@@ -16,6 +16,8 @@ pub(in crate::bridge) enum ProviderRuntimeState {
     Ready,
     Restarting,
     Unavailable,
+    /// The agent stays parked until the owner repeats setup.
+    NeedsSetup,
 }
 
 impl ProviderRuntimeState {
@@ -25,6 +27,7 @@ impl ProviderRuntimeState {
             Self::Ready => "running",
             Self::Restarting => "restarting",
             Self::Unavailable => "unavailable",
+            Self::NeedsSetup => "needs_setup",
         }
     }
 }

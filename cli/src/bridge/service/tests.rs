@@ -670,3 +670,114 @@ fn repeated_control_server_epochs_release_listener_and_connection_descriptors() 
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+fn temporary_fixture(
+    directory: &Path,
+) -> (AccountBridgeConfig, ProviderInstallationConfig, BridgePaths) {
+    let (mut account, mut provider, mut paths) = fixture();
+    paths.root = directory.to_path_buf();
+    provider.state_dir = directory.join("providers/codex");
+    account.providers = vec![provider.clone()];
+    (account, provider, paths)
+}
+
+#[test]
+fn a_service_stopped_for_setup_reports_needs_setup_until_cleared() {
+    let directory = tempfile::tempdir().unwrap();
+    let (account, provider, paths) = temporary_fixture(directory.path());
+    assert!(setup_required_detail(&paths, &provider).is_none());
+    assert!(recovery_check(&paths, &provider).ok);
+
+    FailureLedger::service(&paths).record_needs_setup(
+        "owner_credential_missing",
+        "this bridge has no usable Inline sign-in; run Inline agent setup again",
+        10,
+    );
+    assert_eq!(
+        setup_required_detail(&paths, &provider).as_deref(),
+        Some("this bridge has no usable Inline sign-in; run Inline agent setup again")
+    );
+    let check = recovery_check(&paths, &provider);
+    assert!(!check.ok);
+    assert!(
+        check
+            .detail
+            .contains("needs setup (owner_credential_missing)")
+    );
+
+    clear_account_failure_ledgers(&paths, &account);
+    assert!(setup_required_detail(&paths, &provider).is_none());
+    assert!(recovery_check(&paths, &provider).ok);
+}
+
+#[test]
+fn provider_backoff_and_setup_state_reach_doctor() {
+    let directory = tempfile::tempdir().unwrap();
+    let (account, provider, paths) = temporary_fixture(directory.path());
+    let ledger = FailureLedger::provider(&provider);
+    let now = unix_now();
+    ledger.record_failure("provider_exited", Some("exit status: 1"), now);
+    ledger.record_failure("provider_exited", None, now);
+    let check = recovery_check(&paths, &provider);
+    assert!(!check.ok);
+    assert!(
+        check
+            .detail
+            .starts_with("2 consecutive failures (provider_exited)")
+    );
+    // Backoff alone is not a setup problem; status keeps reporting `stopped`.
+    assert!(setup_required_detail(&paths, &provider).is_none());
+
+    ledger.record_needs_setup(
+        "provider_configuration",
+        "the configured Codex runtime is missing or no longer executable",
+        now,
+    );
+    assert_eq!(
+        setup_required_detail(&paths, &provider).as_deref(),
+        Some("the configured Codex runtime is missing or no longer executable")
+    );
+    clear_account_failure_ledgers(&paths, &account);
+    assert!(recovery_check(&paths, &provider).ok);
+}
+
+#[test]
+fn needs_setup_is_a_distinct_runtime_state() {
+    assert_eq!(ProviderRuntimeState::NeedsSetup.status(), "needs_setup");
+    let health = RuntimeHealth::starting(["codex".to_string()]);
+    health.mark_provider_state_with_detail(
+        "codex",
+        ProviderRuntimeState::NeedsSetup,
+        Some("the configured Codex runtime is missing"),
+    );
+    let snapshot = health.provider_snapshot();
+    assert_eq!(snapshot[0].state, ProviderRuntimeState::NeedsSetup);
+    assert_eq!(
+        serde_json::to_value(&snapshot[0]).unwrap()["state"],
+        "needs_setup"
+    );
+    assert!(!health.snapshot().1);
+}
+
+#[test]
+fn service_restart_backoff_is_visible_without_claiming_setup() {
+    let directory = tempfile::tempdir().unwrap();
+    let (account, provider, paths) = temporary_fixture(directory.path());
+    let ledger = FailureLedger::service(&paths);
+    let now = unix_now();
+    for _ in 0..4 {
+        ledger.record_failure("network_error", Some("realtime connection closed"), now);
+    }
+    let record = ledger.load().unwrap();
+    assert_eq!(record.retry_delay(now), Duration::from_secs(8));
+    let check = recovery_check(&paths, &provider);
+    assert!(!check.ok);
+    assert!(
+        check
+            .detail
+            .starts_with("bridge service 4 consecutive failures (network_error)")
+    );
+    assert!(setup_required_detail(&paths, &provider).is_none());
+    clear_account_failure_ledgers(&paths, &account);
+    assert!(recovery_check(&paths, &provider).ok);
+}

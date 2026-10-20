@@ -54,6 +54,44 @@ pub(crate) fn is_reported_cli_failure(error: &(dyn std::error::Error + 'static))
     find_error_in_chain::<ReportedCliFailure>(error).is_some()
 }
 
+/// Another process holds the account's bridge instance lock.
+#[derive(Debug)]
+pub(crate) struct BridgeAlreadyRunning;
+
+impl std::fmt::Display for BridgeAlreadyRunning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("another Inline bridge process is already running for this account")
+    }
+}
+
+impl std::error::Error for BridgeAlreadyRunning {}
+
+/// The bridge, or one of its agents, cannot run again until the owner repeats
+/// setup. Restarting the same configuration would fail the same way.
+#[derive(Debug)]
+pub(crate) struct BridgeSetupRequired {
+    /// Fixed, allowlist-safe failure class for telemetry and status.
+    pub(crate) reason: &'static str,
+    pub(crate) message: String,
+}
+
+impl BridgeSetupRequired {
+    pub(crate) fn new(reason: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            reason,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for BridgeSetupRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for BridgeSetupRequired {}
+
 impl JsonCliError {
     pub(crate) fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -435,6 +473,25 @@ pub(crate) fn json_cli_error_from_error(error: &(dyn std::error::Error + 'static
         payload.status = Some(status_error.status);
         payload.body = status_error.body.clone();
         payload.hint = status_error.hint.clone();
+        return payload;
+    }
+
+    if find_error_in_chain::<BridgeAlreadyRunning>(error).is_some() {
+        let mut payload =
+            JsonCliError::new("bridge_already_running", BridgeAlreadyRunning.to_string());
+        payload.hint = Some(
+            "Only one bridge process can serve an account. Check it with `inline bridge status`, or stop it with `inline bridge stop` before starting another."
+                .to_string(),
+        );
+        return payload;
+    }
+
+    if let Some(setup) = find_error_in_chain::<BridgeSetupRequired>(error) {
+        let mut payload = JsonCliError::new("bridge_setup_required", setup.message.clone());
+        payload.hint = Some(
+            "Run Inline agent setup again for this agent (for example `inline setup codex`), then check `inline bridge status`."
+                .to_string(),
+        );
         return payload;
     }
 
@@ -971,6 +1028,35 @@ mod tests {
         let host = ProcessHostError::Io(io::Error::other("lock failed"));
         let payload = json_cli_error_from_error(&host);
         assert_eq!(payload.code, "provider_host_io");
+    }
+
+    #[test]
+    fn bridge_lock_contention_is_not_reported_as_file_io() {
+        let error: Box<dyn std::error::Error> = BridgeAlreadyRunning.into();
+        let payload = json_cli_error_from_error(error.as_ref());
+        assert_eq!(payload.code, "bridge_already_running");
+        assert!(payload.message.contains("already running"));
+        let hint = payload.hint.expect("lock contention hint");
+        assert!(hint.contains("inline bridge status"));
+        assert!(!hint.contains("disk space"));
+    }
+
+    #[test]
+    fn bridge_setup_requirements_keep_their_own_code() {
+        let error: Box<dyn std::error::Error> = BridgeSetupRequired::new(
+            "owner_credential_missing",
+            "the Inline sign-in for this bridge is missing",
+        )
+        .into();
+        let payload = json_cli_error_from_error(error.as_ref());
+        assert_eq!(payload.code, "bridge_setup_required");
+        assert_eq!(
+            payload.message,
+            "the Inline sign-in for this bridge is missing"
+        );
+        let hint = payload.hint.expect("setup hint");
+        assert!(hint.contains("inline setup"));
+        assert!(!hint.contains("disk space"));
     }
 
     #[test]

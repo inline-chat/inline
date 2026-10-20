@@ -9,7 +9,9 @@ use super::*;
 
 /// Starts one provider without making its already-connected Inline bot go
 /// silent. Temporary launch failures remain local to this provider; eligible
-/// deliveries are durably queued throughout backoff and initialization.
+/// deliveries are durably queued throughout backoff and initialization. The
+/// backoff is persisted, so a restarted service keeps waiting where it left
+/// off, and a missing configured runtime ends with `BridgeSetupRequired`.
 pub(super) struct ResponsiveProviderLaunch<'a> {
     pub provider_launch: &'a ProviderLaunch,
     pub installation: &'a ProviderInstallationConfig,
@@ -30,10 +32,14 @@ pub(super) async fn launch_provider_responsively<T>(
 where
     T: Future<Output = ()>,
 {
-    let mut failures = 0_u32;
+    let ledger = FailureLedger::provider(launch.installation);
     loop {
-        if failures > 0 {
-            let mut retry_delay = Box::pin(tokio::time::sleep(provider_restart_delay(failures)));
+        let pending_delay = ledger
+            .load()
+            .map(|record| record.retry_delay(unix_now()))
+            .unwrap_or_default();
+        if !pending_delay.is_zero() {
+            let mut retry_delay = Box::pin(tokio::time::sleep(pending_delay));
             loop {
                 tokio::select! {
                     _ = &mut retry_delay => break,
@@ -132,44 +138,75 @@ where
         match result {
             Ok(spawned) => {
                 if let Some(description) = spawned.process_status.exit_description() {
-                    failures = failures.saturating_add(1);
+                    let _ = spawned.driver.shutdown().await;
+                    if let Some(problem) = provider_configuration_problem(launch.installation, None)
+                    {
+                        return Err(provider_setup_required(problem).into());
+                    }
+                    let record = ledger.record_failure(
+                        "provider_exited_during_startup",
+                        Some(&description),
+                        unix_now(),
+                    );
                     let error = io::Error::other(description.clone());
                     crate::telemetry::report_bridge_runtime_error(
                         &launch.installation.provider_id,
                         "provider_startup",
                         &error,
-                        Some(failures),
+                        Some(record.consecutive_failures),
                     );
+                    let retry = describe_delay(record.retry_delay(unix_now()));
                     if let Some(readiness) = launch.readiness {
-                        readiness.mark_startup_failure(launch.installation_id, false, &description);
+                        readiness.mark_startup_failure(
+                            launch.installation_id,
+                            false,
+                            &format!("{description}; retrying in {retry}"),
+                        );
                     }
                     eprintln!(
-                        "{} exited during startup; retrying while Inline stays connected: {}",
+                        "{} exited during startup; retrying in {retry} while Inline stays connected: {}",
                         launch.provider_name,
                         safe_diagnostic(&description)
                     );
-                    let _ = spawned.driver.shutdown().await;
                     continue;
                 }
                 return Ok(Some(spawned));
             }
             Err(error) => {
-                failures = failures.saturating_add(1);
-                crate::telemetry::report_bridge_runtime_error(
-                    &launch.installation.provider_id,
-                    "provider_startup",
-                    error.as_ref(),
-                    Some(failures),
-                );
+                if let Some(problem) =
+                    provider_configuration_problem(launch.installation, Some(error.as_ref()))
+                {
+                    return Err(provider_setup_required(problem).into());
+                }
                 let requires_bridge_update = provider_probe_requires_bridge_update(
                     &launch.installation.provider_id,
                     &error.to_string(),
                 );
+                let record = ledger.record_failure(
+                    if requires_bridge_update {
+                        "provider_requires_bridge_update"
+                    } else {
+                        "provider_startup_failed"
+                    },
+                    Some(&error.to_string()),
+                    unix_now(),
+                );
+                crate::telemetry::report_bridge_runtime_error(
+                    &launch.installation.provider_id,
+                    "provider_startup",
+                    error.as_ref(),
+                    Some(record.consecutive_failures),
+                );
+                let retry = describe_delay(record.retry_delay(unix_now()));
                 if let Some(readiness) = launch.readiness {
                     readiness.mark_startup_failure(
                         launch.installation_id,
                         requires_bridge_update,
-                        &error.to_string(),
+                        &if requires_bridge_update {
+                            error.to_string()
+                        } else {
+                            format!("{error}; retrying in {retry}")
+                        },
                     );
                 }
                 eprintln!(
@@ -177,8 +214,9 @@ where
                     launch.provider_name,
                     if requires_bridge_update {
                         "; waiting for a compatible Inline update while the bot stays connected"
+                            .to_string()
                     } else {
-                        "; retrying while Inline stays connected"
+                        format!("; retrying in {retry} while Inline stays connected")
                     },
                     safe_diagnostic(&error.to_string())
                 );
@@ -274,6 +312,22 @@ impl ProviderReadiness {
     pub(super) fn mark_unavailable(&self, installation_id: &str) {
         self.health
             .mark_provider_state(installation_id, ProviderRuntimeState::Unavailable);
+    }
+
+    pub(super) fn mark_needs_setup(&self, installation_id: &str, detail: &str) {
+        self.health.mark_provider_state_with_detail(
+            installation_id,
+            ProviderRuntimeState::NeedsSetup,
+            Some(detail),
+        );
+    }
+
+    pub(super) fn mark_restarting_with_detail(&self, installation_id: &str, detail: &str) {
+        self.health.mark_provider_state_with_detail(
+            installation_id,
+            ProviderRuntimeState::Restarting,
+            Some(detail),
+        );
     }
 
     fn observe_inline_event(&self, event: &ClientEvent, bot: &InlineClient, installation_id: &str) {

@@ -321,7 +321,10 @@ pub(super) fn read_required_json<T: for<'de> Deserialize<'de>>(
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "bridge secrets are missing").into())
 }
 
-pub(super) fn acquire_instance_lock(path: &Path) -> io::Result<fs::File> {
+/// Takes the account's single-owner lock, or returns `None` while another
+/// process holds it. Real I/O failures stay errors instead of looking like a
+/// duplicate process.
+pub(super) fn try_acquire_instance_lock(path: &Path) -> io::Result<Option<fs::File>> {
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true);
     #[cfg(unix)]
@@ -331,13 +334,18 @@ pub(super) fn acquire_instance_lock(path: &Path) -> io::Result<fs::File> {
     }
     let file = options.open(path)?;
     set_file_mode(path, 0o600)?;
-    file.try_lock().map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!("another agent bridge process is already using this account: {error}"),
-        )
-    })?;
-    Ok(file)
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(fs::TryLockError::WouldBlock) => Ok(None),
+        Err(fs::TryLockError::Error(error)) => Err(io::Error::new(
+            error.kind(),
+            format!("could not lock the bridge account: {error}"),
+        )),
+    }
+}
+
+pub(super) fn acquire_instance_lock(path: &Path) -> Result<fs::File, Box<dyn std::error::Error>> {
+    try_acquire_instance_lock(path)?.ok_or_else(|| BridgeAlreadyRunning.into())
 }
 
 pub(super) fn acquire_account_mutation_lock(paths: &BridgePaths) -> io::Result<fs::File> {

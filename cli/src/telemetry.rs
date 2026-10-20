@@ -1,7 +1,9 @@
 //! Optional allowlisted error reporting with bounded, scrubbed failure text.
-use std::sync::Arc;
-use std::sync::Once;
-use std::time::Duration;
+use std::collections::{BTreeMap, HashSet};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, Once, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::errors::JsonCliError;
 use inline_agent_bridge::{ProcessHostError, StoreError};
@@ -11,6 +13,13 @@ const BRIDGE_RUNTIME_MESSAGE: &str = "Inline CLI bridge runtime failed";
 const COMMAND_FAILURE_MESSAGE: &str = "Inline CLI command failed";
 const PANIC_MESSAGE: &str = "Inline CLI process panicked";
 static PANIC_HOOK: Once = Once::new();
+/// A failure class is reported at most once per window per install, across
+/// every CLI process (service restarts, provider hosts, commands).
+const REPORT_WINDOW_SECONDS: u64 = 24 * 60 * 60;
+const MAX_REPORT_LEDGER_ENTRIES: usize = 256;
+const REPORT_LEDGER_FILE: &str = "telemetry-reports.json";
+static REPORT_LEDGER: OnceLock<PathBuf> = OnceLock::new();
+static REPORTED_IN_PROCESS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 pub(crate) struct TelemetryGuard(Option<sentry::ClientInitGuard>);
 
@@ -69,6 +78,11 @@ pub(crate) fn init() -> Option<TelemetryGuard> {
     options.shutdown_timeout = SHUTDOWN_TIMEOUT;
     options.before_send = Some(Arc::new(|event| Some(allowlisted_event(event))));
     let guard = TelemetryGuard(Some(sentry::init(options)));
+    let _ = REPORT_LEDGER.set(
+        crate::config::Config::load()
+            .data_dir
+            .join(REPORT_LEDGER_FILE),
+    );
     install_panic_hook();
     Some(guard)
 }
@@ -116,7 +130,8 @@ pub(crate) fn report(
     event
         .extra
         .insert("failure_text".into(), command_failure_text(error).into());
-    sentry::capture_event(event);
+    let key = report_key(&event);
+    capture_once_per_window(key, event);
 }
 
 pub(crate) fn provider_host_target(provider_id: &str) -> &'static str {
@@ -208,6 +223,11 @@ pub(crate) fn report_bridge_configuration_fallback(target: &str, failure: &'stat
     capture_bridge_runtime_event(target, "agent_configuration", failure, None, None, None);
 }
 
+/// A terminal needs-setup stop of the account service or of one agent.
+pub(crate) fn report_bridge_setup_required(target: &str, failure: &'static str) {
+    capture_bridge_runtime_event(target, "setup_required", failure, None, None, None);
+}
+
 pub(crate) fn report_bridge_owner_dm_event(
     target: &str,
     phase: &'static str,
@@ -263,7 +283,107 @@ fn capture_bridge_runtime_event(
             .extra
             .insert("limit_maximum".into(), limit.maximum.into());
     }
-    sentry::capture_event(event);
+    let key = report_key(&event);
+    capture_once_per_window(key, event);
+}
+
+/// Groups by the same fields as the Sentry fingerprint, plus the release, so a
+/// restart loop yields one event per day instead of one per attempt.
+fn report_key(event: &sentry::protocol::Event<'static>) -> String {
+    let mut key = format!("inline-cli@{}", env!("CARGO_PKG_VERSION"));
+    for name in [
+        "surface",
+        "command",
+        "error_code",
+        "target",
+        "phase",
+        "failure",
+    ] {
+        key.push('|');
+        if let Some(value) = event.tags.get(name) {
+            key.push_str(&safe_code(value));
+        }
+    }
+    key
+}
+
+fn capture_once_per_window(key: String, event: sentry::protocol::Event<'static>) {
+    if sentry::Hub::current().client().is_none() {
+        return;
+    }
+    let admitted = match REPORT_LEDGER.get() {
+        Some(path) => {
+            admit_report(path, &key, unix_now()).unwrap_or_else(|_| admit_in_process(&key))
+        }
+        None => admit_in_process(&key),
+    };
+    if admitted {
+        sentry::capture_event(event);
+    }
+}
+
+/// Fallback when the shared ledger is unavailable: once per process.
+fn admit_in_process(key: &str) -> bool {
+    REPORTED_IN_PROCESS
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(key.to_string())
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Records `key` and returns true unless it was already reported within the
+/// window. An exclusive lock serializes concurrent CLI processes.
+fn admit_report(path: &Path, key: &str, now: u64) -> io::Result<bool> {
+    let lock = open_private(&path.with_extension("lock"), false)?;
+    lock.lock()?;
+    let mut reported: BTreeMap<String, u64> = std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    // Entries from the future mean the clock moved back; let them report again.
+    reported.retain(|_, at| *at <= now && now - *at < REPORT_WINDOW_SECONDS);
+    if reported.contains_key(key) {
+        return Ok(false);
+    }
+    while reported.len() >= MAX_REPORT_LEDGER_ENTRIES {
+        let Some(oldest) = reported
+            .iter()
+            .min_by_key(|(_, at)| **at)
+            .map(|(key, _)| key.clone())
+        else {
+            break;
+        };
+        reported.remove(&oldest);
+    }
+    reported.insert(key.to_string(), now);
+    let temporary = path.with_extension("json.tmp");
+    let mut file = open_private(&temporary, true)?;
+    file.write_all(&serde_json::to_vec(&reported)?)?;
+    file.sync_all()?;
+    std::fs::rename(&temporary, path)?;
+    Ok(true)
+}
+
+fn open_private(path: &Path, truncate: bool) -> io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(truncate);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
 }
 
 fn should_report_bridge_attempt(attempt: u32) -> bool {
@@ -510,6 +630,60 @@ mod tests {
             assert!(telemetry_disabled(value));
         }
         assert!(!telemetry_disabled("on"));
+    }
+
+    #[test]
+    fn a_failure_class_is_admitted_once_per_day_across_processes() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(REPORT_LEDGER_FILE);
+        let day = REPORT_WINDOW_SECONDS;
+        assert!(admit_report(&path, "bridge_run|io_error", 1_000).unwrap());
+        assert!(!admit_report(&path, "bridge_run|io_error", 1_010).unwrap());
+        assert!(!admit_report(&path, "bridge_run|io_error", 1_000 + day - 1).unwrap());
+        assert!(admit_report(&path, "provider_host|exit_1", 1_010).unwrap());
+        assert!(admit_report(&path, "bridge_run|io_error", 1_000 + day).unwrap());
+        // A clock moved backwards cannot silence a class for longer than a day.
+        assert!(admit_report(&path, "bridge_run|io_error", 500).unwrap());
+    }
+
+    #[test]
+    fn a_corrupt_report_ledger_is_rebuilt() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(REPORT_LEDGER_FILE);
+        std::fs::write(&path, b"{not json").unwrap();
+        assert!(admit_report(&path, "key", 10).unwrap());
+        assert!(!admit_report(&path, "key", 11).unwrap());
+    }
+
+    #[test]
+    fn the_report_ledger_stays_bounded() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(REPORT_LEDGER_FILE);
+        for index in 0..(MAX_REPORT_LEDGER_ENTRIES as u64 + 10) {
+            assert!(admit_report(&path, &format!("key-{index}"), 100 + index).unwrap());
+        }
+        let reported: BTreeMap<String, u64> =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(reported.len(), MAX_REPORT_LEDGER_ENTRIES);
+        assert!(!reported.contains_key("key-0"));
+    }
+
+    #[test]
+    fn report_keys_follow_grouping_tags_and_ignore_attempts() {
+        let mut first = sentry::protocol::Event::default();
+        first
+            .tags
+            .insert("command".into(), "bridge_provider_host".into());
+        first
+            .tags
+            .insert("error_code".into(), "provider_child_exit".into());
+        first.tags.insert("failure".into(), "exit_1".into());
+        first.tags.insert("attempt".into(), "1".into());
+        let mut second = first.clone();
+        second.tags.insert("attempt".into(), "64".into());
+        assert_eq!(report_key(&first), report_key(&second));
+        second.tags.insert("failure".into(), "exit_2".into());
+        assert_ne!(report_key(&first), report_key(&second));
     }
 
     #[test]

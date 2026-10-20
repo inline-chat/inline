@@ -66,6 +66,50 @@ fn provider_restart_backoff_is_bounded_and_starts_promptly() {
 }
 
 #[test]
+fn instance_lock_contention_is_a_typed_duplicate_not_an_io_error() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("bridge.lock");
+    let owner = try_acquire_instance_lock(&path)
+        .expect("lock file")
+        .expect("first owner");
+    assert!(
+        try_acquire_instance_lock(&path)
+            .expect("lock file")
+            .is_none()
+    );
+    let error = acquire_instance_lock(&path).expect_err("duplicate owner");
+    assert!(error.downcast_ref::<BridgeAlreadyRunning>().is_some());
+    assert_eq!(
+        crate::errors::json_cli_error_from_error(error.as_ref()).code,
+        "bridge_already_running"
+    );
+    drop(owner);
+    assert!(
+        try_acquire_instance_lock(&path)
+            .expect("lock file")
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn a_standby_service_takes_over_when_the_owner_exits() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("bridge.lock");
+    let owner = acquire_instance_lock(&path).expect("first owner");
+    let standby_path = path.clone();
+    let standby = tokio::spawn(async move { wait_for_instance_lock(&standby_path).await });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(!standby.is_finished(), "standby must wait, not fail");
+    drop(owner);
+    let lock = tokio::time::timeout(INSTANCE_LOCK_STANDBY_POLL * 3, standby)
+        .await
+        .expect("standby takes over")
+        .expect("standby task")
+        .expect("lock file");
+    assert!(lock.is_some());
+}
+
+#[test]
 fn scheduler_admits_more_than_four_independent_sessions_and_blocks_aliases() {
     let store = BridgeStore::open_in_memory().expect("store");
     let installation_id = InstallationId::new("install").expect("installation");

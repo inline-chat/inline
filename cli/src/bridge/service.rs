@@ -14,8 +14,9 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::watch;
 
 use super::{
-    AccountBridgeConfig, AccountBridgeSecrets, BridgePaths, ProviderInstallationConfig,
-    ensure_private_dir, safe_diagnostic, set_file_mode,
+    AccountBridgeConfig, AccountBridgeSecrets, BridgePaths, BridgeSetupRequired, FailureLedger,
+    ProviderInstallationConfig, clear_account_failure_ledgers, ensure_private_dir, safe_diagnostic,
+    set_file_mode, unix_now,
 };
 
 mod definition;
@@ -61,6 +62,7 @@ pub(super) struct BridgeDoctor {
     pub installed_binary: Check,
     pub provider: Check,
     pub service_definition: Check,
+    pub recovery: Check,
     pub runtime: BridgeStatus,
 }
 
@@ -303,6 +305,9 @@ pub(super) fn install_service(
         )
         .into());
     }
+    // Setup is the owner's repair action: retry every agent immediately.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    clear_account_failure_ledgers(paths, account);
 
     #[cfg(target_os = "macos")]
     {
@@ -374,6 +379,8 @@ pub(super) async fn start_service(
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
+        // An explicit start retries backed-off or parked agents right away.
+        clear_account_failure_ledgers(paths, account);
         let definition = service_definition_path(&account.service_label)?;
         if !definition.is_file() {
             install_service(paths, account)?;
@@ -465,6 +472,7 @@ pub(super) async fn restart_service(
     secrets: &AccountBridgeSecrets,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validate_service_paths(paths, account)?;
+    clear_account_failure_ledgers(paths, account);
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         let definition = service_definition_path(&account.service_label)?;
@@ -590,9 +598,14 @@ pub(super) async fn status(
         Err(error) => {
             let loaded = service_loaded(account);
             let process_running = service_process_running(account);
+            let setup_required = (!process_running)
+                .then(|| setup_required_detail(paths, installation))
+                .flatten();
             BridgeStatus {
                 status: if process_running {
                     "unhealthy"
+                } else if setup_required.is_some() {
+                    "needs_setup"
                 } else {
                     "stopped"
                 }
@@ -607,11 +620,57 @@ pub(super) async fn status(
                 process_id: None,
                 inline_connected: false,
                 provider_ready: false,
-                detail: with_service_lifecycle_detail(
-                    process_running.then(|| safe_diagnostic(&error.to_string())),
-                ),
+                detail: with_service_lifecycle_detail(if process_running {
+                    Some(safe_diagnostic(&error.to_string()))
+                } else {
+                    setup_required
+                }),
             }
         }
+    }
+}
+
+/// Why a stopped service or agent will not come back until setup runs again.
+fn setup_required_detail(
+    paths: &BridgePaths,
+    installation: &ProviderInstallationConfig,
+) -> Option<String> {
+    [
+        FailureLedger::service(paths),
+        FailureLedger::provider(installation),
+    ]
+    .iter()
+    .filter_map(FailureLedger::load)
+    .find(|record| record.needs_setup)
+    .map(|record| {
+        record
+            .detail
+            .unwrap_or_else(|| "run Inline agent setup again for this agent".to_string())
+    })
+}
+
+/// Repeated-failure state for doctor: the account service first, then the
+/// agent. Ledgers are cleared once a run stays up, so healthy bridges have none.
+pub(super) fn recovery_check(
+    paths: &BridgePaths,
+    installation: &ProviderInstallationConfig,
+) -> Check {
+    let now = unix_now();
+    if let Some(record) = FailureLedger::service(paths).load() {
+        return Check {
+            ok: false,
+            detail: format!("bridge service {}", record.summary(now)),
+        };
+    }
+    match FailureLedger::provider(installation).load() {
+        Some(record) => Check {
+            ok: false,
+            detail: record.summary(now),
+        },
+        None => Check {
+            ok: true,
+            detail: "no repeated failures recorded".to_string(),
+        },
     }
 }
 
@@ -773,7 +832,9 @@ pub(super) async fn doctor(
             detail: safe_diagnostic(&error),
         },
     };
+    let recovery = recovery_check(paths, installation);
     let checks = [
+        recovery.ok,
         paths.config.is_file(),
         paths.secrets.is_file()
             && !secrets.providers.is_empty()
@@ -804,6 +865,7 @@ pub(super) async fn doctor(
         installed_binary: executable_check(&account.service_binary),
         provider,
         service_definition,
+        recovery,
         runtime,
     }
 }
@@ -998,6 +1060,15 @@ async fn wait_for_provider_ready_with_timeout(
                         detail: None,
                     });
                 }
+                if matches!(state, ProviderRuntimeState::NeedsSetup) {
+                    return Err(BridgeSetupRequired::new(
+                        "provider_configuration",
+                        provider_connection_detail.unwrap_or_else(|| {
+                            format!("{} needs setup", installation.display_name)
+                        }),
+                    )
+                    .into());
+                }
                 last_error = response.detail.or(provider_connection_detail).or_else(|| {
                     Some(format!(
                         "{} is {}",
@@ -1041,7 +1112,22 @@ async fn wait_for_account_running(
             Ok(response) => {
                 last_error = response.detail.or(Some(response.status));
             }
-            Err(error) => last_error = Some(safe_diagnostic(&error.to_string())),
+            Err(error) => {
+                // A service that stopped for setup will not open its socket.
+                if let Some(record) = FailureLedger::service(paths)
+                    .load()
+                    .filter(|record| record.needs_setup)
+                {
+                    return Err(BridgeSetupRequired::new(
+                        "service_configuration",
+                        record.detail.unwrap_or_else(|| {
+                            "the bridge service stopped until setup runs again".to_string()
+                        }),
+                    )
+                    .into());
+                }
+                last_error = Some(safe_diagnostic(&error.to_string()));
+            }
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }

@@ -17,6 +17,8 @@ pub(crate) struct DoctorOutput {
     config: DoctorConfig,
     paths: DoctorPaths,
     auth: DoctorAuth,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    bridge: Vec<crate::bridge::BridgeRecoverySummary>,
 }
 
 #[derive(Serialize)]
@@ -170,6 +172,7 @@ pub(crate) fn build_doctor_output(
             current_user,
             state_error,
         },
+        bridge: crate::bridge::recovery_summaries(config),
     }
 }
 
@@ -303,6 +306,19 @@ pub(crate) fn print_doctor(output: &DoctorOutput) {
     }
     if let Some(error) = &output.auth.state_error {
         println!("  state error: {}", error);
+    }
+
+    if !output.bridge.is_empty() {
+        print_section_after_break("Agent bridge");
+        for provider in &output.bridge {
+            println!(
+                "  {}: {} — {}",
+                provider.provider,
+                if provider.ok { "ok" } else { "needs attention" },
+                provider.detail
+            );
+        }
+        println!("  details: inline bridge doctor");
     }
 }
 
