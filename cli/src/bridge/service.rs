@@ -531,6 +531,8 @@ async fn restart_installed_service(
     }
     #[cfg(target_os = "linux")]
     {
+        // systemd restarts the unit in place; stopping it needs no credentials.
+        let _ = secrets;
         refresh_systemd_user_unit(paths, account)?;
         let unit_name = systemd_unit_name(&account.service_label);
         run_systemctl(["--user", "enable", &unit_name])?;
