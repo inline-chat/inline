@@ -75,7 +75,7 @@ persisted policy and actual provider readiness after this new-binary restart.
 Keep human release notes in a reviewed file; the script creates generic notes.
 After publication, attach the reviewed text with `gh release edit cli-vVERSION
 --repo inline-chat/inline --notes-file PATH`. The current notes are in
-[v0.7.17.md](releases/v0.7.17.md); refresh them for the next
+[v0.7.18.md](releases/v0.7.18.md); refresh them for the next
 release version and source.
 
 ## Release authentication
