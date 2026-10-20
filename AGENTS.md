@@ -25,6 +25,7 @@
 
 ### Worktrees
 
+- Minimize use of worktrees and branches. Work directly on main in the main worktree unless the task is complicated or a major refactor that would mess up the shared worktree.
 - Useful for big long feature work, or quick fixes in a dirty workspace that must reach main ASAP. Most changes can happen in the main worktree safely.
 - After creating a worktree, copy config files like `apple/Local.xcconfig` alongside it.
 
