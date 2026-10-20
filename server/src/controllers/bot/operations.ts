@@ -1038,11 +1038,11 @@ const resolveBotMedia = async (
 }> => {
   if (!media) return {}
   if (media.type === "nudge") return { nudge: true }
+  // Bots resend their own uploads by file_id; other media goes through forwardMessage with copy.
   const file = await FileModel.getFileByUniqueId(media.file_id)
-  if (!file) {
-    throw new InlineError(InlineError.ApiError.FILE_NOT_FOUND)
+  if (!file || file.userId !== botUserId) {
+    throw new InlineError(InlineError.ApiError.MEDIA_NOT_OWNED)
   }
-  await ensureBotFileAccess(file, botUserId)
   switch (media.type) {
     case "photo": {
       const [row] = await db.select({ id: photoSizes.photoId }).from(photoSizes).where(eq(photoSizes.fileId, file.id)).limit(1)

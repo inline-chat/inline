@@ -1,5 +1,5 @@
 import { RpcError_Code } from "@inline-chat/protocol/core"
-import type { InlineError } from "@in/server/types/errors"
+import { InlineError } from "@in/server/types/errors"
 
 export class RealtimeRpcError extends Error {
   public readonly codeName: string
@@ -196,6 +196,11 @@ export class RealtimeRpcError extends Error {
       RealtimeRpcError.SpaceOwnerRequired,
     )
   }
+  /** Same response for missing and not-owned media, so ids can't be probed. */
+  public static MediaNotOwned() {
+    const [, status, description] = InlineError.ApiError.MEDIA_NOT_OWNED
+    return RealtimeRpcError.create(RpcError_Code.MEDIA_NOT_OWNED, description, status, RealtimeRpcError.MediaNotOwned)
+  }
   // Helper to bridge InlineError from old handlers to RpcError
   public static fromInlineError(error: InlineError): RealtimeRpcError {
     switch (error.type) {
@@ -211,6 +216,8 @@ export class RealtimeRpcError extends Error {
         return RealtimeRpcError.PeerIdInvalid()
       case "MSG_ID_INVALID":
         return RealtimeRpcError.MessageIdInvalid()
+      case "MEDIA_NOT_OWNED":
+        return RealtimeRpcError.MediaNotOwned()
       case "EMAIL_INVALID":
         return new RealtimeRpcError(RpcError_Code.EMAIL_INVALID, error.description ?? error.message, error.code)
       case "PHONE_INVALID":

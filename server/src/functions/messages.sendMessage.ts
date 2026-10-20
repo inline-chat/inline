@@ -10,7 +10,7 @@ import {
 } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
-import type { DbFullDocument, DbFullVoice } from "@in/server/db/models/files"
+import type { DbFullDocument, DbFullPlainFile, DbFullVoice } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { db } from "@in/server/db"
@@ -99,6 +99,7 @@ import {
   validateAgentThreadContext,
 } from "@in/server/modules/agentConfiguration"
 import { getBotUserIdsForChatScope } from "@in/server/functions/bot.peerDiscovery"
+import { InlineError } from "@in/server/types/errors"
 
 type Input = {
   peerId: InputPeer
@@ -154,6 +155,30 @@ export const shouldPublishSendMessageToCurrentSession = ({
   currentUserLayer: number
   hasAttachments: boolean
 }): boolean => !isRealtimeV3Session && (currentUserLayer < 2 || hasAttachments)
+
+const photoFiles = (photo: DbFullPhoto | null | undefined): DbFullPlainFile[] =>
+  photo?.photoSizes?.map((size) => size.file) ?? []
+
+/**
+ * Media ids are sequential, so only the sender's own uploads can be attached by id.
+ * Forwarding clones source media into the forwarder's ownership first. Missing and
+ * foreign ids fail alike so ids can't be probed.
+ */
+const loadOwnedMedia = async <Media>(
+  pending: Promise<Media | undefined>,
+  files: (media: Media) => DbFullPlainFile[],
+  userId: number,
+): Promise<Media> => {
+  const media = await pending.catch((error: unknown) => {
+    if (error instanceof ModelError) return undefined
+    throw error
+  })
+  const mediaFiles = media === undefined ? [] : files(media)
+  if (media === undefined || mediaFiles.length === 0 || mediaFiles.some((file) => file.userId !== userId)) {
+    throw new InlineError(InlineError.ApiError.MEDIA_NOT_OWNED)
+  }
+  return media
+}
 
 export const sendMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
   // input data
@@ -306,16 +331,24 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   if (input.nudge) {
     mediaType = "nudge"
   } else if (input.photoId) {
-    dbFullPhoto = await FileModel.getPhotoById(input.photoId)
+    dbFullPhoto = await loadOwnedMedia(FileModel.getPhotoById(input.photoId), photoFiles, currentUserId)
     mediaType = "photo"
   } else if (input.videoId) {
-    dbFullVideo = await FileModel.getVideoById(input.videoId)
+    dbFullVideo = await loadOwnedMedia(
+      FileModel.getVideoById(input.videoId),
+      (video) => [video.file, ...photoFiles(video.photo)],
+      currentUserId,
+    )
     mediaType = "video"
   } else if (input.documentId) {
-    dbFullDocument = await FileModel.getDocumentById(input.documentId)
+    dbFullDocument = await loadOwnedMedia(
+      FileModel.getDocumentById(input.documentId),
+      (document) => [document.file, ...photoFiles(document.photo)],
+      currentUserId,
+    )
     mediaType = "document"
   } else if (input.voiceId) {
-    dbFullVoice = await FileModel.getVoiceById(input.voiceId)
+    dbFullVoice = await loadOwnedMedia(FileModel.getVoiceById(input.voiceId), (voice) => [voice.file], currentUserId)
     mediaType = "voice"
   }
 

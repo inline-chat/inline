@@ -164,7 +164,20 @@ For initialization, acknowledgement, selection, and recovery, follow [Receive Bo
 
 ## Files and Access
 
-`getFile` and `file_id` reuse require a bot-owned upload or an accessible message. Knowing a file ID alone does not grant access. Keep authorization failures distinct from missing or malformed IDs when diagnosing requests.
+`sendMessage` media accepts only a `file_id` the bot uploaded with `uploadFile`. Knowing a file ID alone does not grant access. To resend media from a message the bot can access, call `forwardMessage` or `forwardMessages` with `copy: true`. Inline then sends a new message without a forward header and copies the media into the bot's ownership, so later sends can reuse the new `file_id`.
+
+`getFile` requires a bot-owned upload or an accessible message.
+
+A `file_id` the bot did not upload returns `MEDIA_NOT_OWNED`. So does one that does not exist, so a response never reveals whether an ID exists:
+
+```json
+{
+  "ok": false,
+  "error": "MEDIA_NOT_OWNED",
+  "error_code": 400,
+  "description": "This media was not uploaded by you. To resend media from another message, forward that message (bots: forwardMessage with copy: true sends it without a forward header)."
+}
+```
 
 Message delivery depends on conversation access and [update selection](/docs/bot-updates#update-selection). Another bot's message requires an explicit resolved mention to activate delivery, even with the `all` trigger. Your integration must not rely on its own outgoing messages being echoed back as incoming updates.
 
@@ -176,10 +189,10 @@ Every successful API response uses an envelope with `ok: true` and a method-spec
 { "ok": true, "result": {} }
 ```
 
-An API error has `ok: false`, a numeric `error_code`, and a `description`:
+An API error has `ok: false`, a numeric `error_code`, a `description`, and usually an `error` name such as `MEDIA_NOT_OWNED`:
 
 ```json
-{ "ok": false, "error_code": 400, "description": "Invalid arguments was provided" }
+{ "ok": false, "error": "BAD_REQUEST", "error_code": 400, "description": "Invalid arguments was provided" }
 ```
 
 Check `ok` before reading `result`. The TypeScript client does not retry automatically and the Bot API does not expose a send idempotency key.
@@ -188,6 +201,7 @@ Check `ok` before reading `result`. The TypeScript client does not retry automat
 | --- | --- |
 | Authentication error | Verify the token with `getMe` and update the configured credential. |
 | Invalid request or inaccessible destination | Correct the fields or the bot's access before retrying. |
+| `MEDIA_NOT_OWNED` | Send a `file_id` from your own `uploadFile`, or forward the source message with `copy: true`. |
 | Failed read request | Retry when appropriate for the failure. A poll carrying an offset also acknowledges earlier updates; retain your saved offset. |
 | Lost response to a mutation | Check the resulting state before retrying. A timeout does not prove that a send, edit, or thread creation failed. |
 

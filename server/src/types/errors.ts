@@ -36,6 +36,11 @@ export const ApiError = {
   FILE_TOO_LARGE: ["FILE_TOO_LARGE", 400, "The file exceeds the maximum size of 40MB"],
   FILE_UNIQUE_ID_INVALID: ["FILE_UNIQUE_ID_INVALID", 400, "The file unique id does not exist or is invalid"],
   FILE_NOT_FOUND: ["FILE_NOT_FOUND", 400, "The file does not exist or you don't have access to it"],
+  MEDIA_NOT_OWNED: [
+    "MEDIA_NOT_OWNED",
+    400,
+    "This media was not uploaded by you. To resend media from another message, forward that message (bots: forwardMessage with copy: true sends it without a forward header).",
+  ],
   MSG_ID_INVALID: ["MSG_ID_INVALID", 400, "The message id is invalid"],
   CHAT_ID_INVALID: ["CHAT_ID_INVALID", 400, "The chat id is invalid"],
   VIDEO_INVALID_EXTENSION: ["VIDEO_INVALID_EXTENSION", 400, "The video extension is not supported or invalid"],
