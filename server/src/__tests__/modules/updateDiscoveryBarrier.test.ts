@@ -8,6 +8,8 @@ import { getUpdatesState } from "@in/server/functions/updates.getUpdatesState"
 import {
   acquireUpdateDiscoveryWriterFence,
   captureUpdateDiscoveryWatermark,
+  UpdateDiscoveryWatermarks,
+  type UpdateDiscoveryWatermarkAttempt,
 } from "@in/server/modules/updates/updateDiscoveryBarrier"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
@@ -296,4 +298,106 @@ describe("update discovery commit barrier", () => {
     }
     expect((await getUpdatesState({}, testUtils.functionContext({ userId: user.id }))).seq).toBe(0)
   }, 10_000)
+
+  test("concurrent captures behind one writer share a single watermark", async () => {
+    const fenced = deferred()
+    const release = deferred()
+    const writer = db.transaction(async (tx) => {
+      const writerDate = await acquireUpdateDiscoveryWriterFence(tx)
+      fenced.resolve()
+      await release.promise
+      return writerDate
+    })
+    await fenced.promise
+    const captures = Array.from({ length: 12 }, () => captureUpdateDiscoveryWatermark())
+    try {
+      await Bun.sleep(30)
+    } finally {
+      release.resolve()
+    }
+    const [writerDate, ...watermarks] = await Promise.all([writer, ...captures])
+    expect(new Set(watermarks.map((watermark) => watermark.getTime())).size).toBe(1)
+    expect(watermarks[0]!.getTime()).toBeGreaterThanOrEqual(writerDate.getTime())
+  })
+})
+
+describe("shared update discovery watermarks", () => {
+  const timeout = "Timed out waiting for durable update discovery writers"
+  const sharedCapture = (attempt: UpdateDiscoveryWatermarkAttempt, clock = { now: 0 }) =>
+    new UpdateDiscoveryWatermarks({
+      attempt,
+      now: () => clock.now,
+      sleep: async (ms) => { clock.now += ms },
+    })
+
+  test("a reconnect wave makes one lock attempt sequence, one try at a time", async () => {
+    const acquired = new Date(1_700_000_000_000)
+    let attempts = 0
+    let inFlight = 0
+    let maxInFlight = 0
+    const watermarks = sharedCapture(async () => {
+      attempts += 1
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await Promise.resolve()
+      inFlight -= 1
+      return attempts < 4 ? undefined : acquired
+    })
+
+    // The first caller starts a try; the rest of the wave arrives during it.
+    const first = watermarks.capture()
+    const wave = Array.from({ length: 50 }, () => watermarks.capture())
+
+    expect(await first).toBe(acquired)
+    expect(await Promise.all(wave)).toEqual(Array.from({ length: 50 }, () => acquired))
+    // Separate loops would have made 51 * 4 tries.
+    expect(attempts).toBe(4)
+    expect(maxInFlight).toBe(1)
+  })
+
+  test("a caller arriving during a try is answered only by a try that starts after it", async () => {
+    const firstTry = Promise.withResolvers<Date | undefined>()
+    const tries = [firstTry.promise, Promise.resolve(new Date(2_000))]
+    const watermarks = sharedCapture(() => tries.shift()!)
+
+    const early = watermarks.capture()
+    const late = watermarks.capture()
+    firstTry.resolve(new Date(1_000))
+
+    expect(await early).toEqual(new Date(1_000))
+    expect(await late).toEqual(new Date(2_000))
+    expect(tries).toEqual([])
+  })
+
+  test("a failed try rejects only the callers it served", async () => {
+    const firstTry = Promise.withResolvers<Date | undefined>()
+    const tries = [firstTry.promise, Promise.resolve(new Date(3_000))]
+    const watermarks = sharedCapture(() => tries.shift()!)
+
+    const early = watermarks.capture().catch((error: unknown) => error)
+    const late = watermarks.capture()
+    firstTry.reject(new Error("pool closed"))
+
+    expect(await early).toMatchObject({ message: "pool closed" })
+    expect(await late).toEqual(new Date(3_000))
+  })
+
+  test("each caller keeps its own budget and never receives a substitute watermark", async () => {
+    const clock = { now: 0 }
+    let late: Promise<Date> | undefined
+    const watermarks: UpdateDiscoveryWatermarks = new UpdateDiscoveryWatermarks({
+      attempt: async (wanted) => (wanted() && clock.now >= 6_000 ? new Date(4_000) : undefined),
+      now: () => clock.now,
+      sleep: async (ms) => {
+        clock.now += ms
+        if (!late && clock.now >= 3_000) late = watermarks.capture()
+      },
+    })
+
+    const early = watermarks.capture().catch((error: unknown) => error)
+
+    expect(await early).toMatchObject({ message: timeout })
+    expect(await late!).toEqual(new Date(4_000))
+    expect(clock.now).toBeLessThan(8_000)
+  })
 })

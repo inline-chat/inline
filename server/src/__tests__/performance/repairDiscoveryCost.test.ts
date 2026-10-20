@@ -75,9 +75,13 @@ for (const size of [1, 10, 100, 1000]) {
       const batched = await measure("batched")
       const prefiltered = await measure("prefiltered")
       // Count all driver commands, including BEGIN/COMMIT and fence SQL.
-      // Individual exclusive fences also contend with each other: failed
-      // lock attempts add BEGIN/try/COMMIT retries, so their cost is a floor.
-      expect(individual.sql.commands - shared.sql.commands).toBeGreaterThanOrEqual(4 * (size - 1))
+      // Per-call fences share one single-flight try loop, so tries never
+      // contend with each other and each costs exactly BEGIN/try/clock/COMMIT.
+      // The first concurrent wave of account scans shares two tries.
+      const individualCaptures = (individual.sql.commands - shared.sql.commands) / 4 + 1
+      expect(Number.isInteger(individualCaptures)).toBe(true)
+      expect(individualCaptures).toBeGreaterThanOrEqual(1)
+      expect(individualCaptures).toBeLessThanOrEqual(size - Math.min(8, size) + Math.min(2, size))
       expect(shared.sql.commands).toBe(4 + (dirty ? 7 : 5) * size)
       expect(batched.sql.commands).toBe(4 + (dirty ? 5 : 3) * size + Math.ceil(size / 512))
       // Regression gate: idle cost scales with bounded batches, not accounts.
@@ -87,7 +91,7 @@ for (const size of [1, 10, 100, 1000]) {
       expect(prefiltered.settledMs).toBeLessThan(10_000)
       console.info(JSON.stringify({
         case: "dated-discovery-cost", users: size, dirty,
-        individual: { commands: individual.sql.commands, sweepMs: individual.settledMs },
+        individual: { commands: individual.sql.commands, captures: individualCaptures, sweepMs: individual.settledMs },
         shared: { commands: shared.sql.commands, sweepMs: shared.settledMs },
         batched: { commands: batched.sql.commands, sweepMs: batched.settledMs },
         prefiltered: { commands: prefiltered.sql.commands, sweepMs: prefiltered.settledMs },
