@@ -37,11 +37,11 @@ Reply-thread behavior:
 The Inline plugin supports OpenClaw `2026.8.2` and newer, including
 `2026.9.x`, with no upper version cap. It is built against `2026.9.4`. Install
 the plugin version for your OpenClaw release line. The current stable release
-is `0.0.71`.
+is `0.0.72`.
 
 | OpenClaw line | Inline plugin | Exact install |
 | --- | --- | --- |
-| `2026.8.2` and newer | `0.0.71` | `openclaw plugins install npm:@inline-openclaw/inline@0.0.71 --force --accept-capabilities` |
+| `2026.8.2` and newer, including `2026.10.5` | `0.0.72` | `openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities` |
 | `2026.7.x` (`>=2026.7.1`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 | `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 
@@ -53,12 +53,19 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.71` | `>=2026.8.2` | `0.0.19` | Stable | Adds opt-in quiet agent activity timelines and the expanded chat-history protocol while retaining recovery and install provenance diagnostics. |
+| `0.0.72` | `>=2026.8.2` | `0.0.19` | Stable | Loads on OpenClaw `2026.10.5` and newer, which removed `readJsonFileWithFallback`; `0.0.71` and older fail to register the channel there. Matches `toolsBySender` on numeric sender ids only. |
+| `0.0.71` | `>=2026.8.2` | `0.0.19` | Previous | Adds opt-in quiet agent activity timelines and the expanded chat-history protocol while retaining recovery and install provenance diagnostics. |
 | `0.0.70` | `>=2026.8.2` | `0.0.18` | Previous | Preserves native reply suppression and send-policy decisions, with September approvals and shutdown cancellation. |
 | `0.0.69` | `>=2026.8.2` | `0.0.18` | Previous | Added September system change approvals and shutdown cancellation. |
 | `0.0.68` | `2026.8.2` | `0.0.18` | Previous | Retries stalled sync autonomously and isolates unrelated chat handlers while retaining ordered acknowledgements. |
 | `0.0.67` | `2026.8.2` | `0.0.17` | Previous | Keeps the manifest compatible with ClawHub's metadata transport without changing the channel schema. |
-| `0.0.66` | `2026.8.2` | `0.0.17` | Previous | Bounds direct account probes so SDK cleanup completes before the host deadline. |
+
+### Release 0.0.72
+
+- Loads on OpenClaw `2026.10.5` and newer. That host removed `readJsonFileWithFallback` from `plugin-sdk/json-store`, so `0.0.71` fails to register the Inline channel there; the plugin now reads its reply-thread route files itself.
+- Matches group `toolsBySender` policies on the sender's numeric Inline user id only. Groups that still key senders by name, username or phone get no tools until those keys are replaced, and the gateway warns at startup.
+- Supports current keyed agent settings.
+- The installed-host admission check now imports the channel entry against the host, so a removed SDK export fails CI instead of passing `plugins list`.
 
 ### Release 0.0.71
 
@@ -82,7 +89,7 @@ bun run --cwd plugins/openclaw check:host /path/to/node_modules/openclaw
 To install this release from npm:
 
 ```sh
-openclaw plugins install npm:@inline-openclaw/inline@0.0.71 --force --accept-capabilities
+openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities
 ```
 
 If the plugin is already installed, update in place:
