@@ -137,4 +137,60 @@ describe("messages.moveThread", () => {
       code: RealtimeRpcError.Code.BAD_REQUEST,
     })
   })
+
+  test("a creator removed from the space cannot move the thread home or regain it", async () => {
+    const space = await testUtils.createSpace("Removed Creator Space")
+    if (!space) throw new Error("Failed to create space")
+    const creator = await testUtils.createUser("removed-creator@example.com")
+    const remaining = await testUtils.createUser("removed-creator-remaining@example.com")
+    await db.insert(schema.members).values([
+      { userId: creator.id, spaceId: space.id, role: "member" },
+      { userId: remaining.id, spaceId: space.id, role: "member" },
+    ])
+    const chat = await testUtils.createChat(space.id, "Creator Thread", "thread", false, creator.id)
+    if (!chat) throw new Error("Failed to create chat")
+    await testUtils.addParticipant(chat.id, creator.id)
+    await testUtils.addParticipant(chat.id, remaining.id)
+
+    // Space removal deletes the membership and the creator's participant row.
+    await db.delete(schema.members).where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, creator.id)))
+    await db.delete(schema.chatParticipants).where(and(
+      eq(schema.chatParticipants.chatId, chat.id),
+      eq(schema.chatParticipants.userId, creator.id),
+    ))
+
+    await expect(moveThread({ chatId: chat.id, spaceId: null }, makeContext(creator.id))).rejects.toBeInstanceOf(RealtimeRpcError)
+    const [after] = await db.select().from(schema.chats).where(eq(schema.chats.id, chat.id))
+    expect(after?.spaceId).toBe(space.id)
+  })
+
+  test("a no-op move does not return another user's private thread", async () => {
+    const owner = await testUtils.createUser("noop-owner@example.com")
+    const outsider = await testUtils.createUser("noop-outsider@example.com")
+    const chat = await testUtils.createChat(null, "Private Home", "thread", false, owner.id)
+    if (!chat) throw new Error("Failed to create chat")
+    await testUtils.addParticipant(chat.id, owner.id)
+
+    await expect(moveThread({ chatId: chat.id, spaceId: null }, makeContext(outsider.id))).rejects.toBeInstanceOf(RealtimeRpcError)
+    const result = await moveThread({ chatId: chat.id, spaceId: null }, makeContext(owner.id))
+    expect(result.chat.id).toBe(chat.id)
+  })
+
+  test("a target-space admin cannot pull in a home thread they cannot read", async () => {
+    const space = await testUtils.createSpace("Pull Space")
+    if (!space) throw new Error("Failed to create space")
+    const admin = await testUtils.createUser("pull-admin@example.com")
+    const creator = await testUtils.createUser("pull-creator@example.com")
+    await db.insert(schema.members).values([
+      { userId: admin.id, spaceId: space.id, role: "admin" },
+      { userId: creator.id, spaceId: space.id, role: "member" },
+    ])
+    const chat = await testUtils.createChat(null, "Someone's Home Thread", "thread", false, creator.id)
+    if (!chat) throw new Error("Failed to create chat")
+    await testUtils.addParticipant(chat.id, creator.id)
+
+    await expect(moveThread({ chatId: chat.id, spaceId: space.id }, makeContext(admin.id))).rejects.toBeInstanceOf(RealtimeRpcError)
+    const [after] = await db.select().from(schema.chats).where(eq(schema.chats.id, chat.id))
+    expect(after?.spaceId).toBeNull()
+  })
 })

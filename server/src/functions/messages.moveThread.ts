@@ -14,6 +14,8 @@ import type { ServerUpdate } from "@in/server/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { allocateThreadNumber } from "@in/server/modules/threadNumbers"
 import { invalidateGridTranscriptionForHistory } from "@in/server/modules/grid/transcription/state"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import type { Transaction } from "@in/server/db/types"
 
 const log = new Log("functions.moveThread")
 
@@ -48,6 +50,17 @@ export async function moveThread(
         throw RealtimeRpcError.ChatIdInvalid()
       }
 
+      // Authority is evaluated against current state, inside the transaction:
+      // a creator who was removed from the Space (or the thread) no longer has
+      // access, so `createdBy` alone must never restore control over it.
+      const currentSpaceId = chat.spaceId ?? null
+      const hasAccess = await hasCurrentChatAccess(tx, chat, context.currentUserId)
+      const isSourceAdmin = currentSpaceId !== null &&
+        await isSpaceAdminOrOwner(tx, currentSpaceId, context.currentUserId)
+      if (!hasAccess && !isSourceAdmin) {
+        throw RealtimeRpcError.ChatIdInvalid()
+      }
+
       if (chat.type !== "thread") {
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
       }
@@ -57,8 +70,6 @@ export async function moveThread(
       if (chat.publicThread) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Only private threads can be moved", 400)
       }
-
-      const currentSpaceId = chat.spaceId ?? null
 
       // v1: only home <-> space moves. Cross-space later.
       if (currentSpaceId !== null && targetSpaceId !== null && currentSpaceId !== targetSpaceId) {
@@ -70,41 +81,25 @@ export async function moveThread(
       }
 
       if (currentSpaceId === targetSpaceId) {
-        // No-op.
+        // No-op: only someone who can read the thread gets it back.
+        if (!hasAccess) throw RealtimeRpcError.ChatIdInvalid()
         return { chat }
       }
 
-      const isCreator = chat.createdBy !== null && chat.createdBy === context.currentUserId
+      // Creator authority only counts while the creator still has access.
+      const isCurrentCreator = hasAccess && chat.createdBy !== null && chat.createdBy === context.currentUserId
 
       // Authorization:
-      // - creator can always move (subject to participant/membership rules below)
-      // - space admins/owners can move threads in/out of that space
+      // - a creator with current access can move (subject to participant/membership rules below)
+      // - into a space: the actor must be able to read the thread, and be its creator or a target admin/owner
+      // - out of a space: an admin/owner of that space, or the creator with current access
       if (targetSpaceId !== null) {
-        // Moving into a space: require admin/owner in target OR creator.
-        const [member] = await tx
-          .select({ role: members.role })
-          .from(members)
-          .where(and(eq(members.spaceId, targetSpaceId), eq(members.userId, context.currentUserId)))
-          .limit(1)
-
-        const isAdminOrOwner = member?.role === "admin" || member?.role === "owner"
-        if (!isCreator && !isAdminOrOwner) {
+        const isTargetAdmin = await isSpaceAdminOrOwner(tx, targetSpaceId, context.currentUserId)
+        if (!hasAccess || (!isCurrentCreator && !isTargetAdmin)) {
           throw RealtimeRpcError.SpaceAdminRequired()
         }
-      } else {
-        // Moving to home: if coming from a space, require admin/owner in that space OR creator.
-        if (currentSpaceId !== null) {
-          const [member] = await tx
-            .select({ role: members.role })
-            .from(members)
-            .where(and(eq(members.spaceId, currentSpaceId), eq(members.userId, context.currentUserId)))
-            .limit(1)
-
-          const isAdminOrOwner = member?.role === "admin" || member?.role === "owner"
-          if (!isCreator && !isAdminOrOwner) {
-            throw RealtimeRpcError.SpaceAdminRequired()
-          }
-        }
+      } else if (currentSpaceId !== null && !isCurrentCreator && !isSourceAdmin) {
+        throw RealtimeRpcError.SpaceAdminRequired()
       }
 
       const participantRows = await tx
@@ -293,4 +288,23 @@ const pushUpdates = async ({
   })
 
   return { updateGroup }
+}
+
+async function hasCurrentChatAccess(tx: Transaction, chat: DbChat, userId: number): Promise<boolean> {
+  try {
+    await AccessGuards.ensureChatAccess(chat, userId, tx)
+    return true
+  } catch (error) {
+    if (error instanceof RealtimeRpcError) return false
+    throw error
+  }
+}
+
+async function isSpaceAdminOrOwner(tx: Transaction, spaceId: number, userId: number): Promise<boolean> {
+  const [member] = await tx
+    .select({ role: members.role })
+    .from(members)
+    .where(and(eq(members.spaceId, spaceId), eq(members.userId, userId)))
+    .limit(1)
+  return member?.role === "admin" || member?.role === "owner"
 }
