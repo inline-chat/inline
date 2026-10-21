@@ -1565,7 +1565,7 @@ final class RealtimeSendTests {
     #expect(second > first)
   }
 
-  @Test("late RPC results from an old transport cannot complete a new request")
+  @Test("a read in flight across a transport reset is re-sent, and late results stay request-scoped")
   func testLateOldTransportResultCannotCollideAfterReset() async throws {
     let auth = Auth.mocked(authenticated: true)
     let transport = MockTransport()
@@ -1577,38 +1577,55 @@ final class RealtimeSendTests {
       }
     }
     defer { collector.cancel() }
+    @Sendable func rpcIDs() async -> [UInt64] {
+      await transport.sentMessages.compactMap { message in
+        if case .rpcCall = message.body { return message.id }
+        return nil
+      }
+    }
 
+    let oldCompleted = SendTestFlag()
     let oldRequest = Task {
-      try await session.callRpc(method: .getMe, input: nil, timeout: nil)
+      _ = try await session.callRpc(method: .getMe, input: nil, timeout: nil)
+      await oldCompleted.set()
     }
-    try #require(await waitForCondition { await transport.sentMessages.count == 1 })
-    let oldID = try #require(await transport.sentMessages.first?.id)
+    try #require(await waitForCondition { await rpcIDs().count == 1 })
+    let oldID = try #require(await rpcIDs().first)
 
+    // The transport goes away. A read-only request outlives it instead of failing with `stopped`.
     await session.stopTransport()
-    do {
-      _ = try await oldRequest.value
-      Issue.record("Expected the old request to be cancelled by transport reset")
-    } catch ProtocolSessionError.stopped {
-      // Expected.
-    } catch {
-      Issue.record("Unexpected old request error: \(error)")
-    }
+    try? await Task.sleep(for: .milliseconds(30))
+    #expect(await oldCompleted.get() == false)
+
+    // The next session opens: the read is re-sent under a fresh message ID.
+    await session.startTransport(sessionID: 1)
+    await session.startHandshake(sessionID: 1)
+    var open = ServerProtocolMessage()
+    open.body = .connectionOpen(.init())
+    await transport.emit(.message(open))
+    try #require(await waitForCondition { await rpcIDs().count == 2 })
+    let resentID = try #require(await rpcIDs().last)
+    #expect(resentID != oldID)
 
     let newCompleted = SendTestFlag()
     let newRequest = Task {
       _ = try await session.callRpc(method: .getMe, input: nil, timeout: .seconds(1))
       await newCompleted.set()
     }
-    try #require(await waitForCondition { await transport.sentMessages.count == 2 })
-    let newID = try #require(await transport.sentMessages.last?.id)
+    try #require(await waitForCondition { await rpcIDs().count == 3 })
+    let newID = try #require(await rpcIDs().last)
     #expect(newID != oldID)
+    #expect(newID != resentID)
 
+    // A late reply for the old attempt resolves the old request, never the new one.
     var oldResult = InlineProtocol.RpcResult()
     oldResult.reqMsgID = oldID
     var oldEnvelope = ServerProtocolMessage()
     oldEnvelope.body = .rpcResult(oldResult)
     await transport.emit(.message(oldEnvelope))
     await transport.emit(.rpcCommitOutcomeUnknown(msgId: oldID))
+    try await oldRequest.value
+    #expect(await oldCompleted.get())
     try? await Task.sleep(for: .milliseconds(30))
     #expect(await newCompleted.get() == false)
 
@@ -1675,27 +1692,42 @@ final class RealtimeSendTests {
     #expect(await drained.get())
   }
 
-  @Test("direct dispatch finalizes its drain lease for both pre-write transport errors")
-  func testDirectRPCDrainFinalizesForTransportErrors() async {
-    for transportError in [TransportError.notConnected, .capacityExceeded] {
-      let transport = DirectDispatchFailureTransport(error: transportError)
-      let session = ProtocolSession(
-        transport: transport,
-        auth: Auth.mocked(authenticated: true).handle
-      )
-      do {
-        _ = try await session.callRpc(method: .deleteChat, input: nil, timeout: .seconds(1))
-        Issue.record("Expected direct dispatch transport error")
-      } catch ProtocolSessionError.notConnected where transportError == .notConnected {
-        // Known-unsent and fully drained.
-      } catch ProtocolSessionError.capacityExceeded where transportError == .capacityExceeded {
-        // Known-unsent and fully drained.
-      } catch {
-        Issue.record("Unexpected direct dispatch error: \(error)")
-      }
-      await session.waitForDirectDispatches()
-      #expect(await transport.sendCount() == 1)
+  @Test("a transport that refuses the bytes proves there is no connection; the request waits for one")
+  func testDirectRPCDrainFinalizesForNotConnected() async {
+    let transport = DirectDispatchFailureTransport(error: .notConnected)
+    let session = ProtocolSession(
+      transport: transport,
+      auth: Auth.mocked(authenticated: true).handle
+    )
+    do {
+      _ = try await session.callRpc(method: .deleteChat, input: nil, timeout: .milliseconds(300))
+      Issue.record("Expected the request to expire without a connection")
+    } catch ProtocolSessionError.notConnected {
+      // Known-unsent: one attempt, then held until a session opens, then the deadline.
+    } catch {
+      Issue.record("Unexpected direct dispatch error: \(error)")
     }
+    await session.waitForDirectDispatches()
+    #expect(await transport.sendCount() == 1)
+  }
+
+  @Test("a transport capacity refusal is retried after a hold instead of failing the caller")
+  func testDirectRPCDrainRetriesAfterCapacityRefusal() async {
+    let transport = DirectDispatchFailureTransport(error: .capacityExceeded)
+    let session = ProtocolSession(
+      transport: transport,
+      auth: Auth.mocked(authenticated: true).handle
+    )
+    do {
+      _ = try await session.callRpc(method: .deleteChat, input: nil, timeout: .milliseconds(700))
+      Issue.record("Expected the request to time out behind capacity")
+    } catch ProtocolSessionError.timeout {
+      // Still known-unsent on an assumed-open connection: a timeout, not uncertainty.
+    } catch {
+      Issue.record("Unexpected direct dispatch error: \(error)")
+    }
+    await session.waitForDirectDispatches()
+    #expect(await transport.sendCount() >= 2)
   }
 
   @Test("direct RPC admission rejects request 65 without a transport write")
@@ -1859,8 +1891,8 @@ final class RealtimeSendTests {
     #expect(await resultTask.value)
   }
 
-  @Test("carrier pre-execution rejection is a known-unsent direct failure")
-  func testCarrierPreexecutionRejectionStaysRequestScoped() async {
+  @Test("carrier pre-execution rejection re-sends the direct request instead of failing it")
+  func testCarrierPreexecutionRejectionStaysRequestScoped() async throws {
     let auth = Auth.mocked(authenticated: true)
     let transport = MockTransport()
     let session = ProtocolSession(transport: transport, auth: auth.handle)
@@ -1872,25 +1904,24 @@ final class RealtimeSendTests {
     }
     defer { collector.cancel() }
 
-    let resultTask = Task { () -> Bool in
-      do {
-        _ = try await session.callRpc(method: .deleteChat, input: nil, timeout: .seconds(1))
-        return false
-      } catch ProtocolSessionError.capacityExceeded {
-        return true
-      } catch {
-        return false
-      }
+    let resultTask = Task {
+      try await session.callRpc(method: .deleteChat, input: nil, timeout: .seconds(3))
     }
 
-    let sent = await waitForCondition {
-      !(await transport.sentMessages.isEmpty)
-    }
-    #expect(sent)
-    if let messageID = await transport.sentMessages.first?.id {
-      await transport.emit(.rpcRejectedBeforeExecution(msgId: messageID))
-    }
-    #expect(await resultTask.value)
+    try #require(await waitForCondition { await transport.sentMessages.count == 1 })
+    let firstID = try #require(await transport.sentMessages.first?.id)
+    // The server proved the first attempt never executed, so a second attempt is safe.
+    await transport.emit(.rpcRejectedBeforeExecution(msgId: firstID))
+    try #require(await waitForCondition(timeout: .seconds(2)) { await transport.sentMessages.count == 2 })
+    let secondID = try #require(await transport.sentMessages.last?.id)
+    #expect(secondID != firstID)
+
+    var result = InlineProtocol.RpcResult()
+    result.reqMsgID = secondID
+    var envelope = ServerProtocolMessage()
+    envelope.body = .rpcResult(result)
+    await transport.emit(.message(envelope))
+    _ = try await resultTask.value
   }
 
   @Test("connectionError posts restart alert notification when auth refresh shows missing token")

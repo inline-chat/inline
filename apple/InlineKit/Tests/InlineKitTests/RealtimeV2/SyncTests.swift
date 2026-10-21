@@ -359,7 +359,8 @@ final class SyncTests {
     #expect(await waitForCondition(timeout: .seconds(4)) {
       await storage.getState().lastSyncDate > 10
     })
-    #expect(failures.errorCategories(prefix: "sync_state:").isEmpty)
+    // Process-global sink: only this client's own teardown category is meaningful here.
+    #expect(failures.errorCategories(prefix: "sync_state:request_failed:\(reason.rawValue)").isEmpty)
     await sync.prepareForTermination()
   }
 
@@ -375,10 +376,14 @@ final class SyncTests {
       methodErrors: [.getUpdatesState: Array(repeating: ProtocolSessionError.stopped, count: 5)]
     )
     let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: .default)
+    // The sink observes the whole test process. Suites run in parallel, and a real-session
+    // sync owner elsewhere can report its own state failure (a 15 s timeout, for example)
+    // while this test runs, so count only the category this scripted client can produce.
     let failures = SyncDiagnosticsLogSink()
     let sinkID = UUID().uuidString
     Log.addSink(failures, id: sinkID)
     defer { Log.removeSink(id: sinkID) }
+    let stopped = "sync_state:request_failed:stopped"
     let stateCalls: @Sendable () async -> Int = {
       await client.getCalledMethods().filter { $0 == .getUpdatesState }.count
     }
@@ -388,11 +393,11 @@ final class SyncTests {
     #expect(await waitForCondition(timeout: .seconds(4)) { await stateCalls() >= 2 })
     await sync.acceptedSessionOpened(sessionID: 2)
     #expect(await waitForCondition { await stateCalls() >= 3 })
-    #expect(failures.errorCategories(prefix: "sync_state:").isEmpty)
+    #expect(failures.errorCategories(prefix: stopped).isEmpty)
 
     await sync.acceptedSessionOpened(sessionID: 3)
     #expect(await waitForCondition {
-      failures.errorCategories(prefix: "sync_state:") == ["sync_state:request_failed:stopped"]
+      failures.errorCategories(prefix: stopped) == [stopped]
     })
 
     // Later teardowns in the same episode do not add events; recovery still lands.
@@ -402,7 +407,7 @@ final class SyncTests {
     #expect(await waitForCondition(timeout: .seconds(8)) {
       await storage.getState().lastSyncDate > 10
     })
-    #expect(failures.errorCategories(prefix: "sync_state:") == ["sync_state:request_failed:stopped"])
+    #expect(failures.errorCategories(prefix: stopped) == [stopped])
     await sync.prepareForTermination()
   }
 

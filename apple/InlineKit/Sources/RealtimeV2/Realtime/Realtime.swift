@@ -343,6 +343,9 @@ public actor RealtimeV2 {
     resumeAllTransactionContinuations(throwing: CancellationError())
 
     await connectionManager.stop()
+    // Direct requests outlive transport reconnects; only the end of the account generation
+    // resolves the ones still waiting for a session.
+    await session.closeDirectRequests()
     await session.waitForDirectDispatches()
     await retryTask?.value
     await cancelHistoryCompletions()
@@ -418,6 +421,7 @@ public actor RealtimeV2 {
 
     async let syncTermination: Void = sync.prepareForTermination()
     await connectionManager.stop()
+    await session.closeDirectRequests()
     // A caller may already have timed out while its transport write is still in progress.
     // Drain that session-owned write before SQLCipher or other app owners can tear down.
     await session.waitForDirectDispatches()

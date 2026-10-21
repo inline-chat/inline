@@ -122,6 +122,7 @@ public final actor RealtimeDirectSession {
     guard !finished else { return }
     finished = true
     await connectionManager.stop()
+    await session.closeDirectRequests()
     // A timed-out or cancelled caller may still own an in-flight transport write.
     await session.waitForDirectDispatches()
     await connectionManager.stop()
