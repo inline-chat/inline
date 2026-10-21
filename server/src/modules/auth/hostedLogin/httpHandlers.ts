@@ -253,14 +253,11 @@ export function hostedLoginConfirmPage(input: {
   browserIp?: string | undefined
   error?: string
 }): Response {
+  // Only a match is shown: a mismatch is usually a false alarm (IPv4 vs IPv6 on
+  // dual-stack, a remote or agent host), so its absence says nothing either way.
   const requestNetwork = input.transaction.client.requestNetwork
-  const browserNetwork = networkFingerprint(input.browserIp)
-  const sameNetwork = requestNetwork !== undefined && requestNetwork === browserNetwork
-  const network = requestNetwork === undefined || browserNetwork === undefined
-    ? `<div><dt>Network</dt><dd>Unknown</dd></div>`
-    : sameNetwork
-      ? `<div><dt>Network</dt><dd>Same as this browser</dd></div>`
-      : `<div><dt>Network</dt><dd>Different from this browser</dd></div>`
+  const sameNetwork = requestNetwork !== undefined && requestNetwork === networkFingerprint(input.browserIp)
+  const network = sameNetwork ? `<div><dt>Network</dt><dd>Same as this browser</dd></div>` : ""
   const device = input.transaction.client.deviceName?.trim()
   return authPageResponse(input.error ? 400 : 200, {
     title: "Sign in the Inline CLI?",

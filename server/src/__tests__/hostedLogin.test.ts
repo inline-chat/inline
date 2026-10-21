@@ -7,12 +7,14 @@ import {
   completeHostedLogin,
   inlineProtocolBrowserLoginStatus,
   issueHostedLoginCsrf,
+  networkFingerprint,
 } from "@in/server/modules/auth/hostedLogin/service"
 import { setupTestLifecycle, testUtils } from "./setup"
 import {
   continueHostedLoginAfterProof,
   handleHostedLoginConfirm,
   handleHostedLoginGet,
+  hostedLoginConfirmPage,
 } from "@in/server/modules/auth/hostedLogin/httpHandlers"
 import { connectionManager } from "@in/server/ws/connections"
 
@@ -189,5 +191,29 @@ describe("hosted login transactions", () => {
     expect(accepted.status).toBe(200)
     expect((await inlineProtocolBrowserLoginStatus({ transactionId: begun.loginTransactionId, authKeyId })).kind)
       .toBe("authorized")
+  })
+
+  it("names the network only when the CLI started on this browser's network", async () => {
+    const page = async (browserIp: string | undefined, requestIp: string | null = "203.0.113.5") =>
+      hostedLoginConfirmPage({
+        transaction: {
+          client: { clientType: "cli", deviceName: "My laptop", requestNetwork: networkFingerprint(requestIp ?? undefined) },
+          createdAt: new Date(),
+        },
+        csrf: "csrf",
+        browserIp,
+      }).text()
+
+    expect(await page("203.0.113.5")).toContain("<dt>Network</dt><dd>Same as this browser</dd>")
+    // IPv6 temporary addresses within the same /64 still match.
+    expect(await page("2001:db8:1:2::abcd", "2001:db8:1:2::1")).toContain("Same as this browser")
+
+    // A mismatch (often IPv4 vs IPv6, or an agent host) or a missing address shows no network row at all.
+    for (const html of [await page("198.51.100.7"), await page("2001:db8::1"), await page(undefined), await page("203.0.113.5", null)]) {
+      expect(html).toContain("Sign in the Inline CLI?")
+      expect(html).not.toContain("<dt>Network</dt>")
+      expect(html).not.toContain("Different from this browser")
+      expect(html).not.toContain("Unknown</dd>")
+    }
   })
 })
