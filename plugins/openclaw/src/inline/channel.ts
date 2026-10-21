@@ -2216,9 +2216,9 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       })
       if (ignoredSenderKeys.length > 0) {
         ctx.log?.warn?.(
-          `[${account.accountId}] Ignoring toolsBySender keys that are not numeric Inline user IDs: ${ignoredSenderKeys.join(", ")}. ` +
+          `[${account.accountId}] Tools are disabled for groups with toolsBySender keys that are not numeric Inline user IDs: ${ignoredSenderKeys.join(", ")}. ` +
             "Names, usernames and phone numbers can be changed by the sender, so they never select a tool policy. " +
-            "Key each entry by the sender's user ID (ask them to send /whoami).",
+            "Key each entry by the sender's user ID (ask them to send /whoami) to restore tools there.",
         )
       }
 

@@ -74,12 +74,24 @@ function normalizeSenderUserId(raw: string | null | undefined): string | null {
   return value > 0n ? value.toString() : null
 }
 
+/** A `toolsBySender` key that can never match a sender: not `*` and not a numeric Inline user ID. */
+function isIgnoredSenderKey(rawKey: string): boolean {
+  return rawKey.trim() !== "*" && normalizeSenderUserId(rawKey) === null
+}
+
+/** OpenClaw's own "no tools" shape. */
+const denyAllTools = (): InlineToolPolicy => ({ allow: [], deny: ["*"] })
+
 function resolveToolsBySender(params: {
   toolsBySender: Record<string, InlineToolPolicy | undefined> | undefined
   senderId: string | null | undefined
 }): InlineToolPolicy | undefined {
   const entries = Object.entries(params.toolsBySender ?? {})
   if (!entries.length) return undefined
+  // A name-keyed entry was meant for someone this policy cannot identify. Until
+  // the owner re-keys it by user ID nobody in this scope gets tools: failing
+  // open would hand the group default to the very sender the entry restricted.
+  if (entries.some(([rawKey]) => isIgnoredSenderKey(rawKey))) return denyAllTools()
 
   const byUserId = new Map<string, InlineToolPolicy>()
   let wildcard: InlineToolPolicy | undefined
@@ -101,7 +113,8 @@ function resolveToolsBySender(params: {
 
 /**
  * Lists `toolsBySender` keys that can never match because they are not numeric
- * Inline user IDs, so startup can say which entries are ignored.
+ * Inline user IDs. Startup names them, and every scope that has one resolves to
+ * no tools until it is re-keyed.
  */
 export function listIgnoredInlineToolsBySenderKeys(params: {
   cfg: OpenClawConfig
@@ -111,7 +124,7 @@ export function listIgnoredInlineToolsBySenderKeys(params: {
   const ignored: string[] = []
   for (const [groupKey, groupConfig] of Object.entries(groups ?? {})) {
     for (const senderKey of Object.keys(groupConfig?.toolsBySender ?? {})) {
-      if (senderKey.trim() === "*" || normalizeSenderUserId(senderKey)) continue
+      if (!isIgnoredSenderKey(senderKey)) continue
       ignored.push(`groups.${JSON.stringify(groupKey)}.toolsBySender.${JSON.stringify(senderKey)}`)
     }
   }

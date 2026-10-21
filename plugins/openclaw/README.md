@@ -233,7 +233,7 @@ channels:
             allow: ["message"]
 ```
 
-`toolsBySender` keys must be the sender's numeric Inline user ID (`42`, `user:42` or `inline:42`), or `*` for every sender. Ask the user to send `/whoami` to see their ID. Display names, usernames and phone numbers never match, because a sender can change them; for example, user 99 renaming themself "42" does not get user 42's tools. The gateway logs a warning at startup for each key it ignores. A sender without an ID entry gets the group's `toolsBySender."*"`, then the group's `tools`, then the same two from the `"*"` group.
+`toolsBySender` keys must be the sender's numeric Inline user ID (`42`, `user:42` or `inline:42`), or `*` for every sender. Ask the user to send `/whoami` to see their ID. Display names, usernames and phone numbers never match, because a sender can change them; for example, user 99 renaming themself "42" does not get user 42's tools. The gateway logs a warning at startup for each such key, and a group that has one gets no tools at all until the key is replaced by a user ID, so a restriction meant for a person never silently turns into the group default. A sender without an ID entry gets the group's `toolsBySender."*"`, then the group's `tools`, then the same two from the `"*"` group.
 
 Per-account override:
 

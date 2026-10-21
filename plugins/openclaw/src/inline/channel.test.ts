@@ -2065,7 +2065,13 @@ describe("inline/channel", () => {
               toolsBySender: {
                 "42": { allow: ["exec"] },
                 "user:43": { allow: ["web.search"] },
-                alice: { allow: ["exec"] },
+              },
+            },
+            "89": {
+              tools: { allow: ["message"] },
+              toolsBySender: {
+                "42": { allow: ["exec"] },
+                alice: { deny: ["exec"] },
                 "@alice": { allow: ["exec"] },
               },
             },
@@ -2115,9 +2121,16 @@ describe("inline/channel", () => {
       } as any),
     ).toEqual({ allow: ["message.read"] })
 
+    // Group 89 still has name keys: nobody gets tools there, not even user 42,
+    // until the owner re-keys the entries by user ID.
+    const denyAll = { allow: [], deny: ["*"] }
+    expect(resolve({ senderId: "42" }, "89")).toEqual(denyAll)
+    expect(resolve({ senderId: "99", senderName: "alice" }, "89")).toEqual(denyAll)
+    expect(resolve({ senderId: "alice" }, "89")).toEqual(denyAll)
+
     expect(listIgnoredInlineToolsBySenderKeys({ cfg, accountId: "default" })).toEqual([
-      'groups."88".toolsBySender."alice"',
-      'groups."88".toolsBySender."@alice"',
+      'groups."89".toolsBySender."alice"',
+      'groups."89".toolsBySender."@alice"',
     ])
   })
 
