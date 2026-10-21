@@ -51,6 +51,45 @@ describe("OAuth consent client trust", () => {
     expect(oauthClientTrust("https://evil.example/cb")).toMatchObject({ verified: false, host: "evil.example" })
   })
 
+  it("verifies only the exact assistant callback URIs, not every path on their hosts", () => {
+    for (const uri of [
+      "https://chatgpt.com/connector_platform_oauth_redirect",
+      "https://claude.ai/api/mcp/auth_callback",
+      "https://claude.com/api/mcp/auth_callback",
+      "https://ChatGPT.com/connector_platform_oauth_redirect",
+      "https://chatgpt.com:443/connector_platform_oauth_redirect",
+    ]) {
+      expect(oauthClientTrust(uri)).toMatchObject({ verified: true, loopback: false })
+    }
+    for (const uri of [
+      // Custom-GPT action callbacks: any ChatGPT user can create one.
+      "https://chatgpt.com/aip/g-0123456789abcdef/oauth/callback",
+      "https://claude.ai/some/other/callback",
+      "https://chatgpt.com/connector_platform_oauth_redirect/",
+      "https://chatgpt.com/connector_platform_oauth_redirect?next=https://evil.example",
+      "https://chatgpt.com/connector_platform_oauth_redirect#fragment",
+      "https://chatgpt.com:8443/connector_platform_oauth_redirect",
+      "https://user@chatgpt.com/connector_platform_oauth_redirect",
+      "http://chatgpt.com/connector_platform_oauth_redirect",
+      "https://claude.ai/API/mcp/auth_callback",
+    ]) {
+      expect(oauthClientTrust(uri)).toMatchObject({ verified: false, loopback: false })
+    }
+    // Loopback is unchanged: any port and path on this computer.
+    expect(oauthClientTrust("http://localhost:8976/oauth/callback")).toMatchObject({ verified: true, loopback: true, host: "this computer" })
+    expect(oauthClientTrust("http://[::1]:7777/cb?x=1")).toMatchObject({ verified: true, loopback: true })
+    expect(oauthClientTrust("https://127.0.0.1/cb")).toMatchObject({ verified: false, loopback: false })
+  })
+
+  it("treats a client named ChatGPT with a custom-GPT callback as unverified", async () => {
+    const f = await fixture("https://chatgpt.com/aip/g-0123456789abcdef/oauth/callback", "ChatGPT")
+    const html = await f.consentPage()
+    expect(html).toContain("Unverified app")
+    expect(html).toContain("Inline hasn’t verified this app.")
+    expect(html).toContain("<strong>chatgpt.com</strong>")
+    expect(html).not.toContain(" checked")
+  })
+
   it("warns about an unverified app, names where access goes, and pre-selects nothing", async () => {
     const f = await fixture("https://evil.example/cb")
     const html = await f.consentPage()

@@ -3,9 +3,15 @@
  * never evidence of who will receive access. Trust comes from where the
  * authorization code is sent:
  * - loopback redirects keep the code on the user's own machine;
- * - a short allowlist covers the hosted assistants we support.
+ * - a short allowlist of exact callback URIs covers the hosted assistants we
+ *   support. It is exact, not host-wide: other paths on these hosts (for
+ *   example custom-GPT action callbacks) belong to whoever created them.
  */
-const VERIFIED_REDIRECT_HOSTS = new Set(["chatgpt.com", "claude.ai", "claude.com"])
+const VERIFIED_REDIRECT_URIS = new Set([
+  "https://chatgpt.com/connector_platform_oauth_redirect",
+  "https://claude.ai/api/mcp/auth_callback",
+  "https://claude.com/api/mcp/auth_callback",
+])
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])
 
 export type OAuthClientTrust = {
@@ -24,8 +30,15 @@ export function oauthClientTrust(redirectUri: string): OAuthClientTrust {
   }
   const hostname = url.hostname.toLowerCase()
   const loopback = url.protocol === "http:" && LOOPBACK_HOSTS.has(hostname)
-  const verified = loopback || (url.protocol === "https:" && url.port === "" && VERIFIED_REDIRECT_HOSTS.has(hostname))
+  const verified = loopback || isVerifiedRedirect(url)
   return { verified, loopback, host: loopback ? "this computer" : url.host.toLowerCase() }
+}
+
+/** Exact match on scheme, host and path, with the default port, no query, fragment or userinfo. */
+function isVerifiedRedirect(url: URL): boolean {
+  if (url.protocol !== "https:" || url.port !== "" || url.search !== "" || url.hash !== "") return false
+  if (url.username !== "" || url.password !== "") return false
+  return VERIFIED_REDIRECT_URIS.has(`https://${url.hostname.toLowerCase()}${url.pathname}`)
 }
 
 const SCOPE_DESCRIPTIONS: Record<string, string> = {
