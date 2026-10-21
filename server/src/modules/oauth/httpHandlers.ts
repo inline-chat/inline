@@ -444,6 +444,7 @@ export async function completeAuthorizeSignIn(
   authRequest: OauthAuthRequest,
   verifyResult: unknown,
   method: "email" | "phone" | "google" | "apple",
+  options: { notice?: string } = {},
 ): Promise<Response> {
   const token = String((verifyResult as Record<string, unknown>)["token"] ?? "")
   const userId = Number((verifyResult as Record<string, unknown>)["userId"] ?? 0)
@@ -525,13 +526,14 @@ export async function completeAuthorizeSignIn(
     ? `<p class="intro"><strong>${escapeHtml(clientName)}</strong> wants to access your Inline account.</p>`
     : `<p class="intro">An app calling itself <strong>“${escapeHtml(clientName)}”</strong> wants to access your Inline account.</p>
 <div class="notice warning"><strong>Inline hasn’t verified this app.</strong> Access will be sent to <strong>${escapeHtml(trust.host)}</strong>. If someone sent you this link, cancel.</div>`
+  const notice = options.notice ? `<div class="error" role="alert">${escapeHtml(options.notice)}</div>\n` : ""
 
   return html(
-    200,
+    options.notice ? 400 : 200,
     renderPage(
       trust.verified ? `Connect ${clientName}` : "Review app access",
       `
-${intro}
+${notice}${intro}
 <div class="section-label">It will be able to</div>
 <ul class="permissions">${permissions}</ul>
 <form method="post" action="/oauth/authorize/consent">
@@ -1162,7 +1164,13 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
   const allowHomeThreads = readParam(body, "allow_home_threads") === "1"
 
   if (selectedSpaceIds.length === 0 && !allowDms && !allowHomeThreads) {
-    return html(400, renderPage("Error", `<div class="error">Select at least one space, DMs, or home threads.</div>`))
+    // Not a dead end: show the same choices again with a nudge.
+    return completeAuthorizeSignIn(
+      authRequest,
+      { userId: authRequest.inlineUserId },
+      authRequest.authMethod ?? "email",
+      { notice: "Choose at least one place to share, or cancel." },
+    )
   }
 
   let availableSpaces: Array<{ id: number; name: string }> = []

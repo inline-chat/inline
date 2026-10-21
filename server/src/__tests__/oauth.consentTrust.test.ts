@@ -119,6 +119,29 @@ describe("OAuth consent client trust", () => {
     expect(session?.revoked).not.toBeNull()
   })
 
+  it("allowing with nothing selected shows the consent page again with a notice", async () => {
+    const f = await fixture("https://evil.example/cb")
+    const response = await f.post({ decision: "allow" })
+    expect(response.status).toBe(400)
+    expect(response.headers.get("location")).toBeNull()
+    const html = await response.text()
+    const notice = `<div class="error" role="alert">Choose at least one place to share, or cancel.</div>`
+    expect(html).toContain(notice)
+    // Above the intro, on the same consent form with its choices and both buttons.
+    expect(html.indexOf(notice)).toBeLessThan(html.indexOf(`<p class="intro">`))
+    expect(html).toContain(`action="/oauth/authorize/consent"`)
+    expect(html).toContain(`name="space_id"`)
+    expect(html).toContain(`value="allow"`)
+    expect(html).toContain(`value="deny"`)
+    expect(html).not.toContain(" checked")
+    expect(await db.select().from(oauthGrants).where(eq(oauthGrants.inlineUserId, f.user.id))).toHaveLength(0)
+
+    // The request is still usable: a real choice now completes consent.
+    const allowed = await f.post({ decision: "allow", allow_dms: "1" })
+    expect(allowed.status).toBe(302)
+    expect(new URL(allowed.headers.get("location")!).searchParams.get("code")).toBeTruthy()
+  })
+
   it("cancelling a verified app returns access_denied to the app", async () => {
     const f = await fixture("https://chatgpt.com/connector_platform_oauth_redirect")
     const response = await f.post({ decision: "deny" })
