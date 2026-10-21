@@ -33,7 +33,7 @@ https://inline.chat/docs/hermes.md.
 Find the existing Hermes container, service user, persisted Hermes home and
 profile first. Preserve its models, memory, skills and existing channels.
 Install the Inline CLI and adapter in persistent storage as that service user.
-Use browser sign-in with --no-open and give me the approval URL when needed.
+Use browser sign-in with --no-open and give me the approval URL and code when needed.
 Do not read or print .env files, tokens, or other secrets. Do not create a
 second Hermes instance or replace an existing Inline bot without asking.
 Finish by verifying the live gateway and an actual reply in Inline.
@@ -97,7 +97,8 @@ If sign-in is required:
 inline login --browser --no-open
 ```
 
-Open the printed URL on your own computer and approve the login. This signs
+Open the printed URL on your own computer, sign in, and enter the printed
+6-digit code to approve the login. This signs
 in the CLI as the bot owner; setup then configures a separate bot credential
 without printing it.
 
