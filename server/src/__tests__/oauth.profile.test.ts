@@ -17,9 +17,10 @@ describe("OAuth profile completion", () => {
     const nowMs = Date.now()
     const user = await testUtils.createUser(`profile-${crypto.randomUUID()}@example.com`)
     await db.update(users).set({ firstName: "Provider", pendingSetup: true }).where(eq(users.id, user.id))
-    const client = await OauthModel.createClient({ clientId: crypto.randomUUID(), redirectUris: ["https://example.com/callback"], clientName, nowMs })
+    const redirectUri = "https://chatgpt.com/connector_platform_oauth_redirect"
+    const client = await OauthModel.createClient({ clientId: crypto.randomUUID(), redirectUris: [redirectUri], clientName, nowMs })
     const request = await OauthModel.createAuthRequest({ id: crypto.randomUUID(), clientId: client.clientId,
-      redirectUri: "https://example.com/callback", state: "test-state", scope: "messages:read",
+      redirectUri, state: "test-state", scope: "messages:read",
       resource: "https://mcp.inline.chat", codeChallenge: await sha256Base64Url("test-verifier"),
       csrfToken: "test-csrf", deviceId: crypto.randomUUID(), nowMs, expiresAtMs: nowMs + 60_000 })
     const { token } = await testUtils.createSessionForUser(user.id, { deviceId: request.deviceId })
@@ -44,7 +45,7 @@ describe("OAuth profile completion", () => {
     const html = await response.text()
     expect(html).toContain("Download for macOS")
     expect(html).toContain("Get Inline for iOS")
-    expect(html).toContain("Choose what to share")
+    expect(html).toContain("Connect ChatGPT")
     const [user] = await db.select().from(users).where(eq(users.id, f.user.id))
     expect(user?.pendingSetup).toBe(false)
     expect(user?.firstName).toBe("Test")

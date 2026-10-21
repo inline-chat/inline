@@ -35,9 +35,13 @@ import {
 } from "@in/server/methods/verifySmsCode"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { Value } from "@sinclair/typebox/value"
+import { authPageDocument, authPageHeaders, escapeHtml, type AuthPageContext } from "@in/server/modules/auth/authPage"
+import { describeOAuthScopes, oauthClientTrust } from "@in/server/modules/oauth/clientTrust"
 import { randomBytes, timingSafeEqual } from "node:crypto"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
+import { getUserIdFromToken } from "@in/server/modules/auth/sessionAuthentication"
+import { revokeSession } from "@in/server/modules/sessions/revokeSession"
 import { OAuthHandlerFailure } from "./httpHandlerFailure"
 import parsePhoneNumber from "libphonenumber-js"
 import { db } from "@in/server/db"
@@ -109,125 +113,8 @@ const NATIVE_PROVIDER_CLIENT_METADATA_LIMITS = [
 let nextProviderCleanupAtMs = 0
 let providerCleanupInFlight: Promise<void> | undefined
 
-function escapeHtml(input: string): string {
-  return input.replace(/[&<>"']/g, (char) => {
-    switch (char) {
-      case "&":
-        return "&amp;"
-      case "<":
-        return "&lt;"
-      case ">":
-        return "&gt;"
-      case '"':
-        return "&quot;"
-      case "'":
-        return "&#39;"
-      default:
-        return char
-    }
-  })
-}
-
-function renderPage(title: string, body: string): string {
-  return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(title)}</title>
-  <style>
-    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 28px 20px; color: #171717; background: #f7f7f5; }
-    .shell { width: 100%; max-width: 440px; }
-    .brand { display: flex; align-items: center; justify-content: center; gap: 9px; margin-bottom: 22px; font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
-    .brand svg { width: 27px; height: 27px; }
-    .card { border: 1px solid #dededb; border-radius: 18px; padding: 30px; background: #fff; box-shadow: 0 12px 40px rgba(21, 21, 19, 0.06); }
-    h1 { margin: 0; font-size: 25px; line-height: 1.2; letter-spacing: -0.035em; }
-    .intro { margin: 9px 0 24px; color: #666661; font-size: 14px; line-height: 1.5; }
-    label { display: block; margin-top: 16px; font-size: 13px; font-weight: 650; }
-    input[type="text"], input[type="email"], input[type="tel"], input[name="code"] { width: 100%; min-height: 46px; padding: 11px 13px; margin-top: 7px; border-radius: 10px; border: 1px solid #cececa; background: #fff; color: #171717; font: inherit; font-size: 15px; outline: none; transition: border-color 120ms ease, box-shadow 120ms ease; }
-    input[type="text"]:focus, input[type="email"]:focus, input[type="tel"]:focus, input[name="code"]:focus { border-color: #343431; box-shadow: 0 0 0 3px rgba(30, 30, 28, 0.1); }
-    input[name="code"] { letter-spacing: 0.16em; font-variant-numeric: tabular-nums; }
-    button { width: 100%; min-height: 46px; margin-top: 20px; padding: 11px 16px; border-radius: 11px; border: 1px solid #171717; background: #171717; color: #fff; font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; transition: background 120ms ease, transform 120ms ease; }
-    button:hover { background: #30302d; }
-    button:active { transform: translateY(1px); }
-    .provider-methods { display: grid; gap: 9px; margin-bottom: 20px; }
-    .provider-button { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; min-height: 46px; padding: 11px 16px; border: 1px solid #cececa; border-radius: 11px; background: #fff; color: #171717; font-size: 14px; font-weight: 650; text-decoration: none; }
-    .provider-button:hover { background: #f5f5f2; }
-    .provider-mark { display: inline-grid; width: 18px; height: 18px; place-items: center; font-size: 18px; line-height: 1; text-align: center; }
-    .provider-mark svg { display: block; width: 18px; height: 18px; }
-    .divider { display: flex; align-items: center; gap: 10px; margin: 18px 0; color: #8a8a84; font-size: 12px; }
-    .divider::before, .divider::after { content: ""; height: 1px; flex: 1; background: #e5e5e1; }
-    .muted { color: #777771; font-size: 12px; line-height: 1.45; margin-top: 11px; }
-    .error { padding: 12px 14px; border: 1px solid #edc9c5; border-radius: 10px; background: #fff6f5; color: #9d2d23; font-size: 14px; line-height: 1.45; }
-    .method-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: 20px; border-radius: 11px; background: #f0f0ed; }
-    .method-tabs label { margin: 0; padding: 8px 10px; border-radius: 8px; color: #6b6b66; text-align: center; cursor: pointer; }
-    .method-tabs input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-    .method-tabs label:has(input:checked) { background: #fff; color: #171717; box-shadow: 0 1px 3px rgba(20, 20, 18, 0.1); }
-    .method-tabs label:has(input:focus-visible) { outline: 2px solid currentColor; outline-offset: 2px; }
-    .sign-in-method { display: none; }
-    .card:has(#method-email:checked) .email-method, .card:has(#method-phone:checked) .phone-method { display: block; }
-    .scope { padding: 12px 14px; margin: 18px 0; border: 1px solid #e4e4e0; border-radius: 10px; background: #fafaf8; }
-    .scope .muted { margin: 0 0 5px; }
-    .spaces { max-height: 290px; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
-    .spaces label { display: flex; align-items: center; gap: 11px; min-height: 39px; margin: 0; border-bottom: 1px solid #eeeeeb; font-size: 14px; font-weight: 500; }
-    .spaces label:last-child { border-bottom: 0; }
-    .spaces input { width: 17px; height: 17px; margin: 0; accent-color: #171717; }
-    code { padding: 2px 5px; border-radius: 5px; background: #efefec; font-size: 11px; overflow-wrap: anywhere; }
-    .trust { margin: 18px 4px 0; color: #85857f; font-size: 11px; line-height: 1.5; text-align: center; }
-    .status { display: grid; justify-items: center; gap: 14px; text-align: center; }
-    .status .intro { margin: 0; max-width: 320px; }
-    .spinner { width: 24px; height: 24px; border: 2px solid #deded9; border-top-color: #292925; border-radius: 50%; animation: spin 800ms linear infinite; }
-    .actions { display: grid; width: 100%; gap: 9px; margin-top: 8px; }
-    .action { display: grid; width: 100%; min-height: 46px; place-items: center; padding: 11px 16px; border: 1px solid #171717; border-radius: 11px; background: #171717; color: #fff; font-size: 14px; font-weight: 650; text-decoration: none; cursor: pointer; }
-    .action.secondary { border-color: #cececa; background: transparent; color: #171717; }
-    .app-downloads { margin: 20px 0; }
-    .app-downloads h2 { margin: 0; font-size: 15px; }
-    .app-downloads p { margin: 10px 0 0; font-size: 13px; line-height: 1.5; }
-    .app-downloads a { color: inherit; text-underline-offset: 3px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @media (max-width: 520px) { body { align-items: start; padding: 22px 14px; } .brand { margin-bottom: 18px; } .card { padding: 24px 20px; border-radius: 16px; } }
-    @media (prefers-color-scheme: dark) {
-      body { color: #f3f3f0; background: #111210; }
-      .card { border-color: #343532; background: #1b1c19; box-shadow: none; }
-      .intro, .muted { color: #a7a8a1; }
-      input[type="text"], input[type="email"], input[type="tel"], input[name="code"] { border-color: #464742; background: #22231f; color: #f3f3f0; }
-      input[type="text"]:focus, input[type="email"]:focus, input[type="tel"]:focus, input[name="code"]:focus { border-color: #d0d0ca; box-shadow: 0 0 0 3px rgba(240, 240, 235, 0.1); }
-      button { border-color: #f1f1ed; background: #f1f1ed; color: #181916; }
-      button:hover { background: #dcdcd7; }
-      .provider-button { border-color: #464742; background: #22231f; color: #f3f3f0; }
-      .provider-button:hover { background: #30312d; }
-      .divider::before, .divider::after { background: #363732; }
-      .method-tabs { background: #252622; }
-      .method-tabs label { color: #a1a29b; }
-      .method-tabs label:has(input:checked) { background: #3a3b36; color: #f3f3f0; box-shadow: none; }
-      .scope { border-color: #363732; background: #21221f; }
-      .spaces label { border-color: #30312d; }
-      .spaces input { accent-color: #f1f1ed; }
-      code { background: #30312d; }
-      .error { border-color: #663e39; background: #2d1d1b; color: #f1aaa2; }
-      .trust { color: #878881; }
-      .spinner { border-color: #42433e; border-top-color: #f1f1ed; }
-      .action { border-color: #f1f1ed; background: #f1f1ed; color: #181916; }
-      .action.secondary { border-color: #464742; background: transparent; color: #f3f3f0; }
-    }
-  </style>
-</head>
-<body>
-  <main class="shell">
-    <div class="brand">
-      <svg viewBox="0 0 54 54" fill="none" aria-hidden="true"><rect x="5" y="5" width="44" height="44" rx="16" stroke="currentColor" stroke-width="10"/><rect x="17" y="17" width="10" height="20" rx="4" fill="currentColor"/></svg>
-      <span>Inline</span>
-    </div>
-    <div class="card">
-      <h1>${escapeHtml(title)}</h1>
-      ${body}
-    </div>
-    <div class="trust">Secure sign-in · Verification codes stay between you and Inline.</div>
-  </main>
-</body>
-</html>`
+function renderPage(title: string, body: string, context?: AuthPageContext): string {
+  return authPageDocument({ title, body, ...(context ? { context } : {}) })
 }
 
 function jsonForInlineScript(value: string): string {
@@ -395,12 +282,11 @@ function nativeAuthJson(status: number, body: unknown, headers?: HeadersInit): R
   return response
 }
 
-function html(status: number, body: string, headers?: HeadersInit): Response {
+function html(status: number, body: string, headers?: Record<string, string>): Response {
   return new Response(body, {
     status,
     headers: {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
+      ...authPageHeaders,
       ...headers,
     },
   })
@@ -609,47 +495,59 @@ export async function completeAuthorizeSignIn(
     )
   }
 
-  const spacesList = spaces
-    .map((space) => {
-      return `<label><input type="checkbox" name="space_id" value="${String(space.id)}" checked /> <span>${escapeHtml(space.name)}</span></label>`
-    })
-    .join("")
   const client = await OauthModel.getClient(authRequest.clientId)
   const clientName = client?.clientName?.trim() || "the connected app"
-  const priorSession = oauthClientKind(client?.clientName) === "chatgpt"
+  const trust = oauthClientTrust(authRequest.redirectUri)
+  // Unverified apps get nothing pre-selected: sharing must be a deliberate choice.
+  const checked = trust.verified ? " checked" : ""
+  const choices = [
+    ...spaces.map((space) =>
+      `<label><input type="checkbox" name="space_id" value="${String(space.id)}"${checked} /> <span>${escapeHtml(space.name)}</span></label>`),
+    `<label><input type="checkbox" name="allow_dms" value="1"${checked} /> <span>Direct messages</span></label>`,
+    `<label><input type="checkbox" name="allow_home_threads" value="1"${checked} /> <span>Home threads shared with you</span></label>`,
+  ].join("")
+  const permissions = describeOAuthScopes(authRequest.scope)
+    .map((description) => `<li>${escapeHtml(description)}</li>`)
+    .join("")
+  const priorSession = oauthClientKind(client?.clientName) === "chatgpt" && trust.verified
     ? (await db.select({ id: sessions.id }).from(sessions).where(and(
       eq(sessions.userId, userId),
       or(isNull(sessions.deviceId), ne(sessions.deviceId, authRequest.deviceId)),
     )).limit(1))[0]
     : true
   const downloadPrompt = !priorSession ? `
-<section class="scope app-downloads" aria-label="Get Inline">
-  <h2>Get Inline on your devices</h2>
-  <p>Download Inline for macOS or iOS to start conversations and connect with your team. Sign in with the same account.</p>
-  <p><a href="https://inline.chat/download/mac/beta" target="_blank" rel="noopener noreferrer">Download for macOS</a> · <a href="https://testflight.apple.com/join/FkC3f7fz" target="_blank" rel="noopener noreferrer">Get Inline for iOS</a></p>
-  <p class="muted">You can download the apps later. Continue below to connect ChatGPT.</p>
+<section class="downloads" aria-label="Get Inline">
+  Use Inline on your devices too, signed in with the same account:
+  <a href="https://inline.chat/download/mac/beta" target="_blank" rel="noopener noreferrer">Download for macOS</a> ·
+  <a href="https://testflight.apple.com/join/FkC3f7fz" target="_blank" rel="noopener noreferrer">Get Inline for iOS</a>
 </section>` : ""
+  const intro = trust.verified
+    ? `<p class="intro"><strong>${escapeHtml(clientName)}</strong> wants to access your Inline account.</p>`
+    : `<p class="intro">An app calling itself <strong>“${escapeHtml(clientName)}”</strong> wants to access your Inline account.</p>
+<div class="notice warning"><strong>Inline hasn’t verified this app.</strong> Access will be sent to <strong>${escapeHtml(trust.host)}</strong>. If someone sent you this link, cancel.</div>`
 
   return html(
     200,
     renderPage(
-      "Choose what to share",
+      trust.verified ? `Connect ${clientName}` : "Review app access",
       `
-${downloadPrompt}
-<p class="intro">Select where ${escapeHtml(clientName)} can act on your behalf. You can revoke access later.</p>
+${intro}
+<div class="section-label">It will be able to</div>
+<ul class="permissions">${permissions}</ul>
 <form method="post" action="/oauth/authorize/consent">
   <input type="hidden" name="csrf" value="${escapeHtml(authRequest.csrfToken)}" />
-  <div class="scope">
-    <div class="muted">Requested permissions</div>
-    <code>${escapeHtml(authRequest.scope)}</code>
+  <div class="section-label">Share with</div>
+  <div class="choices">${choices}</div>
+  <div class="button-row">
+    <button type="submit" name="decision" value="allow">Allow access</button>
+    <button type="submit" name="decision" value="deny" class="secondary" formnovalidate>Cancel</button>
   </div>
-  <div class="spaces">
-    ${spacesList}
-    <label><input type="checkbox" name="allow_dms" value="1" checked /> <span>Direct messages</span></label>
-    <label><input type="checkbox" name="allow_home_threads" value="1" checked /> <span>Home threads shared with you</span></label>
-  </div>
-  <button type="submit">Allow access</button>
-</form>`,
+</form>
+<p class="muted">You can revoke access later.</p>
+${downloadPrompt}`,
+      trust.verified
+        ? { kind: "verified-app", label: clientName, detail: trust.host }
+        : { kind: "unverified-app", label: "Unverified app", detail: trust.host },
     ),
     { "cache-control": "no-store" },
   )
@@ -1182,6 +1080,38 @@ export async function handleAuthorizeVerifySmsCode(
   return completeAuthorizeSignIn(authRequest, verifyResult, "phone")
 }
 
+/**
+ * The user declined. Consume the request, revoke the Inline session that sign-in
+ * created for it, and only bounce back to clients we trust: an unverified
+ * redirect may be the phishing site that sent the user here.
+ */
+async function denyAuthorizeConsent(authRequest: OauthAuthRequest): Promise<Response> {
+  const userId = authRequest.inlineUserId
+  const consumed = userId
+    ? await db.transaction((tx) => OauthModel.consumeAuthRequest(authRequest.id, userId, Date.now(), tx))
+    : null
+  const token = consumed?.inlineTokenEncrypted?.length ? Encryption2.decryptToString(consumed.inlineTokenEncrypted) : undefined
+  if (token && userId) {
+    try {
+      const session = await getUserIdFromToken(token)
+      await revokeSession({ actor: "system", targetUserId: userId, sessionId: session.sessionId })
+    } catch (cause) {
+      Log.shared.warn("Failed to revoke the session behind a declined OAuth consent", { cause })
+    }
+  }
+  const clearCookie = authRequestCookieHeader(config, "", { maxAgeSeconds: 0 })
+  const trust = oauthClientTrust(authRequest.redirectUri)
+  if (consumed && trust.verified) {
+    const redirect = new URL(consumed.redirectUri)
+    redirect.searchParams.set("error", "access_denied")
+    redirect.searchParams.set("state", consumed.state)
+    return new Response(null, { status: 302, headers: { location: redirect.toString(), "set-cookie": clearCookie } })
+  }
+  return html(200, renderPage("No access granted", `<p class="intro">Nothing was shared. You can close this window.</p>`), {
+    "set-cookie": clearCookie,
+  })
+}
+
 export async function handleAuthorizeConsent(req: Request, body: unknown): Promise<Response> {
   const authRequest = await getAuthRequestFromCookie(req)
   if (!authRequest) {
@@ -1195,6 +1125,10 @@ export async function handleAuthorizeConsent(req: Request, body: unknown): Promi
   const csrf = readParam(body, "csrf")
   if (!constantTimeEqual(csrf, authRequest.csrfToken)) {
     return html(400, renderPage("Error", `<div class="error">Invalid CSRF token.</div>`))
+  }
+
+  if (readParam(body, "decision") === "deny") {
+    return denyAuthorizeConsent(authRequest)
   }
 
   const profile = await loadOAuthProfile(authRequest.inlineUserId)
