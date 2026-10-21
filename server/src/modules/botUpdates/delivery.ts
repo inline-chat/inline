@@ -6,6 +6,7 @@ import { Log } from "@in/server/utils/log"
 import { resolveWebhookUrl } from "./webhookSecurity"
 import { request as httpsRequest, type RequestOptions } from "node:https"
 import type { ClientRequest, IncomingMessage } from "node:http"
+import { isIP } from "node:net"
 
 const log = new Log("botUpdates.delivery")
 const requestTimeoutMs = 10_000
@@ -34,28 +35,46 @@ export type BotWebhookTransport = (input: {
 export function makeBotWebhookTransport(dependencies: {
   resolve?: typeof resolveWebhookUrl
   request?: (url: URL, options: RequestOptions, callback: (response: IncomingMessage) => void) => ClientRequest
+  timeoutMs?: number
 } = {}): BotWebhookTransport {
   return async (input) => {
     const target = await (dependencies.resolve ?? resolveWebhookUrl)(input.rawUrl)
     if (!await input.beforeConnect()) return undefined
     return new Promise((resolve, reject) => {
+      let settled = false
+      const finish = (outcome: () => void) => {
+        if (settled) return
+        settled = true
+        clearTimeout(deadline)
+        outcome()
+      }
+      // Bun's Node HTTPS shim does not reliably honor a custom `lookup`, so
+      // connect to the validated literal address. The original hostname stays
+      // in Host and SNI/certificate verification; IP literals send no SNI.
       const request = (dependencies.request ?? httpsRequest)(target.url, {
         method: "POST",
-        headers: { ...input.headers, "content-length": Buffer.byteLength(input.body).toString() },
-        servername: target.url.hostname,
-        lookup: ((_hostname: string, _options: unknown, callback: (error: Error | null, address: string, family: number) => void) =>
-          callback(null, target.address, target.family)) as NonNullable<RequestOptions["lookup"]>,
+        agent: false,
+        hostname: target.address,
+        family: target.family,
+        servername: isIP(target.url.hostname.replace(/^\[|\]$/g, "")) ? "" : target.url.hostname,
+        headers: {
+          ...input.headers,
+          host: target.url.host,
+          "content-length": Buffer.byteLength(input.body).toString(),
+        },
       }, (response) => {
-        let bytes = 0
-        response.on("data", (chunk: Buffer) => {
-          bytes += chunk.byteLength
-          if (bytes > 4_096) response.destroy()
-        })
-        response.on("end", () => resolve({ status: response.statusCode ?? 0, retryAfter: response.headers["retry-after"] }))
-        response.on("error", reject)
+        // Only the status and Retry-After carry meaning; never wait on the body.
+        finish(() => resolve({ status: response.statusCode ?? 0, retryAfter: response.headers["retry-after"] }))
+        response.on("error", () => {})
+        response.destroy()
       })
-      request.setTimeout(requestTimeoutMs, () => request.destroy(new Error("Webhook request timed out")))
-      request.on("error", reject)
+      // One absolute deadline covers connect, TLS and response headers.
+      const deadline = setTimeout(() => {
+        request.destroy()
+        finish(() => reject(new Error("Webhook request timed out")))
+      }, dependencies.timeoutMs ?? requestTimeoutMs)
+      request.on("error", (error) => finish(() => reject(error)))
+      request.on("close", () => finish(() => reject(new Error("Webhook connection closed before a response"))))
       request.end(input.body)
     })
   }

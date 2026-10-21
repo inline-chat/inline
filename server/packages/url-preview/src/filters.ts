@@ -294,6 +294,8 @@ function isBlockedIpv6(ip: string): boolean {
     (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8) ||
     (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x00 && bytes[3] === 0x00) ||
     (bytes[0] === 0x20 && bytes[1] === 0x02) ||
+    // NAT64 (64:ff9b::/96 and local-use 64:ff9b:1::/48) can embed private IPv4.
+    (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b) ||
     (bytes[0] === 0x01 && bytes.slice(1, 8).every((byte) => byte === 0)) ||
     (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x00 && bytes[3] === 0x02)
   )
