@@ -1,11 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { and, eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { MessageEntity_Type } from "@inline-chat/protocol/core"
 import { db, schema } from "@in/server/db"
 import { deleteChat, deleteEmptyUntitledThreadAfterClose } from "@in/server/functions/messages.deleteChat"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 const inputPeerForChat = (chatId: number) => ({
   type: {
@@ -188,7 +189,102 @@ describe("messages.deleteChat", () => {
       push.mockRestore()
     }
   })
+
+  test("a creator removed from a private space thread cannot delete it", async () => {
+    const space = await testUtils.createSpace("Delete Removed Creator Space")
+    if (!space) throw new Error("Failed to create space")
+    const creator = await testUtils.createUser("delete-removed-creator@example.com")
+    const remaining = await testUtils.createUser("delete-removed-creator-remaining@example.com")
+    await db.insert(schema.members).values([
+      { userId: creator.id, spaceId: space.id, role: "member" },
+      { userId: remaining.id, spaceId: space.id, role: "member" },
+    ])
+    const chat = await createThreadWithMessage(space.id, "Removed Creator Thread", creator.id, [creator.id, remaining.id])
+
+    // Removed from the thread, still a member of the Space.
+    await removeParticipant(chat.id, creator.id)
+
+    await expect(
+      deleteChat({ peer: inputPeerForChat(chat.id) }, testUtils.functionContext({ userId: creator.id })),
+    ).rejects.toBeInstanceOf(RealtimeRpcError)
+    await expectThreadIntact(chat.id, [remaining.id])
+  })
+
+  test("a creator removed from a home thread cannot delete it", async () => {
+    const creator = await testUtils.createUser("delete-removed-home-creator@example.com")
+    const remaining = await testUtils.createUser("delete-removed-home-remaining@example.com")
+    const chat = await createThreadWithMessage(null, "Removed Home Thread", creator.id, [creator.id, remaining.id])
+
+    await removeParticipant(chat.id, creator.id)
+
+    await expect(
+      deleteChat({ peer: inputPeerForChat(chat.id) }, testUtils.functionContext({ userId: creator.id })),
+    ).rejects.toBeInstanceOf(RealtimeRpcError)
+    await expectThreadIntact(chat.id, [remaining.id])
+  })
+
+  test("a current creator and a space admin can still delete threads", async () => {
+    const space = await testUtils.createSpace("Delete Authority Space")
+    if (!space) throw new Error("Failed to create space")
+    const creator = await testUtils.createUser("delete-current-creator@example.com")
+    const admin = await testUtils.createUser("delete-space-admin@example.com")
+    await db.insert(schema.members).values([
+      { userId: creator.id, spaceId: space.id, role: "member" },
+      { userId: admin.id, spaceId: space.id, role: "admin" },
+    ])
+    const creatorThread = await createThreadWithMessage(space.id, "Creator Deletes", creator.id, [creator.id])
+    // The admin is not a participant of this private thread.
+    const adminThread = await createThreadWithMessage(space.id, "Admin Deletes", creator.id, [creator.id])
+    const homeThread = await createThreadWithMessage(null, "Creator Deletes Home", creator.id, [creator.id])
+
+    await deleteChat({ peer: inputPeerForChat(creatorThread.id) }, testUtils.functionContext({ userId: creator.id }))
+    await deleteChat({ peer: inputPeerForChat(adminThread.id) }, testUtils.functionContext({ userId: admin.id }))
+    await deleteChat({ peer: inputPeerForChat(homeThread.id) }, testUtils.functionContext({ userId: creator.id }))
+
+    const remaining = await db
+      .select({ id: schema.chats.id })
+      .from(schema.chats)
+      .where(inArray(schema.chats.id, [creatorThread.id, adminThread.id, homeThread.id]))
+    expect(remaining).toHaveLength(0)
+  })
 })
+
+async function createThreadWithMessage(
+  spaceId: number | null,
+  title: string,
+  creatorId: number,
+  participantIds: number[],
+): Promise<schema.DbChat> {
+  const chat = await testUtils.createChat(spaceId, title, "thread", false, creatorId)
+  if (!chat) throw new Error("Failed to create thread")
+  for (const userId of participantIds) {
+    await testUtils.addParticipant(chat.id, userId)
+  }
+  await db.insert(schema.messages).values({ chatId: chat.id, messageId: 1, fromId: creatorId, text: "keep me" })
+  await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, chat.id))
+  return chat
+}
+
+async function removeParticipant(chatId: number, userId: number) {
+  await db
+    .delete(schema.chatParticipants)
+    .where(and(eq(schema.chatParticipants.chatId, chatId), eq(schema.chatParticipants.userId, userId)))
+}
+
+async function expectThreadIntact(chatId: number, participantIds: number[]) {
+  const [chat] = await db.select({ id: schema.chats.id }).from(schema.chats).where(eq(schema.chats.id, chatId))
+  expect(chat?.id).toBe(chatId)
+  const participants = await db
+    .select({ userId: schema.chatParticipants.userId })
+    .from(schema.chatParticipants)
+    .where(eq(schema.chatParticipants.chatId, chatId))
+  expect(participants.map((row) => row.userId).sort()).toEqual([...participantIds].sort())
+  const messages = await db
+    .select({ messageId: schema.messages.messageId })
+    .from(schema.messages)
+    .where(eq(schema.messages.chatId, chatId))
+  expect(messages).toHaveLength(1)
+}
 
 async function waitForThreadBacklink(input: {
   fromChatId: number

@@ -54,7 +54,7 @@ export async function moveThread(
       // a creator who was removed from the Space (or the thread) no longer has
       // access, so `createdBy` alone must never restore control over it.
       const currentSpaceId = chat.spaceId ?? null
-      const hasAccess = await hasCurrentChatAccess(tx, chat, context.currentUserId)
+      const hasAccess = await AccessGuards.hasChatAccess(chat, context.currentUserId, tx)
       const isSourceAdmin = currentSpaceId !== null &&
         await isSpaceAdminOrOwner(tx, currentSpaceId, context.currentUserId)
       if (!hasAccess && !isSourceAdmin) {
@@ -288,16 +288,6 @@ const pushUpdates = async ({
   })
 
   return { updateGroup }
-}
-
-async function hasCurrentChatAccess(tx: Transaction, chat: DbChat, userId: number): Promise<boolean> {
-  try {
-    await AccessGuards.ensureChatAccess(chat, userId, tx)
-    return true
-  } catch (error) {
-    if (error instanceof RealtimeRpcError) return false
-    throw error
-  }
 }
 
 async function isSpaceAdminOrOwner(tx: Transaction, spaceId: number, userId: number): Promise<boolean> {

@@ -24,12 +24,14 @@ import {
 } from "@in/server/modules/authorization/chatAccessProjection"
 import { deleteSubthreadParentPlacement } from "@in/server/functions/messages.deleteMessage"
 import { invalidateGridTranscriptionForHistory } from "@in/server/modules/grid/transcription/state"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 
 const log = new Log("functions.deleteChat")
 /**
  * Deletes a chat (thread).
  * - Space threads: admin/owner or the thread creator.
  * - Home threads: thread creator only.
+ * Creator authority only counts while the creator still has access to the thread.
  * Also deletes participants and dialogs for the chat.
  */
 export async function deleteChat(input: { peer: InputPeer }, context: FunctionContext): Promise<{}> {
@@ -57,7 +59,11 @@ async function deleteChatWithOptions(
       throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
     }
 
-    const isCreator = chat.createdBy === currentUserId
+    // A creator removed from the Space or the thread keeps `createdBy`, so creator
+    // authority only counts while they still have current access (Space membership
+    // for Space threads, a participant grant for home threads).
+    const isCreator =
+      chat.createdBy === currentUserId && (await AccessGuards.hasChatAccess(chat, currentUserId))
     const trimmedTitle = chat.title?.trim() ?? ""
     const hasTitle = trimmedTitle.length > 0
     const hasMessages = chat.lastMsgId != null && chat.lastMsgId !== 0

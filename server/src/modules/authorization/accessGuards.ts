@@ -12,6 +12,7 @@ type AccessQuery = Pick<typeof db, "select"> | Pick<Transaction, "select">
 
 export const AccessGuards = {
   ensureChatAccess,
+  hasChatAccess,
   ensureChatInfoEditAccess,
   ensureSpaceMember,
 }
@@ -46,6 +47,21 @@ async function ensureChatAccess(chat: DbChat, userId: number, query: AccessQuery
   }
 
   await ensureTopLevelChatAccess(chat, userId, validatedSpaceId, query)
+}
+
+/**
+ * `ensureChatAccess` as a boolean: false when access is denied, while database
+ * failures still throw. Use it to gate authority such as thread-creator rights
+ * on the user's current access, since `createdBy` alone outlives removal.
+ */
+async function hasChatAccess(chat: DbChat, userId: number, query: AccessQuery = db): Promise<boolean> {
+  try {
+    await ensureChatAccess(chat, userId, query)
+    return true
+  } catch (error) {
+    if (error instanceof RealtimeRpcError) return false
+    throw error
+  }
 }
 
 async function ensureChatInfoEditAccess(chat: DbChat, userId: number, query?: Pick<Transaction, "select">) {
