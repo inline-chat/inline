@@ -64,10 +64,10 @@ import {
   type ProviderLoginResult,
 } from "@in/server/modules/auth/provider/service"
 import {
-  completionResponse,
+  continueHostedLoginAfterProof,
   requireHostedLoginTransaction,
 } from "@in/server/modules/auth/hostedLogin/httpHandlers"
-import { beginOAuthHostedLogin, completeHostedLogin } from "@in/server/modules/auth/hostedLogin/service"
+import { beginOAuthHostedLogin, getHostedLoginById } from "@in/server/modules/auth/hostedLogin/service"
 import { verifyEmailAccountProof } from "@in/server/modules/auth/contactProof"
 import { isValidAppCodeChallenge } from "@in/server/modules/auth/provider/appHandoff"
 import {
@@ -1855,7 +1855,7 @@ export async function handleProviderCallback(
     })
     context = callbackFailureContext(outcome.attempt)
     if (outcome.kind === "login") {
-      return finishProviderBrowserLogin(outcome.attempt, outcome.result)
+      return finishProviderBrowserLogin(outcome.attempt, outcome.result, clientIpOverride)
     }
     if (outcome.kind === "invite") {
       return html(200, renderPage("Enter your invite code", `
@@ -1921,7 +1921,7 @@ export async function handleProviderContinueInvite(
       continuation: readParam(body, "continuation"),
       inviteCode: readParam(body, "invite_code"),
     })
-    return finishProviderBrowserLogin(outcome.attempt, outcome.result)
+    return finishProviderBrowserLogin(outcome.attempt, outcome.result, clientIpOverride)
   } catch (cause) {
     const description = cause instanceof InlineError ? cause.description : "The invite code could not be accepted."
     return html(400, renderPage("Invite code error", `<div class="error">${escapeHtml(description ?? "Invalid invite code.")}</div>`))
@@ -2067,7 +2067,7 @@ export async function handleProviderVerifyEmailCode(
       challengeToken: attempt.challengeToken,
     })
     const completed = await attachProviderAfterEmailProof({ attempt, userId: proof.user.id })
-    return finishProviderBrowserLogin(completed.attempt, completed.result)
+    return finishProviderBrowserLogin(completed.attempt, completed.result, clientIpOverride)
   } catch (cause) {
     if (claimed && isRetryableProviderEmailProofFailure(cause)) {
       const restored = await restoreProviderEmailAttempt(attemptId, continuation).catch(() => false)
@@ -2134,14 +2134,17 @@ export async function handleProviderRedeem(
 async function finishProviderBrowserLogin(
   attempt: DbProviderAuthAttempt,
   result: ProviderLoginResult,
+  ip?: string,
 ): Promise<Response> {
   if (attempt.purpose === "hosted_login") {
     if (!attempt.loginTransactionId) throw new Error("Hosted login transaction is missing")
-    const completed = await completeHostedLogin({
-      transactionId: attempt.loginTransactionId,
+    const transaction = await getHostedLoginById(attempt.loginTransactionId)
+    if (!transaction) throw new Error("Hosted login transaction is missing")
+    return continueHostedLoginAfterProof({
+      transaction,
       account: { userId: result.userId, method: attempt.provider },
+      ip,
     })
-    return completionResponse(completed.targetKind)
   }
   if (attempt.purpose === "app") {
     const ticket = await issueAppTicket(attempt)
