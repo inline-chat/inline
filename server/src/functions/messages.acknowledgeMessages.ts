@@ -48,7 +48,7 @@ export async function acknowledgeMessages(input: AcknowledgeMessagesInput, conte
   if (input.expectedRevision < 0n || input.expectedRevision > BigInt(MAX_INT32)) throw RealtimeRpcError.BadRequest()
   const requestedMaxId = Number(input.maxId)
   const expectedRevision = Number(input.expectedRevision)
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   const result = await db.transaction(async tx => {

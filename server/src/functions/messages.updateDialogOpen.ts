@@ -45,7 +45,7 @@ export async function updateDialogOpen(input: Input, context: FunctionContext): 
     }
   }
 
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   const { dialogs, changedDialogs } = await setDialogOpenForUsers({

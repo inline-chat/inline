@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   resolvePreview: vi.fn<(input: ResolveUrlPreviewInput) => Promise<ResolvedUrlPreview | null>>(),
 }))
 
-vi.mock("@in/server/db/models/chats", () => ({ ChatModel: { getChatFromInputPeer: mocks.getChat } }))
+vi.mock("@in/server/db/models/chats", () => ({ ChatModel: { getChatFromInputPeerUnchecked: mocks.getChat } }))
 vi.mock("@in/server/db/models/files", () => ({ FileModel: {} }))
 vi.mock("@in/server/modules/authorization/accessGuards", () => ({
   AccessGuards: { ensureChatAccess: mocks.ensureChatAccess },

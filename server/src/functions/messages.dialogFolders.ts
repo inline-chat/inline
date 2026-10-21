@@ -44,7 +44,7 @@ type PinnedOrderUpdate =
   | { oneofKind: "clearPinnedOrder"; clearPinnedOrder: boolean }
   | { oneofKind: undefined }
 
-type ResolvedChat = Awaited<ReturnType<typeof ChatModel.getChatFromInputPeer>>
+type ResolvedChat = Awaited<ReturnType<typeof ChatModel.getChatFromInputPeerUnchecked>>
 
 export async function createDialogFolder(
   input: { title?: string; peers: InputPeer[]; order?: string; pinnedOrder?: string },
@@ -273,7 +273,7 @@ async function resolveUniqueChats(peers: InputPeer[], context: FunctionContext):
   const result: ResolvedChat[] = []
   const seen = new Set<number>()
   for (const peer of peers) {
-    const chat = await ChatModel.getChatFromInputPeer(peer, context)
+    const chat = await ChatModel.getChatFromInputPeerUnchecked(peer, context)
     await AccessGuards.ensureChatAccess(chat, context.currentUserId)
     if (!seen.has(chat.id)) {
       seen.add(chat.id)

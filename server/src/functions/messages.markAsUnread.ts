@@ -26,7 +26,7 @@ type Output = {
 }
 
 export const markAsUnread = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const chat = await ChatModel.getChatFromInputPeer(input.peer, context).catch((error) => {
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peer, context).catch((error) => {
     if (error instanceof ModelError && error.code === ModelError.Codes.CHAT_INVALID) {
       if (input.peer.type.oneofKind === "chat") throw RealtimeRpcError.ChatIdInvalid()
       throw RealtimeRpcError.PeerIdInvalid()

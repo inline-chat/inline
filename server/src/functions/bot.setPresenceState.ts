@@ -37,7 +37,7 @@ export const setBotPresenceStateFn = async (
   const botUserId = context.currentUserId
   await requireBot(botUserId)
 
-  const chat = await ChatModel.getChatFromInputPeer(peerIdInput, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(peerIdInput, context)
   await AccessGuards.ensureChatAccess(chat, botUserId)
 
   const { state, activityId } = await setSharedBotPresence(botUserId, chat.id, inputState)

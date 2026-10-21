@@ -20,7 +20,7 @@ export const getBotPresence = async (
     throw RealtimeRpcError.BadRequest()
   }
 
-  const chat = await ChatModel.getChatFromInputPeer(peerIdInput, context).catch((error) => {
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(peerIdInput, context).catch((error) => {
     if (
       error instanceof ModelError &&
       error.code === ModelError.Codes.CHAT_INVALID

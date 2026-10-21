@@ -49,7 +49,7 @@ export async function updateDialogOrder(input: Input, context: FunctionContext):
     throw RealtimeRpcError.BadRequest()
   }
 
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   const mutation = await db.transaction(async (tx) => {

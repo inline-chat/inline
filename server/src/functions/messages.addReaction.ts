@@ -23,7 +23,7 @@ export const addReaction = async (input: Input, context: FunctionContext): Promi
   const emoji = input.emoji.trim()
   if (!isSingleEmoji(emoji)) throw RealtimeRpcError.BadRequest()
 
-  const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peer, context)
   const chatId = chat.id
   const updateGroup = await getUpdateGroupFromInputPeer(input.peer, { currentUserId: context.currentUserId })
 

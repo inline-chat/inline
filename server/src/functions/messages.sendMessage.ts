@@ -188,7 +188,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const date = messageDate.date
   const fromId = context.currentUserId
   const currentUserId = context.currentUserId
-  let chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  let chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, currentUserId)
   await ensurePrivatePeerCanReceiveMessages(chat, currentUserId)
   const inputPeer = Encoders.peerFromChat(chat, { currentUserId })

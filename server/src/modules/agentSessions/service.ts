@@ -230,7 +230,7 @@ export async function connectAgentSession(
     }
   }
 
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, { currentUserId })
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, { currentUserId })
   await verifiedOwnerBotChat({ chat, botUserId, ownerUserId: currentUserId })
   const statusGlobalId = await statusMessageGlobalId({
     chatId: chat.id,
@@ -333,7 +333,7 @@ export async function getAgentSession(
 ): Promise<GetAgentSessionResult> {
   if (!input.peerId) throw RealtimeRpcError.BadRequest()
   const botUserId = safePositiveNumber(input.botUserId)
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, { currentUserId })
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, { currentUserId })
   await verifiedOwnerBotChat({ chat, botUserId, ownerUserId: currentUserId })
   const [row] = await db.select().from(agentSessions).where(and(
     eq(agentSessions.chatId, chat.id),

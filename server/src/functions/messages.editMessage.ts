@@ -45,7 +45,7 @@ type Output = {
 }
 
 export const editMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peer, context)
   const chatId = chat.id
   const currentUserId = context.currentUserId
   await AccessGuards.ensureChatAccess(chat, currentUserId)

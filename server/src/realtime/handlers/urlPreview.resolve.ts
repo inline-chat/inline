@@ -37,7 +37,7 @@ export async function resolveUrlPreviewHandler(
   }
 
   const chat = input.peerId
-    ? await ChatModel.getChatFromInputPeer(input.peerId, { currentUserId: context.userId })
+    ? await ChatModel.getChatFromInputPeerUnchecked(input.peerId, { currentUserId: context.userId })
     : undefined
   if (chat) await AccessGuards.ensureChatAccess(chat, context.userId)
 

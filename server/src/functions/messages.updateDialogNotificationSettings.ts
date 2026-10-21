@@ -57,7 +57,7 @@ const bytesEqual = (left: Uint8Array | null | undefined, right: Uint8Array | nul
 }
 
 export const updateDialogNotificationSettings = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   const hasDialogSettings = input.notificationSettings !== undefined

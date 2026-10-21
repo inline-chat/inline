@@ -78,7 +78,7 @@ export async function resolvePeerBotScope(
   currentUserId: number,
 ): Promise<{ chat: DbChat; botUserIds: number[] }> {
   if (!peerId?.type.oneofKind) throw RealtimeRpcError.BadRequest()
-  const chat = await ChatModel.getChatFromInputPeer(peerId, { currentUserId })
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(peerId, { currentUserId })
   await AccessGuards.ensureChatAccess(chat, currentUserId)
   return {
     chat,

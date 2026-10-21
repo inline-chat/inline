@@ -29,7 +29,7 @@ type Output = {
 const log = new Log("functions.pinMessage")
 
 export const pinMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peer, context)
 
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 

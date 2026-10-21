@@ -168,8 +168,8 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
   const currentUserId = context.currentUserId
   const shareForwardHeader = input.shareForwardHeader !== false
 
-  const sourceChat = await ChatModel.getChatFromInputPeer(input.fromPeerId, context)
-  const destinationChat = await ChatModel.getChatFromInputPeer(input.toPeerId, context)
+  const sourceChat = await ChatModel.getChatFromInputPeerUnchecked(input.fromPeerId, context)
+  const destinationChat = await ChatModel.getChatFromInputPeerUnchecked(input.toPeerId, context)
 
   await AccessGuards.ensureChatAccess(sourceChat, currentUserId)
   await AccessGuards.ensureChatAccess(destinationChat, currentUserId)

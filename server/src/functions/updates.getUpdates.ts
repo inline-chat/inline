@@ -523,7 +523,7 @@ const resolveBucket = async (
 
 const getChatOrThrow = async (inputPeer: InputPeer, context: FunctionContext): Promise<DbChat> => {
   try {
-    return await ChatModel.getChatFromInputPeer(inputPeer, {
+    return await ChatModel.getChatFromInputPeerUnchecked(inputPeer, {
       currentUserId: context.currentUserId,
     })
   } catch (error) {

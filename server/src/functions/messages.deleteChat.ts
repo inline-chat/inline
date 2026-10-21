@@ -50,7 +50,7 @@ async function deleteChatWithOptions(
 
   try {
     // Get chat
-    const chat = await ChatModel.getChatFromInputPeer(peer, { currentUserId })
+    const chat = await ChatModel.getChatFromInputPeerUnchecked(peer, { currentUserId })
 
     if (chat.type !== "thread") {
       log.error("Chat is not a thread", { chatId: chat.id })

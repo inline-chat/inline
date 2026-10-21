@@ -7,6 +7,8 @@ import {
   type TPeerInfo as PeerInfo,
 } from "@in/server/api-types"
 import { sendTransientUpdateFor } from "@in/server/modules/updates/sendUpdate"
+import { getChatFromPeer } from "@in/server/db/models/chats"
+import { getAuthorizedChat } from "@in/server/modules/authorization/legacyAccessGuards"
 import { InlineError } from "@in/server/types/errors"
 import { normalizeId, TInputId } from "@in/server/types/methods"
 
@@ -50,6 +52,12 @@ export const handler = async (
   let { currentUserId } = context
 
   let peerId = peerFromInput(input)
+
+  // The recipient group is not authorization. Require the actor's current
+  // access to the DM or thread before emitting typing state to its members.
+  // Legacy guard maps denial to PEER_INVALID (a 4xx), not an internal error.
+  const chat = await getChatFromPeer(peerId, { currentUserId })
+  await getAuthorizedChat(chat.id, currentUserId)
 
   // Because we are sending the action to the other user, we need to reverse the peerId
   let otherPeerId = reversePeerId(peerId, context.currentUserId)

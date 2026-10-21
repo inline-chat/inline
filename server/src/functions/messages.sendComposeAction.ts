@@ -17,8 +17,9 @@ type Input = {
 type Output = {}
 
 export const sendComposeAction = async (input: Input, context: FunctionContext): Promise<Output> => {
-  // Get the peer information - this validates the peer exists and user has access
-  const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
+  // Recipient projection is not authorization: the actor must have current
+  // access to the chat before any typing/working state reaches its members.
+  const chat = await ChatModel.getAuthorizedChatFromInputPeer(input.peer, context)
 
   // Get all users who should receive this update (handles DMs and threads with multiple participants)
   const updateGroup = await getUpdateGroupFromInputPeer(input.peer, { currentUserId: context.currentUserId })

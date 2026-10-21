@@ -73,7 +73,7 @@ async function deleteMessageWithOptions(
   context: FunctionContext,
   options: { trustedPlacementCleanup?: boolean } = {},
 ): Promise<Output> {
-  const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peer, context)
   if (!options.trustedPlacementCleanup) {
     await AccessGuards.ensureChatAccess(chat, context.currentUserId)
   }

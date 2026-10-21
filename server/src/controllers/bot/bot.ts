@@ -267,7 +267,7 @@ const makeInputPeerFromBotTarget = async (input: BotTargetInput, currentUserId: 
 
   let chat
   try {
-    chat = await ChatModel.getChatFromInputPeer(chatPeer, { currentUserId })
+    chat = await ChatModel.getChatFromInputPeerUnchecked(chatPeer, { currentUserId })
   } catch {
     throw new InlineError(InlineError.ApiError.CHAT_ID_INVALID)
   }
@@ -939,7 +939,7 @@ const botMethods = (authPlugin: any): any => {
           throw new InlineError(InlineError.ApiError.BAD_REQUEST)
         }
 
-        const chat = await ChatModel.getChatFromInputPeer(peerId, { currentUserId: store.currentUserId })
+        const chat = await ChatModel.getChatFromInputPeerUnchecked(peerId, { currentUserId: store.currentUserId })
         await AccessGuards.ensureChatAccess(chat, store.currentUserId)
 
         await addReactionFn(

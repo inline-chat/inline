@@ -130,7 +130,7 @@ async function clearPeerHistory(input: {
   deleteReplyThreads: boolean
   context: ClearHistoryContext
 }): Promise<ClearHistoryOutput> {
-  const chat = await ChatModel.getChatFromInputPeer(input.peer, input.context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peer, input.context)
 
   await ensureCanClearHistory(chat, input.context.currentUserId)
   const backlinkMessages = await getBacklinkMessagesForClearedChatMessages({

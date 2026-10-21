@@ -578,7 +578,7 @@ const makeInputPeerFromBotTarget = async (
 
   let chat
   try {
-    chat = await ChatModel.getChatFromInputPeer(chatPeer, {
+    chat = await ChatModel.getChatFromInputPeerUnchecked(chatPeer, {
       currentUserId,
     })
   } catch {
@@ -1410,7 +1410,7 @@ const createThread = async (
     },
     context,
   )
-  const createdChat = await ChatModel.getChatFromInputPeer(
+  const createdChat = await ChatModel.getChatFromInputPeerUnchecked(
     { type: { oneofKind: "chat", chat: { chatId: BigInt(result.chat.id) } } },
     context,
   )
@@ -1475,7 +1475,7 @@ const editMessageText = async (
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
 
-  const chat = await ChatModel.getChatFromInputPeer(peerId, {
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(peerId, {
     currentUserId: context.currentUserId,
   })
   await AccessGuards.ensureChatAccess(
@@ -1531,7 +1531,7 @@ const editMessageActions = async (
   if (!messageId || !Array.isArray(input.actions)) {
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
-  const chat = await ChatModel.getChatFromInputPeer(peerId, {
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(peerId, {
     currentUserId: context.currentUserId,
   })
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
@@ -1586,7 +1586,7 @@ const deleteMessages = async (
   }
   const peerId = await makeInputPeerFromBotTarget(input, context.currentUserId)
   const messageIds = normalizeInputIds(input.message_ids)
-  const chat = await ChatModel.getChatFromInputPeer(peerId, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
   const existing = await MessageModel.getMessagesByIds(
     chat.id,
@@ -1616,7 +1616,7 @@ const forwardMessage = async (
   )
   const messageId = normalizeInputId(input.message_id)
   if (!messageId) throw new InlineError(InlineError.ApiError.MSG_ID_INVALID)
-  const destination = await ChatModel.getChatFromInputPeer(destinationPeer, context)
+  const destination = await ChatModel.getChatFromInputPeerUnchecked(destinationPeer, context)
   const result = await forwardMessagesFn({
     fromPeerId: sourcePeer,
     toPeerId: destinationPeer,
@@ -1651,7 +1651,7 @@ const forwardMessages = async (
     context.currentUserId,
   )
   const messageIds = normalizeOrderedInputIds(input.message_ids)
-  const source = await ChatModel.getChatFromInputPeer(sourcePeer, context)
+  const source = await ChatModel.getChatFromInputPeerUnchecked(sourcePeer, context)
   await AccessGuards.ensureChatAccess(source, context.currentUserId)
   const existing = await MessageModel.getMessagesByIds(
     source.id,
@@ -1788,7 +1788,7 @@ const sendReaction = async (
     throw new InlineError(InlineError.ApiError.BAD_REQUEST)
   }
 
-  const chat = await ChatModel.getChatFromInputPeer(peerId, {
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(peerId, {
     currentUserId: context.currentUserId,
   })
   await AccessGuards.ensureChatAccess(

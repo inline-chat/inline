@@ -15,6 +15,7 @@ import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { TranslationModule } from "@in/server/modules/translation2/translation"
 import { TranslationModel } from "@in/server/db/models/translations"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 const log = new Log("functions/translateMessages")
 
@@ -52,8 +53,9 @@ export async function translateMessages(
       language: input.language,
     })
 
-    // Get chat
-    const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+    // Resolve the chat and require the caller's current access before reading
+    // originals, context, cached translations, or calling the provider.
+    const chat = await ChatModel.getAuthorizedChatFromInputPeer(input.peerId, context)
     log.debug("Retrieved chat", { chatId: chat.id })
 
     // Get messages
@@ -190,6 +192,8 @@ export async function translateMessages(
       translations: allTranslations,
     }
   } catch (error) {
+    // Access denials are expected client errors, not translation failures.
+    if (error instanceof RealtimeRpcError) throw error
     log.error("Failed to process translation request", {
       error,
       peerId: input.peerId,

@@ -49,7 +49,7 @@ export const getUpdateGroupFromInputPeer = async (
   inputPeer: InputPeer,
   context: { currentUserId: number },
 ): Promise<UpdateGroup> => {
-  const chat = await ChatModel.getChatFromInputPeer(inputPeer, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(inputPeer, context)
 
   if (chat.type === "private") {
     invariant(chat.minUserId && chat.maxUserId, "Private chat must have minUserId and maxUserId")

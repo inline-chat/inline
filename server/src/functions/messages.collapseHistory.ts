@@ -23,7 +23,7 @@ type Output = {
 }
 
 export const collapseHistory = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   if (

@@ -17,7 +17,7 @@ type Output = {
 }
 
 export const deleteReaction = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peer, context)
   const chatId = chat.id
   const updateGroup = await getUpdateGroupFromInputPeer(input.peer, { currentUserId: context.currentUserId })
 

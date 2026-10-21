@@ -33,7 +33,7 @@ export const updateDialogFollowMode = async (input: Input, context: FunctionCont
     throw RealtimeRpcError.BadRequest()
   }
 
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   if (!canUseThreadFollowMode(chat)) {

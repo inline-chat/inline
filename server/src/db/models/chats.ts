@@ -26,6 +26,8 @@ import {
   dialogOrderForPlacement,
 } from "@in/server/modules/dialogOpen"
 import { messageActivityPredicate } from "@in/server/modules/message/activity"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import type { Transaction } from "@in/server/db/types"
 
 const log = new Log("chats")
 
@@ -36,7 +38,8 @@ export const ChatModel = {
   refreshLastMessageId: refreshLastMessageId,
   refreshLastMessageIdTransaction: refreshLastMessageIdTransaction,
   getChatIdFromInputPeer: getChatIdFromInputPeer,
-  getChatFromInputPeer: getChatFromInputPeer,
+  getAuthorizedChatFromInputPeer: getAuthorizedChatFromInputPeer,
+  getChatFromInputPeerUnchecked: getChatFromInputPeerUnchecked,
   createUserChatAndDialog: createUserChatAndDialog,
   getUserChats,
 }
@@ -182,7 +185,26 @@ async function getChatIdFromInputPeer(peer: InputPeer, context: { currentUserId:
   throw new InlineError(InlineError.ApiError.PEER_INVALID)
 }
 
-async function getChatFromInputPeer(peer: InputPeer, context: { currentUserId: number }): Promise<DbChat> {
+/**
+ * Resolves a peer and requires the caller's current access to that chat.
+ * Use this for every operation that reads or affects a caller-named chat.
+ */
+async function getAuthorizedChatFromInputPeer(
+  peer: InputPeer,
+  context: { currentUserId: number },
+  query?: Pick<Transaction, "select">,
+): Promise<DbChat> {
+  const chat = await getChatFromInputPeerUnchecked(peer, context)
+  await AccessGuards.ensureChatAccess(chat, context.currentUserId, query)
+  return chat
+}
+
+/**
+ * Resolves a peer WITHOUT checking access: a chat ID peer returns any chat.
+ * Callers must authorize the result themselves (see the allowlist in
+ * __tests__/guardrails/chatLookupAuthorization.test.ts).
+ */
+async function getChatFromInputPeerUnchecked(peer: InputPeer, context: { currentUserId: number }): Promise<DbChat> {
   switch (peer.type.oneofKind) {
     case "user": {
       let userId = peer.type.user.userId
@@ -218,7 +240,7 @@ async function getChatFromInputPeer(peer: InputPeer, context: { currentUserId: n
     }
 
     case "self": {
-      return getChatFromInputPeer(
+      return getChatFromInputPeerUnchecked(
         { type: { oneofKind: "user", user: { userId: BigInt(context.currentUserId) } } },
         context,
       )

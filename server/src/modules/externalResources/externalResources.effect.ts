@@ -250,7 +250,7 @@ export const makeExternalResourceSearch = (
 
 const liveDependencies: ExternalResourceSearchDependencies = {
   resolveSpaceId: async (peerId, currentUserId) => {
-    const chat = await ChatModel.getChatFromInputPeer(peerId, {
+    const chat = await ChatModel.getChatFromInputPeerUnchecked(peerId, {
       currentUserId,
     })
     await AccessGuards.ensureChatAccess(chat, currentUserId)

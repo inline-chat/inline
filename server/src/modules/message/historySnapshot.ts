@@ -58,7 +58,7 @@ export async function withHistorySnapshot<T>(
   } else {
     let chat: DbChat
     try {
-      chat = await ChatModel.getChatFromInputPeer(peer, { currentUserId })
+      chat = await ChatModel.getChatFromInputPeerUnchecked(peer, { currentUserId })
     } catch (error) {
       if (!(error instanceof ModelError && error.code === ModelError.Codes.CHAT_INVALID)) throw error
       if (peer.type.oneofKind !== "user" && peer.type.oneofKind !== "self") {
@@ -69,7 +69,7 @@ export async function withHistorySnapshot<T>(
       if (!user || UsersModel.isDeleted(user)) throw RealtimeRpcError.UserIdInvalid()
       await ChatModel.createUserChatAndDialog({ peerUserId, currentUserId })
       await ChatModel.createUserChatAndDialog({ peerUserId: currentUserId, currentUserId: peerUserId })
-      chat = await ChatModel.getChatFromInputPeer(peer, { currentUserId })
+      chat = await ChatModel.getChatFromInputPeerUnchecked(peer, { currentUserId })
     }
     chatId = chat.id
   }

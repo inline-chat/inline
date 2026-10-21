@@ -84,7 +84,7 @@ function validateInput(input: Input): void {
 
 async function getThreadWithAccess(inputPeer: InputPeer, currentUserId: number): Promise<DbChat> {
   try {
-    const chat = await ChatModel.getChatFromInputPeer(inputPeer, { currentUserId })
+    const chat = await ChatModel.getChatFromInputPeerUnchecked(inputPeer, { currentUserId })
     if (chat.type !== "thread") {
       throw RealtimeRpcError.BadRequest()
     }

@@ -6,6 +6,7 @@ import { setupTestLifecycle, testUtils } from "../setup"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { internalMessaging } from "@in/server/modules/internalMessaging/service"
 import { outboundPublications } from "@in/server/modules/internalMessaging/outbound"
+import { handler as legacySendComposeAction } from "@in/server/methods/sendComposeAction"
 
 // Mock RealtimeUpdates.pushToUser to track what updates are sent
 const mockPushToUser = mock(async () => {})
@@ -347,5 +348,61 @@ describe("sendComposeAction", () => {
       await outboundPublications.drain()
       publications.mockRestore()
     }
+  })
+
+  test("rejects outsiders naming another pair's DM by chat ID without notifying anyone", async () => {
+    const userA = await testUtils.createUser(nextEmail("dm-a"))
+    const userB = await testUtils.createUser(nextEmail("dm-b"))
+    const outsider = await testUtils.createUser(nextEmail("dm-outsider"))
+    const chat = await testUtils.createPrivateChat(userA, userB)
+    if (!chat) throw new Error("Failed to create DM")
+
+    await expect(sendComposeAction(
+      {
+        peer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+        action: UpdateComposeAction_ComposeAction.TYPING,
+      },
+      { currentUserId: outsider.id, currentSessionId: 123 },
+    )).rejects.toThrow()
+    expect(mockPushToUser).not.toHaveBeenCalled()
+  })
+
+  test("rejects non-members of a private space thread without notifying participants", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Private Compose Space", [
+      nextEmail("private-member"),
+    ])
+    const [member] = users
+    const outsider = await testUtils.createUser(nextEmail("private-outsider"))
+    const chat = await testUtils.createChat(space.id, "Private Thread", "thread", false)
+    if (!member || !chat) throw new Error("Failed to create fixtures")
+    await testUtils.addParticipant(chat.id, member.id)
+
+    await expect(sendComposeAction(
+      {
+        peer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+        action: UpdateComposeAction_ComposeAction.TYPING,
+      },
+      { currentUserId: outsider.id, currentSessionId: 123 },
+    )).rejects.toThrow()
+    await expect(legacySendComposeAction(
+      { peerThreadId: chat.id, action: "typing" },
+      { currentUserId: outsider.id },
+    )).rejects.toMatchObject({ type: "PEER_INVALID", code: 400 })
+    expect(mockPushToUser).not.toHaveBeenCalled()
+  })
+
+  test("legacy HTTP compose action still reaches an authorized thread", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Legacy Authorized Space", [
+      nextEmail("legacy-authorized-1"),
+      nextEmail("legacy-authorized-2"),
+    ])
+    const [sender, recipient] = users
+    const chat = await testUtils.createChat(space.id, "Legacy Authorized Thread", "thread")
+    if (!sender || !recipient || !chat) throw new Error("Failed to create fixtures")
+
+    await legacySendComposeAction({ peerThreadId: chat.id, action: "typing" }, { currentUserId: sender.id })
+
+    expect(mockPushToUser).toHaveBeenCalledTimes(1)
+    expect(mockPushToUser).toHaveBeenCalledWith(recipient.id, expect.anything())
   })
 })

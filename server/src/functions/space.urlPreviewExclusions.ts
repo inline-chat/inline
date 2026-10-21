@@ -94,7 +94,7 @@ export async function addSpaceUrlPreviewExclusion(
   }
 
   const messageId = toPositiveSafeInteger(input.messageId)
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   if (chat.spaceId !== spaceId) {

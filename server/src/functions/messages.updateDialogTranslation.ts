@@ -17,7 +17,7 @@ export async function updateDialogTranslation(
   context: FunctionContext,
 ): Promise<{ updates: Update[] }> {
   if (input.importLegacyEnabled && !input.enabled) throw RealtimeRpcError.BadRequest()
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
   const peerId = encodeOutputPeerFromChat(chat, { currentUserId: context.currentUserId })
   const mutation = await db.transaction(async (tx) => {

@@ -27,7 +27,7 @@ export async function showInChatList(input: Input, context: FunctionContext): Pr
     throw RealtimeRpcError.PeerIdInvalid()
   }
 
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   let dialog = await getDialogForUser(chat.id, context.currentUserId)

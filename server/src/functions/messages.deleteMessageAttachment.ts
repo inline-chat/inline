@@ -29,7 +29,7 @@ export const deleteMessageAttachment = async (
 
   const messageId = toPositiveSafeInteger(input.messageId)
   const attachmentId = toPositiveSafeInteger(input.attachmentId)
-  const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
   const { update } = await db.transaction(async (tx) => {
