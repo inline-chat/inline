@@ -735,9 +735,10 @@ the local service-epoch probe fails.
   rejected as projects.
 - A chat without a project binding gets the default project (or home) only when
   the owner sends the message, in the owner DM, or when this bridge's own bot
-  hands off work it already admitted. Other operators and allowlisted bots work
-  only in chats the owner has connected to a project; people get a notice with
-  a Retry button, bots are ignored.
+  hands off work it already admitted. Other operators and allowlisted bots
+  inherit the nearest bound parent chat's project, else the owner's most recent
+  project; they never get home. With neither, people get a notice with a Retry
+  button and bots are ignored until the owner connects the chat.
 - Shared/public chats are treated as potentially internet-visible. Admission is
   based only on the strict stable-user-ID allowlist, never group membership.
   Non-allowlisted human messages are excluded from provider context; approval

@@ -55,13 +55,26 @@ impl From<inline_client::StoreError> for ConversationResolutionError {
 }
 
 /// Who may give a chat without a workspace binding its first one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::bridge) enum UnboundChat {
     /// The owner (or this bridge's own bot handing off admitted work) may bind
     /// it to the default project, falling back to home.
     UseDefault,
-    /// Only an existing binding or an explicit project selects the cwd.
-    RequireOwner,
+    /// Another operator or an allowlisted bot: the nearest bound parent chat's
+    /// project, else the owner's most recent project, never home. With
+    /// neither, only the owner can connect the chat.
+    Operator { inherited: Option<WorkspaceRecord> },
+}
+
+/// The resolution rule for a sender who is not the owner. The parent lookup
+/// needs the bot store, so it runs before the synchronous resolvers.
+pub(in crate::bridge) async fn operator_unbound_chat(
+    route: &InboundRoute,
+    chat_id: i64,
+) -> Result<UnboundChat, ConversationResolutionError> {
+    Ok(UnboundChat::Operator {
+        inherited: inherited_parent_workspace(route, chat_id).await?,
+    })
 }
 
 pub(in crate::bridge) fn conversation_for_chat(
@@ -111,33 +124,37 @@ pub(in crate::bridge) fn conversation_for_chat_with_agent_context(
                 workspace.path,
             )
         }
-        None if context.is_some() => {
-            if unbound == UnboundChat::RequireOwner
-                && route
-                    .store
-                    .bound_chat_workspace(&route.installation_id, chat_id)?
-                    .is_none()
-            {
-                return Err(ConversationResolutionError::UnapprovedChat);
+        None if context.is_some() => match unbound {
+            UnboundChat::UseDefault => {
+                // No project was shown/selected yet. Preserve an existing binding;
+                // a new chat uses the advertised default or home, never recents.
+                let default_id = route
+                    .bot_agent_resolver
+                    .configuration_catalog()
+                    .and_then(|catalog| catalog.projects)
+                    .and_then(|projects| projects.default_project_id)
+                    .and_then(|id| WorkspaceId::new(id).ok());
+                let default = default_id
+                    .map(|id| route.store.workspace(&route.installation_id, &id))
+                    .transpose()?
+                    .flatten();
+                let fallback = match default {
+                    Some(workspace) => workspace,
+                    None => home_workspace(route)?,
+                };
+                conversation_for_chat_with_fallback(
+                    route,
+                    chat_id,
+                    Some(fallback),
+                    UnboundChat::UseDefault,
+                )?
             }
-            // No project was shown/selected yet. Preserve an existing binding;
-            // a new chat uses the advertised default or home, never recents.
-            let default_id = route
-                .bot_agent_resolver
-                .configuration_catalog()
-                .and_then(|catalog| catalog.projects)
-                .and_then(|projects| projects.default_project_id)
-                .and_then(|id| WorkspaceId::new(id).ok());
-            let default = default_id
-                .map(|id| route.store.workspace(&route.installation_id, &id))
-                .transpose()?
-                .flatten();
-            let fallback = match default {
-                Some(workspace) => workspace,
-                None => home_workspace(route)?,
-            };
-            conversation_for_chat_with_fallback(route, chat_id, Some(fallback), unbound)?
-        }
+            // Another operator never picks home here; the parent chat or the
+            // owner's project rule in the fallback resolver decides.
+            operator @ UnboundChat::Operator { .. } => {
+                conversation_for_chat_with_fallback(route, chat_id, None, operator)?
+            }
+        },
         None => conversation_for_chat_with_fallback(route, chat_id, None, unbound)?,
     };
     let binding = conversation.snapshot().binding;
@@ -196,8 +213,15 @@ fn conversation_for_chat_with_fallback(
             let workspace = match (inherited, unbound) {
                 (Some(workspace), _) => workspace,
                 (None, UnboundChat::UseDefault) => default_workspace_or_home(route)?,
-                (None, UnboundChat::RequireOwner) => {
-                    return Err(ConversationResolutionError::UnapprovedChat);
+                (
+                    None,
+                    UnboundChat::Operator {
+                        inherited: Some(workspace),
+                    },
+                ) => workspace,
+                (None, UnboundChat::Operator { inherited: None }) => {
+                    operator_default_workspace(route)?
+                        .ok_or(ConversationResolutionError::UnapprovedChat)?
                 }
             };
             bind_chat_workspace(route, chat_id, workspace)?
@@ -264,6 +288,36 @@ fn default_workspace_or_home(
     }
 
     home_workspace(route)
+}
+
+/// The owner's most recent project, if it is a real project folder. Home is
+/// never handed to another operator, so a "No project" selection counts as none,
+/// as does a project folder that is currently unavailable.
+fn operator_default_workspace(
+    route: &InboundRoute,
+) -> Result<Option<WorkspaceRecord>, ConversationResolutionError> {
+    let selected_at = now_seconds();
+    route
+        .store
+        .refresh_workspace_availability(&route.installation_id, selected_at)?;
+    let Some(workspace) = route.store.default_workspace(&route.installation_id)? else {
+        return Ok(None);
+    };
+    let home =
+        resolve_setup_workspace(None).map_err(|_| ConversationResolutionError::MissingWorkspace)?;
+    let home_id = workspace_id(&home).map_err(|_| ConversationResolutionError::MissingWorkspace)?;
+    if workspace.workspace_id == home_id {
+        return Ok(None);
+    }
+    match route.store.verified_workspace(
+        &route.installation_id,
+        &workspace.workspace_id,
+        selected_at,
+    ) {
+        Ok(workspace) => Ok(Some(workspace)),
+        Err(inline_agent_bridge::StoreError::WorkspaceUnavailable { .. }) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn home_workspace(route: &InboundRoute) -> Result<WorkspaceRecord, ConversationResolutionError> {

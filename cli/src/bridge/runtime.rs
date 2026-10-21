@@ -856,8 +856,9 @@ async fn inbound_from_message(
     }
     // A chat without a workspace gets the default project (or home) only when
     // the owner asks, in the owner DM, or when this bridge's own bot hands off
-    // work it already admitted. Other operators and allowlisted bots need a
-    // chat the owner has already connected to a project.
+    // work it already admitted. Other operators and allowlisted bots inherit
+    // the nearest bound parent chat, else the owner's most recent project, and
+    // never home; with neither, the owner has to connect the chat first.
     let unbound = if message.sender_id.get() == route.owner_user_id
         || message.chat_id.get() == route.owner_dm_chat_id
         || message.is_outgoing
@@ -865,7 +866,10 @@ async fn inbound_from_message(
     {
         UnboundChat::UseDefault
     } else {
-        UnboundChat::RequireOwner
+        match operator_unbound_chat(route, message.chat_id.get()).await {
+            Ok(unbound) => unbound,
+            Err(error) => return Err(error.into()),
+        }
     };
     let resolved = if is_command
         && message.sender_id.get() == route.owner_user_id

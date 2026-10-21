@@ -955,11 +955,26 @@ async fn a_foreign_bot_mention_is_not_admitted_in_any_chat() {
     }
 }
 
+/// The owner's most recent selection becomes home ("No project"), which is
+/// never handed to another operator.
+fn select_home_as_most_recent(route: &InboundRoute) {
+    let home = resolve_setup_workspace(None).expect("home");
+    let home_id = workspace_id(&home).expect("home id");
+    route
+        .store
+        .select_workspace(&route.installation_id, &home_id, &home, 2)
+        .expect("select home");
+}
+
 #[tokio::test]
-async fn an_allowlisted_bot_is_admitted_only_in_a_chat_the_owner_connected() {
+async fn an_allowlisted_bot_gets_the_owners_project_but_never_home() {
     let route = route("codex");
+    select_home_as_most_recent(&route);
     let (record, history) = admit_in_ordinary_chat(&route, 77, Some(true)).await;
-    assert!(record.is_none(), "unbound chat must not default for a bot");
+    assert!(
+        record.is_none(),
+        "an unbound chat must not default to home for a bot"
+    );
     assert!(history.messages.is_empty(), "bots get no notice");
     assert!(ordinary_chat_binding(&route).is_none());
 
@@ -968,11 +983,22 @@ async fn an_allowlisted_bot_is_admitted_only_in_a_chat_the_owner_connected() {
     let record = record.expect("allowlisted bot in a bound chat");
     assert_eq!(record.sender_user_id, 77);
     assert_eq!(record.binding.workspace_id.as_str(), "project");
+
+    // With a real project as the owner's most recent selection, a new chat binds to it.
+    let route = self::route("codex");
+    let (record, _) = admit_in_ordinary_chat(&route, 77, Some(true)).await;
+    let record = record.expect("allowlisted bot gets the owner's project");
+    assert_eq!(record.binding.workspace_id.as_str(), "project");
+    assert_eq!(
+        ordinary_chat_binding(&route).map(|workspace| workspace.workspace_id),
+        Some(WorkspaceId::new("project").expect("workspace"))
+    );
 }
 
 #[tokio::test]
-async fn an_allowlisted_person_needs_the_owner_to_connect_a_new_chat() {
+async fn an_allowlisted_person_gets_the_owners_project_or_a_notice() {
     let route = route("codex");
+    select_home_as_most_recent(&route);
     let (record, history) = admit_in_ordinary_chat(&route, 8, Some(false)).await;
     assert!(record.is_none());
     assert!(history_contains(&history, "The bot owner can choose one"));
@@ -981,6 +1007,12 @@ async fn an_allowlisted_person_needs_the_owner_to_connect_a_new_chat() {
     bind_ordinary_chat(&route);
     let (record, _) = admit_in_ordinary_chat(&route, 8, Some(false)).await;
     assert_eq!(record.expect("bound chat").sender_user_id, 8);
+
+    let route = self::route("codex");
+    let (record, history) = admit_in_ordinary_chat(&route, 8, Some(false)).await;
+    let record = record.expect("allowlisted person gets the owner's project");
+    assert_eq!(record.binding.workspace_id.as_str(), "project");
+    assert!(!history_contains(&history, "The bot owner can choose one"));
 }
 
 #[tokio::test]
@@ -1061,7 +1093,7 @@ async fn a_foreign_bot_turn_cannot_use_inline_tools() {
 }
 
 #[test]
-fn projectless_agent_threads_need_the_owner_for_a_first_binding() {
+fn projectless_agent_threads_give_operators_a_parent_or_the_owners_project_never_home() {
     let route = route("codex");
     let context = |project: Option<&str>| proto::AgentThreadContext {
         bot_user_id: route.bot_user_id,
@@ -1072,17 +1104,25 @@ fn projectless_agent_threads_need_the_owner_for_a_first_binding() {
             reasoning_effort_id: None,
         }),
     };
-    let resolve = |project: Option<&str>| {
+    let resolve = |chat_id: i64, project: Option<&str>, inherited: Option<WorkspaceRecord>| {
         conversation_for_chat_with_agent_context(
             &route,
-            6400,
+            chat_id,
             Some(&context(project)),
             true,
-            UnboundChat::RequireOwner,
+            UnboundChat::Operator { inherited },
         )
     };
+    let project = WorkspaceId::new("project").expect("workspace");
+    // The owner's most recent selection is home ("No project"): nothing to hand out.
+    let home = resolve_setup_workspace(None).unwrap();
+    let home_id = workspace_id(&home).unwrap();
+    route
+        .store
+        .select_workspace(&route.installation_id, &home_id, &home, 2)
+        .unwrap();
     assert!(matches!(
-        resolve(None),
+        resolve(6400, None, None),
         Err(ConversationResolutionError::UnapprovedChat)
     ));
     assert!(
@@ -1092,9 +1132,31 @@ fn projectless_agent_threads_need_the_owner_for_a_first_binding() {
             .unwrap()
             .is_none()
     );
+    // A bound parent chat is inherited even then.
+    let parent = route
+        .store
+        .bind_chat_workspace(&route.installation_id, 6300, &project, 3)
+        .unwrap();
+    let inherited = resolve(6401, None, Some(parent)).unwrap().snapshot();
+    assert_eq!(inherited.binding.workspace_id, project);
+    // Once the owner selects a project again, operators get that project.
+    route
+        .store
+        .select_workspace(
+            &route.installation_id,
+            &project,
+            &std::env::current_dir().unwrap(),
+            4,
+        )
+        .unwrap();
+    let defaulted = resolve(6402, None, None).unwrap().snapshot();
+    assert_eq!(defaulted.binding.workspace_id, project);
     // An explicit project names a workspace the owner registered on this host.
-    let explicit = resolve(Some("project")).unwrap().snapshot();
-    assert_eq!(explicit.binding.workspace_id.as_str(), "project");
+    let explicit = resolve(6403, Some("project"), None).unwrap().snapshot();
+    assert_eq!(explicit.binding.workspace_id, project);
     // Once bound, a projectless context keeps that binding.
-    assert_eq!(resolve(None).unwrap().snapshot().binding, explicit.binding);
+    assert_eq!(
+        resolve(6403, None, None).unwrap().snapshot().binding,
+        explicit.binding
+    );
 }
