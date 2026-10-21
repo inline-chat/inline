@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 
 const [artifactDir, hostVersion] = process.argv.slice(2)
 if (!artifactDir || !hostVersion) throw new Error("usage: check-openclaw-admission.mjs ARTIFACT_DIR HOST_VERSION")
@@ -36,6 +37,14 @@ const projects = await readdir(projectsRoot)
 assert.equal(projects.length, 1, "one disposable OpenClaw plugin project")
 const project = path.join(projectsRoot, projects[0])
 const pluginRoot = path.join(project, "node_modules/@inline-openclaw/inline")
+// `plugins list/inspect` only evaluate the light entry; the gateway imports the channel
+// entry lazily, so load it against this host to catch removed plugin-sdk exports. Run it
+// while the host's peer link to openclaw exists; the npm install below prunes it.
+const channelEntry = pathToFileURL(path.join(pluginRoot, "dist/channel-plugin-api.js")).href
+const channel = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e",
+  `const { inlineChannelPlugin } = await import(${JSON.stringify(channelEntry)}); console.log(JSON.stringify({ id: inlineChannelPlugin?.id }))`,
+], { env, cwd: hostDir, encoding: "utf8", timeout: 60_000 }).trim().split("\n").at(-1))
+assert.equal(channel.id, "inline", "Inline channel entry must load against the installed host")
 const candidateDeps = ["@inline-chat/realtime-sdk", "@inline-chat/protocol"].map((name) => {
   const item = manifest.packages.find((entry) => entry.name === name)
   assert.ok(item, `missing ${name} candidate`)
@@ -62,4 +71,4 @@ const inspect = JSON.parse(cli(["plugins", "inspect", "inline", "--json"]))
 assert.equal(inspect.plugin?.id, "inline")
 assert.notEqual(inspect.plugin?.status, "error")
 assert.equal(inspect.plugin?.version, plugin.version)
-console.log(`Installed host registered Inline: ${JSON.stringify({ id: entry.id, status: entry.status, version: inspect.plugin.version })}`)
+console.log(`Installed host registered Inline: ${JSON.stringify({ id: entry.id, status: entry.status, version: inspect.plugin.version, channel: channel.id })}`)

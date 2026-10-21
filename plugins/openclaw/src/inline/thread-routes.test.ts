@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -41,11 +41,18 @@ describe("inline/thread-routes", () => {
     return stateDir
   }
 
+  function routesFilePath(stateDir: string): string {
+    return path.join(stateDir, "inline", "reply-thread-routes", "default.json")
+  }
+
+  function writeRawRoutesFile(stateDir: string, contents: string): void {
+    mkdirSync(path.dirname(routesFilePath(stateDir)), { recursive: true })
+    writeFileSync(routesFilePath(stateDir), contents)
+  }
+
   function writeRoutesFile(stateDir: string, updatedAt: number): void {
-    const routesDir = path.join(stateDir, "inline", "reply-thread-routes")
-    mkdirSync(routesDir, { recursive: true })
-    writeFileSync(
-      path.join(routesDir, "default.json"),
+    writeRawRoutesFile(
+      stateDir,
       JSON.stringify({
         version: 1,
         routes: {
@@ -223,6 +230,39 @@ describe("inline/thread-routes", () => {
       accountId: "default",
       parentChatId: "7000",
       threadId: "7100",
+    })
+  })
+
+  it("treats missing, invalid, and foreign route files as empty", async () => {
+    const stateDir = setStateDir()
+    const lookup = () => lookupInlineReplyThreadRoute({ accountId: "default", parentChatId: 7000n })
+
+    await expect(lookup()).resolves.toBeNull()
+    for (const contents of [
+      "{not json",
+      JSON.stringify([]),
+      JSON.stringify({ version: 2, routes: {} }),
+      JSON.stringify({ version: 1, routes: [] }),
+    ]) {
+      writeRawRoutesFile(stateDir, contents)
+      await expect(lookup()).resolves.toBeNull()
+    }
+  })
+
+  it("keeps existing route file entries when remembering a new route", async () => {
+    const stateDir = setStateDir()
+    writeRoutesFile(stateDir, Date.now())
+
+    rememberInlineReplyThreadRoute({ accountId: "default", parentChatId: 8000n, threadId: 8100n })
+
+    await vi.waitFor(() => {
+      const stored = JSON.parse(readFileSync(routesFilePath(stateDir), "utf8")) as {
+        version: number
+        routes: Record<string, { threadId: string }>
+      }
+      expect(stored.version).toBe(1)
+      expect(stored.routes["default:parent:7000:agent:__any__"]?.threadId).toBe("7100")
+      expect(stored.routes["default:parent:8000:agent:__any__"]?.threadId).toBe("8100")
     })
   })
 

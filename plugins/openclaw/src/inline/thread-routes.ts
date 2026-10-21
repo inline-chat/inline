@@ -1,7 +1,7 @@
 import path from "node:path"
 import fs from "node:fs"
 import { pruneMapToMaxSize } from "openclaw/plugin-sdk/collection-runtime"
-import { readJsonFileWithFallback, writeJsonFileAtomically } from "openclaw/plugin-sdk/json-store"
+import { writeJsonFileAtomically } from "openclaw/plugin-sdk/json-store"
 import { getOptionalInlineRuntime } from "../runtime.js"
 
 const TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -302,14 +302,30 @@ function getMemory(key: string, now: number): InlineReplyThreadRouteRecord | und
   return entry.value
 }
 
+/**
+ * Missing, unreadable, or invalid JSON reads as undefined. OpenClaw 2026.10.5
+ * removed `readJsonFileWithFallback` from `plugin-sdk/json-store`, so the
+ * plugin owns this read; `writeJsonFileAtomically` remains a host export.
+ */
+async function readJsonFileOrUndefined(filePath: string): Promise<unknown> {
+  try {
+    return JSON.parse(await fs.promises.readFile(filePath, "utf8")) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+function isStoredRouteState(value: unknown): value is StoredRouteState {
+  return isRecord(value) && value.version === STORE_VERSION && isRecord(value.routes)
+}
+
 async function readFileRoutes(accountId: string): Promise<Map<string, InlineReplyThreadRouteRecord>> {
   const filePath = resolveRoutesPath(accountId)
   if (!filePath) return new Map()
-  const fallback: StoredRouteState = { version: STORE_VERSION, routes: {} }
   const now = Date.now()
   try {
-    const { value } = await readJsonFileWithFallback(filePath, fallback)
-    if (value.version !== STORE_VERSION || !isRecord(value.routes)) {
+    const value = await readJsonFileOrUndefined(filePath)
+    if (!isStoredRouteState(value)) {
       return new Map()
     }
     const routes = new Map<string, InlineReplyThreadRouteRecord>()
