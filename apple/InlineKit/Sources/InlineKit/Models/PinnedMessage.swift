@@ -55,6 +55,7 @@ public extension PinnedMessage {
     }
 
     try markKnownMessagesPinned(db, chatId: chatId, messageIds: messageIds, pinned: true)
+    publishAfterCommit(db, change: .init(chatId: chatId, messageIds: Set(messageIds), pinned: nil))
   }
 
   static func pin(_ db: Database, chatId: Int64, messageId: Int64) throws {
@@ -66,6 +67,7 @@ public extension PinnedMessage {
     let pinned = PinnedMessage(chatId: chatId, messageId: messageId, position: 0)
     try pinned.save(db)
     try markKnownMessagesPinned(db, chatId: chatId, messageIds: [messageId], pinned: true)
+    publishAfterCommit(db, change: .init(chatId: chatId, messageIds: [messageId], pinned: true))
   }
 
   static func unpin(_ db: Database, chatId: Int64, messageId: Int64) throws {
@@ -74,6 +76,15 @@ public extension PinnedMessage {
       .deleteAll(db)
 
     try markKnownMessagesPinned(db, chatId: chatId, messageIds: [messageId], pinned: false)
+    publishAfterCommit(db, change: .init(chatId: chatId, messageIds: [messageId], pinned: false))
+  }
+
+  private static func publishAfterCommit(_ db: Database, change: MessagesPublisher.PinnedMessagesChange) {
+    db.afterNextTransaction { _ in
+      Task { @MainActor in
+        MessagesPublisher.shared.pinnedMessagesChanged(change)
+      }
+    }
   }
 
   private static func markKnownMessagesPinned(

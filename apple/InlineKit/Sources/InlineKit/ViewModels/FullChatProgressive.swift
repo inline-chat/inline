@@ -281,6 +281,7 @@ public class MessagesProgressiveViewModel {
   private var loadedWindowMetadataGeneration: UInt64 = 0
   private var reloadGeneration: UInt64 = 0
   private var reloadTask: Task<Void, Never>?
+  private var pinChangesDuringReload: [MessagesPublisher.PinnedMessagesChange] = []
 
   deinit {
     threadAnchorFetchTask?.cancel()
@@ -719,6 +720,29 @@ public class MessagesProgressiveViewModel {
           return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index], animated: messageUpdate.animated)
         }
 
+      case let .pinnedMessages(change):
+        guard pinChangeCanAffectThisChat(change.chatId) else { return nil }
+        // Keep an already requested snapshot coherent without cancelling it or fetching again.
+        if reloadTask != nil {
+          pinChangesDuringReload.append(change)
+        }
+        var nextMessages = messages
+        var updated: [FullMessage] = []
+        var indices: [Int] = []
+        for index in nextMessages.indices {
+          if change.apply(to: &nextMessages[index]) {
+            updated.append(nextMessages[index])
+            indices.append(index)
+          }
+        }
+        if var anchor = threadAnchor, change.apply(to: &anchor) {
+          threadAnchor = anchor
+          updated.append(anchor)
+        }
+        guard !updated.isEmpty else { return nil }
+        messages = nextMessages
+        return .updated(updated, indexSet: indices, animated: false)
+
       case let .acknowledgements(change):
         guard change.peer == peer else { return nil }
         invalidatePendingReload()
@@ -792,6 +816,7 @@ public class MessagesProgressiveViewModel {
     reloadGeneration &+= 1
     let generation = reloadGeneration
     reloadTask?.cancel()
+    pinChangesDuringReload.removeAll()
     let database = db
     let peer = peer
     let currentUserId = currentUserId
@@ -810,7 +835,14 @@ public class MessagesProgressiveViewModel {
         )
         guard !Task.isCancelled, let self, reloadGeneration == generation else { return }
 
-        messages = reapplyingPendingAcknowledgements(to: snapshot.messages)
+        var reloadedMessages = snapshot.messages
+        for change in pinChangesDuringReload {
+          for index in reloadedMessages.indices {
+            change.apply(to: &reloadedMessages[index])
+          }
+        }
+        pinChangesDuringReload.removeAll()
+        messages = reapplyingPendingAcknowledgements(to: reloadedMessages)
         updateRange()
         let metadataRequest = beginLoadedWindowMetadataRequest()
         // Shown rows stay while the newest history is still unknown. Once the
@@ -827,6 +859,7 @@ public class MessagesProgressiveViewModel {
       } catch {
         guard !Task.isCancelled, let self, reloadGeneration == generation else { return }
         reloadTask = nil
+        pinChangesDuringReload.removeAll()
         Log.shared.error("Failed to reload messages", error: error)
       }
     }
@@ -836,6 +869,17 @@ public class MessagesProgressiveViewModel {
     reloadGeneration &+= 1
     reloadTask?.cancel()
     reloadTask = nil
+    pinChangesDuringReload.removeAll()
+  }
+
+  /// A pin change is relevant when it names the loaded rows' chat, the parent
+  /// anchor's chat, or this thread's chat before any row is loaded. A direct
+  /// message with nothing loaded cannot be ruled out without a read, so it stays
+  /// eligible until rows arrive; `apply` still checks each message's chat.
+  private func pinChangeCanAffectThisChat(_ chatId: Int64) -> Bool {
+    if messages.first?.chatId == chatId || threadAnchor?.chatId == chatId { return true }
+    if case let .thread(threadChatId) = peer { return threadChatId == chatId }
+    return messages.isEmpty
   }
 
   private nonisolated static func publisherReloadSnapshot(
@@ -1847,10 +1891,33 @@ public final class MessagesPublisher {
     let peer: Peer
   }
 
+  public struct PinnedMessagesChange: Sendable {
+    public let chatId: Int64
+    public let messageIds: Set<Int64>
+    /// nil replaces the complete pin set; true/false changes only the supplied IDs.
+    public let pinned: Bool?
+
+    @discardableResult
+    func apply(to message: inout FullMessage) -> Bool {
+      guard message.chatId == chatId else { return false }
+      let nextPinned: Bool
+      if let pinned {
+        guard messageIds.contains(message.message.messageId) else { return false }
+        nextPinned = pinned
+      } else {
+        nextPinned = messageIds.contains(message.message.messageId)
+      }
+      guard (message.message.pinned == true) != nextPinned else { return false }
+      message.message.pinned = nextPinned
+      return true
+    }
+  }
+
   public enum UpdateType {
     case add(MessageAdd)
     case update(MessageUpdate)
     case acknowledgements(AcknowledgementChange)
+    case pinnedMessages(PinnedMessagesChange)
     case delete(MessageDelete)
     case reload(peer: Peer, animated: Bool?)
   }
@@ -2044,6 +2111,12 @@ public final class MessagesPublisher {
     }
     guard acceptsUpdates else { return }
     publisher.send(.update(MessageUpdate(message: fullMessage, animated: animated, peer: peer)))
+  }
+
+  /// Pin publication patches loaded rows and anchors without hydrating messages.
+  func pinnedMessagesChanged(_ change: PinnedMessagesChange) {
+    guard acceptsUpdates else { return }
+    publisher.send(.pinnedMessages(change))
   }
 
   /// Cursor publication only updates already-loaded rows. No message query or anchor routing.
@@ -2291,7 +2364,7 @@ private extension MessagesPublisher.UpdateType {
     switch self {
       case .add:
         "add"
-      case .update, .acknowledgements:
+      case .update, .acknowledgements, .pinnedMessages:
         "update"
       case .delete:
         "delete"
