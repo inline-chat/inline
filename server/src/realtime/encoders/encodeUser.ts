@@ -26,14 +26,18 @@ export const encodeUser = ({
     cdnUrl = getSignedMediaPhotoUrl(photoFile) ?? undefined
   }
 
+  // Contact details are private to their owner. Only an explicitly identified
+  // self view carries them; every other viewer gets the profile without them.
+  const includeContact = !min && viewerUserId !== undefined && viewerUserId === user.id
+
   return {
     id: BigInt(user.id),
     username: user.username ?? undefined,
     firstName: user.firstName ?? undefined,
     lastName: user.lastName ?? undefined,
     bio: min ? undefined : user.bio ?? undefined,
-    email: min ? undefined : user.email ?? undefined,
-    phoneNumber: min ? undefined : user.phoneNumber ?? undefined,
+    email: includeContact ? user.email ?? undefined : undefined,
+    phoneNumber: includeContact ? user.phoneNumber ?? undefined : undefined,
     pendingSetup: min ? undefined : user.pendingSetup === true ? true : undefined,
     min: min ?? false,
     status: min

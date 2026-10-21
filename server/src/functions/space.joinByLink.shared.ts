@@ -116,9 +116,8 @@ export const joinSpaceByResolvedLink = async ({
       throw RealtimeRpcError.InternalError()
     }
 
-    const encodedUser = space.isPublic
-      ? encodePublicUser({ user })
-      : Encoders.user({ user, min: false })
+    // Shared update: every member, including the joiner, receives it.
+    const encodedUser = encodePublicUser({ user })
     const spaceUpdatePayload: ServerUpdate["update"] = {
       oneofKind: "spaceMemberAdd",
       spaceMemberAdd: {
@@ -266,9 +265,7 @@ function pushJoinUpdate(outcome: JoinOutcome, userId: number): void {
 
 function pushSpaceMemberUpdate(outcome: JoinOutcome, recipientUserIds: number[]): void {
   if (!outcome.user || !outcome.spaceUpdate) return
-  const user = outcome.space.isPublic
-    ? encodePublicUser({ user: outcome.user })
-    : Encoders.user({ user: outcome.user, min: false })
+  const user = encodePublicUser({ user: outcome.user })
   const update: Update = {
     seq: outcome.spaceUpdate.seq,
     date: encodeDateStrict(outcome.spaceUpdate.date),

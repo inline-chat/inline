@@ -34,7 +34,7 @@ export const getSpaceMembers = async (
 
       return {
         members: activeMembers.map((member) => Encoders.member(member)),
-        users: usersWithPhotos.map((u) => Encoders.user({ user: u.user, photoFile: u.photoFile, min })),
+        users: usersWithPhotos.map((u) => Encoders.user({ user: u.user, photoFile: u.photoFile, min, viewerUserId: context.currentUserId })),
         seq: privacy.space.updateSeq ?? 0,
       }
     },

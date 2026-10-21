@@ -106,12 +106,29 @@ describe("getSpaceMembers", () => {
 
     const result = await getSpaceMembers({ spaceId: BigInt(space.id) }, makeFunctionContext(users[0].id))
     expect(result.members.length).toBe(2)
-    expect(result.users.map((user) => user.email)).toContain("public-member@ex.com")
+    // Admins manage membership but don't see other members' contact details.
+    expect(result.users.find((user) => user.id === BigInt(users[1].id))?.email).toBeUndefined()
+    expect(result.users.find((user) => user.id === BigInt(users[0].id))?.email).toBe("public-admin@ex.com")
   })
 
   test("throws error for invalid spaceId", async () => {
     const input = { spaceId: BigInt(-1) }
     const context = makeFunctionContext(1)
     await expect(getSpaceMembers(input, context)).rejects.toThrow()
+  })
+
+  test("private space members see only their own contact details", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Private Contacts Space", [
+      "private-contacts-a@ex.com",
+      "private-contacts-b@ex.com",
+    ])
+    const result = await getSpaceMembers({ spaceId: BigInt(space.id) }, makeFunctionContext(users[0].id))
+    const self = result.users.find((user) => user.id === BigInt(users[0].id))
+    const other = result.users.find((user) => user.id === BigInt(users[1].id))
+    expect(self?.email).toBe("private-contacts-a@ex.com")
+    expect(other?.email).toBeUndefined()
+    expect(other?.phoneNumber).toBeUndefined()
+    // Non-contact profile fields stay available to fellow members.
+    expect(other?.min).toBe(false)
   })
 })

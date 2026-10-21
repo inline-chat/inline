@@ -186,7 +186,7 @@ async function persistMemberAdd(tx: Transaction, input: AddSpaceMemberInput): Pr
     oneofKind: "spaceMemberAdd",
     spaceMemberAdd: {
       member: Encoders.member(member),
-      user: space.isPublic ? encodePublicUser({ user }) : Encoders.user({ user, min: false }),
+      user: encodePublicUser({ user }),
     },
   }
   const spaceUpdate = await UpdatesModel.insertUpdate(tx, {
@@ -411,9 +411,7 @@ function liveSpaceMemberAddUpdate(outcome: PersistedMemberAdd): Update {
       oneofKind: "spaceMemberAdd",
       spaceMemberAdd: {
         member: Encoders.member(outcome.member),
-        user: outcome.space.isPublic
-          ? encodePublicUser({ user: outcome.user })
-          : Encoders.user({ user: outcome.user, min: false }),
+        user: encodePublicUser({ user: outcome.user }),
       },
     },
   }

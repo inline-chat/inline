@@ -41,7 +41,9 @@ describe("inviteToSpace", () => {
     expect(result.member).toBeTruthy()
 
     if (result.user && result.member) {
-      expect(result.user.email).toBe("invitee@ex.com")
+      // Contact details stay private to their owner, even for the inviter.
+      expect(result.user.email).toBeUndefined()
+      expect(result.user.phoneNumber).toBeUndefined()
       expect(result.member.spaceId).toBe(BigInt(space.id))
     }
     // Chat & dialog are no longer created as part of invite flow
@@ -67,7 +69,7 @@ describe("inviteToSpace", () => {
 
     const result = await inviteToSpace(input, makeFunctionContext(owner.id))
 
-    expect(result.user?.email).toBe("owner-invitee@ex.com")
+    expect(result.user?.email).toBeUndefined()
     expect(result.member?.spaceId).toBe(BigInt(space.id))
     expect(result.member?.role).toBe(Member_Role.MEMBER)
   })
@@ -603,7 +605,7 @@ describe("inviteToSpace", () => {
 
     const result = await inviteToSpace(input, makeFunctionContext(member.id))
 
-    expect(result.user?.email).toBe("public-invitee@ex.com")
+    expect(result.user?.email).toBeUndefined()
     expect(result.member?.spaceId).toBe(BigInt(space.id))
     expect(result.member?.role).toBe(Member_Role.MEMBER)
   })

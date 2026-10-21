@@ -274,4 +274,19 @@ describe("getChat", () => {
     expect(repair.messages[0]?.id).toBe(101n)
     expect(repair.messages.at(-1)?.id).toBe(2n)
   })
+
+  test("opening a DM with any user never returns that user's email or phone", async () => {
+    const stranger = await testUtils.createUser("contact-stranger@example.com")
+    const target = await testUtils.createUser("contact-target@example.com")
+    await db.update(schema.users).set({ phoneNumber: "+12025550199" }).where(eq(schema.users.id, target.id))
+
+    const result = await getChat({ peerId: makeInputPeerUser(target.id) }, makeHandlerContext(stranger.id))
+    expect(result.user?.id).toBe(BigInt(target.id))
+    expect(result.user?.email).toBeUndefined()
+    expect(result.user?.phoneNumber).toBeUndefined()
+
+    const self = await getChat({ peerId: { type: { oneofKind: "self", self: {} } } }, makeHandlerContext(target.id))
+    expect(self.user?.email).toBe("contact-target@example.com")
+    expect(self.user?.phoneNumber).toBe("+12025550199")
+  })
 })
