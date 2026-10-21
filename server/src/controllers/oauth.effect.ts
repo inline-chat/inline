@@ -204,6 +204,8 @@ const OAuthConsentPayload = Schema.Struct({
   ),
   allow_dms: OptionalString,
   allow_home_threads: OptionalString,
+  /** "deny" cancels the request; anything else, including absent, means allow. */
+  decision: OptionalString,
 }).annotate({
   identifier: "OAuthConsentForm",
 })
