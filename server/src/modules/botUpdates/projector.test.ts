@@ -7,6 +7,7 @@ import { encodeAgentThreadContext } from "@in/server/modules/agentConfiguration"
 import {
   activationReason,
   agentMentionTargetForChat,
+  foreignBotActivationAllowed,
   hasConsumableAgentContent,
   hasResolvedBoundAgent,
 } from "@in/server/modules/botUpdates/projector"
@@ -166,5 +167,26 @@ describe("Bot activation routing", () => {
     expect(hasResolvedBoundAgent(chat(true, 73), BOT_ID, undefined)).toBe(false)
     expect(hasResolvedBoundAgent(chat(true), BOT_ID, undefined)).toBe(true)
     expect(hasResolvedBoundAgent(chat(false), BOT_ID, undefined)).toBe(true)
+  })
+
+  test("a foreign bot can address your bot only in chats you can access", () => {
+    const owner = 7
+    const attacker = 9
+    // Same owner: delegation between your own bots is allowed anywhere.
+    expect(foreignBotActivationAllowed({ senderBotOwnerId: owner, targetBotOwnerId: owner, recipientUserIds: [] })).toBe(true)
+    // Another user's bot in a thread without you: dropped.
+    expect(foreignBotActivationAllowed({
+      senderBotOwnerId: attacker,
+      targetBotOwnerId: owner,
+      recipientUserIds: [attacker, 100, 200],
+    })).toBe(false)
+    // Another user's bot in a chat you're part of: still delivered.
+    expect(foreignBotActivationAllowed({
+      senderBotOwnerId: attacker,
+      targetBotOwnerId: owner,
+      recipientUserIds: [attacker, owner, 100, 200],
+    })).toBe(true)
+    // Unknown ownership fails closed.
+    expect(foreignBotActivationAllowed({ senderBotOwnerId: null, targetBotOwnerId: null, recipientUserIds: [] })).toBe(false)
   })
 })

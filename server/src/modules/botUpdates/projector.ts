@@ -325,6 +325,24 @@ export const activationReason = (input: {
   return input.stream.messageTrigger === "all" ? "all" : undefined
 }
 
+/**
+ * A bot owned by someone else may address your bot only where you, the owner,
+ * can see the conversation. Otherwise anyone could create a private thread
+ * with their own bot and yours and drive your bot without your knowledge.
+ */
+export const foreignBotActivationAllowed = (input: {
+  senderBotOwnerId: number | null
+  targetBotOwnerId: number | null
+  recipientUserIds: readonly number[]
+}): boolean =>
+  (input.senderBotOwnerId !== null && input.senderBotOwnerId === input.targetBotOwnerId) ||
+  (input.targetBotOwnerId !== null && input.recipientUserIds.includes(input.targetBotOwnerId))
+
+async function botOwners(ids: number[]): Promise<Map<number, number | null>> {
+  const rows = await UsersModel.getUsersWithPhotos(Array.from(new Set(ids)))
+  return new Map(rows.map(({ user }) => [user.id, user.botCreatorId ?? null]))
+}
+
 async function messageCreated(input: {
   chat: DbChat
   messageId: number
@@ -346,6 +364,9 @@ async function messageCreated(input: {
     message.entities,
     streams.map((stream) => stream.botUserId),
   )
+  const owners = message.from.bot
+    ? await botOwners([message.fromId, ...streams.map((stream) => stream.botUserId)])
+    : undefined
   for (const stream of streams) {
     const reason = activationReason({
       stream,
@@ -355,6 +376,18 @@ async function messageCreated(input: {
       sourceChatId: input.sourceChatId,
     })
     if (!reason) continue
+    if (owners && message.fromId !== stream.botUserId && !foreignBotActivationAllowed({
+      senderBotOwnerId: owners.get(message.fromId) ?? null,
+      targetBotOwnerId: owners.get(stream.botUserId) ?? null,
+      recipientUserIds: input.updateGroup.userIds,
+    })) {
+      log.warn("Dropping foreign Bot activation outside the target owner's chats", {
+        botUserId: stream.botUserId,
+        senderBotUserId: message.fromId,
+        chatId: input.chat.id,
+      })
+      continue
+    }
     const encoded = eventMessage(input.chat, message, reply, users, stream.botUserId)
     if (!hasConsumableAgentContent(encoded)) continue
     if (!hasResolvedBoundAgent(input.chat, stream.botUserId, agentsByBotUserId.get(stream.botUserId))) {

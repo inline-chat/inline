@@ -285,7 +285,12 @@ export async function validateAgentThreadContext(
     const actor = options.bindingActorUserId === botUserId
       ? bot
       : await UsersModel.getUserById(options.bindingActorUserId)
-    if (!actor || (!actor.bot && bot.botCreatorId !== options.bindingActorUserId)) {
+    // People bind only bots they created. A bot binds itself, or another bot
+    // with the same owner (agent hand-off); never another user's bot.
+    const allowed = actor?.bot
+      ? actor.id === botUserId || (actor.botCreatorId != null && actor.botCreatorId === bot.botCreatorId)
+      : actor !== undefined && bot.botCreatorId === options.bindingActorUserId
+    if (!actor || !allowed) {
       throw RealtimeRpcError.UserIdInvalid()
     }
   }
