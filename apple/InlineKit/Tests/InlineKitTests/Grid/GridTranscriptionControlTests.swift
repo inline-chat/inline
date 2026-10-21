@@ -70,7 +70,8 @@ struct GridTranscriptionControlTests {
     #expect(GridTranscriptionRequest(room: room(state: 3), enabled: false) == nil)
     #expect(GridTranscriptionRequest(room: room(state: 99), enabled: true) == nil)
     #expect(room(state: 1).transcriptionControlTitle == "Cancel transcription")
-    #expect(room(state: 3).transcriptionControlTitle == "Stopping…")
+    #expect(room(state: 2).transcriptionControlTitle == "Stop transcription")
+    #expect(room(state: 3).transcriptionControlTitle == "Stopping transcription…")
     #expect(room(state: 5).transcriptionControlTitle == "Start transcription")
   }
 

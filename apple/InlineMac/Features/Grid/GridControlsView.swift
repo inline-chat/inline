@@ -21,6 +21,9 @@ struct GridControlPill: View {
   let onStopScreenShare: () -> Void
   let onSetOutputVolume: (Float) -> Void
   let onRetryAudio: () -> Void
+  var transcription: GridTranscriptionControl?
+  var transcriptionNotice: GridTranscriptionNotice?
+  var onRetryTranscription: (GridTranscriptionNotice) -> Void = { _ in }
 
   @ViewBuilder
   var body: some View {
@@ -60,6 +63,12 @@ struct GridControlPill: View {
           title: "Incoming audio stalled",
           actionTitle: "Try Again",
           action: onRetryAudio
+        )
+      } else if let transcriptionNotice {
+        GridMediaNotice(
+          title: transcriptionNotice.title,
+          actionTitle: transcriptionNotice.actionTitle,
+          action: { onRetryTranscription(transcriptionNotice) }
         )
       }
       controlSurface
@@ -153,6 +162,11 @@ struct GridControlPill: View {
         onRefreshSources: onRefreshScreenCaptureSources,
         onStop: onStopScreenShare
       )
+      if let transcription {
+        // Per-room identity, so one room's transcript list never shows in another.
+        transcription
+          .id(transcription.room.id)
+      }
       GridVolumeControl(
         media: media,
         onSelectOutput: onSelectOutput,
@@ -190,16 +204,17 @@ private struct GridMediaNotice: View {
   }
 }
 
-private struct GridTintedControlIcon: View {
+struct GridTintedControlIcon: View {
   let systemName: String
   let isActive: Bool
+  var tint: Color = .green
 
   var body: some View {
     Image(systemName: systemName)
       .font(.system(size: 13, weight: .semibold))
       .foregroundStyle(isActive ? Color.white : Color.primary)
       .frame(width: 34, height: 34)
-      .background(isActive ? Color.green : Color.clear, in: Circle())
+      .background(isActive ? tint : Color.clear, in: Circle())
       .contentShape(Rectangle())
       .animation(.easeOut(duration: 0.15), value: isActive)
   }

@@ -2,111 +2,140 @@ import InlineKit
 import InlineProtocol
 import SwiftUI
 
-/// Room snapshots own capture state. View state is limited to an open picker
-/// and presentation of a failed request.
-struct GridTranscriptionControls: View {
+/// Transcription as one split control in the Grid media pill: the icon starts
+/// or stops capture, and the chevron holds the less frequent actions. Room
+/// snapshots own capture state; this view only presents it. Place it with
+/// `.id(room.id)` so the earlier-transcript list never outlives its room.
+struct GridTranscriptionControl: View {
   let room: GridRoom
   let allowsStarting: Bool
   let isBusy: Bool
-  let onSetTranscription: (Bool, GridTranscriptionRequest.Destination) async throws -> Void
-  let onOpenRoomThread: () async throws -> Void
+  let onSetTranscription: (Bool, GridTranscriptionRequest.Destination) -> Void
+  let onOpenRoomThread: () -> Void
   let onOpenTranscript: () -> Void
   let onListTranscripts: () async throws -> [GridTranscriptDestinationInfo]
 
-  @State private var showsPicker = false
-  @State private var isOpeningRoomThread = false
-  @State private var errorText: String?
+  @State private var earlierTranscripts: EarlierTranscripts = .loading
+  @State private var earlierTranscriptsAttempt = 0
 
+  @ViewBuilder
   var body: some View {
-    VStack(spacing: 6) {
-      if let errorText {
-        Text(errorText)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      if room.hasTranscription, room.transcription.state == .gridTranscriptionStarting {
-        Text("Starting transcription…").font(.caption).foregroundStyle(.secondary)
-      }
-      HStack(spacing: 8) {
-        if (allowsStarting && room.transcriptionAvailable) || room.transcriptionIsRunning {
-          Button {
-            setTranscription(enabled: !room.transcriptionIsRunning, destination: .last)
-          } label: {
-            Label(
-              room.transcriptionControlTitle,
-              systemImage: room.transcriptionIsRunning ? "stop.circle" : "text.bubble"
-            )
-          }
-          .disabled(isBusy || !canControl)
-          .help(room.transcriptionControlTitle)
-        }
+    if #available(macOS 26.0, *) {
+      controls
+        .glassEffect(.regular.interactive(), in: Capsule())
+    } else {
+      controls
+        .background(.ultraThinMaterial, in: Capsule())
+    }
+  }
 
-        if room.hasTranscription, room.transcription.state == .gridTranscriptionActive {
-          Circle().fill(.green).frame(width: 6, height: 6)
-            .accessibilityLabel("Transcription is active")
-        }
-
-        if allowsStarting && room.transcriptionAvailable {
-          Menu {
-            Button("Start a new transcript") {
-              setTranscription(enabled: true, destination: .new)
-            }
-            Button("Continue earlier transcript…") { showsPicker = true }
-          } label: {
-            Label("Transcript options", systemImage: "ellipsis")
-              .labelStyle(.iconOnly)
-          }
-          .menuIndicator(.hidden)
-          .disabled(isBusy || !canControl || !room.canStartTranscription)
-          .help("Transcript options")
-          .popover(isPresented: $showsPicker) {
-            GridTranscriptPicker(
-              isBusy: isBusy,
-              onLoad: onListTranscripts,
-              onSelect: { chatID in
-                try await onSetTranscription(true, .existing(chatID))
-                showsPicker = false
-              }
-            )
-            .id(room.id)
-          }
-        }
-
-        Divider().frame(height: 16)
-
-        if room.transcriptChatID != nil {
-          Button("Open transcript", action: onOpenTranscript)
-        }
-        Button {
-          isOpeningRoomThread = true
-          errorText = nil
-          Task {
-            defer { isOpeningRoomThread = false }
-            do { try await onOpenRoomThread() }
-            catch { errorText = "Couldn’t open the room thread. Try again." }
-          }
-        } label: {
-          Label("Room thread", systemImage: "bubble.left.and.bubble.right")
-        }
-        .disabled(isOpeningRoomThread || !ownsMembership)
+  private var controls: some View {
+    HStack(spacing: 0) {
+      Button {
+        onSetTranscription(!room.canStopTranscription, .last)
+      } label: {
+        icon
       }
       .buttonStyle(.plain)
-      .font(.system(size: 12, weight: .medium))
-      .padding(.horizontal, 12)
-      .padding(.vertical, 9)
-      .background(.regularMaterial, in: Capsule())
+      .disabled(!canToggle)
+      .help(toggleHelp)
+      .accessibilityLabel(toggleHelp)
 
-      if room.hasTranscription, room.transcription.state == .gridTranscriptionInterrupted {
-        Text("Transcription was interrupted. Start again to continue.")
-          .font(.caption)
+      Rectangle()
+        .fill(Color.primary.opacity(0.1))
+        .frame(width: 1, height: 17)
+
+      Menu {
+        menuContent
+      } label: {
+        Image(systemName: "chevron.down")
+          .font(.system(size: 8, weight: .semibold))
           .foregroundStyle(.secondary)
+          .frame(width: 23, height: 34)
+          .contentShape(Rectangle())
       }
+      // A plain button-style menu keeps the label's own size and tint, matching
+      // the other chevrons in the pill.
+      .menuStyle(.button)
+      .buttonStyle(.plain)
+      .menuIndicator(.hidden)
+      .fixedSize()
+      .help("Transcript options")
+      .accessibilityLabel("Transcript options")
     }
-    .onChange(of: room.id) {
-      showsPicker = false
-      errorText = nil
+    .fixedSize()
+    .task(id: earlierTranscriptsKey) { await loadEarlierTranscripts() }
+  }
+
+  @ViewBuilder
+  private var icon: some View {
+    switch room.hasTranscription ? room.transcription.state : nil {
+      case .gridTranscriptionStarting?, .gridTranscriptionStopping?:
+        GridScreenShareActivityIndicator(tint: accent)
+          .frame(width: 34, height: 34)
+          .contentShape(Rectangle())
+      case .gridTranscriptionActive?:
+        GridTintedControlIcon(systemName: "captions.bubble.fill", isActive: true, tint: accent)
+      case .gridTranscriptionInterrupted?:
+        GridTintedControlIcon(systemName: "captions.bubble", isActive: false)
+          .overlay(alignment: .topTrailing) {
+            Circle()
+              .fill(.orange)
+              .frame(width: 7, height: 7)
+              .padding(7)
+          }
+      default:
+        GridTintedControlIcon(systemName: "captions.bubble", isActive: false)
     }
+  }
+
+  @ViewBuilder
+  private var menuContent: some View {
+    Button("Open Transcript", systemImage: "doc.text", action: onOpenTranscript)
+      .disabled(room.transcriptChatID == nil)
+    Button("Open Room Thread", systemImage: "bubble.left.and.bubble.right", action: onOpenRoomThread)
+      .disabled(!ownsMembership)
+    if allowsStarting {
+      Divider()
+      Button("New Transcript", systemImage: "plus") {
+        onSetTranscription(true, .new)
+      }
+      .disabled(!canStart)
+      Menu {
+        earlierTranscriptsMenuContent
+      } label: {
+        Label("Continue Earlier Transcript", systemImage: "clock.arrow.circlepath")
+      }
+      .disabled(!canStart)
+    }
+  }
+
+  @ViewBuilder
+  private var earlierTranscriptsMenuContent: some View {
+    switch earlierTranscripts {
+      case .loading:
+        Text("Loading…")
+      case .failed:
+        Text("Couldn’t Load Earlier Transcripts")
+        Button("Try Again") { earlierTranscriptsAttempt += 1 }
+      case let .loaded(transcripts):
+        if transcripts.isEmpty {
+          Text("No Earlier Transcripts")
+        } else {
+          Section("Everyone here gets that thread’s history") {
+            ForEach(transcripts, id: \.transcriptChatID) { transcript in
+              Button(transcript.busy ? "\(transcript.displayTitle) (In Use)" : transcript.displayTitle) {
+                onSetTranscription(true, .existing(transcript.transcriptChatID))
+              }
+              .disabled(transcript.busy)
+            }
+          }
+        }
+    }
+  }
+
+  private var accent: Color {
+    Color(nsColor: Theme.accentColor)
   }
 
   private var ownsMembership: Bool {
@@ -114,100 +143,117 @@ struct GridTranscriptionControls: View {
   }
 
   private var canControl: Bool {
-    ownsMembership && room.hasConnection && room.connection.generation > 0 && room.transcriptionCanChange
+    !isBusy && ownsMembership && room.hasConnection && room.connection.generation > 0 && room.transcriptionCanChange
   }
 
-  private func setTranscription(enabled: Bool, destination: GridTranscriptionRequest.Destination) {
-    errorText = nil
-    Task {
-      do { try await onSetTranscription(enabled, destination) }
-      catch { errorText = "Couldn’t confirm the change. Check transcription and try again." }
+  private var canStart: Bool {
+    canControl && allowsStarting && room.canStartTranscription
+  }
+
+  private var canToggle: Bool {
+    room.canStopTranscription ? canControl : canStart
+  }
+
+  private var toggleHelp: String {
+    switch room.hasTranscription ? room.transcription.state : nil {
+      case nil, .gridTranscriptionStopped?:
+        return startHelp
+      case .gridTranscriptionInterrupted?:
+        return canStart ? "Transcription was interrupted. Start again" : "Transcription was interrupted"
+      default:
+        return room.transcriptionControlTitle
+    }
+  }
+
+  private var startHelp: String {
+    if room.transcriptionAvailable { return room.transcriptionControlTitle }
+    return room.avatars.count < 2 ? "Transcription needs two people in the room" : "Transcription isn’t available right now"
+  }
+
+  /// A run that ends is what adds a transcript, so the list loads once per room
+  /// and run. It skips while capture runs, when continuing isn't possible.
+  private var earlierTranscriptsKey: EarlierTranscriptsKey {
+    EarlierTranscriptsKey(
+      roomID: room.id,
+      runID: room.hasTranscription ? room.transcription.runID : "",
+      isNeeded: allowsStarting && !room.transcriptionIsRunning,
+      attempt: earlierTranscriptsAttempt
+    )
+  }
+
+  private func loadEarlierTranscripts() async {
+    guard earlierTranscriptsKey.isNeeded else { return }
+    earlierTranscripts = .loading
+    do {
+      let transcripts = try await onListTranscripts()
+      guard !Task.isCancelled else { return }
+      earlierTranscripts = .loaded(Array(transcripts.prefix(20)))
+    } catch {
+      guard !Task.isCancelled else { return }
+      earlierTranscripts = .failed
     }
   }
 }
 
-private struct GridTranscriptPicker: View {
-  let isBusy: Bool
-  let onLoad: () async throws -> [GridTranscriptDestinationInfo]
-  let onSelect: (Int64) async throws -> Void
+private enum EarlierTranscripts {
+  case loading
+  case loaded([GridTranscriptDestinationInfo])
+  case failed
+}
 
-  @State private var transcripts: [GridTranscriptDestinationInfo] = []
-  @State private var isLoading = true
-  @State private var errorText: String?
-  @State private var loadRevision = 0
-  @State private var selectedChatID: Int64?
+private struct EarlierTranscriptsKey: Equatable {
+  let roomID: Int64
+  let runID: String
+  let isNeeded: Bool
+  let attempt: Int
+}
 
-  var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      Text("Continue earlier transcript").font(.headline)
-      Text("Current and future participants get access to the earlier room’s full thread history.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
+private extension GridTranscriptDestinationInfo {
+  var displayTitle: String {
+    title.isEmpty ? "Transcript" : title
+  }
+}
 
-      if isLoading {
-        ProgressView().frame(maxWidth: .infinity).padding(.vertical, 18)
-      } else if transcripts.isEmpty, errorText == nil {
-        Text("No earlier transcripts are available to share.")
-          .foregroundStyle(.secondary)
-          .padding(.vertical, 12)
-      } else {
-        ScrollView {
-          VStack(alignment: .leading, spacing: 4) {
-            ForEach(transcripts, id: \.transcriptChatID) { transcript in
-              Button {
-                selectedChatID = transcript.transcriptChatID
-                errorText = nil
-                Task {
-                  defer { selectedChatID = nil }
-                  do { try await onSelect(transcript.transcriptChatID) }
-                  catch { errorText = "Couldn’t continue this transcript. Try again." }
-                }
-              } label: {
-                HStack {
-                  Text(transcript.title.isEmpty ? "Transcript" : transcript.title)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                  Spacer(minLength: 8)
-                  if transcript.busy {
-                    Text("In use").font(.caption).foregroundStyle(.secondary)
-                  } else if selectedChatID == transcript.transcriptChatID {
-                    ProgressView().controlSize(.small)
-                  }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 7)
-                .padding(.horizontal, 8)
-                .contentShape(Rectangle())
-              }
-              .buttonStyle(.plain)
-              .disabled(transcript.busy || isBusy || selectedChatID != nil)
-            }
-          }
-        }
-        .frame(maxHeight: 270)
-      }
-      if let errorText {
-        Text(errorText).font(.caption).foregroundStyle(.secondary)
-        if selectedChatID == nil {
-          Button("Refresh") { loadRevision += 1 }
-        }
-      }
+/// A failed transcription request, shown in the media pill's notice row. It
+/// keeps the intent rather than a room snapshot: requests fence on the run,
+/// revision and generation, so a retry reads the room again when tapped.
+struct GridTranscriptionNotice: Equatable {
+  enum Retry: Equatable {
+    case setTranscription(enabled: Bool, destination: GridTranscriptionRequest.Destination)
+    case openRoomThread
+  }
+
+  let retry: Retry
+  /// The room and capture state the failure belongs to. Once the room moves
+  /// on, the notice no longer describes it.
+  let capture: GridTranscriptionCapture
+
+  var roomID: Int64 {
+    capture.roomID
+  }
+
+  var title: String {
+    switch retry {
+      case .setTranscription(enabled: true, destination: _): "Transcription couldn’t start"
+      case .setTranscription(enabled: false, destination: _): "Transcription couldn’t stop"
+      case .openRoomThread: "Room thread couldn’t open"
     }
-    .padding(16)
-    .frame(width: 330)
-    .task(id: loadRevision) {
-      isLoading = true
-      errorText = nil
-      do {
-        let result = try await onLoad()
-        guard !Task.isCancelled else { return }
-        transcripts = Array(result.prefix(20))
-      } catch {
-        guard !Task.isCancelled else { return }
-        errorText = "Couldn’t load earlier transcripts."
-      }
-      isLoading = false
-    }
+  }
+
+  var actionTitle: String {
+    "Try Again"
+  }
+}
+
+/// The parts of a room that a transcription notice depends on.
+struct GridTranscriptionCapture: Equatable {
+  let roomID: Int64
+  let runID: String
+  let state: GridTranscriptionState
+
+  init(room: GridRoom) {
+    roomID = room.id
+    runID = room.hasTranscription ? room.transcription.runID : ""
+    state = room.hasTranscription ? room.transcription.state : .gridTranscriptionUnspecified
   }
 }

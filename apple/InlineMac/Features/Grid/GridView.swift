@@ -10,6 +10,7 @@ struct GridView: View {
   @Environment(SidebarViewModel.self) private var sidebar
   @AppStorage(ExperimentalFeatureFlags.gridTranscriptionKey)
   private var gridTranscriptionEnabled = false
+  @State private var transcriptionNotice: GridTranscriptionNotice?
   let spaceID: Int64
 
   var body: some View {
@@ -79,46 +80,25 @@ struct GridView: View {
     }
     .safeAreaInset(edge: .bottom) {
       if let currentRoom, hasLocalAdmissionInSpace {
-        VStack(spacing: 8) {
-          if (gridTranscriptionEnabled || currentRoom.transcriptionIsRunning),
-             currentRoom.transcriptionAvailable || currentRoom.hasTranscription || currentRoom.hasRoomThreadID {
-            GridTranscriptionControls(
-              room: currentRoom,
-              allowsStarting: gridTranscriptionEnabled,
-              isBusy: store.pendingTranscriptionRequestIDs[currentRoom.id] != nil,
-              onSetTranscription: { enabled, destination in
-                guard !enabled || ExperimentalFeatureFlags.gridTranscriptionEnabled else { return }
-                try await store.setTranscription(room: currentRoom, enabled: enabled, destination: destination)
-              },
-              onOpenRoomThread: {
-                let chatID = try await store.openRoomThread(roomID: currentRoom.id)
-                dependencies?.requestOpenChat(peer: .thread(id: chatID))
-              },
-              onOpenTranscript: {
-                guard let chatID = currentRoom.transcriptChatID else { return }
-                dependencies?.requestOpenChat(peer: .thread(id: chatID))
-              },
-              onListTranscripts: { try await store.listTranscripts(roomID: currentRoom.id) }
-            )
-            .id(currentRoom.id)
-          }
-          GridControlPill(
-            media: store.media,
-            onToggleMicrophone: { store.toggleMicrophone(spaceID: spaceID) },
-            onLeave: { store.leaveCurrentRoom(spaceID: spaceID) },
-            onSelectInput: store.setInputSelection,
-            onRefreshInputDevices: store.refreshInputDevices,
-            onSelectOutput: store.setOutputSelection,
-            onRefreshOutputDevices: store.refreshOutputDevices,
-            onToggleScreenShare: store.toggleScreenShare,
-            onSelectScreenCaptureSource: store.startScreenSharing,
-            onSelectScreenShareQualityProfile: store.setScreenShareQualityProfile,
-            onRefreshScreenCaptureSources: store.refreshScreenCaptureSources,
-            onStopScreenShare: store.stopScreenSharing,
-            onSetOutputVolume: store.setOutputVolume,
-            onRetryAudio: store.retryAudio
-          )
-        }
+        GridControlPill(
+          media: store.media,
+          onToggleMicrophone: { store.toggleMicrophone(spaceID: spaceID) },
+          onLeave: { store.leaveCurrentRoom(spaceID: spaceID) },
+          onSelectInput: store.setInputSelection,
+          onRefreshInputDevices: store.refreshInputDevices,
+          onSelectOutput: store.setOutputSelection,
+          onRefreshOutputDevices: store.refreshOutputDevices,
+          onToggleScreenShare: store.toggleScreenShare,
+          onSelectScreenCaptureSource: store.startScreenSharing,
+          onSelectScreenShareQualityProfile: store.setScreenShareQualityProfile,
+          onRefreshScreenCaptureSources: store.refreshScreenCaptureSources,
+          onStopScreenShare: store.stopScreenSharing,
+          onSetOutputVolume: store.setOutputVolume,
+          onRetryAudio: store.retryAudio,
+          transcription: transcriptionControl(room: currentRoom),
+          transcriptionNotice: visibleTranscriptionNotice(room: currentRoom),
+          onRetryTranscription: retryTranscription
+        )
         .padding(.bottom, 18)
         .transition(.move(edge: .bottom).combined(with: .opacity))
       } else if store.callTransferEnabled, let call = store.currentCall, call.spaceID == spaceID {
@@ -147,6 +127,14 @@ struct GridView: View {
       }
     }
     .animation(.smoothSnappy, value: currentRoom?.id)
+    .onChange(of: currentRoom.map(GridTranscriptionCapture.init(room:))) { _, capture in
+      // A failure notice belongs to one room and capture state. The store's
+      // repair reload can land in the same update as a new notice, so keep one
+      // that already matches the new state.
+      if transcriptionNotice?.capture != capture {
+        transcriptionNotice = nil
+      }
+    }
     .task(id: spaceID) {
       await store.load(spaceID: spaceID)
     }
@@ -189,6 +177,78 @@ struct GridView: View {
     guard spaceID != self.spaceID else { return }
     store.recordGridOpened(spaceID: spaceID)
     nav.openGrid(spaceId: spaceID)
+  }
+
+  private func transcriptionControl(room: GridRoom) -> GridTranscriptionControl? {
+    guard gridTranscriptionEnabled || room.transcriptionIsRunning else { return nil }
+    return GridTranscriptionControl(
+      room: room,
+      allowsStarting: gridTranscriptionEnabled,
+      isBusy: store.pendingTranscriptionRequestIDs[room.id] != nil,
+      onSetTranscription: { enabled, destination in
+        setTranscription(roomID: room.id, enabled: enabled, destination: destination)
+      },
+      onOpenRoomThread: { openRoomThread(roomID: room.id) },
+      onOpenTranscript: {
+        guard let chatID = room.transcriptChatID else { return }
+        dependencies?.requestOpenChat(peer: .thread(id: chatID))
+      },
+      onListTranscripts: { try await store.listTranscripts(roomID: room.id) }
+    )
+  }
+
+  private func visibleTranscriptionNotice(room: GridRoom) -> GridTranscriptionNotice? {
+    guard let transcriptionNotice, transcriptionNotice.capture == GridTranscriptionCapture(room: room) else {
+      return nil
+    }
+    return transcriptionNotice
+  }
+
+  private func retryTranscription(_ notice: GridTranscriptionNotice) {
+    switch notice.retry {
+      case let .setTranscription(enabled, destination):
+        setTranscription(roomID: notice.roomID, enabled: enabled, destination: destination)
+      case .openRoomThread:
+        openRoomThread(roomID: notice.roomID)
+    }
+  }
+
+  private func setTranscription(
+    roomID: Int64,
+    enabled: Bool,
+    destination: GridTranscriptionRequest.Destination
+  ) {
+    guard !enabled || ExperimentalFeatureFlags.gridTranscriptionEnabled else { return }
+    transcriptionNotice = nil
+    // Requests fence on the room's run, revision and generation, so read the
+    // room when the action runs rather than when its closure was made.
+    guard let room = currentRoom, room.id == roomID else { return }
+    Task {
+      do {
+        try await store.setTranscription(room: room, enabled: enabled, destination: destination)
+      } catch {
+        showTranscriptionNotice(.setTranscription(enabled: enabled, destination: destination), roomID: roomID)
+      }
+    }
+  }
+
+  private func openRoomThread(roomID: Int64) {
+    transcriptionNotice = nil
+    Task {
+      do {
+        let chatID = try await store.openRoomThread(roomID: roomID)
+        dependencies?.requestOpenChat(peer: .thread(id: chatID))
+      } catch {
+        showTranscriptionNotice(.openRoomThread, roomID: roomID)
+      }
+    }
+  }
+
+  /// Records a failure against the room as it is now, after the store's repair
+  /// reload, so the notice clears once the room or its capture state moves on.
+  private func showTranscriptionNotice(_ retry: GridTranscriptionNotice.Retry, roomID: Int64) {
+    guard let room = currentRoom, room.id == roomID else { return }
+    transcriptionNotice = GridTranscriptionNotice(retry: retry, capture: GridTranscriptionCapture(room: room))
   }
 
   private func openHotkeySettings() {

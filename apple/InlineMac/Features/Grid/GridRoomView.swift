@@ -304,13 +304,25 @@ private struct GridRoomSurface: View {
         )
       }
       .overlay(alignment: .bottomTrailing) {
-        if room.locked {
-          Image(systemName: "lock.fill")
-            .font(.system(size: 8, weight: .semibold))
-            .foregroundStyle(.secondary)
-            .padding(7)
-            .transition(.scale.combined(with: .opacity))
+        HStack(spacing: 4) {
+          // Room-level disclosure, visible before anyone joins.
+          if room.transcriptionIsRunning {
+            Image(systemName: "captions.bubble.fill")
+              .foregroundStyle(Color(nsColor: Theme.accentColor))
+              .help("This room is being transcribed")
+              .accessibilityLabel("This room is being transcribed")
+              .transition(.scale.combined(with: .opacity))
+          }
+          if room.locked {
+            Image(systemName: "lock.fill")
+              .foregroundStyle(.secondary)
+              .help("This room is locked")
+              .accessibilityLabel("This room is locked")
+              .transition(.scale.combined(with: .opacity))
+          }
         }
+        .font(.system(size: 8, weight: .semibold))
+        .padding(7)
       }
       .overlay {
         RoundedRectangle(cornerRadius: 16, style: .continuous)

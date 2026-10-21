@@ -88,12 +88,14 @@ public extension GridRoom {
     hasTranscription && [.gridTranscriptionStarting, .gridTranscriptionActive].contains(transcription.state)
   }
 
+  /// The transcription toggle's action for this snapshot, shared by the Grid
+  /// pill and the sidebar indicator's stop button.
   var transcriptionControlTitle: String {
     guard hasTranscription else { return "Start transcription" }
     switch transcription.state {
       case .gridTranscriptionStarting: return "Cancel transcription"
       case .gridTranscriptionActive: return "Stop transcription"
-      case .gridTranscriptionStopping: return "Stopping…"
+      case .gridTranscriptionStopping: return "Stopping transcription…"
       case .gridTranscriptionStopped, .gridTranscriptionInterrupted: return "Start transcription"
       default: return "Transcription unavailable"
     }
