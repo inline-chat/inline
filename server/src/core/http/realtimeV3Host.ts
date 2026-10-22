@@ -20,7 +20,7 @@ import {
 } from "@inline-chat/protocol/core"
 import type { Server, ServerWebSocket } from "bun"
 import productionTrustRoots from "@inline-chat/protocol/trust-roots/inline-protocol-production.json"
-import { gunzipSync } from "node:zlib"
+import { gunzipSync, gzipSync } from "node:zlib"
 import { isIP } from "node:net"
 import { randomBytes } from "node:crypto"
 import { installNodeAesBackend } from "@inline-chat/protocol/secure/node"
@@ -34,7 +34,10 @@ import { makeInlineProtocolRsaSigner } from "@in/server/modules/inlineProtocol/r
 import { InlineProtocolAuthOperations } from "@in/server/modules/inlineProtocol/auth"
 import { InlineProtocolOperations } from "@in/server/modules/inlineProtocol/operations"
 import { makeInlineProtocolApplicationDispatcher } from "@in/server/modules/inlineProtocol/application"
-import { inlineProtocolReplayPolicy } from "@in/server/modules/inlineProtocol/replayPolicy"
+import {
+  inlineProtocolReplayPolicy,
+  inlineProtocolResultCompressible,
+} from "@in/server/modules/inlineProtocol/replayPolicy"
 import type { InlineProtocolEnabledConfiguration } from "@in/server/modules/inlineProtocol/config"
 import {
   inlineProtocolClock,
@@ -736,6 +739,8 @@ export const makeInlineProtocolRealtimeTransport = (
       tryAcquireApplication,
       tryReserveApplicationUpdateBytes,
       replayPolicy: inlineProtocolReplayPolicy,
+      gzip: (data) => Uint8Array.from(gzipSync(data)),
+      compressResult: inlineProtocolResultCompressible,
     })
     const state: InlineProtocolConnectionState = {
       queue: Promise.resolve(),

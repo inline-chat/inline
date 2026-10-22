@@ -65,7 +65,7 @@ struct SecureTransportTests {
   func sharedVectorCorpus() throws {
     let data = try InlineProtocolVectors.v1JSON()
     #expect(SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-      == "eac2cd11a9e3431109e522472e4a784aec7f0ef307dcea60616c882a2acd79f1")
+      == "35a3bccb6e11a934d83e2370e739204144c1d0b89653b7780b22fd124e20b816")
     let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     #expect(object["formatVersion"] as? Int == 1)
     #expect(object["protocol"] as? String == "Inline Protocol v1")

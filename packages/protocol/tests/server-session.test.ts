@@ -11,6 +11,7 @@ import {
   bytesToHex,
   createTemporaryKeyBindingProof,
   decodeInlineApplicationObject,
+  decodeGzipPacked,
   decodeMsgsAck,
   decodeRpcError,
   decodeRpcResult,
@@ -1502,6 +1503,8 @@ const boundSessionFixture = (options: {
   keyExpiresAt?: number
   bindingExpiresAt?: number
   dispatch?: (payload: Uint8Array) => Promise<void>
+  result?: (payload: Uint8Array) => Uint8Array
+  sessionOptions?: Partial<ConstructorParameters<typeof InlineProtocolServerSession>[0]>
 } = {}) => {
   const authorizationKeys = new MemoryAuthorizationKeys()
   const replay = new CountingReplay()
@@ -1527,12 +1530,13 @@ const boundSessionFixture = (options: {
     application: { dispatch: async ({ payload }) => {
       dispatches += 1
       await options.dispatch?.(payload)
-      return { kind: "result", payload: Uint8Array.of(payload[0]! + 1) }
+      return { kind: "result", payload: options.result?.(payload) ?? Uint8Array.of(payload[0]! + 1) }
     } },
     replayPolicy: (payload) => payload[0] === SESSION_TIER_PAYLOAD ? "session" : "durable",
     randomBytes: (length) => Uint8Array.from(randomBytes(length)),
     nowMilliseconds: () => now,
     gunzip: (packed, maximum) => gunzipSync(packed, { maxOutputLength: maximum }),
+    ...options.sessionOptions,
   })
   const ids = new MessageIdGenerator()
   let sequence = 1
@@ -1550,7 +1554,18 @@ const boundSessionFixture = (options: {
     direction: "server-to-client", sessionId,
     validServerSalts: new Set([serverSalt]), nowSeconds: Math.floor(now / 1_000),
   }).fields)
+  const nextMessageId = () => ids.next(now, sequence, 0)
+  const takeSequence = () => {
+    const value = sequence
+    sequence += 2
+    return value
+  }
+  const rawRecord = (messageId: bigint, sequenceNumber: number, body: Uint8Array) =>
+    encryptRecord(key, "client-to-server", {
+      serverSalt, sessionId, messageId, sequenceNumber, body,
+    }, randomBytes(paddingFor(body.length)))
   return {
+    nextMessageId, takeSequence, rawRecord,
     server, replay, record, bodies, nowSeconds, storedKey: () => authorizationKeys.values.get(bytesToHex(keyId))!.key,
     dispatches: () => dispatches,
     setNow: (milliseconds: number) => { now = milliseconds },
@@ -1656,5 +1671,76 @@ describe("session-tier replay and authority expiry", () => {
     fixture.server.disconnect()
     await expect(fixture.server.receiveConcurrent(fixture.record(encodePing(2n)).bytes)).rejects.toThrow()
     expect(fixture.storedKey().some((byte) => byte !== 0)).toBeTrue()
+  })
+
+  test("accepts a container of an acknowledgement and an invoke and answers the invoke", async () => {
+    const fixture = boundSessionFixture()
+    const first = fixture.record(encodeInlineInvoke(Uint8Array.of(1)))
+    const accepted = await fixture.server.receiveConcurrent(first.bytes)
+    const finalized = await (await accepted.applicationTasks[0]!.dispatch()).finalize()
+    const contentIds = fixture.bodies([...accepted.responses, ...finalized.responses])
+      .filter((body) => body.sequenceNumber % 2 === 1).map((body) => body.messageId)
+    expect(contentIds.length).toBeGreaterThanOrEqual(2)
+    expect(fixture.server.retainedPendingMessageBytes).toBeGreaterThan(0)
+
+    // Children before the container: msgs_ack (non-content), then the invoke (content).
+    const ackId = fixture.nextMessageId()
+    const invokeSequence = fixture.takeSequence()
+    const ackSequence = invokeSequence - 1
+    const invokeId = fixture.nextMessageId()
+    const containerId = fixture.nextMessageId()
+    const container = encodeMessageContainer([
+      { messageId: ackId, sequenceNumber: ackSequence, body: encodeMsgsAck(contentIds) },
+      { messageId: invokeId, sequenceNumber: invokeSequence, body: encodeInlineInvoke(Uint8Array.of(2)) },
+    ])
+    const combined = await fixture.server.receiveConcurrent(fixture.rawRecord(containerId, invokeSequence + 1, container))
+    expect(combined.applicationTasks).toHaveLength(1)
+    expect(combined.applicationTasks[0]!.messageId).toBe(invokeId)
+    expect(fixture.server.retainedPendingMessageBytes).toBe(0)
+    const answered = await (await combined.applicationTasks[0]!.dispatch()).finalize()
+    expect(decodeRpcResult(fixture.bodies(answered.responses).find((body) =>
+      serviceConstructor(body.body) === ServiceConstructor.rpcResult)!.body).requestMessageId).toBe(invokeId)
+
+    // A container whose ID does not exceed its children is rejected.
+    const badChild = fixture.nextMessageId()
+    const badContainer = encodeMessageContainer([
+      { messageId: badChild, sequenceNumber: 0, body: encodeMsgsAck([1n]) },
+    ])
+    await expect(fixture.server.receiveConcurrent(fixture.rawRecord(badChild - 4n, invokeSequence + 1, badContainer)))
+      .rejects.toThrow()
+  })
+
+  test("compresses large compressible results only for layer-4 invokes", async () => {
+    const compressible = new Uint8Array(4_096).fill(0x41)
+    const random = Uint8Array.from(randomBytes(4_096))
+    const fixture = boundSessionFixture({
+      result: (payload) => payload[0] === 1 ? compressible : payload[0] === 2 ? random : payload[0] === 3
+        ? compressible : Uint8Array.of(9),
+      sessionOptions: {
+        gzip: (data) => Uint8Array.from(gzipSync(data)),
+        compressResult: (payload) => payload[0] !== 3,
+      },
+    })
+    const resultFor = async (payload: number, layer: number) => {
+      const invoke = fixture.record(encodeInlineInvoke(Uint8Array.of(payload), layer))
+      const accepted = await fixture.server.receiveConcurrent(invoke.bytes)
+      const finalized = await (await accepted.applicationTasks[0]!.dispatch()).finalize()
+      return decodeRpcResult(fixture.bodies(finalized.responses).find((body) =>
+        serviceConstructor(body.body) === ServiceConstructor.rpcResult)!.body).result
+    }
+    const packed = await resultFor(1, 4)
+    expect(serviceConstructor(packed)).toBe(ServiceConstructor.gzipPacked)
+    expect(decodeInlineApplicationObject(decodeGzipPacked(packed, (data, maximum) =>
+      gunzipSync(data, { maxOutputLength: maximum })))).toEqual({ kind: "result", payload: compressible })
+    expect(packed.length).toBeLessThan(200)
+    expect(serviceConstructor(await resultFor(1, 3))).not.toBe(ServiceConstructor.gzipPacked)
+    expect(serviceConstructor(await resultFor(2, 4))).not.toBe(ServiceConstructor.gzipPacked)
+    expect(serviceConstructor(await resultFor(3, 4))).not.toBe(ServiceConstructor.gzipPacked)
+    expect(serviceConstructor(await resultFor(4, 4))).not.toBe(ServiceConstructor.gzipPacked)
+    // Replay keeps the uncompressed result.
+    const stored = [...fixture.replay.values.values()].map((value) => value.result!)
+    expect(stored.every((body) => serviceConstructor(decodeRpcResult(body).result) !== ServiceConstructor.gzipPacked)).toBeTrue()
+    await expect(fixture.server.receiveConcurrent(fixture.record(encodeInlineInvoke(Uint8Array.of(1), 5)).bytes))
+      .rejects.toThrow("Invalid Inline application request")
   })
 })

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { constants, generateKeyPairSync, privateDecrypt, randomBytes } from "node:crypto"
+import { gzipSync } from "node:zlib"
 import { EventEmitter } from "node:events"
 import { WebSocket, WebSocketServer } from "ws"
 import {
@@ -179,10 +180,13 @@ afterEach(async () => {
 const testServer = async (options: {
   carrierRpcErrorCode?: number
   applicationRpcErrorCode?: number
+  /** Compress large results and answer GET_ME with a large, compressible user. */
+  gzipResults?: boolean
 } = {}): Promise<{
   url: string
   publicKeys: InlineProtocolPublicKey[]
   pushUpdate: (update: RealtimeV3Update) => void
+  stats: { framesReceived: number; gzipped: number; retainedPendingBytes: () => number }
 }> => {
   const pair = generateKeyPairSync("rsa", { modulusLength: 2048, publicExponent: 65537 })
   const jwk = pair.publicKey.export({ format: "jwk" })
@@ -198,6 +202,11 @@ const testServer = async (options: {
     carrier: () => ObfuscatedServerHeader | undefined
   }> = []
   servers.push(server)
+  const stats = {
+    framesReceived: 0,
+    gzipped: 0,
+    retainedPendingBytes: () => active.at(-1)?.session.retainedPendingMessageBytes ?? 0,
+  }
   server.on("connection", (socket) => {
     let carrier: ObfuscatedServerHeader | undefined
     let queue = Promise.resolve()
@@ -252,7 +261,9 @@ const testServer = async (options: {
               return { kind: "error", code: options.carrierRpcErrorCode, message: "carrier error" }
             }
             const result = application.body.rpc.method === Method.GET_ME
-              ? { oneofKind: "getMe" as const, getMe: { user: { id: 7n } } }
+              ? { oneofKind: "getMe" as const, getMe: { user: options.gzipResults
+                ? { id: 7n, firstName: "Inline ".repeat(600) }
+                : { id: 7n } } }
               : { oneofKind: undefined }
             return { kind: "result", payload: RealtimeV3Response.toBinary({
               body: { oneofKind: "rpcResult", rpcResult: {
@@ -269,6 +280,13 @@ const testServer = async (options: {
       gunzip: () => { throw new Error("not used") },
       carrierProfile: "websocket",
       dc: 1,
+      ...(options.gzipResults ? {
+        gzip: (data: Uint8Array) => {
+          stats.gzipped += 1
+          return Uint8Array.from(gzipSync(data))
+        },
+        compressResult: () => true,
+      } : {}),
     })
     active.push({ socket, session, carrier: () => carrier })
     socket.on("message", (data) => {
@@ -280,6 +298,7 @@ const testServer = async (options: {
         }
         const decoded = decodeAbridgedFrame(carrier.inbound.process(frame))
         if (decoded.kind !== "packet") throw new Error("unexpected quick ACK")
+        stats.framesReceived += 1
         const responses = await session.receive(decoded.payload)
         for (const response of responses) socket.send(carrier.outbound.process(encodeAbridgedPacket(response)))
       })
@@ -295,6 +314,7 @@ const testServer = async (options: {
       exponent: Buffer.from(profile.exponent).toString("base64url"),
       fingerprint: profile.fingerprint.toString(),
     }],
+    stats,
     pushUpdate: (update) => {
       const target = active.at(-1)
       const carrier = target?.carrier()
@@ -721,6 +741,29 @@ describe("InlineProtocolV3Connection", () => {
     expect(closed).toMatchObject({ code: "unauthorized" })
     await connection.close()
   })
+
+  it("carries acknowledgements in the next request and decodes gzip-packed results", async () => {
+    const fixture = await testServer({ gzipResults: true })
+    const { permanent, connection } = await authenticatedTestConnection(fixture)
+    const first = await connection.callRpc({ method: Method.GET_ME, input: { oneofKind: undefined } })
+    expect(first.oneofKind === "getMe" && first.getMe.user?.firstName).toBe("Inline ".repeat(600))
+    expect(fixture.stats.gzipped).toBe(1)
+    // The result is retained by the server until acknowledged; no standalone ACK was sent.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const framesAfterFirst = fixture.stats.framesReceived
+    expect(fixture.stats.retainedPendingBytes()).toBeGreaterThan(0)
+    for (let index = 0; index < 3; index += 1) {
+      const result = await connection.callRpc({ method: Method.GET_ME, input: { oneofKind: undefined } })
+      expect(result.oneofKind).toBe("getMe")
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    // One frame per request: each carried the previous result's acknowledgement.
+    expect(fixture.stats.framesReceived - framesAfterFirst).toBe(3)
+    const retainedBeforeClose = fixture.stats.retainedPendingBytes()
+    expect(retainedBeforeClose).toBeGreaterThan(0)
+    await connection.close()
+    await permanent.close()
+  }, 30_000)
 
   it("delivers an unsolicited update while no RPC is in flight", async () => {
     const fixture = await testServer()

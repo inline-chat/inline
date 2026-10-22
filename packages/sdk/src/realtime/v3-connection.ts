@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto"
+import { gunzipSync } from "node:zlib"
 import { WebSocket } from "ws"
 import { installNodeAesBackend } from "@inline-chat/protocol/secure/node"
 import {
@@ -11,6 +12,7 @@ import {
   createTemporaryKeyBindingProof,
   decodeAbridgedFrame,
   decodeBadMessageNotification,
+  decodeGzipPacked,
   decodeInlineApplicationObject,
   decodeMsgsAck,
   decodeRpcError,
@@ -19,6 +21,7 @@ import {
   encodeAbridgedPacket,
   encodeBindTempAuthKey,
   encodeInlineInvoke,
+  encodeMessageContainer,
   encodePing,
   encodeMsgsAck,
   encodeUnencryptedRecord,
@@ -28,6 +31,8 @@ import {
   makeRsaPublicKey,
   readInt64LE,
   serviceConstructor,
+  INLINE_INVOKE_CONSTRUCTOR,
+  INLINE_REALTIME_LAYER_GZIP,
   type EstablishedAuthorizationKey,
   type HandshakeRsaPublicKey,
   type ObfuscatedClientHeader,
@@ -68,6 +73,19 @@ const DEFAULT_MAX_PENDING_REQUESTS = 64
 const DEFAULT_MAX_PENDING_REQUEST_BYTES = 32 * 1024 * 1024
 const TEMPORARY_KEY_LIFETIME_MILLISECONDS = 86_400_000
 const TEMPORARY_KEY_ROTATION_MILLISECONDS = TEMPORARY_KEY_LIFETIME_MILLISECONDS * 0.8
+// Acknowledgements ride along with the next request; a quiet connection flushes
+// them on its own after this delay or once this many are pending.
+const ACK_FLUSH_DELAY_MS = 30_000
+const ACK_FLUSH_PENDING = 16
+const MAXIMUM_GZIP_OUTPUT_BYTES = 16 * 1024 * 1024
+
+const gunzip = (packed: Uint8Array, maximumOutputBytes: number): Uint8Array =>
+  Uint8Array.from(gunzipSync(packed, { maxOutputLength: Math.min(maximumOutputBytes, MAXIMUM_GZIP_OUTPUT_BYTES) }))
+
+const unpackGzip = (body: Uint8Array): Uint8Array =>
+  serviceConstructor(body) === ServiceConstructor.gzipPacked
+    ? decodeGzipPacked(body, gunzip, MAXIMUM_GZIP_OUTPUT_BYTES)
+    : body
 
 const readOnlyRpcMethods = READ_ONLY_RPC_METHODS
 
@@ -286,6 +304,8 @@ export class InlineProtocolV3Connection {
   #closing = false
   #didNotifyClose = false
   #rotationTimer: ReturnType<typeof setTimeout> | undefined
+  readonly #pendingAcknowledgements = new Set<bigint>()
+  #acknowledgementTimer: ReturnType<typeof setTimeout> | undefined
   #rotationDue = false
 
   private constructor(options: InlineProtocolV3ConnectionOptions) {
@@ -340,6 +360,12 @@ export class InlineProtocolV3Connection {
       clearTimeout(this.#rotationTimer)
       this.#rotationTimer = undefined
     }
+    try {
+      // The server keeps unacknowledged results for resend until it hears otherwise.
+      if (this.#authorization && this.#carrier) this.#flushAcknowledgements()
+    } catch {
+      this.#takeAcknowledgements()
+    }
     const socket = this.#socket
     this.#socket = undefined
     const closed = new InlineProtocolV3Error("closed", "Inline Protocol connection closed")
@@ -366,7 +392,7 @@ export class InlineProtocolV3Connection {
     signal?: AbortSignal,
   ): Promise<RealtimeV3Response> {
     const payload = RealtimeV3Request.toBinary(request)
-    const result = await this.#sendContent(encodeInlineInvoke(payload), onDispatched, signal)
+    const result = await this.#sendContent(encodeInlineInvoke(payload, INLINE_REALTIME_LAYER_GZIP), onDispatched, signal)
     let application
     try {
       application = decodeInlineApplicationObject(result)
@@ -680,7 +706,7 @@ export class InlineProtocolV3Connection {
       if (signal?.aborted) onAbort()
       if (this.#pendingContent.get(initialMessageId) !== pending) return
       try {
-        this.#sendEncrypted(initialMessageId, sequenceNumber, body, true)
+        this.#sendContentRecord(initialMessageId, sequenceNumber, body)
         onDispatched?.()
       } catch (error) {
         this.#pendingContent.delete(initialMessageId)
@@ -708,8 +734,9 @@ export class InlineProtocolV3Connection {
 
   async #runReceiveLoop(): Promise<void> {
     for (;;) {
-      const fields = await this.#receiveEncrypted()
-      if (fields.sequenceNumber % 2 === 1) await this.#sendAcknowledgements([fields.messageId])
+      const record = await this.#receiveEncrypted()
+      if (record.sequenceNumber % 2 === 1) this.#queueAcknowledgement(record.messageId)
+      const fields = { ...record, body: unpackGzip(record.body) }
       const constructor = serviceConstructor(fields.body)
       if (constructor === ServiceConstructor.newSessionCreated) {
         this.#setServerSalt(readInt64LE(fields.body, 20))
@@ -731,7 +758,7 @@ export class InlineProtocolV3Connection {
         this.#releasePending(pending.body)
         clearTimeout(pending.timeout)
         pending.removeAbortListener?.()
-        pending.resolve({ messageId: result.requestMessageId, result: result.result })
+        pending.resolve({ messageId: result.requestMessageId, result: unpackGzip(result.result) })
         continue
       }
       if (constructor === ServiceConstructor.pong) {
@@ -848,9 +875,59 @@ export class InlineProtocolV3Connection {
     return fields
   }
 
-  async #sendAcknowledgements(messageIds: readonly bigint[]): Promise<void> {
-    const body = encodeMsgsAck(messageIds)
-    this.#sendEncrypted(this.#nextClientMessageId(), this.#sequenceNumbers.next(false), body, false)
+  #queueAcknowledgement(messageId: bigint): void {
+    this.#pendingAcknowledgements.add(messageId)
+    if (this.#pendingAcknowledgements.size >= ACK_FLUSH_PENDING) {
+      this.#flushAcknowledgements()
+      return
+    }
+    if (this.#acknowledgementTimer === undefined) {
+      this.#acknowledgementTimer = setTimeout(() => {
+        this.#acknowledgementTimer = undefined
+        try {
+          this.#flushAcknowledgements()
+        } catch {
+          // A closed carrier has nothing left to acknowledge to.
+        }
+      }, ACK_FLUSH_DELAY_MS)
+      this.#acknowledgementTimer.unref?.()
+    }
+  }
+
+  #takeAcknowledgements(): bigint[] {
+    if (this.#acknowledgementTimer !== undefined) clearTimeout(this.#acknowledgementTimer)
+    this.#acknowledgementTimer = undefined
+    const messageIds = [...this.#pendingAcknowledgements]
+    this.#pendingAcknowledgements.clear()
+    return messageIds
+  }
+
+  #flushAcknowledgements(): void {
+    const messageIds = this.#takeAcknowledgements()
+    if (messageIds.length === 0) return
+    this.#sendEncrypted(this.#nextClientMessageId(), this.#sequenceNumbers.next(false), encodeMsgsAck(messageIds), false)
+  }
+
+  /**
+   * Sends a content request, carrying pending acknowledgements in one container
+   * `[request, msgs_ack]` when it is an application invoke. Child IDs precede the
+   * container's, and the non-content seqnos follow the request's.
+   */
+  #sendContentRecord(messageId: bigint, sequenceNumber: number, body: Uint8Array): void {
+    const acknowledgements = serviceConstructor(body) === INLINE_INVOKE_CONSTRUCTOR
+      ? this.#takeAcknowledgements()
+      : []
+    if (acknowledgements.length === 0) {
+      this.#sendEncrypted(messageId, sequenceNumber, body, true)
+      return
+    }
+    const acknowledgementMessageId = this.#nextClientMessageId()
+    const nonContentSequenceNumber = this.#sequenceNumbers.next(false)
+    const container = encodeMessageContainer([
+      { messageId, sequenceNumber, body },
+      { messageId: acknowledgementMessageId, sequenceNumber: nonContentSequenceNumber, body: encodeMsgsAck(acknowledgements) },
+    ])
+    this.#sendEncrypted(this.#nextClientMessageId(), nonContentSequenceNumber, container, true)
   }
 
   #sendEncrypted(messageId: bigint, sequenceNumber: number, body: Uint8Array, quickAck: boolean): void {

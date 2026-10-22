@@ -30,7 +30,7 @@ type PartOutcome = { part: GetFilePartResult; error?: never } | { error: unknown
 export class NativeDownloadClient {
   constructor(
     private readonly rpc: NativeDownloadRpcTransport,
-    private readonly concurrency = 3,
+    private readonly concurrency = 4,
     private readonly partSize = MAX_DOWNLOAD_PART_SIZE,
   ) {
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 8 ||

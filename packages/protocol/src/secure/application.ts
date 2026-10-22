@@ -5,6 +5,11 @@ export const INLINE_RESULT_CONSTRUCTOR = 0xac3ddc54
 export const INLINE_UPDATE_CONSTRUCTOR = 0xdc412c98
 export const INLINE_INVOKE_CONSTRUCTOR = 0xeb7d4aa6
 export const INLINE_REALTIME_LAYER = 3
+/**
+ * Same request schema as layer 3. A client sending it decodes `gzip_packed`
+ * at top level and inside `rpc_result`, so the server may compress results.
+ */
+export const INLINE_REALTIME_LAYER_GZIP = 4
 
 export type InlineApplicationObject =
   | { kind: "invoke"; layer: number; payload: Uint8Array }

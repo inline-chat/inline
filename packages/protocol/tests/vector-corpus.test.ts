@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { gunzipSync } from "node:zlib"
 import {
   authKeyId,
   bytesToHex,
   createTemporaryKeyBindingProof,
+  decodeGzipPacked,
+  decodeRpcResult,
   decryptRecord,
   encodeInlineInvoke,
   encryptRecord,
@@ -14,7 +17,7 @@ interface VectorCorpus {
   formatVersion: number
   protocol: string
   applicationObjects: { rawProtobufPayloadHex: string; invokeHex: string; updateHex: string }
-  serviceObjects: { destroyAuthKeyHex: string }
+  serviceObjects: { destroyAuthKeyHex: string; gzipPackedRpcResultHex: string; gzipPackedInnerResultHex: string }
   bindingProofHex: string
   encryptedRecords: {
     clientToServer: typeof portableCoreV1Vector
@@ -33,7 +36,7 @@ describe("language-neutral conformance corpus", () => {
   test("is the frozen corpus consumed by the TypeScript implementation", async () => {
     const data = await Bun.file(new URL("../vectors/inline-protocol-v1.json", import.meta.url)).bytes()
     expect(new Bun.CryptoHasher("sha256").update(data).digest("hex")).toBe(
-      "eac2cd11a9e3431109e522472e4a784aec7f0ef307dcea60616c882a2acd79f1",
+      "35a3bccb6e11a934d83e2370e739204144c1d0b89653b7780b22fd124e20b816",
     )
     const corpus = JSON.parse(new TextDecoder().decode(data)) as VectorCorpus
     expect(corpus.formatVersion).toBe(1)
@@ -97,5 +100,10 @@ describe("language-neutral conformance corpus", () => {
       randomInt128: new Uint8Array(16).fill(0x11),
       randomPadding: new Uint8Array(8).fill(0x22),
     }))).toBe(corpus.bindingProofHex)
+
+    const packedResult = decodeRpcResult(hexToBytes(corpus.serviceObjects.gzipPackedRpcResultHex))
+    expect(packedResult.requestMessageId).toBe(24n)
+    expect(bytesToHex(decodeGzipPacked(packedResult.result, (packed, maximum) =>
+      Uint8Array.from(gunzipSync(packed, { maxOutputLength: maximum }))))).toBe(corpus.serviceObjects.gzipPackedInnerResultHex)
   })
 })

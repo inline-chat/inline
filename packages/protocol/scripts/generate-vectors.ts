@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises"
 import { constants, createPrivateKey, privateDecrypt } from "node:crypto"
+import { gzipSync } from "node:zlib"
 import {
   InlineHandshakeClient,
   InlineHandshakeServer,
@@ -21,9 +22,11 @@ import {
   encodeMessageContainer,
   encodeMsgsAck,
   encodeMsgsStateInfo,
+  encodeGzipPacked,
   encodePingDelayDisconnect,
   encodeRpcDropAnswer,
   encodeRpcDropAnswerResult,
+  encodeRpcResult,
   encodeReqDhParams,
   encodeReqPqMulti,
   encodeResPq,
@@ -169,6 +172,8 @@ const binding = createTemporaryKeyBindingProof({
   randomPadding: new Uint8Array(8).fill(0x22),
 })
 
+const gzipVectorPayload = Uint8Array.from({ length: 2_048 }, (_, index) => 0x41 + (index % 7))
+
 const corpus = {
   formatVersion: 1,
   protocol: "Inline Protocol v1",
@@ -254,6 +259,11 @@ const corpus = {
     msgNewDetailedInfoHex: bytesToHex(encodeDetailedMessageInfo({
       answerMessageId: 20n, bytes: 128, status: 0,
     })),
+    // A layer-4 client must accept an rpc_result whose result is gzip_packed.
+    gzipPackedRpcResultHex: bytesToHex(encodeRpcResult(24n, encodeGzipPacked(Uint8Array.from(
+      gzipSync(encodeInlineResult(gzipVectorPayload), { level: 9 }),
+    )))),
+    gzipPackedInnerResultHex: bytesToHex(encodeInlineResult(gzipVectorPayload)),
   },
 } as const
 

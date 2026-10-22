@@ -22,6 +22,7 @@ import {
 } from "./handshakeSchema.js"
 import {
   INLINE_REALTIME_LAYER,
+  INLINE_REALTIME_LAYER_GZIP,
   INLINE_INVOKE_CONSTRUCTOR,
   decodeInlineApplicationObject,
   encodeInlineResult,
@@ -62,6 +63,7 @@ import {
   encodeDestroyAuthKeyResult,
   encodeDestroySessionResult,
   encodeFutureSalts,
+  encodeGzipPacked,
   encodeMsgsAck,
   encodeMsgsStateInfo,
   encodePong,
@@ -80,6 +82,8 @@ const MAX_DEFERRED_INVOKE_AFTER_BYTES = 32 * 1024 * 1024
 const MAX_IN_FLIGHT_APPLICATIONS = 64
 const MAX_INVOKE_AFTER_NESTING = 16
 const DEFAULT_APPLICATION_TIMEOUT_MS = 30_000
+/** Results at least this large may be compressed for a layer-4 client. */
+const MIN_COMPRESSED_RESULT_BYTES = 1024
 
 /** The account authorization behind an otherwise valid encrypted session is no longer active. */
 export class InlineProtocolAuthorizationInvalidated extends Error {
@@ -261,6 +265,13 @@ export interface InlineProtocolServerSessionOptions {
    * window re-executes; return it only for idempotent or read-only requests.
    */
   replayPolicy?: (payload: Uint8Array) => "durable" | "session"
+  /** Compresses a result object; enables `gzip_packed` results for layer-4 invokes. */
+  gzip?: (data: Uint8Array) => Uint8Array
+  /**
+   * Whether this request's result may be compressed; consulted only for large
+   * layer-4 results. Transfer bodies are incompressible and must return false.
+   */
+  compressResult?: (payload: Uint8Array) => boolean
 }
 
 type ReplayTier = "durable" | "session"
@@ -977,7 +988,8 @@ export class InlineProtocolServerSession {
       throw new RangeError("Authorization-key state does not permit application dispatch")
     }
     const application = decodeInlineApplicationObject(message.body)
-    if (application.kind !== "invoke" || application.layer !== INLINE_REALTIME_LAYER) {
+    if (application.kind !== "invoke" ||
+        (application.layer !== INLINE_REALTIME_LAYER && application.layer !== INLINE_REALTIME_LAYER_GZIP)) {
       throw new RangeError("Invalid Inline application request")
     }
     const replayTier: ReplayTier = this.options.replayPolicy?.(application.payload) ?? "durable"
@@ -1092,6 +1104,8 @@ export class InlineProtocolServerSession {
                 sessionId,
                 messageId: message.messageId,
                 replayTier,
+                layer: application.layer,
+                applicationPayload: application.payload,
                 completionMessageIds,
                 dispatched,
                 updates,
@@ -1223,6 +1237,8 @@ export class InlineProtocolServerSession {
     sessionId: bigint
     messageId: bigint
     replayTier: ReplayTier
+    layer: number
+    applicationPayload: Uint8Array
     completionMessageIds: readonly bigint[]
     dispatched: Awaited<ReturnType<ServerApplicationDispatcher["dispatch"]>>
     updates: Uint8Array[]
@@ -1234,10 +1250,12 @@ export class InlineProtocolServerSession {
       const resultObject = input.dispatched.kind === "result"
         ? encodeInlineResult(input.dispatched.payload)
         : encodeRpcError(input.dispatched.code, input.dispatched.message)
-      const resultBody = encodeRpcResult(input.messageId, resultObject)
+      const uncompressedResultBody = encodeRpcResult(input.messageId, resultObject)
+      // Replay keeps the uncompressed body; every client accepts it.
       const replayResultBody = input.dispatched.kind === "result" && input.dispatched.replayPayload
         ? encodeRpcResult(input.messageId, encodeInlineResult(input.dispatched.replayPayload))
-        : resultBody
+        : uncompressedResultBody
+      const resultBody = this.#maybeCompressedResult(input, resultObject) ?? uncompressedResultBody
       const completion = input.replayTier === "session"
         ? { kind: "completed" as const }
         : await this.options.replay.complete({
@@ -1365,6 +1383,17 @@ export class InlineProtocolServerSession {
     if (this.#receivedIds.has(message.messageId)) return allowDuplicate ? undefined : 20
     if (!this.#receivedIds.claim(message.messageId)) return 20
     return this.#receivedSequences.validate(message.messageId, message.sequenceNumber, contentRelated)
+  }
+
+  #maybeCompressedResult(
+    input: { messageId: bigint; layer: number; applicationPayload: Uint8Array },
+    resultObject: Uint8Array,
+  ): Uint8Array | undefined {
+    if (input.layer !== INLINE_REALTIME_LAYER_GZIP || !this.options.gzip ||
+        resultObject.length < MIN_COMPRESSED_RESULT_BYTES ||
+        !this.options.compressResult?.(input.applicationPayload)) return undefined
+    const packed = encodeGzipPacked(this.options.gzip(resultObject))
+    return packed.length < resultObject.length * 0.9 ? encodeRpcResult(input.messageId, packed) : undefined
   }
 
   #rememberSessionTier(messageId: bigint): void {
