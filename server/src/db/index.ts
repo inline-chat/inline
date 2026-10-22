@@ -7,6 +7,7 @@ import * as schema from "./schema"
 import { relations } from "./relations"
 import { startDatabaseDiagnostics } from "./databaseDiagnostics"
 import { Log, LogLevel } from "@in/server/utils/log"
+import { recordSqlStatement } from "@in/server/modules/transfers/trace"
 
 const diagnosticsLog = new Log("db.diagnostics", LogLevel.INFO)
 let stopDiagnostics: (() => void) | undefined
@@ -16,9 +17,14 @@ let clients = makeDatabaseClients(DATABASE_URL, process.env)
 // still catches a restored older database within about a minute.
 let migrationHead = cachedHealthProbe(() => checkMigrationHead(clients.healthClient))
 
+// Counts each issued query into the transfer trace scopes of its async context;
+// outside a scope this is one AsyncLocalStorage lookup.
+const statementCounter = { logQuery: () => { recordSqlStatement() } }
+
 const createDatabase = (queryClient: typeof clients.queryClient) => installPostCommitHooks(drizzle(queryClient, {
   relations,
   schema,
+  logger: statementCounter,
 }))
 
 export let db = createDatabase(clients.queryClient)

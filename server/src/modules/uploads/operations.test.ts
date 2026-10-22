@@ -17,6 +17,9 @@ import type { HandlerContext } from "@in/server/realtime/types"
 import type { MediaUploadFinalizer } from "./finalizer"
 import { MEDIA_UPLOAD_MAX_BYTES } from "@in/server/modules/files/metadata"
 import { NativeUploadOperations } from "./operations"
+import { countTransferWork } from "@in/server/modules/transfers/trace"
+import { INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
+import { sql } from "drizzle-orm"
 import type { UploadPartStore } from "./partStore"
 
 setDefaultTimeout(60_000)
@@ -124,10 +127,10 @@ describe("native upload operations", () => {
 
   test("reconciles an accepted part after a lost manifest commit response", async () => {
     class Repository extends InlineUploadRepository {
-      override async acceptPart(
-        input: Parameters<InlineUploadRepository["acceptPart"]>[0],
-      ): ReturnType<InlineUploadRepository["acceptPart"]> {
-        await super.acceptPart(input)
+      override async acceptPartFast(
+        input: Parameters<InlineUploadRepository["acceptPartFast"]>[0],
+      ): ReturnType<InlineUploadRepository["acceptPartFast"]> {
+        await super.acceptPartFast(input)
         throw new Error("commit response lost")
       }
     }
@@ -152,9 +155,9 @@ describe("native upload operations", () => {
   test("retains an unmanifested object on DB failure so an identical save can safely retry", async () => {
     class Repository extends InlineUploadRepository {
       failAcceptance = true
-      override async acceptPart(input: Parameters<InlineUploadRepository["acceptPart"]>[0]) {
+      override async acceptPartFast(input: Parameters<InlineUploadRepository["acceptPartFast"]>[0]) {
         if (this.failAcceptance) throw new Error("database unavailable")
-        return super.acceptPart(input)
+        return super.acceptPartFast(input)
       }
     }
     const user = await testUtils.createUser("native-upload-accept-unavailable@example.com")
@@ -326,11 +329,12 @@ describe("native upload operations", () => {
       .toMatchObject({ status: UploadStatus.UPLOADING, acceptedParts: [0] })
 
     expect(await operations.finish({ uploadId: create.uploadId }, requestContext))
-      .toEqual({ state: { oneofKind: "processing", processing: { retryAfterSeconds: 2 } } })
+      .toEqual({ state: { oneofKind: "processing", processing: { retryAfterSeconds: 1 } } })
     expect(store.objects.size).toBe(1)
-    expect(wakes.length).toBeGreaterThanOrEqual(2)
+    // A one-part upload completes no full storage group; only finish wakes the worker.
+    expect(wakes).toHaveLength(1)
     expect(await operations.finish({ uploadId: create.uploadId }, requestContext))
-      .toEqual({ state: { oneofKind: "processing", processing: { retryAfterSeconds: 2 } } })
+      .toEqual({ state: { oneofKind: "processing", processing: { retryAfterSeconds: 1 } } })
   })
 
   test("does not turn a lost in-process wake into a lost part ACK or finish intent", async () => {
@@ -397,7 +401,7 @@ describe("native upload operations", () => {
       .toEqual({
         state: {
           oneofKind: "processing",
-          processing: { retryAfterSeconds: 2 },
+          processing: { retryAfterSeconds: 1 },
         },
       })
   })
@@ -625,5 +629,149 @@ describe("native upload operations", () => {
     const rejected = outcomes.filter(({ status }) => status === "rejected")
     expect(rejected).toHaveLength(1)
     expect(rejected[0]).toMatchObject({ reason: { code: RpcError_Code.RATE_LIMIT } })
+  })
+
+  test("accepts a new part with one statement and resolves duplicates and conflicts from the manifest", async () => {
+    const user = await testUtils.createUser("native-upload-one-statement@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = new NativeUploadOperations(new InlineUploadRepository(), store, finalizer)
+    const requestContext = context(user.id, account.session.id)
+    const first = new Uint8Array(INLINE_TRANSFER_PART_SIZE).fill(1)
+    const second = new Uint8Array(3).fill(2)
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(101), fileName: "one-statement.bin",
+      mimeType: "application/octet-stream", byteCount: BigInt(first.length + second.length),
+      sha256: createHash("sha256").update(first).update(second).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+
+    const accepted = await countTransferWork(() => operations.savePart({
+      uploadId: created.uploadId, partIndex: 0, data: first,
+    }, requestContext))
+    expect(accepted.value).toEqual({ alreadyPresent: false })
+    expect(accepted.counters.sqlStatements).toBe(1)
+
+    const duplicate = await countTransferWork(() => operations.savePart({
+      uploadId: created.uploadId, partIndex: 0, data: first,
+    }, requestContext))
+    expect(duplicate.value).toEqual({ alreadyPresent: true })
+    // The statement inserts nothing; one manifest read classifies the duplicate.
+    expect(duplicate.counters.sqlStatements).toBe(2)
+    expect((await operations.state({ uploadId: created.uploadId }, requestContext)).acceptedParts).toEqual([0])
+    expect(store.objects.size).toBe(1)
+
+    await expect(operations.savePart({
+      uploadId: created.uploadId, partIndex: 0, data: new Uint8Array(INLINE_TRANSFER_PART_SIZE).fill(9),
+    }, requestContext)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    await expect(operations.savePart({
+      uploadId: created.uploadId, partIndex: 1, data: new Uint8Array(4),
+    }, requestContext)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+
+    // A cold cache costs one geometry statement before the accept.
+    const cold = new NativeUploadOperations(new InlineUploadRepository(), store, finalizer)
+    const coldAccept = await countTransferWork(() => cold.savePart({
+      uploadId: created.uploadId, partIndex: 1, data: second,
+    }, requestContext))
+    expect(coldAccept.value).toEqual({ alreadyPresent: false })
+    expect(coldAccept.counters.sqlStatements).toBe(2)
+    await expect(cold.savePart({
+      uploadId: created.uploadId, partIndex: 1, data: second,
+    }, context(user.id + 1_000_000, account.session.id))).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+  })
+
+  test("a resent part after finish keeps the durable staging object", async () => {
+    const user = await testUtils.createUser("native-upload-resend-after-finish@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const store = new MemoryPartStore()
+    const operations = new NativeUploadOperations(new InlineUploadRepository(), store, finalizer)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([7, 7, 7])
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(102), fileName: "resend.bin",
+      mimeType: "application/octet-stream", byteCount: 3n,
+      sha256: createHash("sha256").update(body).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext)
+    const stale = new NativeUploadOperations(new InlineUploadRepository(), store, finalizer)
+    await stale.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext)
+    expect((await operations.finish({ uploadId: created.uploadId }, requestContext)).state.oneofKind).toBe("processing")
+    // The stale process still caches uploading geometry; its resend is terminal.
+    await expect(stale.savePart({ uploadId: created.uploadId, partIndex: 0, data: body }, requestContext))
+      .rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
+    expect(store.objects.size).toBe(1)
+  })
+
+  test("concurrent parts of one upload do not wait on each other", async () => {
+    const user = await testUtils.createUser("native-upload-no-row-lock@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const repository = new InlineUploadRepository()
+    const operations = new NativeUploadOperations(repository, new MemoryPartStore(), finalizer)
+    const requestContext = context(user.id, account.session.id)
+    const part = new Uint8Array(INLINE_TRANSFER_PART_SIZE).fill(4)
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(103), fileName: "parallel.bin",
+      mimeType: "application/octet-stream", byteCount: BigInt(part.length * 3),
+      sha256: createHash("sha256").update(part).update(part).update(part).digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    await operations.savePart({ uploadId: created.uploadId, partIndex: 0, data: part }, requestContext)
+    const [row] = await db.select({ id: inlineUploads.id }).from(inlineUploads)
+      .where(eq(inlineUploads.uploadId, Buffer.from(created.uploadId))).limit(1)
+
+    // Hold an uncommitted accept of part 1, as a concurrent save in flight would.
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    let holding!: () => void
+    const isHolding = new Promise<void>((resolve) => { holding = resolve })
+    const open = db.transaction(async (tx) => {
+      await tx.execute(sql`insert into inline_upload_parts
+        (upload_id, part_index, byte_count, sha256, stored_byte_count, stored_sha256, object_key)
+        values (${row!.id}, 1, ${part.length}, ${createHash("sha256").update(part).digest()},
+          ${part.length}, ${createHash("sha256").update(part).digest()}, 'held-part')`)
+      holding()
+      await held
+    })
+    await isHolding
+    const concurrent = operations.savePart({ uploadId: created.uploadId, partIndex: 2, data: part }, requestContext)
+    const outcome = await Promise.race([
+      concurrent.then(() => "accepted" as const),
+      Bun.sleep(5_000).then(() => "blocked" as const),
+    ])
+    release()
+    await open
+    await concurrent
+    expect(outcome).toBe("accepted")
+    expect((await operations.state({ uploadId: created.uploadId }, requestContext)).acceptedParts).toEqual([0, 1, 2])
+  })
+
+  test("wakes the worker once per completed ten-frame group and never for the tail", async () => {
+    const user = await testUtils.createUser("native-upload-group-wakes@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const wakes: Array<[number, number | undefined]> = []
+    const operations = new NativeUploadOperations(
+      new InlineUploadRepository(), new MemoryPartStore(), finalizer,
+      (uploadDbId, groupNumber) => { wakes.push([uploadDbId, groupNumber]) },
+    )
+    const requestContext = context(user.id, account.session.id)
+    const partCount = 25
+    const part = new Uint8Array(INLINE_TRANSFER_PART_SIZE).fill(6)
+    const digest = createHash("sha256")
+    for (let index = 0; index < partCount; index += 1) digest.update(part)
+    const created = await operations.create({
+      clientUploadId: new Uint8Array(16).fill(104), fileName: "groups.bin",
+      mimeType: "application/octet-stream", byteCount: BigInt(part.length * partCount),
+      sha256: digest.digest(), kind: UploadKind.DOCUMENT,
+      metadata: { oneofKind: undefined },
+    }, requestContext)
+    const order = Array.from({ length: partCount }, (_, index) => (index * 7) % partCount)
+    for (const partIndex of order) {
+      await operations.savePart({ uploadId: created.uploadId, partIndex, data: part }, requestContext)
+    }
+    await operations.savePart({ uploadId: created.uploadId, partIndex: 3, data: part }, requestContext)
+    const uploadDbId = wakes[0]?.[0]
+    expect(wakes.map(([, group]) => group).sort()).toEqual([1, 2])
+    expect(wakes.every(([id]) => id === uploadDbId)).toBeTrue()
   })
 })

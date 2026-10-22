@@ -247,15 +247,17 @@ describe("native upload repository", () => {
       .toEqual({ kind: "missing", partIndices: [0, 1] })
 
     const second = bytes.subarray(INLINE_UPLOAD_PART_SIZE)
-    expect(await repository.acceptPart({
-      upload: created.upload,
+    expect(await repository.acceptPartFast({
+      uploadId: created.upload.uploadId, owner, uploadDbId: created.upload.id,
       partIndex: 1,
       ...partIntegrity(second),
       objectKey: "part-1",
     })).toEqual({ kind: "accepted", durableObjectKey: "part-1" })
     expect((await repository.get(created.upload.uploadId, owner))?.acceptedParts).toEqual([1])
-    const partTarget = await repository.getPartTarget(created.upload.uploadId, owner)
+    const partTarget = await repository.getPartGeometry(created.upload.uploadId, owner)
+    expect(partTarget?.acceptedParts).toEqual([1])
     expect(Object.keys(partTarget ?? {}).sort()).toEqual([
+      "acceptedParts",
       "byteCount",
       "expired",
       "expiresAt",
@@ -269,14 +271,14 @@ describe("native upload repository", () => {
     expect(partTarget?.expired).toBe(false)
 
     const first = bytes.subarray(0, INLINE_UPLOAD_PART_SIZE)
-    expect(await repository.acceptPart({
-      upload: created.upload,
+    expect(await repository.acceptPartFast({
+      uploadId: created.upload.uploadId, owner, uploadDbId: created.upload.id,
       partIndex: 0,
       ...partIntegrity(first),
       objectKey: "part-0",
     })).toEqual({ kind: "accepted", durableObjectKey: "part-0" })
-    expect(await repository.acceptPart({
-      upload: created.upload,
+    expect(await repository.acceptPartFast({
+      uploadId: created.upload.uploadId, owner, uploadDbId: created.upload.id,
       partIndex: 0,
       ...partIntegrity(first),
       objectKey: "ignored-duplicate-key",
@@ -414,8 +416,8 @@ describe("native upload repository", () => {
         sha256: createHash("sha256").update(bytes).digest(),
         kind,
       })
-      await repository.acceptPart({
-        upload: created.upload,
+      await repository.acceptPartFast({
+        uploadId: created.upload.uploadId, owner, uploadDbId: created.upload.id,
         partIndex: 0,
         ...partIntegrity(bytes),
         objectKey: `${kind}-part`,
@@ -508,8 +510,8 @@ describe("native upload repository", () => {
       sha256: createHash("sha256").update(bytes).digest(),
       kind: "document",
     })
-    await repository.acceptPart({
-      upload: created.upload,
+    await repository.acceptPartFast({
+      uploadId: created.upload.uploadId, owner, uploadDbId: created.upload.id,
       partIndex: 0,
       ...partIntegrity(bytes),
       objectKey: "fenced-part",
@@ -560,7 +562,7 @@ describe("native upload repository", () => {
       byteCount: BigInt(body.length), sha256: createHash("sha256").update(body).digest(), kind: "document" as const,
     }
     const { upload } = await repository.create(owner, metadata)
-    await repository.acceptPart({ upload, partIndex: 0, ...partIntegrity(body), objectKey: "processing-cancel" })
+    await repository.acceptPartFast({ uploadId: upload.uploadId, owner, uploadDbId: upload.id, partIndex: 0, ...partIntegrity(body), objectKey: "processing-cancel" })
     await repository.requestFinish(upload.uploadId, owner)
     const claim = await repository.claimProcessing(upload.id)
     if (!claim) throw new Error("Expected processing claim")

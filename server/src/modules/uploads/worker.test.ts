@@ -390,7 +390,7 @@ describe("native upload multipart worker", () => {
       repository,
       staging,
       finalizer,
-      (uploadDbId) => worker.wake(uploadDbId),
+      (uploadDbId, groupNumber) => worker.wake(uploadDbId, groupNumber),
     )
     worker.start()
     const created = await saveBody(operations, requestContext, body, 79)

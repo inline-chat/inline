@@ -513,36 +513,6 @@ export class InlineUploadRepository {
     }
   }
 
-  async getPartTarget(
-    uploadId: Uint8Array,
-    owner: InlineUploadOwner,
-  ): Promise<InlineUploadPartTarget | undefined> {
-    if (uploadId.length !== 16) return undefined
-    const result = (await db.select({
-      id: inlineUploads.id,
-      byteCount: inlineUploads.byteCount,
-      partSize: inlineUploads.partSize,
-      partCount: inlineUploads.partCount,
-      status: inlineUploads.status,
-      expiresAt: inlineUploads.expiresAt,
-      hardExpiresAt: inlineUploads.hardExpiresAt,
-      storageFormat: inlineUploads.storageFormat,
-      databaseNow: sql<Date>`CURRENT_TIMESTAMP`,
-    }).from(inlineUploads).where(and(
-      eq(inlineUploads.uploadId, Buffer.from(uploadId)),
-      eq(inlineUploads.userId, owner.userId),
-      eq(inlineUploads.accountSessionId, owner.accountSessionId),
-      ownerKeyMatches(owner),
-    )).limit(1))[0]
-    if (!result) return undefined
-    const { databaseNow, ...upload } = result
-    const now = databaseTimestamp(databaseNow)
-    return {
-      ...upload,
-      expired: upload.expiresAt <= now || upload.hardExpiresAt <= now,
-    }
-  }
-
   async getPart(uploadDbId: number, partIndex: number): Promise<InlineUploadPartRecord | undefined> {
     const row = (await db.select().from(inlineUploadParts).where(and(
       eq(inlineUploadParts.uploadDbId, uploadDbId),
@@ -563,8 +533,53 @@ export class InlineUploadRepository {
     return row?.mediaId ?? undefined
   }
 
-  async acceptPart(input: {
-    upload: Pick<InlineUploadRecord, "id">
+  /** Immutable upload geometry plus accepted part indices, in one statement. */
+  async getPartGeometry(
+    uploadId: Uint8Array,
+    owner: InlineUploadOwner,
+  ): Promise<(InlineUploadPartTarget & { acceptedParts: number[] }) | undefined> {
+    if (uploadId.length !== 16) return undefined
+    const result = (await db.select({
+      id: inlineUploads.id,
+      byteCount: inlineUploads.byteCount,
+      partSize: inlineUploads.partSize,
+      partCount: inlineUploads.partCount,
+      status: inlineUploads.status,
+      expiresAt: inlineUploads.expiresAt,
+      hardExpiresAt: inlineUploads.hardExpiresAt,
+      storageFormat: inlineUploads.storageFormat,
+      databaseNow: sql<Date>`CURRENT_TIMESTAMP`,
+      acceptedParts: sql<number[]>`coalesce((
+        select array_agg(p.part_index order by p.part_index)
+        from inline_upload_parts p where p.upload_id = ${inlineUploads.id}
+      ), '{}'::integer[])`,
+    }).from(inlineUploads).where(and(
+      eq(inlineUploads.uploadId, Buffer.from(uploadId)),
+      eq(inlineUploads.userId, owner.userId),
+      eq(inlineUploads.accountSessionId, owner.accountSessionId),
+      ownerKeyMatches(owner),
+    )).limit(1))[0]
+    if (!result) return undefined
+    const { databaseNow, acceptedParts, ...upload } = result
+    const now = databaseTimestamp(databaseNow)
+    return {
+      ...upload,
+      acceptedParts: acceptedParts.map(Number),
+      expired: upload.expiresAt <= now || upload.hardExpiresAt <= now,
+    }
+  }
+
+  /**
+   * Accepts one part in a single statement without locking the upload row. The
+   * primary key `(upload_id, part_index)` arbitrates concurrent saves, and the
+   * idle-expiry bump runs at most once an hour per upload to bound row churn.
+   * Returns `terminal` when no live upload matches the owner, `accepted` when
+   * this call inserted the part, and otherwise the existing manifest outcome.
+   */
+  async acceptPartFast(input: {
+    uploadId: Uint8Array
+    owner: InlineUploadOwner
+    uploadDbId: number
     partIndex: number
     byteCount: number
     sha256: Uint8Array
@@ -572,51 +587,49 @@ export class InlineUploadRepository {
     storedSha256: Uint8Array
     objectKey: string
   }): Promise<InlineUploadPartAcceptance> {
-    return db.transaction(async (tx) => {
-      const [clock] = await tx.execute<{ now: string | Date }>(sql`
-        select CURRENT_TIMESTAMP as now
-      `)
-      const now = databaseTimestamp(clock?.now)
-      const [locked] = await tx.select().from(inlineUploads)
-        .where(eq(inlineUploads.id, input.upload.id)).for("update").limit(1)
-      const existing = locked
-        ? (await tx.select().from(inlineUploadParts).where(and(
-          eq(inlineUploadParts.uploadDbId, locked.id),
-          eq(inlineUploadParts.partIndex, input.partIndex),
-        )).limit(1))[0]
-        : undefined
-      if (!locked || locked.status !== "uploading" || locked.expiresAt <= now ||
-          locked.hardExpiresAt <= now) {
-        return { kind: "terminal", durableObjectKey: existing?.objectKey }
-      }
-      const [inserted] = await tx.insert(inlineUploadParts).values({
-        uploadDbId: locked.id,
-        partIndex: input.partIndex,
-        byteCount: input.byteCount,
-        sha256: Buffer.from(input.sha256),
-        storedByteCount: input.storedByteCount,
-        storedSha256: Buffer.from(input.storedSha256),
-        objectKey: input.objectKey,
-      }).onConflictDoNothing({
-        target: [inlineUploadParts.uploadDbId, inlineUploadParts.partIndex],
-      }).returning({ partIndex: inlineUploadParts.partIndex })
-      if (!inserted) {
-        if (!existing || existing.byteCount !== input.byteCount ||
-            !sameBytes(existing.sha256, input.sha256) ||
-            (existing.storedByteCount ?? existing.byteCount) !== input.storedByteCount ||
-            !sameBytes(existing.storedSha256 ?? existing.sha256, input.storedSha256)) {
-          return { kind: "conflict", durableObjectKey: existing?.objectKey }
-        }
-        return { kind: "already-present", durableObjectKey: existing.objectKey }
-      }
-      const nextExpiry = new Date(Math.min(
-        locked.hardExpiresAt.getTime(),
-        now.getTime() + INLINE_UPLOAD_IDLE_TTL_MS,
-      ))
-      await tx.update(inlineUploads).set({ lastPartAt: now, expiresAt: nextExpiry })
-        .where(eq(inlineUploads.id, locked.id))
-      return { kind: "accepted", durableObjectKey: input.objectKey }
-    })
+    const permanentAuthKeyId = input.owner.permanentAuthKeyId ? Buffer.from(input.owner.permanentAuthKeyId) : null
+    const [row] = await db.execute<{ targeted: string | number; inserted: string | number }>(sql`
+      with target as (
+        select id from inline_uploads
+        where upload_id = ${Buffer.from(input.uploadId)}
+          and user_id = ${input.owner.userId}
+          and account_session_id = ${input.owner.accountSessionId}
+          and permanent_auth_key_id is not distinct from ${permanentAuthKeyId}::bytea
+          and status = 'uploading' and expires_at > now() and hard_expires_at > now()
+      ),
+      inserted as (
+        insert into inline_upload_parts
+          (upload_id, part_index, byte_count, sha256, stored_byte_count, stored_sha256, object_key)
+        select id, ${input.partIndex}, ${input.byteCount}, ${Buffer.from(input.sha256)},
+          ${input.storedByteCount}, ${Buffer.from(input.storedSha256)}, ${input.objectKey}
+        from target
+        on conflict (upload_id, part_index) do nothing
+        returning upload_id
+      ),
+      bumped as (
+        update inline_uploads u
+        set last_part_at = now(),
+            expires_at = least(u.hard_expires_at, now() + interval '24 hours')
+        from inserted
+        where u.id = inserted.upload_id
+          and (u.last_part_at is null or u.last_part_at < now() - interval '1 hour')
+        returning u.id
+      )
+      select (select count(*) from target) as targeted, (select count(*) from inserted) as inserted
+    `)
+    if (Number(row?.targeted ?? 0) === 0) {
+      // Staging keys are content-addressed, so a resend after finish wrote the
+      // same key a durable part may own. Report that owner so it is not removed.
+      const existing = await this.getPart(input.uploadDbId, input.partIndex)
+      return { kind: "terminal", durableObjectKey: existing?.objectKey }
+    }
+    if (Number(row?.inserted ?? 0) === 1) return { kind: "accepted", durableObjectKey: input.objectKey }
+    const existing = await this.getPart(input.uploadDbId, input.partIndex)
+    if (!existing || existing.byteCount !== input.byteCount || !sameBytes(existing.sha256, input.sha256) ||
+        existing.storedByteCount !== input.storedByteCount || !sameBytes(existing.storedSha256, input.storedSha256)) {
+      return { kind: "conflict", durableObjectKey: existing?.objectKey }
+    }
+    return { kind: "already-present", durableObjectKey: existing.objectKey }
   }
 
   async requestFinish(uploadId: Uint8Array, owner: InlineUploadOwner): Promise<

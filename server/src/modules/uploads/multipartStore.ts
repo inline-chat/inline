@@ -1,3 +1,4 @@
+import { recordStorageOperation } from "@in/server/modules/transfers/trace"
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
@@ -197,6 +198,7 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
   }
 
   async create(key: string, contentType: string, signal?: AbortSignal): Promise<string> {
+    recordStorageOperation("put")
     try {
       const { bucket, client } = this.#requireConfiguration()
       const result = await client.send(new CreateMultipartUploadCommand({
@@ -219,6 +221,7 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
     bytes: Uint8Array
     signal?: AbortSignal
   }): Promise<MultipartUploadedPart> {
+    recordStorageOperation("put")
     const md5 = createHash("md5").update(input.bytes).digest()
     try {
       const { bucket, client } = this.#requireConfiguration()
@@ -247,6 +250,7 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
     parts: MultipartUploadedPart[]
     signal?: AbortSignal
   }): Promise<{ etag: string }> {
+    recordStorageOperation("put")
     try {
       const { bucket, client } = this.#requireConfiguration()
       const result = await client.send(new CompleteMultipartUploadCommand({
@@ -273,6 +277,7 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
   }
 
   async abort(key: string, uploadId: string, signal?: AbortSignal): Promise<void> {
+    recordStorageOperation("delete")
     try {
       const { bucket, client } = this.#requireConfiguration()
       await client.send(new AbortMultipartUploadCommand({
@@ -287,6 +292,7 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
   }
 
   async head(key: string, signal?: AbortSignal): Promise<MultipartObjectHead | undefined> {
+    recordStorageOperation("get")
     try {
       const { bucket, client } = this.#requireConfiguration()
       const result = await client.send(new HeadObjectCommand({
@@ -303,6 +309,7 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
   }
 
   async stream(key: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+    recordStorageOperation("get")
     try {
       const { bucket, client } = this.#requireConfiguration()
       const streamSignal = storageDeadlineSignal(signal, this.#streamTimeoutMs)
@@ -322,6 +329,7 @@ export class R2MultipartObjectStore implements MultipartObjectStore {
   }
 
   async remove(key: string, signal?: AbortSignal): Promise<void> {
+    recordStorageOperation("delete")
     try {
       const { bucket, client } = this.#requireConfiguration()
       await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }), {

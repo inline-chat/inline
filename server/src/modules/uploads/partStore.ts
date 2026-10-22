@@ -3,6 +3,7 @@ import { createHash } from "node:crypto"
 import { getR2 } from "@in/server/libs/r2"
 import { readFileBytes, FileByteLengthError } from "@in/server/modules/files/readFileBytes"
 import { INLINE_TRANSFER_PART_SIZE } from "@inline-chat/protocol/transfers"
+import { recordStorageOperation } from "@in/server/modules/transfers/trace"
 import {
   createR2S3Configuration,
   storageDeadlineSignal,
@@ -113,6 +114,7 @@ export class R2UploadPartStore implements UploadPartStore {
     data: Uint8Array
   }, signal?: AbortSignal): Promise<string> {
     const key = objectKey(input)
+    recordStorageOperation("put")
     try {
       const written = await this.#writePart(
         key,
@@ -134,6 +136,7 @@ export class R2UploadPartStore implements UploadPartStore {
     if (!Number.isInteger(byteCount) || byteCount < 1 || byteCount > MAX_STORED_FRAME_BYTES) {
       throw new UploadPartStorageUnavailableError()
     }
+    recordStorageOperation("get")
     try {
       const deadline = AbortSignal.timeout(this.#readTimeoutMs)
       const readSignal = signal ? AbortSignal.any([signal, deadline]) : deadline
@@ -146,6 +149,7 @@ export class R2UploadPartStore implements UploadPartStore {
   }
 
   async remove(key: string, signal?: AbortSignal): Promise<void> {
+    recordStorageOperation("delete")
     try {
       await this.#removePart(key, storageDeadlineSignal(signal, this.#operationTimeoutMs))
     } catch (cause) {

@@ -28,6 +28,9 @@ import {
 } from "./multipartStore"
 import { UploadPartStorageUnavailableError, type UploadPartStore } from "./partStore"
 import { storageCodecFor } from "./storageCodec"
+import { transferTraces, withTransferCounters } from "@in/server/modules/transfers/trace"
+
+export const uploadTraceKey = (uploadDbId: number): string => `upload:${uploadDbId}`
 
 const log = new Log("modules/uploads/worker")
 export const STORAGE_FRAMES_PER_PART = 10
@@ -139,7 +142,8 @@ export class NativeUploadWorker {
   readonly #shutdownDrainTimeoutMs: number
   readonly #random: () => number
   readonly #backoff: IdleBackoff
-  readonly #queued = new Set<number>()
+  /** Queued uploads; a group set means only those complete storage groups, `full` a whole pass. */
+  readonly #queued = new Map<number, Set<number> | "full">()
   readonly #activeUploads = new Set<number>()
   readonly #claimControllers = new Map<number, AbortController>()
   readonly #tasks = new Set<Promise<void>>()
@@ -232,9 +236,21 @@ export class NativeUploadWorker {
     return trackedStop
   }
 
-  wake(uploadDbId: number): void {
+  /**
+   * Queues work for an upload. With `groupNumber` (a 1-based storage part
+   * number), only that complete ten-frame group is compacted; without it the
+   * upload gets a full pass (finish, cross-process resume).
+   */
+  wake(uploadDbId: number, groupNumber?: number): void {
     if (!Number.isSafeInteger(uploadDbId) || uploadDbId < 1) return
-    this.#queued.add(uploadDbId)
+    const queued = this.#queued.get(uploadDbId)
+    if (groupNumber === undefined || !Number.isSafeInteger(groupNumber) || groupNumber < 1) {
+      this.#queued.set(uploadDbId, "full")
+    } else if (queued === undefined) {
+      this.#queued.set(uploadDbId, new Set([groupNumber]))
+    } else if (queued !== "full") {
+      queued.add(groupNumber)
+    }
     this.#backoff.reset()
     if (this.#started) this.#pump()
   }
@@ -251,16 +267,23 @@ export class NativeUploadWorker {
 
   #pump(): void {
     while (this.#started && this.#active < this.#concurrency) {
-      const uploadDbId = Array.from(this.#queued).find((id) => !this.#activeUploads.has(id))
+      const uploadDbId = Array.from(this.#queued.keys()).find((id) => !this.#activeUploads.has(id))
       if (uploadDbId === undefined) break
+      const queued = this.#queued.get(uploadDbId)!
       this.#queued.delete(uploadDbId)
-      this.#track(uploadDbId, this.#runUpload(uploadDbId))
+      this.#track(uploadDbId, queued === "full"
+        ? () => this.#runUpload(uploadDbId)
+        : () => this.#runGroups(uploadDbId, [...queued]))
     }
   }
 
-  #track(uploadDbId: number, task: Promise<void>): void {
+  #track(uploadDbId: number, run: () => Promise<void>): void {
     this.#active += 1
     this.#activeUploads.add(uploadDbId)
+    // Worker statements and storage operations count toward this process's
+    // open trace for the upload, when it received the parts.
+    const trace = transferTraces.get(uploadTraceKey(uploadDbId))
+    const task = trace ? withTransferCounters(trace.counters, run) : run()
     const observed = task.catch((error) => {
       if (!this.#abort.signal.aborted) log.error("Native upload worker task failed", { error })
     }).finally(() => {
@@ -347,7 +370,7 @@ export class NativeUploadWorker {
             uploadDbId: claim.upload.id,
             lockToken: claim.lockToken,
           })
-          this.#queued.add(claim.upload.id)
+          this.#queued.set(claim.upload.id, "full")
           break
         }
         if (!this.#started) {
@@ -357,7 +380,7 @@ export class NativeUploadWorker {
           })
           break
         }
-        this.#track(claim.upload.id, this.#processClaim(claim))
+        this.#track(claim.upload.id, () => this.#processClaim(claim))
       }
     } catch (error) {
       if (!this.#abort.signal.aborted) log.warn("Native upload worker poll failed", { error })
@@ -389,6 +412,25 @@ export class NativeUploadWorker {
       if (!claim) return
       await this.#processUploadingClaim(claim)
     }
+  }
+
+  /**
+   * Compacts complete groups announced by part acceptance. Claims directly,
+   * skipping the storage-work read; a finished or concurrently claimed upload
+   * is left to the finish path, which compacts whatever remains.
+   */
+  async #runGroups(uploadDbId: number, groupNumbers: number[]): Promise<void> {
+    throwIfAborted(this.#abort.signal)
+    const claim = await this.repository.claimUploadingCompaction(uploadDbId)
+    if (!claim) return
+    if (!this.#started || this.#abort.signal.aborted) {
+      await this.repository.releaseProcessingClaim({
+        uploadDbId: claim.upload.id,
+        lockToken: claim.lockToken,
+      }).catch(() => false)
+      return
+    }
+    await this.#processUploadingClaim(claim, groupNumbers)
   }
 
   #claimLease(claim: InlineUploadProcessingClaim) {
@@ -436,11 +478,11 @@ export class NativeUploadWorker {
     }
   }
 
-  async #processUploadingClaim(claim: InlineUploadProcessingClaim): Promise<void> {
+  async #processUploadingClaim(claim: InlineUploadProcessingClaim, onlyGroups?: readonly number[]): Promise<void> {
     const lease = this.#claimLease(claim)
     try {
       await lease.assertOwnership()
-      await this.#compact(claim, false, lease.controller.signal, claim.lockToken)
+      await this.#compact(claim, false, lease.controller.signal, claim.lockToken, onlyGroups)
     } catch (error) {
       await this.#discardCanceledWork(claim.upload.id)
       if (!(error instanceof MultipartUploadNotFoundError) &&
@@ -555,6 +597,7 @@ export class NativeUploadWorker {
         publication,
       })
       if (!completed) throw new UploadOwnershipLostError()
+      transferTraces.finish(uploadTraceKey(claim.upload.id), "complete")
       log.info("UPLOAD_TRACE phase=worker_complete", {
         uploadDbId: claim.upload.id,
         kind: claim.upload.kind,
@@ -587,7 +630,10 @@ export class NativeUploadWorker {
           code: "integrity",
           retryable: false,
         })
-        if (failed) await this.#discardTerminalStorage(cleanupWork, controller.signal)
+        if (failed) {
+          transferTraces.finish(uploadTraceKey(claim.upload.id), "failed")
+          await this.#discardTerminalStorage(cleanupWork, controller.signal)
+        }
         return
       }
       if (error instanceof UploadInvalidMediaError ||
@@ -599,7 +645,10 @@ export class NativeUploadWorker {
           code: "invalid_media",
           retryable: false,
         })
-        if (failed) await this.#discardTerminalStorage(cleanupWork, controller.signal)
+        if (failed) {
+          transferTraces.finish(uploadTraceKey(claim.upload.id), "failed")
+          await this.#discardTerminalStorage(cleanupWork, controller.signal)
+        }
         return
       }
       if (error instanceof InlineUploadPublicationConflictError) {
@@ -610,7 +659,10 @@ export class NativeUploadWorker {
           code: "publication_conflict",
           retryable: false,
         })
-        if (failed) await this.#discardTerminalStorage(cleanupWork, controller.signal)
+        if (failed) {
+          transferTraces.finish(uploadTraceKey(claim.upload.id), "failed")
+          await this.#discardTerminalStorage(cleanupWork, controller.signal)
+        }
         return
       }
       if (claim.upload.attempts + 1 >= MAX_PROCESSING_ATTEMPTS) {
@@ -622,7 +674,10 @@ export class NativeUploadWorker {
             error instanceof UploadPartStorageUnavailableError ? "storage" : "processing",
           retryable: true,
         })
-        if (failed) await this.#discardTerminalStorage(cleanupWork, controller.signal)
+        if (failed) {
+          transferTraces.finish(uploadTraceKey(claim.upload.id), "failed")
+          await this.#discardTerminalStorage(cleanupWork, controller.signal)
+        }
         return
       }
       const exponentialMs = Math.min(30_000, 500 * 2 ** claim.upload.attempts)
@@ -649,14 +704,17 @@ export class NativeUploadWorker {
     includeTail: boolean,
     signal: AbortSignal,
     lockToken?: Uint8Array,
+    onlyGroups?: readonly number[],
   ): Promise<InlineUploadStorageWork> {
     throwIfAborted(signal)
     const codec = storageCodecFor(initialWork.upload.storageFormat)
     if (!codec) throw new UploadIntegrityError()
     const sourceByIndex = new Map(initialWork.parts.map((part) => [part.partIndex, part]))
     const readyGroups: number[] = []
+    const selectedGroups = onlyGroups ? new Set(onlyGroups) : undefined
     for (const geometry of storagePartGeometry(initialWork.upload.partCount)) {
       if (!includeTail && geometry.frameCount < STORAGE_FRAMES_PER_PART) continue
+      if (selectedGroups && !selectedGroups.has(geometry.partNumber)) continue
       if (Array.from({ length: geometry.frameCount }, (_, offset) =>
         sourceByIndex.has(geometry.firstFrameIndex + offset)).every(Boolean)) {
         readyGroups.push(geometry.partNumber)
@@ -742,6 +800,8 @@ export class NativeUploadWorker {
       if (recorded === "stale") throw new UploadOwnershipLostError()
     }, signal)
 
+    // A group pass only needed its own groups recorded; recordStoragePart fenced ownership.
+    if (onlyGroups) return initialWork
     const refreshed = await this.repository.getStorageWork(initialWork.upload.id)
     if (!refreshed || refreshed.upload.storageUploadId !== storageUploadId) throw new UploadOwnershipLostError()
     return refreshed
