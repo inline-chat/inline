@@ -135,6 +135,38 @@ describe("SessionsModel push sessions", () => {
     await expect(SessionsModel.setActiveIfPresent(2_000_000_000, false)).resolves.toBe(false)
   })
 
+  test("each push registration reports filtered sync push support", async () => {
+    const user = await testUtils.createUser("filtered-sync-push@test.com")
+    const session = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
+    const read = async () => {
+      const [row] = await db
+        .select({ pushFilteredSyncPushes: schema.sessions.pushFilteredSyncPushes })
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, session.session.id))
+        .limit(1)
+      return row?.pushFilteredSyncPushes
+    }
+
+    await SessionsModel.updatePushNotificationDetails(session.session.id, {
+      applePushToken: "ios-token",
+      supportsFilteredSyncPushes: true,
+    })
+    expect(await read()).toBe(true)
+    const [pushSession] = await SessionsModel.getValidIOSPushSessionsByUserId(user.id)
+    expect(pushSession?.pushFilteredSyncPushes).toBe(true)
+
+    // A build without the capability (older or downgraded) must not inherit it.
+    await SessionsModel.updatePushNotificationDetails(session.session.id, { applePushToken: "ios-token" })
+    expect(await read()).toBe(false)
+
+    await SessionsModel.updatePushNotificationDetails(session.session.id, {
+      applePushToken: "ios-token",
+      supportsFilteredSyncPushes: true,
+    })
+    await SessionsModel.clearApplePushToken(session.session.id)
+    expect(await read()).toBeNull()
+  })
+
   test("revoke clears push notification details", async () => {
     const user = await testUtils.createUser("revoke-clears-push@test.com")
     const session = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
@@ -148,6 +180,7 @@ describe("SessionsModel push sessions", () => {
         algorithm: "X25519_HKDF_SHA256_AES256_GCM",
       },
       pushContentVersion: 1,
+      supportsFilteredSyncPushes: true,
     })
     await SessionsModel.setActive(session.session.id, true)
 
@@ -166,6 +199,7 @@ describe("SessionsModel push sessions", () => {
         pushContentKeyId: schema.sessions.pushContentKeyId,
         pushContentKeyAlgorithm: schema.sessions.pushContentKeyAlgorithm,
         pushContentVersion: schema.sessions.pushContentVersion,
+        pushFilteredSyncPushes: schema.sessions.pushFilteredSyncPushes,
       })
       .from(schema.sessions)
       .where(eq(schema.sessions.id, session.session.id))
@@ -182,6 +216,7 @@ describe("SessionsModel push sessions", () => {
     expect(row?.pushContentKeyId).toBeNull()
     expect(row?.pushContentKeyAlgorithm).toBeNull()
     expect(row?.pushContentVersion).toBeNull()
+    expect(row?.pushFilteredSyncPushes).toBeNull()
 
     await expect(SessionsModel.getValidIOSPushSessionsByUserId(user.id)).resolves.toEqual([])
   })

@@ -14533,6 +14533,18 @@ public nonisolated struct RegisterDeviceInput: Sendable {
   /// Clears the value of `notificationMethod`. Subsequent reads from it will return its default value.
   public mutating func clearNotificationMethod() {self._notificationMethod = nil}
 
+  /// The notification service extension can consume read/delete sync pushes
+  /// without showing them (Apple notification filtering entitlement). Each
+  /// registration reports it; absent means unsupported.
+  public var supportsFilteredSyncPushes: Bool {
+    get {_supportsFilteredSyncPushes ?? false}
+    set {_supportsFilteredSyncPushes = newValue}
+  }
+  /// Returns true if `supportsFilteredSyncPushes` has been explicitly set.
+  public var hasSupportsFilteredSyncPushes: Bool {self._supportsFilteredSyncPushes != nil}
+  /// Clears the value of `supportsFilteredSyncPushes`. Subsequent reads from it will return its default value.
+  public mutating func clearSupportsFilteredSyncPushes() {self._supportsFilteredSyncPushes = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -14540,6 +14552,7 @@ public nonisolated struct RegisterDeviceInput: Sendable {
   fileprivate var _pushContentEncryptionKey: PushContentEncryptionKey? = nil
   fileprivate var _pushContentVersion: UInt32? = nil
   fileprivate var _notificationMethod: PushNotificationMethod? = nil
+  fileprivate var _supportsFilteredSyncPushes: Bool? = nil
 }
 
 public nonisolated struct RegisterDeviceResult: Sendable {
@@ -42479,7 +42492,7 @@ nonisolated extension PushNotificationMethod: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension RegisterDeviceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RegisterDeviceInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}apple_push_token\0\u{3}push_content_encryption_key\0\u{3}push_content_version\0\u{3}notification_method\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}apple_push_token\0\u{3}push_content_encryption_key\0\u{3}push_content_version\0\u{3}notification_method\0\u{3}supports_filtered_sync_pushes\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -42491,6 +42504,7 @@ nonisolated extension RegisterDeviceInput: SwiftProtobuf.Message, SwiftProtobuf.
       case 2: try { try decoder.decodeSingularMessageField(value: &self._pushContentEncryptionKey) }()
       case 3: try { try decoder.decodeSingularUInt32Field(value: &self._pushContentVersion) }()
       case 4: try { try decoder.decodeSingularMessageField(value: &self._notificationMethod) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self._supportsFilteredSyncPushes) }()
       default: break
       }
     }
@@ -42513,6 +42527,9 @@ nonisolated extension RegisterDeviceInput: SwiftProtobuf.Message, SwiftProtobuf.
     try { if let v = self._notificationMethod {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
     } }()
+    try { if let v = self._supportsFilteredSyncPushes {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -42521,6 +42538,7 @@ nonisolated extension RegisterDeviceInput: SwiftProtobuf.Message, SwiftProtobuf.
     if lhs._pushContentEncryptionKey != rhs._pushContentEncryptionKey {return false}
     if lhs._pushContentVersion != rhs._pushContentVersion {return false}
     if lhs._notificationMethod != rhs._notificationMethod {return false}
+    if lhs._supportsFilteredSyncPushes != rhs._supportsFilteredSyncPushes {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

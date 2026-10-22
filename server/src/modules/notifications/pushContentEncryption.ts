@@ -8,6 +8,7 @@ import {
   type KeyObject,
   randomBytes,
 } from "node:crypto"
+import type { NotificationSyncOps } from "@in/server/modules/notifications/notificationSyncOps"
 
 const X25519_RAW_PUBLIC_KEY_LENGTH = 32
 const X25519_SPKI_DER_PREFIX = Buffer.from("302a300506032b656e032100", "hex")
@@ -44,6 +45,8 @@ export type EncryptedSendMessagePushContent = {
   isReplyThread?: boolean
   threadEmoji?: string
   photoUrl?: string
+  /** Recent read/delete state from the user's other devices; see notificationSyncOps. */
+  sync?: NotificationSyncOps
 }
 
 const encodeBase64Url = (value: Buffer): string => value.toString("base64url")

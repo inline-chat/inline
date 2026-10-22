@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "push_filtered_sync_pushes" boolean;

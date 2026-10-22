@@ -65,6 +65,8 @@ export const updatePushNotificationDetailsHandler = async (
           }
         : undefined,
       pushContentVersion: input.pushContentVersion !== undefined ? Number(input.pushContentVersion) : undefined,
+      // Only APNs sessions have a notification service extension.
+      supportsFilteredSyncPushes: pushNotificationProvider !== "expo_android" && input.supportsFilteredSyncPushes === true,
     },
     {
       currentSessionId: handlerContext.sessionId,

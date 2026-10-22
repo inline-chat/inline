@@ -12,6 +12,7 @@ import { Log } from "@in/server/utils/log"
 import { Notification } from "apn"
 import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import { configureAlertNotification, configureBackgroundNotification, iOSTopic } from "./utils"
+import { notificationSyncOpsTracker, type NotificationSyncOps } from "./notificationSyncOps"
 import { maxNotificationNameBytes, notificationBodyText, notificationText } from "./messagePreview"
 import {
   encryptSendMessagePushContent,
@@ -181,7 +182,8 @@ type PushContentSession = Pick<
   | "pushContentKeyId"
   | "pushContentVersion"
   | "pushContentKeyAlgorithm"
->
+> &
+  Partial<Pick<PushSession, "pushFilteredSyncPushes">>
 
 const sessionSupportsEncryptedPushContent = (
   session: PushContentSession,
@@ -195,6 +197,38 @@ const sessionSupportsEncryptedPushContent = (
   return session.pushContentKeyAlgorithm === PUSH_CONTENT_ALGORITHM
 }
 
+const filteredSyncAlertTitle = "Inline"
+const filteredSyncAlertBody = "Conversation updated."
+
+/**
+ * Read/delete sync pushes clear delivered notifications. Background pushes are
+ * throttled and dropped by iOS, so sessions whose notification service extension
+ * can filter (hide) a push get a mutable alert the extension consumes instead.
+ */
+const configureSyncNotification = ({
+  notification,
+  session,
+  expirySeconds,
+  collapseId,
+}: {
+  notification: Notification
+  session: PushContentSession
+  expirySeconds: number
+  collapseId?: string
+}) => {
+  if (session.pushFilteredSyncPushes !== true) {
+    configureBackgroundNotification({ notification, expirySeconds, collapseId })
+    return
+  }
+  configureAlertNotification(notification)
+  notification.mutableContent = true
+  notification.priority = 10
+  notification.expiry = expirySeconds
+  if (collapseId) notification.collapseId = collapseId
+  // Only visible if the extension fails to filter; never carries content.
+  notification.alert = { title: filteredSyncAlertTitle, body: filteredSyncAlertBody }
+}
+
 export const buildApnNotification = ({
   session,
   recipientUserId,
@@ -205,6 +239,7 @@ export const buildApnNotification = ({
   encrypt = encryptSendMessagePushContent,
   onEncryptionError,
   onPayloadTooLarge,
+  syncOps,
 }: {
   session: PushContentSession
   recipientUserId: number
@@ -212,6 +247,8 @@ export const buildApnNotification = ({
   silent: boolean
   topic: string
   nowSeconds: number
+  /** Recent read/delete state carried inside encrypted message content. */
+  syncOps?: NotificationSyncOps
   encrypt?: typeof encryptSendMessagePushContent
   onEncryptionError?: (error: unknown) => void
   onPayloadTooLarge?: (bytes: number) => void
@@ -264,6 +301,7 @@ export const buildApnNotification = ({
             isReplyThread: payload.isReplyThread ?? false,
             threadEmoji: payload.threadEmoji,
             photoUrl: payload.photoUrl,
+            ...(syncOps ? { sync: syncOps } : {}),
           },
         })
       } catch (error) {
@@ -290,6 +328,13 @@ export const buildApnNotification = ({
         body: genericEncryptedAlertBody,
       }
       notification.payload = { ...notification.payload, recipientUserId: String(recipientUserId) }
+      if (syncOps && encryptedContent && Buffer.byteLength(JSON.stringify(notification), "utf8") > 4_096) {
+        // Sync ops are best-effort cleanup. Drop them before any message content.
+        return buildApnNotification({
+          session, recipientUserId, payload,
+          silent, topic, nowSeconds, encrypt, onEncryptionError, onPayloadTooLarge,
+        })
+      }
       if (payload.photoUrl && encryptedContent && Buffer.byteLength(JSON.stringify(notification), "utf8") > 4_096) {
         // The image is optional. Preserve the encrypted caption before using the generic fallback.
         return buildApnNotification({
@@ -324,8 +369,9 @@ export const buildApnNotification = ({
 
   if (payload.kind === "message_deleted") {
     if (!payload.messageIds.length) return undefined
-    configureBackgroundNotification({
+    configureSyncNotification({
       notification,
+      session,
       expirySeconds: nowSeconds + 60 * 60,
     })
     notification.payload = {
@@ -337,8 +383,9 @@ export const buildApnNotification = ({
   }
 
   if (!payload.readUpToMessageId) return undefined
-  configureBackgroundNotification({
+  configureSyncNotification({
     notification,
+    session,
     expirySeconds: nowSeconds + 60 * 10,
     collapseId: `messages_read:${payload.threadId}`,
   })
@@ -376,6 +423,22 @@ export const preparePushNotificationToUser = async (
       }
     }
 
+    const hasApnsSession = userSessions.some((session) => session.pushNotificationProvider !== "expo_android")
+    let syncOps: NotificationSyncOps | undefined
+    if (hasApnsSession) {
+      try {
+        if (payload.kind === "messages_read") {
+          await notificationSyncOpsTracker.recordRead(userId, payload.threadId, payload.readUpToMessageId)
+        } else if (payload.kind === "message_deleted") {
+          await notificationSyncOpsTracker.recordDeleted(userId, payload.threadId, payload.messageIds)
+        } else if (payload.kind === "send_message" && userSessions.some(sessionSupportsEncryptedPushContent)) {
+          syncOps = await notificationSyncOpsTracker.recent(userId)
+        }
+      } catch (error) {
+        log.warn("Notification sync ops unavailable", { error, userId })
+      }
+    }
+
     const submissions: PreparedPushSubmission[] = []
     for (const session of userSessions) {
       if (session.pushNotificationProvider === "expo_android") {
@@ -399,6 +462,7 @@ export const preparePushNotificationToUser = async (
         silent,
         topic,
         nowSeconds: Math.floor(Date.now() / 1_000),
+        syncOps,
         onEncryptionError: (error) => {
           log.error("Failed to encrypt push content", {
             error,

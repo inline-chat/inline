@@ -56,6 +56,7 @@ export interface UpdatePushNotificationDetailsData {
   deviceId?: string | undefined
   pushContentEncryptionKey?: PushContentEncryptionKeyDetails | undefined
   pushContentVersion?: number | undefined
+  supportsFilteredSyncPushes?: boolean | undefined
 }
 
 export interface UpdateSessionMetadataData {
@@ -266,6 +267,8 @@ export class SessionsModel {
       pushContentKeyId: null,
       pushContentKeyAlgorithm: null,
       pushContentVersion: null,
+      // Every registration reports this capability; older builds never do.
+      pushFilteredSyncPushes: data.supportsFilteredSyncPushes ?? false,
       ...(data.deviceId ? { deviceId: data.deviceId } : {}),
     }
 
@@ -302,6 +305,7 @@ export class SessionsModel {
         pushContentKeyId: null,
         pushContentKeyAlgorithm: null,
         pushContentVersion: null,
+        pushFilteredSyncPushes: null,
       })
       .where(eq(sessions.id, id))
   }

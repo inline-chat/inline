@@ -8465,6 +8465,14 @@ export interface RegisterDeviceInput {
      * @generated from protobuf field: optional PushNotificationMethod notification_method = 4;
      */
     notificationMethod?: PushNotificationMethod;
+    /**
+     * The notification service extension can consume read/delete sync pushes
+     * without showing them (Apple notification filtering entitlement). Each
+     * registration reports it; absent means unsupported.
+     *
+     * @generated from protobuf field: optional bool supports_filtered_sync_pushes = 5;
+     */
+    supportsFilteredSyncPushes?: boolean;
 }
 /**
  * @generated from protobuf message RegisterDeviceResult
@@ -36718,7 +36726,8 @@ class RegisterDeviceInput$Type extends MessageType<RegisterDeviceInput> {
             { no: 1, name: "apple_push_token", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "push_content_encryption_key", kind: "message", T: () => PushContentEncryptionKey },
             { no: 3, name: "push_content_version", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
-            { no: 4, name: "notification_method", kind: "message", T: () => PushNotificationMethod }
+            { no: 4, name: "notification_method", kind: "message", T: () => PushNotificationMethod },
+            { no: 5, name: "supports_filtered_sync_pushes", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<RegisterDeviceInput>): RegisterDeviceInput {
@@ -36745,6 +36754,9 @@ class RegisterDeviceInput$Type extends MessageType<RegisterDeviceInput> {
                 case /* optional PushNotificationMethod notification_method */ 4:
                     message.notificationMethod = PushNotificationMethod.internalBinaryRead(reader, reader.uint32(), options, message.notificationMethod);
                     break;
+                case /* optional bool supports_filtered_sync_pushes */ 5:
+                    message.supportsFilteredSyncPushes = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -36769,6 +36781,9 @@ class RegisterDeviceInput$Type extends MessageType<RegisterDeviceInput> {
         /* optional PushNotificationMethod notification_method = 4; */
         if (message.notificationMethod)
             PushNotificationMethod.internalBinaryWrite(message.notificationMethod, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool supports_filtered_sync_pushes = 5; */
+        if (message.supportsFilteredSyncPushes !== undefined)
+            writer.tag(5, WireType.Varint).bool(message.supportsFilteredSyncPushes);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

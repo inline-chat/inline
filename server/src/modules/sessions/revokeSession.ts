@@ -87,6 +87,7 @@ export async function revokeSessionInTransaction(
         pushContentKeyId: null,
         pushContentKeyAlgorithm: null,
         pushContentVersion: null,
+        pushFilteredSyncPushes: null,
       })
       .where(and(eq(sessions.id, input.sessionId), eq(sessions.userId, input.targetUserId), isNull(sessions.revoked)))
       .returning()

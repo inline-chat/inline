@@ -364,6 +364,82 @@ describe("sendToUser APN payloads", () => {
     expect(read?.collapseId).toBe("messages_read:chat_34")
   })
 
+  it("carries sync ops inside encrypted content and drops them before a photo", () => {
+    const recipient = generateKeyPairSync("x25519")
+    const session = {
+      pushContentKeyPublic: recipient.publicKey.export({ format: "der", type: "spki" }).subarray(-32),
+      pushContentKeyId: "ios-x25519-v1",
+      pushContentVersion: PUSH_CONTENT_VERSION,
+      pushContentKeyAlgorithm: PUSH_CONTENT_ALGORITHM,
+    }
+    const payload = { kind: "send_message" as const, senderUserId: 42, threadId: "chat_7", messageId: "19", title: "Alex", body: "Hi" }
+    const syncOps = { read: [{ threadId: "chat_3", upTo: "88" }], deleted: [{ threadId: "chat_4", ids: ["5"] }] }
+
+    const withOps = buildApnNotification({ session, payload, syncOps, recipientUserId: 12, silent: false,
+      topic: "chat.inline.Inline", nowSeconds: 100 })!
+    expect(JSON.stringify(withOps)).not.toContain("chat_3")
+    expect(decryptSendMessagePushContentForTests({ privateKey: recipient.privateKey,
+      envelope: withOps.payload.encryptedContent }).sync).toEqual(syncOps)
+
+    const plaintext = buildApnNotification({ session: unencryptedSession, payload, syncOps, recipientUserId: 12,
+      silent: false, topic: "chat.inline.Inline", nowSeconds: 100 })!
+    expect(JSON.stringify(plaintext)).not.toContain("chat_3")
+
+    const hugeOps = { read: Array.from({ length: 60 }, (_, i) => ({ threadId: `chat_${1_000_000 + i}`, upTo: "9".repeat(18) })), deleted: [] }
+    const photoUrl = "https://example.com/" + "a".repeat(200)
+    const trimmed = buildApnNotification({ session, payload: { ...payload, photoUrl }, syncOps: hugeOps,
+      recipientUserId: 12, silent: false, topic: "chat.inline.Inline", nowSeconds: 100 })!
+    const decrypted = decryptSendMessagePushContentForTests({ privateKey: recipient.privateKey,
+      envelope: trimmed.payload.encryptedContent })
+    expect(decrypted.sync).toBeUndefined()
+    expect(decrypted.photoUrl).toBe(photoUrl)
+  })
+
+  it("sends sync pushes as filtered alerts only to sessions that can filter them", () => {
+    const build = (pushFilteredSyncPushes: boolean | null, payload: Parameters<typeof buildApnNotification>[0]["payload"]) =>
+      buildApnNotification({
+        recipientUserId: 99,
+        session: { ...unencryptedSession, pushFilteredSyncPushes },
+        payload,
+        silent: false,
+        topic: "chat.inline.Inline",
+        nowSeconds: 500,
+      })!
+    const readPayload = { kind: "messages_read", threadId: "chat_34", readUpToMessageId: "99" } as const
+    const deletedPayload = { kind: "message_deleted" as const, threadId: "chat_34", messageIds: ["90"] }
+
+    for (const capable of [null, false]) {
+      const read = build(capable, readPayload)
+      expect(read.pushType).toBe("background")
+      expect(read.priority).toBe(5)
+      expect(read.aps["content-available"]).toBe(1)
+      expect(read.aps["mutable-content"]).toBeUndefined()
+      expect(read.aps.alert).toBeUndefined()
+    }
+
+    const read = build(true, readPayload)
+    expect(read.pushType).toBe("alert")
+    expect(read.priority).toBe(10)
+    expect(read.aps["mutable-content"]).toBe(1)
+    expect(read.aps["content-available"]).toBeUndefined()
+    expect(read.aps.sound).toBeUndefined()
+    expect(read.aps.alert).toEqual({ title: "Inline", body: "Conversation updated." })
+    expect(read.expiry).toBe(1_100)
+    expect(read.collapseId).toBe("messages_read:chat_34")
+    expect(read.payload).toEqual({
+      recipientUserId: "99",
+      kind: "messages_read",
+      threadId: "chat_34",
+      readUpToMessageId: "99",
+    })
+
+    const deleted = build(true, deletedPayload)
+    expect(deleted.pushType).toBe("alert")
+    expect(deleted.aps["mutable-content"]).toBe(1)
+    expect(deleted.expiry).toBe(4_100)
+    expect(deleted.collapseId).toBeUndefined()
+  })
+
   it("does not relabel an oversized invite alert as a chat message", () => {
     const notification = buildApnNotification({
       recipientUserId: 99, session: unencryptedSession,

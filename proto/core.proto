@@ -3054,6 +3054,11 @@ message RegisterDeviceInput {
 
   // New provider-specific method payload.
   optional PushNotificationMethod notification_method = 4;
+
+  // The notification service extension can consume read/delete sync pushes
+  // without showing them (Apple notification filtering entitlement). Each
+  // registration reports it; absent means unsupported.
+  optional bool supports_filtered_sync_pushes = 5;
 }
 
 message RegisterDeviceResult {}
