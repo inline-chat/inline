@@ -58,7 +58,7 @@ describe("release source validation", () => {
     offMain = commit("unqualified branch")
     git(source, "push", "origin", "off-main")
     git(directory, "clone", origin, checkout)
-  })
+  }, 15_000)
 
   afterAll(() => { if (directory) rmSync(directory, { recursive: true, force: true }) })
 

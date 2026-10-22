@@ -83,7 +83,8 @@ The workflow performs these steps:
    against the unchanged Fly revision instead.
 6. The `Release outcome` job reports published, already current or failed per
    origin, including a partial release (Nuremberg done, Fly not). Bootstrap
-   completion also requires the worker-activation job.
+   completion also requires the worker-activation job. Publication-only runs
+   report image publication separately without claiming a server deployment.
 
 After a partial failure use **Re-run failed jobs**: successful jobs and the
 original release plan are retained. Nuremberg resumes a recorded deployment

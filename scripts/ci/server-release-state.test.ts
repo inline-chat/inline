@@ -107,17 +107,17 @@ describe("server release restore plan", () => {
 })
 
 type JobResult = { result: "success" | "skipped" | "failure" | "cancelled"; outputs?: { outcome: string } }
-function report(origins: "both" | "fly" | "nuremberg", changes: Record<string, JobResult> = {}, bootstrap = false) {
+function report(origins: "both" | "fly" | "nuremberg", changes: Record<string, JobResult> = {}, bootstrap = false, publishOnly = false) {
   const directory = mkdtempSync(path.join(tmpdir(), "inline-server-summary-"))
   const summary = path.join(directory, "summary.md")
   const needs: Record<string, JobResult> = {
     validate: { result: "success" }, qualify: { result: "success" }, preflight: { result: "success" }, migrate: { result: "success" },
     nuremberg: { result: "success", outputs: { outcome: "published" } }, deploy: { result: "success", outputs: { outcome: "published" } },
-    activate: { result: "skipped" }, ...changes,
+    activate: { result: "skipped" }, prepared: { result: "skipped" }, ...changes,
   }
   try {
     const result = Bun.spawnSync(["bash", "scripts/ci/server-release-summary.sh"], { cwd: root, env: {
-      PATH: process.env.PATH, ORIGINS: origins, BOOTSTRAP: String(bootstrap), RESULTS: JSON.stringify(needs),
+      PATH: process.env.PATH, ORIGINS: origins, BOOTSTRAP: String(bootstrap), PUBLISH_ONLY: String(publishOnly), RESULTS: JSON.stringify(needs),
       GITHUB_SHA: sha, GITHUB_STEP_SUMMARY: summary,
     } })
     return { code: result.exitCode, error: result.stderr.toString(), annotation: result.stdout.toString(), summary: existsSync(summary) ? readFileSync(summary, "utf8") : "" }
@@ -125,6 +125,17 @@ function report(origins: "both" | "fly" | "nuremberg", changes: Record<string, J
 }
 
 describe("server release completion summary", () => {
+  it("reports publication-only success and failure without claiming a server deployment", () => {
+    const success = report("nuremberg", { prepared: { result: "success" } }, false, true)
+    expect(success.code, success.error).toBe(0)
+    expect(success.summary).toContain("Server images: Published")
+    expect(success.summary).toContain("production jobs were not requested")
+    const failed = report("nuremberg", { qualify: { result: "failure" } }, false, true)
+    expect(failed.code, failed.error).toBe(0)
+    expect(failed.summary).toContain("Server images: Failed")
+    expect(failed.summary).toContain("image qualification failure")
+    expect(failed.summary).not.toContain("Server release: Published")
+  })
   it("reports validation, qualification, preflight and migration failures without claiming publication", () => {
     for (const [job, reason] of [["validate", "input validation"], ["qualify", "image qualification"], ["preflight", "origin/configuration preflight"], ["migrate", "migration did not pass"]]) {
       const result = report("both", { [job!]: { result: "failure" }, nuremberg: { result: "skipped" }, deploy: { result: "skipped" } })
@@ -149,7 +160,7 @@ describe("server release completion summary", () => {
   })
 
   it("requires worker activation success before calling bootstrap published", () => {
-    expect(workflow.jobs.summary!.needs).toEqual(["validate", "qualify", "preflight", "migrate", "nuremberg", "deploy", "activate"])
+    expect(workflow.jobs.summary!.needs).toEqual(["validate", "qualify", "prepared", "preflight", "migrate", "nuremberg", "deploy", "activate"])
     for (const result of ["failure", "skipped", "cancelled"] as const) {
       const summary = report("fly", { activate: { result } }, true)
       expect(summary.code, summary.error).toBe(0)

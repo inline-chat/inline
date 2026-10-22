@@ -162,7 +162,7 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   }
   const runnable = (...args: Parameters<typeof status>) => status(...args) !== "skipped"
   for (const [publishOnly, expected] of [
-    [true, ["validate", "qualify", "prepared"]],
+    [true, ["validate", "qualify", "prepared", "summary"]],
     [false, ["validate", "qualify", "preflight", "migrate", "nuremberg", "deploy", "summary"]],
   ] as const) {
     expect(Object.keys(workflow.jobs).filter((id) => runnable(id, publishOnly)).sort()).toEqual([...expected].sort())

@@ -459,8 +459,8 @@ jobs:
 
   summary:
     name: Release outcome
-    needs: [validate, qualify, preflight, migrate, nuremberg, deploy, activate]
-    if: ${{ always() && !inputs.publish_only }}
+    needs: [validate, qualify, prepared, preflight, migrate, nuremberg, deploy, activate]
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -472,5 +472,6 @@ jobs:
         env:
           ORIGINS: ${{ inputs.origins }}
           BOOTSTRAP: ${{ inputs.bootstrap }}
+          PUBLISH_ONLY: ${{ inputs.publish_only }}
           RESULTS: ${{ toJSON(needs) }}
         run: bash scripts/ci/server-release-summary.sh

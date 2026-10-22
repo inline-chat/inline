@@ -26,7 +26,10 @@ describe("required validation results", () => {
     it(`${kind}: matches the entire workflow dependency inventory`, () => {
       const filename = { apple: "apple-validation", integrations: "integrations", server: "server-test" }[kind]
       const workflow = parse(readFileSync(path.resolve(import.meta.dir, `../../.github/workflows/${filename}.yml`), "utf8"))
-      expect(Object.keys(workflow.jobs).filter((job) => job !== "required").sort()).toEqual(Object.keys(needs).sort())
+      // Publication is optional on ordinary server CI; its caller waits for it
+      // separately. Keep the required gate's inventory limited to validation.
+      const optional = kind === "server" ? ["publish"] : []
+      expect(Object.keys(workflow.jobs).filter((job) => job !== "required").sort()).toEqual([...Object.keys(needs), ...optional].sort())
       expect([...workflow.jobs.required.needs].sort()).toEqual(Object.keys(needs).sort())
       expect(workflow.jobs.required.if).toBe("${{ always() }}")
       expect(() => checkResults(kind, needs)).not.toThrow()

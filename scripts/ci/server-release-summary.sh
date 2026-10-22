@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Summarizes a server release per origin, including partial completion.
-# Env: ORIGINS (both|fly|nuremberg), RESULTS (toJSON(needs)), GITHUB_SHA.
+# Env: ORIGINS (both|fly|nuremberg), RESULTS (toJSON(needs)), GITHUB_SHA,
+# optional PUBLISH_ONLY and BOOTSTRAP booleans.
 set -euo pipefail
 
 result() { jq -r --arg job "$1" '.[$job].result // "skipped"' <<< "$RESULTS"; }
@@ -16,6 +17,12 @@ if [[ "$validate" != success ]]; then
   reason="input validation $validate; this attempt did not reach deployment"
 elif [[ "$qualify" != success ]]; then
   reason="image qualification $qualify; this attempt did not reach deployment"
+elif [[ "${PUBLISH_ONLY:-false}" == true ]]; then
+  if [[ "$(result prepared)" == success ]]; then
+    outcome=published reason="qualified images published; production jobs were not requested"
+  else
+    reason="image publication report $(result prepared); production jobs were not requested"
+  fi
 elif [[ "$preflight" != success ]]; then
   reason="origin/configuration preflight $preflight; this attempt did not reach migrations or deployment"
 elif [[ "$migrate" != success ]]; then
@@ -55,4 +62,6 @@ else
 fi
 
 [[ -n "$outcome" ]] || outcome=failed
-bash "$(dirname "$0")/release-summary.sh" "Server release" "$outcome" "$reason" "${GITHUB_SHA:-}" "$detail"
+title="Server release"
+if [[ "${PUBLISH_ONLY:-false}" == true ]]; then title="Server images"; fi
+bash "$(dirname "$0")/release-summary.sh" "$title" "$outcome" "$reason" "${GITHUB_SHA:-}" "$detail"

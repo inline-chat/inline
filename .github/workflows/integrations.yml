@@ -299,7 +299,7 @@ jobs:
       - name: Validate active workflows
         run: |
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.10 -color
-          cd scripts && bun --no-env-file test ci && cd ..
+          (cd scripts && bun --no-env-file test ci)
           python3 -m unittest discover -s scripts/ci -p 'test_nightly_tip_gate.py'
       - name: Check CI shell scripts
         run: |
