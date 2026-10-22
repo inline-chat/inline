@@ -608,9 +608,12 @@ public actor InlineProtocolV3Connection {
     acknowledged: (@Sendable () async -> Void)? = nil,
     completion: @escaping @Sendable (Result<RealtimeV3Response, any Error>) async -> Void
   ) async throws {
+    // Layer 3 until servers advertise layer 4: a layer-3-only server (an older deploy or the
+    // fallback host) closes the connection on any other layer. gzip_packed results are still
+    // decoded if a server sends them.
     let body = try InlineSecureTransport.encodeInlineInvoke(
       payload: Array(request.serializedData()),
-      layer: InlineSecureTransport.realtimeLayerGzip
+      layer: InlineSecureTransport.realtimeLayer
     )
     try await beginPrepared(
       messageID: nextMessageID(),

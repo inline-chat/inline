@@ -750,12 +750,13 @@ describe("InlineProtocolV3Connection", () => {
     await connection.close()
   })
 
-  it("carries acknowledgements in the next request and decodes gzip-packed results", async () => {
+  it("carries acknowledgements in the next request and invokes at layer 3", async () => {
     const fixture = await testServer({ gzipResults: true })
     const { permanent, connection } = await authenticatedTestConnection(fixture)
     const first = await connection.callRpc({ method: Method.GET_ME, input: { oneofKind: undefined } })
     expect(first.oneofKind === "getMe" && first.getMe.user?.firstName).toBe("Inline ".repeat(600))
-    expect(fixture.stats.gzipped).toBe(1)
+    // Layer 3 until servers advertise layer 4, so a gzip-capable server sends it uncompressed.
+    expect(fixture.stats.gzipped).toBe(0)
     // The result is retained by the server until acknowledged; no standalone ACK was sent.
     await new Promise((resolve) => setTimeout(resolve, 50))
     const framesAfterFirst = fixture.stats.framesReceived

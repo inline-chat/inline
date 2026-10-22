@@ -32,7 +32,7 @@ import {
   readInt64LE,
   serviceConstructor,
   INLINE_INVOKE_CONSTRUCTOR,
-  INLINE_REALTIME_LAYER_GZIP,
+  INLINE_REALTIME_LAYER,
   type EstablishedAuthorizationKey,
   type HandshakeRsaPublicKey,
   type ObfuscatedClientHeader,
@@ -394,7 +394,10 @@ export class InlineProtocolV3Connection {
     signal?: AbortSignal,
   ): Promise<RealtimeV3Response> {
     const payload = RealtimeV3Request.toBinary(request)
-    const result = await this.#sendContent(encodeInlineInvoke(payload, INLINE_REALTIME_LAYER_GZIP), onDispatched, signal)
+    // Layer 3 until servers advertise layer 4: a layer-3-only server (an older deploy
+    // or the fallback host) closes the connection on any other layer. gzip_packed
+    // results are still decoded if a server sends them.
+    const result = await this.#sendContent(encodeInlineInvoke(payload, INLINE_REALTIME_LAYER), onDispatched, signal)
     let application
     try {
       application = decodeInlineApplicationObject(result)

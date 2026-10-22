@@ -14,9 +14,9 @@ use inline_protocol::secure::handshake::client::{
 };
 use inline_protocol::secure::handshake::{RsaPublicKey, rsa_public_key_fingerprint};
 use inline_protocol::secure::{
-    AbridgedFrame, ContainerMessage, Direction, INLINE_INVOKE_CONSTRUCTOR,
-    INLINE_REALTIME_LAYER_GZIP, InlineApplicationObject, MAX_GZIP_OUTPUT_BYTES, RecordFields,
-    decode_abridged_frame, decode_inline_application_object, decode_rpc_error_code, decrypt_record,
+    AbridgedFrame, ContainerMessage, Direction, INLINE_INVOKE_CONSTRUCTOR, INLINE_REALTIME_LAYER,
+    InlineApplicationObject, MAX_GZIP_OUTPUT_BYTES, RecordFields, decode_abridged_frame,
+    decode_inline_application_object, decode_rpc_error_code, decrypt_record,
     encode_abridged_packet_with_quick_ack, encode_inline_invoke, encode_message_container,
     encode_msgs_ack, encrypt_record, gzip_packed_data,
 };
@@ -607,7 +607,10 @@ impl InlineProtocolV3Connection {
             request.body.as_ref(),
             Some(proto::realtime_v3_request::Body::Rpc(_))
         );
-        let body = encode_inline_invoke(&request.encode_to_vec(), INLINE_REALTIME_LAYER_GZIP)
+        // Layer 3 until servers advertise layer 4: a layer-3-only server (an
+        // older deploy or the fallback host) closes the connection on any
+        // other layer. gzip_packed results are still decoded if sent.
+        let body = encode_inline_invoke(&request.encode_to_vec(), INLINE_REALTIME_LAYER)
             .map_err(|_| InlineProtocolV3Error::Protocol)?;
         let result = self.send_content(body, read_only).await?;
         let InlineApplicationObject::Result(payload) = decode_inline_application_object(&result)
@@ -1314,7 +1317,7 @@ pub(crate) async fn run_inline_protocol_v3_session(
                         input: Some(input),
                     })),
                 };
-                let body = match encode_inline_invoke(&request.encode_to_vec(), INLINE_REALTIME_LAYER_GZIP) {
+                let body = match encode_inline_invoke(&request.encode_to_vec(), INLINE_REALTIME_LAYER) {
                     Ok(body) => body,
                     Err(_) => {
                         let _ = response.send(Err(RealtimeError::InlineProtocol {
