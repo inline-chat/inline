@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import sharp from "sharp"
 import { describe, expect, test } from "bun:test"
 import type {
   InlineUploadPartRecord,
@@ -251,5 +252,43 @@ describe("native upload finalizer integrity", () => {
 
     expect(readCount).toBe(parts.length)
     expect(maximumActiveReads).toBe(4)
+  })
+
+  const unusedStore: UploadPartStore = {
+    async put() { throw new Error("not used") },
+    async read() { throw new Error("not used") },
+    async remove() {},
+  }
+
+  test("publishes a verified document from metadata alone", async () => {
+    const size = 300 * 1024 * 1024
+    const publication = await new UploadMediaFinalizer(unusedStore).prepareBufferedPublication({
+      upload: { ...upload, uploadId: Buffer.alloc(16), fileName: "report.pdf", mimeType: "application/pdf", byteCount: BigInt(size) },
+      assertOwnership: async () => {},
+    })
+    expect(publication.file.record.fileSize).toBe(size)
+    expect(publication.media.kind).toBe("document")
+  })
+
+  test("decodes a buffered photo from its frames and requires them", async () => {
+    const png = Uint8Array.from(await sharp({
+      create: { width: 2, height: 1, channels: 3, background: { r: 10, g: 20, b: 30 } },
+    }).png().toBuffer())
+    const photo = {
+      ...upload, uploadId: Buffer.alloc(16), kind: "photo", fileName: "pixel.png", mimeType: "image/png",
+      byteCount: BigInt(png.length), sha256: createHash("sha256").update(png).digest(),
+    } as InlineUploadRecord
+    const finalizer = new UploadMediaFinalizer(unusedStore)
+    await expect(finalizer.prepareBufferedPublication({ upload: photo, assertOwnership: async () => {} }))
+      .rejects.toBeInstanceOf(UploadIntegrityError)
+    const publication = await finalizer.prepareBufferedPublication({
+      upload: photo,
+      frames: [png.subarray(0, 10), png.subarray(10)],
+      assertOwnership: async () => {},
+    })
+    expect(publication.media).toMatchObject({ kind: "photo", width: 2, height: 1, format: "png" })
+    await expect(finalizer.prepareBufferedPublication({
+      upload: photo, frames: [png.subarray(0, 10)], assertOwnership: async () => {},
+    })).rejects.toBeInstanceOf(UploadIntegrityError)
   })
 })

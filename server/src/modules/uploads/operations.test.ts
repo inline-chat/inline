@@ -116,6 +116,9 @@ const finalizer: MediaUploadFinalizer = {
   async prepareStoredPublication() {
     throw new Error("Stored publication is worker-owned in operations tests")
   },
+  async prepareBufferedPublication() {
+    throw new Error("Buffered publication is worker-owned in operations tests")
+  },
   async discardPublication() {},
   async project(_kind, fileUniqueId) {
     return complete(fileUniqueId)

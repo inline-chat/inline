@@ -87,6 +87,18 @@ export interface MediaUploadFinalizer {
     assertOwnership: () => Promise<void>
     signal?: AbortSignal
   }): Promise<InlineUploadPublication>
+  /**
+   * Publishes an object whose stored bytes were already verified against the
+   * upload digest during compaction. `frames` are the logical bytes in order;
+   * they are required only for kinds whose validation reads content.
+   */
+  prepareBufferedPublication(input: {
+    upload: InlineUploadRecord
+    frames?: readonly Uint8Array[]
+    thumbnailPhotoId?: number
+    assertOwnership: () => Promise<void>
+    signal?: AbortSignal
+  }): Promise<InlineUploadPublication>
   discardPublication(upload: InlineUploadRecord): Promise<void>
   project(
     kind: InlineUploadRecord["kind"],
@@ -268,6 +280,33 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     }
   }
 
+  async prepareBufferedPublication(input: {
+    upload: InlineUploadRecord
+    frames?: readonly Uint8Array[]
+    thumbnailPhotoId?: number
+    assertOwnership: () => Promise<void>
+    signal?: AbortSignal
+  }): Promise<InlineUploadPublication> {
+    throwIfAborted(input.signal)
+    if (bufferedPublicationNeedsBytes(input.upload.kind) && !input.frames) throw new UploadIntegrityError()
+    let file: File
+    if (input.frames) {
+      const byteCount = input.frames.reduce((total, frame) => total + frame.byteLength, 0)
+      if (BigInt(byteCount) !== input.upload.byteCount) throw new UploadIntegrityError()
+      file = new File([...input.frames] as BlobPart[], input.upload.fileName, {
+        type: input.upload.mimeType,
+      })
+    } else {
+      // Validation for this kind reads only name, type and size.
+      file = new File([], input.upload.fileName, { type: input.upload.mimeType })
+      Object.defineProperty(file, "size", { value: Number(input.upload.byteCount) })
+    }
+    await input.assertOwnership()
+    const publication = await this.#preparePublication(file, input.upload, input.thumbnailPhotoId, input.signal, true)
+    await input.assertOwnership()
+    return publication
+  }
+
   async project(kind: InlineUploadRecord["kind"], fileUniqueId: string, mediaId: number): Promise<UploadComplete> {
     switch (kind) {
       case "photo": {
@@ -421,6 +460,14 @@ export class UploadMediaFinalizer implements MediaUploadFinalizer {
     }
   }
 }
+
+/**
+ * Photo validation decodes the image; document, video and voice validation read
+ * only name, type and size. TODO(video): content validation (ffprobe) would
+ * need the moov atom; read it with ranged GETs of the head and tail instead of
+ * the whole object.
+ */
+export const bufferedPublicationNeedsBytes = (kind: InlineUploadRecord["kind"]): boolean => kind === "photo"
 
 const throwIfAborted = (signal: AbortSignal | undefined): void => {
   if (signal?.aborted) throw signal.reason ?? new DOMException("The operation was aborted", "AbortError")

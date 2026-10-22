@@ -27,6 +27,7 @@ import {
 import { NativeUploadOperations } from "./operations"
 import type { UploadPartStore } from "./partStore"
 import { NativeUploadWorker, storagePartGeometry } from "./worker"
+import { UploadGroupBuffer } from "./groupBuffer"
 
 setDefaultTimeout(120_000)
 
@@ -68,14 +69,26 @@ class MemoryPartStore implements UploadPartStore {
     return key
   }
 
+  reads = 0
+  removes = 0
   async read(key: string): Promise<Uint8Array> {
+    this.reads += 1
     const bytes = this.objects.get(key)
     if (!bytes) throw new Error(`Missing staging object ${key}`)
     return bytes.slice()
   }
 
   async remove(key: string): Promise<void> {
+    this.removes += 1
     this.objects.delete(key)
+  }
+}
+
+class BatchingPartStore extends MemoryPartStore {
+  batchRemoves = 0
+  async removeMany(keys: readonly string[]): Promise<void> {
+    this.batchRemoves += 1
+    for (const key of keys) this.objects.delete(key)
   }
 }
 
@@ -159,7 +172,9 @@ class MemoryMultipartStore implements MultipartObjectStore {
     return object ? { byteCount: object.bytes.byteLength, etag: object.etag } : undefined
   }
 
+  streams = 0
   async stream(key: string): Promise<ReadableStream<Uint8Array>> {
+    this.streams += 1
     const object = this.objects.get(key)
     if (!object) throw new Error(`Missing completed object ${key}`)
     return new Blob([Uint8Array.from(object.bytes)]).stream()
@@ -256,6 +271,12 @@ const makeFinalizer = (expected: Uint8Array, onStored?: () => void): MediaUpload
     onStored?.()
     return publicationFor(upload)
   },
+  async prepareBufferedPublication({ upload, frames, assertOwnership }) {
+    if (frames) expect(Buffer.concat(frames.map((frame) => Buffer.from(frame))).equals(Buffer.from(expected))).toBe(true)
+    await assertOwnership()
+    onStored?.()
+    return publicationFor(upload)
+  },
   async discardPublication() {},
   async project(_kind, fileUniqueId): Promise<UploadComplete> {
     return { fileUniqueId, media: { oneofKind: undefined } }
@@ -314,19 +335,25 @@ describe("native upload multipart worker", () => {
     const blocked = new Promise<void>((resolve) => { release = resolve })
     let activeSignal: AbortSignal | undefined
     let finalizerSettled = false
+    const lateWrite = async ({ upload, signal, stream }: {
+      upload: InlineUploadRecord
+      signal?: AbortSignal
+      stream?: ReadableStream<Uint8Array>
+    }) => {
+      activeSignal = signal
+      if (stream) await new Response(stream).arrayBuffer()
+      enteredResolve()
+      // Model a provider write that ignores cancellation until settlement.
+      await blocked
+      const key = `files/${inlineUploadPublicationPath(upload.resultFileUniqueId!)}`
+      multipart.objects.set(key, { bytes: body, etag: "late-write" })
+      finalizerSettled = true
+      return publicationFor(upload)
+    }
     const finalizer: MediaUploadFinalizer = {
       ...makeFinalizer(body),
-      async prepareStoredPublication({ upload, signal, stream }) {
-        activeSignal = signal
-        await new Response(stream).arrayBuffer()
-        enteredResolve()
-        // Model a provider write that ignores cancellation until settlement.
-        await blocked
-        const key = `files/${inlineUploadPublicationPath(upload.resultFileUniqueId!)}`
-        multipart.objects.set(key, { bytes: body, etag: "late-write" })
-        finalizerSettled = true
-        return publicationFor(upload)
-      },
+      prepareStoredPublication: lateWrite,
+      prepareBufferedPublication: lateWrite,
       async discardPublication(upload) {
         await multipart.remove(`files/${inlineUploadPublicationPath(upload.resultFileUniqueId!)}`)
       },
@@ -626,14 +653,16 @@ describe("native upload multipart worker", () => {
     const body = new Uint8Array([91])
     let enteredResolve!: () => void
     const entered = new Promise<void>((resolve) => { enteredResolve = resolve })
+    const block = async ({ signal }: { signal?: AbortSignal }) => {
+      enteredResolve()
+      return new Promise<never>((_, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true })
+      })
+    }
     const blockedFinalizer: MediaUploadFinalizer = {
       ...makeFinalizer(body),
-      async prepareStoredPublication({ signal }) {
-        enteredResolve()
-        return new Promise<never>((_, reject) => {
-          signal?.addEventListener("abort", () => reject(signal.reason), { once: true })
-        })
-      },
+      prepareStoredPublication: block,
+      prepareBufferedPublication: block,
     }
     const operations = new NativeUploadOperations(repository, staging, blockedFinalizer)
     const created = await saveBody(operations, requestContext, body, 73)
@@ -731,11 +760,11 @@ describe("native upload multipart worker", () => {
     const staging = new MemoryPartStore()
     const multipart = new MemoryMultipartStore()
     const body = new Uint8Array([7, 7, 7])
+    const reject = async (): Promise<never> => { throw new InlineError(ApiError.PHOTO_INVALID_TYPE) }
     const invalidFinalizer: MediaUploadFinalizer = {
       ...makeFinalizer(body),
-      async prepareStoredPublication() {
-        throw new InlineError(ApiError.PHOTO_INVALID_TYPE)
-      },
+      prepareStoredPublication: reject,
+      prepareBufferedPublication: reject,
     }
     const operations = new NativeUploadOperations(repository, staging, invalidFinalizer)
     const created = await saveBody(operations, requestContext, body, 75)
@@ -813,5 +842,160 @@ describe("native upload multipart worker", () => {
     await worker.stop()
 
     expect(staging.objects.size).toBe(0)
+  })
+
+  const pipeline = (options: {
+    staging?: MemoryPartStore
+    buffer?: UploadGroupBuffer
+    finalizerFor: (body: Uint8Array) => MediaUploadFinalizer
+    body: Uint8Array
+    inline?: boolean
+  }) => {
+    const repository = new InlineUploadRepository()
+    const staging = options.staging ?? new BatchingPartStore()
+    const multipart = new MemoryMultipartStore()
+    const buffer = options.buffer ?? new UploadGroupBuffer()
+    const finalizer = options.finalizerFor(options.body)
+    const worker = createWorker(repository, staging, multipart, finalizer, {
+      concurrency: 4, pollIntervalMs: 20, groupBuffer: buffer,
+    })
+    const operations = new NativeUploadOperations(repository, staging, finalizer,
+      (uploadDbId, groupNumber) => worker.wake(uploadDbId, groupNumber), undefined, undefined, {
+        groupBuffer: buffer,
+        finishInline: options.inline === false ? undefined : (upload, signal) => worker.processNow(upload, signal),
+      })
+    return { repository, staging, multipart, buffer, worker, operations, finalizer }
+  }
+
+  const storageOps = (staging: MemoryPartStore, multipart: MemoryMultipartStore, partCount: number) => {
+    const batch = staging instanceof BatchingPartStore ? staging.batchRemoves : 0
+    const groupPuts = [...multipart.uploadPartCounts.values()].reduce((total, count) => total + count, 0)
+    return {
+      stagingPuts: partCount,
+      stagingGets: staging.reads,
+      stagingDeletes: staging.removes + batch,
+      multipartPuts: groupPuts,
+      finalGets: multipart.streams,
+      perGroup: (staging.reads + staging.removes + batch + groupPuts + multipart.streams) /
+        Math.ceil(partCount / 10),
+    }
+  }
+
+  test("finishes a small document inline without staging or final-object reads", async () => {
+    const user = await testUtils.createUser("native-upload-inline-finish@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE * 2 + 1234).fill(5)
+    const paths: string[] = []
+    const { staging, multipart, worker, operations } = pipeline({
+      body,
+      finalizerFor: (expected) => {
+        const base = makeFinalizer(expected)
+        return {
+          ...base,
+          prepareStoredPublication: async (input) => { paths.push("stored"); return base.prepareStoredPublication(input) },
+          prepareBufferedPublication: async (input) => { paths.push("buffered"); return base.prepareBufferedPublication(input) },
+        }
+      },
+    })
+    worker.start()
+    const created = await saveBody(operations, requestContext, body, 120)
+    const finished = await operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(finished.state.oneofKind).toBe("complete")
+    expect(paths).toEqual(["buffered"])
+    expect(staging.reads).toBe(0)
+    expect(multipart.streams).toBe(0)
+    await waitFor(() => staging.objects.size === 0)
+    const ops = storageOps(staging, multipart, created.partCount)
+    console.log("UPLOAD_STORAGE_OPS inline 3-part", JSON.stringify(ops))
+    expect(ops.perGroup).toBeLessThanOrEqual(2)
+  })
+
+  test("completes a 25-part upload whose buffer was evicted from staging reads and the running digest", async () => {
+    const user = await testUtils.createUser("native-upload-evicted-buffer@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE * 25)
+    for (let index = 0; index < body.length; index += 4096) body[index] = index % 251
+    const { staging, multipart, worker, operations, repository } = pipeline({
+      body,
+      // Too small for any frame: every compaction reads staging.
+      buffer: new UploadGroupBuffer(1),
+      finalizerFor: makeFinalizer,
+    })
+    worker.start()
+    const created = await saveBody(operations, requestContext, body, 121)
+    expect((await operations.finish({ uploadId: created.uploadId }, requestContext)).state.oneofKind).toBe("processing")
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "complete")
+    expect(staging.reads).toBe(25)
+    // Groups were hashed in order while compacting, so the object is never read back.
+    expect(multipart.streams).toBe(0)
+    console.log("UPLOAD_STORAGE_OPS evicted 25-part", JSON.stringify(storageOps(staging, multipart, created.partCount)))
+  })
+
+  test("falls back to reading the stored object when another process compacted a group", async () => {
+    const user = await testUtils.createUser("native-upload-two-process-digest@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE * 25).fill(3)
+    const staging = new BatchingPartStore()
+    const first = pipeline({ body, staging, finalizerFor: makeFinalizer, inline: false })
+    first.worker.start()
+    const created = await saveBody(first.operations, requestContext, body, 122)
+    await waitFor(async () => (await first.repository.getStorageWork((await first.repository.get(created.uploadId, owner))!.id))!
+      .storageParts.length === 2)
+    await first.worker.stop()
+
+    // A second process (fresh buffer and digest state) finishes the upload.
+    const paths: string[] = []
+    const base = makeFinalizer(body)
+    const finalizer: MediaUploadFinalizer = {
+      ...base,
+      prepareStoredPublication: async (input) => { paths.push("stored"); return base.prepareStoredPublication(input) },
+      prepareBufferedPublication: async (input) => { paths.push("buffered"); return base.prepareBufferedPublication(input) },
+    }
+    const second = createWorker(first.repository, staging, first.multipart, finalizer, { concurrency: 2, pollIntervalMs: 20 })
+    const operations = new NativeUploadOperations(first.repository, staging, finalizer,
+      (uploadDbId) => second.wake(uploadDbId))
+    second.start()
+    await operations.finish({ uploadId: created.uploadId }, requestContext)
+    await waitFor(async () => (await first.repository.get(created.uploadId, owner))?.status === "complete")
+    expect(paths).toEqual(["stored"])
+    expect(first.multipart.streams).toBe(1)
+  })
+
+  test("fails with integrity when the running digest does not match the declared file digest", async () => {
+    const user = await testUtils.createUser("native-upload-digest-mismatch@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const owner = { userId: user.id, accountSessionId: account.session.id }
+    const body = new Uint8Array(INLINE_TRANSFER_PART_SIZE + 10).fill(8)
+    const { worker, operations, repository, staging } = pipeline({ body, finalizerFor: makeFinalizer })
+    worker.start()
+    const created = await saveBody(operations, requestContext, body, 123)
+    // Each frame matches its manifest digest; only the whole-file digest is wrong.
+    await db.update(inlineUploads).set({ sha256: Buffer.alloc(32, 1) })
+      .where(eq(inlineUploads.uploadId, Buffer.from(created.uploadId)))
+    const finished = await operations.finish({ uploadId: created.uploadId }, requestContext)
+    expect(finished.state.oneofKind).toBe("processing")
+    await waitFor(async () => (await repository.get(created.uploadId, owner))?.status === "failed")
+    expect((await repository.get(created.uploadId, owner))?.failureCode).toBe("integrity")
+    expect(staging.objects.size).toBe(0)
+    expect((await operations.state({ uploadId: created.uploadId }, requestContext)).failure?.retryable).toBe(false)
+  })
+
+  test("rejects finish on a canceled upload", async () => {
+    const user = await testUtils.createUser("native-upload-finish-canceled@example.com")
+    const account = await testUtils.createSessionForUser(user.id)
+    const requestContext = context(user.id, account.session.id)
+    const body = new Uint8Array([1, 2, 3])
+    const { operations, buffer } = pipeline({ body, finalizerFor: makeFinalizer })
+    const created = await saveBody(operations, requestContext, body, 124)
+    expect(buffer.bytes).toBe(3)
+    expect((await operations.cancel({ uploadId: created.uploadId }, requestContext)).canceled).toBe(true)
+    expect(buffer.bytes).toBe(0)
+    await expect(operations.finish({ uploadId: created.uploadId }, requestContext)).rejects.toThrow()
   })
 })

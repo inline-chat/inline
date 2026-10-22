@@ -635,7 +635,7 @@ export class InlineUploadRepository {
   async requestFinish(uploadId: Uint8Array, owner: InlineUploadOwner): Promise<
     | { kind: "missing"; partIndices: number[] }
     | { kind: "processing" }
-    | { kind: "queued"; uploadDbId: number }
+    | { kind: "queued"; uploadDbId: number; byteCount: bigint; partCount: number; uploadKind: InlineUploadKind }
     | { kind: "complete"; upload: InlineUploadRecord }
     | { kind: "failed"; upload: InlineUploadRecord }
     | { kind: "rejected" }
@@ -674,7 +674,13 @@ export class InlineUploadRepository {
         retryAt: now,
         attempts: 0,
       }).where(eq(inlineUploads.id, row.id))
-      return { kind: "queued", uploadDbId: row.id } as const
+      return {
+        kind: "queued",
+        uploadDbId: row.id,
+        byteCount: row.byteCount,
+        partCount: row.partCount,
+        uploadKind: row.kind as InlineUploadKind,
+      } as const
     })
   }
 

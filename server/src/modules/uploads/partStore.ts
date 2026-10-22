@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
+import { DeleteObjectCommand, DeleteObjectsCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { createHash } from "node:crypto"
 import { getR2 } from "@in/server/libs/r2"
 import { readFileBytes, FileByteLengthError } from "@in/server/modules/files/readFileBytes"
@@ -34,7 +34,12 @@ export interface UploadPartStore {
   }, signal?: AbortSignal): Promise<string>
   read(objectKey: string, byteCount: number, signal?: AbortSignal): Promise<Uint8Array>
   remove(objectKey: string, signal?: AbortSignal): Promise<void>
+  /** Removes many objects in as few storage requests as the provider allows. */
+  removeMany?(objectKeys: readonly string[], signal?: AbortSignal): Promise<void>
 }
+
+/** S3 DeleteObjects accepts at most this many keys per request. */
+const MAX_KEYS_PER_DELETE = 1_000
 
 const requireR2 = () => {
   const r2 = getR2()
@@ -145,6 +150,26 @@ export class R2UploadPartStore implements UploadPartStore {
       signal?.throwIfAborted()
       if (cause instanceof FileByteLengthError) throw cause
       throw new UploadPartStorageUnavailableError({ cause })
+    }
+  }
+
+  async removeMany(keys: readonly string[], signal?: AbortSignal): Promise<void> {
+    for (let start = 0; start < keys.length; start += MAX_KEYS_PER_DELETE) {
+      const batch = keys.slice(start, start + MAX_KEYS_PER_DELETE)
+      recordStorageOperation("delete")
+      try {
+        const { bucket, client } = this.#requireConfiguration()
+        const result = await client.send(new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+        }), { abortSignal: storageDeadlineSignal(signal, this.#operationTimeoutMs) })
+        const failed = new Set((result.Errors ?? []).flatMap((error) => error.Key ? [error.Key] : []))
+        for (const key of batch) if (failed.has(key)) await this.remove(key, signal)
+      } catch {
+        signal?.throwIfAborted()
+        // A provider without batch delete still removes each key.
+        for (const key of batch) await this.remove(key, signal)
+      }
     }
   }
 

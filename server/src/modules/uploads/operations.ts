@@ -41,6 +41,7 @@ import {
 import { R2MultipartObjectStore } from "./multipartStore"
 import { IDENTITY_STORAGE_FORMAT, storageCodecFor } from "./storageCodec"
 import { NativeUploadWorker, uploadTraceKey } from "./worker"
+import { UploadGroupBuffer, uploadGroupBuffer } from "./groupBuffer"
 import { uploadTraceLogLevel } from "./trace"
 import {
   UploadGeometryCache,
@@ -161,8 +162,24 @@ const contextOwner = (context: HandlerContext): InlineUploadOwner => ({
   permanentAuthKeyId: context.inlineProtocol?.permanentAuthKeyId,
 })
 
+/** Uploads at most this large may finalize inside FINISH_UPLOAD. */
+const INLINE_FINISH_MAX_BYTES = 10n * 1_024n * 1_024n
+
+export type NativeUploadOperationsOptions = {
+  geometry?: UploadGeometryCache
+  /** Shared with the worker so compaction can skip staging reads. */
+  groupBuffer?: UploadGroupBuffer
+  /** Finalizes now when this process holds the upload in memory; see NativeUploadWorker.processNow. */
+  finishInline?: (
+    upload: { id: number; partCount: number; kind: InlineUploadRecord["kind"] },
+    signal?: AbortSignal,
+  ) => Promise<"complete" | "processing">
+}
+
 export class NativeUploadOperations {
   readonly #geometry: UploadGeometryCache
+  readonly #groupBuffer: UploadGroupBuffer | undefined
+  readonly #finishInline: NativeUploadOperationsOptions["finishInline"]
 
   constructor(
     private readonly repository: InlineUploadRepository,
@@ -171,9 +188,11 @@ export class NativeUploadOperations {
     private readonly wakeWorker: (uploadDbId: number, groupNumber?: number) => void = () => {},
     private readonly discardStorage: (upload: InlineUploadRecord) => Promise<void> = async () => {},
     private readonly cancelWorker: (uploadDbId: number) => void = () => {},
-    geometry: UploadGeometryCache = new UploadGeometryCache(),
+    options: NativeUploadOperationsOptions = {},
   ) {
-    this.#geometry = geometry
+    this.#geometry = options.geometry ?? new UploadGeometryCache()
+    this.#groupBuffer = options.groupBuffer
+    this.#finishInline = options.finishInline
   }
 
   async create(input: CreateUploadInput, context: HandlerContext): Promise<CreateUploadResult> {
@@ -327,6 +346,8 @@ export class NativeUploadOperations {
       return badRequest()
     }
     if (accepted.kind === "conflict") return badRequest()
+    // The staged frame is durable; this copy only spares the worker a read.
+    this.#groupBuffer?.put(geometry.uploadDbId, input.partIndex, encoded.bytes)
     const completedGroup = markPartAccepted(geometry, input.partIndex)
     if (completedGroup !== undefined) this.#wake(geometry.uploadDbId, completedGroup)
     return {
@@ -402,13 +423,34 @@ export class NativeUploadOperations {
         return { state: { oneofKind: "missing", missing: { partIndices: result.partIndices } } }
       case "processing":
         return { state: { oneofKind: "processing", processing: { retryAfterSeconds: RETRY_AFTER_SECONDS } } }
-      case "queued":
-        this.#wake(result.uploadDbId)
+      case "queued": {
+        const inline = result.byteCount <= INLINE_FINISH_MAX_BYTES && this.#finishInline
+          ? await this.#finishInline({ id: result.uploadDbId, partCount: result.partCount, kind: result.uploadKind }, context.signal)
+            .catch((error) => {
+              log.warn("Native upload inline finish failed", { error, uploadDbId: result.uploadDbId })
+              return "processing" as const
+            })
+          : "processing"
         log.debug("UPLOAD_TRACE phase=finish_queued", {
           uploadDbId: result.uploadDbId,
+          inline,
           elapsedMs: Date.now() - startedAt,
         })
+        if (inline === "complete") {
+          const upload = await this.repository.get(input.uploadId, owner)
+          if (upload?.status === "complete" && upload.resultFileUniqueId && upload.resultMediaId) {
+            return {
+              state: {
+                oneofKind: "complete",
+                complete: await this.finalizer.project(upload.kind, upload.resultFileUniqueId, upload.resultMediaId),
+              },
+            }
+          }
+        }
+        // A queued upload not finished here belongs to the worker (or is already its task).
+        this.#wake(result.uploadDbId)
         return { state: { oneofKind: "processing", processing: { retryAfterSeconds: RETRY_AFTER_SECONDS } } }
+      }
       case "failed":
         return { state: { oneofKind: "failed", failed: failureForRow(result.upload) } }
       case "complete": {
@@ -427,6 +469,7 @@ export class NativeUploadOperations {
     const owner = await this.#owner(context)
     const canceled = requireValue(await this.repository.cancel(input.uploadId, owner))
     this.#geometry.drop(input.uploadId)
+    this.#groupBuffer?.drop(canceled.upload.id)
     if (canceled.result.canceled) {
       transferTraces.finish(uploadTraceKey(canceled.upload.id), "canceled")
       this.cancelWorker(canceled.upload.id)
@@ -496,6 +539,7 @@ export const nativeUploadWorker = new NativeUploadWorker(
   partStore,
   multipartStore,
   finalizer,
+  { groupBuffer: uploadGroupBuffer },
 )
 
 export class NativeUploadWorkerAlreadyOwnedError extends Error {
@@ -545,4 +589,8 @@ export const nativeUploadOperations = new NativeUploadOperations(
   (uploadDbId, groupNumber) => nativeUploadWorker.wake(uploadDbId, groupNumber),
   (upload) => nativeUploadWorker.discardStorage(upload),
   (uploadDbId) => nativeUploadWorker.cancel(uploadDbId),
+  {
+    groupBuffer: uploadGroupBuffer,
+    finishInline: (upload, signal) => nativeUploadWorker.processNow(upload, signal),
+  },
 )
