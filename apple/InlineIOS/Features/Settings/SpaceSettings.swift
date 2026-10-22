@@ -1,4 +1,5 @@
 import Auth
+import InlineGrid
 import InlineKit
 import InlineUI
 import Logger
@@ -82,6 +83,8 @@ struct SpaceSettingsView: View {
       }
 
       if isAdminOrOwner {
+        SpaceGridSettingsSection(spaceId: spaceId)
+
         UserGroupsSettingsSection(
           viewModel: userGroups,
           canManage: true
@@ -163,6 +166,41 @@ struct SpaceSettingsView: View {
        let rootVC = windowScene.windows.first?.rootViewController
     {
       rootVC.topmostPresentedViewController.present(alert, animated: true)
+    }
+  }
+}
+
+private struct SpaceGridSettingsSection: View {
+  let spaceId: Int64
+  private let store = GridRuntime.shared.rooms
+  @State private var isUpdating = false
+  @State private var failed = false
+
+  var body: some View {
+    Section {
+      Toggle(isOn: Binding(
+        get: { store.isEnabled(spaceID: spaceId) },
+        set: { enabled in
+          isUpdating = true
+          Task {
+            do {
+              try await store.setEnabled(enabled, spaceID: spaceId)
+            } catch {
+              failed = true
+            }
+            isUpdating = false
+          }
+        }
+      )) {
+        Label("Grid", systemImage: "waveform")
+      }
+      .disabled(isUpdating)
+    } footer: {
+      Text("Let members join voice rooms in this space.")
+    }
+    .task { await store.load(spaceID: spaceId) }
+    .alert("Couldn't update Grid", isPresented: $failed) {
+      Button("OK", role: .cancel) {}
     }
   }
 }

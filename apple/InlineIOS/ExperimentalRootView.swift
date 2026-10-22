@@ -132,7 +132,6 @@ private struct ExperimentalAuthedRootView: View {
   @State private var lastContentRootTab: RootTab = .allChats
   @State private var pendingSearchExit: PendingSearchExit?
   @State private var isCreatingThread = false
-  @AppStorage(ExperimentalFeatureFlags.gridIOSKey) private var gridIOSEnabled = false
   @State private var isCleaningOpenChats = false
   @State private var iPadCommandRequest: IPadCommandRequest?
   @State private var homeBootstrapTask: Task<HomeBootstrapOutcome, Never>?
@@ -893,8 +892,7 @@ private struct ExperimentalAuthedRootView: View {
   }
 
   private func openGrid() {
-    guard gridIOSEnabled,
-          GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).isEligible else { return }
+    guard GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).isEligible else { return }
     openHomeDestination(.grid(initialSpaceID: nav.activeSpaceId))
   }
 
@@ -1198,8 +1196,7 @@ private struct ExperimentalAuthedRootView: View {
       onManage: activeSpace.map { space in
         { openHomeDestination(.spaceSettings(spaceId: space.id)) }
       },
-      onGrid: gridIOSEnabled
-        && GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).showsMenuEntry
+      onGrid: GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).showsMenuEntry
         ? openGrid
         : nil
     )

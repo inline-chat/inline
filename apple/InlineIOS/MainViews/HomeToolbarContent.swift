@@ -9,7 +9,6 @@ struct HomeToolbarContent: ToolbarContent {
   private let router: Router
   @ObservedObject private var realtimeState: RealtimeState
   @ObservedObject private var notificationSettings: NotificationSettingsManager
-  @AppStorage(ExperimentalFeatureFlags.gridIOSKey) private var gridIOSEnabled = false
   private let onOpenGrid: () -> Void
 
   init(
@@ -69,8 +68,7 @@ struct HomeToolbarContent: ToolbarContent {
   @ViewBuilder
   private var dotsButton: some View {
     Menu {
-      if gridIOSEnabled,
-         GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).showsMenuEntry {
+      if GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).showsMenuEntry {
         Button("Grid", systemImage: "square.grid.2x2", action: onOpenGrid)
       }
 

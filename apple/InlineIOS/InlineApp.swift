@@ -1,6 +1,5 @@
 import Auth
 import Foundation
-import InlineGrid
 import InlineKit
 import Sentry
 import SwiftUI
@@ -40,7 +39,6 @@ private struct InlineSceneRoot: View {
   @State private var sceneID = UUID()
   @State private var didRestoreScene = false
   @ObservedObject private var auth = Auth.shared
-  @AppStorage(ExperimentalFeatureFlags.gridIOSKey) private var gridEnabled = false
   @SceneStorage("ios.navigation.routerState.v1") private var routerState: Data?
   @Environment(\.scenePhase) private var scenePhase
 
@@ -111,11 +109,6 @@ private struct InlineSceneRoot: View {
         appDelegate.sceneRouterRegistry.accountDidChange(from: oldValue, to: newValue)
         if newValue != nil {
           appDelegate.resumePendingSpaceJoin(router: router)
-        }
-      }
-      .onChange(of: gridEnabled) { _, enabled in
-        if !enabled {
-          GridRuntime.existing?.rooms.withdrawLocalAdmission()
         }
       }
       .onChange(of: router.persistenceRevision) { _, _ in
