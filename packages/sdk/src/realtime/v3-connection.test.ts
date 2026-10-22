@@ -5,11 +5,19 @@ import { EventEmitter } from "node:events"
 import { WebSocket, WebSocketServer } from "ws"
 import {
   InlineProtocolServerSession,
+  MessageIdGenerator,
+  ServiceConstructor,
   acceptObfuscatedClientHeader,
   bytesToHex,
   decodeAbridgedFrame,
+  decodeMessageContainer,
+  decryptRecordWithMetadata,
+  encodeBadServerSalt,
   encodeInlineInvoke,
+  encodeInlineUpdate,
   encodeAbridgedPacket,
+  encryptRecord,
+  serviceConstructor,
   makeRsaPublicKey,
   type EstablishedAuthorizationKey,
   type LoadedServerAuthorizationKey,
@@ -764,6 +772,56 @@ describe("InlineProtocolV3Connection", () => {
     await connection.close()
     await permanent.close()
   }, 30_000)
+
+  it("recovers the request when the server rejects a whole acknowledgement container", async () => {
+    const socket = new OpenWebSocketStub()
+    const authorization = testAuthorization()
+    const connection = await InlineProtocolV3Connection.connect({
+      url: "ws://inline.test/realtime/v3",
+      rsaPublicKeys: [],
+      authorization,
+      webSocketFactory: () => socket as unknown as WebSocket,
+    })
+    const carrier = acceptObfuscatedClientHeader(socket.sent[0]!, 1)
+    const decodeClient = (frame: Uint8Array, salts: bigint[]) => {
+      const decoded = decodeAbridgedFrame(carrier.inbound.process(frame))
+      if (decoded.kind !== "packet") throw new Error("unexpected quick ACK")
+      return decryptRecordWithMetadata(decoded.payload, authorization.key, {
+        direction: "client-to-server", validServerSalts: new Set(salts), nowSeconds: Date.now() / 1_000,
+      }).fields
+    }
+    const serverIds = new MessageIdGenerator()
+    const deliver = (sessionId: bigint, sequenceNumber: number, body: Uint8Array) => {
+      const record = encryptRecord(authorization.key, "server-to-client", {
+        serverSalt: 7n, sessionId, messageId: serverIds.next(Date.now(), 1, 1), sequenceNumber, body,
+      }, new Uint8Array(12 + ((16 - ((32 + body.length + 12) % 16)) % 16)))
+      socket.emit("message", Buffer.from(carrier.outbound.process(encodeAbridgedPacket(record))))
+    }
+    const first = connection.callRpc({ method: Method.GET_ME, input: { oneofKind: undefined } }).catch(() => undefined)
+    const firstRecord = decodeClient(socket.sent[1]!, [7n])
+    expect(serviceConstructor(firstRecord.body)).not.toBe(ServiceConstructor.msgContainer)
+    deliver(firstRecord.sessionId, 1, encodeInlineUpdate(RealtimeV3Update.toBinary({ message: { payload: { oneofKind: undefined } } })))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(socket.sent).toHaveLength(2)
+
+    const second = connection.callRpc({ method: Method.GET_ME, input: { oneofKind: undefined } }).catch(() => undefined)
+    const containerRecord = decodeClient(socket.sent[2]!, [7n])
+    expect(serviceConstructor(containerRecord.body)).toBe(ServiceConstructor.msgContainer)
+    const [request, acknowledgement] = decodeMessageContainer(containerRecord.body)
+    expect(serviceConstructor(acknowledgement!.body)).toBe(ServiceConstructor.msgsAck)
+    expect(request!.messageId < acknowledgement!.messageId && acknowledgement!.messageId < containerRecord.messageId).toBe(true)
+
+    deliver(firstRecord.sessionId, 2, encodeBadServerSalt(containerRecord.messageId, containerRecord.sequenceNumber, 48, 9n))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(socket.sent).toHaveLength(4)
+    const resent = decodeClient(socket.sent[3]!, [9n])
+    expect(resent.serverSalt).toBe(9n)
+    expect(resent.body).toEqual(request!.body)
+    expect(resent.sequenceNumber).toBe(request!.sequenceNumber)
+
+    await connection.close()
+    await Promise.all([first, second])
+  })
 
   it("delivers an unsolicited update while no RPC is in flight", async () => {
     const fixture = await testServer()

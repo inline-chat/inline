@@ -305,6 +305,8 @@ export class InlineProtocolV3Connection {
   #didNotifyClose = false
   #rotationTimer: ReturnType<typeof setTimeout> | undefined
   readonly #pendingAcknowledgements = new Set<bigint>()
+  /** Containers sent, so a rejection of the whole container recovers its request. */
+  readonly #sentContainers = new Map<bigint, { requestMessageId: bigint; sequenceNumber: number }>()
   #acknowledgementTimer: ReturnType<typeof setTimeout> | undefined
   #rotationDue = false
 
@@ -752,9 +754,12 @@ export class InlineProtocolV3Connection {
       }
       if (constructor === ServiceConstructor.rpcResult) {
         const result = decodeRpcResult(fields.body)
-    const pending = this.#pendingContent.get(result.requestMessageId)
+        const pending = this.#pendingContent.get(result.requestMessageId)
         if (!pending) continue
         this.#pendingContent.delete(result.requestMessageId)
+        for (const [containerId, container] of this.#sentContainers) {
+          if (container.requestMessageId === result.requestMessageId) this.#sentContainers.delete(containerId)
+        }
         this.#releasePending(pending.body)
         clearTimeout(pending.timeout)
         pending.removeAbortListener?.()
@@ -789,7 +794,16 @@ export class InlineProtocolV3Connection {
   }
 
   #handleBadMessage(body: Uint8Array, serverMessageId: bigint): void {
-    const bad = decodeBadMessageNotification(body)
+    const notification = decodeBadMessageNotification(body)
+    const container = this.#sentContainers.get(notification.badMessageId)
+    const carried = container && container.sequenceNumber === notification.badSequenceNumber
+      ? this.#pendingContent.get(container.requestMessageId)
+      : undefined
+    if (container) this.#sentContainers.delete(notification.badMessageId)
+    // A rejected container drops its acknowledgements and recovers its request alone.
+    const bad = carried
+      ? { ...notification, badMessageId: container!.requestMessageId, badSequenceNumber: carried.sequenceNumber }
+      : notification
     const pending = this.#pendingContent.get(bad.badMessageId)
     const probeEntry = [...this.#pendingProbes.entries()].find(([, value]) => value.messageId === bad.badMessageId)
     if ((!pending && !probeEntry) || bad.badSequenceNumber !== (pending ?? probeEntry![1]).sequenceNumber) {
@@ -927,7 +941,13 @@ export class InlineProtocolV3Connection {
       { messageId, sequenceNumber, body },
       { messageId: acknowledgementMessageId, sequenceNumber: nonContentSequenceNumber, body: encodeMsgsAck(acknowledgements) },
     ])
-    this.#sendEncrypted(this.#nextClientMessageId(), nonContentSequenceNumber, container, true)
+    const containerMessageId = this.#nextClientMessageId()
+    if (this.#sentContainers.size >= 128) {
+      const oldest = this.#sentContainers.keys().next().value
+      if (oldest !== undefined) this.#sentContainers.delete(oldest)
+    }
+    this.#sentContainers.set(containerMessageId, { requestMessageId: messageId, sequenceNumber: nonContentSequenceNumber })
+    this.#sendEncrypted(containerMessageId, nonContentSequenceNumber, container, true)
   }
 
   #sendEncrypted(messageId: bigint, sequenceNumber: number, body: Uint8Array, quickAck: boolean): void {
