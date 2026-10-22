@@ -23,6 +23,7 @@ import productionTrustRoots from "@inline-chat/protocol/trust-roots/inline-proto
 import { gunzipSync } from "node:zlib"
 import { isIP } from "node:net"
 import { randomBytes } from "node:crypto"
+import { installNodeAesBackend } from "@inline-chat/protocol/secure/node"
 import { InlineProtocolReplayRepository, PermanentAuthorizationKeyRepository } from "@in/server/db/models/inlineProtocol"
 import { makeAuthorizationKeyCipher } from "@in/server/modules/inlineProtocol/keyCipher"
 import { InlineProtocolAuthorizationKeys } from "@in/server/modules/inlineProtocol/authorizationKeys"
@@ -49,6 +50,10 @@ import type { RealtimeRequestMetadata } from "@in/server/realtime/types"
 import type { TrustedClientIpHeader } from "./middleware"
 import { Log } from "@in/server/utils/log"
 import { BoundedLogAggregator } from "@in/server/utils/logging/boundedLogAggregator"
+
+// Record and carrier AES through node:crypto; the portable backend costs one key
+// schedule per 16-byte block and dominated transfer CPU on the event loop.
+installNodeAesBackend()
 
 const REALTIME_V3_PATH = "/realtime/v3"
 const INLINE_PROTOCOL_VERIFICATION_PATH = "/.well-known/inline-protocol"

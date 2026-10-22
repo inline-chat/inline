@@ -193,6 +193,7 @@
         "@protobuf-ts/runtime": "^2.11.1",
       },
       "devDependencies": {
+        "@types/node": "^20.11.30",
         "typescript": "^5.8.3",
       },
     },

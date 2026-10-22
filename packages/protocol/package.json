@@ -51,6 +51,10 @@
       "types": "./dist/secure/index.d.ts",
       "default": "./dist/secure/index.js"
     },
+    "./secure/node": {
+      "types": "./dist/secure/node.d.ts",
+      "default": "./dist/secure/node.js"
+    },
     "./client": {
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"
@@ -102,6 +106,7 @@
     "@protobuf-ts/runtime": "^2.11.1"
   },
   "devDependencies": {
+    "@types/node": "^20.11.30",
     "typescript": "^5.8.3"
   },
   "publishConfig": {

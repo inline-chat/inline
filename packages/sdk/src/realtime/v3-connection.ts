@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto"
 import { WebSocket } from "ws"
+import { installNodeAesBackend } from "@inline-chat/protocol/secure/node"
 import {
   AuthenticatedServerClock,
   InlineHandshakeClient,
@@ -52,6 +53,9 @@ import {
   type RpcCall,
   type RpcResult,
 } from "@inline-chat/protocol/core"
+
+// Record and carrier AES through node:crypto instead of the portable pure-JS backend.
+installNodeAesBackend()
 
 const BOOL_TRUE = 0x997275b5
 const CONNECT_TIMEOUT_MS = 30_000

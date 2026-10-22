@@ -4,8 +4,10 @@ import {
   aesIgeEncrypt,
   authKeyId,
   computeV2MsgKey,
-  computeV2QuickAckId,
+  computeV2MsgKeyDigest,
   deriveV2Aes,
+  msgKeyFromDigest,
+  quickAckIdFromDigest,
 } from "./crypto.js"
 
 export type RecordDirection = "client-to-server" | "server-to-client"
@@ -74,7 +76,8 @@ export const decryptRecordWithMetadata = (
     const msgKey = record.slice(8, 24)
     const { key, iv } = deriveV2Aes(authKey, msgKey, validation.direction)
     const plaintext = aesIgeDecrypt(record.slice(24), key, iv)
-    const expectedMsgKey = computeV2MsgKey(authKey, plaintext, validation.direction)
+    const digest = computeV2MsgKeyDigest(authKey, plaintext, validation.direction)
+    const expectedMsgKey = msgKeyFromDigest(digest)
     const validKeyId = equalBytes(receivedKeyId, authKeyId(authKey))
     const validMessageKey = equalBytes(msgKey, expectedMsgKey)
     if (!validKeyId || !validMessageKey) throw new InvalidEncryptedRecord()
@@ -99,7 +102,7 @@ export const decryptRecordWithMetadata = (
     if (!validation.validServerSalts.has(serverSalt)) throw new RecoverableEncryptedRecordError(48, fields)
     return {
       fields,
-      quickAckId: computeV2QuickAckId(authKey, plaintext, validation.direction),
+      quickAckId: quickAckIdFromDigest(digest),
     }
   } catch (error) {
     if (error instanceof InvalidEncryptedRecord || error instanceof RecoverableEncryptedRecordError) throw error
