@@ -1647,6 +1647,30 @@ struct GridRTCEngineTests {
     #expect(safeReceipt.isQuiescent)
   }
 
+  @Test("same-revision lease replacement keeps the shared capture lease", .timeLimit(.minutes(1)))
+  func sameRevisionLeaseReplacementKeepsLease() async throws {
+    let permission = BlockingStatusGridMicrophonePermissionDriver()
+    let audio = GridAudioEngine(driver: RTCFakeAudioDriver(), permissionDriver: permission)
+    let driver = FakeGridRTCDriver()
+    let rtc = GridRTCEngine(audio: audio, driver: driver)
+    let target = InlineRTCSessionID("grid-test:1:52:1")
+
+    let lease = GridAudioLease.connectionDemand(target)
+
+    // Admission suspends inside its lease acquisition; reconciliation for the
+    // same revision acquires and commits the same lease meanwhile.
+    let admission = Task { await rtc.setDemand(demand(target: target, microphoneEnabled: false)) }
+    try await eventuallyRTC { await permission.hasStartedStatus() }
+    await rtc.audioAvailabilityChanged()
+    try await eventuallyRTC { await audio.holdsCaptureLease(lease) }
+    await permission.releaseStatus()
+    await admission.value
+
+    #expect(await audio.holdsCaptureLease(lease))
+    await rtc.setDemand(InlineRTCDemand())
+    try await eventuallyRTC { await audio.holdsCaptureLease(lease) == false }
+  }
+
   @Test("leave proves local quiescence before becoming idle")
   func leaveQuiescesLocallyFirst() async throws {
     let audio = GridAudioEngine(

@@ -302,6 +302,10 @@ actor GridAudioEngine {
     }
   }
 
+  func holdsCaptureLease(_ lease: GridAudioLease) -> Bool {
+    captureLeases.contains(lease)
+  }
+
   func releaseCaptureLease(_ lease: GridAudioLease) {
     guard captureLeases.remove(lease) != nil else { return }
     log.debug("GRID_ENGINE phase=audio_lease_released count=\(captureLeases.count)")

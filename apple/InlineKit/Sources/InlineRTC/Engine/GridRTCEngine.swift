@@ -304,14 +304,14 @@ actor GridRTCEngine {
       await releaseSupersededDemandAudioLease(nextLease)
       return
     }
-    if let demandAudioLease {
-      await audio.releaseCaptureLease(demandAudioLease)
-    }
-    guard demandRevision == revision else {
-      await releaseSupersededDemandAudioLease(nextLease)
-      return
-    }
+    // Same-revision callers want the same lease, and another one may have
+    // committed it while this acquisition was suspended. Commit before the
+    // release suspends so the stored owner is always a lease that is held.
+    let previousLease = demandAudioLease
     demandAudioLease = nextLease
+    if let previousLease, previousLease != nextLease {
+      await audio.releaseCaptureLease(previousLease)
+    }
   }
 
   private func releaseSupersededDemandAudioLease(_ lease: GridAudioLease?) async {
