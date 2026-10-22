@@ -14,12 +14,15 @@ use inline_protocol::secure::handshake::client::{
 };
 use inline_protocol::secure::handshake::{RsaPublicKey, rsa_public_key_fingerprint};
 use inline_protocol::secure::{
-    AbridgedFrame, Direction, InlineApplicationObject, RecordFields, decode_abridged_frame,
-    decode_inline_application_object, decode_rpc_error_code, decrypt_record,
-    encode_abridged_packet_with_quick_ack, encode_inline_invoke, encrypt_record,
+    AbridgedFrame, ContainerMessage, Direction, INLINE_INVOKE_CONSTRUCTOR,
+    INLINE_REALTIME_LAYER_GZIP, InlineApplicationObject, MAX_GZIP_OUTPUT_BYTES, RecordFields,
+    decode_abridged_frame, decode_inline_application_object, decode_rpc_error_code, decrypt_record,
+    encode_abridged_packet_with_quick_ack, encode_inline_invoke, encode_message_container,
+    encode_msgs_ack, encrypt_record, gzip_packed_data,
 };
 use prost::Message;
 use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::io::Read as _;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -33,13 +36,17 @@ const BAD_MSG_NOTIFICATION: u32 = 0xa7ef_f811;
 const BAD_SERVER_SALT: u32 = 0xedab_447b;
 const PING: u32 = 0x7abe_77ec;
 const PONG: u32 = 0x3477_73c5;
-const VECTOR: u32 = 0x1cb5_c415;
 const SESSION_REVOKED_CLOSE_CODE: u16 = 4401;
 /// The only 4401 reason that proves the account session itself is gone. The
 /// server also closes with 4401 `authorization_unavailable` when a temporary
 /// key is missing, which a fresh temporary key recovers.
 const SESSION_REVOKED_CONFIRMED_REASON: &str = "session_revoked_confirmed";
 const PENDING_UPDATE_CAPACITY: usize = 256;
+// Acknowledgements ride along with the next invoke; a quiet session sends them
+// alone after this delay or once this many are pending.
+const ACK_FLUSH_DELAY: Duration = Duration::from_secs(30);
+const ACK_FLUSH_PENDING: usize = 16;
+const MAX_TRACKED_CONTAINERS: usize = 128;
 const PENDING_UPDATE_BYTE_CAPACITY: usize = 8 * 1024 * 1024;
 const TEMPORARY_KEY_LIFETIME_SECONDS: i64 = 86_400;
 const TEMPORARY_KEY_ROTATION_LEAD_SECONDS: i64 = TEMPORARY_KEY_LIFETIME_SECONDS / 5;
@@ -388,6 +395,28 @@ pub struct InlineProtocolV3Connection {
     request_timeout: Duration,
     pending_update_payloads: VecDeque<Vec<u8>>,
     pending_update_bytes: usize,
+    pending_acks: Vec<i64>,
+    ack_deadline: Option<tokio::time::Instant>,
+    /// Containers sent, by container ID, with the request each carried and the
+    /// container's seqno, so a rejection of the whole container recovers it.
+    sent_containers: HashMap<i64, (i64, i32)>,
+}
+
+/// Returns `body` unchanged unless it is `gzip_packed`, which is inflated with
+/// a bounded decoder that also checks the trailer CRC and size.
+fn unpack_gzip(body: Vec<u8>) -> Result<Vec<u8>, InlineProtocolV3Error> {
+    let Some(stream) = gzip_packed_data(&body).map_err(|_| InlineProtocolV3Error::Protocol)? else {
+        return Ok(body);
+    };
+    let mut inflated = Vec::new();
+    flate2::read::GzDecoder::new(stream)
+        .take(MAX_GZIP_OUTPUT_BYTES as u64 + 1)
+        .read_to_end(&mut inflated)
+        .map_err(|_| InlineProtocolV3Error::Protocol)?;
+    if inflated.len() > MAX_GZIP_OUTPUT_BYTES {
+        return Err(InlineProtocolV3Error::Protocol);
+    }
+    Ok(inflated)
 }
 
 impl InlineProtocolV3Connection {
@@ -447,6 +476,9 @@ impl InlineProtocolV3Connection {
             request_timeout: options.request_timeout,
             pending_update_payloads: VecDeque::new(),
             pending_update_bytes: 0,
+            pending_acks: Vec::new(),
+            ack_deadline: None,
+            sent_containers: HashMap::new(),
         };
         if options.authorization.is_none() {
             let mut handshake = InlineHandshakeClient::new(options.rsa_public_keys, 1, |bytes| {
@@ -531,6 +563,15 @@ impl InlineProtocolV3Connection {
         self.session_id
     }
 
+    /// Opens a second connection on this authorization for bulk transfers and
+    /// returns it as a multiplexed session, so file parts can be in flight
+    /// together without queueing behind this connection's other requests.
+    pub async fn open_transfer_session(
+        &self,
+    ) -> Result<crate::realtime::RealtimeSession, InlineProtocolV3Error> {
+        Ok(self.reconnect().await?.into_session())
+    }
+
     /// Promotes this authenticated connection into the SDK's single
     /// multiplexed session owner for RPCs and continuously delivered updates.
     pub fn into_session(self) -> crate::realtime::RealtimeSession {
@@ -547,7 +588,7 @@ impl InlineProtocolV3Connection {
             request.body.as_ref(),
             Some(proto::realtime_v3_request::Body::Rpc(_))
         );
-        let body = encode_inline_invoke(&request.encode_to_vec(), 3)
+        let body = encode_inline_invoke(&request.encode_to_vec(), INLINE_REALTIME_LAYER_GZIP)
             .map_err(|_| InlineProtocolV3Error::Protocol)?;
         let result = self.send_content(body, read_only).await?;
         let InlineApplicationObject::Result(payload) = decode_inline_application_object(&result)
@@ -778,40 +819,38 @@ impl InlineProtocolV3Connection {
         read_only: bool,
     ) -> Result<(i64, Vec<u8>), InlineProtocolV3Error> {
         let write_admitted = AtomicBool::new(false);
-        self.send_encrypted(
-            message_id,
-            sequence_number,
-            &body,
-            true,
-            Some(&write_admitted),
-        )
-        .await
-        .map_err(|error| {
-            classify_application_send_error(
-                error,
-                read_only,
-                write_admitted.load(Ordering::Acquire),
-            )
-        })?;
+        self.send_content_record(message_id, sequence_number, &body, Some(&write_admitted))
+            .await
+            .map_err(|error| {
+                classify_application_send_error(
+                    error,
+                    read_only,
+                    write_admitted.load(Ordering::Acquire),
+                )
+            })?;
         loop {
-            let fields = self
+            let mut fields = self
                 .receive_encrypted()
                 .await
                 .map_err(|error| classify_application_send_error(error, read_only, true))?;
-            if fields.sequence_number % 2 == 1 {
-                self.send_ack(fields.message_id)
+            if fields.sequence_number % 2 == 1 && self.queue_ack(fields.message_id) {
+                self.flush_acks()
                     .await
                     .map_err(|error| classify_application_send_error(error, read_only, true))?;
             }
+            fields.body = unpack_gzip(std::mem::take(&mut fields.body))?;
             let constructor = read_u32(&fields.body, 0)?;
             if constructor == NEW_SESSION_CREATED {
                 self.authorization.server_salt = read_i64(&fields.body, 20)?;
             } else if constructor == MSGS_ACK {
                 continue;
             } else if constructor == BAD_MSG_NOTIFICATION || constructor == BAD_SERVER_SALT {
-                if read_i64(&fields.body, 4)? != message_id
-                    || read_i32(&fields.body, 12)? != sequence_number
-                {
+                let (bad_message_id, bad_sequence_number) = self.resolve_rejected(
+                    read_i64(&fields.body, 4)?,
+                    read_i32(&fields.body, 12)?,
+                    |request| (request == message_id).then_some(sequence_number),
+                );
+                if bad_message_id != message_id || bad_sequence_number != sequence_number {
                     return Err(InlineProtocolV3Error::Protocol);
                 }
                 let code = read_i32(&fields.body, 16)?;
@@ -834,7 +873,8 @@ impl InlineProtocolV3Connection {
                 .map_err(|error| classify_application_send_error(error, read_only, true))?;
             } else if constructor == RPC_RESULT {
                 if read_i64(&fields.body, 4)? == message_id {
-                    let result = fields.body[12..].to_vec();
+                    self.forget_containers_for(message_id);
+                    let result = unpack_gzip(fields.body[12..].to_vec())?;
                     if let Some(code) = decode_rpc_error_code(&result)
                         .map_err(|_| InlineProtocolV3Error::Protocol)?
                     {
@@ -887,18 +927,109 @@ impl InlineProtocolV3Connection {
         Ok(fields)
     }
 
-    async fn send_ack(&mut self, message_id: i64) -> Result<(), InlineProtocolV3Error> {
-        let body = [
-            MSGS_ACK.to_le_bytes().as_slice(),
-            VECTOR.to_le_bytes().as_slice(),
-            1_i32.to_le_bytes().as_slice(),
-            message_id.to_le_bytes().as_slice(),
-        ]
-        .concat();
+    /// Queues an acknowledgement; returns whether enough are pending to send now.
+    fn queue_ack(&mut self, message_id: i64) -> bool {
+        if !self.pending_acks.contains(&message_id) {
+            self.pending_acks.push(message_id);
+        }
+        self.ack_deadline
+            .get_or_insert_with(|| tokio::time::Instant::now() + ACK_FLUSH_DELAY);
+        self.pending_acks.len() >= ACK_FLUSH_PENDING
+    }
+
+    fn take_acks(&mut self) -> Vec<i64> {
+        self.ack_deadline = None;
+        std::mem::take(&mut self.pending_acks)
+    }
+
+    async fn flush_acks(&mut self) -> Result<(), InlineProtocolV3Error> {
+        let message_ids = self.take_acks();
+        if message_ids.is_empty() {
+            return Ok(());
+        }
         let outgoing_id = self.next_message_id()?;
         let sequence = self.next_sequence(false);
-        self.send_encrypted(outgoing_id, sequence, &body, false, None)
-            .await
+        self.send_encrypted(
+            outgoing_id,
+            sequence,
+            &encode_msgs_ack(&message_ids),
+            false,
+            None,
+        )
+        .await
+    }
+
+    /// Sends a content request; an invoke carries pending acknowledgements in one
+    /// container `[request, msgs_ack]`. Child IDs precede the container's and the
+    /// non-content seqnos follow the request's, as the server's window requires.
+    async fn send_content_record(
+        &mut self,
+        message_id: i64,
+        sequence_number: i32,
+        body: &[u8],
+        attempted: Option<&AtomicBool>,
+    ) -> Result<(), InlineProtocolV3Error> {
+        let is_invoke = body.len() >= 4 && body[..4] == INLINE_INVOKE_CONSTRUCTOR.to_le_bytes();
+        if !is_invoke || self.pending_acks.is_empty() {
+            return self
+                .send_encrypted(message_id, sequence_number, body, true, attempted)
+                .await;
+        }
+        let acks = self.take_acks();
+        let ack_message_id = self.next_message_id()?;
+        let non_content_sequence = self.next_sequence(false);
+        let container = encode_message_container(&[
+            ContainerMessage {
+                message_id,
+                sequence_number,
+                body: body.to_vec(),
+            },
+            ContainerMessage {
+                message_id: ack_message_id,
+                sequence_number: non_content_sequence,
+                body: encode_msgs_ack(&acks),
+            },
+        ])
+        .map_err(|_| InlineProtocolV3Error::Protocol)?;
+        let container_id = self.next_message_id()?;
+        if self.sent_containers.len() >= MAX_TRACKED_CONTAINERS
+            && let Some(oldest) = self.sent_containers.keys().min().copied()
+        {
+            self.sent_containers.remove(&oldest);
+        }
+        self.sent_containers
+            .insert(container_id, (message_id, non_content_sequence));
+        self.send_encrypted(
+            container_id,
+            non_content_sequence,
+            &container,
+            true,
+            attempted,
+        )
+        .await
+    }
+
+    /// Maps a rejected container to the request it carried. `sequence_for` returns
+    /// the carried request's seqno when that request is still pending.
+    fn resolve_rejected(
+        &mut self,
+        message_id: i64,
+        sequence_number: i32,
+        sequence_for: impl FnOnce(i64) -> Option<i32>,
+    ) -> (i64, i32) {
+        match self.sent_containers.remove(&message_id) {
+            Some((request, container_sequence)) if container_sequence == sequence_number => {
+                sequence_for(request)
+                    .map(|request_sequence| (request, request_sequence))
+                    .unwrap_or((message_id, sequence_number))
+            }
+            _ => (message_id, sequence_number),
+        }
+    }
+
+    fn forget_containers_for(&mut self, request_message_id: i64) {
+        self.sent_containers
+            .retain(|_, (request, _)| *request != request_message_id);
     }
 
     async fn send_encrypted(
@@ -1090,7 +1221,17 @@ pub(crate) async fn run_inline_protocol_v3_session(
         let rotation_deadline = (!rotation_requested)
             .then(|| connection.temporary_key_rotation_deadline())
             .flatten();
+        let ack_deadline = connection.ack_deadline;
         tokio::select! {
+            _ = async {
+                if let Some(deadline) = ack_deadline {
+                    tokio::time::sleep_until(deadline).await;
+                }
+            }, if ack_deadline.is_some() => {
+                if connection.flush_acks().await.is_err() {
+                    break;
+                }
+            }
             _ = async {
                 if let Some(deadline) = rotation_deadline {
                     tokio::time::sleep_until(deadline).await;
@@ -1154,7 +1295,7 @@ pub(crate) async fn run_inline_protocol_v3_session(
                         input: Some(input),
                     })),
                 };
-                let body = match encode_inline_invoke(&request.encode_to_vec(), 3) {
+                let body = match encode_inline_invoke(&request.encode_to_vec(), INLINE_REALTIME_LAYER_GZIP) {
                     Ok(body) => body,
                     Err(_) => {
                         let _ = response.send(Err(RealtimeError::InlineProtocol {
@@ -1176,7 +1317,7 @@ pub(crate) async fn run_inline_protocol_v3_session(
                 // conservatively treated as may-have-executed by the
                 // session-level retry classifier.
                 if let Err(error) = connection
-                    .send_encrypted(message_id, sequence_number, &body, true, Some(&attempted))
+                    .send_content_record(message_id, sequence_number, &body, Some(&attempted))
                     .await
                 {
                     let read_only = crate::realtime::rpc_method_is_read_only(method);
@@ -1197,7 +1338,7 @@ pub(crate) async fn run_inline_protocol_v3_session(
                 });
             }
             received = connection.receive_encrypted_unbounded() => {
-                let fields = match received {
+                let mut fields = match received {
                     Ok(fields) => fields,
                     Err(error) => {
                         if error.is_authorization_invalidated() {
@@ -1208,9 +1349,14 @@ pub(crate) async fn run_inline_protocol_v3_session(
                     },
                 };
                 if fields.sequence_number % 2 == 1
-                    && connection.send_ack(fields.message_id).await.is_err()
+                    && connection.queue_ack(fields.message_id)
+                    && connection.flush_acks().await.is_err()
                 {
                     break;
+                }
+                match unpack_gzip(std::mem::take(&mut fields.body)) {
+                    Ok(body) => fields.body = body,
+                    Err(_) => break,
                 }
                 let constructor = match read_u32(&fields.body, 0) {
                     Ok(value) => value,
@@ -1270,6 +1416,11 @@ pub(crate) async fn run_inline_protocol_v3_session(
                         pending_ping = Some(ping);
                         continue;
                     }
+                    let (request_message_id, sequence_number) = connection.resolve_rejected(
+                        request_message_id,
+                        sequence_number,
+                        |request| pending.get(&request).map(|rpc| rpc.sequence_number),
+                    );
                     let Some(rpc) = pending.remove(&request_message_id) else { continue };
                     if rpc.sequence_number != sequence_number {
                         break;
@@ -1294,7 +1445,18 @@ pub(crate) async fn run_inline_protocol_v3_session(
                 if constructor == RPC_RESULT {
                     let Ok(request_message_id) = read_i64(&fields.body, 4) else { break };
                     let Some(rpc) = pending.remove(&request_message_id) else { continue };
-                    match decode_session_rpc_response(&fields.body[12..]) {
+                    connection.forget_containers_for(request_message_id);
+                    let Ok(result_body) = unpack_gzip(fields.body[12..].to_vec()) else {
+                        let error = authenticated_result_failure(
+                            rpc.read_only,
+                            RealtimeError::InlineProtocol {
+                                message: "invalid gzip_packed result".into(),
+                            },
+                        );
+                        let _ = rpc.response.send(Err(error));
+                        break;
+                    };
+                    match decode_session_rpc_response(&result_body) {
                         Ok(Ok(result)) => {
                             if let Err(error) =
                                 crate::realtime::validate_rpc_result_for_method(rpc.method, &result)
@@ -1338,6 +1500,8 @@ pub(crate) async fn run_inline_protocol_v3_session(
         }
     }
 
+    // Best effort: the server retains unacknowledged results for resend.
+    let _ = connection.flush_acks().await;
     for (_, rpc) in pending {
         let error = if authentication_invalidated {
             authentication_invalidated_realtime_error()
@@ -1528,6 +1692,46 @@ fn authentication_invalidated_realtime_error() -> crate::realtime::RealtimeError
 mod tests {
     use super::*;
     use inline_protocol::secure::auth_key_id;
+
+    fn gzip_stream(object: &[u8]) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(object).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn pack(stream: &[u8]) -> Vec<u8> {
+        let mut body = inline_protocol::secure::GZIP_PACKED_CONSTRUCTOR
+            .to_le_bytes()
+            .to_vec();
+        // TL bytes: long form for streams of 254 bytes or more.
+        if stream.len() < 254 {
+            body.push(stream.len() as u8);
+        } else {
+            body.push(254);
+            body.extend_from_slice(&(stream.len() as u32).to_le_bytes()[..3]);
+        }
+        body.extend_from_slice(stream);
+        while !body.len().is_multiple_of(4) {
+            body.push(0);
+        }
+        body
+    }
+
+    #[test]
+    fn unpacks_gzip_packed_results_with_a_bounded_decoder() {
+        let object = vec![0x41_u8; 4_096];
+        assert_eq!(unpack_gzip(pack(&gzip_stream(&object))).unwrap(), object);
+        assert_eq!(unpack_gzip(object.clone()).unwrap(), object);
+
+        let mut corrupt = gzip_stream(&object);
+        let crc = corrupt.len() - 8;
+        corrupt[crc] ^= 0xff;
+        assert!(unpack_gzip(pack(&corrupt)).is_err());
+
+        let oversized = vec![0_u8; MAX_GZIP_OUTPUT_BYTES + 1];
+        assert!(unpack_gzip(pack(&gzip_stream(&oversized))).is_err());
+    }
 
     #[test]
     fn authorization_round_trips_without_debugging_key_material() {

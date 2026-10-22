@@ -4,6 +4,7 @@ use crate::{
     InlineProtocolV3Connection, InlineProtocolV3Error, RealtimeClient, RealtimeError,
     RealtimeSession,
 };
+use futures_util::stream::{FuturesUnordered, StreamExt as _};
 use inline_protocol::proto;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -18,6 +19,9 @@ const MAX_V3_RESUME_ATTEMPTS: u32 = 3;
 const MAX_PART_SAVE_ATTEMPTS: u32 = 3;
 const RECONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const PROCESSING_TIMEOUT: Duration = Duration::from_secs(600);
+/// Parts in flight per file on a multiplexed session (the server admits 64
+/// applications per account session and per-part saves are idempotent).
+const PARALLEL_PARTS: usize = 4;
 
 fn bounded_processing_retry_seconds(seconds: u32) -> u64 {
     u64::from(seconds.max(1)).min(MAX_PROCESSING_RETRY_SECONDS)
@@ -145,9 +149,24 @@ trait NativeUploadTransport {
         &mut self,
         upload_id: Vec<u8>,
     ) -> Result<proto::FinishUploadResult, NativeUploadError>;
+    /// Another handle to the same carrier that may run calls concurrently with
+    /// this one, when the carrier multiplexes requests.
+    fn fork(&self) -> Option<Self>
+    where
+        Self: Sized,
+    {
+        None
+    }
 }
 
 impl NativeUploadTransport for Transport<'_> {
+    fn fork(&self) -> Option<Self> {
+        match self {
+            Self::V2Session(session) => Some(Self::V2Session(session)),
+            Self::V2(_) | Self::V3(_) => None,
+        }
+    }
+
     async fn create(
         &mut self,
         input: proto::CreateUploadInput,
@@ -268,6 +287,38 @@ pub async fn upload_file_v3(
     }
 }
 
+/// Uploads through a separate V3 transfer session with several parts in
+/// flight, then, if that carrier fails, resumes on `client` with the same
+/// upload identity (accepted parts are reconciled, not resent).
+pub async fn upload_file_v3_parallel(
+    client: &mut InlineProtocolV3Connection,
+    mut input: NativeUploadInput,
+    mut progress: impl FnMut(NativeUploadProgress),
+) -> Result<proto::UploadComplete, NativeUploadError> {
+    input
+        .client_upload_id
+        .get_or_insert_with(|| *uuid::Uuid::new_v4().as_bytes());
+    // A second carrier pays for itself only beyond a few parts.
+    let worth_parallel = tokio::fs::metadata(&input.path)
+        .await
+        .is_ok_and(|metadata| {
+            metadata.len() > u64::from(NEGOTIATED_PART_SIZE) * PARALLEL_PARTS as u64
+        });
+    if worth_parallel
+        && let Ok(Ok(session)) =
+            tokio::time::timeout(RECONNECT_TIMEOUT, client.open_transfer_session()).await
+    {
+        match upload(Transport::V2Session(&session), input.clone(), &mut progress).await {
+            Ok(complete) => return Ok(complete),
+            Err(NativeUploadError::V2(error)) => {
+                log::debug!(target: "inline::upload", "transfer session failed, resuming on the main connection: {error}");
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    upload_file_v3(client, input, progress).await
+}
+
 fn resumable_v3_upload_error(error: &NativeUploadError) -> bool {
     matches!(error, NativeUploadError::V3(error) if resumable_v3_transport_error(error))
 }
@@ -358,67 +409,49 @@ async fn upload_with_processing_timeout(
     let mut processing_deadline = None;
 
     loop {
-        for index in 0..created.part_count {
-            if accepted[index as usize] {
-                continue;
-            }
+        let missing: Vec<u32> = (0..created.part_count)
+            .filter(|index| !accepted[*index as usize])
+            .collect();
+        if !missing.is_empty() {
             // Missing bytes return the upload to transfer. A previous
             // processing deadline must never cancel a healthy retransmission.
             processing_deadline = None;
-            let offset = u64::from(index) * u64::from(created.part_size);
-            let length = u64::from(created.part_size).min(byte_count - offset) as usize;
-            let mut part = vec![0_u8; length];
-            file.seek(std::io::SeekFrom::Start(offset)).await?;
-            file.read_exact(&mut part).await?;
-            let mut save_attempts = 0;
+        }
+        if transport.fork().is_some() {
+            let mut queue = missing.into_iter();
+            let mut in_flight = FuturesUnordered::new();
             loop {
-                let save = transport
-                    .save(proto::SaveUploadPartInput {
-                        upload_id: created.upload_id.clone(),
-                        part_index: index,
-                        data: part.clone(),
-                    })
-                    .await;
-                let Err(error) = save else {
+                while in_flight.len() < PARALLEL_PARTS {
+                    let Some(index) = queue.next() else { break };
+                    let part = read_part(&mut file, index, created.part_size, byte_count).await?;
+                    let mut fork = transport.fork().ok_or(NativeUploadError::Protocol)?;
+                    let upload_id = created.upload_id.clone();
+                    in_flight.push(async move {
+                        (index, save_part(&mut fork, &upload_id, index, part).await)
+                    });
+                }
+                // Dropping the remaining saves on an early return abandons only
+                // idempotent part writes; the manifest stays authoritative.
+                let Some((index, outcome)) = in_flight.next().await else {
                     break;
                 };
-                let state = match transport.state(created.upload_id.clone()).await {
-                    Ok(state) => state,
-                    Err(_) => return Err(error),
-                };
-                match proto::UploadStatus::try_from(state.status) {
-                    Ok(proto::UploadStatus::Complete) => {
-                        return state.complete.ok_or(NativeUploadError::Protocol);
-                    }
-                    Ok(proto::UploadStatus::Failed) => {
-                        let failure = state.failure.ok_or(NativeUploadError::Protocol)?;
-                        return Err(NativeUploadError::Rejected {
-                            code: failure.code,
-                            retryable: failure.retryable,
-                        });
-                    }
-                    Ok(proto::UploadStatus::Canceled) => return Err(NativeUploadError::Canceled),
-                    Ok(proto::UploadStatus::Expired) => return Err(NativeUploadError::Expired),
-                    Ok(proto::UploadStatus::Uploading | proto::UploadStatus::Processing)
-                        if state.accepted_parts.contains(&index) =>
-                    {
-                        break;
-                    }
-                    Ok(proto::UploadStatus::Uploading) => {}
-                    Ok(proto::UploadStatus::Processing | proto::UploadStatus::Unspecified)
-                    | Err(_) => return Err(NativeUploadError::Protocol),
+                if let Some(complete) = outcome? {
+                    return Ok(complete);
                 }
-                save_attempts += 1;
-                if save_attempts >= MAX_PART_SAVE_ATTEMPTS {
-                    return Err(error);
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(
-                    100 * u64::from(1_u32 << save_attempts.saturating_sub(1)),
-                ))
-                .await;
+                accepted[index as usize] = true;
+                report_progress(&accepted, created.part_size, byte_count, progress);
             }
-            accepted[index as usize] = true;
-            report_progress(&accepted, created.part_size, byte_count, progress);
+        } else {
+            for index in missing {
+                let part = read_part(&mut file, index, created.part_size, byte_count).await?;
+                if let Some(complete) =
+                    save_part(&mut transport, &created.upload_id, index, part).await?
+                {
+                    return Ok(complete);
+                }
+                accepted[index as usize] = true;
+                report_progress(&accepted, created.part_size, byte_count, progress);
+            }
         }
 
         let deadline = *processing_deadline
@@ -512,6 +545,78 @@ async fn upload_with_processing_timeout(
                 });
             }
         }
+    }
+}
+
+async fn read_part(
+    file: &mut tokio::fs::File,
+    index: u32,
+    part_size: u32,
+    byte_count: u64,
+) -> Result<Vec<u8>, NativeUploadError> {
+    let offset = u64::from(index) * u64::from(part_size);
+    let length = u64::from(part_size).min(byte_count - offset) as usize;
+    let mut part = vec![0_u8; length];
+    file.seek(std::io::SeekFrom::Start(offset)).await?;
+    file.read_exact(&mut part).await?;
+    Ok(part)
+}
+
+/// Saves one part, reconciling an ambiguous failure against the manifest.
+/// Returns the completed upload when reconciliation finds it already complete.
+async fn save_part(
+    transport: &mut impl NativeUploadTransport,
+    upload_id: &[u8],
+    index: u32,
+    part: Vec<u8>,
+) -> Result<Option<proto::UploadComplete>, NativeUploadError> {
+    let mut save_attempts = 0;
+    loop {
+        let save = transport
+            .save(proto::SaveUploadPartInput {
+                upload_id: upload_id.to_vec(),
+                part_index: index,
+                data: part.clone(),
+            })
+            .await;
+        let Err(error) = save else {
+            return Ok(None);
+        };
+        let state = match transport.state(upload_id.to_vec()).await {
+            Ok(state) => state,
+            Err(_) => return Err(error),
+        };
+        match proto::UploadStatus::try_from(state.status) {
+            Ok(proto::UploadStatus::Complete) => {
+                return state.complete.ok_or(NativeUploadError::Protocol).map(Some);
+            }
+            Ok(proto::UploadStatus::Failed) => {
+                let failure = state.failure.ok_or(NativeUploadError::Protocol)?;
+                return Err(NativeUploadError::Rejected {
+                    code: failure.code,
+                    retryable: failure.retryable,
+                });
+            }
+            Ok(proto::UploadStatus::Canceled) => return Err(NativeUploadError::Canceled),
+            Ok(proto::UploadStatus::Expired) => return Err(NativeUploadError::Expired),
+            Ok(proto::UploadStatus::Uploading | proto::UploadStatus::Processing)
+                if state.accepted_parts.contains(&index) =>
+            {
+                return Ok(None);
+            }
+            Ok(proto::UploadStatus::Uploading) => {}
+            Ok(proto::UploadStatus::Processing | proto::UploadStatus::Unspecified) | Err(_) => {
+                return Err(NativeUploadError::Protocol);
+            }
+        }
+        save_attempts += 1;
+        if save_attempts >= MAX_PART_SAVE_ATTEMPTS {
+            return Err(error);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(
+            100 * u64::from(1_u32 << save_attempts.saturating_sub(1)),
+        ))
+        .await;
     }
 }
 
@@ -725,6 +830,116 @@ mod tests {
         ) -> Result<proto::FinishUploadResult, NativeUploadError> {
             std::future::pending().await
         }
+    }
+
+    #[derive(Default)]
+    struct ConcurrentState {
+        in_flight: usize,
+        max_in_flight: usize,
+        saved: std::collections::BTreeSet<u32>,
+        fail_once: Option<u32>,
+    }
+
+    #[derive(Clone, Default)]
+    struct ConcurrentTransport(std::sync::Arc<std::sync::Mutex<ConcurrentState>>);
+
+    impl NativeUploadTransport for ConcurrentTransport {
+        async fn create(
+            &mut self,
+            input: proto::CreateUploadInput,
+        ) -> Result<proto::CreateUploadResult, NativeUploadError> {
+            Ok(proto::CreateUploadResult {
+                upload_id: vec![9; 16],
+                part_size: NEGOTIATED_PART_SIZE,
+                part_count: input.byte_count.div_ceil(u64::from(NEGOTIATED_PART_SIZE)) as u32,
+                expires_at: 1_900_000_000,
+                accepted_parts: vec![],
+            })
+        }
+
+        async fn save(
+            &mut self,
+            input: proto::SaveUploadPartInput,
+        ) -> Result<proto::SaveUploadPartResult, NativeUploadError> {
+            {
+                let mut state = self.0.lock().unwrap();
+                state.in_flight += 1;
+                state.max_in_flight = state.max_in_flight.max(state.in_flight);
+            }
+            tokio::time::sleep(Duration::from_millis(15)).await;
+            let mut state = self.0.lock().unwrap();
+            state.in_flight -= 1;
+            state.saved.insert(input.part_index);
+            if state.fail_once == Some(input.part_index) {
+                state.fail_once = None;
+                // The part was stored; only its response was lost.
+                return Err(NativeUploadError::Protocol);
+            }
+            Ok(proto::SaveUploadPartResult {
+                already_present: false,
+            })
+        }
+
+        async fn state(
+            &mut self,
+            _upload_id: Vec<u8>,
+        ) -> Result<proto::GetUploadStateResult, NativeUploadError> {
+            Ok(proto::GetUploadStateResult {
+                status: proto::UploadStatus::Uploading as i32,
+                accepted_parts: self.0.lock().unwrap().saved.iter().copied().collect(),
+                complete: None,
+                failure: None,
+            })
+        }
+
+        async fn finish(
+            &mut self,
+            _upload_id: Vec<u8>,
+        ) -> Result<proto::FinishUploadResult, NativeUploadError> {
+            Ok(proto::FinishUploadResult {
+                state: Some(proto::finish_upload_result::State::Complete(
+                    proto::UploadComplete {
+                        file_unique_id: "INDparallel".into(),
+                        media: None,
+                    },
+                )),
+            })
+        }
+
+        fn fork(&self) -> Option<Self> {
+            Some(self.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn multiplexed_carriers_keep_four_parts_in_flight_and_reconcile_each() {
+        let path = std::env::temp_dir().join(format!("inline-parallel-{}", uuid::Uuid::new_v4()));
+        let bytes = vec![5_u8; NEGOTIATED_PART_SIZE as usize * 10 + 7];
+        tokio::fs::write(&path, &bytes).await.unwrap();
+        let transport = ConcurrentTransport::default();
+        transport.0.lock().unwrap().fail_once = Some(3);
+        let mut progress = vec![];
+        let result = upload_with_processing_timeout(
+            transport.clone(),
+            NativeUploadInput::new(
+                &path,
+                "parallel.bin",
+                "application/octet-stream",
+                proto::UploadKind::Document,
+            ),
+            &mut |value| progress.push(value.accepted_bytes),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.file_unique_id, "INDparallel");
+        {
+            let state = transport.0.lock().unwrap();
+            assert_eq!(state.max_in_flight, PARALLEL_PARTS);
+            assert_eq!(state.saved, (0..11).collect());
+        }
+        assert_eq!(*progress.last().unwrap(), bytes.len() as u64);
+        tokio::fs::remove_file(path).await.unwrap();
     }
 
     #[tokio::test]

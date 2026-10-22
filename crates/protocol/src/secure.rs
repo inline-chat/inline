@@ -27,6 +27,17 @@ pub const RPC_ERROR_CONSTRUCTOR: u32 = 0x2144_ca19;
 pub const INLINE_INVOKE_CONSTRUCTOR: u32 = 0xeb7d4aa6;
 /// Realtime V3 application layer.
 pub const INLINE_REALTIME_LAYER: i32 = 3;
+/// Same request schema as layer 3; the sender decodes `gzip_packed` results.
+pub const INLINE_REALTIME_LAYER_GZIP: i32 = 4;
+/// Telegram `gzip_packed` TL constructor.
+pub const GZIP_PACKED_CONSTRUCTOR: u32 = 0x3072_cfa1;
+/// Telegram `msg_container` TL constructor.
+pub const MESSAGE_CONTAINER_CONSTRUCTOR: u32 = 0x73f1_f8dc;
+/// Telegram `msgs_ack` TL constructor.
+pub const MSGS_ACK_CONSTRUCTOR: u32 = 0x62d6_b459;
+/// Largest object a client inflates from `gzip_packed`.
+pub const MAX_GZIP_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CONTAINER_MESSAGES: usize = 1_024;
 /// Telegram `invokeAfterMsg` TL constructor.
 pub const INVOKE_AFTER_MSG_CONSTRUCTOR: u32 = 0xcb9f372d;
 /// Telegram `invokeAfterMsgs` TL constructor.
@@ -174,6 +185,70 @@ pub fn encode_inline_invoke(payload: &[u8], layer: i32) -> Result<Vec<u8>, Inval
         &layer.to_le_bytes(),
         &encode_tl_bytes(payload)?,
     ]))
+}
+
+/// One child of a `msg_container`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContainerMessage {
+    /// Child message ID.
+    pub message_id: i64,
+    /// Child sequence number.
+    pub sequence_number: i32,
+    /// Child TL object.
+    pub body: Vec<u8>,
+}
+
+/// Encodes `msg_container` with children in order. Callers assign child IDs
+/// below the container's and non-decreasing sequence numbers.
+pub fn encode_message_container(
+    messages: &[ContainerMessage],
+) -> Result<Vec<u8>, InvalidEncryptedRecord> {
+    if messages.is_empty() || messages.len() > MAX_CONTAINER_MESSAGES {
+        return Err(InvalidEncryptedRecord);
+    }
+    let mut encoded = concat(&[
+        &MESSAGE_CONTAINER_CONSTRUCTOR.to_le_bytes(),
+        &(messages.len() as i32).to_le_bytes(),
+    ]);
+    for message in messages {
+        if message.body.len() < 4
+            || message.body.len() % 4 != 0
+            || message.body[..4] == MESSAGE_CONTAINER_CONSTRUCTOR.to_le_bytes()
+        {
+            return Err(InvalidEncryptedRecord);
+        }
+        encoded.extend_from_slice(&message.message_id.to_le_bytes());
+        encoded.extend_from_slice(&message.sequence_number.to_le_bytes());
+        encoded.extend_from_slice(&(message.body.len() as i32).to_le_bytes());
+        encoded.extend_from_slice(&message.body);
+    }
+    Ok(encoded)
+}
+
+/// Encodes `msgs_ack` for the given message IDs.
+pub fn encode_msgs_ack(message_ids: &[i64]) -> Vec<u8> {
+    let mut body = concat(&[
+        &MSGS_ACK_CONSTRUCTOR.to_le_bytes(),
+        &TL_VECTOR_CONSTRUCTOR.to_le_bytes(),
+        &(message_ids.len() as i32).to_le_bytes(),
+    ]);
+    for message_id in message_ids {
+        body.extend_from_slice(&message_id.to_le_bytes());
+    }
+    body
+}
+
+/// Returns the gzip stream inside `gzip_packed`, or `None` when `body` is
+/// another object. Inflate it with a bounded decoder.
+pub fn gzip_packed_data(body: &[u8]) -> Result<Option<&[u8]>, InvalidEncryptedRecord> {
+    if body.len() < 4 || body[..4] != GZIP_PACKED_CONSTRUCTOR.to_le_bytes() {
+        return Ok(None);
+    }
+    let (packed, consumed) = decode_tl_bytes(&body[4..])?;
+    if consumed != body.len() - 4 {
+        return Err(InvalidEncryptedRecord);
+    }
+    Ok(Some(packed))
 }
 
 /// Encodes `inline.result` around exact protobuf payload bytes.

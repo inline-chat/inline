@@ -51,7 +51,7 @@ pub use client_info::{AuthMetadata, ClientIdentity, ClientIdentityError};
 pub use inline_protocol::proto;
 pub use native_upload::{
     NativeUploadError, NativeUploadInput, NativeUploadProgress, upload_file_session,
-    upload_file_v2, upload_file_v3,
+    upload_file_v2, upload_file_v3, upload_file_v3_parallel,
 };
 pub use realtime::{
     DEFAULT_CONNECT_TIMEOUT, DEFAULT_HEARTBEAT_INTERVAL, DEFAULT_HEARTBEAT_TIMEOUT,
@@ -80,6 +80,6 @@ pub mod prelude {
         RealtimeSession, RpcRequest, SendCodeResult, UploadFileBytesInput, UploadFileInput,
         UploadFileResult, UploadFileType, UploadFileTypeParseError, UploadThumbnailBytesInput,
         UploadVideoMetadata, VerifyCodeResult, proto, upload_file_session, upload_file_v2,
-        upload_file_v3,
+        upload_file_v3, upload_file_v3_parallel,
     };
 }

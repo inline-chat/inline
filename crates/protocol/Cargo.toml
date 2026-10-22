@@ -28,6 +28,7 @@ sha2 = "0.10.8"
 subtle = "2.6.1"
 
 [dev-dependencies]
+flate2 = "1.0.30"
 hex = "0.4.3"
 serde_json.workspace = true
 

@@ -6,9 +6,11 @@ use crate::{
     AuthenticatedRealtime, clear_owned_authority_if_invalidated, connect_realtime,
     resumable_v2_upload_error,
 };
+use futures_util::stream::{FuturesUnordered, StreamExt as _};
 use inline_protocol::proto;
-use inline_sdk::{RealtimeError, RpcRequest};
+use inline_sdk::{RealtimeError, RealtimeSession, RpcRequest};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -16,6 +18,8 @@ use tokio::io::AsyncWriteExt;
 const PART_SIZE: u32 = 512 * 1024;
 const MAX_DOCUMENT_BYTES: u64 = 500_000_000;
 const RPC_TIMEOUT: Duration = Duration::from_secs(30);
+/// Ranges in flight on a transfer session (the server admits 16 per session).
+const PARALLEL_RANGES: usize = 4;
 
 #[derive(Clone)]
 struct FilePartRequest(proto::GetFilePartInput);
@@ -47,9 +51,48 @@ trait FilePartFetching {
         &mut self,
         request: proto::GetFilePartInput,
     ) -> Result<proto::GetFilePartResult, Box<dyn std::error::Error>>;
+
+    /// A separate multiplexed carrier for parallel ranges, when one can be opened.
+    async fn parallel_fetcher(&mut self) -> Option<ParallelFetcher> {
+        None
+    }
+}
+
+/// Fetches ranges concurrently; any failure ends the parallel stage and the
+/// sequential path, with its own retries and reconnects, continues the file.
+#[derive(Clone)]
+enum ParallelFetcher {
+    Session(RealtimeSession),
+    #[cfg(test)]
+    Memory(std::sync::Arc<tests::MemoryParallel>),
+}
+
+impl ParallelFetcher {
+    async fn fetch(
+        &self,
+        request: proto::GetFilePartInput,
+    ) -> Result<proto::GetFilePartResult, Box<dyn std::error::Error>> {
+        match self {
+            Self::Session(session) => Ok(tokio::time::timeout(
+                RPC_TIMEOUT,
+                session.call(FilePartRequest(request)),
+            )
+            .await
+            .map_err(|_| RealtimeError::Timeout {
+                operation: "native download RPC",
+                timeout: RPC_TIMEOUT,
+            })??),
+            #[cfg(test)]
+            Self::Memory(memory) => memory.fetch(request).await,
+        }
+    }
 }
 
 impl FilePartFetching for AuthenticatedRealtime {
+    async fn parallel_fetcher(&mut self) -> Option<ParallelFetcher> {
+        self.open_parallel_fetcher().await
+    }
+
     async fn fetch_part(
         &mut self,
         request: proto::GetFilePartInput,
@@ -89,6 +132,18 @@ impl FilePartFetching for AuthenticatedRealtime {
                     Err(error) => return Err(error),
                 }
             }
+        }
+    }
+}
+
+impl AuthenticatedRealtime {
+    async fn open_parallel_fetcher(&mut self) -> Option<ParallelFetcher> {
+        let Self::V3 { connection, .. } = self else {
+            return None;
+        };
+        match tokio::time::timeout(RPC_TIMEOUT, connection.open_transfer_session()).await {
+            Ok(Ok(session)) => Some(ParallelFetcher::Session(session)),
+            _ => None,
         }
     }
 }
@@ -252,6 +307,12 @@ async fn download_ranges(
         .prefix(".inline-download-")
         .tempfile_in(parent)?;
     let mut file = tokio::fs::File::from_std(staged.reopen()?);
+    // A second carrier pays for itself only beyond a few ranges.
+    if expected_size > u64::from(request.limit) * PARALLEL_RANGES as u64
+        && let Some(fetcher) = transport.parallel_fetcher().await
+    {
+        request.offset = parallel_fill(&fetcher, &mut file, &request, expected_size).await?;
+    }
     while request.offset < expected_size {
         let part = transport.fetch_part(request.clone()).await?;
         validate_part(&request, &part, expected_size)?;
@@ -264,6 +325,51 @@ async fn download_ranges(
     drop(file);
     staged.persist_noclobber(output)?;
     Ok(request.offset)
+}
+
+/// Fetches ranges `PARALLEL_RANGES` at a time and writes them in order.
+/// Returns the contiguous prefix written; a fetch failure stops the stage
+/// there, while a range that fails validation is fatal.
+async fn parallel_fill(
+    fetcher: &ParallelFetcher,
+    file: &mut tokio::fs::File,
+    request: &proto::GetFilePartInput,
+    expected_size: u64,
+) -> Result<u64, Box<dyn std::error::Error>> {
+    let mut written = request.offset;
+    let mut next = request.offset;
+    let mut ready = BTreeMap::<u64, proto::GetFilePartResult>::new();
+    let mut in_flight = FuturesUnordered::new();
+    loop {
+        while in_flight.len() + ready.len() < PARALLEL_RANGES && next < expected_size {
+            let mut range = request.clone();
+            range.offset = next;
+            next += u64::from(range.limit);
+            let fetcher = fetcher.clone();
+            in_flight.push(async move {
+                let result = fetcher.fetch(range.clone()).await;
+                (range, result)
+            });
+        }
+        let Some((range, result)) = in_flight.next().await else {
+            break;
+        };
+        let part = match result {
+            Ok(part) => part,
+            Err(error) => {
+                log::debug!(target: "inline::download", "parallel download stopped at {written} bytes: {error}");
+                return Ok(written);
+            }
+        };
+        validate_part(&range, &part, expected_size)?;
+        ready.insert(range.offset, part);
+        while let Some(part) = ready.remove(&written) {
+            file.write_all(&part.data).await?;
+            written += part.data.len() as u64;
+            log::debug!(target: "inline::download", "download accepted {written}/{expected_size} bytes");
+        }
+    }
+    Ok(written)
 }
 
 fn validate_part(
@@ -313,6 +419,41 @@ mod tests {
         offsets: Vec<u64>,
         corruption: Option<Corruption>,
         competing_output: Option<std::path::PathBuf>,
+        parallel: Option<std::sync::Arc<MemoryParallel>>,
+    }
+
+    #[derive(Default)]
+    pub(super) struct MemoryParallel {
+        bytes: Vec<u8>,
+        state: std::sync::Mutex<(usize, usize, Vec<u64>)>,
+        fail_at: Option<u64>,
+        corrupt_at: Option<u64>,
+    }
+
+    impl MemoryParallel {
+        pub(super) async fn fetch(
+            &self,
+            request: proto::GetFilePartInput,
+        ) -> Result<proto::GetFilePartResult, Box<dyn std::error::Error>> {
+            {
+                let mut state = self.state.lock().unwrap();
+                state.0 += 1;
+                state.1 = state.1.max(state.0);
+                state.2.push(request.offset);
+            }
+            // Later ranges finish first so writes must be reordered.
+            let delay = 20_u64.saturating_sub(request.offset / u64::from(PART_SIZE) * 3);
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            self.state.lock().unwrap().0 -= 1;
+            if self.fail_at == Some(request.offset) {
+                return Err(Box::new(RealtimeError::ConnectionClosed));
+            }
+            let mut part = range(&self.bytes, &request);
+            if self.corrupt_at == Some(request.offset) {
+                part.sha256[0] ^= 1;
+            }
+            Ok(part)
+        }
     }
 
     fn request() -> proto::GetFilePartInput {
@@ -340,6 +481,10 @@ mod tests {
     }
 
     impl FilePartFetching for MemoryFetcher {
+        async fn parallel_fetcher(&mut self) -> Option<ParallelFetcher> {
+            self.parallel.clone().map(ParallelFetcher::Memory)
+        }
+
         async fn fetch_part(
             &mut self,
             request: proto::GetFilePartInput,
@@ -370,7 +515,93 @@ mod tests {
             offsets: Vec::new(),
             corruption,
             competing_output: None,
+            parallel: None,
         }
+    }
+
+    fn parallel_source() -> Vec<u8> {
+        (0..PART_SIZE as usize * 9 + 123)
+            .map(|index| (index % 251) as u8)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn parallel_ranges_are_written_in_order_with_four_in_flight() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("parallel.bin");
+        let bytes = parallel_source();
+        let parallel = std::sync::Arc::new(MemoryParallel {
+            bytes: bytes.clone(),
+            ..Default::default()
+        });
+        let mut transport = MemoryFetcher {
+            bytes: bytes.clone(),
+            parallel: Some(parallel.clone()),
+            ..memory(None)
+        };
+        let written = download_ranges(&mut transport, request(), bytes.len() as u64, &output)
+            .await
+            .unwrap();
+        assert_eq!(written, bytes.len() as u64);
+        assert_eq!(tokio::fs::read(&output).await.unwrap(), bytes);
+        assert!(transport.offsets.is_empty());
+        let state = parallel.state.lock().unwrap();
+        assert_eq!(state.1, PARALLEL_RANGES);
+        assert_eq!(state.2.len(), 10);
+    }
+
+    #[tokio::test]
+    async fn a_failed_parallel_range_continues_sequentially_from_the_written_prefix() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("fallback.bin");
+        let bytes = parallel_source();
+        let fail_at = u64::from(PART_SIZE) * 5;
+        let parallel = std::sync::Arc::new(MemoryParallel {
+            bytes: bytes.clone(),
+            fail_at: Some(fail_at),
+            ..Default::default()
+        });
+        let mut transport = MemoryFetcher {
+            bytes: bytes.clone(),
+            parallel: Some(parallel),
+            ..memory(None)
+        };
+        download_ranges(&mut transport, request(), bytes.len() as u64, &output)
+            .await
+            .unwrap();
+        assert_eq!(tokio::fs::read(&output).await.unwrap(), bytes);
+        // Ranges finish out of order, so the written prefix may stop before the failed range.
+        let resumed = *transport.offsets.first().unwrap();
+        assert!(resumed > 0 && resumed <= fail_at && resumed.is_multiple_of(u64::from(PART_SIZE)));
+        assert_eq!(
+            transport.offsets,
+            (resumed / u64::from(PART_SIZE)..10)
+                .map(|index| index * u64::from(PART_SIZE))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_corrupt_parallel_range_never_publishes_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("corrupt.bin");
+        let bytes = parallel_source();
+        let parallel = std::sync::Arc::new(MemoryParallel {
+            bytes: bytes.clone(),
+            corrupt_at: Some(u64::from(PART_SIZE) * 2),
+            ..Default::default()
+        });
+        let mut transport = MemoryFetcher {
+            bytes: bytes.clone(),
+            parallel: Some(parallel),
+            ..memory(None)
+        };
+        assert!(
+            download_ranges(&mut transport, request(), bytes.len() as u64, &output)
+                .await
+                .is_err()
+        );
+        assert!(!output.exists());
     }
 
     #[tokio::test]

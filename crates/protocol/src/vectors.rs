@@ -19,6 +19,40 @@ mod tests {
         );
         let corpus: serde_json::Value = serde_json::from_str(INLINE_PROTOCOL_V1_JSON).unwrap();
         assert_eq!(corpus["formatVersion"], 1);
+        let service = &corpus["serviceObjects"];
+        let packed_result =
+            hex::decode(service["gzipPackedRpcResultHex"].as_str().unwrap()).unwrap();
+        assert_eq!(packed_result[..4], 0xf35c_6d01_u32.to_le_bytes());
+        let stream = crate::secure::gzip_packed_data(&packed_result[12..])
+            .unwrap()
+            .unwrap();
+        let mut inflated = Vec::new();
+        std::io::Read::read_to_end(&mut flate2::read::GzDecoder::new(stream), &mut inflated)
+            .unwrap();
+        assert_eq!(
+            hex::encode(inflated),
+            service["gzipPackedInnerResultHex"].as_str().unwrap()
+        );
+        let invoke =
+            hex::decode(corpus["applicationObjects"]["invokeHex"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            hex::encode(
+                crate::secure::encode_message_container(&[
+                    crate::secure::ContainerMessage {
+                        message_id: 4,
+                        sequence_number: 1,
+                        body: invoke
+                    },
+                    crate::secure::ContainerMessage {
+                        message_id: 8,
+                        sequence_number: 0,
+                        body: crate::secure::encode_msgs_ack(&[4]),
+                    },
+                ])
+                .unwrap()
+            ),
+            service["containerHex"].as_str().unwrap()
+        );
         assert_eq!(corpus["protocol"], "Inline Protocol v1");
         assert_eq!(
             corpus["encryptedRecords"]["clientToServer"]["recordHex"],

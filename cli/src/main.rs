@@ -102,7 +102,7 @@ use inline_protocol::proto;
 use inline_sdk::api::ApiClient;
 use inline_sdk::{
     InlineProtocolV3Connection, NativeUploadError, NativeUploadInput, RealtimeClient, RpcRequest,
-    upload_file_v2, upload_file_v3,
+    upload_file_v2, upload_file_v3_parallel,
 };
 
 #[allow(clippy::large_enum_variant)]
@@ -245,7 +245,7 @@ impl AuthenticatedRealtime {
                     OsRng.fill_bytes(&mut client_upload_id);
                     input.client_upload_id = Some(client_upload_id);
                 }
-                match upload_file_v3(connection, input.clone(), |progress| {
+                match upload_file_v3_parallel(connection, input.clone(), |progress| {
                     log::debug!(target: "inline::upload", "upload accepted {}/{} bytes", progress.accepted_bytes, progress.total_bytes);
                 }).await {
                     Ok(upload) => Ok(upload),
@@ -261,7 +261,7 @@ impl AuthenticatedRealtime {
                         *connection =
                             regenerate_inline_protocol_temporary(url, &permanent, auth_store)
                                 .await?;
-                        Ok(upload_file_v3(connection, input, |progress| {
+                        Ok(upload_file_v3_parallel(connection, input, |progress| {
                             log::debug!(target: "inline::upload", "upload accepted {}/{} bytes", progress.accepted_bytes, progress.total_bytes);
                         }).await?)
                     }

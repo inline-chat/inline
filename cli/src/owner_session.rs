@@ -7,7 +7,7 @@ use inline_protocol::proto;
 use inline_sdk::{
     InlineProtocolAuthorization, InlineProtocolPublicKey, InlineProtocolV3Connection,
     InlineProtocolV3Error, NativeUploadError, NativeUploadInput, RealtimeClient, RealtimeSession,
-    RpcRequest, upload_file_v2, upload_file_v3,
+    RpcRequest, upload_file_v2, upload_file_v3_parallel,
 };
 use rand::{RngCore, rngs::OsRng};
 
@@ -135,7 +135,7 @@ impl OwnerSession {
         match &mut self.connection {
             OwnerConnection::V2(connection) => Ok(upload_file_v2(connection, input, |_| {}).await?),
             OwnerConnection::V3(connection) => {
-                match upload_file_v3(connection, input.clone(), |_| {}).await {
+                match upload_file_v3_parallel(connection, input.clone(), |_| {}).await {
                     Ok(upload) => Ok(upload),
                     Err(NativeUploadError::V3(error))
                         if temporary_reconnect_can_regenerate(&error) =>
@@ -163,7 +163,7 @@ impl OwnerSession {
                         regenerated.bind_temporary(permanent).await?;
                         regenerated.call(proto::GetMeInput {}).await?;
                         *connection = regenerated;
-                        Ok(upload_file_v3(connection, input, |_| {}).await?)
+                        Ok(upload_file_v3_parallel(connection, input, |_| {}).await?)
                     }
                     Err(NativeUploadError::V3(error)) => Err(error.into()),
                     Err(error) => Err(error.into()),
