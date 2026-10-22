@@ -2,7 +2,8 @@ import { nanoid } from "nanoid"
 import { type FileTypes } from "@in/server/modules/files/types"
 import { generateFileUniqueId } from "@in/server/modules/files/fileId"
 import { uploadToBucket } from "@in/server/modules/files/uploadToBucket"
-import { files, type DbNewFile } from "@in/server/db/schema"
+import { PartHasher } from "@in/server/modules/files/partHashes"
+import { filePartHashes, files, type DbNewFile } from "@in/server/db/schema"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import { db } from "@in/server/db"
 import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
@@ -56,6 +57,8 @@ export type UploadedFileObject = {
   fileUniqueId: string
   path: string
   prefix?: string
+  /** Range hashes of the bytes written; insert with the file row when present. */
+  partHashes?: Buffer
 }
 
 export function prepareFileObjectRecord(
@@ -119,12 +122,16 @@ export async function uploadFileObject(
     })
 
     const prepared = prepareFileObjectRecord(file.size, fileType, normalizedMetadata, context, identity)
+    const partHasher = new PartHasher()
     try {
       await uploadToBucket(file, {
         path: `${FILES_PATH_PREFIX}/${prepared.path}`,
         type: normalizedMetadata.mimeType,
         signal,
+        observe: (chunk) => partHasher.update(chunk),
       })
+      // Anchors native range downloads of this file to the bytes we sent.
+      prepared.partHashes = partHasher.finish(file.size)
       log.info("File uploaded to bucket successfully", { fileType, userId: context.userId })
     } catch (error) {
       const storageError = describeStorageError(error)
@@ -168,6 +175,12 @@ export async function uploadFile(
     const [dbFile] = await db.insert(files).values(prepared.dbFile).returning()
     if (!dbFile) {
       throw new Error("No file returned from database")
+    }
+    if (prepared.partHashes) {
+      // Without the row, range downloads hash the bytes they read; never fail the upload for it.
+      await db.insert(filePartHashes).values({ fileId: dbFile.id, hashes: prepared.partHashes })
+        .onConflictDoNothing({ target: filePartHashes.fileId })
+        .catch((error) => log.warn("Failed to record file part hashes", { error }))
     }
     log.info("File saved to database successfully", { fileUniqueId: prepared.fileUniqueId })
     return { dbFile, fileUniqueId: prepared.fileUniqueId, prefix: prepared.prefix }

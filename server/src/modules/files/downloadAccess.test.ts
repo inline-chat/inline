@@ -113,7 +113,8 @@ describe("native download authorization", () => {
     now = 60_000
     await expect(operations.getPart(request, context)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
     expect(lookups).toBe(3)
-    expect(reads).toBe(3)
+    // One read-ahead window served every admitted range within the authorization lifetime.
+    expect(reads).toBe(1)
   })
 
   test("requires the exact message reference and current chat access for documents and thumbnails", async () => {

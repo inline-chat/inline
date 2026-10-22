@@ -18,6 +18,7 @@ import { createHash, randomBytes } from "node:crypto"
 import { db } from "@in/server/db"
 import {
   documents,
+  filePartHashes,
   files,
   inlineProtocolAuthKeys,
   inlineUploadParts,
@@ -31,6 +32,7 @@ import {
   type DbInlineUpload,
 } from "@in/server/db/schema"
 import { decrypt } from "@in/server/modules/encryption/encryption"
+import { partHashesFromManifest } from "@in/server/modules/files/partHashes"
 import { INLINE_TRANSFER_PART_SIZE, INLINE_UPLOAD_MAX_PARTS } from "@inline-chat/protocol/transfers"
 
 export const INLINE_UPLOAD_PART_SIZE = INLINE_TRANSFER_PART_SIZE
@@ -956,6 +958,15 @@ export class InlineUploadRepository {
         throw new InlineUploadPublicationConflictError()
       }
 
+      // Range hashes come from the manifest verified at receipt, never from storage.
+      const manifest = await tx.select({
+        partIndex: inlineUploadParts.partIndex,
+        byteCount: inlineUploadParts.byteCount,
+        sha256: inlineUploadParts.sha256,
+      }).from(inlineUploadParts)
+        .where(eq(inlineUploadParts.uploadDbId, upload.id))
+        .orderBy(asc(inlineUploadParts.partIndex))
+      const partHashes = partHashesFromManifest(manifest, Number(upload.byteCount))
       const [insertedFile] = await tx.insert(files)
         .values(publication.file.record)
         .onConflictDoNothing({ target: files.fileUniqueId })
@@ -966,6 +977,10 @@ export class InlineUploadRepository {
         .limit(1))[0]
       if (!file) throw new InlineUploadPublicationConflictError()
       assertPublicationFileMatches(file, publication.file)
+      if (partHashes) {
+        await tx.insert(filePartHashes).values({ fileId: file.id, hashes: partHashes })
+          .onConflictDoNothing({ target: filePartHashes.fileId })
+      }
 
       let mediaId: number
       switch (publication.media.kind) {

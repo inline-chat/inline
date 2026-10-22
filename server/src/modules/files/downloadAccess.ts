@@ -2,7 +2,7 @@ import type { FileMessageLocation } from "@inline-chat/protocol/core"
 import { eq, sql } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { getFileByUniqueId } from "@in/server/db/models/files"
-import { chats, spaces } from "@in/server/db/schema"
+import { chats, filePartHashes, spaces } from "@in/server/db/schema"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { INLINE_TRANSFER_MAX_LOCATOR_ID } from "@inline-chat/protocol/transfers"
@@ -87,4 +87,11 @@ export async function resolveDownloadFile(
     limit 1
   `)
   return references.length > 0 ? file : undefined
+}
+
+/** The recorded range hashes for a file, if its upload recorded them. */
+export async function loadFilePartHashes(fileId: number): Promise<Uint8Array | undefined> {
+  const [row] = await db.select({ hashes: filePartHashes.hashes }).from(filePartHashes)
+    .where(eq(filePartHashes.fileId, fileId)).limit(1)
+  return row ? Uint8Array.from(row.hashes) : undefined
 }

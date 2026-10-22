@@ -9,13 +9,22 @@ type BucketWriter = (
   file: File,
   type: string,
   signal: AbortSignal,
+  observe?: (chunk: Uint8Array) => void,
 ) => Promise<number>
 
-const writeBucketObject: BucketWriter = async (path, file, type, signal) => {
+const writeBucketObject: BucketWriter = async (path, file, type, signal, observe) => {
   const r2 = getR2Aws()
   if (!r2) throw new Error("R2 is not initialized")
+  const body = observe
+    ? file.stream().pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        observe(chunk)
+        controller.enqueue(chunk)
+      },
+    }))
+    : file.stream()
   await r2.client.send(new PutObjectCommand({
-    Body: Readable.fromWeb(file.stream() as never),
+    Body: Readable.fromWeb(body as never),
     Bucket: r2.bucket,
     ContentLength: file.size,
     ContentType: type,
@@ -39,7 +48,15 @@ export async function uploadToBucket(
     type,
     signal,
     timeoutMs = DEFAULT_BUCKET_WRITE_TIMEOUT_MS,
-  }: { path: string; type: string; signal?: AbortSignal; timeoutMs?: number },
+    observe,
+  }: {
+    path: string
+    type: string
+    signal?: AbortSignal
+    timeoutMs?: number
+    /** Sees every body chunk as it is sent, in order. */
+    observe?: (chunk: Uint8Array) => void
+  },
   write: BucketWriter = writeBucketObject,
 ): Promise<void> {
   if (file.size === 0) {
@@ -54,7 +71,7 @@ export async function uploadToBucket(
 
   const deadline = AbortSignal.timeout(timeoutMs)
   const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline
-  const written = await write(path, file, type, requestSignal)
+  const written = await write(path, file, type, requestSignal, observe)
   if (written !== file.size) {
     throw new Error(`File storage wrote ${written} of ${file.size} bytes`)
   }

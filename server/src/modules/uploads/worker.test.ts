@@ -11,7 +11,7 @@ import {
   type InlineUploadPublication,
   type InlineUploadRecord,
 } from "@in/server/db/models/inlineUploads"
-import { files, inlineUploads } from "@in/server/db/schema"
+import { filePartHashes, files, inlineUploads } from "@in/server/db/schema"
 import { encrypt } from "@in/server/modules/encryption/encryption"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { ApiError, InlineError } from "@in/server/types/errors"
@@ -931,6 +931,14 @@ describe("native upload multipart worker", () => {
     expect(staging.reads).toBe(25)
     // Groups were hashed in order while compacting, so the object is never read back.
     expect(multipart.streams).toBe(0)
+    // Range hashes are recorded from the verified manifest for downloads.
+    const published = await repository.get(created.uploadId, owner)
+    const [stored] = await db.select({ id: files.id }).from(files)
+      .where(eq(files.fileUniqueId, published!.resultFileUniqueId!)).limit(1)
+    const [hashes] = await db.select().from(filePartHashes).where(eq(filePartHashes.fileId, stored!.id))
+    const expectedHashes = Buffer.concat(Array.from({ length: 25 }, (_, index) => createHash("sha256")
+      .update(body.subarray(index * INLINE_TRANSFER_PART_SIZE, (index + 1) * INLINE_TRANSFER_PART_SIZE)).digest()))
+    expect(Buffer.from(hashes!.hashes).equals(expectedHashes)).toBeTrue()
     console.log("UPLOAD_STORAGE_OPS evicted 25-part", JSON.stringify(storageOps(staging, multipart, created.partCount)))
   })
 

@@ -38,7 +38,7 @@ describe("native download ranges", () => {
     expect(lookups).toBe(0)
   })
 
-  test.each(["V2", "V3"] as const)("%s reads only the requested range, returns exact tail/EOF and a digest", async (carrier) => {
+  test.each(["V2", "V3"] as const)("%s reads one aligned window, returns exact tail/EOF and a digest", async (carrier) => {
     const currentContext = carrierContext(carrier)
     const calls: number[][] = []
     const operations = new NativeDownloadOperations(async () => file, async (_path, offset, length) => {
@@ -51,7 +51,8 @@ describe("native download ranges", () => {
     })
     expect((await operations.getPart(request(4n), currentContext)).data).toEqual(new Uint8Array([5]))
     expect((await operations.getPart(request(5n), currentContext)).data.length).toBe(0)
-    expect(calls).toEqual([[0, 4], [4, 1]])
+    // The read-ahead window covers the whole five-byte file; the tail is served from memory.
+    expect(calls).toEqual([[0, 5]])
     await expect(operations.getPart(request(6n), currentContext)).rejects.toMatchObject({ code: RpcError_Code.BAD_REQUEST })
   })
 
@@ -78,29 +79,39 @@ describe("native download ranges", () => {
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
     const operations = new NativeDownloadOperations(async () => file, async () => { await gate; throw new Error("storage failed") })
-    const pending = Array.from({ length: 8 }, () => operations.getPart(request(), currentContext).catch((error: unknown) => error))
+    const pending = Array.from({ length: 16 }, () => operations.getPart(request(), currentContext).catch((error: unknown) => error))
     await expect(operations.getPart(request(), currentContext)).rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT, codeNumber: 429 })
     release()
-    await Promise.all(pending)
+    expect((await Promise.all(pending)).every((error) => error instanceof Error && error.message === "storage failed")).toBeTrue()
     await expect(operations.getPart(request(), currentContext)).rejects.toThrow("storage failed")
   })
 
-  test.each(["V2", "V3"] as const)("%s bounds global reads across different account sessions", async (carrier) => {
+  test.each(["V2", "V3"] as const)("%s bounds requested bytes in flight across account sessions", async (carrier) => {
     const currentContext = carrierContext(carrier)
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })
-    const operations = new NativeDownloadOperations(async () => file, async () => { await gate; return bytes.slice(0, 4) })
-    const pending = Array.from({ length: 64 }, (_, sessionId) => operations.getPart(request(), { ...currentContext, sessionId: sessionId + 1 }))
-    await expect(operations.getPart(request(), { ...currentContext, sessionId: 100 })).rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT })
+    const operations = new NativeDownloadOperations(async () => file, async (_path, _offset, length) => {
+      await gate
+      return bytes.slice(0, length)
+    }, 25_000, { maxBytesInFlight: 10 })
+    const pending = [1, 2].map((sessionId) => operations.getPart(request(0n, 4), { ...currentContext, sessionId }))
+    // 8 bytes admitted; a third 4-byte request would exceed 10 even from another session.
+    await expect(operations.getPart(request(0n, 4), { ...currentContext, sessionId: 3 }))
+      .rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT })
+    // Two more bytes still fit the budget.
+    pending.push(operations.getPart(request(0n, 2), { ...currentContext, sessionId: 4 }))
     release()
     await Promise.all(pending)
     expect((await operations.getPart(request(), currentContext)).data.length).toBe(4)
   })
 
   test("fails closed on short or oversized storage responses", async () => {
-    for (const length of [3, 5]) {
+    // The window for this five-byte file is the whole file.
+    for (const length of [4, 6]) {
       const operations = new NativeDownloadOperations(async () => file, async () => new Uint8Array(length))
       await expect(operations.getPart(request(), context)).rejects.toMatchObject({ code: RpcError_Code.INTERNAL_ERROR })
+    }
+    for (const length of [3, 5]) {
       const stream = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(length)); c.close() } })
       await expect(readFileBytes(stream, 4)).rejects.toBeInstanceOf(FileByteLengthError)
     }
@@ -129,18 +140,19 @@ describe("native download ranges", () => {
     let canceled = 0
     const operations = new NativeDownloadOperations(async () => file, async (_path, _offset, length, signal) => {
       reads += 1
-      if (reads > 8) return bytes.slice(0, length)
+      if (reads > 1) return bytes.slice(0, length)
       return readFileBytes(new ReadableStream<Uint8Array>({ cancel() { canceled += 1 } }), length, signal)
     }, 10)
     const currentContext = carrierContext("V2")
-    const pending = Array.from({ length: 8 }, () => operations.getPart(request(), currentContext).catch((error: unknown) => error))
+    const pending = Array.from({ length: 16 }, () => operations.getPart(request(), currentContext).catch((error: unknown) => error))
     await expect(operations.getPart(request(), currentContext)).rejects.toMatchObject({ code: RpcError_Code.RATE_LIMIT })
     for (const result of await Promise.all(pending)) {
       expect(toRealtimeRpcError(result)).toMatchObject({
         code: RpcError_Code.INTERNAL_ERROR, codeNumber: 408, message: "File download part timed out",
       })
     }
-    expect(canceled).toBe(8)
+    // Sixteen ranges of one window share a single storage read, canceled once.
+    expect(canceled).toBe(1)
     const recovered = await Promise.all(Array.from({ length: 8 }, () => operations.getPart(request(), currentContext)))
     expect(recovered.every((part) => part.data.length === 4)).toBe(true)
   })
@@ -377,8 +389,14 @@ describe("native download ranges", () => {
     await operations.getPart(request(), carrierContext(carrier))
     await operations.getPart(request(4n), carrierContext(carrier))
     expect(traces).toEqual([
-      { authorizationMs: 7, storageMs: 11, bytes: 4, carrier, cacheHit: false, outcome: "ok" },
-      { authorizationMs: 0, storageMs: 11, bytes: 1, carrier, cacheHit: true, outcome: "ok" },
+      {
+        authorizationMs: 7, storageMs: 11, bytes: 4, carrier, cacheHit: false, readAheadHit: false,
+        manifestDigest: false, sqlStatements: 0, outcome: "ok",
+      },
+      {
+        authorizationMs: 0, storageMs: 0, bytes: 1, carrier, cacheHit: true, readAheadHit: true,
+        manifestDigest: false, sqlStatements: 0, outcome: "ok",
+      },
     ])
     const serialized = JSON.stringify(traces)
     for (const secret of ["IND_test", "test-download", "permanentAuthKeyId", "sessionId", "connectionId"]) {
@@ -420,7 +438,10 @@ describe("native download ranges", () => {
       async () => bytes, 25_000, { now: () => now, trace: (trace) => { traces.push(trace) } })
     await expect(operations.getPart(request(), context)).rejects.toBe(failure)
     expect(traces).toEqual([
-      { authorizationMs: 5, storageMs: 0, bytes: 0, carrier: "V3", cacheHit: false, outcome: "failed" },
+      {
+        authorizationMs: 5, storageMs: 0, bytes: 0, carrier: "V3", cacheHit: false, readAheadHit: false,
+        manifestDigest: false, sqlStatements: 0, outcome: "failed",
+      },
     ])
     const healthy = new NativeDownloadOperations(async () => file,
       async (_path, _offset, length) => bytes.slice(0, length), 25_000,
@@ -464,6 +485,112 @@ describe("native download ranges", () => {
     const last = await operations.getPart(request(BigInt(lastOffset), 524_288), carrierContext(carrier))
     expect(last.data.length).toBe(size - lastOffset)
     expect(last.sha256).toEqual(createHash("sha256").update(last.data).digest())
-    expect(rangeCalls).toEqual([[0, 524_288], [lastOffset, size - lastOffset]])
+    const lastWindow = Math.floor(lastOffset / 4_194_304) * 4_194_304
+    expect(rangeCalls).toEqual([[0, 4_194_304], [lastWindow, size - lastWindow]])
+  })
+
+  const partSize = 524_288
+  const largeFile = (size: number) => ({ ...file, id: 41, fileSize: size }) as DbFile
+  const manifestFor = (data: Uint8Array) => {
+    const hashes: Buffer[] = []
+    for (let offset = 0; offset < data.length; offset += partSize) {
+      hashes.push(createHash("sha256").update(data.subarray(offset, offset + partSize)).digest())
+    }
+    return Uint8Array.from(Buffer.concat(hashes))
+  }
+
+  test("returns the manifest digest for aligned ranges without hashing, and hashes otherwise", async () => {
+    const size = partSize * 2 + 100
+    const data = new Uint8Array(size).map((_, index) => index % 251)
+    let hashed = 0
+    const hashRange = (bytes: Uint8Array) => { hashed += 1; return createHash("sha256").update(bytes).digest() }
+    const read = async (_path: string, offset: number, length: number) => data.slice(offset, offset + length)
+    const withManifest = new NativeDownloadOperations(async () => largeFile(size), read, 25_000, {
+      loadPartHashes: async () => manifestFor(data), hashRange,
+    })
+    for (const offset of [0, partSize, partSize * 2]) {
+      const part = await withManifest.getPart(request(BigInt(offset), partSize), context)
+      expect(part.sha256).toEqual(createHash("sha256").update(part.data).digest())
+    }
+    expect(hashed).toBe(0)
+    await withManifest.getPart(request(100n, 1_000), context)
+    await withManifest.getPart(request(0n, 1_000), context)
+    expect(hashed).toBe(2)
+
+    // A stored object that differs from its manifest yields a digest the client rejects.
+    const substituted = new NativeDownloadOperations(async () => largeFile(size),
+      async (_path, offset, length) => new Uint8Array(length).fill(offset === 0 ? 7 : 8), 25_000,
+      { loadPartHashes: async () => manifestFor(data), hashRange })
+    const part = await substituted.getPart(request(0n, partSize), context)
+    expect(part.sha256).not.toEqual(createHash("sha256").update(part.data).digest())
+
+    const withoutManifest = new NativeDownloadOperations(async () => largeFile(size), read, 25_000, {
+      loadPartHashes: async () => undefined, hashRange,
+    })
+    await withoutManifest.getPart(request(0n, partSize), context)
+    const malformed = new NativeDownloadOperations(async () => largeFile(size), read, 25_000, {
+      loadPartHashes: async () => new Uint8Array(31), hashRange,
+    })
+    await malformed.getPart(request(0n, partSize), context)
+    expect(hashed).toBe(4)
+  })
+
+  test("serves eight sequential ranges from one storage read", async () => {
+    const size = partSize * 20
+    const reads: number[][] = []
+    const operations = new NativeDownloadOperations(async () => largeFile(size), async (_path, offset, length) => {
+      reads.push([offset, length])
+      return new Uint8Array(length).fill(offset / partSize)
+    }, 25_000, { loadPartHashes: async () => undefined })
+    for (let index = 0; index < 20; index += 1) {
+      const part = await operations.getPart(request(BigInt(index * partSize), partSize), context)
+      expect(part.data[0]).toBe(Math.floor(index / 8) * 8)
+    }
+    expect(reads).toEqual([[0, 8 * partSize], [8 * partSize, 8 * partSize], [16 * partSize, 4 * partSize]])
+    // Random access replaces the window.
+    await operations.getPart(request(BigInt(2 * partSize), partSize), context)
+    expect(reads).toHaveLength(4)
+  })
+
+  test("concurrent ranges in one window share a single read", async () => {
+    const size = partSize * 8
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    let reads = 0
+    const operations = new NativeDownloadOperations(async () => largeFile(size), async (_path, _offset, length) => {
+      reads += 1
+      await gate
+      return new Uint8Array(length).fill(1)
+    }, 25_000, { loadPartHashes: async () => undefined })
+    const pending = [0, 1, 2, 3].map((index) => operations.getPart(request(BigInt(index * partSize), partSize), context))
+    await Bun.sleep(5)
+    release()
+    const parts = await Promise.all(pending)
+    expect(reads).toBe(1)
+    expect(parts.every((part) => part.data.length === partSize)).toBeTrue()
+    expect(operations.readAheadBytes).toBe(size)
+  })
+
+  test("drops a window when its authorization expires or a read fails", async () => {
+    let now = 0
+    const size = partSize * 4
+    let reads = 0
+    let fail = false
+    const operations = new NativeDownloadOperations(async () => largeFile(size), async (_path, _offset, length) => {
+      reads += 1
+      if (fail) throw new Error("storage failed")
+      return new Uint8Array(length).fill(2)
+    }, 25_000, { now: () => now, loadPartHashes: async () => undefined })
+    await operations.getPart(request(0n, partSize), context)
+    await operations.getPart(request(BigInt(partSize), partSize), context)
+    expect(reads).toBe(1)
+    now = 60_000
+    fail = true
+    await expect(operations.getPart(request(BigInt(2 * partSize), partSize), context)).rejects.toThrow("storage failed")
+    expect(reads).toBe(2)
+    expect(operations.readAheadBytes).toBe(0)
+    fail = false
+    await operations.getPart(request(BigInt(3 * partSize), partSize), context)
+    expect(reads).toBe(3)
   })
 })

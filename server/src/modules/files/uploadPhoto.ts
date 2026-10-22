@@ -1,6 +1,6 @@
 import { getPhotoMetadataAndValidate } from "@in/server/modules/files/metadata"
 import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types"
-import { files, photos, photoSizes } from "@in/server/db/schema"
+import { filePartHashes, files, photos, photoSizes } from "@in/server/db/schema"
 import { db } from "@in/server/db"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { generateStrippedThumbnail } from "@in/server/modules/files/strippedThumbnail"
@@ -84,6 +84,9 @@ export async function uploadPhoto(
       const photoId = await db.transaction(async (tx) => {
         const [dbFile] = await tx.insert(files).values(prepared.dbFile).returning()
         if (!dbFile) throw new Error("No file returned from database")
+        if (prepared.partHashes) {
+          await tx.insert(filePartHashes).values({ fileId: dbFile.id, hashes: prepared.partHashes })
+        }
 
         const [photo] = await tx.insert(photos).values({
           format,

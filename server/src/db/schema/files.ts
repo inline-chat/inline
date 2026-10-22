@@ -39,5 +39,17 @@ export const files = pgTable("files", {
   // --------------------------------------------------------
 })
 
+/**
+ * SHA-256 per 512 KiB range of a file's stored object, concatenated (the last
+ * range may be shorter). Kept apart from `files` so the many relational loads
+ * of file rows never carry it. Files without a row are hashed when read.
+ */
+export const filePartHashes = pgTable("file_part_hashes", {
+  fileId: integer("file_id")
+    .primaryKey()
+    .references(() => files.id, { onDelete: "cascade" }),
+  hashes: bytea("hashes").notNull(),
+})
+
 export type DbFile = typeof files.$inferSelect
 export type DbNewFile = typeof files.$inferInsert
