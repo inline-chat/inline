@@ -458,7 +458,8 @@ public actor NativeDownloadManager {
         var active = 0
         var ready: [UInt64: GetFilePartResult] = [:]
         func refill() {
-          while active + ready.count < 2, next < total {
+          // Four ranges per file (at most three files): 12 per client, under the server's 16.
+          while active + ready.count < 4, next < total {
             var nextInput = base; nextInput.offset = next
             let scheduled = nextInput
             next += UInt64(base.limit); active += 1

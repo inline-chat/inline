@@ -1,5 +1,6 @@
 import BigInt
 import CommonCrypto
+import Compression
 import Foundation
 import Security
 
@@ -102,6 +103,11 @@ public enum InlineSecureTransport {
   private static let maximumInvokeAfterDependencies = 8_192
   private static let dhPrimeCache = DHPrimeValidationCache(capacity: 64)
   public static let realtimeLayer: Int32 = 3
+  /// Same request schema as layer 3; the sender decodes `gzip_packed` results.
+  public static let realtimeLayerGzip: Int32 = 4
+  public static let gzipPackedConstructor: UInt32 = 0x3072cfa1
+  public static let messageContainerConstructor: UInt32 = 0x73f1f8dc
+  public static let maximumGzipOutputBytes = 16 * 1024 * 1024
   public static let telegramDHPrime: [UInt8] = hexBytes(
     "c71caeb9c6b1c9048e6c522f70f13f73980d40238e3e21c14934d037563d930f" +
       "48198a0aa7c14058229493d22530f4dbfa336f6e0ac925139543aed44cce7c372" +
@@ -557,6 +563,8 @@ public enum InlineSecureTransport {
     return .packet(payload: Array(frame[headerLength...]), quickAckRequested: quickAckRequested)
   }
 
+  /// One AES-256 key schedule per record: an ECB cryptor fed one block at a time, chaining in
+  /// place through preallocated scratch. Per-block `CCCrypt` re-expanded the key each block.
   private static func aesIGE(
     _ input: [UInt8],
     key: [UInt8],
@@ -565,54 +573,155 @@ public enum InlineSecureTransport {
   ) throws -> [UInt8] {
     guard key.count == kCCKeySizeAES256, iv.count == 32, input.count.isMultiple(of: kCCBlockSizeAES128)
     else { throw InlineProtocolError.invalidInput }
-    var previousCipher = Array(iv[0..<16])
-    var previousPlain = Array(iv[16..<32])
-    var output: [UInt8] = []
-    output.reserveCapacity(input.count)
-    for offset in stride(from: 0, to: input.count, by: 16) {
-      let block = Array(input[offset..<(offset + 16)])
-      if operation == CCOperation(kCCEncrypt) {
-        let encrypted = try aesECB(xor(block, previousCipher), key: key, operation: operation)
-        let result = xor(encrypted, previousPlain)
-        output += result
-        previousCipher = result
-        previousPlain = block
-      } else {
-        let decrypted = try aesECB(xor(block, previousPlain), key: key, operation: operation)
-        let result = xor(decrypted, previousCipher)
-        output += result
-        previousCipher = block
-        previousPlain = result
-      }
+    var cryptorReference: CCCryptorRef?
+    let created = key.withUnsafeBytes { keyBytes in
+      CCCryptorCreateWithMode(
+        operation, CCMode(kCCModeECB), CCAlgorithm(kCCAlgorithmAES), CCPadding(ccNoPadding),
+        nil, keyBytes.baseAddress, key.count, nil, 0, 0, CCModeOptions(0), &cryptorReference
+      )
     }
-    return output
-  }
+    guard created == kCCSuccess, let cryptor = cryptorReference else { throw InlineProtocolError.invalidInput }
+    defer { CCCryptorRelease(cryptor) }
 
-  private static func aesECB(_ input: [UInt8], key: [UInt8], operation: CCOperation) throws -> [UInt8] {
+    let encrypting = operation == CCOperation(kCCEncrypt)
     var output = [UInt8](repeating: 0, count: input.count)
-    let outputCapacity = output.count
-    var moved = 0
-    let status = key.withUnsafeBytes { keyBytes in
-      input.withUnsafeBytes { inputBytes in
-        output.withUnsafeMutableBytes { outputBytes in
-          CCCrypt(
-            operation,
-            CCAlgorithm(kCCAlgorithmAES),
-            CCOptions(kCCOptionECBMode),
-            keyBytes.baseAddress,
-            key.count,
-            nil,
-            inputBytes.baseAddress,
-            input.count,
-            outputBytes.baseAddress,
-            outputCapacity,
-            &moved
-          )
+    var scratchIn = [UInt8](repeating: 0, count: 16)
+    var scratchOut = [UInt8](repeating: 0, count: 16)
+    var failed = false
+    iv.withUnsafeBufferPointer { ivBuffer in
+      input.withUnsafeBufferPointer { inputBuffer in
+        output.withUnsafeMutableBufferPointer { outputBuffer in
+          scratchIn.withUnsafeMutableBufferPointer { blockIn in
+            scratchOut.withUnsafeMutableBufferPointer { blockOut in
+              guard let ivBase = ivBuffer.baseAddress, let inputBase = inputBuffer.baseAddress,
+                    let outputBase = outputBuffer.baseAddress, let inBase = blockIn.baseAddress,
+                    let outBase = blockOut.baseAddress
+              else {
+                failed = !input.isEmpty
+                return
+              }
+              var previousCipher = ivBase
+              var previousPlain = ivBase + 16
+              var offset = 0
+              while offset < input.count {
+                let block = inputBase + offset
+                let result = outputBase + offset
+                let mask = encrypting ? previousCipher : previousPlain
+                let post = encrypting ? previousPlain : previousCipher
+                for index in 0 ..< 16 { inBase[index] = block[index] ^ mask[index] }
+                var moved = 0
+                let status = CCCryptorUpdate(cryptor, inBase, 16, outBase, 16, &moved)
+                guard status == kCCSuccess, moved == 16 else {
+                  failed = true
+                  return
+                }
+                for index in 0 ..< 16 { result[index] = outBase[index] ^ post[index] }
+                if encrypting {
+                  previousCipher = UnsafePointer(result)
+                  previousPlain = block
+                } else {
+                  previousCipher = block
+                  previousPlain = UnsafePointer(result)
+                }
+                offset += 16
+              }
+            }
+          }
         }
       }
     }
-    guard status == kCCSuccess, moved == input.count else { throw InlineProtocolError.invalidInput }
+    guard !failed else { throw InlineProtocolError.invalidInput }
     return output
+  }
+
+  /// Decodes `gzip_packed#3072cfa1 packed_data:bytes` into the object it carries.
+  public static func decodeGzipPacked(
+    _ body: [UInt8],
+    maximumOutputBytes: Int = maximumGzipOutputBytes
+  ) throws -> [UInt8] {
+    guard body.count >= 8, try readUInt32(body, at: 0) == gzipPackedConstructor else {
+      throw InlineProtocolError.invalidInput
+    }
+    let packed = try decodeTLBytes(Array(body[4...]))
+    guard packed.consumed == body.count - 4 else { throw InlineProtocolError.invalidInput }
+    return try gunzip(packed.value, maximumOutputBytes: maximumOutputBytes)
+  }
+
+  /// Returns `body` unchanged unless it is `gzip_packed`.
+  public static func unpackGzip(_ body: [UInt8]) throws -> [UInt8] {
+    guard body.count >= 4, try readUInt32(body, at: 0) == gzipPackedConstructor else { return body }
+    return try decodeGzipPacked(body)
+  }
+
+  /// A single-member RFC 1952 stream. The declared size bounds the output buffer and must match
+  /// it exactly, and the trailer CRC-32 must match the inflated bytes.
+  static func gunzip(_ data: [UInt8], maximumOutputBytes: Int) throws -> [UInt8] {
+    guard data.count >= 18, data[0] == 0x1f, data[1] == 0x8b, data[2] == 8 else {
+      throw InlineProtocolError.invalidInput
+    }
+    let flags = data[3]
+    guard flags & 0xe0 == 0 else { throw InlineProtocolError.invalidInput }
+    var offset = 10
+    if flags & 0x04 != 0 {
+      guard offset + 2 <= data.count else { throw InlineProtocolError.invalidInput }
+      offset += 2 + (Int(data[offset]) | Int(data[offset + 1]) << 8)
+    }
+    for flag in [UInt8(0x08), UInt8(0x10)] where flags & flag != 0 {
+      while offset < data.count, data[offset] != 0 { offset += 1 }
+      offset += 1
+    }
+    if flags & 0x02 != 0 { offset += 2 }
+    guard offset <= data.count - 8 else { throw InlineProtocolError.invalidInput }
+    let trailer = data.count - 8
+    let expectedCRC = UInt32(data[trailer]) | UInt32(data[trailer + 1]) << 8 |
+      UInt32(data[trailer + 2]) << 16 | UInt32(data[trailer + 3]) << 24
+    let expectedSize = Int(UInt32(data[trailer + 4]) | UInt32(data[trailer + 5]) << 8 |
+      UInt32(data[trailer + 6]) << 16 | UInt32(data[trailer + 7]) << 24)
+    guard expectedSize > 0, expectedSize <= maximumOutputBytes else { throw InlineProtocolError.invalidInput }
+    // One spare byte distinguishes "exactly the declared size" from "truncated at capacity".
+    var output = [UInt8](repeating: 0, count: expectedSize + 1)
+    let deflate = Array(data[offset ..< trailer])
+    let produced = output.withUnsafeMutableBufferPointer { destination in
+      deflate.withUnsafeBufferPointer { source in
+        compression_decode_buffer(
+          destination.baseAddress!, destination.count,
+          source.baseAddress!, source.count,
+          nil, COMPRESSION_ZLIB
+        )
+      }
+    }
+    guard produced == expectedSize else { throw InlineProtocolError.invalidInput }
+    output.removeLast()
+    guard crc32(output) == expectedCRC else { throw InlineProtocolError.invalidInput }
+    return output
+  }
+
+  private static let crcTable: [UInt32] = (0 ..< 256).map { value in
+    var crc = UInt32(value)
+    for _ in 0 ..< 8 { crc = crc & 1 == 1 ? 0xedb8_8320 ^ (crc >> 1) : crc >> 1 }
+    return crc
+  }
+
+  static func crc32(_ bytes: [UInt8]) -> UInt32 {
+    var crc: UInt32 = 0xffff_ffff
+    for byte in bytes { crc = crcTable[Int((crc ^ UInt32(byte)) & 0xff)] ^ (crc >> 8) }
+    return crc ^ 0xffff_ffff
+  }
+
+  /// `msg_container#73f1f8dc`: children in order, each with its own message ID and seqno.
+  public static func encodeMessageContainer(
+    _ messages: [(messageID: Int64, sequenceNumber: Int32, body: [UInt8])]
+  ) throws -> [UInt8] {
+    guard !messages.isEmpty, messages.count <= 1_024 else { throw InlineProtocolError.invalidInput }
+    var encoded = littleEndian(messageContainerConstructor) + littleEndian(Int32(messages.count))
+    for message in messages {
+      guard message.body.count.isMultiple(of: 4), message.body.count >= 4,
+            try readUInt32(message.body, at: 0) != messageContainerConstructor
+      else { throw InlineProtocolError.invalidInput }
+      encoded += littleEndian(message.messageID) + littleEndian(message.sequenceNumber) +
+        littleEndian(Int32(message.body.count)) + message.body
+    }
+    return encoded
   }
 
   private static func sha1(_ input: [UInt8]) -> [UInt8] {

@@ -372,6 +372,11 @@ public actor InlineProtocolV3Connection {
   private static let boolTrue: UInt32 = 0x997275b5
   private static let ping: UInt32 = 0x7abe77ec
   private static let pong: UInt32 = 0x347773c5
+  private static let invokeConstructor: UInt32 = 0xeb7d4aa6
+  /// Acknowledgements ride along with the next invoke; a quiet connection sends them alone
+  /// after this delay or once this many are pending.
+  private static let acknowledgementFlushDelay: Duration = .seconds(30)
+  private static let acknowledgementFlushCount = 16
   private static let applicationRequestTimeout: Duration = .seconds(45)
   private static let temporaryKeyLifetimeMilliseconds: Int64 = 86_400_000
   private static let temporaryKeyRotationMilliseconds: Int64 = temporaryKeyLifetimeMilliseconds * 4 / 5
@@ -394,6 +399,11 @@ public actor InlineProtocolV3Connection {
   private var terminated = false
   private var terminationErrorValue: InlineProtocolV3ConnectionError?
   private var didWarnAboutUnknownServiceMessage = false
+  private var pendingAcknowledgements: [Int64] = []
+  private var acknowledgementFlushTask: Task<Void, Never>?
+  /// Containers this connection sent, by container ID, so a rejection of the whole container
+  /// resends its request rather than failing the connection.
+  private var sentContainers: [Int64: (requestID: Int64, sequence: Int32)] = [:]
 
   private init(
     session: URLSession,
@@ -543,6 +553,8 @@ public actor InlineProtocolV3Connection {
   }
 
   public func close() async {
+    // The server retains unacknowledged results for resend until it hears otherwise.
+    await flushAcknowledgements()
     await terminate(with: InlineProtocolV3ConnectionError.closed, closeCode: .normalClosure)
   }
 
@@ -596,7 +608,10 @@ public actor InlineProtocolV3Connection {
     acknowledged: (@Sendable () async -> Void)? = nil,
     completion: @escaping @Sendable (Result<RealtimeV3Response, any Error>) async -> Void
   ) async throws {
-    let body = try InlineSecureTransport.encodeInlineInvoke(payload: Array(request.serializedData()))
+    let body = try InlineSecureTransport.encodeInlineInvoke(
+      payload: Array(request.serializedData()),
+      layer: InlineSecureTransport.realtimeLayerGzip
+    )
     try await beginPrepared(
       messageID: nextMessageID(),
       sequence: nextSequence(content: true),
@@ -840,7 +855,7 @@ public actor InlineProtocolV3Connection {
       acknowledgement: acknowledged
     )
     do {
-      try await sendEncrypted(messageID: messageID, sequence: sequence, body: body, quickAck: true)
+      try await sendContent(messageID: messageID, sequence: sequence, body: body)
     } catch {
       // A terminal writer failure completes all pending requests during termination. Avoid
       // completing the same waiter twice if that path won the race with this catch.
@@ -865,8 +880,16 @@ public actor InlineProtocolV3Connection {
   }
 
   private func receiveAndDispatch() async throws {
-    let fields = try await receiveEncrypted()
-    if fields.sequenceNumber % 2 == 1 { try await sendAcknowledgement(fields.messageID) }
+    let record = try await receiveEncrypted()
+    // Never wait on a write here: acknowledgements are queued and ride along with the next request.
+    if record.sequenceNumber % 2 == 1 { queueAcknowledgement(record.messageID) }
+    let fields = InlineEncryptedRecordFields(
+      serverSalt: record.serverSalt,
+      sessionID: record.sessionID,
+      messageID: record.messageID,
+      sequenceNumber: record.sequenceNumber,
+      body: try InlineSecureTransport.unpackGzip(record.body)
+    )
     let constructor = try readUInt32(fields.body, at: 0)
     if constructor != Self.pong,
        constructor != Self.badMessage,
@@ -908,7 +931,15 @@ public actor InlineProtocolV3Connection {
       let requestID = readInt64(fields.body, at: 4)
       guard let pending = pendingRequests.removeValue(forKey: requestID) else { return }
       pending.timeoutTask?.cancel()
-      deliver(pending, .success((requestID, Array(fields.body.dropFirst(12)))))
+      sentContainers = sentContainers.filter { $0.value.requestID != requestID }
+      let result: [UInt8]
+      do {
+        result = try InlineSecureTransport.unpackGzip(Array(fields.body.dropFirst(12)))
+      } catch {
+        deliver(pending, .failure(InlineProtocolV3ConnectionError.protocolFailure))
+        throw InlineProtocolV3ConnectionError.protocolFailure
+      }
+      deliver(pending, .success((requestID, result)))
     default:
       let application: InlineApplicationObject
       do {
@@ -940,8 +971,16 @@ public actor InlineProtocolV3Connection {
     constructor: UInt32
   ) async throws {
     guard fields.body.count >= 20 else { throw InlineProtocolV3ConnectionError.protocolFailure }
-    let requestID = readInt64(fields.body, at: 4)
-    let sequence = readInt32(fields.body, at: 12)
+    var requestID = readInt64(fields.body, at: 4)
+    var sequence = readInt32(fields.body, at: 12)
+    if let container = sentContainers.removeValue(forKey: requestID), container.sequence == sequence,
+       let carried = pendingRequests[container.requestID]
+    {
+      // The whole container was rejected; its acknowledgements are dropped and only the
+      // request is recovered, exactly as if it had been sent alone.
+      requestID = container.requestID
+      sequence = carried.sequence
+    }
     if let pending = pendingRequests.removeValue(forKey: requestID) {
       guard pending.sequence == sequence else {
         pending.timeoutTask?.cancel()
@@ -1128,11 +1167,77 @@ public actor InlineProtocolV3Connection {
     return fields
   }
 
-  private func sendAcknowledgement(_ messageID: Int64) async throws {
-    let body = little(Self.messagesAck) + little(Self.vector) + little(Int32(1)) + little(messageID)
-    try await sendEncrypted(
-      messageID: try nextMessageID(), sequence: nextSequence(content: false), body: body, quickAck: false
+  private func queueAcknowledgement(_ messageID: Int64) {
+    if !pendingAcknowledgements.contains(messageID) { pendingAcknowledgements.append(messageID) }
+    if pendingAcknowledgements.count >= Self.acknowledgementFlushCount {
+      acknowledgementFlushTask?.cancel()
+      acknowledgementFlushTask = nil
+      Task { [weak self] in await self?.flushAcknowledgements() }
+      return
+    }
+    guard acknowledgementFlushTask == nil else { return }
+    acknowledgementFlushTask = Task { [weak self] in
+      do {
+        try await Task.sleep(for: Self.acknowledgementFlushDelay)
+      } catch {
+        return
+      }
+      await self?.flushAcknowledgements()
+    }
+  }
+
+  private func takeAcknowledgements() -> [Int64] {
+    acknowledgementFlushTask?.cancel()
+    acknowledgementFlushTask = nil
+    let messageIDs = pendingAcknowledgements
+    pendingAcknowledgements.removeAll(keepingCapacity: true)
+    return messageIDs
+  }
+
+  private func flushAcknowledgements() async {
+    let messageIDs = takeAcknowledgements()
+    guard !messageIDs.isEmpty, !terminated else { return }
+    // sendEncrypted terminates the connection on a write failure; nothing is left to acknowledge.
+    try? await sendEncrypted(
+      messageID: try nextMessageID(),
+      sequence: nextSequence(content: false),
+      body: Self.encodeAcknowledgements(messageIDs),
+      quickAck: false
     )
+  }
+
+  private static func encodeAcknowledgements(_ messageIDs: [Int64]) -> [UInt8] {
+    var body = little(messagesAck) + little(vector) + little(Int32(messageIDs.count))
+    for messageID in messageIDs { body += little(messageID) }
+    return body
+  }
+
+  /// Sends a content request. An invoke carries pending acknowledgements in one container
+  /// `[request, msgs_ack]`: child IDs precede the container's and the non-content seqnos follow
+  /// the request's, which the server's receive window requires.
+  private func sendContent(messageID: Int64, sequence: Int32, body: [UInt8]) async throws {
+    let isInvoke = body.count >= 4 && (try? readUInt32(body, at: 0)) == Self.invokeConstructor
+    let acknowledgements = isInvoke ? takeAcknowledgements() : []
+    guard !acknowledgements.isEmpty else {
+      try await sendEncrypted(messageID: messageID, sequence: sequence, body: body, quickAck: true)
+      return
+    }
+    let acknowledgementID = try nextMessageID()
+    let nonContentSequence = nextSequence(content: false)
+    let container = try InlineSecureTransport.encodeMessageContainer([
+      (messageID: messageID, sequenceNumber: sequence, body: body),
+      (
+        messageID: acknowledgementID,
+        sequenceNumber: nonContentSequence,
+        body: Self.encodeAcknowledgements(acknowledgements)
+      ),
+    ])
+    let containerID = try nextMessageID()
+    if sentContainers.count >= 128, let oldest = sentContainers.keys.min() {
+      sentContainers.removeValue(forKey: oldest)
+    }
+    sentContainers[containerID] = (requestID: messageID, sequence: nonContentSequence)
+    try await sendEncrypted(messageID: containerID, sequence: nonContentSequence, body: container, quickAck: true)
   }
 
   private func sendEncrypted(
@@ -1170,6 +1275,8 @@ public actor InlineProtocolV3Connection {
   ) async {
     guard !terminated else { return }
     terminated = true
+    acknowledgementFlushTask?.cancel()
+    acknowledgementFlushTask = nil
     terminationErrorValue = error as? InlineProtocolV3ConnectionError ?? .closed
     let pendingRPCCount = pendingRequests.count
     let pendingProbeCount = pendingProbes.count
