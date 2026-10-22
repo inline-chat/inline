@@ -922,6 +922,15 @@ final class AppMenu: NSObject {
     statusPageItem.image = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: nil)
     helpMenu.addItem(statusPageItem)
 
+    let callDiagnosticsItem = NSMenuItem(
+      title: "Call Diagnostics",
+      action: #selector(openCallDiagnostics(_:)),
+      keyEquivalent: ""
+    )
+    callDiagnosticsItem.target = self
+    callDiagnosticsItem.image = NSImage(systemSymbolName: "waveform.path.ecg", accessibilityDescription: nil)
+    helpMenu.addItem(callDiagnosticsItem)
+
     helpMenu.addItem(NSMenuItem.separator())
 
     let clearCacheItem = NSMenuItem(
@@ -1029,6 +1038,10 @@ final class AppMenu: NSObject {
       window.level = .floating
       sender.state = .on
     }
+  }
+
+  @objc private func openCallDiagnostics(_ sender: Any?) {
+    GridCallDiagnosticsWindowController.show(sender: sender)
   }
 
   @objc private func openMacDevtools(_ sender: Any?) {

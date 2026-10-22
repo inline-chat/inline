@@ -17,6 +17,7 @@ protocol GridRTCDriver: Sendable {
   ) async throws
   func setOutputVolume(_ volume: Float, in room: GridRTCRoomHandle) async
   func quiesceLocally(_ room: GridRTCRoomHandle) async -> GridLocalRoomQuiescenceReceipt
+  func diagnosticsSample(_ room: GridRTCRoomHandle) async -> InlineRTCDiagnosticsSample?
 }
 
 extension GridRTCDriver {
@@ -30,6 +31,7 @@ extension GridRTCDriver {
 
   func setOutputVolume(_: Float, in _: GridRTCRoomHandle) async {}
 
+  func diagnosticsSample(_: GridRTCRoomHandle) async -> InlineRTCDiagnosticsSample? { nil }
 }
 
 actor GridRTCEngine {
@@ -224,6 +226,11 @@ actor GridRTCEngine {
 
   func screenCaptureSources() async throws -> [InlineRTCScreenCaptureSource] {
     try await driver.screenCaptureSources()
+  }
+
+  func diagnosticsSample() async -> InlineRTCDiagnosticsSample? {
+    guard let room else { return nil }
+    return await driver.diagnosticsSample(room)
   }
 
   func currentSnapshot() -> InlineRTCConnectionSnapshot {

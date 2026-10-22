@@ -271,6 +271,9 @@ struct InlineRTCConfiguration: Equatable, Sendable {
       ),
       adaptiveStream: connection.adaptiveStream,
       dynacast: connection.dynacast,
+      // One getStats per remote track per second. Cheap, and it lets call
+      // diagnostics show history from before someone opened the window.
+      reportRemoteTrackStatistics: true,
       singlePeerConnection: connection.singlePeerConnection
     )
   }

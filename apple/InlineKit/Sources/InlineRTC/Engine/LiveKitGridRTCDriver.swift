@@ -454,6 +454,15 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
     )
   }
 
+  func diagnosticsSample(_ room: GridRTCRoomHandle) async -> InlineRTCDiagnosticsSample? {
+    guard let context = rooms[room], !context.isLocallyRetired else { return nil }
+    return LiveKitGridDiagnostics.sample(
+      room: context.room,
+      microphoneTrack: context.microphoneTrack,
+      counters: &context.diagnosticsCounters
+    )
+  }
+
   private func context(for room: GridRTCRoomHandle) throws -> RoomContext {
     guard let context = rooms[room] else {
       throw LiveKitGridRTCDriverError.roomNotFound
@@ -666,6 +675,7 @@ private final class RoomContext: @unchecked Sendable {
   var localFlowProof: GridLocalAudioTransportProof
   var isLocallyRetired = false
   var localMediaMutationCount = 0
+  var diagnosticsCounters = LiveKitGridDiagnosticsCounters()
 
   init(
     room: Room,

@@ -49,6 +49,11 @@ public final class GridRuntime {
     return await engine.shutdown()
   }
 
+  /// Recorded history of the current or last call for the diagnostics window.
+  public func callDiagnostics() async -> InlineRTCDiagnosticsReport {
+    await engine.diagnosticsReport()
+  }
+
   public func applicationDidWake() async {
     await rooms.applicationDidWake()
   }

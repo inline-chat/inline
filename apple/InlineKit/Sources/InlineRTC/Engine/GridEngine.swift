@@ -22,6 +22,8 @@ public actor InlineRTCSession {
   private var eventTasks: [Task<Void, Never>] = []
   private var commandTask: Task<Void, Never>?
   private var permissionRequestTask: Task<Void, Never>?
+  private var diagnostics = InlineRTCDiagnosticsRecorder()
+  private var diagnosticsTask: Task<Void, Never>?
 
   public init(captureCooldown: Duration = InlineRTCSession.defaultCaptureCooldown) {
     self.init(
@@ -62,6 +64,7 @@ public actor InlineRTCSession {
   }
 
   deinit {
+    diagnosticsTask?.cancel()
     commandTask?.cancel()
     permissionRequestTask?.cancel()
     eventTasks.forEach { $0.cancel() }
@@ -154,6 +157,12 @@ public actor InlineRTCSession {
       stream.continuation.yield(snapshot)
     }
     return stream.stream
+  }
+
+  /// Recorded call history for the diagnostics window and exported reports.
+  /// Sampling runs only while a room is targeted.
+  public func diagnosticsReport() -> InlineRTCDiagnosticsReport {
+    diagnostics.report(state: currentSnapshot())
   }
 
   public func start() async {
@@ -279,6 +288,8 @@ public actor InlineRTCSession {
     }
     snapshotRevision &+= 1
     guard let snapshot = currentSnapshot() else { return }
+    diagnostics.observe(snapshot)
+    updateDiagnosticsSampling(active: snapshot.rtc.target != nil)
     for continuation in subscribers.values {
       continuation.yield(snapshot)
     }
@@ -292,6 +303,33 @@ public actor InlineRTCSession {
       devices: latestDeviceSnapshot,
       outputDevices: latestOutputDeviceSnapshot,
       rtc: rtc
+    )
+  }
+
+  private func updateDiagnosticsSampling(active: Bool) {
+    guard active else {
+      diagnosticsTask?.cancel()
+      diagnosticsTask = nil
+      return
+    }
+    guard diagnosticsTask == nil else { return }
+    diagnosticsTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: InlineRTCDiagnosticsReport.sampleInterval)
+        guard !Task.isCancelled, let self else { return }
+        await self.recordDiagnosticsSample()
+      }
+    }
+  }
+
+  private func recordDiagnosticsSample() async {
+    guard let sample = await rtc.diagnosticsSample(), diagnosticsTask != nil else { return }
+    let route = latestAudioSnapshot?.route
+    diagnostics.record(
+      sample.withDeviceDelays(
+        input: route?.measuredInputDelayMilliseconds.map { Double($0) },
+        output: route?.measuredOutputDelayMilliseconds.map { Double($0) }
+      )
     )
   }
 
