@@ -392,4 +392,113 @@ describe("InlineProtocolV3Transport", () => {
     expect(connect).toHaveBeenCalledOnce()
     expect(connection.bindTemporary).not.toHaveBeenCalled()
   })
+
+  const rpc = (id: bigint, method: number): ClientMessage => ({
+    id,
+    seq: 0,
+    body: { oneofKind: "rpcCall", rpcCall: { method, input: { oneofKind: undefined } } },
+  })
+  const rpcResult = { body: { oneofKind: "rpcResult", rpcResult: { reqMsgId: 0n, result: { oneofKind: undefined } } } }
+  const rsaPublicKeys = [{ modulus: "AQAB", exponent: "AQAB", fingerprint: "1" }]
+
+  it("runs transfer RPCs on a separate transfer-only connection without delaying chat", async () => {
+    const main = fakeConnection()
+    const transfer = fakeConnection()
+    let releaseTransfer!: () => void
+    const slowTransfer = new Promise<void>((resolve) => { releaseTransfer = resolve })
+    main.invoke = vi.fn(async () => rpcResult) as never
+    transfer.invoke = vi.fn(async (request: { body: { oneofKind: string } }) => {
+      if (request.body.oneofKind === "connectionInit") return { body: { oneofKind: "connectionOpen", connectionOpen: {} } }
+      await slowTransfer
+      return rpcResult
+    }) as never
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(main)
+      .mockResolvedValueOnce(transfer)
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys,
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+    })
+    await transport.start()
+
+    // 118 = SAVE_UPLOAD_PART; 2 = SEND_MESSAGE.
+    const upload = transport.send(rpc(1n, 118))
+    await vi.waitFor(() => expect(transfer.invoke).toHaveBeenCalledTimes(2))
+    const startedAt = performance.now()
+    await transport.send(rpc(2n, 2))
+    expect(performance.now() - startedAt).toBeLessThan(50)
+    expect(main.invoke).toHaveBeenCalledOnce()
+    releaseTransfer()
+    await upload
+
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(connect.mock.calls[1]![0]).toMatchObject({ temporary: true })
+    expect(transfer.bindTemporary).toHaveBeenCalledOnce()
+    expect((transfer.invoke as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toMatchObject({
+      body: { oneofKind: "connectionInit", connectionInit: { transferOnly: true } },
+    })
+    expect(transport.hasTransferConnection).toBe(true)
+    await transport.stop()
+    expect(transfer.close).toHaveBeenCalled()
+  })
+
+  it("falls back to the main connection when the transfer connection fails and closes it when idle", async () => {
+    vi.useFakeTimers()
+    const main = fakeConnection()
+    const transfer = fakeConnection()
+    main.invoke = vi.fn(async () => rpcResult) as never
+    let transferCalls = 0
+    transfer.invoke = vi.fn(async (request: { body: { oneofKind: string } }) => {
+      if (request.body.oneofKind === "connectionInit") return { body: { oneofKind: "connectionOpen", connectionOpen: {} } }
+      transferCalls += 1
+      if (transferCalls === 1) throw new InlineProtocolV3Error("closed", "transfer socket dropped")
+      return rpcResult
+    }) as never
+    const second = fakeConnection()
+    second.invoke = vi.fn(async (request: { body: { oneofKind: string } }) =>
+      request.body.oneofKind === "connectionInit"
+        ? { body: { oneofKind: "connectionOpen", connectionOpen: {} } }
+        : rpcResult) as never
+    vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(main)
+      .mockResolvedValueOnce(transfer)
+      .mockResolvedValueOnce(second)
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys,
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+    })
+    await transport.start()
+
+    // 136 = GET_FILE_PART: retried on the main connection after the transfer socket failed.
+    await transport.send(rpc(1n, 136))
+    expect(main.invoke).toHaveBeenCalledOnce()
+    expect(transfer.close).toHaveBeenCalled()
+    expect(transport.hasTransferConnection).toBe(false)
+
+    await transport.send(rpc(2n, 136))
+    expect(second.invoke).toHaveBeenCalledTimes(2)
+    expect(transport.hasTransferConnection).toBe(true)
+    await vi.advanceTimersByTimeAsync(110_000)
+    expect(second.close).toHaveBeenCalled()
+    expect(transport.hasTransferConnection).toBe(false)
+    await transport.stop()
+  })
+
+  it("keeps transfer RPCs on the main connection without pinned keys for a fresh temporary key", async () => {
+    const main = fakeConnection()
+    main.invoke = vi.fn(async () => rpcResult) as never
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect").mockResolvedValue(main)
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+    })
+    await transport.start()
+    await transport.send(rpc(1n, 118))
+    expect(connect).toHaveBeenCalledOnce()
+    expect(main.invoke).toHaveBeenCalledOnce()
+    await transport.stop()
+  })
 })

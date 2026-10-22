@@ -35,8 +35,18 @@ import { Log, LogLevel } from "@in/server/utils/log"
 import { InlineError } from "@in/server/types/errors"
 import { connectionManager } from "@in/server/ws/connections"
 import { upgradedSessionTransportPreference } from "@in/server/modules/serverConfig/transportPreference"
+import { TRANSFER_RPC_METHODS } from "@inline-chat/protocol/transfers"
 
 const log = new Log("InlineProtocol.V3.Application", LogLevel.INFO)
+
+/** A transfer-only socket may execute only these besides pings. */
+export const inlineProtocolTransferSocketAllows = (method: Method): boolean =>
+  TRANSFER_RPC_METHODS.has(method) || method === Method.GET_ME
+
+export type InlineProtocolAuthorizationOptions = {
+  /** The socket declared itself a dedicated transfer connection in connection_init. */
+  transferOnly: boolean
+}
 
 export type InlineProtocolApplicationContext = {
   authorization: ServerApplicationAuthorization
@@ -211,10 +221,15 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
    * Returning false means a revocation won the auth-to-execution race, so this
    * request must not cross the application execution boundary.
    */
-  onAuthorized?: (authorization: ServerApplicationAuthorization) => boolean
+  onAuthorized?: (
+    authorization: ServerApplicationAuthorization,
+    options: InlineProtocolAuthorizationOptions,
+  ) => boolean
 }): ServerApplicationDispatcher => {
   const lanes = new InlineProtocolApplicationLanes()
   let recordedProtocolUse = false
+  // Fixed by the first successful connection_init; a socket never changes role.
+  let transferOnly = false
   return {
     dispatch: async ({ payload, authorization, signal, markExecutionStarted, sendUpdate }) => {
       let request
@@ -295,18 +310,24 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
           // the legacy token in this payload, owns the authenticated identity.
           const current = await input.authorizationKeys.load(authorization.authKeyId)
           if (signal.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError")
+          const requestsTransferOnly = request.body.connectionInit.transferOnly === true
           if (!current?.temporary || !current.binding || !authorization.permanentAuthKeyId ||
               current.binding.userId !== authorization.userId ||
               current.binding.accountSessionId !== authorization.accountSessionId ||
               !Buffer.from(current.binding.permanentAuthKeyId).equals(authorization.permanentAuthKeyId) ||
-              (input.onAuthorized && !input.onAuthorized(authorization))) {
+              (input.onAuthorized &&
+                !input.onAuthorized(authorization, { transferOnly: transferOnly || requestsTransferOnly }))) {
             throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
           }
           markExecutionStarted()
-          connectionManager.setSupportsWorking(
-            input.connectionId, authorization.userId, authorization.accountSessionId,
-            request.body.connectionInit.supportsWorking === true,
-          )
+          if (requestsTransferOnly) transferOnly = true
+          // A transfer socket has no presentation; its capabilities stay with the main socket.
+          if (!transferOnly) {
+            connectionManager.setSupportsWorking(
+              input.connectionId, authorization.userId, authorization.accountSessionId,
+              request.body.connectionInit.supportsWorking === true,
+            )
+          }
           const upgradedSessionTransport = upgradedSessionTransportPreference()
           return { kind: "result", payload: RealtimeV3Response.toBinary({ body: {
             oneofKind: "connectionOpen", connectionOpen: { upgradedSessionTransport },
@@ -314,6 +335,9 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
         }
         if (request.body.oneofKind === "rpc") {
           const rpc = request.body.rpc
+          if (transferOnly && !inlineProtocolTransferSocketAllows(rpc.method)) {
+            throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+          }
           const result = await lanes.run(inlineProtocolRpcExecutionLane(rpc), signal, async () => {
             // Admission may precede a long resource-lane wait. Revalidate the
             // same binding before entering application-owned execution.
@@ -325,7 +349,7 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
                 !Buffer.from(current.binding.permanentAuthKeyId).equals(authorization.permanentAuthKeyId)) {
               throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
             }
-            if (input.onAuthorized && !input.onAuthorized(authorization)) {
+            if (input.onAuthorized && !input.onAuthorized(authorization, { transferOnly })) {
               throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
             }
             markExecutionStarted()

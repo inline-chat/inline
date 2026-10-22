@@ -1985,6 +1985,18 @@ public nonisolated struct ConnectionInit: Sendable {
   /// Clears the value of `supportsWorking`. Subsequent reads from it will return its default value.
   public mutating func clearSupportsWorking() {self._supportsWorking = nil}
 
+  /// Realtime V3: a second connection for bulk file transfers. The server
+  /// sends it no updates, keeps it out of presence, admits only transfer RPCs
+  /// and getMe on it, and closes it after two idle minutes.
+  public var transferOnly: Bool {
+    get {_transferOnly ?? false}
+    set {_transferOnly = newValue}
+  }
+  /// Returns true if `transferOnly` has been explicitly set.
+  public var hasTransferOnly: Bool {self._transferOnly != nil}
+  /// Clears the value of `transferOnly`. Subsequent reads from it will return its default value.
+  public mutating func clearTransferOnly() {self._transferOnly = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1998,6 +2010,7 @@ public nonisolated struct ConnectionInit: Sendable {
   fileprivate var _clientType: String? = nil
   fileprivate var _timeZone: String? = nil
   fileprivate var _supportsWorking: Bool? = nil
+  fileprivate var _transferOnly: Bool? = nil
 }
 
 public nonisolated struct ServerProtocolMessage: Sendable {
@@ -23278,7 +23291,7 @@ nonisolated extension ClientMessage: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 nonisolated extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ConnectionInit"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0\u{3}build_number\0\u{1}layer\0\u{3}client_version\0\u{3}os_version\0\u{3}device_id\0\u{3}device_name\0\u{3}client_type\0\u{3}time_zone\0\u{3}supports_working\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}token\0\u{3}build_number\0\u{1}layer\0\u{3}client_version\0\u{3}os_version\0\u{3}device_id\0\u{3}device_name\0\u{3}client_type\0\u{3}time_zone\0\u{3}supports_working\0\u{3}transfer_only\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -23296,6 +23309,7 @@ nonisolated extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._Mess
       case 8: try { try decoder.decodeSingularStringField(value: &self._clientType) }()
       case 9: try { try decoder.decodeSingularStringField(value: &self._timeZone) }()
       case 10: try { try decoder.decodeSingularBoolField(value: &self._supportsWorking) }()
+      case 11: try { try decoder.decodeSingularBoolField(value: &self._transferOnly) }()
       default: break
       }
     }
@@ -23336,6 +23350,9 @@ nonisolated extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._Mess
     try { if let v = self._supportsWorking {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
     } }()
+    try { if let v = self._transferOnly {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 11)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -23350,6 +23367,7 @@ nonisolated extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs._clientType != rhs._clientType {return false}
     if lhs._timeZone != rhs._timeZone {return false}
     if lhs._supportsWorking != rhs._supportsWorking {return false}
+    if lhs._transferOnly != rhs._transferOnly {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

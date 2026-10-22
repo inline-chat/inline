@@ -112,6 +112,14 @@ export interface ConnectionInit {
      * @generated from protobuf field: optional bool supports_working = 10;
      */
     supportsWorking?: boolean;
+    /**
+     * Realtime V3: a second connection for bulk file transfers. The server
+     * sends it no updates, keeps it out of presence, admits only transfer RPCs
+     * and getMe on it, and closes it after two idle minutes.
+     *
+     * @generated from protobuf field: optional bool transfer_only = 11;
+     */
+    transferOnly?: boolean;
 }
 /**
  * @generated from protobuf message ServerProtocolMessage
@@ -15400,7 +15408,8 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
             { no: 7, name: "device_name", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 8, name: "client_type", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 9, name: "time_zone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 10, name: "supports_working", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 10, name: "supports_working", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 11, name: "transfer_only", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<ConnectionInit>): ConnectionInit {
@@ -15445,6 +15454,9 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
                 case /* optional bool supports_working */ 10:
                     message.supportsWorking = reader.bool();
                     break;
+                case /* optional bool transfer_only */ 11:
+                    message.transferOnly = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -15487,6 +15499,9 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
         /* optional bool supports_working = 10; */
         if (message.supportsWorking !== undefined)
             writer.tag(10, WireType.Varint).bool(message.supportsWorking);
+        /* optional bool transfer_only = 11; */
+        if (message.transferOnly !== undefined)
+            writer.tag(11, WireType.Varint).bool(message.transferOnly);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

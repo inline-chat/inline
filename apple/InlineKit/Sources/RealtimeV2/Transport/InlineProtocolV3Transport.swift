@@ -54,7 +54,17 @@ struct InlineProtocolV3ProbeDispatcher: Sendable {
   }
 }
 
+/// RPCs a dedicated transfer connection carries; every one is idempotent.
+enum InlineProtocolTransferMethods {
+  static let methods: Set<InlineProtocol.Method> = [
+    .getFilePart, .saveUploadPart, .getUploadState, .createUpload, .finishUpload, .cancelUpload,
+  ]
+}
+
 public actor InlineProtocolV3Transport: Transport {
+  /// The server closes an idle transfer socket after 120 s; close ours first.
+  private static let transferIdleTimeout: Duration = .seconds(110)
+
   private let log = Log.scoped("RealtimeV3.Transport")
   private let auth: AuthHandle
   private let url: URL
@@ -75,6 +85,13 @@ public actor InlineProtocolV3Transport: Transport {
   private var startCredentials: InlineProtocolSessionCredentials?
   private var startBearerToken: String?
   private var startInvalidationReceipt: AuthInvalidationReceipt?
+  /// A second connection with its own RAM-only temporary key, opened for file transfers so their
+  /// parts never queue behind chat on `connection`. Belongs to `transferMain` only.
+  private var transferConnection: InlineProtocolV3Connection?
+  private var transferMain: InlineProtocolV3Connection?
+  private var transferOpening: Task<InlineProtocolV3Connection?, Never>?
+  private var transferIdleTask: Task<Void, Never>?
+  private var transferActive = 0
 
   public nonisolated var events: AsyncChannel<TransportEvent> { channel }
 
@@ -260,6 +277,7 @@ public actor InlineProtocolV3Transport: Transport {
     rotationTask = nil
     preferenceTask?.cancel()
     preferenceTask = nil
+    await closeTransfer()
     if let connection { await connection.close() }
     connection = nil
     await channel.send(.disconnected(errorDescription: "stopped"))
@@ -315,32 +333,49 @@ public actor InlineProtocolV3Transport: Transport {
       let startedAt = ProcessInfo.processInfo.systemUptime
       log.debug("RPC dispatch started rpc_id=\(message.id) method=\(call.method)")
       do {
-        let multiplexer = InlineProtocolV3RPCMultiplexer(
-          beginInvoke: { request, acknowledged, completion in
-            try await connection.beginInvoke(
-              request,
-              acknowledged: acknowledged,
-              completion: completion
-            )
-          },
-          acknowledge: { [weak self] requestMessageID, method in
-            await self?.acknowledgeRPC(
-              source: connection,
-              requestMessageID: requestMessageID,
-              method: method
-            )
-          },
-          deliver: { [weak self] requestMessageID, method, result in
-            await self?.completeRPC(
-              result,
-              source: connection,
-              requestMessageID: requestMessageID,
-              method: method,
-              startedAt: startedAt
-            )
+        let multiplexer = { (source: InlineProtocolV3Connection) in
+          InlineProtocolV3RPCMultiplexer(
+            beginInvoke: { request, acknowledged, completion in
+              try await source.beginInvoke(
+                request,
+                acknowledged: acknowledged,
+                completion: completion
+              )
+            },
+            acknowledge: { [weak self] requestMessageID, method in
+              await self?.acknowledgeRPC(
+                source: source,
+                requestMessageID: requestMessageID,
+                method: method
+              )
+            },
+            deliver: { [weak self] requestMessageID, method, result in
+              await self?.completeRPC(
+                result,
+                source: source,
+                requestMessageID: requestMessageID,
+                method: method,
+                startedAt: startedAt
+              )
+              if source !== connection { await self?.releaseTransfer(source) }
+            }
+          )
+        }
+        if InlineProtocolTransferMethods.methods.contains(call.method),
+           let transfer = await acquireTransfer(main: connection)
+        {
+          do {
+            try await multiplexer(transfer).dispatch(messageID: message.id, call: call)
+          } catch {
+            // Transfer RPCs are idempotent; the main connection carries this one instead.
+            log.warning("Transfer connection write failed; using the main connection error=\(error)")
+            await releaseTransfer(transfer)
+            await closeTransfer()
+            try await multiplexer(connection).dispatch(messageID: message.id, call: call)
           }
-        )
-        try await multiplexer.dispatch(messageID: message.id, call: call)
+        } else {
+          try await multiplexer(connection).dispatch(messageID: message.id, call: call)
+        }
         let writeDurationMilliseconds = Int(
           (ProcessInfo.processInfo.systemUptime - startedAt) * 1_000
         )
@@ -436,6 +471,12 @@ public actor InlineProtocolV3Transport: Transport {
     }
   }
 
+  /// Results from the transfer connection count only while it serves the current main connection.
+  private func isCurrentSource(_ source: InlineProtocolV3Connection) -> Bool {
+    guard let connection else { return false }
+    return connection === source || (transferConnection === source && transferMain === connection)
+  }
+
   private func completeRPC(
     _ completion: Result<RealtimeV3Response, any Error>,
     source: InlineProtocolV3Connection,
@@ -443,7 +484,7 @@ public actor InlineProtocolV3Transport: Transport {
     method: InlineProtocol.Method,
     startedAt: TimeInterval
   ) async {
-    guard connection === source else { return }
+    guard isCurrentSource(source) else { return }
     let durationMilliseconds = Int(
       (ProcessInfo.processInfo.systemUptime - startedAt) * 1_000
     )
@@ -508,7 +549,7 @@ public actor InlineProtocolV3Transport: Transport {
     requestMessageID: UInt64,
     method: InlineProtocol.Method
   ) async {
-    guard connection === source else { return }
+    guard isCurrentSource(source) else { return }
     var acknowledgement = Ack()
     acknowledgement.msgID = requestMessageID
     var server = ServerProtocolMessage()
@@ -573,6 +614,118 @@ public actor InlineProtocolV3Transport: Transport {
       await temporary.close()
       throw error
     }
+  }
+
+  /// Opens (once) the transfer connection for `main`, or returns nil to use `main` itself.
+  private func acquireTransfer(main: InlineProtocolV3Connection) async -> InlineProtocolV3Connection? {
+    if transferMain !== main { await closeTransfer() }
+    transferIdleTask?.cancel()
+    transferIdleTask = nil
+    if let transferConnection {
+      transferActive += 1
+      return transferConnection
+    }
+    let opening: Task<InlineProtocolV3Connection?, Never>
+    if let transferOpening {
+      opening = transferOpening
+    } else {
+      guard let permanent = auth.snapshot().inlineProtocol?.permanent else { return nil }
+      transferMain = main
+      opening = Task { [weak self] in
+        guard let self else { return nil }
+        return await self.openTransfer(permanent: permanent)
+      }
+      transferOpening = opening
+    }
+    let opened = await opening.value
+    if transferOpening == opening { transferOpening = nil }
+    guard let transfer = opened else { return nil }
+    // The transport stopped, reconnected or replaced the transfer while it opened: never leak it.
+    guard transferMain === main, connection === main,
+          transferConnection == nil || transferConnection === transfer
+    else {
+      if transferConnection !== transfer { await transfer.close() }
+      return nil
+    }
+    if transferConnection == nil {
+      transferConnection = transfer
+      watchTransfer(transfer)
+    }
+    transferActive += 1
+    return transfer
+  }
+
+  private func openTransfer(permanent: InlineProtocolAuthorization) async -> InlineProtocolV3Connection? {
+    do {
+      // Same path as rotation: a fresh temporary key bound to the stored permanent key. It is
+      // never persisted, so each launch (or idle reopen) makes a new one.
+      let transfer = try await makeVerifiedTemporary(permanent: permanent)
+      do {
+        let response = try await transfer.invoke(.with {
+          $0.body = .connectionInit(.with { $0.transferOnly = true })
+        })
+        guard case .connectionOpen = response.body else {
+          throw InlineProtocolV3ConnectionError.unexpectedResponse
+        }
+        log.debug("Transfer connection opened")
+        return transfer
+      } catch {
+        await transfer.close()
+        throw error
+      }
+    } catch {
+      log.warning("Transfer connection unavailable; using the main connection error=\(error)")
+      return nil
+    }
+  }
+
+  private func watchTransfer(_ transfer: InlineProtocolV3Connection) {
+    Task { [weak self] in
+      // A transfer-only socket receives no updates; the stream ends with the connection.
+      for await _ in transfer.updates {}
+      await self?.transferEnded(transfer)
+    }
+  }
+
+  private func transferEnded(_ transfer: InlineProtocolV3Connection) {
+    guard transferConnection === transfer else { return }
+    transferConnection = nil
+    transferMain = nil
+    transferActive = 0
+    transferIdleTask?.cancel()
+    transferIdleTask = nil
+  }
+
+  private func releaseTransfer(_ transfer: InlineProtocolV3Connection) {
+    guard transferConnection === transfer else { return }
+    transferActive = max(0, transferActive - 1)
+    guard transferActive == 0 else { return }
+    transferIdleTask?.cancel()
+    transferIdleTask = Task { [weak self] in
+      do {
+        try await Task.sleep(for: Self.transferIdleTimeout)
+      } catch {
+        return
+      }
+      await self?.closeIdleTransfer(transfer)
+    }
+  }
+
+  private func closeIdleTransfer(_ transfer: InlineProtocolV3Connection) async {
+    guard transferConnection === transfer, transferActive == 0 else { return }
+    await closeTransfer()
+  }
+
+  private func closeTransfer() async {
+    transferIdleTask?.cancel()
+    transferIdleTask = nil
+    transferOpening?.cancel()
+    transferOpening = nil
+    transferMain = nil
+    transferActive = 0
+    let transfer = transferConnection
+    transferConnection = nil
+    await transfer?.close()
   }
 
   private func startUpdates(_ connection: InlineProtocolV3Connection) {
@@ -669,6 +822,7 @@ public actor InlineProtocolV3Transport: Transport {
     log.debug("Inline Protocol transport receive loop ended")
     connection = nil
     connectionAuthority = nil
+    await closeTransfer()
     await handleConnectionClosure(generation: generation, authority: authority) {
       await endedConnection.terminationError
     }

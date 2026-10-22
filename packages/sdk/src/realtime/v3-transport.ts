@@ -14,6 +14,7 @@ import {
 } from "./v3-connection.js"
 import type { InlineProtocolV3Credentials } from "./v3-client.js"
 import type { TransportEvent } from "./types.js"
+import { TRANSFER_RPC_METHODS } from "@inline-chat/protocol/transfers"
 
 type State = "idle" | "connecting" | "connected"
 const pendingUpdateCapacity = 256
@@ -21,6 +22,20 @@ const pendingUpdateByteCapacity = 8 * 1024 * 1024
 const transportEventByteCapacity = 8 * 1024 * 1024
 const rejectedBeforeExecutionRetryLimit = 2
 const rejectedBeforeExecutionRetryDelayMs = 1_000
+// The server closes an idle transfer socket after 120 s; close ours first.
+const transferIdleTimeoutMs = 110_000
+
+type TransferConnection = {
+  generation: number
+  opening: Promise<InlineProtocolV3Connection>
+  connection?: InlineProtocolV3Connection
+  active: number
+  idleTimer?: ReturnType<typeof setTimeout>
+}
+
+/** A transfer connection failure the main connection can absorb: every transfer RPC is idempotent. */
+const transferCarrierFailed = (error: unknown): boolean =>
+  error instanceof InlineProtocolV3Error && error.code !== "unauthorized"
 
 const transportEventByteLength = (event: TransportEvent): number =>
   event.type === "message" ? ServerProtocolMessage.toBinary(event.message).byteLength : 32
@@ -67,6 +82,7 @@ export class InlineProtocolV3Transport implements Transport {
   #flushingUpdates = false
   #rotationDue = false
   #activeRequests = 0
+  #transfer: TransferConnection | undefined
 
   constructor(options: InlineProtocolV3TransportOptions) {
     this.#options = options
@@ -109,6 +125,7 @@ export class InlineProtocolV3Transport implements Transport {
     await this.events.send({ type: "stopping" })
     const connection = this.#connection
     this.#connection = undefined
+    this.#closeTransfer()
     await connection?.close()
   }
 
@@ -117,6 +134,7 @@ export class InlineProtocolV3Transport implements Transport {
     const connection = this.#connection
     this.#connection = undefined
     if (this.#state !== "idle") this.#state = "connecting"
+    this.#closeTransfer()
     await connection?.close()
   }
 
@@ -181,28 +199,48 @@ export class InlineProtocolV3Transport implements Transport {
       case "rpcCall": {
         this.#activeRequests += 1
         let response: Awaited<ReturnType<InlineProtocolV3Connection["invoke"]>>
+        const generation = this.#generation
+        const transfer = TRANSFER_RPC_METHODS.has(message.body.rpcCall.method)
+          ? await this.#acquireTransfer(generation)
+          : undefined
         try {
           const request = { body: { oneofKind: "rpc" as const, rpc: message.body.rpcCall } }
-          for (let attempt = 0; ; attempt += 1) {
-            try {
-              response = await connection.invoke(request)
-              break
-            } catch (error) {
-              if (!(error instanceof InlineProtocolV3Error) || error.code !== "rejected-before-execution") {
-                throw error
-              }
-              if (attempt >= rejectedBeforeExecutionRetryLimit) {
-                throw TransportError.capacityExceeded(
-                  "Inline Protocol application remained overloaded before execution",
-                )
-              }
-              await new Promise((resolve) => setTimeout(resolve, rejectedBeforeExecutionRetryDelayMs))
-              if (this.#state !== "connected" || this.#connection !== connection || this.#rotationDue) {
-                throw TransportError.rejectedBeforeExecution(
-                  "Inline Protocol connection changed before rejected work could be redelivered",
-                )
+          const invokeOn = async (target: InlineProtocolV3Connection, current: () => boolean) => {
+            for (let attempt = 0; ; attempt += 1) {
+              try {
+                return await target.invoke(request)
+              } catch (error) {
+                if (!(error instanceof InlineProtocolV3Error) || error.code !== "rejected-before-execution") {
+                  throw error
+                }
+                if (attempt >= rejectedBeforeExecutionRetryLimit) {
+                  throw TransportError.capacityExceeded(
+                    "Inline Protocol application remained overloaded before execution",
+                  )
+                }
+                await new Promise((resolve) => setTimeout(resolve, rejectedBeforeExecutionRetryDelayMs))
+                if (!current()) {
+                  throw TransportError.rejectedBeforeExecution(
+                    "Inline Protocol connection changed before rejected work could be redelivered",
+                  )
+                }
               }
             }
+          }
+          const mainIsCurrent = () =>
+            this.#state === "connected" && this.#connection === connection && !this.#rotationDue
+          if (transfer) {
+            try {
+              response = await invokeOn(transfer, () => this.#transfer?.connection === transfer)
+            } catch (error) {
+              if (!transferCarrierFailed(error)) throw error
+              // Transfer RPCs are idempotent; the main connection finishes this one.
+              this.#log.warn?.("Inline Protocol transfer connection failed; using the main connection", error)
+              this.#closeTransfer(transfer)
+              response = await invokeOn(connection, mainIsCurrent)
+            }
+          } else {
+            response = await invokeOn(connection, mainIsCurrent)
           }
         } catch (error) {
           if (error instanceof InlineProtocolV3Error && error.code === "commit-outcome-unknown") {
@@ -214,6 +252,7 @@ export class InlineProtocolV3Transport implements Transport {
           throw error
         } finally {
           this.#activeRequests -= 1
+          if (transfer) this.#releaseTransfer(transfer)
           this.#maybeRotate()
         }
         if (response.body.oneofKind === "rpcResult") {
@@ -389,6 +428,91 @@ export class InlineProtocolV3Transport implements Transport {
     this.#maybeRotate()
   }
 
+  /**
+   * A second connection with its own RAM-only temporary key, bound to the stored
+   * permanent key and declared transfer-only, so file parts never queue behind
+   * chat on the main socket. Returns undefined (use the main connection) when it
+   * cannot be opened.
+   */
+  async #acquireTransfer(generation: number): Promise<InlineProtocolV3Connection | undefined> {
+    if (this.#options.rsaPublicKeys.length === 0 || this.#state !== "connected") return undefined
+    if (this.#transfer && this.#transfer.generation !== generation) this.#closeTransfer()
+    let transfer = this.#transfer
+    if (!transfer) {
+      const opening = this.#openTransfer()
+      transfer = { generation, opening, active: 0 }
+      this.#transfer = transfer
+    }
+    transfer.active += 1
+    if (transfer.idleTimer) clearTimeout(transfer.idleTimer)
+    transfer.idleTimer = undefined
+    try {
+      const connection = await transfer.opening
+      if (this.#transfer !== transfer || this.#generation !== generation) {
+        transfer.active -= 1
+        return undefined
+      }
+      transfer.connection = connection
+      return connection
+    } catch (error) {
+      transfer.active -= 1
+      if (this.#transfer === transfer) this.#transfer = undefined
+      this.#log.warn?.("Inline Protocol transfer connection unavailable; using the main connection", error)
+      return undefined
+    }
+  }
+
+  async #openTransfer(): Promise<InlineProtocolV3Connection> {
+    let source: InlineProtocolV3Connection | undefined
+    const connection = await InlineProtocolV3Connection.connect({
+      url: this.#options.url,
+      rsaPublicKeys: this.#options.rsaPublicKeys,
+      temporary: true,
+      requestTimeoutMs: this.#options.requestTimeoutMs,
+      onClose: () => {
+        if (source && this.#transfer?.connection === source) this.#transfer = undefined
+      },
+    })
+    source = connection
+    try {
+      await connection.bindTemporary(this.#credentials.permanent)
+      const opened = await connection.invoke({
+        body: { oneofKind: "connectionInit", connectionInit: { token: "", transferOnly: true } },
+      })
+      if (opened.body.oneofKind !== "connectionOpen") {
+        throw new InlineProtocolV3Error("protocol", "Transfer connection was not accepted")
+      }
+      return connection
+    } catch (error) {
+      await connection.close()
+      throw error
+    }
+  }
+
+  #releaseTransfer(connection: InlineProtocolV3Connection): void {
+    const transfer = this.#transfer
+    if (!transfer || transfer.connection !== connection) return
+    transfer.active = Math.max(0, transfer.active - 1)
+    if (transfer.active > 0) return
+    if (transfer.idleTimer) clearTimeout(transfer.idleTimer)
+    transfer.idleTimer = setTimeout(() => {
+      if (this.#transfer === transfer && transfer.active === 0) this.#closeTransfer()
+    }, transferIdleTimeoutMs)
+    transfer.idleTimer.unref?.()
+  }
+
+  #closeTransfer(only?: InlineProtocolV3Connection): void {
+    const transfer = this.#transfer
+    if (!transfer || (only && transfer.connection !== only)) return
+    this.#transfer = undefined
+    if (transfer.idleTimer) clearTimeout(transfer.idleTimer)
+    void transfer.opening.then((connection) => connection.close(), () => {})
+  }
+
+  get hasTransferConnection(): boolean {
+    return this.#transfer?.connection !== undefined
+  }
+
   #rotationBecameDue(generation: number, source: InlineProtocolV3Connection): void {
     if (this.#generation !== generation || this.#connection !== source || this.#state === "idle") return
     this.#rotationDue = true
@@ -429,6 +553,7 @@ export class InlineProtocolV3Transport implements Transport {
     this.#pendingUpdates = []
     this.#pendingUpdateBytes = 0
     this.#rotationDue = false
+    this.#closeTransfer()
     const connection = this.#connection
     this.#connection = undefined
     await connection?.close()

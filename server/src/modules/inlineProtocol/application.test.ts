@@ -8,6 +8,7 @@ import { Log } from "@in/server/utils/log"
 import {
   InlineProtocolApplicationLanes,
   inlineProtocolRpcExecutionLane,
+  inlineProtocolTransferSocketAllows,
   makeInlineProtocolApplicationDispatcher,
 } from "./application"
 import { inlineProtocolReplayPolicy } from "./replayPolicy"
@@ -739,5 +740,71 @@ describe("Inline Protocol replay policy", () => {
     }))).toBe("durable")
     expect(inlineProtocolReplayPolicy(Uint8Array.of(0xff, 0xff, 0xff))).toBe("durable")
     expect([...TRANSFER_RPC_METHODS].every((method) => REPLAY_EXEMPT_METHODS.has(method))).toBeTrue()
+  })
+})
+
+describe("Inline Protocol transfer-only sockets", () => {
+  test("a transfer-only socket runs transfer RPCs and getMe but refuses everything else", async () => {
+    const authorization = {
+      authKeyId: new Uint8Array(8).fill(5), permanentAuthKeyId: new Uint8Array(8).fill(6),
+      permanent: false, temporaryBound: true, userId: 70_001, accountSessionId: 70_002,
+    }
+    const active: LoadedServerAuthorizationKey = {
+      key: new Uint8Array(256), keyId: authorization.authKeyId, temporary: true, currentServerSalt: 1n,
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      binding: { permanentAuthKeyId: authorization.permanentAuthKeyId, temporarySessionId: 3n, nonce: 4n,
+        expiresAt: Math.floor(Date.now() / 1000) + 3600, userId: authorization.userId,
+        accountSessionId: authorization.accountSessionId },
+    }
+    const authorizedAs: boolean[] = []
+    const executed: Method[] = []
+    const handler = spyOn(rpcHandlers, "handleRpcCall").mockImplementation(async (rpc) => {
+      executed.push(rpc.method)
+      return { oneofKind: "getMe", getMe: {} }
+    })
+    const supportsWorking = spyOn(connectionManager, "setSupportsWorking")
+    try {
+      const dispatcher = makeInlineProtocolApplicationDispatcher({
+        connectionId: "transfer-only-test",
+        authorizationKeys: { load: async () => active },
+        onAuthorized: (_authorization, options) => {
+          authorizedAs.push(options.transferOnly)
+          return true
+        },
+        operations: {
+          authUpgradeSession: async () => { throw new Error("unexpected auth") },
+          authBegin: async () => { throw new Error("unexpected auth") },
+          authComplete: async () => { throw new Error("unexpected auth") },
+          authBeginBrowser: async () => { throw new Error("unexpected auth") },
+          authBrowserStatus: async () => { throw new Error("unexpected auth") },
+        },
+      })
+      const dispatch = async (body: RealtimeV3Request["body"]) => {
+        const result = await dispatcher.dispatch({
+          payload: RealtimeV3Request.toBinary({ body }), authorization, messageId: 1n, sessionId: 3n,
+          signal: new AbortController().signal, markExecutionStarted: () => {}, sendUpdate: () => {},
+        })
+        if (result.kind !== "result") throw new Error("expected result")
+        return RealtimeV3Response.fromBinary(result.payload).body
+      }
+      expect((await dispatch({
+        oneofKind: "connectionInit", connectionInit: { token: "", transferOnly: true, supportsWorking: true },
+      })).oneofKind).toBe("connectionOpen")
+      expect(supportsWorking).not.toHaveBeenCalled()
+      for (const method of [Method.GET_FILE_PART, Method.SAVE_UPLOAD_PART, Method.GET_ME]) {
+        expect((await dispatch({ oneofKind: "rpc", rpc: RpcCall.create({ method }) })).oneofKind).toBe("rpcResult")
+      }
+      const refused = await dispatch({ oneofKind: "rpc", rpc: RpcCall.create({ method: Method.SEND_MESSAGE }) })
+      expect(refused.oneofKind).toBe("rpcError")
+      if (refused.oneofKind === "rpcError") expect(refused.rpcError.code).toBe(401)
+      expect(executed).toEqual([Method.GET_FILE_PART, Method.SAVE_UPLOAD_PART, Method.GET_ME])
+      // The role is fixed: every later authorization reports the transfer socket.
+      expect(authorizedAs).toEqual([true, true, true, true])
+      expect(inlineProtocolTransferSocketAllows(Method.CREATE_UPLOAD)).toBeTrue()
+      expect(inlineProtocolTransferSocketAllows(Method.GET_CHAT_HISTORY)).toBeFalse()
+    } finally {
+      handler.mockRestore()
+      supportsWorking.mockRestore()
+    }
   })
 })

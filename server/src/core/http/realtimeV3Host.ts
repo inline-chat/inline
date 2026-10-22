@@ -92,6 +92,8 @@ const HANDSHAKE_PHASE_TIMEOUT_MS = 30_000
 // Login, browser-login, upgrade and bind requests are a few KiB. Bound the
 // carrier and record work an unauthenticated peer can demand per frame.
 const MAX_UNREGISTERED_FRAME_BYTES = 64 * 1024
+// A dedicated transfer socket exists only while files move.
+const TRANSFER_SOCKET_IDLE_TIMEOUT_MS = 120_000
 const HANDSHAKE_RATE_WINDOW_MS = 60_000
 const MAX_HANDSHAKE_STARTS_PER_WINDOW = 4_096
 const MAX_HANDSHAKE_STARTS_PER_IP_PER_WINDOW = 60
@@ -136,6 +138,13 @@ type InlineProtocolConnectionState = {
   compatibilityQueuedUpdates: number
   overloaded: boolean
   registered: boolean
+  /** Set with `registered` for a transfer-only socket, which connectionManager never sees. */
+  transfer?: {
+    userId: number
+    accountSessionId: number
+    idleTimeout?: ReturnType<typeof setTimeout>
+    activeApplications: number
+  }
   authenticationTimeout?: ReturnType<typeof setTimeout>
   handshakeTimeout?: ReturnType<typeof setTimeout>
 }
@@ -200,6 +209,15 @@ const closeAuthorizationInvalidated = (socket: ServerWebSocket<InlineProtocolWeb
   }
 }
 
+/**
+ * Application admission is keyed by account session once one is bound, so the
+ * main socket and a transfer-only socket (different temporary keys) share it.
+ */
+export const inlineProtocolApplicationAuthorityKey = (authorization: ServerApplicationAuthorization): string =>
+  authorization.accountSessionId === undefined
+    ? `auth:${Buffer.from(authorization.authKeyId).toString("hex")}`
+    : `account:${authorization.accountSessionId}`
+
 export const makeInlineProtocolRuntime = (
   configuration: InlineProtocolEnabledConfiguration,
 ): InlineProtocolRuntime => {
@@ -255,7 +273,10 @@ export const makeInlineProtocolRealtimeTransport = (
     applicationDispatcherFactory?: (input: {
       connectionId: string
       metadata?: RealtimeRequestMetadata
-      onAuthorized: (authorization: ServerApplicationAuthorization) => boolean
+      onAuthorized: (
+        authorization: ServerApplicationAuthorization,
+        options?: { transferOnly: boolean },
+      ) => boolean
     }) => ServerApplicationDispatcher
   } = {},
 ): InlineProtocolRealtimeTransport => {
@@ -277,6 +298,9 @@ export const makeInlineProtocolRealtimeTransport = (
   const activeApplicationsByAuthority = new Map<string, number>()
   let bufferedApplicationUpdateBytes = 0
   let accepting = true
+  // Transfer sockets by account session, closed with the session's authority.
+  const transferSockets = new Map<string, Set<ServerWebSocket<InlineProtocolWebSocketData>>>()
+  const transferKey = (userId: number, accountSessionId: number) => `${userId}:${accountSessionId}`
   const overloadLogs = new BoundedLogAggregator(OVERLOAD_LOG_WINDOW_MS, 8)
 
   const warnOverload = (
@@ -292,10 +316,7 @@ export const makeInlineProtocolRealtimeTransport = (
     })
   }
 
-  const applicationAuthorityKey = (authorization: ServerApplicationAuthorization): string =>
-    authorization.accountSessionId === undefined
-      ? `auth:${Buffer.from(authorization.authKeyId).toString("hex")}`
-      : `account:${authorization.accountSessionId}`
+  const applicationAuthorityKey = inlineProtocolApplicationAuthorityKey
 
   const tryAcquireApplication = (
     authorization: ServerApplicationAuthorization,
@@ -557,6 +578,11 @@ export const makeInlineProtocolRealtimeTransport = (
     const state = socket.data.state
     if (!state) return
     const handlerStartedAt = performance.now()
+    const transfer = state.transfer
+    if (transfer) {
+      transfer.activeApplications += 1
+      scheduleTransferIdle(socket, transfer)
+    }
     const execution = (async () => {
       const completion = await task.dispatch()
       const responseDurationMs = Math.round(performance.now() - handlerStartedAt)
@@ -601,7 +627,14 @@ export const makeInlineProtocolRealtimeTransport = (
       closeProtocol(socket)
     })
     state.applicationTasks.add(execution)
-    void execution.finally(() => state.applicationTasks.delete(execution))
+    void execution.finally(() => {
+      state.applicationTasks.delete(execution)
+      const current = state.transfer
+      if (current) {
+        current.activeApplications = Math.max(0, current.activeApplications - 1)
+        scheduleTransferIdle(socket, current)
+      }
+    })
   }
 
   const drainConnectionState = async (state: InlineProtocolConnectionState): Promise<void> => {
@@ -619,13 +652,89 @@ export const makeInlineProtocolRealtimeTransport = (
     void draining.finally(() => drainingConnections.delete(draining))
   }
 
-  const registerAuthenticatedConnection = (
+  const scheduleTransferIdle = (
+    socket: ServerWebSocket<InlineProtocolWebSocketData>,
+    transfer: NonNullable<InlineProtocolConnectionState["transfer"]>,
+  ): void => {
+    if (transfer.idleTimeout !== undefined) clearTimeout(transfer.idleTimeout)
+    transfer.idleTimeout = undefined
+    if (transfer.activeApplications > 0 || socket.data.closed) return
+    transfer.idleTimeout = setTimeout(() => {
+      transfer.idleTimeout = undefined
+      if (transfer.activeApplications > 0 || socket.data.closed) return
+      close(socket)
+      socket.close(1000, "Transfer connection idle")
+    }, TRANSFER_SOCKET_IDLE_TIMEOUT_MS)
+    transfer.idleTimeout.unref?.()
+  }
+
+  /**
+   * A transfer-only socket authenticates with the same bound key and account
+   * session fence as the main socket but is never registered for update
+   * fan-out, presence or presentation capabilities. Admission is keyed by the
+   * account session, so it shares every budget with the main socket.
+   */
+  const registerTransferConnection = (
     socket: ServerWebSocket<InlineProtocolWebSocketData>,
     userId: number,
     accountSessionId: number,
   ): boolean => {
     const state = socket.data.state
     if (!accepting || socket.data.closed || !state) return false
+    const identity = { userId, sessionId: accountSessionId }
+    if (state.registered) {
+      // A main socket cannot become a transfer socket, nor change identity.
+      const transfer = state.transfer
+      if (transfer && transfer.userId === userId && transfer.accountSessionId === accountSessionId &&
+          sessionAuthority.allows(identity)) return true
+      realtimeV3Log.warn("Inline Protocol V3 transfer authority closed", {
+        userId,
+        sessionId: accountSessionId,
+        reason: !transfer ? "main_socket" : sessionAuthority.isKnownInvalidated(identity) ? "revoked" : "unverified",
+      })
+      if (transfer) {
+        close(socket)
+        socket.close(PROTOCOL_CLOSE_CODE, PROTOCOL_CLOSE_REASON)
+      }
+      return false
+    }
+    // No fresh session lookup happens here, so the authority must already be
+    // verified for a live main connection of this account session.
+    if (!sessionAuthority.allows(identity)) return false
+    state.registered = true
+    state.transfer = { userId, accountSessionId, activeApplications: 0 }
+    clearAuthenticationTimeout(state)
+    releaseHandshake(socket)
+    const key = transferKey(userId, accountSessionId)
+    let sockets = transferSockets.get(key)
+    if (!sockets) {
+      sockets = new Set()
+      transferSockets.set(key, sockets)
+    }
+    sockets.add(socket)
+    scheduleTransferIdle(socket, state.transfer)
+    return true
+  }
+
+  const stopTransferInvalidation = sessionAuthority.onInvalidate((identity) => {
+    const sockets = transferSockets.get(transferKey(identity.userId, identity.sessionId))
+    // close() removes each socket from the set, so iterate over a copy.
+    for (const socket of Array.from(sockets ?? [])) {
+      if (socket.data.closed) continue
+      close(socket)
+      socket.close(REALTIME_CLOSE_SESSION_REVOKED, "session_revoked_confirmed")
+    }
+  })
+
+  const registerAuthenticatedConnection = (
+    socket: ServerWebSocket<InlineProtocolWebSocketData>,
+    userId: number,
+    accountSessionId: number,
+    transferOnly = false,
+  ): boolean => {
+    const state = socket.data.state
+    if (!accepting || socket.data.closed || !state) return false
+    if (transferOnly || state.transfer) return registerTransferConnection(socket, userId, accountSessionId)
     if (state.registered) {
       // The dispatcher calls this fence before every RPC. Do not refresh the
       // authority timestamp here: that would let traffic hide an unavailable
@@ -724,9 +833,11 @@ export const makeInlineProtocolRealtimeTransport = (
       application: applicationDispatcherFactory({
         connectionId: socket.data.id,
         metadata: socket.data.metadata,
-        onAuthorized: (authorization) => {
+        onAuthorized: (authorization, options) => {
           if (authorization.userId === undefined || authorization.accountSessionId === undefined) return false
-          return registerAuthenticatedConnection(socket, authorization.userId, authorization.accountSessionId)
+          return registerAuthenticatedConnection(
+            socket, authorization.userId, authorization.accountSessionId, options?.transferOnly === true,
+          )
         },
       }),
       randomBytes: (length) => Uint8Array.from(randomBytes(length)),
@@ -832,7 +943,7 @@ export const makeInlineProtocolRealtimeTransport = (
         }
         // This only records local activity; the presence owner persists it in
         // coarse batches, never as a session query or write per V3 frame.
-        if (state.registered) connectionManager.markConnectionActivity(socket.data.id)
+        if (state.registered && !state.transfer) connectionManager.markConnectionActivity(socket.data.id)
         void sendRecords(socket, accepted.responses)
         for (const task of accepted.applicationTasks) scheduleApplicationTask(socket, task)
         closeDestroyedSessionAfterWrites(socket)
@@ -852,7 +963,17 @@ export const makeInlineProtocolRealtimeTransport = (
     sockets.delete(socket)
     if (socket.data.state) {
       socket.data.state.session.disconnect()
-      if (socket.data.state.registered) connectionManager.removeConnection(socket.data.id)
+      const transfer = socket.data.state.transfer
+      if (transfer) {
+        if (transfer.idleTimeout !== undefined) clearTimeout(transfer.idleTimeout)
+        transfer.idleTimeout = undefined
+        const key = transferKey(transfer.userId, transfer.accountSessionId)
+        const sockets = transferSockets.get(key)
+        sockets?.delete(socket)
+        if (sockets?.size === 0) transferSockets.delete(key)
+      } else if (socket.data.state.registered) {
+        connectionManager.removeConnection(socket.data.id)
+      }
       trackClosedConnection(socket.data.state)
     }
   }
@@ -941,6 +1062,7 @@ export const makeInlineProtocolRealtimeTransport = (
     },
     shutdown: async () => {
       accepting = false
+      stopTransferInvalidation()
       const active = [...sockets]
       const activeStates = active.flatMap((socket) => socket.data.state ? [socket.data.state] : [])
       for (const socket of active) {

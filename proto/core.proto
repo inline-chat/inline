@@ -40,6 +40,11 @@ message ConnectionInit {
 
   // Opt in per connection. Older clients interpret WORKING as cancellation.
   optional bool supports_working = 10;
+
+  // Realtime V3: a second connection for bulk file transfers. The server
+  // sends it no updates, keeps it out of presence, admits only transfer RPCs
+  // and getMe on it, and closes it after two idle minutes.
+  optional bool transfer_only = 11;
 }
 
 message ServerProtocolMessage {

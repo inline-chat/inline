@@ -2034,6 +2034,7 @@ fn connection_init_for_token(token: &str, identity: &ClientIdentity) -> proto::C
         client_type: None,
         time_zone: None,
         supports_working: None,
+        transfer_only: None,
     }
 }
 

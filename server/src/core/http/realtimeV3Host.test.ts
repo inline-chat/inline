@@ -43,6 +43,7 @@ import {
   type ServerReplayRepository,
 } from "@inline-chat/protocol/server"
 import {
+  inlineProtocolApplicationAuthorityKey,
   makeInlineProtocolRealtimeTransport,
   realtimeV3Log,
   type InlineProtocolRuntime,
@@ -1383,6 +1384,72 @@ describe("Inline Protocol WebSocket carrier", () => {
     expect(sent).toHaveLength(sentAfterClose)
     expect(data.state?.session.retainedPendingMessageBytes).toBe(0)
 
+  })
+
+  test("keeps a transfer-only socket out of fan-out and presence, idles it out and closes it on revocation", async () => {
+    const authorizers: Array<(authorization: ServerApplicationAuthorization, options?: { transferOnly: boolean }) => boolean> = []
+    const transport = makeInlineProtocolRealtimeTransport(fixture(), {
+      applicationDispatcherFactory: ({ onAuthorized }) => {
+        authorizers.push(onAuthorized)
+        return { dispatch: async () => ({ kind: "result", payload: Uint8Array.of(1) }) }
+      },
+    })
+    const timerSpy = spyOn(globalThis, "setTimeout")
+    const closes = new Map<string, Array<{ code: number; reason: string }>>()
+    const openSocket = () => {
+      const data = upgrade(transport)
+      closes.set(data.id, [])
+      const socket = {
+        data,
+        close: (code: number, reason: string) => {
+          closes.get(data.id)!.push({ code, reason })
+          transport.websocket.close?.(socket, code, reason)
+        },
+        sendBinary: (bytes: Uint8Array) => bytes.length,
+      } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+      transport.websocket.open?.(socket)
+      return { data, authorize: authorizers.at(-1)! }
+    }
+    const identity = { userId: 4_201, accountSessionId: 8_401 }
+    const mainAuthorization: ServerApplicationAuthorization = {
+      authKeyId: Uint8Array.of(1, 1, 1, 1, 1, 1, 1, 1), permanent: false, temporaryBound: true, ...identity,
+    }
+    const transferAuthorization = { ...mainAuthorization, authKeyId: Uint8Array.of(2, 2, 2, 2, 2, 2, 2, 2) }
+    const main = openSocket()
+    const transfer = openSocket()
+    try {
+      // Without a verified main connection there is no authority to share.
+      expect(transfer.authorize(transferAuthorization, { transferOnly: true })).toBeFalse()
+      expect(main.authorize(mainAuthorization)).toBeTrue()
+      expect(transfer.authorize(transferAuthorization, { transferOnly: true })).toBeTrue()
+      expect(transfer.authorize(transferAuthorization, { transferOnly: true })).toBeTrue()
+      expect(connectionManager.getUserConnections(identity.userId).map(({ connectionId }) => connectionId))
+        .toEqual([main.data.id])
+      expect(connectionManager.getConnection(transfer.data.id)).toBeUndefined()
+      expect(transfer.data.state?.transfer).toMatchObject(identity)
+      // A registered main socket never becomes a transfer socket.
+      expect(main.authorize(mainAuthorization, { transferOnly: true })).toBeFalse()
+      expect(closes.get(main.data.id)).toEqual([])
+      // Both sockets share the account session's application admission.
+      expect(inlineProtocolApplicationAuthorityKey(transferAuthorization))
+        .toBe(inlineProtocolApplicationAuthorityKey(mainAuthorization))
+
+      const idle = timerSpy.mock.calls.filter(([, delay]) => delay === 120_000).at(-1)?.[0]
+      if (typeof idle !== "function") throw new Error("Expected transfer idle timer")
+      idle()
+      expect(closes.get(transfer.data.id)).toEqual([{ code: 1000, reason: "Transfer connection idle" }])
+      expect(transfer.data.closed).toBeTrue()
+
+      const second = openSocket()
+      expect(second.authorize(transferAuthorization, { transferOnly: true })).toBeTrue()
+      sessionAuthority.invalidate({ userId: identity.userId, sessionId: identity.accountSessionId })
+      expect(closes.get(second.data.id)).toEqual([{ code: 4401, reason: "session_revoked_confirmed" }])
+      expect(second.authorize(transferAuthorization, { transferOnly: true })).toBeFalse()
+    } finally {
+      timerSpy.mockRestore()
+      connectionManager.removeConnection(main.data.id)
+      await transport.shutdown()
+    }
   })
 
   test("does not register a compatibility connection after the socket closes", async () => {

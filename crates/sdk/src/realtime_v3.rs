@@ -569,7 +569,26 @@ impl InlineProtocolV3Connection {
     pub async fn open_transfer_session(
         &self,
     ) -> Result<crate::realtime::RealtimeSession, InlineProtocolV3Error> {
-        Ok(self.reconnect().await?.into_session())
+        let mut transfer = self.reconnect().await?;
+        // The server then sends this socket no updates, keeps it out of
+        // presence, admits only transfer RPCs on it, and closes it when idle.
+        let response = transfer
+            .invoke(proto::RealtimeV3Request {
+                body: Some(proto::realtime_v3_request::Body::ConnectionInit(
+                    proto::ConnectionInit {
+                        transfer_only: Some(true),
+                        ..Default::default()
+                    },
+                )),
+            })
+            .await?;
+        if !matches!(
+            response.body,
+            Some(proto::realtime_v3_response::Body::ConnectionOpen(_))
+        ) {
+            return Err(InlineProtocolV3Error::Protocol);
+        }
+        Ok(transfer.into_session())
     }
 
     /// Promotes this authenticated connection into the SDK's single
