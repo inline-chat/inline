@@ -69,6 +69,7 @@
     "@inline-chat/realtime-sdk": "workspace:*",
     "@inline-chat/oauth-core": "workspace:*",
     "@inline-chat/bot-api-types": "workspace:*",
+    "effect@4.0.0-beta.98>toml": "5.0.1",
     "express-rate-limit>ip-address": "10.3.1",
     "node-forge": "github:digitalbazaar/forge#ceba34402e329f0365134f23fe19898756527d65"
   },
