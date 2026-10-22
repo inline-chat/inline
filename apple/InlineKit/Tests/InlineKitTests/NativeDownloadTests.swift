@@ -34,24 +34,27 @@ private actor DownloadPartMock: NativeFilePartFetching {
   enum Corruption: Sendable { case none, offset, size, length, digest }
   let bytes: Data
   let corruption: Corruption
-  let stallOffset: UInt64?
+  let stallOffsets: Set<UInt64>
   let failureOffset: UInt64?
   let failure: any Error
   private var failuresRemaining: Int
-  let gate = AsyncStream<Void>.makeStream()
+  private var gates: [UInt64: AsyncStream<Void>.Continuation] = [:]
   private var requests: [GetFilePartInput] = []
   private var waiters: [UInt64: [CheckedContinuation<Void, Never>]] = [:]
+  private var responses: [UInt64] = []
+  private var responseWaiters: [UInt64: [CheckedContinuation<Void, Never>]] = [:]
   private var active = 0
   private var maxActive = 0
 
   init(
     bytes: Data, corruption: Corruption = .none, stallOffset: UInt64? = nil,
+    stallOffsets: Set<UInt64> = [],
     failureOffset: UInt64? = nil, failuresRemaining: Int = 0,
     failure: any Error = RealtimeDirectRpcError.timeout
   ) {
     self.bytes = bytes
     self.corruption = corruption
-    self.stallOffset = stallOffset
+    self.stallOffsets = stallOffsets.union(stallOffset.map { [$0] } ?? [])
     self.failureOffset = failureOffset
     self.failuresRemaining = failuresRemaining
     self.failure = failure
@@ -68,7 +71,9 @@ private actor DownloadPartMock: NativeFilePartFetching {
       failuresRemaining -= 1
       throw failure
     }
-    if input.offset == stallOffset {
+    if stallOffsets.contains(input.offset) {
+      let gate = AsyncStream<Void>.makeStream()
+      gates[input.offset] = gate.continuation
       for await _ in gate.stream { break }
       try Task.checkCancellation()
     }
@@ -91,6 +96,8 @@ private actor DownloadPartMock: NativeFilePartFetching {
       case .digest: part.sha256[0] ^= 1
       }
     }
+    responses.append(input.offset)
+    responseWaiters.removeValue(forKey: input.offset)?.forEach { $0.resume() }
     return part
   }
 
@@ -98,7 +105,12 @@ private actor DownloadPartMock: NativeFilePartFetching {
     if requests.contains(where: { $0.offset == offset }) { return }
     await withCheckedContinuation { waiters[offset, default: []].append($0) }
   }
-  func release() { gate.continuation.finish() }
+  func waitForResponse(_ offset: UInt64) async {
+    if responses.contains(offset) { return }
+    await withCheckedContinuation { responseWaiters[offset, default: []].append($0) }
+  }
+  func release(_ offset: UInt64) { gates.removeValue(forKey: offset)?.finish() }
+  func responseOffsets() -> [UInt64] { responses }
   func snapshot() -> ([GetFilePartInput], Int, Int) { (requests, maxActive, active) }
 }
 
@@ -500,8 +512,9 @@ private func downloadDestination() -> URL {
 
   @Test func boundedOutOfOrderRangesProduceExactFile() async throws {
     let partSize = 524_288
-    let bytes = Data((0 ..< partSize * 4 + 17).map { UInt8($0 % 251) })
-    let transport = DownloadPartMock(bytes: bytes, stallOffset: UInt64(partSize))
+    let bytes = Data((0 ..< partSize * 6 + 17).map { UInt8($0 % 251) })
+    let window = (1 ... 4).map { UInt64(partSize * $0) }
+    let transport = DownloadPartMock(bytes: bytes, stallOffsets: Set(window))
     let destination = downloadDestination()
     defer { try? FileManager.default.removeItem(at: destination) }
     var message = FileMessageLocation()
@@ -513,19 +526,28 @@ private func downloadDestination() -> URL {
         fileUniqueID: "INP_download", message: provenance, to: destination
       )
     }
-    await transport.waitForRequest(UInt64(partSize * 2))
-    await transport.waitForRequest(UInt64(partSize))
-    let (pending, maximum, _) = await transport.snapshot()
-    #expect(pending.map(\.offset).sorted() == [0, UInt64(partSize), UInt64(partSize * 2)])
-    #expect(maximum <= 2)
-    await transport.release()
+    // The size probe finishes first, then all four range slots must fill. More
+    // parts remain beyond this window, so the assertion also checks admission.
+    for offset in window { await transport.waitForRequest(offset) }
+    let (pending, maximum, inFlight) = await transport.snapshot()
+    #expect(pending.map(\.offset).sorted() == [0] + window)
+    #expect(maximum == 4)
+    #expect(inFlight == 4)
+    // Return the later ranges in reverse order while the next writable range
+    // remains blocked, then verify the published file still has exact bytes.
+    for offset in window.dropFirst().reversed() {
+      await transport.release(offset)
+      await transport.waitForResponse(offset)
+    }
+    #expect(await transport.responseOffsets() == [0] + window.dropFirst().reversed())
+    await transport.release(window[0])
     let result = try await download.value
     #expect(result == destination)
     #expect(try Data(contentsOf: result) == bytes)
     let (requests, maxActive, active) = await transport.snapshot()
-    #expect(requests.count == 5)
+    #expect(requests.map(\.offset).sorted() == (0 ... 6).map { UInt64(partSize * $0) })
     #expect(requests.allSatisfy { $0.message == provenance && $0.fileUniqueID == "INP_download" })
-    #expect(maxActive <= 2)
+    #expect(maxActive == 4)
     #expect(active == 0)
   }
 
