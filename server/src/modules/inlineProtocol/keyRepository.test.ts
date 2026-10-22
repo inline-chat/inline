@@ -15,7 +15,7 @@ import {
   PermanentAuthorizationKeyRepository,
 } from "@in/server/db/models/inlineProtocol"
 import { makeAuthorizationKeyCipher } from "./keyCipher"
-import { InlineProtocolAuthorizationKeys } from "./authorizationKeys"
+import { AUTHORITY_CACHE_TTL_MS, InlineProtocolAuthorizationKeys } from "./authorizationKeys"
 import { TemporaryAuthorizationKeyStore } from "./temporaryKeys"
 
 const oldKey = new Uint8Array(32).fill(0x11)
@@ -186,7 +186,8 @@ describe("Inline Protocol durable authorization-key lifecycle", () => {
     const temporaryKey = new Uint8Array(256).fill(0x77)
     const temporaryKeyId = authKeyId(temporaryKey)
     const temporary = new TemporaryAuthorizationKeyStore(() => 100)
-    const authorizations = new InlineProtocolAuthorizationKeys(permanent, temporary)
+    let nowMs = 0
+    const authorizations = new InlineProtocolAuthorizationKeys(permanent, temporary, { nowMilliseconds: () => nowMs })
     await temporary.create({
       key: temporaryKey,
       keyId: temporaryKeyId,
@@ -206,6 +207,10 @@ describe("Inline Protocol durable authorization-key lifecycle", () => {
 
     await db.update(schema.sessions).set({ revoked: new Date() })
       .where(eq(schema.sessions.id, account.session.id))
+    // A revocation committed by another process is seen at the next reconciliation
+    // (which invalidates the cache) or, at the latest, when the 30 s authority TTL lapses.
+    expect(await authorizations.load(temporaryKeyId)).toBeDefined()
+    nowMs = AUTHORITY_CACHE_TTL_MS
     expect(await authorizations.load(temporaryKeyId)).toBeUndefined()
     expect(temporary.size).toBe(0)
   })
