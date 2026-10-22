@@ -121,34 +121,49 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   expect(workflow.jobs.qualify).toMatchObject({ needs: "validate", uses: "./.github/workflows/server-test.yml",
     with: { publish_image: true, publish_only: "${{ inputs.publish_only }}" } })
   expect(workflow.jobs.validate?.steps?.[0]?.env).toEqual({
-    PUBLISH_ONLY: "${{ inputs.publish_only }}", BOOTSTRAP: "${{ inputs.bootstrap }}",
+    PUBLISH_ONLY: "${{ inputs.publish_only }}", BOOTSTRAP: "${{ inputs.bootstrap }}", ORIGINS: "${{ inputs.origins }}",
   })
-  for (const id of ["preflight", "migrate", "deploy", "activate"]) {
+  for (const id of ["preflight", "migrate", "nuremberg", "deploy", "activate"]) {
     expect(workflow.jobs[id]?.if).toContain("github.ref == 'refs/heads/main'")
     expect(workflow.jobs[id]?.if).toContain("!inputs.publish_only")
   }
-  // Interpret the workflow's deliberately simple boolean guards and dependency
-  // success requirements, so changing either changes the jobs exercised here.
-  const runnable = (id: string, publishOnly: boolean, failed?: string, bootstrap = false, ref = "refs/heads/main"): boolean => {
+  // Interpret the workflow's deliberately simple guards and dependency rules,
+  // so changing either changes the jobs exercised here. Jobs without
+  // `!cancelled()`/`always()` require every dependency to succeed; the others
+  // state their dependency requirements as explicit clauses.
+  type Status = "success" | "skipped" | "failure"
+  const status = (id: string, publishOnly: boolean, failed?: string, bootstrap = false, ref = "refs/heads/main", origins = "both"): Status => {
     const job = workflow.jobs[id]!
+    const needs = typeof job.needs === "string" ? [job.needs] : job.needs ?? []
+    const results = Object.fromEntries(needs.map((dependency) =>
+      [dependency, status(dependency, publishOnly, failed, bootstrap, ref, origins)]))
+    const custom = /!cancelled\(\)|always\(\)/.test(job.if ?? "")
+    if (!custom && needs.some((dependency) => results[dependency] !== "success")) return "skipped"
     if (job.if !== undefined) {
       const expression = job.if.match(/^\$\{\{\s*(.*?)\s*\}\}$/)?.[1]
       if (!expression) throw new Error("Unexpected release job condition")
       const clauses: Record<string, boolean> = {
         "github.ref == 'refs/heads/main'": ref === "refs/heads/main",
         "inputs.publish_only": publishOnly, "!inputs.publish_only": !publishOnly, "inputs.bootstrap": bootstrap,
+        "!cancelled()": true, "always()": true,
       }
       if (!expression.split(" && ").every((clause) => {
+        const origin = clause.match(/^inputs\.origins != '(\w+)'$/)
+        if (origin) return origins !== origin[1]
+        const success = clause.match(/^needs\.(\w+)\.result == 'success'$/)
+        if (success) return results[success[1]!] === "success"
+        const done = clause.match(/^\(needs\.(\w+)\.result == 'success' \|\| needs\.\1\.result == 'skipped'\)$/)
+        if (done) return results[done[1]!] !== "failure"
         if (!(clause in clauses)) throw new Error(`Unexpected release condition: ${clause}`)
         return clauses[clause]
-      })) return false
+      })) return "skipped"
     }
-    const needs = typeof job.needs === "string" ? [job.needs] : job.needs ?? []
-    return needs.every((dependency) => dependency !== failed && runnable(dependency, publishOnly, failed, bootstrap, ref))
+    return id === failed ? "failure" : "success"
   }
+  const runnable = (...args: Parameters<typeof status>) => status(...args) !== "skipped"
   for (const [publishOnly, expected] of [
     [true, ["validate", "qualify", "prepared"]],
-    [false, ["validate", "qualify", "preflight", "migrate", "deploy"]],
+    [false, ["validate", "qualify", "preflight", "migrate", "nuremberg", "deploy", "summary"]],
   ] as const) {
     expect(Object.keys(workflow.jobs).filter((id) => runnable(id, publishOnly)).sort()).toEqual([...expected].sort())
     for (const [id, job] of Object.entries(workflow.jobs)) {
@@ -165,13 +180,25 @@ test("publish-only keeps full CI and excludes every production job; normal and f
   expect(runnable("deploy", false, "migrate")).toBe(false)
   expect(JSON.stringify(workflow.jobs.prepared)).not.toContain("secrets.")
   expect(workflow.jobs.prepared?.environment).toBeUndefined()
-  expect(Object.keys(workflow.jobs).filter((job) => runnable(job, false, undefined, true)).sort())
-    .toEqual(["activate", "deploy", "migrate", "preflight", "qualify", "validate"])
+  expect(Object.keys(workflow.jobs).filter((job) => runnable(job, false, undefined, true, "refs/heads/main", "fly")).sort())
+    .toEqual(["activate", "deploy", "migrate", "preflight", "qualify", "summary", "validate"])
+  // Both origins: Nuremberg is released and verified before Fly is touched.
+  expect(runnable("deploy", false, "nuremberg")).toBe(false)
+  expect(runnable("summary", false, "nuremberg")).toBe(true)
+  expect(workflow.jobs.nuremberg?.needs).toEqual(["qualify", "preflight", "migrate"])
+  expect(workflow.jobs.deploy?.needs).toContain("nuremberg")
+  // Manual single-origin releases stay available.
+  const ran = (origins: string) => Object.keys(workflow.jobs)
+    .filter((job) => runnable(job, false, undefined, false, "refs/heads/main", origins)).sort()
+  expect(ran("fly")).toEqual(["deploy", "migrate", "preflight", "qualify", "summary", "validate"])
+  expect(ran("nuremberg")).toEqual(["migrate", "nuremberg", "preflight", "qualify", "summary", "validate"])
+  expect(runnable("nuremberg", false, "preflight", false, "refs/heads/main", "nuremberg")).toBe(false)
+  expect(runnable("nuremberg", false, "migrate", false, "refs/heads/main", "nuremberg")).toBe(false)
   expect(runnable("activate", false, "deploy", true)).toBe(false)
   for (const ref of ["refs/heads/main", "refs/heads/codex/multi-node-ha", "refs/tags/main"]) {
     for (const publishOnly of [true, false]) {
       for (const bootstrap of [true, false]) {
-        for (const id of ["preflight", "migrate", "deploy", "activate"]) {
+        for (const id of ["preflight", "migrate", "nuremberg", "deploy", "activate"]) {
           // Test every production job's own fence even if upstream validation
           // were to accept a branch or conflicting inputs accidentally.
           expect(runnable(id, publishOnly, undefined, bootstrap, ref))
@@ -203,13 +230,64 @@ test("publish-only keeps full CI and excludes every production job; normal and f
             expect(Bun.spawnSync(["bash", "-e", "-c", validate], { env: {
               PATH: process.env.PATH, GITHUB_EVENT_NAME: event, GITHUB_REF: ref,
               GITHUB_REF_TYPE: refType, GITHUB_REPOSITORY: repository,
-              PUBLISH_ONLY: publishOnly, BOOTSTRAP: bootstrap,
+              PUBLISH_ONLY: publishOnly, BOOTSTRAP: bootstrap, ORIGINS: "fly",
             } }).exitCode === 0, `${event} ${repository} ${ref} publish-only=${publishOnly} bootstrap=${bootstrap}`).toBe(permitted)
           }
         }
       }
     }
   }
+  // Bootstrap is a Fly-only cutover; unknown origin choices are rejected.
+  for (const origins of ["both", "fly", "nuremberg", "", "all"]) {
+    for (const bootstrap of ["false", "true"]) {
+      const permitted = ["both", "fly", "nuremberg"].includes(origins) && (bootstrap === "false" || origins === "fly")
+      expect(Bun.spawnSync(["bash", "-e", "-c", validate], { env: {
+        PATH: process.env.PATH, GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/main",
+        GITHUB_REF_TYPE: "branch", GITHUB_REPOSITORY: "inline-chat/inline",
+        PUBLISH_ONLY: "false", BOOTSTRAP: bootstrap, ORIGINS: origins,
+      } }).exitCode === 0, `origins=${origins} bootstrap=${bootstrap}`).toBe(permitted)
+    }
+  }
+})
+
+test("a re-run after Fly already took the digest verifies instead of redeploying", async () => {
+  const workflow = await releaseWorkflow()
+  const script = workflow.jobs.deploy?.steps?.find((step) => step.name === "Revalidate the recorded baseline and deploy the same digest")?.run
+  if (!script) throw new Error("Missing deployment command")
+  const directory = await mkdtemp(resolve(tmpdir(), "inline-rerun-shell-"))
+  const inventory = resolve(directory, "inventory.json")
+  const calls = resolve(directory, "calls")
+  const executable = resolve(directory, "flyctl")
+  await Bun.write(executable, '#!/bin/bash\nset -eu\nif [[ "$1 $2" = "machine list" ]]; then\n  cat "$STUB_INVENTORY"\nelse\n  echo deploy > "$STUB_CALLS"\nfi\n')
+  await chmod(executable, 0o700)
+  const sha = "a".repeat(40)
+  const next = "sha256:" + "2".repeat(64)
+  const release = (id: string) => ({ ...machine(id), image_ref: { ...machine().image_ref, digest: next, labels: { "org.opencontainers.image.revision": sha } } })
+  const baseline = JSON.stringify(summary([machine()]))
+  const execute = (recordedBaseline = baseline) => Bun.spawnSync(["bash", "-e", "-c", script], {
+    cwd: resolve(import.meta.dir, "../.."),
+    env: { PATH: `${directory}:${process.env.PATH}`, FLY_API_TOKEN: "synthetic", RUNTIME_IMAGE: `ghcr.io/inline-chat/inline-server@${next}`,
+      BASELINE: recordedBaseline, BOOTSTRAP: "false", GITHUB_SHA: sha, RUNNER_TEMP: directory, STUB_INVENTORY: inventory, STUB_CALLS: calls },
+  })
+  // Blue-green replaced the Machine under a new ID: same count, new digest and revision.
+  await Bun.write(inventory, JSON.stringify([release("new123")]))
+  await Bun.write(calls, "")
+  expect(execute().exitCode).toBe(0)
+  expect(await Bun.file(calls).text()).toBe("")
+  // A new dispatch can record a baseline already on the selected digest too.
+  expect(execute(JSON.stringify(summary([release("new123")]))).exitCode).toBe(0)
+  expect(await Bun.file(calls).text()).toBe("")
+  // The baseline itself still deploys.
+  await Bun.write(inventory, JSON.stringify([machine()]))
+  expect(execute().exitCode).toBe(0)
+  expect((await Bun.file(calls).text()).trim()).toBe("deploy")
+  // Anything else (another image, another count) still refuses.
+  await Bun.write(calls, "")
+  await Bun.write(inventory, JSON.stringify([release("new123"), release("new234")]))
+  expect(execute().exitCode).not.toBe(0)
+  await Bun.write(inventory, JSON.stringify([{ ...machine(), image_ref: { ...machine().image_ref, digest: "sha256:" + "3".repeat(64) } }]))
+  expect(execute().exitCode).not.toBe(0)
+  expect(await Bun.file(calls).text()).toBe("")
 })
 
 const inspectInitial = (machines: unknown[], legacy = false) => Bun.spawnSync([
@@ -278,7 +356,7 @@ test("the actual first/resumed bootstrap shell preserves rehearsal Machines and 
   const executable = resolve(directory, "flyctl")
   await Bun.write(executable, '#!/bin/bash\nset -eu\nif [[ "$1 $2" = "machine list" ]]; then\n  cat "$STUB_INVENTORY"\nelse\n  printf "%s\\n" "$@" > "$STUB_CALLS"\nfi\n')
   await chmod(executable, 0o700)
-  const image = `registry.fly.io/inline-api@${digest}`
+  const image = `ghcr.io/inline-chat/inline-server@${digest}`
   const execute = (baseline: string) => Bun.spawnSync(["bash", "-e", "-c", script], {
     cwd: resolve(import.meta.dir, "../.."),
     env: { PATH: `${directory}:${process.env.PATH}`, FLY_API_TOKEN: "synthetic", RUNTIME_IMAGE: image,
@@ -359,8 +437,8 @@ test("the publish-only summary records both qualified image digests and rejects 
   if (!script) throw new Error("Missing prepared image summary")
   const directory = await mkdtemp(resolve(tmpdir(), "inline-prepared-image-"))
   const summaryPath = resolve(directory, "summary.md")
-  const image = `registry.fly.io/inline-api@${digest}`
-  const standbyImage = `registry.fly.io/inline-api@sha256:${"2".repeat(64)}`
+  const image = `ghcr.io/inline-chat/inline-server@${digest}`
+  const standbyImage = `ghcr.io/inline-chat/inline-server@sha256:${"2".repeat(64)}`
   const execute = (runtimeImage: string, standby = standbyImage) => Bun.spawnSync(["bash", "-e", "-c", script], {
     env: { PATH: process.env.PATH, GITHUB_SHA: "a".repeat(40), RUNTIME_IMAGE: runtimeImage, STANDBY_IMAGE: standby, GITHUB_STEP_SUMMARY: summaryPath },
   })
@@ -371,8 +449,8 @@ test("the publish-only summary records both qualified image digests and rejects 
   expect(output).toContain(standbyImage)
   expect(output).toContain("No Hetzner deployment was performed")
   expect(output).toContain("migrations, and deployment were skipped")
-  expect(execute("registry.fly.io/inline-api:latest").exitCode).not.toBe(0)
-  expect(execute(image, "registry.fly.io/inline-api:latest").exitCode).not.toBe(0)
+  expect(execute("ghcr.io/inline-chat/inline-server:latest").exitCode).not.toBe(0)
+  expect(execute(image, "ghcr.io/inline-chat/inline-server:latest").exitCode).not.toBe(0)
   expect(execute(image, "").exitCode).not.toBe(0)
   expect(await Bun.file(summaryPath).text()).toBe(output)
 })

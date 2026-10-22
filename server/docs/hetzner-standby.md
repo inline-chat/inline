@@ -196,8 +196,9 @@ the old container and wait for its real exit/drain. Keep the other origins ready
 Source changes, image publication and local examples alone change no routing.
 
 For Fly, retain the existing exact-fleet preflight, migration and blue-green
-workflow; `--ha=false` preserves the selected public Machine count. It does not
-update either Hetzner origin. Before the next selected `main` release reaches
+workflow; `--ha=false` preserves the selected public Machine count. The default
+release also updates Nuremberg through its Coolify API; Finland remains outside
+this workflow. Before the next selected `main` release reaches
 Fly, require Nuremberg to pass direct authenticated HTTP/V2/V3, effective
 image/configuration and schema checks for that SHA's qualified ARM64 image.
 Record both architecture-specific digests, the compatible rollback release,
@@ -208,10 +209,13 @@ routing. Recheck routing and origin health after the rollout. Mixed releases
 are acceptable only for deliberately qualified additive overlap with a named
 owner and completion deadline, not indefinitely stale fallbacks.
 
-The checked-in Fly workflow currently has no Nuremberg deployment/readback or
-freshness gate. Until a reviewed release guard is added, the operator must
-complete and record the standby prerequisite before dispatching the Fly
-release. Automatic Git deployment remains disabled on the standby; enabling
+The default `server-deploy.yml` release (`origins=both`) pins the qualified public
+GHCR image in Coolify and smoke-tests Nuremberg before Fly. It uses no SSH tunnel
+or host registry credentials. The retained original image/configuration is used
+for verified restoration on failure; see the
+[Fly runbook](fly-deployment.md#manual-release-from-main). A `fly`-only
+dispatch skips it, and the operator must then complete and record the standby
+prerequisite. Automatic Git deployment remains disabled on the standby; enabling
 it would bypass exact-image qualification rather than solve release coordination.
 
 Before a planned node stop, verify a ready alternative, withdraw that node from

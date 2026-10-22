@@ -34,7 +34,14 @@ from `main` in GitHub Actions, or use:
 
 ```sh
 gh workflow run server-deploy.yml --ref main
+# One origin alone, when that is deliberately needed:
+gh workflow run server-deploy.yml --ref main -f origins=fly
+gh workflow run server-deploy.yml --ref main -f origins=nuremberg
 ```
+
+The default `origins=both` releases the whole fleet. An NBG-only dispatch still
+checks the healthy Fly alternative and runs the shared migration gate, but
+does not replace Fly or change routing.
 
 The default dispatch is the explicit release action: after configured environment
 approvals, it can run production DDL and replace the serving Machines. Ordinary pushes and
@@ -47,24 +54,54 @@ The workflow performs these steps:
 2. Call the existing Server Tests workflow, irrespective of push path filters.
    It runs the server suite, builds runtime and Coolify images, and exercises
    packaged migrations and the final runtime artifact against disposable
-   PostgreSQL. Publish that tested runtime image without rebuilding and record
-   its immutable registry digest. A failing parallel test job prevents promotion
-   even if an unused image was already pushed.
-3. Before DDL, inspect the existing Fly fleet: require healthy managed public
-   Machines, reject unmanaged public writers and record the current image/IDs.
-   Pull that digest in a protected production migration job; verify its source
+   PostgreSQL. Only after all three jobs succeed, load the saved amd64 runtime
+   and ARM64 Coolify archives and publish those exact bytes to public GHCR.
+   Check source/architecture and anonymous access to both immutable digests.
+   Ordinary test jobs remain read-only; only this manual publisher gets package-write access.
+3. Before DDL, check required credentials, anonymous image access, the Fly
+   fleet and selected-origin read-only bot/chat access. Check the Coolify app
+   and its health configuration when Nuremberg is selected. Save a small
+   `server-release-plan` artifact with source, both digests, migration head,
+   Fly baseline and original Coolify image name/tag/serving revision.
+   Pull the runtime digest in the protected migration job; verify its source
    revision label. Run `bun server/dist/migrate.js` followed by the read-only
    `bun server/dist/verify-migrations.js` using the job's direct DDL credential.
    A failure stops the release before API replacement.
-4. Re-read the fleet immediately before replacement and require the recorded
+4. Release Nuremberg first (`scripts/ci/nbg-release.ts`): PATCH the existing
+   Docker Image app to the qualified ARM64 GHCR digest, deploy through Coolify's
+   API, and require finished deployment, matching configured pin, health and
+   direct readiness on the release revision. Smoke-test bot login, send/readback
+   and HTTP 101 upgrades on `/realtime` and `/realtime/v3`. On a confirmed failure,
+   restore both original image fields, redeploy, and verify the old revision's
+   readiness. Cancel an active recorded deployment before restoring; ambiguous
+   queue/controller state stops for reconciliation instead of racing a restore.
+5. Re-read the Fly fleet immediately before replacement and require the recorded
    baseline to match. Replace that set with the same digest using blue-green. A service-free dark Machine is excluded. Refuse
    incomplete Machine observations; verify the final count, image digest,
-   source revision and passing service checks.
-5. Perform authenticated user-path checks and inspect recovery, errors, worker
-   backlog and drain outcomes. The automated Machine checks are infrastructure
-   evidence, not proof that every client or provider integration works.
+   source revision and passing service checks, then smoke-test Fly directly and
+   canonical routing separately. An NBG-only run checks canonical routing
+   against the unchanged Fly revision instead.
+6. The `Release outcome` job reports published, already current or failed per
+   origin, including a partial release (Nuremberg done, Fly not). Bootstrap
+   completion also requires the worker-activation job.
 
-The runtime image is `registry.fly.io/inline-api@sha256:...`. The source manifest,
+After a partial failure use **Re-run failed jobs**: successful jobs and the
+original release plan are retained. Nuremberg resumes a recorded deployment
+and rechecks the exact pin, readiness and smoke paths. Without a usable receipt,
+it redeploys the same qualified digest; a matching source label alone never
+skips deployment. Fly already on the selected digest is verified without
+replacement. A full rerun that rebuilds different bytes cannot reuse the old
+plan: start a new dispatch instead. Retained Actions artifacts expire after
+90 days; keep needed recovery records before expiry.
+
+Coolify's API on the existing installation does not expose an independent
+running-container digest. Its receipt establishes the pinned controller
+configuration and successful deployment, supplemented by direct runtime checks.
+The smoke test's WebSocket checks prove upgrades, not authenticated sessions,
+reconnect/replay or cross-origin recovery. Keep watching errors, worker backlog
+and drain outcomes after release.
+
+Both image references use `ghcr.io/inline-chat/inline-server@sha256:...`. The source manifest,
 source revision label and immutable digest identify the candidate. The checked-in
 Fly config contains an image sentinel so an ordinary deploy cannot silently
 build or select an unqualified checkout.
@@ -80,9 +117,10 @@ does not establish these effective settings.
 ### Release contract with a warm fallback
 
 Since October 16, 2026, `api.inline.chat` uses Cloudflare load balancing with
-Fly preferred and a running Nuremberg fallback. The Fly workflow publishes both
-architecture-specific images but deploys and verifies only Fly. It does not
-refresh Nuremberg or prove that automatic fallback remains usable.
+Fly preferred and a running Nuremberg fallback. The workflow's default
+`origins=both` updates and verifies Nuremberg before Fly in the same run.
+A `fly`-only release leaves Nuremberg on its previous revision; the
+run summary says so, and the requirements below then apply manually.
 
 Before releasing the next selected `main` SHA to Fly, qualify that same SHA's
 ARM64 image on Nuremberg against the intended schema and runtime configuration.
@@ -94,9 +132,10 @@ and qualify Nuremberg before replacing Fly, keeping another ready origin during
 each replacement. Verify direct HTTP/V2/V3 and cross-node recovery, then verify
 canonical routing and both effective release identities after the Fly rollout.
 
-The current workflow does not enforce this fleet gate. Until a reviewed guard
-is installed, it is an explicit operator prerequisite, and a green Fly-only
-workflow is not completion of the fleet release. Deliberate mixed-version
+The default release enforces the ordering, immutable pins and origin checks above.
+Cloudflare pool identity/order and schema-compatibility decisions remain
+operator checks, and a green `fly`-only run is not completion of the fleet
+release. Deliberate mixed-version
 overlap needs a recorded compatibility decision and an owner/deadline for
 finishing it; it must not leave an indefinitely stale standby. See
 [the standby release procedure](hetzner-standby.md#rolling-upgrades-and-removing-a-node).
@@ -116,9 +155,8 @@ and native ARM64 Coolify images without rebuilding. After all CI succeeds, the
 run summary records the selected source SHA and both immutable digests.
 Tags, pull-request refs and fork repositories are rejected. It skips the
 production environment jobs, fleet preflight, migrations, and deployment; it
-never receives the production
-database credential. Registry publishing still requires the repository/org Fly
-token. Use the recorded digest for the separately authorized clone rehearsal
+never receives the production database credential. Registry publishing uses the
+job's short-lived `GITHUB_TOKEN`, not a Fly token. Use the recorded digest for the separately authorized clone rehearsal
 and initial Machine bootstrap. This option does not bootstrap or migrate an app.
 
 `publish_only` defaults to `false`; a branch dispatch without it fails before
@@ -131,7 +169,7 @@ preflight before DDL and the immediate baseline recheck before replacement.
 After rehearsal and the GitHub setup below, dispatch:
 
 ```sh
-gh workflow run server-deploy.yml --ref main -f bootstrap=true
+gh workflow run server-deploy.yml --ref main -f origins=fly -f bootstrap=true
 ```
 
 `bootstrap` defaults to `false` and cannot be combined with `publish_only`.
@@ -190,15 +228,38 @@ it does not roll back DDL or automatically re-enable the predecessor.
   continues to authorize deployment to `inline-api`.
 - Store `PRODUCTION_DATABASE_MIGRATION_URL` only in `production`. It must be a
   direct PostgreSQL endpoint reachable from the hosted runner with verified TLS.
-  Only the migration command step receives it, by environment variable rather than a
-  command argument. Do not put this DDL credential in the API app's Fly secrets.
-- Supply an app-scoped `FLY_API_TOKEN` for `inline-api`. The reusable image
-  publishing job requires a repository or organization secret; production jobs
-  may use a separately scoped environment secret of the same name. Environment
-  secrets cannot be forwarded to a reusable workflow through its caller.
+  Preflight checks that it is configured; only the migration command step uses
+  it against the database, by environment rather than a command argument. Do
+  not put this DDL credential in either API's runtime secrets.
+- Supply an app-scoped `FLY_API_TOKEN` for `inline-api` in `production`.
+  Registry publication and migrations no longer require Fly registry access.
+- Make the GHCR `inline-server` package public before production release.
+  New packages default to private even for public source repositories; anonymous
+  manifest checks deliberately fail until visibility is public. A publish-only
+  run can create the package without accessing production, after which its
+  visibility can be configured and the failed publisher rerun.
 - Audit API database grants: application DML and ledger `SELECT` are required;
   schema DDL belongs to the migration role. Repository configuration does not
   itself establish provider role separation.
+
+- For Nuremberg, in `production`: secrets `NBG_ORIGIN_IP` and
+  `COOLIFY_NBG_TOKEN` (team-scoped API access to read/update/deploy/cancel the
+  selected app); variables `COOLIFY_URL` (HTTPS origin) and
+  `NBG_COOLIFY_APP_UUID`. Use an expiring token with a renewal owner. No SSH
+  key, loopback registry tunnel or host registry credential is required.
+  Coolify's digest representation uses image name `ghcr.io/inline-chat/inline-server@sha256`
+  and the 64-character digest as image tag, producing `repo@sha256:<digest>`
+  on older and newer versions. Retain the existing app's runtime configuration.
+- Set `FLY_ORIGIN_IP` in `production` to the Fly ingress address. Smoke requests
+  keep `api.inline.chat` as Host/SNI and pin the connection to each origin.
+- For smoke tests: secret `SMOKE_BOT_TOKEN` for a dedicated smoke bot and
+  variable `SMOKE_CHAT_ID` for a private chat that only the bot and operators
+  can read. Never point it at a teammate or customer chat.
+
+After hosted qualification succeeds, audit remaining consumers before removing
+obsolete CI SSH secrets. This workflow no longer consumes `NBG_SSH_HOST`,
+`NBG_SSH_KEY`, `NBG_KNOWN_HOSTS` or `STANDBY_RELEASE_SSH_KEY`; local emergency
+tools may still have their own independent host access.
 
 If the direct database is not reachable from GitHub, use a trusted private
 runner or a separately scoped migration execution environment. Do not silently
