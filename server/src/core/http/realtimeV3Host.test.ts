@@ -730,6 +730,123 @@ describe("Inline Protocol WebSocket carrier", () => {
     }
   })
 
+  test("closes an oversized frame from an unregistered socket before any key lookup", async () => {
+    const runtime = fixture()
+    let lookups = 0
+    const load = runtime.authorizationKeys.load.bind(runtime.authorizationKeys)
+    runtime.authorizationKeys.load = async (authKeyId) => { lookups += 1; return load(authKeyId) }
+    const transport = makeInlineProtocolRealtimeTransport(runtime)
+    const data = upgrade(transport)
+    const closes: number[] = []
+    const socket = { data, close: (code: number) => { closes.push(code) }, sendBinary: (bytes: Uint8Array) => bytes.length } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    try {
+      transport.websocket.open?.(socket)
+      let header: Uint8Array
+      do header = Uint8Array.from(randomBytes(64)); while (!isValidObfuscatedHeader(header))
+      const carrier = createObfuscatedClientHeader(header, 1)
+      await transport.websocket.message(socket, Buffer.from(carrier.wireHeader))
+      await data.state!.queue
+      // A login-sized record passes the cap (it then fails decryption as an unknown key).
+      const loginSized = new Uint8Array(60 * 1024)
+      loginSized.set(randomBytes(8), 0)
+      await transport.websocket.message(socket, Buffer.from(carrier.outbound.process(encodeAbridgedPacket(loginSized))))
+      await data.state!.queue
+      expect(lookups).toBe(1)
+
+      const oversizedTransport = makeInlineProtocolRealtimeTransport(runtime)
+      const oversizedData = upgrade(oversizedTransport)
+      const oversizedCloses: number[] = []
+      const oversizedSocket = { data: oversizedData, close: (code: number) => { oversizedCloses.push(code) }, sendBinary: (bytes: Uint8Array) => bytes.length } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+      oversizedTransport.websocket.open?.(oversizedSocket)
+      do header = Uint8Array.from(randomBytes(64)); while (!isValidObfuscatedHeader(header))
+      const oversizedCarrier = createObfuscatedClientHeader(header, 1)
+      await oversizedTransport.websocket.message(oversizedSocket, Buffer.from(oversizedCarrier.wireHeader))
+      await oversizedData.state!.queue
+      const oversized = new Uint8Array(64 * 1024 + 16)
+      oversized.set(randomBytes(8), 0)
+      await oversizedTransport.websocket.message(oversizedSocket, Buffer.from(oversizedCarrier.outbound.process(encodeAbridgedPacket(oversized))))
+      await oversizedData.state!.queue
+      expect(oversizedCloses).toEqual([1002])
+      expect(lookups).toBe(1)
+      expect(oversizedData.state!.inboundQueuedFrames).toBe(0)
+      await oversizedTransport.shutdown()
+    } finally {
+      await transport.shutdown()
+    }
+  })
+
+  test("admits a large frame before registration once a bound key is known", async () => {
+    const runtime = fixture()
+    const key = Uint8Array.from(randomBytes(256))
+    const keyId = authKeyId(key)
+    const serverSalt = 0x0bad_cafen
+    const sessionId = 0x5151n
+    const expiresAt = Math.floor(Date.now() / 1000) + 600
+    runtime.authorizationKeys.values.set(bytesToHex(keyId), {
+      key, keyId, temporary: true, expiresAt, currentServerSalt: serverSalt,
+      binding: {
+        permanentAuthKeyId: Uint8Array.from(randomBytes(8)), temporarySessionId: sessionId, nonce: 1n,
+        expiresAt, userId: 1, accountSessionId: 2,
+      },
+    })
+    const transport = makeInlineProtocolRealtimeTransport(runtime)
+    const data = upgrade(transport)
+    const closes: number[] = []
+    const socket = { data, close: (code: number) => { closes.push(code) }, sendBinary: (bytes: Uint8Array) => bytes.length } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    try {
+      transport.websocket.open?.(socket)
+      let header: Uint8Array
+      do header = Uint8Array.from(randomBytes(64)); while (!isValidObfuscatedHeader(header))
+      const carrier = createObfuscatedClientHeader(header, 1)
+      await transport.websocket.message(socket, Buffer.from(carrier.wireHeader))
+      await data.state!.queue
+      const ids = new MessageIdGenerator()
+      const send = async (body: Uint8Array, sequenceNumber: number) => {
+        const record = encryptRecord(key, "client-to-server", {
+          serverSalt, sessionId, messageId: ids.next(Date.now(), 1, 0), sequenceNumber, body,
+        }, paddingFor(body.length))
+        await transport.websocket.message(socket, Buffer.from(carrier.outbound.process(encodeAbridgedPacket(record))))
+        await data.state!.queue
+      }
+      await send(encodePing(1n), 0)
+      expect(data.state!.session.hasAccountAuthority).toBeTrue()
+      expect(data.state!.registered).toBeFalse()
+      await send(encodeMsgsAck(Array.from({ length: 8_192 }, (_, index) => BigInt(index + 1))), 0)
+      expect(closes).toEqual([])
+    } finally {
+      await transport.shutdown()
+    }
+  })
+
+  test("closes a socket that has not established a key within the handshake deadline", async () => {
+    const transport = makeInlineProtocolRealtimeTransport(fixture())
+    const timerSpy = spyOn(globalThis, "setTimeout")
+    const data = upgrade(transport)
+    const closes: Array<{ code: number; reason: string }> = []
+    const socket = {
+      data,
+      close: (code: number, reason: string) => {
+        closes.push({ code, reason })
+        transport.websocket.close?.(socket, code, reason)
+      },
+      sendBinary: (bytes: Uint8Array) => bytes.length,
+    } as unknown as ServerWebSocket<InlineProtocolWebSocketData>
+    try {
+      transport.websocket.open?.(socket)
+      const deadlines = timerSpy.mock.calls.filter(([, delay]) => delay === 30_000)
+      expect(deadlines).toHaveLength(1)
+      const expire = deadlines[0]?.[0]
+      if (typeof expire !== "function") throw new Error("Expected handshake deadline")
+      expire()
+      expect(closes).toEqual([{ code: 1001, reason: "Key establishment deadline exceeded" }])
+      expect(data.closed).toBeTrue()
+      expect(data.handshakeAdmissionIp).toBeUndefined()
+    } finally {
+      timerSpy.mockRestore()
+      await transport.shutdown()
+    }
+  })
+
   test("expires established service-only sockets without extending the pending-login deadline", async () => {
     const runtime = fixture()
     const key = Uint8Array.from(randomBytes(256))

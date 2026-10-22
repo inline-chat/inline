@@ -34,6 +34,7 @@ import { makeInlineProtocolRsaSigner } from "@in/server/modules/inlineProtocol/r
 import { InlineProtocolAuthOperations } from "@in/server/modules/inlineProtocol/auth"
 import { InlineProtocolOperations } from "@in/server/modules/inlineProtocol/operations"
 import { makeInlineProtocolApplicationDispatcher } from "@in/server/modules/inlineProtocol/application"
+import { inlineProtocolReplayPolicy } from "@in/server/modules/inlineProtocol/replayPolicy"
 import type { InlineProtocolEnabledConfiguration } from "@in/server/modules/inlineProtocol/config"
 import {
   inlineProtocolClock,
@@ -82,6 +83,12 @@ const MAX_PENDING_LOGINS_PER_IP = 64
 // Native and hosted login challenges last ten minutes. This absolute lifetime
 // leaves time for handshake/provider work without letting pings renew admission.
 const ACCOUNT_AUTHENTICATION_TIMEOUT_MS = 15 * 60 * 1_000
+// Key establishment is a few round trips; an idle socket must not keep the
+// login-phase lifetime before it has proven possession of any key.
+const HANDSHAKE_PHASE_TIMEOUT_MS = 30_000
+// Login, browser-login, upgrade and bind requests are a few KiB. Bound the
+// carrier and record work an unauthenticated peer can demand per frame.
+const MAX_UNREGISTERED_FRAME_BYTES = 64 * 1024
 const HANDSHAKE_RATE_WINDOW_MS = 60_000
 const MAX_HANDSHAKE_STARTS_PER_WINDOW = 4_096
 const MAX_HANDSHAKE_STARTS_PER_IP_PER_WINDOW = 60
@@ -93,7 +100,9 @@ export const realtimeV3Log = new Log("InlineProtocol.V3")
 
 export type InlineProtocolRuntime = {
   rsaKeys: readonly HandshakeRsaServerKey[]
-  authorizationKeys: ServerAuthorizationKeyRepository
+  authorizationKeys: ServerAuthorizationKeyRepository & {
+    invalidateAccountSession?: (userId: number, accountSessionId: number) => void
+  }
   replay: ServerReplayRepository
   operations: InlineProtocolOperations
   clock: Pick<InlineProtocolClock, "assertHealthy" | "nowMilliseconds">
@@ -125,6 +134,7 @@ type InlineProtocolConnectionState = {
   overloaded: boolean
   registered: boolean
   authenticationTimeout?: ReturnType<typeof setTimeout>
+  handshakeTimeout?: ReturnType<typeof setTimeout>
 }
 
 export interface InlineProtocolRealtimeTransport {
@@ -204,17 +214,24 @@ export const makeInlineProtocolRuntime = (
     ...(configuration.replayResultKeyRing ? { cipher: makeReplayResultCipher(configuration.replayResultKeyRing) } : {}),
     encryptWrites: configuration.encryptReplayResults,
   }))
+  const authorizationKeys = new InlineProtocolAuthorizationKeys(permanent, temporary)
+  // Local revocations and reconciled cross-process revocations drop cached
+  // permanent authority at once; the cache TTL only bounds reconciliation lag.
+  const stopAuthorityInvalidation = sessionAuthority.onInvalidate((identity) => {
+    authorizationKeys.invalidateAccountSession(identity.userId, identity.sessionId)
+  })
   return {
     rsaKeys: signer.handshakeKeys,
-    authorizationKeys: new InlineProtocolAuthorizationKeys(permanent, temporary),
+    authorizationKeys,
     replay,
     operations: new InlineProtocolOperations(
       new InlineProtocolAuthOperations(configuration.authCodePepperRing),
     ),
     clock: inlineProtocolClock,
     close: () => {
+      stopAuthorityInvalidation()
       replay.close()
-      temporary.clear()
+      authorizationKeys.clearTemporary()
     },
   }
 }
@@ -379,9 +396,16 @@ export const makeInlineProtocolRealtimeTransport = (
   }
 
   const clearAuthenticationTimeout = (state: InlineProtocolConnectionState | undefined): void => {
+    clearHandshakeTimeout(state)
     if (state?.authenticationTimeout === undefined) return
     clearTimeout(state.authenticationTimeout)
     state.authenticationTimeout = undefined
+  }
+
+  const clearHandshakeTimeout = (state: InlineProtocolConnectionState | undefined): void => {
+    if (state?.handshakeTimeout === undefined) return
+    clearTimeout(state.handshakeTimeout)
+    state.handshakeTimeout = undefined
   }
 
   const clockHealthy = (): boolean => {
@@ -711,6 +735,7 @@ export const makeInlineProtocolRealtimeTransport = (
       dc: 1,
       tryAcquireApplication,
       tryReserveApplicationUpdateBytes,
+      replayPolicy: inlineProtocolReplayPolicy,
     })
     const state: InlineProtocolConnectionState = {
       queue: Promise.resolve(),
@@ -734,6 +759,12 @@ export const makeInlineProtocolRealtimeTransport = (
       close(socket)
       socket.close(1001, "Account authentication deadline exceeded")
     }, ACCOUNT_AUTHENTICATION_TIMEOUT_MS)
+    state.handshakeTimeout = setTimeout(() => {
+      state.handshakeTimeout = undefined
+      if (!accepting || socket.data.closed || state.registered || state.session.hasEstablishedAuthorization) return
+      close(socket)
+      socket.close(1001, "Key establishment deadline exceeded")
+    }, HANDSHAKE_PHASE_TIMEOUT_MS)
   }
 
   const receive = (socket: ServerWebSocket<InlineProtocolWebSocketData>, message: string | Buffer<ArrayBuffer>): void => {
@@ -749,6 +780,12 @@ export const makeInlineProtocolRealtimeTransport = (
     }
     if (state.overloaded) return
     const frameBytes = message.byteLength
+    // Clients verify a cached or new key with a round trip before sending transfer RPCs,
+    // so a bound key is known here even before connection_init registers the socket.
+    if (frameBytes > MAX_UNREGISTERED_FRAME_BYTES && !state.registered && !state.session.hasAccountAuthority) {
+      closeProtocol(socket)
+      return
+    }
     if (state.inboundQueuedFrames >= MAX_QUEUED_INBOUND_FRAMES ||
         state.inboundQueuedBytes + frameBytes > MAX_QUEUED_INBOUND_BYTES) {
       warnOverload("inbound", "Inline Protocol V3 inbound queue overloaded", {
@@ -778,6 +815,7 @@ export const makeInlineProtocolRealtimeTransport = (
         const accepted = await state.session.receiveConcurrent(decoded.payload, decoded.quickAckRequested
           ? { onQuickAck: (quickAckId) => { void sendQuickAck(socket, quickAckId) } }
         : undefined)
+        if (state.session.hasEstablishedAuthorization) clearHandshakeTimeout(state)
         if (state.session.hasEstablishedAuthorization && !tryRetainPendingLogin(socket)) {
           warnOverload("pending-login", "Inline Protocol V3 pending-login admission overloaded", {
             activePendingLogins,

@@ -82,7 +82,7 @@ const errorResponse = (error: unknown): Uint8Array => {
   })
 }
 
-const freshRequestIdRequiredResponse = (method = "getFilePart"): Uint8Array => RealtimeV3Response.toBinary({
+const freshRequestIdRequiredResponse = (method: string): Uint8Array => RealtimeV3Response.toBinary({
   body: {
     oneofKind: "rpcError",
     rpcError: {
@@ -200,7 +200,10 @@ const waitForLane = async (previous: Promise<void>, signal: AbortSignal): Promis
 
 export const makeInlineProtocolApplicationDispatcher = (input: {
   operations: InlineProtocolApplicationOperations
-  authorizationKeys: Pick<ServerAuthorizationKeyRepository, "load">
+  authorizationKeys: Pick<ServerAuthorizationKeyRepository, "load"> & {
+    /** Drops cached permanent authority for an account session this connection logged out. */
+    invalidateAccountSession?: (userId: number, accountSessionId: number) => void
+  }
   connectionId: string
   metadata?: RealtimeRequestMetadata
   /**
@@ -338,6 +341,9 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
                 : undefined,
             })
           })
+          if (rpc.method === Method.LOG_OUT) {
+            input.authorizationKeys.invalidateAccountSession?.(authorization.userId, authorization.accountSessionId)
+          }
           if (!recordedProtocolUse && !signal.aborted && rpc.method !== Method.GET_ME) {
             recordedProtocolUse = true
             try {
@@ -355,9 +361,9 @@ export const makeInlineProtocolApplicationDispatcher = (input: {
           return {
             kind: "result",
             terminateAuthorization: rpc.method === Method.LOG_OUT,
-            replayPayload: rpc.method === Method.GET_FILE_PART
-              ? freshRequestIdRequiredResponse()
-              : rpc.method === Method.TRANSCRIBE_VOICE_DRAFT
+            // File parts use session-tier replay and never reach a durable row. A
+            // transcription result is not retained in one either.
+            replayPayload: rpc.method === Method.TRANSCRIBE_VOICE_DRAFT
               ? freshRequestIdRequiredResponse("transcribeVoiceDraft")
               : undefined,
             payload: RealtimeV3Response.toBinary({

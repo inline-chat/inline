@@ -18,23 +18,35 @@ type TemporaryKeyEntry = {
   binding?: TemporaryKeyBinding
 }
 
+const SWEEP_INTERVAL_MS = 30_000
+
 export class TemporaryAuthorizationKeyStore {
   readonly #entries = new Map<string, TemporaryKeyEntry>()
+  #sweepTimer: ReturnType<typeof setInterval> | undefined
+  #sweeps = 0
 
   constructor(
     private readonly nowSeconds: () => number,
     private readonly capacity = 100_000,
+    private readonly sweepIntervalMs = SWEEP_INTERVAL_MS,
   ) {
     if (!Number.isSafeInteger(capacity) || capacity < 1) throw new RangeError("Invalid temporary-key capacity")
+  }
+
+  /** Full scans performed so far; lookups never scan. */
+  get sweepCount(): number {
+    return this.#sweeps
   }
 
   async create(key: EstablishedAuthorizationKey): Promise<"created" | "collision"> {
     if (!key.temporary || key.expiresAt === undefined || key.key.length !== 256 || key.keyId.length !== 8) {
       throw new InlineProtocolKeyStoreError({ operation: "create_temporary_shape" })
     }
-    this.#pruneExpired()
+    this.#startSweeping()
     const id = bytesToHex(key.keyId)
-    if (this.#entries.has(id)) return "collision"
+    const existing = this.#live(id)
+    if (existing) return "collision"
+    if (this.#entries.size >= this.capacity) this.#pruneExpired()
     if (this.#entries.size >= this.capacity) throw new InlineProtocolKeyStoreError({ operation: "temporary_capacity" })
     this.#entries.set(id, {
       key: key.key.slice(),
@@ -46,14 +58,12 @@ export class TemporaryAuthorizationKeyStore {
   }
 
   get(authKeyId: Uint8Array): Omit<TemporaryKeyEntry, "binding"> & { binding?: TemporaryKeyBinding } | undefined {
-    this.#pruneExpired()
-    const entry = this.#entries.get(bytesToHex(authKeyId))
+    const entry = this.#live(bytesToHex(authKeyId))
     return entry ? this.#copy(entry) : undefined
   }
 
   bind(authKeyId: Uint8Array, binding: TemporaryKeyBinding): "created" | "idempotent" | "conflict" {
-    this.#pruneExpired()
-    const entry = this.#entries.get(bytesToHex(authKeyId))
+    const entry = this.#live(bytesToHex(authKeyId))
     if (!entry || binding.expiresAt > entry.expiresAt + 30 || binding.expiresAt <= this.nowSeconds()) {
       throw new InlineProtocolKeyStoreError({ operation: "bind_temporary_missing_or_expired" })
     }
@@ -83,8 +93,7 @@ export class TemporaryAuthorizationKeyStore {
   }
 
   rotateServerSalt(authKeyId: Uint8Array, serverSalt: bigint): boolean {
-    this.#pruneExpired()
-    const entry = this.#entries.get(bytesToHex(authKeyId))
+    const entry = this.#live(bytesToHex(authKeyId))
     if (!entry) return false
     entry.serverSalt = serverSalt
     return true
@@ -100,6 +109,8 @@ export class TemporaryAuthorizationKeyStore {
   }
 
   clear(): void {
+    if (this.#sweepTimer !== undefined) clearInterval(this.#sweepTimer)
+    this.#sweepTimer = undefined
     for (const entry of this.#entries.values()) entry.key.fill(0)
     this.#entries.clear()
   }
@@ -109,11 +120,31 @@ export class TemporaryAuthorizationKeyStore {
     return this.#entries.size
   }
 
+  /** Returns the entry only while unexpired, deleting it otherwise; O(1). */
+  #live(id: string): TemporaryKeyEntry | undefined {
+    const entry = this.#entries.get(id)
+    if (!entry) return undefined
+    if (this.#effectiveExpiry(entry) > this.nowSeconds()) return entry
+    entry.key.fill(0)
+    this.#entries.delete(id)
+    return undefined
+  }
+
+  #effectiveExpiry(entry: TemporaryKeyEntry): number {
+    return Math.min(entry.expiresAt, entry.binding?.expiresAt ?? entry.expiresAt)
+  }
+
+  #startSweeping(): void {
+    if (this.#sweepTimer !== undefined) return
+    this.#sweepTimer = setInterval(() => this.#pruneExpired(), this.sweepIntervalMs)
+    this.#sweepTimer.unref?.()
+  }
+
   #pruneExpired(): void {
+    this.#sweeps += 1
     const now = this.nowSeconds()
     for (const [id, entry] of this.#entries) {
-      const effectiveExpiry = Math.min(entry.expiresAt, entry.binding?.expiresAt ?? entry.expiresAt)
-      if (effectiveExpiry <= now) {
+      if (this.#effectiveExpiry(entry) <= now) {
         entry.key.fill(0)
         this.#entries.delete(id)
       }

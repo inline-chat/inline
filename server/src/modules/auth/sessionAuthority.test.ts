@@ -147,6 +147,30 @@ describe("SessionAuthorityReconciler", () => {
     reconciler.stop()
   })
 
+  test("notifies invalidation listeners for local and reconciled revocations", async () => {
+    let now = 0
+    const local = identity(10, 1)
+    const remote = identity(20, 2)
+    const notified: SessionAuthorityIdentity[] = []
+    const reconciler = new SessionAuthorityReconciler({
+      now: () => now,
+      findActiveSessions: async () => [],
+      log: { warn: () => {} },
+    })
+    const unsubscribe = reconciler.onInvalidate((value) => { notified.push(value) })
+    reconciler.onInvalidate(() => { throw new Error("listener failure stays local") })
+    reconciler.start({ connectedSessions: () => [remote], closeSession: () => {} }, configuration)
+    reconciler.admit(remote)
+    reconciler.invalidate(local)
+    now = 10
+    await reconciler.reconcileNow()
+    expect(notified).toEqual([local, remote])
+    unsubscribe()
+    reconciler.invalidate(remote)
+    expect(notified).toHaveLength(2)
+    reconciler.stop()
+  })
+
   test("does not revive authority when a revocation races an in-flight batch", async () => {
     let now = 0
     const query = Promise.withResolvers<readonly SessionAuthorityIdentity[]>()

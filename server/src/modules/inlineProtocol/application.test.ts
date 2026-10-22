@@ -10,6 +10,8 @@ import {
   inlineProtocolRpcExecutionLane,
   makeInlineProtocolApplicationDispatcher,
 } from "./application"
+import { inlineProtocolReplayPolicy } from "./replayPolicy"
+import { READ_ONLY_RPC_METHODS, REPLAY_EXEMPT_METHODS, TRANSFER_RPC_METHODS } from "@inline-chat/protocol/transfers"
 
 const deferred = () => {
   let resolve!: () => void
@@ -222,7 +224,7 @@ describe("Inline Protocol application ordering", () => {
       .toBe("authBrowserStatus")
   })
 
-  test.each(["getFilePart", "transcribeVoiceDraft"] as const)("returns private %s content once and a compact replay response", async (methodName) => {
+  test.each(["getFilePart", "transcribeVoiceDraft"] as const)("returns private %s content once; only a durable method keeps a compact replay response", async (methodName) => {
     const authorization = {
       authKeyId: new Uint8Array(8).fill(1),
       permanentAuthKeyId: new Uint8Array(8).fill(2),
@@ -290,6 +292,14 @@ describe("Inline Protocol application ordering", () => {
       expect(dispatched.kind).toBe("result")
       if (dispatched.kind !== "result") throw new Error("expected application result")
       expect(RealtimeV3Response.fromBinary(dispatched.payload).body.oneofKind).toBe("rpcResult")
+      if (methodName === "getFilePart") {
+        // Session-tier replay never persists a file part, so it needs no tombstone.
+        expect(inlineProtocolReplayPolicy(RealtimeV3Request.toBinary({ body: { oneofKind: "rpc", rpc: RpcCall.create({
+          method: Method.GET_FILE_PART,
+        }) } }))).toBe("session")
+        expect(dispatched.replayPayload).toBeUndefined()
+        return
+      }
       expect(dispatched.replayPayload).toBeDefined()
       const replay = RealtimeV3Response.fromBinary(dispatched.replayPayload!)
       expect(replay.body.oneofKind).toBe("rpcError")
@@ -695,5 +705,39 @@ describe("Inline Protocol application ordering", () => {
 
     expect(inlineProtocolRpcExecutionLane(connect)).toBe("chat:44")
     expect(inlineProtocolRpcExecutionLane(sync)).toBe("agent-session:91")
+  })
+})
+
+describe("Inline Protocol replay policy", () => {
+  const rpcPayload = (method: Method): Uint8Array => RealtimeV3Request.toBinary({
+    body: { oneofKind: "rpc", rpc: RpcCall.create({ method }) },
+  })
+
+  test.each([
+    Method.GET_FILE_PART,
+    Method.SAVE_UPLOAD_PART,
+    Method.GET_UPLOAD_STATE,
+    Method.CREATE_UPLOAD,
+    Method.FINISH_UPLOAD,
+    Method.CANCEL_UPLOAD,
+    ...READ_ONLY_RPC_METHODS,
+  ])("keeps %s in the session receive window", (method) => {
+    expect(REPLAY_EXEMPT_METHODS.has(method)).toBeTrue()
+    expect(inlineProtocolReplayPolicy(rpcPayload(method))).toBe("session")
+  })
+
+  test.each([Method.SEND_MESSAGE, Method.DELETE_MESSAGES, Method.LOG_OUT, Method.TRANSCRIBE_VOICE_DRAFT])(
+    "keeps durable replay for %s",
+    (method) => {
+      expect(inlineProtocolReplayPolicy(rpcPayload(method))).toBe("durable")
+    },
+  )
+
+  test("treats connection init and undecodable payloads as durable", () => {
+    expect(inlineProtocolReplayPolicy(RealtimeV3Request.toBinary({
+      body: { oneofKind: "connectionInit", connectionInit: { token: "" } },
+    }))).toBe("durable")
+    expect(inlineProtocolReplayPolicy(Uint8Array.of(0xff, 0xff, 0xff))).toBe("durable")
+    expect([...TRANSFER_RPC_METHODS].every((method) => REPLAY_EXEMPT_METHODS.has(method))).toBeTrue()
   })
 })

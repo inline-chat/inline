@@ -37,6 +37,7 @@ import {
   rpcUploadTransport,
   type NativeUploadInput,
 } from "@inline-chat/protocol/uploads"
+import { READ_ONLY_RPC_METHODS } from "@inline-chat/protocol/transfers"
 import {
   Method,
   RealtimeV3Request,
@@ -68,47 +69,7 @@ const DEFAULT_MAX_PENDING_REQUEST_BYTES = 32 * 1024 * 1024
 const TEMPORARY_KEY_LIFETIME_MILLISECONDS = 86_400_000
 const TEMPORARY_KEY_ROTATION_MILLISECONDS = TEMPORARY_KEY_LIFETIME_MILLISECONDS * 0.8
 
-const readOnlyRpcMethods = new Set<Method>([
-  Method.GET_ME,
-  Method.GET_PEER_PHOTO,
-  Method.GET_CHAT_HISTORY,
-  Method.GET_SPACE_MEMBERS,
-  Method.GET_CHAT_PARTICIPANTS,
-  Method.GET_CHATS,
-  Method.GET_USER_SETTINGS,
-  Method.GET_UPDATES_STATE,
-  Method.GET_CHAT,
-  Method.GET_UPDATES,
-  Method.SEARCH_MESSAGES,
-  Method.LIST_BOTS,
-  Method.REVEAL_BOT_TOKEN,
-  Method.GET_MESSAGES,
-  Method.GET_BOT_COMMANDS,
-  Method.GET_PEER_BOT_COMMANDS,
-  Method.GET_BOT_PRESENCE,
-  Method.GET_SESSIONS,
-  Method.CHECK_USERNAME,
-  Method.GET_SPACE_URL_PREVIEW_EXCLUSIONS,
-  Method.GET_USER_GROUPS,
-  Method.GET_SPACE_SETTINGS,
-  Method.GET_SPACE,
-  Method.GET_THREAD_REFERENCES,
-  Method.GET_THREAD_SUBTHREADS,
-  Method.GET_PEER_BOTS,
-  Method.GET_MY_BOT_CAPABILITIES,
-  Method.GET_GRID,
-  Method.GET_GRID_HOME,
-  Method.GET_EXTERNAL_PROFILE_PHOTO,
-  Method.GET_CHAT_TRANSCRIPT,
-  Method.SEARCH_EXTERNAL_RESOURCES,
-  Method.LIST_CONNECTORS,
-  Method.SEARCH_USERS,
-  Method.RESOLVE_URL_PREVIEW,
-  Method.GET_BOT_AGENT,
-  Method.LIST_BOT_AGENTS,
-  Method.GET_CONNECTOR_CONFIG,
-  Method.GET_UPLOAD_STATE,
-])
+const readOnlyRpcMethods = READ_ONLY_RPC_METHODS
 
 /** Returns true at the exact 80% lifetime boundary using authenticated server time. */
 export const temporaryAuthorizationNeedsRotation = (

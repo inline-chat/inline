@@ -3,6 +3,7 @@ import { constants, generateKeyPairSync, privateDecrypt, randomBytes } from "nod
 import { gzipSync, gunzipSync } from "node:zlib"
 import {
   InlineHandshakeClient,
+  InlineProtocolAuthorizationInvalidated,
   InlineProtocolServerSession,
   MessageIdGenerator,
   ServiceConstructor,
@@ -21,6 +22,7 @@ import {
   encodeInlineInvoke,
   encodeInvokeAfterMsg,
   encodeMessageContainer,
+  encodeMsgsAck,
   encodeMsgCopy,
   encodePing,
   encodeRpcDropAnswer,
@@ -1479,4 +1481,180 @@ describe("carrier-independent Inline Protocol server session", () => {
     expect(server.destroyed).toBeTrue()
     expect(() => server.sendApplicationUpdate(Uint8Array.of(1))).toThrow()
   }, 30_000)
+})
+
+class CountingReplay extends MemoryReplay {
+  claims = 0
+  completions = 0
+  override async claim(input: Parameters<MemoryReplay["claim"]>[0]): Promise<ServerReplayClaim> {
+    this.claims += 1
+    return super.claim(input)
+  }
+  override async complete(input: Parameters<MemoryReplay["complete"]>[0]) {
+    this.completions += 1
+    return super.complete(input)
+  }
+}
+
+const SESSION_TIER_PAYLOAD = 0x51
+
+const boundSessionFixture = (options: {
+  keyExpiresAt?: number
+  bindingExpiresAt?: number
+  dispatch?: (payload: Uint8Array) => Promise<void>
+} = {}) => {
+  const authorizationKeys = new MemoryAuthorizationKeys()
+  const replay = new CountingReplay()
+  const key = Uint8Array.from(randomBytes(256))
+  const keyId = authKeyId(key)
+  const serverSalt = 0x0102_0304_0506_0708n
+  const sessionId = 0x2468_1357n
+  const nowSeconds = Math.floor(nowMilliseconds / 1_000)
+  authorizationKeys.values.set(bytesToHex(keyId), {
+    key, keyId, temporary: true,
+    expiresAt: options.keyExpiresAt ?? nowSeconds + 600,
+    currentServerSalt: serverSalt,
+    binding: {
+      permanentAuthKeyId: Uint8Array.from(randomBytes(8)), temporarySessionId: sessionId,
+      nonce: 1n, expiresAt: options.bindingExpiresAt ?? nowSeconds + 600,
+      userId: 42, accountSessionId: 84,
+    },
+  })
+  let now = nowMilliseconds
+  let dispatches = 0
+  const server = new InlineProtocolServerSession({
+    rsaKeys: [rsaFixture().server], authorizationKeys, replay,
+    application: { dispatch: async ({ payload }) => {
+      dispatches += 1
+      await options.dispatch?.(payload)
+      return { kind: "result", payload: Uint8Array.of(payload[0]! + 1) }
+    } },
+    replayPolicy: (payload) => payload[0] === SESSION_TIER_PAYLOAD ? "session" : "durable",
+    randomBytes: (length) => Uint8Array.from(randomBytes(length)),
+    nowMilliseconds: () => now,
+    gunzip: (packed, maximum) => gunzipSync(packed, { maxOutputLength: maximum }),
+  })
+  const ids = new MessageIdGenerator()
+  let sequence = 1
+  const record = (body: Uint8Array, messageId = ids.next(now, sequence, 0), contentRelated = true) => {
+    const sequenceNumber = contentRelated ? sequence : sequence - 1
+    if (contentRelated) sequence += 2
+    return {
+      messageId,
+      bytes: encryptRecord(key, "client-to-server", {
+        serverSalt, sessionId, messageId, sequenceNumber, body,
+      }, randomBytes(paddingFor(body.length))),
+    }
+  }
+  const bodies = (records: readonly Uint8Array[]) => records.map((value) => decryptRecordWithMetadata(value, key, {
+    direction: "server-to-client", sessionId,
+    validServerSalts: new Set([serverSalt]), nowSeconds: Math.floor(now / 1_000),
+  }).fields)
+  return {
+    server, replay, record, bodies, nowSeconds, storedKey: () => authorizationKeys.values.get(bytesToHex(keyId))!.key,
+    dispatches: () => dispatches,
+    setNow: (milliseconds: number) => { now = milliseconds },
+  }
+}
+
+describe("session-tier replay and authority expiry", () => {
+  test("a session-tier invoke never touches the replay repository; a durable invoke does", async () => {
+    const fixture = boundSessionFixture()
+    const sessionInvoke = fixture.record(encodeInlineInvoke(Uint8Array.of(SESSION_TIER_PAYLOAD)))
+    const accepted = await fixture.server.receiveConcurrent(sessionInvoke.bytes)
+    expect(accepted.applicationTasks).toHaveLength(1)
+    const finalized = await (await accepted.applicationTasks[0]!.dispatch()).finalize()
+    const result = fixture.bodies(finalized.responses).find((body) =>
+      serviceConstructor(body.body) === ServiceConstructor.rpcResult)
+    expect(decodeRpcResult(result!.body).requestMessageId).toBe(sessionInvoke.messageId)
+    expect(fixture.replay.claims).toBe(0)
+    expect(fixture.replay.completions).toBe(0)
+
+    const durable = fixture.record(encodeInlineInvoke(Uint8Array.of(1)))
+    const durableAccepted = await fixture.server.receiveConcurrent(durable.bytes)
+    await (await durableAccepted.applicationTasks[0]!.dispatch()).finalize()
+    expect(fixture.replay.claims).toBe(1)
+    expect(fixture.replay.completions).toBe(1)
+  })
+
+  test("a session-tier duplicate inside the receive window is dropped silently", async () => {
+    const fixture = boundSessionFixture()
+    const invoke = fixture.record(encodeInlineInvoke(Uint8Array.of(SESSION_TIER_PAYLOAD)))
+    const accepted = await fixture.server.receiveConcurrent(invoke.bytes)
+    const duplicate = await fixture.server.receiveConcurrent(invoke.bytes)
+    expect(duplicate.applicationTasks).toHaveLength(0)
+    expect(fixture.bodies(duplicate.responses).map((body) => serviceConstructor(body.body))
+      .filter((constructor) => constructor !== ServiceConstructor.msgsAck)).toEqual([])
+    await (await accepted.applicationTasks[0]!.dispatch()).finalize()
+    const late = await fixture.server.receiveConcurrent(invoke.bytes)
+    expect(late.applicationTasks).toHaveLength(0)
+    expect(fixture.dispatches()).toBe(1)
+    expect(fixture.replay.claims).toBe(0)
+  })
+
+  test("rpc_drop_answer on a session-tier request answers from memory", async () => {
+    const gate = deferred()
+    const fixture = boundSessionFixture({ dispatch: async () => { await gate.promise } })
+    const invoke = fixture.record(encodeInlineInvoke(Uint8Array.of(SESSION_TIER_PAYLOAD)))
+    const accepted = await fixture.server.receiveConcurrent(invoke.bytes)
+    const dispatched = accepted.applicationTasks[0]!.dispatch()
+
+    const running = await fixture.server.receiveConcurrent(fixture.record(encodeRpcDropAnswer(invoke.messageId)).bytes)
+    const runningAnswer = fixture.bodies(running.responses).find((body) =>
+      serviceConstructor(body.body) === ServiceConstructor.rpcResult)!
+    expect(decodeRpcDropAnswerResult(decodeRpcResult(runningAnswer.body).result).kind).toBe("running")
+    gate.resolve()
+    const finalized = await (await dispatched).finalize()
+    // A dropped answer is never delivered.
+    expect(fixture.bodies(finalized.responses).some((body) =>
+      serviceConstructor(body.body) === ServiceConstructor.rpcResult)).toBeFalse()
+
+    const second = fixture.record(encodeInlineInvoke(Uint8Array.of(SESSION_TIER_PAYLOAD)))
+    const secondAccepted = await fixture.server.receiveConcurrent(second.bytes)
+    const secondFinalized = await (await secondAccepted.applicationTasks[0]!.dispatch()).finalize()
+    const secondResult = fixture.bodies(secondFinalized.responses).find((body) =>
+      serviceConstructor(body.body) === ServiceConstructor.rpcResult)!
+    await fixture.server.receiveConcurrent(fixture.record(encodeMsgsAck([secondResult.messageId]), undefined, false).bytes)
+    const unknown = await fixture.server.receiveConcurrent(fixture.record(encodeRpcDropAnswer(second.messageId)).bytes)
+    const unknownAnswer = fixture.bodies(unknown.responses).find((body) =>
+      serviceConstructor(body.body) === ServiceConstructor.rpcResult)!
+    expect(decodeRpcDropAnswerResult(decodeRpcResult(unknownAnswer.body).result).kind).toBe("unknown")
+    expect(fixture.replay.claims).toBe(0)
+  })
+
+  test("an expired temporary key rejects pushed updates and inbound records", async () => {
+    const fixture = boundSessionFixture()
+    await fixture.server.receiveConcurrent(fixture.record(encodePing(1n)).bytes)
+    fixture.setNow((fixture.nowSeconds + 599) * 1_000)
+    expect(() => fixture.server.sendApplicationUpdate(Uint8Array.of(1))).not.toThrow()
+    await fixture.server.receiveConcurrent(fixture.record(encodePing(2n)).bytes)
+    fixture.setNow((fixture.nowSeconds + 600) * 1_000)
+    expect(() => fixture.server.sendApplicationUpdate(Uint8Array.of(1)))
+      .toThrow(InlineProtocolAuthorizationInvalidated)
+    expect(fixture.server.destroyed).toBeTrue()
+
+    const inbound = boundSessionFixture()
+    await inbound.server.receiveConcurrent(inbound.record(encodePing(1n)).bytes)
+    inbound.setNow((inbound.nowSeconds + 600) * 1_000)
+    await expect(inbound.server.receiveConcurrent(inbound.record(encodePing(3n)).bytes))
+      .rejects.toThrow(InlineProtocolAuthorizationInvalidated)
+  })
+
+  test("a binding that expires before its key governs", async () => {
+    const fixture = boundSessionFixture({ bindingExpiresAt: Math.floor(nowMilliseconds / 1_000) + 60 })
+    await fixture.server.receiveConcurrent(fixture.record(encodePing(1n)).bytes)
+    fixture.setNow((fixture.nowSeconds + 59) * 1_000)
+    expect(() => fixture.server.sendApplicationUpdate(Uint8Array.of(1))).not.toThrow()
+    fixture.setNow((fixture.nowSeconds + 60) * 1_000)
+    expect(() => fixture.server.sendApplicationUpdate(Uint8Array.of(1)))
+      .toThrow(InlineProtocolAuthorizationInvalidated)
+  })
+
+  test("disconnect wipes the session's key copy without touching the store", async () => {
+    const fixture = boundSessionFixture()
+    await fixture.server.receiveConcurrent(fixture.record(encodePing(1n)).bytes)
+    fixture.server.disconnect()
+    await expect(fixture.server.receiveConcurrent(fixture.record(encodePing(2n)).bytes)).rejects.toThrow()
+    expect(fixture.storedKey().some((byte) => byte !== 0)).toBeTrue()
+  })
 })

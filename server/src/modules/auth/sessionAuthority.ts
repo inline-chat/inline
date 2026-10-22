@@ -105,6 +105,7 @@ export class SessionAuthorityReconciler {
   private readonly cancelTimer: (timer: ReturnType<typeof setTimeout>) => void
   private readonly authorities = new Map<string, AuthorityRecord>()
   private readonly invalidatedUntil = new Map<string, number>()
+  private readonly invalidationListeners = new Set<(identity: SessionAuthorityIdentity) => void>()
   private bindings: SessionAuthorityBindings | undefined
   private configuration: SessionAuthorityConfiguration = sessionAuthorityConfigurationFromEnvironment()
   private timer: ReturnType<typeof setTimeout> | undefined
@@ -168,6 +169,16 @@ export class SessionAuthorityReconciler {
     this.invalidatedUntil.set(key, now + this.configuration.invalidationRetentionMs)
     // Removing an authority may leave an earlier timer behind, which is a
     // harmless wake. Do not scan the remaining authority set per revocation.
+    this.notifyInvalidated(identity)
+  }
+
+  /**
+   * Observes committed local revocations and reconciled "revoked" results so
+   * process caches of the same authority drop it. Returns an unsubscribe.
+   */
+  onInvalidate(listener: (identity: SessionAuthorityIdentity) => void): () => void {
+    this.invalidationListeners.add(listener)
+    return () => { this.invalidationListeners.delete(listener) }
   }
 
   /** Forget a disconnected local session without treating it as revoked. */
@@ -341,8 +352,19 @@ export class SessionAuthorityReconciler {
     })
     if (reason === "revoked") {
       this.invalidatedUntil.set(authority.key, this.now() + this.configuration.invalidationRetentionMs)
+      this.notifyInvalidated({ userId: authority.userId, sessionId: authority.sessionId })
     }
     this.bindings?.closeSession({ userId: authority.userId, sessionId: authority.sessionId }, reason)
+  }
+
+  private notifyInvalidated(identity: SessionAuthorityIdentity): void {
+    for (const listener of this.invalidationListeners) {
+      try {
+        listener(identity)
+      } catch (error) {
+        this.log.warn("session authority invalidation listener failed", { error })
+      }
+    }
   }
 
   private pruneInvalidations(now: number): void {

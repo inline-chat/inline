@@ -255,7 +255,15 @@ export interface InlineProtocolServerSessionOptions {
   tryAcquireApplication?: (authorization: ServerApplicationAuthorization) => (() => void) | undefined
   /** Reserves process-owned update bytes until the application is finalized. */
   tryReserveApplicationUpdateBytes?: (bytes: number) => (() => void) | undefined
+  /**
+   * Classifies an invoke's application payload. "session" relies on this session's
+   * in-memory receive window instead of a durable replay row, so a resend after the
+   * window re-executes; return it only for idempotent or read-only requests.
+   */
+  replayPolicy?: (payload: Uint8Array) => "durable" | "session"
 }
+
+type ReplayTier = "durable" | "session"
 
 export interface InlineProtocolServerReceiveOptions {
   onQuickAck?: (quickAckId: number) => void
@@ -299,6 +307,7 @@ export class InlineProtocolServerSession {
   #deferredInvokeAfterBytes = 0
   readonly #inFlightApplications = new Set<bigint>()
   readonly #droppedApplicationAnswers = new Set<bigint>()
+  readonly #sessionTierApplications = new Map<bigint, true>()
   readonly #handshake: InlineHandshakeServer
   #authorization: LoadedServerAuthorizationKey | undefined
   #sessionId: bigint | undefined
@@ -323,6 +332,12 @@ export class InlineProtocolServerSession {
 
   get destroyed(): boolean { return this.#destroyed }
   get hasEstablishedAuthorization(): boolean { return this.#authorization !== undefined }
+  /** A bound temporary key or an account-authorized permanent key, not merely a completed handshake. */
+  get hasAccountAuthority(): boolean {
+    const authorization = this.#authorization
+    return authorization !== undefined &&
+      (authorization.temporary ? authorization.binding !== undefined : authorization.authorized !== undefined)
+  }
   get retainedPendingMessageBytes(): number { return this.#pending.retainedBytes }
   get retainedDeferredInvokeAfterBytes(): number { return this.#deferredInvokeAfterBytes }
 
@@ -331,6 +346,9 @@ export class InlineProtocolServerSession {
     this.#transportClosed = true
     this.#pending.clear()
     this.#clearDeferred()
+    // Nothing encrypted after disconnect can reach the peer; do not retain key material
+    // for applications that only still settle replay and capacity.
+    this.#authorization?.key.fill(0)
   }
 
   async receive(
@@ -365,6 +383,7 @@ export class InlineProtocolServerSession {
 
   sendApplicationUpdate(payload: Uint8Array): Uint8Array {
     if (this.#destroyed) throw new InvalidEncryptedRecord()
+    this.#requireUnexpired()
     return this.#encryptOutgoing(encodeInlineUpdate(payload), true, 3)
   }
 
@@ -399,10 +418,12 @@ export class InlineProtocolServerSession {
       // authorization-invalidated classification used for revoked keys so a client can prove its
       // permanent authority and bind a replacement instead of retrying the stale key forever.
       if (!loaded) throw new InlineProtocolAuthorizationInvalidated()
-      this.#authorization = loaded
+      // The session owns its key copy so disconnect can wipe it without touching the store.
+      this.#authorization = { ...loaded, key: loaded.key.slice() }
       this.#sessionId = undefined
     }
     const authorization = this.#authorization
+    this.#requireUnexpired()
     let fields: EncryptedRecordFields
     let quickAckId: number
     try {
@@ -690,7 +711,7 @@ export class InlineProtocolServerSession {
       }, undefined, [...completionMessageIds, copied.messageId])
     }
     if (constructor === INLINE_INVOKE_CONSTRUCTOR) {
-      return this.#acceptApplication(message, completionMessageIds)
+      return this.#acceptApplication(message, completionMessageIds, duplicate)
     }
 
     return {
@@ -773,7 +794,8 @@ export class InlineProtocolServerSession {
       case ServiceConstructor.rpcDropAnswer: {
         const requestMessageId = decodeRpcDropAnswer(message.body)
         const dropped = this.#pending.dropRpcResult(requestMessageId)
-        if (dropped) {
+        const sessionTier = this.#sessionTierApplications.has(requestMessageId)
+        if (dropped && !sessionTier) {
           await this.options.replay.forgetAnswer({
             authKeyId: this.#authorization!.keyId,
             sessionId: this.#sessionId!,
@@ -791,6 +813,10 @@ export class InlineProtocolServerSession {
             sequenceNumber: dropped.sequenceNumber,
             bytes: dropped.body.length,
           }
+          : sessionTier
+          ? this.#inFlightApplications.has(requestMessageId)
+            ? { kind: "running" as const }
+            : { kind: "unknown" as const }
           : await this.options.replay.dropAnswer({
             authKeyId: this.#authorization!.keyId,
             sessionId: this.#sessionId!,
@@ -931,6 +957,7 @@ export class InlineProtocolServerSession {
   async #acceptApplication(
     message: LogicalMessage,
     completionMessageIds: readonly bigint[] = [message.messageId],
+    duplicate = false,
   ): Promise<LogicalHandlingResult> {
     if (this.#transportClosed) return { result: { responses: [], applicationTasks: [] }, completed: false }
     const activeAuthorization = this.#authorization
@@ -945,7 +972,7 @@ export class InlineProtocolServerSession {
     if (!equalBytes(authorization.keyId, activeAuthorization.keyId) || this.#sessionId !== sessionId) {
       throw new InvalidEncryptedRecord()
     }
-    this.#authorization = authorization
+    this.#authorization = { ...authorization, key: activeAuthorization.key }
     if (authorization.temporary && !authorization.binding) {
       throw new RangeError("Authorization-key state does not permit application dispatch")
     }
@@ -953,41 +980,49 @@ export class InlineProtocolServerSession {
     if (application.kind !== "invoke" || application.layer !== INLINE_REALTIME_LAYER) {
       throw new RangeError("Invalid Inline application request")
     }
-    const replay = await this.options.replay.claim({
-      authKeyId: authorization.keyId,
-      sessionId,
-      messageId: message.messageId,
-      authenticatedBody: message.authenticatedBody ?? message.body,
-    })
-    if (replay.kind === "digest_mismatch") throw new RangeError("Replay digest mismatch")
-    if (replay.kind === "completed") {
-      return {
-        result: {
-          responses: [this.#encryptOutgoing(replay.resultBody, true, 1)],
-          applicationTasks: [],
-        },
-        completed: true,
+    const replayTier: ReplayTier = this.options.replayPolicy?.(application.payload) ?? "durable"
+    if (replayTier === "session") {
+      // The receive window is this request's only replay record. A duplicate inside it is a
+      // resend of a request this session already owns; its single answer is still coming.
+      if (duplicate) return { result: { responses: [], applicationTasks: [] }, completed: false }
+      this.#rememberSessionTier(message.messageId)
+    } else {
+      const replay = await this.options.replay.claim({
+        authKeyId: authorization.keyId,
+        sessionId,
+        messageId: message.messageId,
+        authenticatedBody: message.authenticatedBody ?? message.body,
+      })
+      if (replay.kind === "digest_mismatch") throw new RangeError("Replay digest mismatch")
+      if (replay.kind === "completed") {
+        return {
+          result: {
+            responses: [this.#encryptOutgoing(replay.resultBody, true, 1)],
+            applicationTasks: [],
+          },
+          completed: true,
+        }
       }
-    }
-    if (replay.kind === "in_flight") {
-      return {
-        result: {
-          responses: [this.#encryptOutgoing(
-            encodeMsgsStateInfo(message.messageId, Uint8Array.of(0x04)), false, 1,
-          )],
-          applicationTasks: [],
-        },
-        completed: false,
+      if (replay.kind === "in_flight") {
+        return {
+          result: {
+            responses: [this.#encryptOutgoing(
+              encodeMsgsStateInfo(message.messageId, Uint8Array.of(0x04)), false, 1,
+            )],
+            applicationTasks: [],
+          },
+          completed: false,
+        }
       }
-    }
-    if (replay.kind === "unknown_outcome") {
-      return {
-        result: {
-          responses: [this.#encryptOutgoing(encodeRpcResult(message.messageId,
-            encodeRpcError(504, "Realtime application outcome is unknown; reconcile before retrying")), true, 1)],
-          applicationTasks: [],
-        },
-        completed: false,
+      if (replay.kind === "unknown_outcome") {
+        return {
+          result: {
+            responses: [this.#encryptOutgoing(encodeRpcResult(message.messageId,
+              encodeRpcError(504, "Realtime application outcome is unknown; reconcile before retrying")), true, 1)],
+            applicationTasks: [],
+          },
+          completed: false,
+        }
       }
     }
 
@@ -996,7 +1031,7 @@ export class InlineProtocolServerSession {
         message.messageId,
         encodeRpcError(503, "Realtime application capacity exceeded"),
       )
-      const completion = await this.options.replay.complete({
+      const completion = replayTier === "session" ? { kind: "completed" as const } : await this.options.replay.complete({
         authKeyId: authorization.keyId,
         sessionId,
         messageId: message.messageId,
@@ -1056,6 +1091,7 @@ export class InlineProtocolServerSession {
                 authKeyId: authorization.keyId.slice(),
                 sessionId,
                 messageId: message.messageId,
+                replayTier,
                 completionMessageIds,
                 dispatched,
                 updates,
@@ -1168,6 +1204,7 @@ export class InlineProtocolServerSession {
               authKeyId: authorization.keyId.slice(),
               sessionId,
               messageId: message.messageId,
+              replayTier,
               executionStarted,
             })
           },
@@ -1185,6 +1222,7 @@ export class InlineProtocolServerSession {
     authKeyId: Uint8Array
     sessionId: bigint
     messageId: bigint
+    replayTier: ReplayTier
     completionMessageIds: readonly bigint[]
     dispatched: Awaited<ReturnType<ServerApplicationDispatcher["dispatch"]>>
     updates: Uint8Array[]
@@ -1200,12 +1238,14 @@ export class InlineProtocolServerSession {
       const replayResultBody = input.dispatched.kind === "result" && input.dispatched.replayPayload
         ? encodeRpcResult(input.messageId, encodeInlineResult(input.dispatched.replayPayload))
         : resultBody
-      const completion = await this.options.replay.complete({
-        authKeyId: input.authKeyId,
-        sessionId: input.sessionId,
-        messageId: input.messageId,
-        resultBody: replayResultBody,
-      })
+      const completion = input.replayTier === "session"
+        ? { kind: "completed" as const }
+        : await this.options.replay.complete({
+          authKeyId: input.authKeyId,
+          sessionId: input.sessionId,
+          messageId: input.messageId,
+          resultBody: replayResultBody,
+        })
       const terminateAuthorization = input.dispatched.terminateAuthorization === true
       if (terminateAuthorization) {
         if (this.#destroyed || this.#sessionId !== input.sessionId ||
@@ -1225,16 +1265,12 @@ export class InlineProtocolServerSession {
         this.#destroyed = true
         return { responses, applicationTasks: [] }
       }
-      const refreshed = await this.options.authorizationKeys.load(input.authKeyId)
-      if (!refreshed) {
-        this.#destroyed = true
-        return { responses: [], applicationTasks: [] }
-      }
+      // Authority was verified in memory when this application was accepted and again in its
+      // lane; revocation reaches a live session through the authority fence, not this reload.
       if (this.#destroyed || this.#sessionId !== input.sessionId ||
           !this.#authorization || !equalBytes(this.#authorization.keyId, input.authKeyId)) {
         return { responses: [], applicationTasks: [] }
       }
-      this.#authorization = refreshed
       const answerDropped = this.#droppedApplicationAnswers.delete(input.messageId)
       const responses = input.includeResult && !answerDropped
         ? [this.#encryptOutgoing(
@@ -1266,6 +1302,7 @@ export class InlineProtocolServerSession {
     authKeyId: Uint8Array
     sessionId: bigint
     messageId: bigint
+    replayTier: ReplayTier
     executionStarted: boolean
   }): Promise<InlineProtocolServerReceiveResult> {
     if (this.#destroyed || this.#sessionId !== input.sessionId ||
@@ -1278,7 +1315,7 @@ export class InlineProtocolServerSession {
         ? encodeRpcError(504, "Realtime application deadline exceeded; commit outcome is unknown")
         : encodeRpcError(503, "Realtime application deadline exceeded before execution"),
     )
-    const resultBody = input.executionStarted
+    const resultBody = input.executionStarted || input.replayTier === "session"
       ? deadlineResultBody
       : await this.options.replay.complete({
         authKeyId: input.authKeyId,
@@ -1330,6 +1367,32 @@ export class InlineProtocolServerSession {
     return this.#receivedSequences.validate(message.messageId, message.sequenceNumber, contentRelated)
   }
 
+  #rememberSessionTier(messageId: bigint): void {
+    this.#sessionTierApplications.set(messageId, true)
+    if (this.#sessionTierApplications.size > MAX_COMPLETED_INCOMING_MESSAGES) {
+      const oldest = this.#sessionTierApplications.keys().next().value
+      if (oldest !== undefined) this.#sessionTierApplications.delete(oldest)
+    }
+  }
+
+  #authorityExpiresAt(): number | undefined {
+    const authorization = this.#authorization
+    if (!authorization) return undefined
+    const bindingExpiresAt = authorization.binding?.expiresAt
+    if (authorization.expiresAt === undefined) return bindingExpiresAt
+    return bindingExpiresAt === undefined
+      ? authorization.expiresAt
+      : Math.min(authorization.expiresAt, bindingExpiresAt)
+  }
+
+  /** A temporary key or its binding may expire mid-session; nothing may be sent or read under it. */
+  #requireUnexpired(): void {
+    const expiresAt = this.#authorityExpiresAt()
+    if (expiresAt === undefined || Math.floor(this.options.nowMilliseconds() / 1000) < expiresAt) return
+    this.#destroyed = true
+    throw new InlineProtocolAuthorizationInvalidated()
+  }
+
   #isContentRelated(constructor: number): boolean {
     return !NON_CONTENT_CONSTRUCTORS.has(constructor)
   }
@@ -1344,6 +1407,7 @@ export class InlineProtocolServerSession {
     const authorization = this.#authorization
     const sessionId = this.#sessionId
     if (!authorization || sessionId === undefined) throw new InvalidEncryptedRecord()
+    this.#requireUnexpired()
     const messageId = fixedMessageId ?? this.#nextServerMessageId(modulo)
     const sequenceNumber = fixedSequenceNumber ?? (fixedMessageId === undefined
       ? this.#sequenceNumbers.next(contentRelated)

@@ -28,7 +28,7 @@ The obfuscated carrier hides the abridged framing pattern. It does not replace W
 
 These credentials are not interchangeable. A completed V3 handshake does not grant application access, and a V2 bearer token cannot authenticate `/realtime/v3`. Within an authenticated session, each RPC still needs its operation-specific access checks; authentication does not grant access to every space, chat, file, or bot. See [Authentication](/docs/technical/authentication) for key creation, persistence, rotation, and revocation, and [server application admission](https://github.com/inline-chat/inline/blob/main/server/src/modules/inlineProtocol/application.ts) for the V3 authority check.
 
-Treat tokens, authorization keys, OAuth grants, and local control credentials as secrets. Do not put them in logs, URLs, screenshots, or client-visible diagnostics. Revocation can race with an in-flight request; a lost result remains a [commit-unknown outcome](/docs/technical/realtime#outcomes), not proof that execution stopped.
+Treat tokens, authorization keys, OAuth grants, and local control credentials as secrets. Do not put them in logs, URLs, screenshots, or client-visible diagnostics. Revocation can race with an in-flight request; a lost result remains a [commit-unknown outcome](/docs/technical/realtime#outcomes), not proof that execution stopped. A revocation committed on one server process applies to that process's V3 sessions at once; an already authenticated V3 session on another process can keep its permanent-key authority for up to 30 seconds, and a file range authorization for up to 60 seconds, before either is checked again.
 
 ## Apple Database
 
