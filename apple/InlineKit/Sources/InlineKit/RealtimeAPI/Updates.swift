@@ -1,6 +1,7 @@
 import Auth
 import Foundation
 import GRDB
+import InlineNotificationFence
 import InlineProtocol
 import Logger
 import RealtimeV2
@@ -2605,6 +2606,9 @@ extension InlineProtocol.UpdateDeleteMessages {
     }
 
     try Message.deleteMessages(db, messageIds: messageIds, chatId: chat.id)
+    NotificationSyncCleaner.enqueueAfterCommit(db, ops: NotificationSyncOps(deletions: [
+      .init(threadID: "chat_\(chat.id)", messageIDs: Set(messageIds)),
+    ]))
 
     if publishChanges {
       db.afterNextTransaction { _ in
@@ -3357,6 +3361,11 @@ extension InlineProtocol.UpdateReadMaxId {
       dialog.unreadCount = Int(unreadCount)
       dialog.unreadMark = false
       try dialog.update(db)
+      if let chatID = try dialog.chatId ?? Chat.getByPeerId(db: db, peerId: peerID.toPeer())?.id {
+        NotificationSyncCleaner.enqueueAfterCommit(db, ops: NotificationSyncOps(reads: [
+          .init(threadID: "chat_\(chatID)", upToMessageID: readMaxID),
+        ]))
+      }
     } else {
       Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update read state")
     }

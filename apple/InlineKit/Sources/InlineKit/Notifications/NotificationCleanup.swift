@@ -1,5 +1,7 @@
 import Auth
 import Foundation
+import GRDB
+import InlineNotificationFence
 @preconcurrency import UserNotifications
 
 enum NotificationCleanup {
@@ -9,34 +11,12 @@ enum NotificationCleanup {
     upToMessageId: Int64?,
     recipientUserID: Int64? = nil
   ) -> Bool {
-    if let recipientUserID,
-       !MessageNotificationAccount.matchesRecipient(
-         userInfo: content.userInfo,
-         currentUserID: recipientUserID
-       ) {
+    if let recipientUserID, !NotificationSyncOps.belongs(content, to: recipientUserID) {
       return false
     }
-
-    if content.threadIdentifier != threadId {
-      let payloadThreadId = content.userInfo["threadId"] as? String
-      if payloadThreadId != threadId { return false }
-    }
-
+    guard NotificationSyncOps.thread(of: content, is: threadId) else { return false }
     guard let upToMessageId else { return true }
-
-    let messageId: Int64? = if let raw = content.userInfo["messageId"] as? String {
-      Int64(raw)
-    } else if let raw = content.userInfo["messageId"] as? Int64 {
-      raw
-    } else if let raw = content.userInfo["messageId"] as? Int {
-      Int64(raw)
-    } else if let raw = content.userInfo["messageId"] as? NSNumber {
-      raw.int64Value
-    } else {
-      nil
-    }
-
-    guard let messageId else { return false }
+    guard let messageId = NotificationSyncOps.messageID(content.userInfo["messageId"]) else { return false }
     return messageId <= upToMessageId
   }
 
@@ -79,6 +59,68 @@ enum NotificationCleanup {
           center.removePendingNotificationRequests(withIdentifiers: pendingIds)
         }
       }
+    }
+  }
+}
+
+/// Removes notifications for messages read or deleted on the user's other devices once sync
+/// applies that state locally. Like Telegram's ClearNotificationsManager, it batches for two
+/// seconds and is flushed when the app leaves the foreground.
+public actor NotificationSyncCleaner {
+  public static let shared = NotificationSyncCleaner()
+  static let batchInterval: Duration = .seconds(2)
+
+  private var pending = NotificationSyncOps()
+  private var account: AuthAccountMutationToken?
+  private var timer: Task<Void, Never>?
+
+  /// Call after the read or delete state is durably applied.
+  public func enqueue(_ ops: NotificationSyncOps, account: AuthAccountMutationToken) {
+    guard !ops.isEmpty else { return }
+    if self.account != account {
+      // Never apply one account's batch on behalf of another.
+      pending = NotificationSyncOps()
+      self.account = account
+    }
+    pending.merge(ops)
+    timer?.cancel()
+    timer = Task { [weak self] in
+      do { try await Task.sleep(for: Self.batchInterval) } catch { return }
+      await self?.flush()
+    }
+  }
+
+  /// Applies the pending batch now and waits for the notification center lookups.
+  public func flush() async {
+    timer?.cancel()
+    timer = nil
+    guard let account, !pending.isEmpty else { return }
+    let ops = pending
+    pending = NotificationSyncOps()
+    self.account = nil
+    guard MessageNotificationAccount.isCurrent(account) else { return }
+    await ops.removeCovered(recipientUserID: account.userID)
+  }
+
+  public static func isSyncPush(_ userInfo: [AnyHashable: Any]) -> Bool {
+    NotificationSyncOps.isSyncPush(userInfo)
+  }
+
+  /// Applies a dedicated read/delete sync push the app received itself. Runs immediately: the
+  /// app may be suspended again as soon as the push handler completes.
+  public static func applySyncPush(_ userInfo: [AnyHashable: Any], account: AuthAccountMutationToken) async -> Bool {
+    guard let ops = NotificationSyncOps(syncPushUserInfo: userInfo),
+          MessageNotificationAccount.isCurrent(account)
+    else { return false }
+    return await ops.removeCovered(recipientUserID: account.userID) > 0
+  }
+
+  /// Enqueues from a database write; nothing is removed unless the transaction commits.
+  nonisolated static func enqueueAfterCommit(_ db: Database, ops: NotificationSyncOps) {
+    guard !ops.isEmpty else { return }
+    db.afterNextTransaction { _ in
+      guard let account = try? Auth.shared.handle.beginAccountMutation() else { return }
+      Task { await NotificationSyncCleaner.shared.enqueue(ops, account: account) }
     }
   }
 }

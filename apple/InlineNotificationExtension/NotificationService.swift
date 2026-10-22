@@ -25,7 +25,10 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
       userInfo: request.content.userInfo,
       fence: accountFence.read()
     )
-    let redacted = NotificationAccountRedaction.content(from: request.content)
+    // Read/delete sync pushes carry nothing to show. With the filtering entitlement, empty
+    // content hides them on every path, including rejection and expiry.
+    let isSyncPush = NotificationSyncOps.isSyncPush(request.content.userInfo)
+    let redacted = isSyncPush ? UNNotificationContent() : NotificationAccountRedaction.content(from: request.content)
     // Recheck on every publication path, including expiry: logout can land mid-processing.
     let publish: (UNNotificationContent) -> Void = { content in
       contentHandler(admission.isCurrent(accountFence.read()) ? content : redacted)
@@ -33,7 +36,7 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
 
     // Install a fallback synchronously: system expiry cannot depend on the main queue.
     let delivery = InlineNotificationDelivery(
-      content: admission.isAdmitted ? request.content : redacted,
+      content: admission.isAdmitted && !isSyncPush ? request.content : redacted,
       handler: publish
     )
     let previous = deliveryLock.withLock {
@@ -50,11 +53,32 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
       return
     }
     let work = Task { @MainActor in
+      if isSyncPush {
+        await processSyncPush(request, delivery: delivery)
+        return
+      }
       await process(request, delivery: delivery) {
         admission.isCurrent(accountFence.read())
       }
     }
     delivery.cancelOnFinish { work.cancel() }
+  }
+
+  /// Removes the notifications a read/delete sync push covers, then publishes empty content.
+  @MainActor
+  private func processSyncPush(_ request: UNNotificationRequest, delivery: InlineNotificationDelivery) async {
+    guard let recipientUserID = NotificationAccountAdmission.recipientUserID(in: request.content.userInfo),
+          let ops = NotificationSyncOps(syncPushUserInfo: request.content.userInfo)
+    else {
+      delivery.finish()
+      return
+    }
+    let removed = await ops.removeCovered(recipientUserID: recipientUserID)
+    if removed > 0 {
+      // Like Telegram, give the removal a moment to land before the extension is torn down.
+      try? await Task.sleep(for: .seconds(1))
+    }
+    delivery.finish()
   }
 
   @MainActor
@@ -71,7 +95,12 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
       delivery.finish()
       return
     }
-    let photoURL = hydrateFromEncryptedContentIfNeeded(content: content)
+    let (photoURL, syncOps) = hydrateFromEncryptedContentIfNeeded(content: content)
+    // Read/delete state from the user's other devices clears notifications already handled there.
+    if let syncOps, isAccountCurrent(),
+       let recipientUserID = NotificationAccountAdmission.recipientUserID(in: content.userInfo) {
+      await syncOps.removeCovered(recipientUserID: recipientUserID)
+    }
     guard !Task.isCancelled, delivery.isPending else { return }
     var bestContent: UNNotificationContent = content
     delivery.updateFallback(bestContent)
@@ -220,20 +249,23 @@ private extension NotificationService {
     let threadEmoji: String?
   }
 
-  /// Photo capabilities are accepted only from authenticated encrypted content, never userInfo.
-  func hydrateFromEncryptedContentIfNeeded(content: UNMutableNotificationContent) -> URL? {
+  /// Photo capabilities and sync ops are accepted only from authenticated encrypted content,
+  /// never userInfo.
+  func hydrateFromEncryptedContentIfNeeded(
+    content: UNMutableNotificationContent
+  ) -> (photoURL: URL?, syncOps: NotificationSyncOps?) {
     guard let envelope = EncryptedPayloadEnvelope(userInfo: content.userInfo) else {
-      return nil
+      return (nil, nil)
     }
 
     guard envelope.version == 1, envelope.algorithm == "X25519_HKDF_SHA256_AES256_GCM" else {
       logger.error("unsupported encrypted payload metadata")
-      return nil
+      return (nil, nil)
     }
 
     guard let privateKeyData = loadPushContentPrivateKeyData() else {
       logger.error("push-content private key missing")
-      return nil
+      return (nil, nil)
     }
 
     do {
@@ -242,7 +274,7 @@ private extension NotificationService {
       let payload = try JSONDecoder().decode(DecryptedSendMessagePayload.self, from: payloadData)
       guard payload.kind == "send_message" else {
         logger.error("unsupported decrypted payload kind")
-        return nil
+        return (nil, nil)
       }
 
       content.title = payload.title
@@ -273,10 +305,14 @@ private extension NotificationService {
       content.userInfo = userInfo
 
       logger.info("decrypted encrypted notification content")
-      return InlineNotificationPhoto.url(inDecryptedContent: payloadData)
+      let object = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any]
+      return (
+        InlineNotificationPhoto.url(inDecryptedContent: payloadData),
+        NotificationSyncOps(jsonObject: object?["sync"])
+      )
     } catch {
       logger.error("failed to decrypt encrypted notification content")
-      return nil
+      return (nil, nil)
     }
   }
 

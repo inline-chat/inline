@@ -104,6 +104,7 @@ private struct InlineSceneRoot: View {
           synchronizeUserSettings()
         } else {
           appDelegate.sceneRouterRegistry.deactivate(sceneID)
+          Task { await NotificationSyncCleaner.shared.flush() }
         }
       }
       .onChange(of: auth.currentUserId) { oldValue, newValue in

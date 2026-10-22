@@ -108,8 +108,9 @@ let package = Package(
       swiftSettings: swiftSettings
     ),
 
-    // Account fence shared with the iOS notification service extension. Dependency-free so the
-    // extension can link it without the app's auth, database or network stack.
+    // Account fence and notification sync rules shared with the iOS notification service
+    // extension. Dependency-free so the extension can link it without the app's auth, database or
+    // network stack.
     .target(
       name: "InlineNotificationFence",
       swiftSettings: swiftSettings
@@ -144,6 +145,7 @@ let package = Package(
         "Auth",
         "RealtimeV2",
         "InlineAvatarCore",
+        "InlineNotificationFence",
         "InlineObjectCache",
       ],
       swiftSettings: swiftSettings

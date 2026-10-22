@@ -24,6 +24,8 @@ public struct UpdatePushNotificationDetailsTransaction: Transaction2 {
     public var applePushToken: String
     public var pushContentEncryptionKey: PushContentEncryptionKeyMetadata?
     public var pushContentVersion: UInt32?
+    /// The notification extension can hide read/delete sync pushes (Apple filtering entitlement).
+    public var supportsFilteredSyncPushes: Bool?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -35,12 +37,14 @@ public struct UpdatePushNotificationDetailsTransaction: Transaction2 {
   public init(
     applePushToken: String,
     pushContentEncryptionKey: PushContentEncryptionKeyMetadata? = nil,
-    pushContentVersion: UInt32? = nil
+    pushContentVersion: UInt32? = nil,
+    supportsFilteredSyncPushes: Bool = false
   ) {
     context = Context(
       applePushToken: applePushToken,
       pushContentEncryptionKey: pushContentEncryptionKey,
-      pushContentVersion: pushContentVersion
+      pushContentVersion: pushContentVersion,
+      supportsFilteredSyncPushes: supportsFilteredSyncPushes
     )
   }
 
@@ -55,6 +59,9 @@ public struct UpdatePushNotificationDetailsTransaction: Transaction2 {
       }
       if let pushContentVersion = context.pushContentVersion {
         $0.pushContentVersion = pushContentVersion
+      }
+      if context.supportsFilteredSyncPushes == true {
+        $0.supportsFilteredSyncPushes = true
       }
       if let key = context.pushContentEncryptionKey {
         $0.pushContentEncryptionKey = .with {
@@ -86,12 +93,14 @@ public extension Transaction2 where Self == UpdatePushNotificationDetailsTransac
   static func updatePushNotificationDetails(
     applePushToken: String,
     pushContentEncryptionKey: PushContentEncryptionKeyMetadata? = nil,
-    pushContentVersion: UInt32? = nil
+    pushContentVersion: UInt32? = nil,
+    supportsFilteredSyncPushes: Bool = false
   ) -> UpdatePushNotificationDetailsTransaction {
     UpdatePushNotificationDetailsTransaction(
       applePushToken: applePushToken,
       pushContentEncryptionKey: pushContentEncryptionKey,
-      pushContentVersion: pushContentVersion
+      pushContentVersion: pushContentVersion,
+      supportsFilteredSyncPushes: supportsFilteredSyncPushes
     )
   }
 }

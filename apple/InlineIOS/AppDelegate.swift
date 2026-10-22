@@ -269,7 +269,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         .updatePushNotificationDetails(
           applePushToken: deviceToken,
           pushContentEncryptionKey: pushContentKey,
-          pushContentVersion: pushContentVersion
+          pushContentVersion: pushContentVersion,
+          supportsFilteredSyncPushes: Self.supportsFilteredSyncPushes
         )
       )
     }
@@ -287,54 +288,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
   ) {
-    guard MessageNotificationAccount.capture(userInfo: userInfo) != nil,
-          let kind = userInfo["kind"] as? String else {
+    guard let account = MessageNotificationAccount.capture(userInfo: userInfo),
+          NotificationSyncCleaner.isSyncPush(userInfo)
+    else {
       completionHandler(.noData)
       return
     }
-
-    switch kind {
-    case "message_deleted":
-      guard
-        let threadId = userInfo["threadId"] as? String,
-        let messageIdSet = Self.coerceStringSet(userInfo["messageIds"]),
-        !messageIdSet.isEmpty
-      else {
-        completionHandler(.noData)
-        return
-      }
-
-      Self.removeNotificationRequests(threadId: threadId) { content in
-        guard let deliveredMessageId = Self.coerceString(content.userInfo["messageId"]) else { return false }
-        return messageIdSet.contains(deliveredMessageId)
-      } didRemoveAny: { didRemoveAny in
-        completionHandler(didRemoveAny ? .newData : .noData)
-      }
-
-    case "messages_read":
-      guard
-        let threadId = userInfo["threadId"] as? String,
-        let readUpToRaw = Self.coerceString(userInfo["readUpToMessageId"]),
-        let readUpToMessageId = Int64(readUpToRaw)
-      else {
-        completionHandler(.noData)
-        return
-      }
-
-      Self.removeNotificationRequests(threadId: threadId) { content in
-        guard
-          let deliveredMessageIdRaw = Self.coerceString(content.userInfo["messageId"]),
-          let deliveredMessageId = Int64(deliveredMessageIdRaw)
-        else {
-          return false
-        }
-        return deliveredMessageId <= readUpToMessageId
-      } didRemoveAny: { didRemoveAny in
-        completionHandler(didRemoveAny ? .newData : .noData)
-      }
-
-    default:
-      completionHandler(.noData)
+    Task {
+      let didRemoveAny = await NotificationSyncCleaner.applySyncPush(userInfo, account: account)
+      completionHandler(didRemoveAny ? .newData : .noData)
     }
   }
 
@@ -507,6 +469,10 @@ extension AppDelegate {
 
 private extension AppDelegate {
   static let pushContentVersion: UInt32 = 1
+  /// Turn on together with `com.apple.developer.usernotifications.filtering` in
+  /// InlineNotificationExtension.entitlements once Apple grants it (request 66FMH87LA5).
+  /// While false the server keeps sending read/delete sync as background pushes.
+  static let supportsFilteredSyncPushes = false
   static let pushContentKeychainService = "chat.inline.push-content"
   static let pushContentPrivateKeyAccount = "private-key-v1"
   static let pushContentKeyId = "ios-x25519-v1"
@@ -593,98 +559,6 @@ private extension AppDelegate {
 
     Log.shared.error("Failed to add push-content private key (status: \(addStatus))")
     return false
-  }
-
-  static func coerceString(_ value: Any?) -> String? {
-    if let string = value as? String { return string }
-    if let int = value as? Int { return String(int) }
-    if let int64 = value as? Int64 { return String(int64) }
-    if let number = value as? NSNumber { return number.stringValue }
-    return nil
-  }
-
-  static func coerceInt64(_ value: Any?) -> Int64? {
-    if let int64 = value as? Int64 { return int64 }
-    if let int = value as? Int { return Int64(int) }
-    if let number = value as? NSNumber { return number.int64Value }
-    if let string = value as? String { return Int64(string) }
-    return nil
-  }
-
-  static func coerceBool(_ value: Any?) -> Bool? {
-    if let bool = value as? Bool { return bool }
-    if let number = value as? NSNumber { return number.boolValue }
-    if let string = value as? String {
-      switch string.lowercased() {
-      case "true", "1", "yes":
-        return true
-      case "false", "0", "no":
-        return false
-      default:
-        return nil
-      }
-    }
-    return nil
-  }
-
-  static func coerceThreadId(_ value: Any?) -> Int64? {
-    guard let raw = coerceString(value) else { return nil }
-    let id = raw.replacingOccurrences(of: "chat_", with: "")
-    return Int64(id)
-  }
-
-  static func coerceStringArray(_ value: Any?) -> [String] {
-    if let array = value as? [Any] {
-      return array.compactMap { coerceString($0) }
-    }
-    if let array = value as? NSArray {
-      return array.compactMap { coerceString($0) }
-    }
-    return []
-  }
-
-  static func coerceStringSet(_ value: Any?) -> Set<String>? {
-    let array = coerceStringArray(value)
-    return array.isEmpty ? nil : Set(array)
-  }
-
-  static func removeNotificationRequests(
-    threadId: String,
-    shouldRemove: @escaping (UNNotificationContent) -> Bool,
-    didRemoveAny: @escaping (Bool) -> Void
-  ) {
-    let center = UNUserNotificationCenter.current()
-
-    func matchesThread(_ content: UNNotificationContent) -> Bool {
-      if content.threadIdentifier == threadId { return true }
-      if let payloadThreadId = content.userInfo["threadId"] as? String, payloadThreadId == threadId { return true }
-      return false
-    }
-
-    center.getDeliveredNotifications { delivered in
-      let deliveredIds = delivered.compactMap { deliveredNotification -> String? in
-        let content = deliveredNotification.request.content
-        guard matchesThread(content), shouldRemove(content) else { return nil }
-        return deliveredNotification.request.identifier
-      }
-
-      center.getPendingNotificationRequests { pending in
-        let pendingIds = pending.compactMap { request -> String? in
-          let content = request.content
-          guard matchesThread(content), shouldRemove(content) else { return nil }
-          return request.identifier
-        }
-
-        if !deliveredIds.isEmpty {
-          center.removeDeliveredNotifications(withIdentifiers: deliveredIds)
-        }
-        if !pendingIds.isEmpty {
-          center.removePendingNotificationRequests(withIdentifiers: pendingIds)
-        }
-
-        didRemoveAny(!deliveredIds.isEmpty || !pendingIds.isEmpty)
-      }
-    }
   }
 }
 
