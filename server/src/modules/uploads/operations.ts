@@ -173,7 +173,7 @@ export type NativeUploadOperationsOptions = {
   finishInline?: (
     upload: { id: number; partCount: number; kind: InlineUploadRecord["kind"] },
     signal?: AbortSignal,
-  ) => Promise<"complete" | "processing">
+  ) => Promise<"complete" | "running" | "processing">
 }
 
 export class NativeUploadOperations {
@@ -447,8 +447,9 @@ export class NativeUploadOperations {
             }
           }
         }
-        // A queued upload not finished here belongs to the worker (or is already its task).
-        this.#wake(result.uploadDbId)
+        // A queued upload not finished here belongs to the worker; one this process already
+        // claimed is still its task and must not be queued for a second full pass.
+        if (inline !== "running") this.#wake(result.uploadDbId)
         return { state: { oneofKind: "processing", processing: { retryAfterSeconds: RETRY_AFTER_SECONDS } } }
       }
       case "failed":

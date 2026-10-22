@@ -294,7 +294,9 @@ describe("carrier-independent Inline Protocol server session", () => {
     expect(decodeRpcError(decodeRpcResult(rejected.resultBody).result).code).toBe(503)
     release.resolve()
     const finalized = await (await execution).finalize()
-    expect(finalized.responses.length).toBeGreaterThan(0)
+    // The transport is gone and disconnect wiped the session's key copy: the application still
+    // settles (replay, capacity, ordering) but nothing is encrypted for a peer that cannot read it.
+    expect(finalized.responses).toHaveLength(0)
     expect(finalized.applicationTasks).toHaveLength(0)
     expect(activeApplications).toBe(0)
     expect(server.retainedPendingMessageBytes).toBe(0)

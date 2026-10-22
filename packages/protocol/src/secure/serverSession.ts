@@ -1271,7 +1271,8 @@ export class InlineProtocolServerSession {
           return { responses: [], applicationTasks: [] }
         }
         const answerDropped = this.#droppedApplicationAnswers.delete(input.messageId)
-        const responses = input.includeResult && !answerDropped
+        // After disconnect the key is wiped and nothing can reach the peer; settle without encrypting.
+        const responses = input.includeResult && !answerDropped && !this.#transportClosed
           ? [this.#encryptOutgoing(
             completion.kind === "completed" ? resultBody : completion.resultBody,
             true,
@@ -1290,20 +1291,22 @@ export class InlineProtocolServerSession {
         return { responses: [], applicationTasks: [] }
       }
       const answerDropped = this.#droppedApplicationAnswers.delete(input.messageId)
-      const responses = input.includeResult && !answerDropped
+      // After disconnect the key is wiped and nothing can reach the peer; settle without encrypting.
+      const deliverable = !this.#transportClosed
+      const responses = input.includeResult && !answerDropped && deliverable
         ? [this.#encryptOutgoing(
           completion.kind === "completed" ? resultBody : completion.resultBody,
           true,
           1,
         )]
         : []
-      if (completion.kind === "completed") {
+      if (completion.kind === "completed" && deliverable) {
         for (const update of input.updates) responses.push(this.sendApplicationUpdate(update))
       }
       for (const messageId of new Set(input.completionMessageIds)) this.#markCompleted(messageId)
       const deferred = await this.#drainDeferredConcurrent()
       const acknowledgements = this.#acknowledgements.drain()
-      if (acknowledgements.length > 0) {
+      if (acknowledgements.length > 0 && deliverable) {
         responses.push(this.#encryptOutgoing(encodeMsgsAck(acknowledgements), false, 1))
       }
       responses.push(...deferred.responses)
@@ -1345,7 +1348,7 @@ export class InlineProtocolServerSession {
         : completion.resultBody)
     const answerDropped = this.#droppedApplicationAnswers.delete(input.messageId)
     return {
-      responses: answerDropped ? [] : [this.#encryptOutgoing(resultBody, true, 1)],
+      responses: answerDropped || this.#transportClosed ? [] : [this.#encryptOutgoing(resultBody, true, 1)],
       applicationTasks: [],
     }
   }

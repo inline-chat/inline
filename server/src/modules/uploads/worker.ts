@@ -312,12 +312,14 @@ export class NativeUploadWorker {
   /**
    * Finalizes a small upload inside its FINISH_UPLOAD request when this process
    * still holds every group in memory. Returns `complete` when published within
-   * the timeout; otherwise the claimed work continues as an ordinary worker task.
+   * the timeout, `running` when this process claimed the work and it continues as
+   * an ordinary worker task (no wake is needed), and `processing` when nothing
+   * was claimed here.
    */
   async processNow(
     upload: { id: number; partCount: number; kind: InlineUploadRecord["kind"] },
     signal?: AbortSignal,
-  ): Promise<"complete" | "processing"> {
+  ): Promise<"complete" | "running" | "processing"> {
     if (!this.#started || this.#activeUploads.has(upload.id) || !this.#holdsInMemory(upload)) return "processing"
     const claim = await this.repository.claimProcessing(upload.id)
     if (!claim) return "processing"
@@ -341,7 +343,7 @@ export class NativeUploadWorker {
     ])
     if (timer !== undefined) clearTimeout(timer)
     if (onAbort) signal?.removeEventListener("abort", onAbort)
-    return published ? "complete" : "processing"
+    return published ? "complete" : "running"
   }
 
   /** Every group is either already in the running digest or fully buffered; photos need every frame. */
