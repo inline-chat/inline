@@ -49,8 +49,32 @@ jobs:
     runs-on: ubuntu-latest
     environment: npm-publish
     steps:
-      - name: Checkout main
+      # Publish the exact validated commit; main may have moved on since.
+      - name: Checkout release commit
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+
+      - name: Verify exact main commit before installing dependencies
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Release commit must be a full 40-character lowercase SHA" >&2
+            exit 1
+          fi
+          checkout_commit="$(git rev-parse HEAD)"
+          if [[ "$checkout_commit" != "$RELEASE_COMMIT" ]]; then
+            echo "Commit mismatch: checked out $checkout_commit, requested $RELEASE_COMMIT" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$checkout_commit" FETCH_HEAD; then
+            echo "Release commit $checkout_commit is not on main" >&2
+            exit 1
+          fi
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -76,14 +100,8 @@ jobs:
           RELEASE_KEY: ${{ inputs.package }}
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_TAG: ${{ inputs.tag }}
-          RELEASE_COMMIT: ${{ inputs.commit }}
         run: |
-          checkout_commit="$(git rev-parse HEAD)"
-          if [[ "$checkout_commit" != "$RELEASE_COMMIT" ]]; then
-            echo "Commit mismatch: checked out $checkout_commit, requested $RELEASE_COMMIT" >&2
-            exit 1
-          fi
-
+          set -euo pipefail
           # Keep this mapping in sync with scripts/release-npm.ts. It is
           # duplicated intentionally so the workflow revalidates the release
           # request independently of the local wrapper.

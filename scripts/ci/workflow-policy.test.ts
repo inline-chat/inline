@@ -8,7 +8,7 @@ const read = (relative: string) => readFileSync(path.join(root, relative), "utf8
 const workflow = (name: string) => parse(read(`.github/workflows/${name}`)) as {
   on: Record<string, unknown>
   permissions: Record<string, string>
-  jobs: Record<string, { runs_on?: string; steps?: Array<{ run?: string }> }>
+  jobs: Record<string, { runs_on?: string; needs?: string | string[]; steps?: Array<{ run?: string }> }>
 }
 
 describe("public CI contracts", () => {
@@ -70,7 +70,7 @@ describe("public CI contracts", () => {
     const tip = workflow("macos-tip-nightly.yml")
     expect(tip.on.schedule).toBeDefined()
     expect(tip.on.workflow_dispatch).toBeDefined()
-    expect(tip.on.workflow_run).toEqual({ workflows: ["CI", "Apple Validation", "Server Tests", "CodeQL", "CLI Build"], types: ["completed"], branches: ["main"] })
+    expect(tip.on.workflow_run).toEqual({ workflows: ["Apple Validation", "CodeQL"], types: ["completed"], branches: ["main"] })
     const source = read(".github/workflows/macos-tip-nightly.yml")
     expect(source).toContain("github.ref == 'refs/heads/main'")
     expect(source).toContain("cancel-in-progress: false")
@@ -78,17 +78,20 @@ describe("public CI contracts", () => {
     expect(source).toContain("scripts/ci/nightly-tip-gate.py qualify-tip")
     expect(source).toContain("ref: ${{ needs.select.outputs.sha }}")
     expect(source).toContain("INLINE_NIGHTLY_MAIN_SHA: ${{ needs.select.outputs.sha }}")
+    expect(tip.jobs.summary.needs).toEqual(["select", "release"])
+    expect(source).toContain("scripts/ci/release-summary.sh \"macOS tip\"")
   })
 
   it("gates automatic internal iOS releases with trusted main scripts", () => {
     const ios = workflow("ios-early-testers.yml")
     expect(ios.on.schedule).toBeDefined()
-    expect(ios.on.workflow_run).toEqual({ workflows: ["CI", "Apple Validation", "Server Tests", "CodeQL", "CLI Build"], types: ["completed"], branches: ["main"] })
+    expect(ios.on.workflow_run).toEqual({ workflows: ["Apple Validation", "CodeQL"], types: ["completed"], branches: ["main"] })
     expect(ios.permissions.contents).toBe("read")
     const source = read(".github/workflows/ios-early-testers.yml")
     expect(source).toContain("github.ref == 'refs/heads/main'")
     expect(source).toContain("ref: main")
-    expect(source).toContain("scripts/ci/nightly-tip-gate.py select-green")
+    expect(source).toContain("scripts/ci/nightly-tip-gate.py select-ios")
+    expect(source).toContain("scripts/ci/release-summary.sh \"iOS Early Testers\"")
     expect(source).toContain("EXPECTED_SHA: ${{ steps.gate.outputs.sha }}")
     expect(source).not.toContain("download-artifact")
     expect(read("scripts/ci/ios-early-testers.mjs")).not.toContain("betaAppReviewSubmissions")

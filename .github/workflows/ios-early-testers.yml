@@ -2,7 +2,7 @@ name: iOS Early Testers
 
 on:
   workflow_run:
-    workflows: [CI, Apple Validation, Server Tests, CodeQL, CLI Build]
+    workflows: [Apple Validation, CodeQL]
     types: [completed]
     branches: [main]
   schedule:
@@ -36,12 +36,14 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '22'
-      - name: Select latest green main using the macOS tip gate
+      # Selects the newest green main commit; later pushes do not cancel it.
+      - name: Select newest green main commit
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/ci/nightly-tip-gate.py select-green
+        run: python3 scripts/ci/nightly-tip-gate.py select-ios
       - name: Build and distribute to internal Early Testers
+        id: publish
         if: steps.gate.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,3 +53,29 @@ jobs:
           ASC_PRIVATE_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: node scripts/ci/ios-early-testers.mjs
+      - name: Report published, already current, deferred, blocked or failed
+        if: always()
+        env:
+          GATE_RESULT: ${{ steps.gate.outcome }}
+          PUBLISH_RESULT: ${{ steps.publish.outcome }}
+          SHOULD_RELEASE: ${{ steps.gate.outputs.should_release }}
+          GATE_OUTCOME: ${{ steps.gate.outputs.outcome }}
+          REASON: ${{ steps.gate.outputs.reason }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outputs.outcome }}
+          BUILD: ${{ steps.publish.outputs.build }}
+          SHA: ${{ steps.gate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          OUTCOME="$GATE_OUTCOME" DETAIL=""
+          if [[ "$GATE_RESULT" != success ]]; then
+            OUTCOME=failed REASON="candidate selection $GATE_RESULT"
+          elif [[ "$SHOULD_RELEASE" == true ]]; then
+            if [[ "$PUBLISH_RESULT" == success ]]; then
+              OUTCOME="$PUBLISH_OUTCOME" DETAIL="Build $BUILD"
+              REASON="build already available to internal Early Testers"
+              if [[ "$OUTCOME" == published ]]; then REASON="internal Early Testers verified"; fi
+            else
+              OUTCOME=failed REASON="publisher $PUBLISH_RESULT; inspect the failed step before retrying"
+            fi
+          fi
+          bash scripts/ci/release-summary.sh "iOS Early Testers" "$OUTCOME" "$REASON" "$SHA" "$DETAIL"

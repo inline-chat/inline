@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -14,12 +15,13 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 
 
-REQUIRED_WORKFLOWS = (
-    "integrations.yml",
-    "apple-validation.yml",
-    "server-test.yml",
-)
-OPTIONAL_PUSH_WORKFLOWS = ("cli-check.yml",)
+# Apple releases depend only on Apple Validation (which also regenerates and
+# diffs the Swift protocol) plus CodeQL. Server, CLI and integration workflows
+# gate their own releases and must not hold back the apps.
+REQUIRED_WORKFLOWS = ("apple-validation.yml",)
+IOS_STATUS_CONTEXT = "ios/early-testers"
+# A commit whose checks are not registered yet is pending, not red.
+PENDING_GRACE = timedelta(minutes=30)
 TIP_FEED_URL = "https://public-assets.inline.chat/mac/tip/appcast.xml"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 COMMIT_DESCRIPTION = re.compile(r"from commit ([0-9a-f]{7,40})")
@@ -232,92 +234,138 @@ def public_feed():
         raise
 
 
-def ci_problem(github, sha, runs=None):
-    for workflow in (*REQUIRED_WORKFLOWS, *OPTIONAL_PUSH_WORKFLOWS):
+def check_status(label, check):
+    if not check:
+        return f"{label} is missing", "missing"
+    if check.get("status") != "completed":
+        return f"{label} is {check.get('status')}/{check.get('conclusion')}", "pending"
+    if check.get("conclusion") != "success":
+        return f"{label} is completed/{check.get('conclusion')}", "failed"
+    return None, "green"
+
+
+def ci_status(github, sha, runs=None):
+    for workflow in REQUIRED_WORKFLOWS:
         if runs is None:
             path = f"actions/workflows/{workflow}/runs?head_sha={sha}&event=push&per_page=100"
             workflow_runs = github.request(path)["workflow_runs"]
         else:
             workflow_runs = runs[workflow]
-        run = latest_push_run(workflow_runs, sha)
-        if not run and workflow in OPTIONAL_PUSH_WORKFLOWS:
-            continue
-        if not run or run.get("status") != "completed" or run.get("conclusion") != "success":
-            state = f"{run.get('status')}/{run.get('conclusion')}" if run else "missing"
-            return f"{workflow} is {state}"
-    check = latest_codeql_check(github.checks(sha))
-    if not check or check.get("status") != "completed" or check.get("conclusion") != "success":
-        state = f"{check.get('status')}/{check.get('conclusion')}" if check else "missing"
-        return f"CodeQL actions analysis is {state}"
-    return None
+        problem, state = check_status(workflow, latest_push_run(workflow_runs, sha))
+        if problem:
+            return problem, state
+    return check_status("CodeQL actions analysis", latest_codeql_check(github.checks(sha)))
 
 
-def inspect_main(github):
-    sha = require_sha(github.request("git/ref/heads/main")["object"]["sha"])
-    problem = ci_problem(github, sha)
-    return sha, f"{problem} for latest main" if problem else None
+def ci_problem(github, sha, runs=None):
+    return ci_status(github, sha, runs)[0]
 
 
-def ci_running(sha, runs):
-    for workflow in (*REQUIRED_WORKFLOWS, *OPTIONAL_PUSH_WORKFLOWS):
-        run = latest_push_run(runs[workflow], sha)
-        if run and run.get("status") != "completed":
-            return True
-    return False
+def committed_at(commit):
+    try:
+        return datetime.fromisoformat(commit["commit"]["committer"]["date"].replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
-def newest_green_main(github, stop_at):
+def newest_green_main(github, is_published, now=None):
     """Return the newest green main commit and the newest commit above it still in CI.
 
-    The walk stops after the current tip so older commits are never selected.
+    The walk stops at the last published commit so an older one is never selected.
     """
-    runs = {workflow: github.main_push_runs(workflow)
-            for workflow in (*REQUIRED_WORKFLOWS, *OPTIONAL_PUSH_WORKFLOWS)}
+    runs = {workflow: github.main_push_runs(workflow) for workflow in REQUIRED_WORKFLOWS}
     running = None
     for commit in github.main_commits():
         sha = require_sha(commit["sha"])
-        problem = ci_problem(github, sha, runs)
+        problem, state = ci_status(github, sha, runs)
         if problem is None:
             return sha, running
         print(f"Not green: {sha[:9]} ({problem})")
-        if running is None and ci_running(sha, runs):
+        committed = committed_at(commit)
+        pending = state == "pending" or (state == "missing" and committed and now and now - committed < PENDING_GRACE)
+        if running is None and pending:
             running = sha
-        if sha == stop_at:
+        if is_published(sha):
             break
     return None, running
 
 
+# Outcomes shared by every release workflow summary.
+RELEASE, CURRENT, DEFERRED, BLOCKED = "release", "already-current", "deferred", "blocked"
+
+
+def tip_outcome(reason):
+    if "older" in reason or "macOS-relevant" in reason:
+        return CURRENT
+    return DEFERRED
+
+
 def select_tip(github, event, now):
+    """Return (sha, outcome, reason, create_new_appcast)."""
     tag_sha = github.tip_commit()
-    sha, running = newest_green_main(github, tag_sha)
+    sha, running = newest_green_main(github, lambda candidate: candidate == tag_sha, now)
     # Every CI completion retriggers this gate, so wait for newer commits instead
     # of building one that is about to be superseded. The sweep never waits.
     if running and event == "workflow_run":
-        return sha, f"newer main commit {running[:9]} is still in CI", False
+        return sha, DEFERRED, f"newer main commit {running[:9]} is still in CI", False
     if sha is None:
-        return None, "no green main commit at or after the current tip", False
+        return None, BLOCKED, "no green main commit at or after the current tip", False
     if sha == tag_sha and event == "workflow_run":
         # Re-hashing the published DMG on every CI completion would be wasteful,
         # so only the scheduled sweep and manual runs repair a partial publication.
-        return sha, "already the current tip", False
+        return sha, CURRENT, "already the current tip", False
     feed = public_feed()
     if sha == tag_sha:
         release = github.request("releases/tags/tip", missing_ok=True)
         digest = remote_dmg_sha256(feed) if release and feed else None
         if published_tip_matches(sha, tag_sha, release, feed, digest):
-            return sha, "already published", False
-        return sha, None, feed is None
+            return sha, CURRENT, "already published", False
+        return sha, RELEASE, "repairing a partial tip publication", feed is None
     comparison = github.compare(tag_sha, sha) if tag_sha else None
     problem = tip_decision(comparison, feed, event=event, now=now)
-    return sha, problem, feed is None
+    if problem:
+        return sha, tip_outcome(problem), problem, False
+    return sha, RELEASE, "newer green main commit", feed is None
+
+
+def ios_published(github, sha):
+    statuses = github.request(f"commits/{sha}/statuses?per_page=100")
+    status = next((item for item in statuses if item.get("context") == IOS_STATUS_CONTEXT), None)
+    return bool(status and status.get("state") == "success"
+                and status.get("creator", {}).get("login") == "github-actions[bot]")
+
+
+def select_ios(github, event, now):
+    """Return (sha, outcome, reason) for internal Early Testers."""
+    sha, running = newest_green_main(github, lambda candidate: ios_published(github, candidate), now)
+    if running and event == "workflow_run":
+        return sha, DEFERRED, f"newer main commit {running[:9]} is still in CI"
+    if sha is None:
+        return None, BLOCKED, "no green main commit since the last Early Testers build"
+    # Scheduled and manual runs still resume the publisher, which is idempotent
+    # and refreshes a build approaching TestFlight expiry.
+    if event == "workflow_run" and ios_published(github, sha):
+        return sha, CURRENT, "already available to Early Testers"
+    return sha, RELEASE, "newest green main commit"
+
+
+def qualify_commit(github, sha):
+    """A selected commit stays releasable while it is green and on main, even if main moves on."""
+    # GitHub can briefly omit a just-completed run. Recheck only missing/pending
+    # results, never a completed failure, and still fail closed after three reads.
+    for attempt in range(3):
+        problem, state = ci_status(github, sha)
+        if not problem:
+            break
+        if state == "failed" or attempt == 2:
+            raise ValueError(f"Selected commit {sha} is no longer green: {problem}")
+        time.sleep(2)
+    if github.compare(sha, "main")["status"] not in ("ahead", "identical"):
+        raise ValueError(f"Selected commit {sha} is not on main")
 
 
 def qualify_tip(github, sha):
-    problem = ci_problem(github, sha)
-    if problem:
-        raise ValueError(f"Selected commit {sha} is no longer green: {problem}")
-    if github.compare(sha, "main")["status"] not in ("ahead", "identical"):
-        raise ValueError(f"Selected commit {sha} is not on main")
+    qualify_commit(github, sha)
     tag_sha = github.tip_commit()
     if tag_sha and tag_sha != sha and github.compare(tag_sha, sha)["status"] == "behind":
         raise ValueError(f"Selected commit {sha} is older than the current tip {tag_sha}")
@@ -332,28 +380,27 @@ def output(**values):
             stream.write(f"{key}={value}\n")
 
 
+def decide(label, event, sha, outcome, reason, **extra):
+    print(f"{label} ({event}): {outcome}: {reason}{f' ({sha})' if sha else ''}")
+    output(sha=sha or "", should_release=str(outcome == RELEASE).lower(),
+           outcome=outcome, reason=reason, **extra)
+
+
 def main():
     github = GitHub(os.environ.get("GITHUB_REPOSITORY"), os.environ.get("GH_TOKEN"))
     mode = sys.argv[1] if len(sys.argv) > 1 else "select"
-    if mode == "select-green":
-        sha, problem = inspect_main(github)
-        print(f"Latest main: {sha}; gate: {problem or 'green'}")
-        output(sha=sha, should_release=str(problem is None).lower())
+    event = os.environ.get("GITHUB_EVENT_NAME", "workflow_dispatch")
+    if mode == "select-ios":
+        sha, outcome, reason = select_ios(github, event, datetime.now(timezone.utc))
+        decide("iOS Early Testers", event, sha, outcome, reason)
     elif mode == "select":
-        event = os.environ.get("GITHUB_EVENT_NAME", "workflow_dispatch")
-        sha, problem, create_new_appcast = select_tip(github, event, datetime.now(timezone.utc))
-        if problem:
-            print(f"Skipping tip ({event}): {problem}{f' ({sha})' if sha else ''}")
-            output(sha=sha or "", should_release="false", create_new_appcast="false")
-            return
-        print(f"Releasing tip ({event}) from green main commit {sha}")
-        output(sha=sha, should_release="true", create_new_appcast=str(create_new_appcast).lower())
+        sha, outcome, reason, create_new_appcast = select_tip(github, event, datetime.now(timezone.utc))
+        decide("macOS tip", event, sha, outcome, reason,
+               create_new_appcast=str(create_new_appcast).lower())
     elif mode == "qualify":
         sha = require_sha(os.environ.get("EXPECTED_SHA"))
-        current, problem = inspect_main(github)
-        if current != sha or problem:
-            raise ValueError(f"Selected main commit is no longer green: {problem or current}")
-        print(f"Requalified latest green main: {sha}")
+        qualify_commit(github, sha)
+        print(f"Requalified green main commit: {sha}")
     elif mode == "qualify-tip":
         sha = require_sha(os.environ.get("EXPECTED_SHA"))
         qualify_tip(github, sha)

@@ -1,12 +1,15 @@
 name: macOS Tip
 
-# Every CI completion on main re-runs the gate, which releases the newest fully
-# green commit when it changes the Mac app and the last tip is over an hour old.
-# The concurrency group keeps one release running and only the newest run
-# waiting. The 3-hourly sweep catches anything the interval deferred.
+# Every Apple Validation or CodeQL completion on main re-runs the gate, which
+# releases the newest green commit when it changes the Mac app and the last tip
+# is over an hour old. Server, CLI and integration workflows do not gate Apple
+# releases. The concurrency group keeps one release running and only the newest
+# run waiting. The 3-hourly sweep catches anything the interval deferred. The
+# summary job states whether the run published, was already current, deferred,
+# blocked or failed.
 on:
   workflow_run:
-    workflows: [CI, Apple Validation, Server Tests, CodeQL, CLI Build]
+    workflows: [Apple Validation, CodeQL]
     types: [completed]
     branches: [main]
   schedule:
@@ -31,6 +34,8 @@ jobs:
       sha: ${{ steps.gate.outputs.sha }}
       should_release: ${{ steps.gate.outputs.should_release }}
       create_new_appcast: ${{ steps.gate.outputs.create_new_appcast }}
+      outcome: ${{ steps.gate.outputs.outcome }}
+      reason: ${{ steps.gate.outputs.reason }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Select newest green main commit for tip
@@ -136,3 +141,36 @@ jobs:
           bun --no-env-file scripts/macos/release-app.ts "${args[@]}"
       - name: Verify published GitHub and Sparkle state
         run: python3 scripts/ci/nightly-tip-gate.py verify
+
+  summary:
+    name: Release outcome
+    needs: [select, release]
+    if: always() && github.repository == 'inline-chat/inline' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          sparse-checkout: scripts/ci
+      - name: Report published, already current, deferred, blocked or failed
+        env:
+          SELECT_RESULT: ${{ needs.select.result }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          SHOULD_RELEASE: ${{ needs.select.outputs.should_release }}
+          OUTCOME: ${{ needs.select.outputs.outcome }}
+          REASON: ${{ needs.select.outputs.reason }}
+          SHA: ${{ needs.select.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$SELECT_RESULT" != success ]]; then
+            OUTCOME=failed REASON="candidate selection $SELECT_RESULT"
+          elif [[ "$SHOULD_RELEASE" == true ]]; then
+            if [[ "$RELEASE_RESULT" == success ]]; then
+              OUTCOME=published REASON="signed, notarized and verified on the tip feed"
+            else
+              OUTCOME=failed REASON="release job $RELEASE_RESULT; rerun or resume from the logs"
+            fi
+          fi
+          bash scripts/ci/release-summary.sh "macOS tip" "$OUTCOME" "$REASON" "$SHA"

@@ -180,6 +180,8 @@ async function uploadSymbols(api, runId) {
   })
 }
 
+// Selection lives in nightly-tip-gate.py select-ios; qualify re-checks that the
+// selected commit is still green and on main, so later pushes do not cancel it.
 export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, symbols = async () => {}, isPublished = async () => false, markPublished = async () => {}, pause = sleep, now = Date.now, log = console.log }) {
   if (!/^[0-9a-f]{40}$/.test(sha || "")) throw new Error("Expected a full qualified main SHA")
   const deadline = now() + 75 * 60_000
@@ -239,7 +241,7 @@ export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, 
   const groups = await buildGroups(api, build.id)
   if (groups.some((item) => item.id === GROUP) && await isPublished(sha, build.id)) {
     log(`Already available to internal Early Testers: ${sha}, build ${build.attributes.version}`)
-    return result
+    return { ...result, outcome: "already-current" }
   }
   if (groups.some((item) => item.attributes.isInternalGroup !== true)) {
     throw new Error("Build already has external distribution; refusing automatic promotion")
@@ -257,7 +259,7 @@ export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, 
   }
   await markPublished(result)
   log(`Verified iOS ${version.attributes.version} (${build.attributes.version}) for internal Early Testers: ${sha}`)
-  return result
+  return { ...result, outcome: "published" }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -272,8 +274,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       symbols: uploadSymbols,
       ...publicationReceipt(),
     })
-    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-      `Internal Early Testers: build **${result.version}**, source \`${result.sha}\`, Xcode Cloud run \`${result.run}\`.\n`)
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `outcome=${result.outcome}\nbuild=${result.version}\n`)
   } catch (error) {
     console.error(error instanceof Error ? error.message : "iOS early tester release failed")
     process.exitCode = 1

@@ -58,13 +58,13 @@ jobs:
           fi
           checkout_commit="$(git rev-parse HEAD)"
           git fetch --no-tags origin main
-          main_commit="$(git rev-parse FETCH_HEAD)"
           if [[ "${checkout_commit}" != "${RELEASE_COMMIT}" ]]; then
             echo "Checked out ${checkout_commit}, requested ${RELEASE_COMMIT}." >&2
             exit 1
           fi
-          if [[ "${checkout_commit}" != "${main_commit}" ]]; then
-            echo "Release commit ${checkout_commit} is not current main ${main_commit}." >&2
+          # Main may move on after selection; the release commit only has to be on it.
+          if ! git merge-base --is-ancestor "${checkout_commit}" FETCH_HEAD; then
+            echo "Release commit ${checkout_commit} is not on main." >&2
             exit 1
           fi
 
@@ -242,9 +242,9 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ inputs.commit }}
 
-      - name: Verify release commit remains current main
+      - name: Verify release commit is still on main
         env:
           RELEASE_COMMIT: ${{ inputs.commit }}
         run: |
@@ -255,7 +255,12 @@ jobs:
           fi
           checkout_commit="$(git rev-parse HEAD)"
           if [[ "${checkout_commit}" != "${RELEASE_COMMIT}" ]]; then
-            echo "Current main ${checkout_commit} no longer matches requested release ${RELEASE_COMMIT}." >&2
+            echo "Checked out ${checkout_commit}, requested ${RELEASE_COMMIT}." >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${checkout_commit}" FETCH_HEAD; then
+            echo "Release commit ${checkout_commit} is not on main." >&2
             exit 1
           fi
 

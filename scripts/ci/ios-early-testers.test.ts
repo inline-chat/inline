@@ -45,6 +45,7 @@ describe("internal iOS release boundary", () => {
     let gates = 0
     const result = await publish({ api: f.api, sha, qualify: () => { gates++ }, log: () => {} })
     expect(result.build).toBe("build")
+    expect(result.outcome).toBe("published")
     expect(gates).toBe(2)
     expect(f.mutations).toEqual([{ path: `/v1/betaGroups/${GROUP}/relationships/builds`, data: { data: [{ type: "builds", id: "build" }] } }])
   })
@@ -52,7 +53,8 @@ describe("internal iOS release boundary", () => {
     const f = fixture()
     f.setGroups([group])
     let uploads = 0
-    await publish({ api: f.api, sha, qualify: () => {}, isPublished: async () => true, symbols: async () => { uploads++ }, log: () => {} })
+    const result = await publish({ api: f.api, sha, qualify: () => {}, isPublished: async () => true, symbols: async () => { uploads++ }, log: () => {} })
+    expect(result.outcome).toBe("already-current")
     expect(f.mutations).toEqual([])
     expect(uploads).toBe(0)
   })
@@ -95,10 +97,10 @@ describe("internal iOS release boundary", () => {
     await expect(publish({ api: f.api, sha, qualify: () => {}, log: () => {} })).rejects.toThrow("external distribution")
     expect(f.mutations).toEqual([])
   })
-  it("does not distribute when main advances during the build", async () => {
+  it("does not distribute when the selected commit loses qualification", async () => {
     const f = fixture()
     let gates = 0
-    await expect(publish({ api: f.api, sha, qualify: () => { if (++gates === 2) throw new Error("main moved") }, log: () => {} })).rejects.toThrow("main moved")
+    await expect(publish({ api: f.api, sha, qualify: () => { if (++gates === 2) throw new Error("candidate is no longer green") }, log: () => {} })).rejects.toThrow("no longer green")
     expect(f.mutations).toEqual([])
   })
   it("does not reuse failed runs or runs from another commit", () => {

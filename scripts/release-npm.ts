@@ -297,9 +297,10 @@ async function assertCleanAndSynced(repoRoot: string): Promise<string> {
   }
 
   const head = await requireCommand(["git", "rev-parse", "HEAD"], repoRoot)
-  const remoteHead = await requireCommand(["git", "rev-parse", "origin/main"], repoRoot)
-  if (head !== remoteHead) {
-    throw new Error(`Local HEAD ${head.slice(0, 8)} does not match origin/main ${remoteHead.slice(0, 8)}`)
+  // A pushed commit stays releasable after main moves on; unpushed work does not.
+  const onMain = await runCommand(["git", "merge-base", "--is-ancestor", head, "origin/main"], { cwd: repoRoot })
+  if (onMain.exitCode !== 0) {
+    throw new Error(`Local HEAD ${head.slice(0, 8)} is not on origin/main; push it first`)
   }
   return head
 }
