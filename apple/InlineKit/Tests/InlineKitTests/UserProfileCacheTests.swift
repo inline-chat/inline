@@ -57,6 +57,59 @@ struct UserProfileCacheTests {
     }
   }
 
+  @Test("a photo identity known only from the legacy photo File admits its download")
+  func acceptsLegacyFileIdentity() async throws {
+    let database = AppDatabase.empty()
+    try await database.dbWriter.write { db in
+      var current = User(id: 1, email: nil, firstName: "User")
+      current.profileCdnUrl = "https://example.com/legacy.jpg"
+      try current.save(db)
+      try legacyProfilePhoto(userId: 1, uniqueId: "legacy-photo").insert(db)
+
+      // The view resolves its identity through UserInfo, which falls back to the File.
+      let userInfo = try #require(try User.userInfoQuery().filter(Column("id") == 1).fetchOne(db))
+      #expect(current.stableAvatarIdentity == nil)
+      #expect(userInfo.stableAvatarIdentity == "unique:legacy-photo")
+
+      _ = try User.storeCachedProfilePhoto(
+        db,
+        userId: 1,
+        localPath: "legacy-cache.jpg",
+        expectedSourceURL: current.getRemoteURL(),
+        expectedAvatarIdentity: userInfo.stableAvatarIdentity
+      )
+      #expect(try User.fetchOne(db, id: 1)?.profileLocalPath == "legacy-cache.jpg")
+    }
+  }
+
+  @Test("a legacy photo File does not admit a different photo", arguments: [
+    (userPhoto: String?.none, expected: "unique:other-photo"),
+    // A User-level identity replaces the File's, as it does in UserInfo.
+    (userPhoto: "new-photo", expected: "unique:legacy-photo"),
+  ])
+  func rejectsOtherPhotoWithLegacyFile(userPhoto: String?, expected: String) async throws {
+    let database = AppDatabase.empty()
+    try await database.dbWriter.write { db in
+      var current = User(id: 1, email: nil, firstName: "User")
+      current.profileFileUniqueId = userPhoto
+      current.profileCdnUrl = "https://example.com/legacy.jpg"
+      try current.save(db)
+      try legacyProfilePhoto(userId: 1, uniqueId: "legacy-photo").insert(db)
+      let stored = try #require(try User.fetchOne(db, id: 1))
+
+      #expect(throws: (any Error).self) {
+        try User.storeCachedProfilePhoto(
+          db,
+          userId: 1,
+          localPath: "other-cache.jpg",
+          expectedSourceURL: current.getRemoteURL(),
+          expectedAvatarIdentity: expected
+        )
+      }
+      #expect(try User.fetchOne(db, id: 1) == stored)
+    }
+  }
+
   @Test("full user without a profile photo clears cached photo fields")
   func clearsPhotoForFullUser() async throws {
     let database = AppDatabase.empty()
@@ -108,5 +161,24 @@ struct UserProfileCacheTests {
     user.profileLocalPath = "cached.jpg"
 
     #expect(user.shouldInvalidateLocalCache(newFileUniqueId: "same-unique", newFileId: "other-file") == false)
+  }
+
+  private func legacyProfilePhoto(userId: Int64, uniqueId: String) -> File {
+    var file = File(
+      id: "legacy-file",
+      fileUniqueId: uniqueId,
+      fileType: .photo,
+      fileName: "avatar.jpg",
+      uploading: false,
+      fileSize: nil,
+      temporaryUrl: nil,
+      temporaryUrlExpiresAt: nil,
+      width: nil,
+      height: nil,
+      localPath: nil,
+      mimeType: "image/jpeg"
+    )
+    file.profileForUserId = userId
+    return file
   }
 }

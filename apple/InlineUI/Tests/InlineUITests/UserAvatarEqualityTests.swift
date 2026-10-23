@@ -84,7 +84,7 @@ struct UserAvatarEqualityTests {
     #expect(source.cacheKey == uncachedSource.cacheKey)
   }
 
-  @Test("full-size preview preserves the original after loading a small avatar from cache")
+  @Test("full-size preview returns the original bytes after loading a small avatar from cache")
   @MainActor
   func previewRetainsOriginalResolution() async throws {
     var user = User(id: 42, email: nil, firstName: "Avatar")
@@ -92,13 +92,22 @@ struct UserAvatarEqualityTests {
     user.profileCdnUrl = "https://example.invalid/current.jpg"
     let source = try #require(UserAvatarImageSource(user: user))
     let cache = ImageCache(name: "avatar-original-test-\(UUID().uuidString)")
+    defer { cache.clearDiskCache() }
     let manager = KingfisherManager(downloader: .default, cache: cache)
     let original = NSImage(size: NSSize(width: 512, height: 512))
     original.lockFocus()
     NSColor.red.setFill()
     NSRect(x: 0, y: 0, width: 512, height: 512).fill()
     original.unlockFocus()
-    cache.store(original, forKey: source.cacheKey, toDisk: false)
+    let originalData = try #require(
+      original.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) }
+    )
+    // A processed avatar request with `.cacheOriginalImage()` stores the downloaded bytes under the bare key.
+    await withCheckedContinuation { continuation in
+      cache.storeToDisk(originalData, forKey: source.cacheKey, callbackQueue: .mainAsync) { _ in
+        continuation.resume()
+      }
+    }
 
     let thumbnail = try await withCheckedThrowingContinuation {
       (continuation: CheckedContinuation<(cacheTypeIsNone: Bool, data: Data?), any Error>) in
@@ -122,12 +131,59 @@ struct UserAvatarEqualityTests {
     #expect(thumbnailImage.pixelsWide == 22)
 
     let previewData = try await source.originalImageData(using: manager, onlyFromCache: true)
+    // Byte-identical: the cached original is returned, not re-encoded.
+    #expect(previewData == originalData)
     let preview = try #require(NSBitmapImageRep(data: previewData))
     #expect(preview.pixelsWide >= 512)
     #expect(preview.pixelsHigh >= 512)
     #expect(try #require(preview.colorAt(x: 0, y: 0)?.usingColorSpace(.deviceRGB)).redComponent > 0.9)
   }
   #endif
+
+  @Test("a verified local original is returned as stored")
+  @MainActor
+  func localOriginalIsReturnedAsStored() async throws {
+    let local = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "\(User.remoteProfilePhotoCacheFilePrefix)\(UUID().uuidString).jpg"
+    )
+    let stored = Data([0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3])
+    try stored.write(to: local)
+    defer { try? FileManager.default.removeItem(at: local) }
+    let source = try #require(UserAvatarImageSource(
+      userID: 42, identity: "unique:current", remoteURL: URL(string: "https://example.invalid/current.jpg"),
+      localURL: local, scale: 1
+    ))
+    let cache = ImageCache(name: "avatar-local-original-test-\(UUID().uuidString)")
+    defer { cache.clearDiskCache() }
+
+    let data = try await source.originalImageData(
+      using: KingfisherManager(downloader: .default, cache: cache),
+      onlyFromCache: true
+    )
+    #expect(data == stored)
+  }
+
+  @Test("an original still being written to the disk cache is read whole")
+  @MainActor
+  func originalWrittenJustBeforeReadIsComplete() async throws {
+    let source = try #require(UserAvatarImageSource(
+      userID: 42, identity: "unique:current", remoteURL: URL(string: "https://example.invalid/current.jpg"),
+      localURL: nil, scale: 1
+    ))
+    let cache = ImageCache(name: "avatar-pending-write-test-\(UUID().uuidString)")
+    defer { cache.clearDiskCache() }
+    let original = Data((0 ..< 2_000_000).map { UInt8(truncatingIfNeeded: $0 &* 31) })
+
+    // Kingfisher's own request finishes before its queued writes do. A large write queued first
+    // keeps the original's write pending when the read starts.
+    cache.storeToDisk(Data(count: 64 * 1_024 * 1_024), forKey: "\(source.cacheKey):queued-ahead")
+    cache.storeToDisk(original, forKey: source.cacheKey)
+    let data = try await source.originalImageData(
+      using: KingfisherManager(downloader: .default, cache: cache),
+      onlyFromCache: true
+    )
+    #expect(data == original)
+  }
 
   @Test("a refreshed URL updates the view while preserving the photo cache")
   @MainActor

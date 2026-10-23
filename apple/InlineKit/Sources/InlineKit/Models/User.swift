@@ -503,11 +503,14 @@ public extension User {
     data: Data,
     expectedSourceURL: URL? = nil,
     expectedAvatarIdentity: String? = nil,
-    accountToken: AuthAccountMutationToken? = nil
+    accountToken: AuthAccountMutationToken? = nil,
+    auth: AuthHandle = Auth.shared.handle,
+    database: AppDatabase = .shared,
+    directory: URL? = nil
   ) async throws {
     Log.shared.debug("Trying to cache image data")
 
-    let directory = User.getProfileCacheDirectory()
+    let directory = directory ?? User.getProfileCacheDirectory()
     let format = imageFormat(for: data)
     let prefix = expectedSourceURL == nil ? "User" : Self.remoteProfilePhotoCacheFilePrefix
     let localPath = "\(prefix)\(UUID().uuidString).\(format.fileExtension)"
@@ -516,9 +519,9 @@ public extension User {
     do {
       try data.write(to: localUrl, options: .atomic)
 
-      let oldLocalUrl = try await AppDatabase.shared.dbWriter.write { db -> URL? in
+      let oldLocalUrl = try await database.dbWriter.write { db -> URL? in
         if let accountToken {
-          try Auth.shared.handle.validateAccountMutation(accountToken)
+          try auth.validateAccountMutation(accountToken)
         }
         let oldLocalPath = try storeCachedProfilePhoto(
           db,
@@ -553,8 +556,13 @@ public extension User {
       throw UserAvatarCacheError.userNotFound(userId)
     }
     if let expectedSourceURL {
+      // Views resolve a missing User photo identity through the photo File, as `UserInfo` does.
+      let fileAvatarIdentity = user.stableAvatarIdentity == nil
+        ? try user.photos.fetchAll(db).first?.stableAvatarIdentity
+        : nil
       guard user.getRemoteURL() == expectedSourceURL,
-            user.stableAvatarIdentity == expectedAvatarIdentity
+            expectedAvatarIdentity == user.stableAvatarIdentity
+            || (fileAvatarIdentity != nil && expectedAvatarIdentity == fileAvatarIdentity)
       else {
         throw UserAvatarCacheError.stalePhoto
       }

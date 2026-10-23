@@ -50,26 +50,59 @@ public struct UserAvatarImageSource: Sendable {
     try await originalImageData(using: .shared)
   }
 
+  /// Returns the photo's original bytes without re-encoding a cached image, which took hundreds of
+  /// milliseconds on the main thread for large photos.
   @MainActor
   func originalImageData(using manager: KingfisherManager, onlyFromCache: Bool = false) async throws -> Data {
+    let cache = manager.cache
+    // Avatar views use `.cacheOriginalImage()`, which stores the downloaded bytes under the bare key.
+    await Self.waitForPendingDiskWrites(in: cache)
+    if let data = await Self.readFile(at: URL(fileURLWithPath: cache.cachePath(forKey: cacheKey))) {
+      return data
+    }
+    if url.isFileURL, let data = await Self.readFile(at: url) {
+      return data
+    }
+    if onlyFromCache {
+      throw CocoaError(.fileReadNoSuchFile)
+    }
+
+    let data = try await Self.download(url, using: manager)
+    cache.storeToDisk(data, forKey: cacheKey)
+    return data
+  }
+
+  /// Kingfisher writes to disk on one serial queue, after the request that stored the file has finished.
+  /// Queuing a lookup behind those writes means a just-downloaded original is complete before it is read.
+  @MainActor
+  private static func waitForPendingDiskWrites(in cache: ImageCache) async {
+    await withCheckedContinuation { continuation in
+      cache.retrieveImageInDiskCache(forKey: "user-avatar:pending-writes", callbackQueue: .mainAsync) { _ in
+        continuation.resume()
+      }
+    }
+  }
+
+  @concurrent
+  private static func readFile(at url: URL) async -> Data? {
+    guard let data = try? Data(contentsOf: url), !data.isEmpty else { return nil }
+    return data
+  }
+
+  @MainActor
+  private static func download(_ url: URL, using manager: KingfisherManager) async throws -> Data {
     try await withCheckedThrowingContinuation { continuation in
-      // No downsampling processor: a .none result from a processed request can still be thumbnail data.
-      manager.retrieveImage(
-        with: KF.ImageResource(downloadURL: url, cacheKey: cacheKey),
-        options: onlyFromCache ? [.onlyFromCache] : [],
-        completionHandler: { result in
-          switch result {
-          case let .success(image):
-            if let data = image.data(), !data.isEmpty {
-              continuation.resume(returning: data)
-            } else {
-              continuation.resume(throwing: CocoaError(.fileReadCorruptFile))
-            }
-          case let .failure(error):
-            continuation.resume(throwing: error)
-          }
+      let options = manager.defaultOptions + [.callbackQueue(.mainAsync)]
+      manager.downloader.downloadImage(with: url, options: options) { result in
+        switch result {
+        case let .success(value) where !value.originalData.isEmpty:
+          continuation.resume(returning: value.originalData)
+        case .success:
+          continuation.resume(throwing: CocoaError(.fileReadCorruptFile))
+        case let .failure(error):
+          continuation.resume(throwing: error)
         }
-      )
+      }
     }
   }
 }

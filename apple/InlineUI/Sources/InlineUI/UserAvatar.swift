@@ -51,7 +51,6 @@ public struct UserAvatar: View, Equatable {
   let showsPersonSymbol: Bool
 
   @Environment(\.displayScale) private var displayScale
-  @State private var startedRemoteCacheUrl: URL?
 
   public nonisolated static func getNameForInitials(user: User) -> String {
     avatarPresentation(
@@ -328,26 +327,13 @@ public struct UserAvatar: View, Equatable {
     let sourceUrl = source.url
     guard sourceUrl.isFileURL == false else { return }
     guard localUrl?.lastPathComponent.hasPrefix(User.remoteProfilePhotoCacheFilePrefix) != true else { return }
-    guard startedRemoteCacheUrl != sourceUrl else { return }
 
-    startedRemoteCacheUrl = sourceUrl
-
-    guard let account = try? Auth.shared.handle.beginAccountMutation() else { return }
-
-    Task { [userId, stableAvatarIdentity] in
-      do {
-        let data = try await source.originalImageData()
-        try Auth.shared.handle.validateAccountMutation(account)
-        try await User.cacheImageData(
-          userId: userId,
-          data: data,
-          expectedSourceURL: sourceUrl,
-          expectedAvatarIdentity: stableAvatarIdentity,
-          accountToken: account
-        )
-      } catch {
-        Log.shared.error("Failed to cache image", error: error)
-      }
+    UserAvatarMirror.shared.mirror(
+      userId: userId,
+      sourceURL: sourceUrl,
+      expectedAvatarIdentity: stableAvatarIdentity
+    ) {
+      try await source.originalImageData()
     }
   }
 
