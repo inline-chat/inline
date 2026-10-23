@@ -117,6 +117,14 @@ describe("log redaction", () => {
     }
   })
 
+  it("keeps hosts, paths and structural query params useful", () => {
+    expect(redactString("Running on http://0.0.0.0:8000")).toBe("Running on http://0.0.0.0:8000")
+    expect(redactString("GET https://u:p@api.test/v1/getChats?chatId=5&limit=50&text=hi&sid=s#f"))
+      .toBe("GET https://<redacted>@api.test/v1/getChats?chatId=5&limit=50&text=<redacted>&sid=<redacted>")
+    expect(redactValue({ photoUrl: "https://cdn.test/a.png?sig=s", url: "opaque" }))
+      .toEqual({ photoUrl: "https://cdn.test/a.png?sig=<redacted>", url: "<redacted>" })
+  })
+
   it("does not let malformed diagnostics break redaction or expose a raw fallback", () => {
     expect(redactValue(new Date(NaN))).toBe("<unserializable>")
     const error = new Error("safe")

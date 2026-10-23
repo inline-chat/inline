@@ -20,12 +20,17 @@ const ENCODED_EMAIL_RE = /\b[A-Z0-9._%+-]+%40[A-Z0-9.-]+\.[A-Z]{2,}\b/gi
 const INTERNATIONAL_PHONE_RE = /\+[1-9](?:[\s().-]*\d){7,14}\b/g
 const SENTRY_PROD_DROP_LEVELS = new Set<SentryLogLevel>(["trace", "debug"])
 const SENTRY_USER_DETAIL_ATTRIBUTES = ["user.email", "user.name"]
+// Query values are redacted unless the key is a known structural parameter (ids, paging, flags).
+const SAFE_QUERY_KEY_RE = /^(?!session)(?:id|ids|[a-z]+(?:Id|Ids|_id|_ids)|limit|offset|page|per_?page|before|after|since|until|sort|order|v|version|api_?version|platform|format|type|kind|mode|lang|locale|region|debug|w|h|width|height|size)$/
+const URL_RE = /\bhttps?:\/\/[^\s<>"']+/gi
 
 export const redactString = (value: string): string => {
   // Avoid leaking tokens in path (e.g. /bot<token>/sendMessage) or in auth headers.
   return redactCredentialPath(value)
-    .replace(/\bhttps?:\/\/[^\s<>"']+/gi, "<url>")
-    .replace(/([?&][^\s=&#]+)=([^&#\s<>"']*)/g, "$1=<redacted>")
+    // Keep scheme, host and path for diagnostics; drop userinfo and fragments.
+    .replace(URL_RE, (url) => url.replace(/^(https?:\/\/)[^/?#@]*@/i, `$1${REDACTED}@`).replace(/#.*$/, ""))
+    .replace(/([?&])([^\s=&#]+)=([^&#\s<>"']*)/g, (match, sep: string, key: string) =>
+      SAFE_QUERY_KEY_RE.test(key) ? match : `${sep}${key}=${REDACTED}`)
     .replace(BEARER_RE, `Bearer ${REDACTED}`)
     .replace(BOT_TOKEN_SEGMENT_RE, `bot${REDACTED}`)
     .replace(AUTH_TOKEN_SEGMENT_RE, `$1${REDACTED}`)
@@ -46,10 +51,14 @@ const shouldRedactKey = (key: string): boolean => {
     k.includes("password") ||
     k.includes("cookie") ||
     k === "query" || k === "query_string" || k === "querystring" || k.endsWith(".query") ||
-    k === "filename" || k === "file_name" ||
-    k === "url" || k.endsWith("url")
+    k === "filename" || k === "file_name"
   )
 }
+
+// URL-keyed values are kept (scrubbed) only when they look like a URL or path.
+const isUrlKey = (key: string): boolean => key.toLowerCase().endsWith("url")
+const redactUrlKeyValue = (value: unknown): unknown =>
+  typeof value === "string" && /^(?:https?:\/\/|\/)/i.test(value) ? redactString(value).slice(0, 8_192) : REDACTED
 
 export const redactValue = (value: unknown, depth = 0): unknown => {
   const seen = new WeakSet<object>()
@@ -82,7 +91,8 @@ export const redactValue = (value: unknown, depth = 0): unknown => {
         const descriptor = Object.getOwnPropertyDescriptor(value, key)
         Object.defineProperty(next, key, {
           configurable: true, enumerable: true, writable: true,
-          value: shouldRedactKey(key) ? REDACTED : descriptor && "value" in descriptor
+          value: shouldRedactKey(key) ? REDACTED : isUrlKey(key) && descriptor && "value" in descriptor
+            ? redactUrlKeyValue(descriptor.value) : descriptor && "value" in descriptor
             ? visit(descriptor.value, depth + 1) : "<accessor>",
         })
       }
@@ -92,7 +102,8 @@ export const redactValue = (value: unknown, depth = 0): unknown => {
     const out: Record<string, unknown> = Object.create(null)
     for (const key of Object.keys(value).slice(0, 128)) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key)
-      out[key] = shouldRedactKey(key) ? REDACTED : descriptor && "value" in descriptor
+      out[key] = shouldRedactKey(key) ? REDACTED : isUrlKey(key) && descriptor && "value" in descriptor
+        ? redactUrlKeyValue(descriptor.value) : descriptor && "value" in descriptor
         ? visit(descriptor.value, depth + 1) : "<accessor>"
     }
     return out
@@ -146,7 +157,7 @@ const toSentryAttributes = (attributes: Record<string, unknown> | undefined): Se
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(attributes)) {
     if (SENTRY_USER_DETAIL_ATTRIBUTES.includes(key)) continue
-    out[key] = shouldRedactKey(key) ? REDACTED : toSentryValue(value)
+    out[key] = shouldRedactKey(key) ? REDACTED : isUrlKey(key) ? redactUrlKeyValue(value) : toSentryValue(value)
   }
 
   return out
