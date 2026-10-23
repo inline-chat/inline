@@ -112,7 +112,7 @@ describe("public CI contracts", () => {
     const publish = read(".github/workflows/npm-publish.yml")
     expect(publish).toContain('check-hermes-admission.mjs --artifact "$HERMES_ARTIFACT"')
     expect(publish.indexOf("Validate exact Hermes release artifact against real host")).toBeLessThan(
-      publish.indexOf("HERMES_ARTIFACT_SHA256:"),
+      publish.indexOf("Retain the exact checked artifact and integrity receipt"),
     )
   })
 

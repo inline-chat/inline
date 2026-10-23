@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { describe, expect, it } from "bun:test"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { parse } from "yaml"
@@ -9,89 +9,44 @@ type Step = { name?: string; run?: string; env?: Record<string, string>; with?: 
 const workflow = (name: string) => parse(readFileSync(path.join(root, ".github/workflows", name), "utf8")) as {
   jobs: Record<string, { steps: Step[] }>
 }
-const npm = workflow("npm-publish.yml").jobs.publish.steps
-const cli = workflow("cli-release.yml").jobs
-const sourceGates = [
-  { label: "npm", steps: npm },
-  { label: "CLI preflight", steps: cli.preflight.steps },
-  { label: "CLI validation", steps: cli.validate.steps },
-].map(({ label, steps }) => {
-  const index = steps.findIndex((step) => step.env?.RELEASE_COMMIT && step.run?.includes("merge-base --is-ancestor"))
-  if (index < 0) throw new Error(`${label} has no source validation step`)
-  return { label, steps, index, script: steps[index].run! }
-})
-
-describe("release source validation", () => {
-  let directory: string
-  let checkout: string
-  let candidate: string
-  let newer: string
-  let offMain: string
-  const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0" }
-  const git = (cwd: string, ...args: string[]) => {
-    const result = Bun.spawnSync(["git", ...args], { cwd, env: gitEnv })
-    if (result.exitCode !== 0) throw new Error(result.stderr.toString())
-    return result.stdout.toString().trim()
-  }
-
-  beforeAll(() => {
-    directory = mkdtempSync(path.join(tmpdir(), "inline-release-gates-"))
-    const origin = path.join(directory, "origin.git")
-    const source = path.join(directory, "source")
-    checkout = path.join(directory, "checkout")
-    git(directory, "init", "--bare", "--initial-branch=main", origin)
-    git(directory, "init", "--initial-branch=main", source)
-    git(source, "config", "user.name", "Release fixture")
-    git(source, "config", "user.email", "release-fixture@example.invalid")
-    git(source, "config", "core.hooksPath", "/dev/null")
-    git(source, "remote", "add", "origin", origin)
-    const commit = (content: string) => {
-      writeFileSync(path.join(source, "source.txt"), content)
-      git(source, "add", "source.txt")
-      git(source, "commit", "-m", content)
-      return git(source, "rev-parse", "HEAD")
+describe("tag release workflow boundaries", () => {
+  it("qualifies tags with trusted main before candidate code or publishing privileges", () => {
+    for (const [file, job] of [["npm-publish.yml", "prepare"], ["cli-release.yml", "select"]]) {
+      const parsed = workflow(file) as any
+      const select = parsed.jobs[job!]
+      const steps = select.steps as Step[]
+      const gate = steps.findIndex((step) => step.run?.includes("scripts/ci/assert-release-commit.mjs"))
+      expect(gate).toBeGreaterThan(0)
+      expect(steps[0]?.with?.ref).toBe("main")
+      expect(steps[0]?.with?.["persist-credentials"]).toBe(false)
+      expect(select.environment).toBeUndefined()
+      expect(parsed.permissions["id-token"]).toBeUndefined()
+      for (const step of steps.slice(0, gate)) expect(step.run || "").not.toMatch(/\b(?:bun|npm) install\b/)
+      expect(parsed.concurrency).toMatchObject({ "cancel-in-progress": false, queue: "max" })
     }
-    candidate = commit("selected release")
-    newer = commit("main advanced")
-    git(source, "push", "origin", "main")
-    git(source, "checkout", "-b", "off-main", candidate)
-    offMain = commit("unqualified branch")
-    git(source, "push", "origin", "off-main")
-    git(directory, "clone", origin, checkout)
-  }, 15_000)
+  })
 
-  afterAll(() => { if (directory) rmSync(directory, { recursive: true, force: true }) })
-
-  for (const gate of sourceGates) {
-    it(`${gate.label} accepts the selected commit after main advances`, () => {
-      git(checkout, "checkout", "--detach", candidate)
-      const result = Bun.spawnSync(["bash", "-e", "-c", gate.script], {
-        cwd: checkout, env: { ...gitEnv, RELEASE_COMMIT: candidate },
-      })
-      expect(result.exitCode, result.stderr.toString()).toBe(0)
-      expect(git(checkout, "rev-parse", "origin/main")).toBe(newer)
-    })
-
-    it(`${gate.label} rejects off-main, mismatched and malformed candidates before proceeding`, () => {
-      const marker = path.join(directory, "validated")
-      for (const [head, requested] of [[offMain, offMain], [candidate, newer], [candidate, "main"]]) {
-        git(checkout, "checkout", "--detach", head!)
-        const result = Bun.spawnSync(["bash", "-e", "-c", `${gate.script}\nprintf validated > "$MARKER"`], {
-          cwd: checkout, env: { ...gitEnv, RELEASE_COMMIT: requested!, MARKER: marker },
-        })
-        expect(result.exitCode).not.toBe(0)
-        expect(existsSync(marker)).toBe(false)
-      }
-    })
-  }
-
-  it("validates npm source immediately after checkout and before any dependency installation", () => {
-    const gate = sourceGates[0]!
-    expect(gate.index).toBe(1)
-    expect(npm[0]?.with?.ref).toBe("${{ inputs.commit }}")
-    const installs = npm.flatMap((step, index) => /\b(?:bun|npm) install\b/.test(step.run || "") ? [index] : [])
-    expect(installs.length).toBeGreaterThan(0)
-    for (const index of installs) expect(index).toBeGreaterThan(gate.index)
+  it("only the npm publisher gets OIDC and installs the checked artifact without lifecycle scripts", () => {
+    const npm = workflow("npm-publish.yml") as any
+    expect(npm.on.push.tags).toHaveLength(7)
+    expect(npm.on.workflow_dispatch).toBeUndefined()
+    expect(npm.jobs.publish.environment).toBe("npm-publish")
+    expect(npm.jobs.publish.permissions["id-token"]).toBe("write")
+    expect(npm.jobs.publish.needs).toBe("prepare")
+    expect(npm.jobs.publish.concurrency).toMatchObject({ queue: "max", "cancel-in-progress": false })
+    const source = npm.jobs.publish.steps.map((step: Step) => step.run || "").join("\n")
+    expect(source).not.toMatch(/bun install|npm install(?! --global npm@)/)
+    expect(source).toContain("scripts/ci/publish-npm-release.mjs")
+    const steps = npm.jobs.prepare.steps as Step[]
+    const dependencies = steps.findIndex((step) => step.run?.includes("bun install"))
+    const metadata = steps.findIndex((step) => step.run?.includes("npm-release-preflight.mjs"))
+    expect(metadata).toBeGreaterThan(-1)
+    expect(dependencies).toBeGreaterThan(metadata)
+    const install = steps.find((step) => step.name === "Install exact packed artifact outside the workspace")!
+    expect(install.run).toContain('if [[ "$PACKAGE_KEY" == openclaw ]]')
+    expect(install.run).toContain("devDependencies.openclaw")
+    expect(install.run).toContain('"${host[@]}"')
+    expect(npm.jobs.summary.needs).toEqual(["prepare", "publish"])
   })
 })
 

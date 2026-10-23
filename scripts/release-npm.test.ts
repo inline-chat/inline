@@ -46,8 +46,8 @@ describe("release npm dist-tags", () => {
   })
 
   test("rejects malformed versions, unsupported channels, and tag mismatches", () => {
-    expect(() => expectedDistTag("1.2")).toThrow("Invalid semantic version")
-    expect(() => expectedDistTag("1.2.3-rc.1")).toThrow("unsupported dist-tag rc")
+    expect(() => expectedDistTag("1.2")).toThrow("Invalid canonical release version")
+    expect(() => expectedDistTag("1.2.3-rc.1")).toThrow("Unsupported npm prerelease channel: rc")
     expect(() => resolveDistTag("1.2.3-alpha.1", "latest")).toThrow(
       "must use the alpha dist-tag",
     )
@@ -67,13 +67,13 @@ describe("release npm manifest", () => {
     publishConfig: { access: "public" },
   }
 
-  test("returns the committed version for a public trusted package", () => {
-    expect(validateManifest(config, manifest, "0.0.6")).toBe("0.0.6")
+  test("takes the requested tag version without changing the trusted source manifest", () => {
+    expect(validateManifest(config, manifest, "0.0.7-alpha.1")).toBe("0.0.7-alpha.1")
+    expect(manifest.version).toBe("0.0.6")
   })
 
   test("rejects private, mismatched, and incorrectly sourced packages", () => {
     expect(() => validateManifest(config, { ...manifest, private: true })).toThrow("marked private")
-    expect(() => validateManifest(config, manifest, "0.0.7")).toThrow("Version mismatch")
     expect(() =>
       validateManifest(config, {
         ...manifest,
@@ -98,25 +98,13 @@ test("parses the workflow run URL emitted by gh", () => {
 
 test("recognizes an unpublished package as missing registry state", () => {
   expect(isRegistryNotFound("npm error code E404\nNot Found")).toBe(true)
-  expect(isRegistryNotFound("No match found for version 1.2.3")).toBe(true)
+  expect(isRegistryNotFound("No match found for version 1.2.3")).toBe(false)
   expect(isRegistryNotFound("npm error code E401\nUnauthorized")).toBe(false)
 })
 
-test("keeps the local allowlist aligned with the workflow security boundary", async () => {
-  const workflow = await Bun.file(
-    new URL("../.github/workflows/npm-publish.yml", import.meta.url),
-  ).text()
-
-  for (const config of Object.values(PACKAGE_CONFIGS)) {
-    expect(workflow).toContain(`          - ${config.key}`)
-
-    const branch = workflow
-      .split(`            ${config.key})`, 2)[1]
-      ?.split("              ;;", 1)[0]
-    expect(branch).toBeDefined()
-    expect(branch).toContain(`              package_dir="${config.directory}"`)
-    expect(branch).toContain(`              package_name="${config.name}"`)
-  }
-
-  expect(workflow).toContain('"./$PACKAGE_DIR"')
+test("uses allowlisted package release tags", async () => {
+  const workflow = await Bun.file(new URL("../.github/workflows/npm-publish.yml", import.meta.url)).text()
+  for (const config of Object.values(PACKAGE_CONFIGS)) expect(workflow).toContain(`'${config.key}-v*'`)
+  expect(workflow).toContain("scripts/ci/assert-release-commit.mjs")
+  expect(workflow).not.toContain("workflow_dispatch:")
 })

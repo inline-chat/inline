@@ -1,10 +1,60 @@
 # CLI releases
 
-The public repository owns `scripts/release-cli.ts` and
-`.github/workflows/cli-release.yml`. The root Cargo workspace version, internal
-path-dependency requirements, and lockfile must agree before release. Prepare
-only the intended source changes; unrelated uncommitted work is not a release
-candidate. Do not reuse an already published version.
+A CLI release is an existing `cli-vX.Y.Z` tag on a tested commit from `main`.
+Prerelease tags such as `cli-v0.7.19-alpha.1`, `-beta.1`, and `-next.1` use the
+same pipeline. Push the tag once; the CLI Release workflow builds all five
+supported targets, signs and notarizes Apple silicon macOS, then publishes R2,
+GitHub, and (for stable releases) Homebrew.
+
+The tag supplies the version. Do not commit release version bumps. In each
+throwaway CI checkout, the workflow stamps the Cargo workspace version, its
+inherited crate versions in `Cargo.lock`, and internal path dependency
+requirements before checks or builds. Independently versioned crates and the
+private unversioned `cli/package.json` retain their source versions.
+
+## Select and release a candidate
+
+Review and commit the intended source changes, then wait for the exact SHA's
+`main` push in CI to pass **Rust workspace all targets** and **Workflow and
+release contracts**. The release gate reads its tools from trusted `main`,
+checks the existing tag and main ancestry, and freezes that SHA before checking
+out or executing candidate code or accessing release environments. Later main
+pushes do not replace the selected commit. CLI releases queue without cancelling
+running or older queued releases.
+
+```sh
+# One publication action, after the selected commit is tested and approved.
+git tag cli-v0.7.19-alpha.1 QUALIFIED_MAIN_SHA
+git push origin cli-v0.7.19-alpha.1
+
+# Resume an existing exact tag, using the current workflow on main.
+gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
+  -f tag=cli-v0.7.19-alpha.1
+```
+
+Normal publication always uses all five targets and notarization. A tag must
+already exist and resolve to the selected commit; the publishing script never
+creates or moves one. Release notes use GitHub's automatic notes.
+
+Credentials-only and build diagnostics can use an exact green main commit
+without creating a tag. They never publish. Target overrides and signed-only
+macOS builds are available only for diagnostics:
+
+```sh
+gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
+  -f commit=QUALIFIED_MAIN_SHA -f preflight_only=true
+
+gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
+  -f commit=QUALIFIED_MAIN_SHA -f build_only=true \
+  -f targets=aarch64-apple-darwin
+```
+
+An empty diagnostic `targets` input builds the normal five targets:
+`aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`,
+`x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-musl`, and
+`x86_64-unknown-linux-musl`. Full hosted validation retains the CLI, installer,
+Homebrew contract, agent package, and Umbrel checks. Local Rust release builds
+are not required.
 
 ## Codex runtime freshness
 
@@ -29,91 +79,66 @@ Inline currently discovers an installed Codex executable (including the bundled
 ChatGPT runtime as a fallback); its release archive does not contain a separate
 Codex binary. This is a CLI release requirement, not a Mac-wide automatic updater.
 
-Run the CLI checks, release-script tests, Homebrew validation, and external
-agent-package contract check before committing the candidate:
+## Verify and resume
+
+Verify the tag's commit, five target archives and checksums, manifest version,
+macOS signature/notarization, applicable Homebrew version, and the installed
+binary separately. Every run reports published, already current, deferred,
+blocked, or failed with a reason. A diagnostic success is reported as deferred
+because it did not publish.
+
+Each version has `cli/vVERSION/release.json`, binding its tag, source SHA, and
+complete target set. Retries validate this receipt and reuse existing archives;
+only missing targets are rebuilt. R2 versioned objects and existing GitHub
+assets must match their recorded bytes/digests. Missing checksums or GitHub
+assets can be completed; conflicting content fails without clobbering it. Older
+releases without a receipt require an explicit audit rather than being claimed
+by this workflow.
+
+Every release retains `cli/vVERSION/manifest.json`. Stable releases additionally
+advance `cli/manifest.json`, the installer, and the Homebrew cask after artifact
+publication succeeds. Prereleases leave those stable entry points unchanged.
+Resuming an older stable release also leaves a newer stable entry point in
+place. The bundle contains the versioned manifest and matching archives.
 
 ```sh
-bun run --cwd cli ci
-bun test scripts/release-cli.test.ts
-INLINE_HOMEBREW_TAP_PATH=/path/to/homebrew-inline bun run scripts/release-cli.ts validate-homebrew
-node scripts/check-agent-release-group.mjs
+gh release view cli-vVERSION --repo inline-chat/inline --json assets
+curl -fsSL https://public-assets.inline.chat/cli/vVERSION/manifest.json
+# Stable pointer, only when checking a stable release:
+curl -fsSL https://public-assets.inline.chat/cli/manifest.json
 ```
-
-Push the reviewed candidate, then pass its exact commit SHA as `commit` below.
-The workflow definition comes from `main`. An empty `targets` input builds all
-five supported targets in CI, including signed and notarized Apple-silicon
-macOS. Do not skip notarization for a normal stable release.
-
-```sh
-# Credentials only; no build or publication.
-gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
-  -f commit=PUBLIC_CANDIDATE_SHA -f preflight_only=true
-
-# After the candidate is approved for publication:
-gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
-  -f commit=PUBLIC_CANDIDATE_SHA
-```
-
-The full workflow validates the CLI and integration packages before building,
-then publishes GitHub/R2 artifacts and the stable manifest/install script and
-Homebrew cask. Prereleases leave stable/Homebrew unchanged. Verify the tag's
-commit, manifest version and checksums, five assets, macOS signature/notarization,
-Homebrew version, and installed binary separately. Build-only runs retain CI
-artifacts without publishing. Local release builds are not required.
 
 For installed checks, resolve `command -v inline` and use the candidate's exact
 executable if another installation shadows it on PATH. Check `inline bridge
 doctor --json` for the service's installed binary and provider executable;
-verify their versions separately from the CLI selected by the shell.
+verify their versions separately from the shell's CLI. Readiness or `--version`
+alone does not qualify an authenticated provider turn.
 
-When upgrading an existing macOS bot bridge to 0.7.16, run `inline bridge
-restart` with the newly installed binary once after the update. This refreshes
-the existing service definition to Standard process policy; the older updater
+When upgrading an existing macOS bot bridge from before 0.7.16, run `inline
+bridge restart` with the newly installed binary once after the update. This
+refreshes the service definition to Standard process policy; the older updater
 process can retain its previous policy during the first restart. Verify the
 persisted policy and actual provider readiness after this new-binary restart.
 
-Keep human release notes in a reviewed file; the script creates generic notes.
-After publication, attach the reviewed text with `gh release edit cli-vVERSION
---repo inline-chat/inline --notes-file PATH`. The current notes are in
-[v0.7.18.md](releases/v0.7.18.md); refresh them for the next
-release version and source.
-
 ## Release authentication
 
-The CLI Release workflow publishes GitHub/R2 artifacts and updates the separate
-`inline-chat/homebrew-inline` repository. Homebrew publishing uses the dedicated
-`INLINE_HOMEBREW_DEPLOY_KEY` Actions secret in `inline-chat/inline`.
+All CLI jobs that consume release secrets use the `cli` GitHub environment,
+after candidate qualification. Its allowed refs must include `main` and CLI
+release tags. Shared repository Apple/R2 secrets may still be used by the Mac
+workflow until that surface moves to its own environment; declaring the CLI
+environment alone does not remove those shared credentials.
 
-The public Ed25519 key is registered as a write-enabled deploy key only on the
-Homebrew repository. The private key goes into an isolated SSH agent through
-stdin; the workflow never writes it to a key file. SSH ignores personal config,
-uses only that identity, and pins GitHub's published Ed25519 host key. The agent
-is stopped after the operation. No personal GitHub token is copied into CI.
+Homebrew uses the dedicated `INLINE_HOMEBREW_DEPLOY_KEY`, registered as a
+write-enabled deploy key only on `inline-chat/homebrew-inline`. The workflow
+loads it through stdin into an isolated SSH agent, ignores personal SSH config,
+and pins GitHub's published Ed25519 host key. It stops the agent afterward.
+Stable preflight checks Homebrew write access with a push dry run.
 
-Stable releases that update Homebrew verify SSH write authentication before
-building, using a push dry run that does not change repository contents. The
-same authentication script is reused during publication. It lives in the
-workflow so releasing an older source ref does not require a new helper file.
-
-To check credentials without building or publishing:
-
-```sh
-gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
-  -f commit=PUBLIC_CANDIDATE_SHA -f preflight_only=true
-```
-
-Wait for the preflight job to succeed. Validation, build, and publication jobs
-must be skipped. For full stable credentials, leave `targets` empty and
-`build_only` false. No new release or version bump is needed for this check.
-
-Deploy keys do not expire automatically. To rotate, register a new dedicated
-key, replace `INLINE_HOMEBREW_DEPLOY_KEY`, and run the preflight check before
-revoking the previous key. GitHub may also remove a deploy key when the GitHub
-authorization used to create it is revoked. Never paste private keys into logs,
-commit them, or reuse a developer's general-purpose SSH key.
-
-The former `INLINE_HOMEBREW_TAP_TOKEN` secret is no longer used by this workflow.
-Its presence does not imply it is still valid; do not reuse it as a fallback.
+Deploy keys do not expire automatically. Rotate by registering a new dedicated
+key, replacing `INLINE_HOMEBREW_DEPLOY_KEY`, and running credentials preflight
+before revoking the old key. Never print credentials, inspect `.env`, or copy a
+personal token/SSH key into CI. The retired `INLINE_HOMEBREW_TAP_TOKEN` is not a
+fallback.
 
 References: [GitHub deploy keys](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys)
 and [host-key fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints).

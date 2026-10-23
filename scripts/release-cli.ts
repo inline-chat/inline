@@ -1,7 +1,8 @@
 import { S3Client } from "bun";
 import { createHash } from "crypto";
-import { copyFile, mkdir, readFile, realpath, rm, stat, writeFile } from "fs/promises";
+import { appendFile, copyFile, mkdir, readFile, realpath, rm, stat, writeFile } from "fs/promises";
 import { basename, dirname, join, resolve } from "path";
+import { parseCliReleaseTag } from "./ci/cli-release-version";
 
 const rootDir = resolve(import.meta.dir, "..");
 const cliDir = join(rootDir, "cli");
@@ -9,8 +10,6 @@ const targetDir = join(rootDir, "target");
 const distDir = join(cliDir, "dist");
 const tempAssetsDir = join(rootDir, "scripts", ".release-tmp");
 const githubRepo = process.env.INLINE_CLI_GITHUB_REPO ?? "inline-chat/inline";
-const githubTagPrefix = process.env.INLINE_CLI_GITHUB_TAG_PREFIX ?? "cli-v";
-const githubRemote = process.env.INLINE_CLI_GIT_REMOTE ?? "origin";
 const githubReleaseTarget = process.env.INLINE_CLI_GITHUB_TARGET;
 const homebrewTapPath =
   process.env.INLINE_HOMEBREW_TAP_PATH ?? resolve(rootDir, "..", "homebrew-inline");
@@ -24,7 +23,7 @@ const appleNotarizationKeyId = process.env.APPLE_NOTARIZATION_KEY_ID;
 const appleNotarizationIssuer = process.env.APPLE_NOTARIZATION_ISSUER;
 const skipNotarize =
   isTruthy(process.env.INLINE_SKIP_NOTARIZE) || isTruthy(process.env.SKIP_NOTARIZE);
-const resumeRelease = isTruthy(process.env.INLINE_CLI_RELEASE_RESUME);
+let publicationChanged = false;
 const defaultTargets = [
   "aarch64-apple-darwin",
   "aarch64-unknown-linux-gnu",
@@ -43,19 +42,32 @@ async function main() {
   const command = process.argv[2] ?? "release";
 
   if (command === "release") {
+    parseCliReleaseTag(requireEnv("INLINE_CLI_RELEASE_TAG"));
     const { r2, publicBaseUrl, prefix } = getR2Context();
     await runRelease(r2, publicBaseUrl, prefix);
   } else if (command === "build") {
     await runBuildArtifacts();
   } else if (command === "publish") {
+    parseCliReleaseTag(requireEnv("INLINE_CLI_RELEASE_TAG"));
     const { r2, publicBaseUrl, prefix } = getR2Context();
     await runPublish(r2, publicBaseUrl, prefix);
+  } else if (command === "status") {
+    const context = await getReleaseContext(true);
+    const { r2, prefix } = getR2Context();
+    const receipt = await readReleaseReceipt(r2, prefix, context);
+    const available: string[] = [];
+    if (receipt) {
+      for (const target of context.targets) {
+        if (await r2.file(`${prefix}/v${context.version}/${artifactName(context.version, target)}`).exists()) available.push(target);
+      }
+    }
+    await writeOutputs({ available_targets: JSON.stringify(available), artifacts_ready: String(available.length === context.targets.length) });
   } else if (command === "validate-homebrew") {
     await readValidatedHomebrewCask();
     console.log("Homebrew cask platform contract is valid.");
   } else {
     throw new Error(
-      `Unknown command: ${command}. Supported commands: release, build, publish, validate-homebrew.`,
+      `Unknown command: ${command}. Supported commands: release, build, publish, status, validate-homebrew.`,
     );
   }
 }
@@ -122,7 +134,7 @@ function manifestPublicUrl(publicBaseUrl: string, prefix: string, version: strin
 }
 
 function logPublishedRelease(publicBaseUrl: string, prefix: string, context: ReleaseContext) {
-  console.log(`Uploaded Inline CLI v${context.version}`);
+  console.log(`${publicationChanged ? "Published" : "Verified existing"} Inline CLI v${context.version}`);
   console.log(`Manifest: ${manifestPublicUrl(publicBaseUrl, prefix, context.version)}`);
   if (isPrereleaseVersion(context.version)) {
     console.log("Prerelease: stable manifest, install script, and Homebrew cask were not advanced.");
@@ -191,15 +203,75 @@ async function uploadFile(
   path: string,
   contentType: string,
 ) {
-  const file = r2.file(key);
-  await file.write(Bun.file(path), { type: contentType });
+  await writeReleaseObject(r2, key, new Uint8Array(await readFile(path)), contentType, false);
 }
 
-type ReleaseContext = {
+export async function writeReleaseObject(r2: S3Client, key: string, bytes: Uint8Array, contentType: string, immutable = true): Promise<boolean> {
+  const file = r2.file(key);
+  if (await file.exists()) {
+    const existing = new Uint8Array(await file.arrayBuffer());
+    if (Buffer.from(existing).equals(Buffer.from(bytes))) return false;
+    if (immutable) throw new Error(`Refusing to overwrite different release content: ${key}`);
+  }
+  await file.write(bytes, { type: contentType });
+  publicationChanged = true;
+  return true;
+}
+
+export type ReleaseContext = {
   version: string;
   targets: readonly string[];
   releaseDir: string;
+  tag?: string;
+  sourceSha: string;
 };
+
+export type ReleaseReceipt = { version: string; tag: string; sourceSha: string; targets: readonly string[] };
+
+function expectedReceipt(context: ReleaseContext): ReleaseReceipt {
+  if (!context.tag) throw new Error("Publication requires an existing exact CLI release tag");
+  return { version: context.version, tag: context.tag, sourceSha: context.sourceSha, targets: [...context.targets].sort() };
+}
+
+export function assertMatchingReleaseReceipt(actual: ReleaseReceipt, expected: ReleaseReceipt) {
+  if (actual.version !== expected.version || actual.tag !== expected.tag || actual.sourceSha !== expected.sourceSha || !Array.isArray(actual.targets) || JSON.stringify([...actual.targets].sort()) !== JSON.stringify([...expected.targets].sort())) {
+    throw new Error("Existing CLI release receipt belongs to a different source, version, or target set");
+  }
+}
+
+async function readReleaseReceipt(r2: S3Client, prefix: string, context: ReleaseContext): Promise<ReleaseReceipt | null> {
+  const file = r2.file(`${prefix}/v${context.version}/release.json`);
+  if (!(await file.exists())) return null;
+  const receipt = JSON.parse(await file.text()) as ReleaseReceipt;
+  assertMatchingReleaseReceipt(receipt, expectedReceipt(context));
+  return receipt;
+}
+
+async function ensureReleaseReceipt(r2: S3Client, prefix: string, context: ReleaseContext) {
+  if (await readReleaseReceipt(r2, prefix, context)) return;
+  // Older releases have no source receipt. They require an explicit audit;
+  // absence of a receipt never licenses a new run to claim their bytes.
+  if (await githubReleaseAssets(context.tag!) || await r2.file(`${prefix}/v${context.version}/manifest.json`).exists()) {
+    throw new Error("Existing CLI release has no source receipt; refusing to replace it");
+  }
+  for (const target of context.targets) {
+    const key = `${prefix}/v${context.version}/${artifactName(context.version, target)}`;
+    if (await r2.file(key).exists() || await r2.file(`${key}.sha256`).exists()) throw new Error("Existing CLI archive has no source receipt; refusing to replace it");
+  }
+  const stable = r2.file(`${prefix}/manifest.json`);
+  if (await stable.exists() && (JSON.parse(await stable.text()) as UpdateManifest).version === context.version) {
+    throw new Error("Stable version already exists without a source receipt; refusing to claim it");
+  }
+  await writeReleaseObject(r2, `${prefix}/v${context.version}/release.json`, new TextEncoder().encode(`${JSON.stringify(expectedReceipt(context), null, 2)}\n`), "application/json");
+}
+
+function artifactName(version: string, target: string) {
+  return `inline-cli-${version}-${target}.tar.gz`;
+}
+
+async function writeOutputs(values: Record<string, string>) {
+  if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, Object.entries(values).map(([key, value]) => `${key}=${value}\n`).join(""));
+}
 
 export type HomebrewHashes = {
   macosArm: string;
@@ -213,8 +285,7 @@ type GitHubReleaseAsset = {
 };
 
 async function runRelease(r2: S3Client, publicBaseUrl: string, prefix: string) {
-  const context = await getReleaseContext();
-  await assertNoDuplicateVersion(context);
+  const context = await getReleaseContext(true);
   await preflightHomebrewCask(context);
   await runBuild(context);
   await signAndNotarize(context);
@@ -231,20 +302,9 @@ async function runBuildArtifacts() {
 }
 
 async function runPublish(r2: S3Client, publicBaseUrl: string, prefix: string) {
-  const context = await getReleaseContext();
+  const context = await getReleaseContext(true);
   await preflightHomebrewCask(context);
-  if (resumeRelease && (await resumePublishedRelease(context))) {
-    console.log(`Resumed Inline CLI v${context.version}`);
-    logPublishedRelease(publicBaseUrl, prefix, context);
-    return;
-  }
-
-  if (!resumeRelease) {
-    await assertNoDuplicateVersion(context);
-  }
-  await assertBuiltArtifacts(context);
   await publishArtifacts(r2, publicBaseUrl, prefix, context);
-
   logPublishedRelease(publicBaseUrl, prefix, context);
 }
 
@@ -254,38 +314,47 @@ async function publishArtifacts(
   prefix: string,
   context: ReleaseContext,
 ) {
+  await ensureReleaseReceipt(r2, prefix, context);
   await runPackageManifest(r2, publicBaseUrl, prefix, context);
-  if (!isPrereleaseVersion(context.version)) {
-    await uploadInstall(r2, prefix);
-  }
-  await createBundle(context);
-  await publishGitHubRelease(context);
-  if (isPrereleaseVersion(context.version)) {
-    console.log("Skipping Homebrew cask update for prerelease.");
+  const bundlePath = join(context.releaseDir, `inline-cli-v${context.version}-bundle.tar.gz`);
+  const bundleKey = `${prefix}/v${context.version}/${basename(bundlePath)}`;
+  if (await r2.file(bundleKey).exists()) {
+    await writeFile(bundlePath, new Uint8Array(await r2.file(bundleKey).arrayBuffer()));
   } else {
+    await createBundle(context);
+    await writeReleaseObject(r2, bundleKey, new Uint8Array(await readFile(bundlePath)), "application/gzip");
+  }
+  await publishGitHubRelease(context);
+  await publishStableEntryPoints(r2, prefix, context);
+  await writeOutputs({ outcome: publicationChanged ? "published" : "already-current", reason: publicationChanged ? "release publication completed" : "all published content already matches" });
+}
+
+export async function publishStableEntryPoints(r2: S3Client, prefix: string, context: ReleaseContext) {
+  if (isPrereleaseVersion(context.version)) {
+    console.log("Skipping stable manifest, installer, and Homebrew for prerelease.");
+  } else if (await mayAdvanceStableRelease(r2, prefix, context)) {
+    await uploadFile(r2, `${prefix}/manifest.json`, join(context.releaseDir, "manifest.json"), "application/json");
+    await uploadInstall(r2, prefix);
     await updateHomebrewCask(context);
   }
 }
 
-async function resumePublishedRelease(context: ReleaseContext): Promise<boolean> {
-  const tag = releaseTag(context.version);
-  const assets = await githubReleaseAssets(tag);
-  if (!assets) {
-    return false;
+async function mayAdvanceStableRelease(r2: S3Client, prefix: string, context: ReleaseContext) {
+  const stable = r2.file(`${prefix}/manifest.json`);
+  if (!(await stable.exists())) return true;
+  const current = JSON.parse(await stable.text()) as UpdateManifest;
+  parseCliReleaseTag(`cli-v${current.version}`);
+  if (isPrereleaseVersion(current.version)) throw new Error("Stable manifest unexpectedly names a prerelease");
+  const newer = current.version.split(".").map(BigInt);
+  const selected = context.version.split(".").map(BigInt);
+  for (let index = 0; index < 3; index++) {
+    if (newer[index]! > selected[index]!) {
+      console.log(`Stable manifest already names newer v${current.version}; retaining it and Homebrew.`);
+      return false;
+    }
+    if (newer[index]! < selected[index]!) return true;
   }
-
-  const expected = githubReleaseAssetPaths(context).map((asset) => basename(asset));
-  const names = new Set(assets.map((asset) => asset.name));
-  const missing = expected.filter((name) => !names.has(name));
-  if (missing.length > 0) {
-    console.log(`GitHub release ${tag} exists but is missing assets: ${missing.join(", ")}`);
-    return false;
-  }
-
-  if (!isPrereleaseVersion(context.version)) {
-    await updateHomebrewCask(context, homebrewHashesFromReleaseAssets(context, assets));
-  }
-  console.log(`GitHub release ${tag} already exists with all expected assets.`);
+  if (current.sourceSha && current.sourceSha !== context.sourceSha) throw new Error("Stable version is already bound to another source");
   return true;
 }
 
@@ -364,14 +433,9 @@ async function runPackageManifest(
   context: ReleaseContext,
 ) {
   const manifest = await buildManifest(context, publicBaseUrl, prefix, r2);
-  const manifestPath = join(distDir, "manifest.json");
+  const manifestPath = join(context.releaseDir, "manifest.json");
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-  await uploadFile(
-    r2,
-    manifestObjectKey(prefix, context.version),
-    manifestPath,
-    "application/json",
-  );
+  await writeReleaseObject(r2, `${prefix}/v${context.version}/manifest.json`, new Uint8Array(await readFile(manifestPath)), "application/json");
   console.log("Manifest packaged and uploaded.");
 }
 
@@ -380,32 +444,43 @@ async function uploadInstall(r2: S3Client, prefix: string) {
   await uploadFile(r2, `${prefix}/install.sh`, installPath, "text/x-shellscript");
 }
 
-async function buildManifest(
+export async function buildManifest(
   context: ReleaseContext,
   publicBaseUrl: string,
   prefix: string,
   r2: S3Client,
 ): Promise<UpdateManifest> {
+  const existing = r2.file(`${prefix}/v${context.version}/manifest.json`);
+  const previous = await existing.exists() ? JSON.parse(await existing.text()) as UpdateManifest : null;
+  if (previous && (previous.version !== context.version || previous.tag !== context.tag || previous.sourceSha !== context.sourceSha)) throw new Error("Existing versioned manifest belongs to another release");
   const manifest: UpdateManifest = {
     version: context.version,
-    publishedAt: new Date().toISOString(),
+    tag: context.tag!,
+    sourceSha: context.sourceSha,
+    publishedAt: previous?.publishedAt ?? new Date().toISOString(),
     installUrl: `${publicBaseUrl}/${prefix}/install.sh`,
     targets: {},
   };
 
   for (const target of context.targets) {
     const binaryPath = join(targetDir, target, "release", "inline");
-    const artifactName = `inline-cli-${context.version}-${target}.tar.gz`;
-    const artifactPath = join(context.releaseDir, artifactName);
-
-    await runCommand("tar", ["-czf", artifactPath, "-C", dirname(binaryPath), "inline"]);
+    const name = artifactName(context.version, target);
+    const artifactPath = join(context.releaseDir, name);
+    const key = `${prefix}/v${context.version}/${name}`;
+    if (await r2.file(key).exists()) {
+      await writeFile(artifactPath, new Uint8Array(await r2.file(key).arrayBuffer()));
+      console.log(`Reusing published ${name}`);
+    } else {
+      await stat(binaryPath).catch(() => { throw new Error(`Missing built CLI artifact: ${target}`); });
+      await runCommand("tar", ["-czf", artifactPath, "-C", dirname(binaryPath), "inline"]);
+    }
 
     const sha256 = await sha256File(artifactPath);
     const shaPath = `${artifactPath}.sha256`;
-    await writeFile(shaPath, `${sha256}  ${artifactName}\n`);
+    await writeFile(shaPath, `${sha256}  ${name}\n`);
 
     const size = (await stat(artifactPath)).size;
-    const publicUrl = `${publicBaseUrl}/${prefix}/v${context.version}/${artifactName}`;
+    const publicUrl = `${publicBaseUrl}/${prefix}/v${context.version}/${name}`;
 
     manifest.targets[target] = {
       url: publicUrl,
@@ -413,35 +488,11 @@ async function buildManifest(
       size,
     };
 
-    await uploadFile(
-      r2,
-      `${prefix}/v${context.version}/${artifactName}`,
-      artifactPath,
-      "application/gzip",
-    );
-    await uploadFile(
-      r2,
-      `${prefix}/v${context.version}/${artifactName}.sha256`,
-      shaPath,
-      "text/plain",
-    );
+    await writeReleaseObject(r2, key, new Uint8Array(await readFile(artifactPath)), "application/gzip");
+    await writeReleaseObject(r2, `${key}.sha256`, new Uint8Array(await readFile(shaPath)), "text/plain");
   }
-
+  if (previous && JSON.stringify(previous) !== JSON.stringify(manifest)) throw new Error("Existing versioned manifest content differs from its published archives");
   return manifest;
-}
-
-async function assertBuiltArtifacts(context: ReleaseContext) {
-  const missing: string[] = [];
-  for (const target of context.targets) {
-    const binaryPath = join(targetDir, target, "release", "inline");
-    await stat(binaryPath).catch(() => {
-      missing.push(`${target} (${binaryPath})`);
-    });
-  }
-
-  if (missing.length > 0) {
-    throw new Error(`Missing built CLI artifact(s): ${missing.join(", ")}`);
-  }
 }
 
 async function signAndNotarize(context: ReleaseContext) {
@@ -577,7 +628,7 @@ async function createBundle(context: ReleaseContext) {
   const bundleWorkDir = join(tempAssetsDir, `bundle-v${context.version}-${Date.now()}`);
   await mkdir(bundleWorkDir, { recursive: true });
 
-  const manifestPath = join(distDir, "manifest.json");
+  const manifestPath = join(context.releaseDir, "manifest.json");
   await copyFile(manifestPath, join(bundleWorkDir, "manifest.json"));
   await copyFile(join(cliDir, "install.sh"), join(bundleWorkDir, "install.sh"));
 
@@ -769,89 +820,69 @@ async function updateHomebrewCask(context: ReleaseContext, hashes?: HomebrewHash
   await runCommand("git", ["push", homebrewTapRemote, branch.stdout.trim()], {
     cwd: homebrewTapPath,
   });
+  publicationChanged = true;
   console.log("Homebrew cask updated and pushed.");
 }
 
 export function releaseTag(version: string): string {
-  return `${githubTagPrefix}${version}`;
+  return parseCliReleaseTag(`cli-v${version}`).tag;
 }
 
-async function assertNoDuplicateVersion(context: ReleaseContext) {
-  const tag = releaseTag(context.version);
+export function parseRemoteReleaseTag(output: string, tag: string): string {
+  parseCliReleaseTag(tag);
+  const refs = new Map(output.trim().split("\n").filter(Boolean).map((line) => { const [sha, ref] = line.split(/\s+/); return [ref!, sha!] as const; }));
+  const sha = refs.get(`refs/tags/${tag}^{}`) ?? refs.get(`refs/tags/${tag}`);
+  if (!sha || !/^[a-f0-9]{40}$/.test(sha)) throw new Error(`Existing exact release tag not found: ${tag}`);
+  return sha;
+}
 
-  const localTag = await runCommandCapture("git", ["tag", "--list", tag], { cwd: rootDir });
-  if (localTag.exitCode !== 0) {
-    throw new Error(`Failed to check local tags: ${localTag.stderr || localTag.stdout}`);
+async function assertExistingReleaseTag(context: ReleaseContext) {
+  const tag = context.tag!;
+  const remote = await runCommandCapture("git", ["ls-remote", "--tags", `https://github.com/${githubRepo}.git`, `refs/tags/${tag}`, `refs/tags/${tag}^{}`], { cwd: rootDir });
+  if (remote.exitCode !== 0) throw new Error(`Failed to verify existing release tag: ${remote.stderr}`);
+  if (parseRemoteReleaseTag(remote.stdout, tag) !== context.sourceSha || (githubReleaseTarget && githubReleaseTarget !== context.sourceSha)) {
+    throw new Error("Release tag, selected commit, and checkout must match exactly");
   }
-  if (localTag.stdout.trim()) {
-    throw new Error(`Tag ${tag} already exists locally. Bump CLI version before releasing.`);
-  }
+}
 
-  const remoteUrl = `https://github.com/${githubRepo}.git`;
-  const remoteTag = await runCommandCapture(
-    "git",
-    ["ls-remote", "--tags", remoteUrl, tag],
-    { cwd: rootDir },
-  );
-  if (remoteTag.exitCode !== 0) {
-    throw new Error(`Failed to check remote tags: ${remoteTag.stderr || remoteTag.stdout}`);
+export function planGitHubReleaseUploads(existing: readonly GitHubReleaseAsset[], expected: ReadonlyMap<string, string>) {
+  const present = new Map(existing.map((asset) => [asset.name, asset]));
+  for (const asset of existing) {
+    const sha = expected.get(asset.name);
+    if (!sha) throw new Error(`Unexpected existing GitHub release asset: ${asset.name}`);
+    if (asset.digest && asset.digest !== `sha256:${sha}`) throw new Error(`Different existing GitHub release asset: ${asset.name}`);
   }
-  if (remoteTag.stdout.trim()) {
-    throw new Error(`Tag ${tag} already exists on ${githubRepo}. Bump CLI version.`);
-  }
+  return [...expected.keys()].filter((name) => !present.has(name));
 }
 
 async function publishGitHubRelease(context: ReleaseContext) {
-  const tag = releaseTag(context.version);
-  const assets = githubReleaseAssetPaths(context);
-  const names = assets.map((asset) => basename(asset));
-
-  if (resumeRelease) {
-    const existing = await githubReleaseAssets(tag);
-    if (existing) {
-      const existingNames = new Set(existing.map((asset) => asset.name));
-      const missing = names.filter((name) => !existingNames.has(name));
-      if (missing.length === 0) {
-        console.log(`GitHub release ${tag} already exists with all expected assets.`);
-        return;
-      }
-    }
+  await assertExistingReleaseTag(context);
+  const tag = context.tag!;
+  const paths = githubReleaseAssetPaths(context);
+  const expected = new Map(await Promise.all(paths.map(async (asset) => [basename(asset), await sha256File(asset)] as const)));
+  let existing = await githubReleaseAssets(tag);
+  if (!existing) {
+    const args = ["release", "create", tag, "--repo", githubRepo, "--verify-tag", "--generate-notes", "--title", `Inline CLI v${context.version}`];
+    if (isPrereleaseVersion(context.version)) args.push("--prerelease", "--latest=false");
+    await runCommand("gh", args, { cwd: rootDir });
+    publicationChanged = true;
+    existing = [];
   }
-
-  const createArgs = [
-    "release",
-    "create",
-    tag,
-    "--repo",
-    githubRepo,
-    "--title",
-    `Inline CLI v${context.version}`,
-    "--notes",
-    `Automated release for Inline CLI v${context.version}.`,
-  ];
-
-  if (githubReleaseTarget) {
-    createArgs.push("--target", githubReleaseTarget);
-  } else {
-    if (!(await localTagExists(tag))) {
-      await runCommand("git", ["tag", "-a", tag, "-m", `Inline CLI v${context.version}`], {
-        cwd: rootDir,
-      });
-    }
-    if (!(await remoteTagExists(tag))) {
-      await runCommand("git", ["push", githubRemote, tag], { cwd: rootDir });
-    }
+  const missing = planGitHubReleaseUploads(existing, expected);
+  // GitHub may omit a digest on an old asset. Download and hash it rather than
+  // treating a matching name as proof of matching content.
+  for (const asset of existing.filter((asset) => !asset.digest)) {
+    const directory = join(tempAssetsDir, `verify-${Date.now()}-${asset.name}`);
+    await mkdir(directory, { recursive: true });
+    await runCommand("gh", ["release", "download", tag, "--repo", githubRepo, "--pattern", asset.name, "--dir", directory]);
+    if (await sha256File(join(directory, asset.name)) !== expected.get(asset.name)) throw new Error(`Different existing GitHub release asset: ${asset.name}`);
   }
-
-  if (isPrereleaseVersion(context.version)) {
-    createArgs.push("--prerelease");
+  if (missing.length) {
+    await runCommand("gh", ["release", "upload", tag, "--repo", githubRepo, ...paths.filter((asset) => missing.includes(basename(asset)))], { cwd: rootDir });
+    publicationChanged = true;
   }
-
-  await runCommand(
-    "gh",
-    [...createArgs, ...assets],
-    { cwd: rootDir },
-  );
+  const verified = await githubReleaseAssets(tag);
+  if (!verified || planGitHubReleaseUploads(verified, expected).length) throw new Error("GitHub release is missing expected assets after publication");
 }
 
 function githubReleaseAssetPaths(context: ReleaseContext): string[] {
@@ -869,7 +900,7 @@ function githubReleaseAssetPaths(context: ReleaseContext): string[] {
 async function githubReleaseAssets(tag: string): Promise<GitHubReleaseAsset[] | null> {
   const result = await runCommandCapture(
     "gh",
-    ["release", "view", tag, "--repo", githubRepo, "--json", "assets"],
+    ["release", "view", tag, "--repo", githubRepo, "--json", "assets,tagName,isPrerelease,isDraft"],
     { cwd: rootDir },
   );
   if (result.exitCode !== 0) {
@@ -880,55 +911,22 @@ async function githubReleaseAssets(tag: string): Promise<GitHubReleaseAsset[] | 
     throw new Error(`Failed to check GitHub release ${tag}: ${result.stderr || result.stdout}`);
   }
 
-  const data = JSON.parse(result.stdout) as { assets: GitHubReleaseAsset[] };
+  const data = JSON.parse(result.stdout) as { assets: GitHubReleaseAsset[]; tagName: string; isPrerelease: boolean; isDraft: boolean };
+  if (data.tagName !== tag || data.isDraft || data.isPrerelease !== isPrereleaseVersion(parseCliReleaseTag(tag).version)) throw new Error("Existing GitHub release has a different tag, channel, or draft state");
   return data.assets;
 }
 
-function homebrewHashesFromReleaseAssets(
-  context: ReleaseContext,
-  assets: readonly GitHubReleaseAsset[],
-): HomebrewHashes {
-  const byName = new Map(assets.map((asset) => [asset.name, asset]));
-  const digestFor = (target: string): string => {
-    const name = `inline-cli-${context.version}-${target}.tar.gz`;
-    const digest = byName.get(name)?.digest;
-    const sha = digest?.replace(/^sha256:/, "");
-    if (!sha || !/^[a-f0-9]{64}$/i.test(sha)) {
-      throw new Error(`Missing sha256 digest for GitHub release asset: ${name}`);
-    }
-    return sha;
-  };
-
-  return {
-    macosArm: digestFor(homebrewTargets.macosArm),
-    linuxArm: digestFor(homebrewTargets.linuxArm),
-    linuxIntel: digestFor(homebrewTargets.linuxIntel),
-  };
-}
-
-async function localTagExists(tag: string): Promise<boolean> {
-  const result = await runCommandCapture("git", ["tag", "--list", tag], { cwd: rootDir });
-  if (result.exitCode !== 0) {
-    throw new Error(`Failed to check local tags: ${result.stderr || result.stdout}`);
-  }
-  return Boolean(result.stdout.trim());
-}
-
-async function remoteTagExists(tag: string): Promise<boolean> {
-  const remoteUrl = `https://github.com/${githubRepo}.git`;
-  const result = await runCommandCapture("git", ["ls-remote", "--tags", remoteUrl, tag], {
-    cwd: rootDir,
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(`Failed to check remote tags: ${result.stderr || result.stdout}`);
-  }
-  return Boolean(result.stdout.trim());
-}
-
-async function getReleaseContext(): Promise<ReleaseContext> {
+async function getReleaseContext(publication = false): Promise<ReleaseContext> {
   const publicWorkspaceRoot = dirname(await realpath(cliDir));
   const version = await readCargoVersion(join(publicWorkspaceRoot, "Cargo.toml"));
+  const tag = process.env.INLINE_CLI_RELEASE_TAG;
+  if (publication && !tag) throw new Error("Publication requires INLINE_CLI_RELEASE_TAG naming an existing exact tag");
+  if (tag && parseCliReleaseTag(tag).version !== version) throw new Error("Cargo workspace version must be stamped from the release tag before building or publishing");
   const targets = getReleaseTargets();
+  if (publication && JSON.stringify([...targets].sort()) !== JSON.stringify([...defaultTargets].sort())) throw new Error("Publication requires all five CLI release targets");
+  const checkout = await runCommandCapture("git", ["rev-parse", "HEAD"], { cwd: rootDir });
+  const sourceSha = checkout.stdout.trim();
+  if (checkout.exitCode !== 0 || !/^[a-f0-9]{40}$/.test(sourceSha)) throw new Error("Expected an exact release checkout");
 
   await mkdir(distDir, { recursive: true });
   const releaseDir = join(distDir, `v${version}`);
@@ -936,7 +934,9 @@ async function getReleaseContext(): Promise<ReleaseContext> {
 
   await mkdir(tempAssetsDir, { recursive: true });
 
-  return { version, targets, releaseDir };
+  const context = { version, targets, releaseDir, tag, sourceSha };
+  if (publication) await assertExistingReleaseTag(context);
+  return context;
 }
 
 function getReleaseTargets(): string[] {
@@ -968,6 +968,8 @@ function getReleaseTargets(): string[] {
 
 type UpdateManifest = {
   version: string;
+  tag: string;
+  sourceSha: string;
   publishedAt: string;
   installUrl: string;
   targets: Record<string, { url: string; sha256: string; size: number }>;

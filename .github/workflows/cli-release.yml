@@ -1,18 +1,24 @@
 name: CLI Release
 
 on:
+  push:
+    tags: ["cli-v*"]
   workflow_dispatch:
     inputs:
+      tag:
+        description: "Existing cli-vX.Y.Z tag to publish or resume"
+        required: false
+        type: string
       commit:
-        description: "Exact commit on main to release"
-        required: true
+        description: "Exact main commit for an untagged preflight/build diagnostic"
+        required: false
         type: string
       targets:
         description: "Optional comma-separated release targets override"
         required: false
         default: ""
       skip_notarize:
-        description: "Skip macOS notarization and publish signed-only CLI binaries"
+        description: "Skip notarization for a build-only diagnostic"
         required: false
         default: false
         type: boolean
@@ -30,13 +36,73 @@ on:
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
+  queue: max
 
 permissions:
   actions: read
   contents: read
 
 jobs:
+  select:
+    name: Qualify frozen CLI candidate
+    if: github.repository == 'inline-chat/inline' && (github.event_name == 'push' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      sha: ${{ steps.gate.outputs.sha }}
+      tag: ${{ steps.gate.outputs.tag }}
+      version: ${{ steps.gate.outputs.version }}
+      outcome: ${{ steps.gate.outputs.outcome }}
+      reason: ${{ steps.gate.outputs.reason }}
+    steps:
+      - name: Checkout trusted release tools
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require complete normal publication
+        env:
+          TARGETS_OVERRIDE: ${{ inputs.targets }}
+          SKIP_NOTARIZE: ${{ inputs.skip_notarize }}
+          BUILD_ONLY: ${{ inputs.build_only }}
+          PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
+        run: |
+          set -euo pipefail
+          if [[ "$BUILD_ONLY" == true && "$PREFLIGHT_ONLY" == true ]]; then
+            echo "Choose preflight_only or build_only." >&2
+            exit 1
+          fi
+          if [[ "$BUILD_ONLY" != true && "$PREFLIGHT_ONLY" != true ]]; then
+            test -z "$TARGETS_OVERRIDE" || { echo "Publishing requires all five targets." >&2; exit 1; }
+            test "$SKIP_NOTARIZE" != true || { echo "Publishing requires notarization." >&2; exit 1; }
+          fi
+      - name: Qualify exact tag or diagnostic commit
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SURFACE: cli
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          BUILD_ONLY: ${{ inputs.build_only }}
+          PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ "$BUILD_ONLY" == true || "$PREFLIGHT_ONLY" == true ]]; then
+            args+=(--allow-untagged)
+          fi
+          node scripts/ci/assert-release-commit.mjs "${args[@]}"
+
   preflight:
+    needs: select
+    environment: cli
+    outputs:
+      available_targets: ${{ steps.existing.outputs.available_targets }}
+      artifacts_ready: ${{ steps.existing.outputs.artifacts_ready }}
+    env:
+      INLINE_CLI_RELEASE_TAG: ${{ needs.select.outputs.tag }}
+      INLINE_CLI_GITHUB_TARGET: ${{ needs.select.outputs.sha }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -45,11 +111,11 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.select.outputs.sha }}
 
       - name: Verify exact main commit
         env:
-          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_COMMIT: ${{ needs.select.outputs.sha }}
         run: |
           set -euo pipefail
           if [[ ! "${RELEASE_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
@@ -67,6 +133,14 @@ jobs:
             echo "Release commit ${checkout_commit} is not on main." >&2
             exit 1
           fi
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+      - name: Stamp tagged release version
+        if: needs.select.outputs.tag != ''
+        run: bun --no-env-file scripts/ci/cli-release-version.ts stamp "$INLINE_CLI_RELEASE_TAG"
 
       - name: Preflight
         id: config
@@ -231,9 +305,24 @@ jobs:
         if: ${{ github.event.inputs.build_only != 'true' }}
         run: node scripts/check-agent-release-group.mjs
 
+      - name: Inspect resumable published archives
+        id: existing
+        if: needs.select.outputs.tag != '' && inputs.build_only != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
+          PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY }}
+          PUBLIC_RELEASES_R2_BUCKET: ${{ secrets.PUBLIC_RELEASES_R2_BUCKET }}
+          PUBLIC_RELEASES_R2_ENDPOINT: ${{ secrets.PUBLIC_RELEASES_R2_ENDPOINT }}
+          PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
+        run: bun --no-env-file scripts/release-cli.ts status
+
   validate:
-    needs: preflight
-    if: github.event.inputs.preflight_only != 'true'
+    needs: [select, preflight]
+    if: inputs.preflight_only != true && needs.preflight.outputs.artifacts_ready != 'true'
+    env:
+      INLINE_CLI_RELEASE_TAG: ${{ needs.select.outputs.tag }}
+      INLINE_CLI_GITHUB_TARGET: ${{ needs.select.outputs.sha }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -242,11 +331,11 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.select.outputs.sha }}
 
       - name: Verify release commit is still on main
         env:
-          RELEASE_COMMIT: ${{ inputs.commit }}
+          RELEASE_COMMIT: ${{ needs.select.outputs.sha }}
         run: |
           set -euo pipefail
           if [[ ! "${RELEASE_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
@@ -268,6 +357,10 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.0"
+
+      - name: Stamp tagged release version
+        if: needs.select.outputs.tag != ''
+        run: bun --no-env-file scripts/ci/cli-release-version.ts stamp "$INLINE_CLI_RELEASE_TAG"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -294,7 +387,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/ci/test-cli-installer.py
-          bun test scripts/release-cli.test.ts
+          bun --cwd scripts test release-cli.test.ts ci/cli-release-version.test.ts
           bun run scripts/release-cli.ts validate-homebrew
           node scripts/check-agent-release-group.mjs --source-only
           bun run --cwd packages/protocol build
@@ -306,7 +399,11 @@ jobs:
           bun run --cwd cli ci
 
   build-linux:
-    needs: validate
+    needs: [select, preflight, validate]
+    environment: cli
+    env:
+      INLINE_CLI_RELEASE_TAG: ${{ needs.select.outputs.tag }}
+      INLINE_CLI_GITHUB_TARGET: ${{ needs.select.outputs.sha }}
     runs-on: ${{ startsWith(matrix.target, 'aarch64-') && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     strategy:
@@ -324,6 +421,7 @@ jobs:
         env:
           TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
           TARGET: ${{ matrix.target }}
+          AVAILABLE_TARGETS: ${{ needs.preflight.outputs.available_targets }}
         run: |
           set -euo pipefail
           selected=false
@@ -339,6 +437,10 @@ jobs:
               fi
             done
           fi
+          if jq -e --arg target "$TARGET" 'index($target) != null' <<< "${AVAILABLE_TARGETS:-[]}" > /dev/null; then
+            selected=false
+            echo "Reusing published ${TARGET} for this exact release."
+          fi
           echo "selected=${selected}" >> "${GITHUB_OUTPUT}"
           echo "Selected ${TARGET}: ${selected}"
 
@@ -347,13 +449,17 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.select.outputs.sha }}
 
       - name: Setup Bun
         if: steps.target.outputs.selected == 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.0"
+
+      - name: Stamp tagged release version
+        if: steps.target.outputs.selected == 'true' && needs.select.outputs.tag != ''
+        run: bun --no-env-file scripts/ci/cli-release-version.ts stamp "$INLINE_CLI_RELEASE_TAG"
 
       - name: Setup Rust
         if: steps.target.outputs.selected == 'true'
@@ -391,7 +497,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${INLINE_CLI_SENTRY_DSN}" || { echo "Missing INLINE_CLI_SENTRY_DSN release configuration" >&2; exit 1; }
-          bun run scripts/release-cli.ts build
+          bun --no-env-file scripts/release-cli.ts build
 
       - name: Validate Target Binary
         if: steps.target.outputs.selected == 'true'
@@ -429,7 +535,11 @@ jobs:
           retention-days: 1
 
   build-macos:
-    needs: validate
+    needs: [select, preflight, validate]
+    environment: cli
+    env:
+      INLINE_CLI_RELEASE_TAG: ${{ needs.select.outputs.tag }}
+      INLINE_CLI_GITHUB_TARGET: ${{ needs.select.outputs.sha }}
     runs-on: macos-26
     # The release script allows notarytool to wait up to 60 minutes after the
     # Rust build, so the job needs headroom for compilation and packaging.
@@ -446,6 +556,7 @@ jobs:
         env:
           TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
           TARGET: ${{ matrix.target }}
+          AVAILABLE_TARGETS: ${{ needs.preflight.outputs.available_targets }}
         run: |
           set -euo pipefail
           selected=false
@@ -461,6 +572,10 @@ jobs:
               fi
             done
           fi
+          if jq -e --arg target "$TARGET" 'index($target) != null' <<< "${AVAILABLE_TARGETS:-[]}" > /dev/null; then
+            selected=false
+            echo "Reusing published ${TARGET} for this exact release."
+          fi
           echo "selected=${selected}" >> "${GITHUB_OUTPUT}"
           echo "Selected ${TARGET}: ${selected}"
 
@@ -469,13 +584,17 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.commit }}
+          ref: ${{ needs.select.outputs.sha }}
 
       - name: Setup Bun
         if: steps.target.outputs.selected == 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.0"
+
+      - name: Stamp tagged release version
+        if: steps.target.outputs.selected == 'true' && needs.select.outputs.tag != ''
+        run: bun --no-env-file scripts/ci/cli-release-version.ts stamp "$INLINE_CLI_RELEASE_TAG"
 
       - name: Setup Rust
         if: steps.target.outputs.selected == 'true'
@@ -536,7 +655,7 @@ jobs:
           security unlock-keychain -p "$MACOS_CI_KEYCHAIN_PWD" "$MACOS_CI_KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$MACOS_CI_KEYCHAIN_PATH"
           test -n "${INLINE_CLI_SENTRY_DSN}" || { echo "Missing INLINE_CLI_SENTRY_DSN release configuration" >&2; exit 1; }
-          bun run scripts/release-cli.ts build
+          bun --no-env-file scripts/release-cli.ts build
 
       - name: Validate Signed Target Binary
         if: steps.target.outputs.selected == 'true'
@@ -576,14 +695,21 @@ jobs:
 
   publish:
     needs:
+      - select
       - preflight
       - validate
       - build-linux
       - build-macos
-    if: ${{ always() && github.event.inputs.preflight_only != 'true' && github.event.inputs.build_only != 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    if: ${{ always() && needs.select.result == 'success' && needs.preflight.result == 'success' && inputs.preflight_only != true && inputs.build_only != true && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: Production
+    environment: cli
+    outputs:
+      outcome: ${{ steps.publish.outputs.outcome }}
+      reason: ${{ steps.publish.outputs.reason }}
+    env:
+      INLINE_CLI_RELEASE_TAG: ${{ needs.select.outputs.tag }}
+      INLINE_CLI_GITHUB_TARGET: ${{ needs.select.outputs.sha }}
     permissions:
       actions: read
       contents: write
@@ -593,30 +719,28 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.commit }}
-
-      - name: Read Release Channel
-        id: release
-        run: |
-          set -euo pipefail
-          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
-          if [[ -z "${version}" ]]; then
-            echo "Could not read CLI workspace version." >&2
-            exit 1
-          fi
-          prerelease=false
-          if [[ "${version}" == *-* ]]; then
-            prerelease=true
-          fi
-          echo "version=${version}" >> "${GITHUB_OUTPUT}"
-          echo "prerelease=${prerelease}" >> "${GITHUB_OUTPUT}"
+          ref: ${{ needs.select.outputs.sha }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.0"
+      - name: Stamp tagged release version
+        run: bun --no-env-file scripts/ci/cli-release-version.ts stamp "$INLINE_CLI_RELEASE_TAG"
+      - name: Read Release Channel
+        id: release
+        env:
+          RELEASE_VERSION: ${{ needs.select.outputs.version }}
+        run: |
+          set -euo pipefail
+          test -n "$INLINE_CLI_RELEASE_TAG"
+          prerelease=false
+          [[ "$RELEASE_VERSION" != *-* ]] || prerelease=true
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Download Target Artifacts
+        if: needs.preflight.outputs.artifacts_ready != 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: inline-cli-*
@@ -624,6 +748,7 @@ jobs:
           merge-multiple: true
 
       - name: Restore Target Artifacts
+        if: needs.preflight.outputs.artifacts_ready != 'true'
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -640,13 +765,13 @@ jobs:
           fi
 
       - name: Configure Homebrew Publishing Key
-        if: ${{ steps.release.outputs.prerelease == 'false' && (github.event.inputs.targets == '' || contains(github.event.inputs.targets, 'apple-darwin')) }}
+        if: steps.release.outputs.prerelease == 'false'
         env:
           INLINE_HOMEBREW_DEPLOY_KEY: ${{ secrets.INLINE_HOMEBREW_DEPLOY_KEY }}
         run: *homebrew_ssh
 
       - name: Clone Homebrew Tap
-        if: ${{ steps.release.outputs.prerelease == 'false' && (github.event.inputs.targets == '' || contains(github.event.inputs.targets, 'apple-darwin')) }}
+        if: steps.release.outputs.prerelease == 'false'
         run: git clone git@github.com:inline-chat/homebrew-inline.git homebrew-inline
 
       - name: Configure Git Identity
@@ -655,6 +780,7 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Publish CLI Release
+        id: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INLINE_HOMEBREW_TAP_PATH: ${{ github.workspace }}/homebrew-inline
@@ -663,7 +789,6 @@ jobs:
           PUBLIC_RELEASES_R2_BUCKET: ${{ secrets.PUBLIC_RELEASES_R2_BUCKET }}
           PUBLIC_RELEASES_R2_ENDPOINT: ${{ secrets.PUBLIC_RELEASES_R2_ENDPOINT }}
           PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
-          INLINE_CLI_RELEASE_RESUME: "1"
           TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
         run: |
           set -euo pipefail
@@ -676,7 +801,7 @@ jobs:
             exit 1
           fi
           export INLINE_CLI_GITHUB_TARGET="${public_target}"
-          bun run scripts/release-cli.ts publish
+          bun --no-env-file scripts/release-cli.ts publish
 
       - name: Stop Homebrew SSH Agent
         if: always()
@@ -684,3 +809,49 @@ jobs:
           if [[ -n "${SSH_AGENT_PID:-}" ]]; then
             ssh-agent -k > /dev/null
           fi
+
+  summary:
+    name: CLI release outcome
+    needs: [select, preflight, validate, build-linux, build-macos, publish]
+    if: always() && github.repository == 'inline-chat/inline'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Report CLI outcome
+        env:
+          SELECT_RESULT: ${{ needs.select.result }}
+          SELECT_OUTCOME: ${{ needs.select.outputs.outcome }}
+          SELECT_REASON: ${{ needs.select.outputs.reason }}
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          LINUX_RESULT: ${{ needs.build-linux.result }}
+          MACOS_RESULT: ${{ needs.build-macos.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          PUBLISH_OUTCOME: ${{ needs.publish.outputs.outcome }}
+          PUBLISH_REASON: ${{ needs.publish.outputs.reason }}
+          BUILD_ONLY: ${{ inputs.build_only }}
+          PREFLIGHT_ONLY: ${{ inputs.preflight_only }}
+          SHA: ${{ needs.select.outputs.sha }}
+          TAG: ${{ needs.select.outputs.tag }}
+        run: |
+          set -euo pipefail
+          outcome=failed
+          reason="CLI release job failed or was cancelled"
+          if [[ "$SELECT_RESULT" != success ]]; then
+            outcome=blocked
+            [[ "$SELECT_OUTCOME" != deferred ]] || outcome=deferred
+            reason="${SELECT_REASON:-candidate was not qualified}"
+          elif [[ "$PREFLIGHT_RESULT" == success && "$VALIDATE_RESULT $LINUX_RESULT $MACOS_RESULT" != *failure* && "$VALIDATE_RESULT $LINUX_RESULT $MACOS_RESULT" != *cancelled* ]]; then
+            if [[ "$PREFLIGHT_ONLY" == true || "$BUILD_ONLY" == true ]]; then
+              outcome=deferred
+              reason="diagnostic completed; publication was not requested"
+            elif [[ "$PUBLISH_RESULT" == success ]]; then
+              outcome="${PUBLISH_OUTCOME:-published}"
+              reason="${PUBLISH_REASON:-release publication completed}"
+            fi
+          fi
+          bash scripts/ci/release-summary.sh "CLI" "$outcome" "$reason" "$SHA" "$TAG"

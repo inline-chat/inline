@@ -1,13 +1,14 @@
 import { existsSync } from "node:fs"
-import { readFile } from "node:fs/promises"
+import { execFileSync } from "node:child_process"
 import path from "node:path"
 import { createInterface } from "node:readline/promises"
+import { PACKAGE_CONFIGS as RELEASE_PACKAGES, parseReleaseTag } from "./ci/release-tag.mjs"
+import { qualifyRelease } from "./ci/assert-release-commit.mjs"
 
 const REPOSITORY = "inline-chat/inline"
 const REPOSITORY_URL = "git+https://github.com/inline-chat/inline.git"
 const WORKFLOW_FILE = "npm-publish.yml"
 const WORKFLOW_ENVIRONMENT = "npm-publish"
-const ALLOWED_TAGS = new Set(["latest", "alpha", "beta", "next"])
 
 export interface PackageConfig {
   key: string
@@ -45,7 +46,7 @@ interface CommandResult {
 }
 
 export function isRegistryNotFound(output: string): boolean {
-  return /E404|No match found|not found/i.test(output)
+  return /\bE404\b/.test(output)
 }
 
 interface WorkflowRun {
@@ -57,46 +58,7 @@ interface WorkflowRun {
   createdAt?: string
 }
 
-// Keep this allowlist in sync with npm-publish.yml. The workflow intentionally
-// revalidates it independently so a modified local wrapper cannot weaken the
-// trusted-publishing boundary.
-export const PACKAGE_CONFIGS: Readonly<Record<string, PackageConfig>> = {
-  protocol: {
-    key: "protocol",
-    directory: "packages/protocol",
-    name: "@inline-chat/protocol",
-  },
-  "bot-api-types": {
-    key: "bot-api-types",
-    directory: "packages/bot-api-types",
-    name: "@inline-chat/bot-api-types",
-  },
-  "bot-client": {
-    key: "bot-client",
-    directory: "packages/bot-client",
-    name: "@inline-chat/bot-client",
-  },
-  "realtime-sdk": {
-    key: "realtime-sdk",
-    directory: "packages/sdk",
-    name: "@inline-chat/realtime-sdk",
-  },
-  openclaw: {
-    key: "openclaw",
-    directory: "plugins/openclaw",
-    name: "@inline-openclaw/inline",
-  },
-  "hermes-agent": {
-    key: "hermes-agent",
-    directory: "plugins/hermes-agent",
-    name: "@inline-chat/hermes-agent-adapter",
-  },
-  "chat-sdk": {
-    key: "chat-sdk",
-    directory: "plugins/chat-sdk-plugin",
-    name: "@inline-chat/chat-sdk",
-  },
-}
+export const PACKAGE_CONFIGS: Readonly<Record<string, PackageConfig>> = RELEASE_PACKAGES
 
 const USAGE = `Usage: bun run release:npm <package> [options]
 
@@ -104,17 +66,17 @@ Packages:
   ${Object.keys(PACKAGE_CONFIGS).join("\n  ")}
 
 Options:
-  --version <version>  Require this exact package.json version
+  --version <version>  Release this version via <package>-v<version> (required)
   --tag <tag>          Require this dist-tag (derived when omitted)
-  --dry-run            Run every preflight check without dispatching
-  --no-watch           Dispatch without waiting for the workflow
+  --dry-run            Run preflight checks without pushing a tag
+  --no-watch           Push the tag without waiting for its workflow
   --yes                Skip the final interactive confirmation
   --help               Show this help
 
 Examples:
-  bun run release:npm hermes-agent --dry-run
+  bun run release:npm hermes-agent --version 0.0.23-alpha.0 --dry-run
   bun run release:npm hermes-agent --version 0.0.6 --tag latest
-  bun run release:npm openclaw --yes`
+  bun run release:npm openclaw --version 0.0.73-alpha.0 --yes`
 
 export function parseReleaseArgs(argv: string[]): ReleaseOptions | { help: true } {
   if (argv.includes("--help") || argv.includes("-h")) return { help: true }
@@ -165,18 +127,7 @@ export function parseReleaseArgs(argv: string[]): ReleaseOptions | { help: true 
 }
 
 export function expectedDistTag(version: string): string {
-  const match = version.match(
-    /^\d+\.\d+\.\d+(?:-([0-9A-Za-z-]+)(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z.-]+)?$/,
-  )
-  if (!match) throw new Error(`Invalid semantic version: ${version}`)
-
-  const tag = match[1] ?? "latest"
-  if (!ALLOWED_TAGS.has(tag)) {
-    throw new Error(
-      `Version ${version} derives unsupported dist-tag ${tag}; expected latest, alpha, beta, or next`,
-    )
-  }
-  return tag
+  return parseReleaseTag(`protocol-v${version}`, "npm").channel
 }
 
 export function resolveDistTag(version: string, requestedTag?: string): string {
@@ -198,11 +149,7 @@ export function validateManifest(
   if (manifest.private === true) throw new Error(`${config.name} is marked private`)
   if (typeof manifest.version !== "string") throw new Error(`${config.name} has no valid version`)
   expectedDistTag(manifest.version)
-  if (requestedVersion && requestedVersion !== manifest.version) {
-    throw new Error(
-      `Version mismatch: package.json has ${manifest.version}, requested ${requestedVersion}`,
-    )
-  }
+  if (requestedVersion) expectedDistTag(requestedVersion)
   if (manifest.repository?.url !== REPOSITORY_URL) {
     throw new Error(`${config.name} repository URL must be ${REPOSITORY_URL}`)
   }
@@ -214,7 +161,7 @@ export function validateManifest(
   if (manifest.publishConfig?.access !== "public") {
     throw new Error(`${config.name} publishConfig.access must be public`)
   }
-  return manifest.version
+  return requestedVersion ?? manifest.version
 }
 
 export function parseWorkflowRunUrl(output: string): { id: number; url: string } | undefined {
@@ -275,13 +222,7 @@ function assertOriginRemote(remote: string): void {
   }
 }
 
-async function assertCleanAndSynced(repoRoot: string): Promise<string> {
-  const status = await requireCommand(
-    ["git", "status", "--porcelain=v1", "--untracked-files=all"],
-    repoRoot,
-  )
-  if (status) throw new Error(`Worktree must be clean before publishing:\n${status}`)
-
+async function assertMainCommit(repoRoot: string): Promise<string> {
   const branch = await requireCommand(["git", "branch", "--show-current"], repoRoot)
   if (branch !== "main") throw new Error(`Release must run from main; current branch is ${branch}`)
 
@@ -315,47 +256,9 @@ async function assertWorkflowAvailable(repoRoot: string): Promise<void> {
 }
 
 async function assertSuccessfulCi(repoRoot: string, head: string): Promise<void> {
-  const output = await requireCommand(
-    [
-      "gh",
-      "run",
-      "list",
-      "--repo",
-      REPOSITORY,
-      "--workflow",
-      "CI",
-      "--commit",
-      head,
-      "--limit",
-      "10",
-      "--json",
-      "databaseId,status,conclusion,headSha,url",
-    ],
-    repoRoot,
-  )
-  const runs = parseJson<WorkflowRun[]>(output, "GitHub CI runs").filter(
-    (run) => run.headSha === head,
-  )
-  if (runs.some((run) => run.status === "completed" && run.conclusion === "success")) return
-
-  const active = runs.find((run) => run.status === "queued" || run.status === "in_progress")
-  if (active) {
-    console.log(`Waiting for CI on ${head.slice(0, 8)}: ${active.url}`)
-    const result = await runCommand(
-      ["gh", "run", "watch", String(active.databaseId), "--repo", REPOSITORY, "--exit-status"],
-      { cwd: repoRoot, inherit: true },
-    )
-    if (result.exitCode === 0) return
-    throw new Error(`CI failed for ${head.slice(0, 8)}: ${active.url}`)
-  }
-
-  const failed = runs[0]
-  if (failed) {
-    throw new Error(
-      `CI is not green for ${head.slice(0, 8)} (${failed.conclusion || failed.status}): ${failed.url}`,
-    )
-  }
-  throw new Error(`No CI run found for ${head.slice(0, 8)}`)
+  qualifyRelease({ tag: "", commit: head, surface: "npm", allowUntagged: true, repository: REPOSITORY,
+    runGit: (...args: string[]) => execFileSync("git", args, { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(),
+  })
 }
 
 async function readRegistryState(
@@ -368,9 +271,9 @@ async function readRegistryState(
     { cwd: repoRoot },
   )
   if (versionResult.exitCode === 0) {
-    throw new Error(`${packageName}@${version} already exists on npm`)
+    console.log(`${packageName}@${version} exists; the workflow will verify exact artifact identity before resuming`)
   }
-  if (!isRegistryNotFound(`${versionResult.stderr}\n${versionResult.stdout}`)) {
+  if (versionResult.exitCode !== 0 && !isRegistryNotFound(`${versionResult.stderr}\n${versionResult.stdout}`)) {
     throw new Error(`Could not check ${packageName}@${version}: ${versionResult.stderr}`)
   }
 
@@ -399,6 +302,7 @@ async function confirmRelease(summary: string): Promise<void> {
 async function findDispatchedRun(
   repoRoot: string,
   head: string,
+  releaseTag: string,
   dispatchedAfter: number,
 ): Promise<{ id: number; url: string } | undefined> {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -411,6 +315,10 @@ async function findDispatchedRun(
         REPOSITORY,
         "--workflow",
         WORKFLOW_FILE,
+        "--branch",
+        releaseTag,
+        "--event",
+        "push",
         "--limit",
         "10",
         "--json",
@@ -445,11 +353,12 @@ async function verifyPublishedVersion(
     ["npm", "view", packageName, `dist-tags.${tag}`],
     repoRoot,
   )
-  if (published !== version || tagged !== version) {
+  if (published !== version) {
     throw new Error(
       `Registry verification mismatch: version=${published || "missing"}, ${tag}=${tagged || "missing"}`,
     )
   }
+  if (tagged !== version) console.log(`${tag} is now ${tagged || "unset"}; the verified release version remains available`)
 }
 
 async function main(): Promise<void> {
@@ -459,62 +368,48 @@ async function main(): Promise<void> {
     return
   }
 
+  if (!parsed.requestedVersion) throw new Error("--version is required; release versions come from tags, not version-bump commits")
   const repoRoot = path.resolve(import.meta.dir, "..")
   const config = PACKAGE_CONFIGS[parsed.packageKey]
-  console.log(`Preflighting ${config.name} from ${REPOSITORY}`)
+  const releaseTag = `${config.key}-v${parsed.requestedVersion}`
+  parseReleaseTag(releaseTag, "npm")
+  console.log(`Preflighting ${releaseTag} from ${REPOSITORY}`)
 
-  await requireCommand(["gh", "auth", "status"], repoRoot)
-  const head = await assertCleanAndSynced(repoRoot)
+  const head = await assertMainCommit(repoRoot)
   await assertWorkflowAvailable(repoRoot)
-
-  const manifestPath = path.join(repoRoot, config.directory, "package.json")
-  const manifest = parseJson<PackageManifest>(await readFile(manifestPath, "utf8"), manifestPath)
+  const manifest = parseJson<PackageManifest>(await requireCommand(
+    ["git", "show", `${head}:${config.directory}/package.json`], repoRoot), "committed package manifest")
   const version = validateManifest(config, manifest, parsed.requestedVersion)
   const tag = resolveDistTag(version, parsed.requestedTag)
   const currentTags = await readRegistryState(repoRoot, config.name, version)
   await assertSuccessfulCi(repoRoot, head)
+  const remote = await requireCommand(["git", "ls-remote", "origin", `refs/tags/${releaseTag}`, `refs/tags/${releaseTag}^{}`], repoRoot)
+  const existingRefs = remote.split("\n").filter(Boolean).map((line) => line.split(/\s+/))
+  const existing = existingRefs.length > 0
+  const target = existingRefs.find((entry) => entry[1]?.endsWith("^{}")) ?? existingRefs[0]
+  if (target && target[0] !== head) throw new Error(`Immutable tag ${releaseTag} already points to another commit`)
 
   console.log(`Package: ${config.name}`)
-  console.log(`Version: ${version} (not yet published)`)
-  console.log(`Dist-tag: ${tag} (currently ${currentTags[tag] ?? "unset"})`)
-  console.log(`Commit: ${head}`)
+  console.log(`Version: ${version}; npm channel: ${tag} (currently ${currentTags[tag] ?? "unset"})`)
+  console.log(`Commit: ${head}; Git tag: ${releaseTag}`)
   console.log(`Workflow: ${WORKFLOW_FILE}, environment ${WORKFLOW_ENVIRONMENT}`)
-
   if (parsed.dryRun) {
-    console.log("Dry run complete; no workflow was dispatched")
+    console.log("Dry run complete; no tag was pushed")
     return
   }
-  if (!parsed.yes) {
-    await confirmRelease(`Release ${config.name}@${version} to npm dist-tag ${tag}`)
-  }
+  if (!parsed.yes) await confirmRelease(`Push ${releaseTag} to release ${config.name}@${version} on ${tag}`)
 
-  const dispatchedAfter = Date.now()
-  const dispatch = await requireCommand(
-    [
-      "gh",
-      "workflow",
-      "run",
-      WORKFLOW_FILE,
-      "--repo",
-      REPOSITORY,
-      "--ref",
-      "main",
-      "-f",
-      `package=${config.key}`,
-      "-f",
-      `version=${version}`,
-      "-f",
-      `tag=${tag}`,
-      "-f",
-      `commit=${head}`,
-    ],
-    repoRoot,
-  )
-  const run = parseWorkflowRunUrl(dispatch) ?? (await findDispatchedRun(repoRoot, head, dispatchedAfter))
-  if (!run) {
-    throw new Error("Workflow dispatched, but its run ID could not be resolved; inspect GitHub Actions")
+  const dispatchedAfter = existing ? 0 : Date.now()
+  if (!existing) await requireCommand(["git", "push", "origin", `${head}:refs/tags/${releaseTag}`], repoRoot)
+  const run = await findDispatchedRun(repoRoot, head, releaseTag, dispatchedAfter)
+  if (!run) throw new Error("Tag exists, but its run was not found; check GitHub Actions before retrying")
+  if (existing) {
+    const state = parseJson<WorkflowRun>(await requireCommand(["gh", "run", "view", String(run.id), "--repo", REPOSITORY, "--json", "status,conclusion"], repoRoot), "existing workflow run")
+    if (state.status === "completed" && state.conclusion !== "success") {
+      await requireCommand(["gh", "run", "rerun", String(run.id), "--repo", REPOSITORY, "--failed"], repoRoot)
+    }
   }
-  console.log(`Dispatched: ${run.url}`)
+  console.log(`Release run: ${run.url}`)
 
   if (!parsed.watch) return
   const watched = await runCommand(

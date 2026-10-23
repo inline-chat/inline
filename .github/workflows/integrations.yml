@@ -298,7 +298,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Validate active workflows
         run: |
-          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.10 -color
+          # GitHub supports queue:max; actionlint has not added that key yet.
+          # Release contracts below check its value and non-cancelling behavior.
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.10 -color -ignore 'unexpected key "queue" for "concurrency" section'
           (cd scripts && bun --no-env-file test ci)
           python3 -m unittest discover -s scripts/ci -p 'test_nightly_tip_gate.py'
       - name: Check CI shell scripts
@@ -307,7 +309,8 @@ jobs:
           bash -n scripts/apple/run-ci-checks.sh scripts/apple/build-ci-app.sh scripts/ci/ensure-public-workspaces.sh
           shellcheck scripts/apple/run-ci-checks.sh scripts/apple/build-ci-app.sh
       - name: Test release parsers and scripts
-        run: bun test scripts/release-cli.test.ts scripts/release-npm.test.ts
+        working-directory: scripts
+        run: bun --no-env-file test release-cli.test.ts release-npm.test.ts
       - name: Check generated Rust schema copy
         run: bun run scripts/sync-public-artifacts.ts --check
 
