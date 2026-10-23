@@ -6,15 +6,17 @@ same pipeline. Push the tag once; the CLI Release workflow builds all five
 supported targets, signs and notarizes Apple silicon macOS, then publishes R2,
 GitHub, and (for stable releases) Homebrew.
 
-The tag supplies the version. Do not commit release version bumps. In each
-throwaway CI checkout, the workflow stamps the Cargo workspace version, its
-inherited crate versions in `Cargo.lock`, and internal path dependency
-requirements before checks or builds. Independently versioned crates and the
-private unversioned `cli/package.json` retain their source versions.
+The release command updates and commits the Cargo workspace version, inherited
+crate versions in `Cargo.lock`, and internal path dependency requirements
+together. It pushes that commit, waits for its release checks, then creates and
+pushes an annotated tag. CI verifies the committed versions match the tag before
+building; it does not rewrite release versions. Independently versioned crates
+and the private unversioned `cli/package.json` retain their source versions.
 
 ## Select and release a candidate
 
-Review and commit the intended source changes, then wait for the exact SHA's
+Review and commit the intended source changes, then prepare a release in a
+checkout with clean tracked files and index. The command waits for the exact SHA's
 `main` push in CI to pass **Rust workspace all targets** and **Workflow and
 release contracts**. The release gate reads its tools from trusted `main`,
 checks the existing tag and main ancestry, and freezes that SHA before checking
@@ -23,9 +25,11 @@ pushes do not replace the selected commit. CLI releases queue without cancelling
 running or older queued releases.
 
 ```sh
-# One publication action, after the selected commit is tested and approved.
-git tag cli-v0.7.19-alpha.1 QUALIFIED_MAIN_SHA
-git push origin cli-v0.7.19-alpha.1
+# Preview the version files without committing or publishing.
+bun run release:cli --version 0.7.19-alpha.1 --dry-run
+
+# Commit the version, push main, wait for CI, then push its release tag.
+bun run release:cli --version 0.7.19-alpha.1 --yes
 
 # Resume an existing exact tag, using the current workflow on main.
 gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
@@ -34,7 +38,11 @@ gh workflow run cli-release.yml --repo inline-chat/inline --ref main \
 
 Normal publication always uses all five targets and notarization. A tag must
 already exist and resolve to the selected commit; the publishing script never
-creates or moves one. Release notes use GitHub's automatic notes.
+creates or moves one. The preparation command never force-pushes or moves an
+existing tag; repository tag rules also prevent tag updates and deletion.
+Release notes use GitHub's automatic notes. If CI or a push fails, rerun the same
+preparation command to reuse its version commit. If main advances while CI runs,
+the release retains the selected commit.
 
 Credentials-only and build diagnostics can use an exact green main commit
 without creating a tag. They never publish. Target overrides and signed-only

@@ -51,8 +51,8 @@ function isolatedManifest(manifest, rootManifest) {
   return staged
 }
 
-// The workflow runs source checks before calling this helper. In particular,
-// OpenClaw's historical README checks must see its committed source version.
+// The workflow checks that the committed version matches the tag before source
+// checks. This isolated copy adds artifact identity and registry dependencies.
 export async function stageNpmRelease(options, { repoRoot = defaultRoot } = {}) {
   const release = parseReleaseTag(options.tag, "npm")
   if (!Object.hasOwn(PACKAGE_CONFIGS, options.packageKey) || release.packageKey !== options.packageKey ||

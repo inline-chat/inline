@@ -1,9 +1,7 @@
 import { existsSync } from "node:fs"
-import { execFileSync } from "node:child_process"
 import path from "node:path"
-import { createInterface } from "node:readline/promises"
 import { PACKAGE_CONFIGS as RELEASE_PACKAGES, parseReleaseTag } from "./ci/release-tag.mjs"
-import { qualifyRelease } from "./ci/assert-release-commit.mjs"
+import { prepareReleaseTag } from "./prepare-release"
 
 const REPOSITORY = "inline-chat/inline"
 const REPOSITORY_URL = "git+https://github.com/inline-chat/inline.git"
@@ -68,8 +66,8 @@ Packages:
 Options:
   --version <version>  Release this version via <package>-v<version> (required)
   --tag <tag>          Require this dist-tag (derived when omitted)
-  --dry-run            Run preflight checks without pushing a tag
-  --no-watch           Push the tag without waiting for its workflow
+  --dry-run            Preview version files without committing or publishing
+  --no-watch           Prepare the release without waiting for publication
   --yes                Skip the final interactive confirmation
   --help               Show this help
 
@@ -211,41 +209,6 @@ function parseJson<T>(value: string, description: string): T {
   }
 }
 
-function assertOriginRemote(remote: string): void {
-  const allowed = new Set([
-    "https://github.com/inline-chat/inline.git",
-    "git@github.com:inline-chat/inline.git",
-    "ssh://git@github.com/inline-chat/inline.git",
-  ])
-  if (!allowed.has(remote)) {
-    throw new Error(`origin must point to ${REPOSITORY}; found ${remote}`)
-  }
-}
-
-async function assertMainCommit(repoRoot: string): Promise<string> {
-  const branch = await requireCommand(["git", "branch", "--show-current"], repoRoot)
-  if (branch !== "main") throw new Error(`Release must run from main; current branch is ${branch}`)
-
-  assertOriginRemote(await requireCommand(["git", "remote", "get-url", "origin"], repoRoot))
-  await requireCommand(["git", "fetch", "--quiet", "origin", "main"], repoRoot)
-
-  const upstream = await requireCommand(
-    ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
-    repoRoot,
-  )
-  if (upstream !== "origin/main") {
-    throw new Error(`main must track origin/main; current upstream is ${upstream}`)
-  }
-
-  const head = await requireCommand(["git", "rev-parse", "HEAD"], repoRoot)
-  // A pushed commit stays releasable after main moves on; unpushed work does not.
-  const onMain = await runCommand(["git", "merge-base", "--is-ancestor", head, "origin/main"], { cwd: repoRoot })
-  if (onMain.exitCode !== 0) {
-    throw new Error(`Local HEAD ${head.slice(0, 8)} is not on origin/main; push it first`)
-  }
-  return head
-}
-
 async function assertWorkflowAvailable(repoRoot: string): Promise<void> {
   const localWorkflow = path.join(repoRoot, ".github", "workflows", WORKFLOW_FILE)
   if (!existsSync(localWorkflow)) throw new Error(`Missing ${localWorkflow}`)
@@ -253,12 +216,6 @@ async function assertWorkflowAvailable(repoRoot: string): Promise<void> {
     ["gh", "workflow", "view", WORKFLOW_FILE, "--repo", REPOSITORY, "--yaml"],
     repoRoot,
   )
-}
-
-async function assertSuccessfulCi(repoRoot: string, head: string): Promise<void> {
-  qualifyRelease({ tag: "", commit: head, surface: "npm", allowUntagged: true, repository: REPOSITORY,
-    runGit: (...args: string[]) => execFileSync("git", args, { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(),
-  })
 }
 
 async function readRegistryState(
@@ -286,17 +243,6 @@ async function readRegistryState(
     throw new Error(`Could not check ${packageName} dist-tags: ${tagsResult.stderr}`)
   }
   return parseJson<Record<string, string>>(tagsResult.stdout, `${packageName} dist-tags`)
-}
-
-async function confirmRelease(summary: string): Promise<void> {
-  if (!process.stdin.isTTY) throw new Error("Interactive confirmation requires a TTY; pass --yes")
-  const readline = createInterface({ input: process.stdin, output: process.stdout })
-  try {
-    const answer = await readline.question(`${summary}\nPublish now? [y/N] `)
-    if (!/^y(?:es)?$/i.test(answer.trim())) throw new Error("Release cancelled")
-  } finally {
-    readline.close()
-  }
 }
 
 async function findDispatchedRun(
@@ -368,40 +314,28 @@ async function main(): Promise<void> {
     return
   }
 
-  if (!parsed.requestedVersion) throw new Error("--version is required; release versions come from tags, not version-bump commits")
+  if (!parsed.requestedVersion) throw new Error("--version is required")
   const repoRoot = path.resolve(import.meta.dir, "..")
   const config = PACKAGE_CONFIGS[parsed.packageKey]
   const releaseTag = `${config.key}-v${parsed.requestedVersion}`
   parseReleaseTag(releaseTag, "npm")
   console.log(`Preflighting ${releaseTag} from ${REPOSITORY}`)
 
-  const head = await assertMainCommit(repoRoot)
+  const sourceHead = await requireCommand(["git", "rev-parse", "HEAD"], repoRoot)
   await assertWorkflowAvailable(repoRoot)
   const manifest = parseJson<PackageManifest>(await requireCommand(
-    ["git", "show", `${head}:${config.directory}/package.json`], repoRoot), "committed package manifest")
+    ["git", "show", `${sourceHead}:${config.directory}/package.json`], repoRoot), "committed package manifest")
   const version = validateManifest(config, manifest, parsed.requestedVersion)
   const tag = resolveDistTag(version, parsed.requestedTag)
   const currentTags = await readRegistryState(repoRoot, config.name, version)
-  await assertSuccessfulCi(repoRoot, head)
-  const remote = await requireCommand(["git", "ls-remote", "origin", `refs/tags/${releaseTag}`, `refs/tags/${releaseTag}^{}`], repoRoot)
-  const existingRefs = remote.split("\n").filter(Boolean).map((line) => line.split(/\s+/))
-  const existing = existingRefs.length > 0
-  const target = existingRefs.find((entry) => entry[1]?.endsWith("^{}")) ?? existingRefs[0]
-  if (target && target[0] !== head) throw new Error(`Immutable tag ${releaseTag} already points to another commit`)
-
   console.log(`Package: ${config.name}`)
   console.log(`Version: ${version}; npm channel: ${tag} (currently ${currentTags[tag] ?? "unset"})`)
-  console.log(`Commit: ${head}; Git tag: ${releaseTag}`)
   console.log(`Workflow: ${WORKFLOW_FILE}, environment ${WORKFLOW_ENVIRONMENT}`)
-  if (parsed.dryRun) {
-    console.log("Dry run complete; no tag was pushed")
-    return
-  }
-  if (!parsed.yes) await confirmRelease(`Push ${releaseTag} to release ${config.name}@${version} on ${tag}`)
-
-  const dispatchedAfter = existing ? 0 : Date.now()
-  if (!existing) await requireCommand(["git", "push", "origin", `${head}:refs/tags/${releaseTag}`], repoRoot)
-  const run = await findDispatchedRun(repoRoot, head, releaseTag, dispatchedAfter)
+  const dispatchedAfter = Date.now()
+  const prepared = await prepareReleaseTag(repoRoot, releaseTag, { dryRun: parsed.dryRun, yes: parsed.yes })
+  if (parsed.dryRun) return
+  const { sha: head, existing } = prepared
+  const run = await findDispatchedRun(repoRoot, head, releaseTag, existing ? 0 : dispatchedAfter)
   if (!run) throw new Error("Tag exists, but its run was not found; check GitHub Actions before retrying")
   if (existing) {
     const state = parseJson<WorkflowRun>(await requireCommand(["gh", "run", "view", String(run.id), "--repo", REPOSITORY, "--json", "status,conclusion"], repoRoot), "existing workflow run")

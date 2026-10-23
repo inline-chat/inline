@@ -50,8 +50,8 @@ function stampRequirements(contents: string, packages: Set<string>, version: str
   return result;
 }
 
-/** Stamp only a disposable release checkout; tracked source versions stay put. */
-export async function stampCliReleaseVersion(root: string, tag: string) {
+/** Plan the workspace, internal requirements and lockfile as one version change. */
+export async function planCliReleaseVersion(root: string, tag: string) {
   const release = parseCliReleaseTag(tag);
   const workspacePath = join(root, "Cargo.toml");
   const workspaceContents = await readFile(workspacePath, "utf8");
@@ -87,16 +87,30 @@ export async function stampCliReleaseVersion(root: string, tag: string) {
     stampedLock = stampedLock.replaceAll(`"${name} ${previous}"`, `"${name} ${release.version}"`);
   }
   edits.set(lockPath, stampedLock);
-  // Compute and validate every edit before touching the checkout.
+  return { release, edits };
+}
+
+export async function stampCliReleaseVersion(root: string, tag: string) {
+  const { release, edits } = await planCliReleaseVersion(root, tag);
   for (const [file, contents] of edits) await writeFile(file, contents);
+  return release;
+}
+
+export async function verifyCliReleaseVersion(root: string, tag: string) {
+  const { release, edits } = await planCliReleaseVersion(root, tag);
+  for (const [file, contents] of edits) {
+    if (contents !== await readFile(file, "utf8")) throw new Error(`Commit the release version before tagging: ${file}`);
+  }
   return release;
 }
 
 if (import.meta.main) {
   const [command, tag, directory] = process.argv.slice(2);
-  if (!tag || !["parse", "stamp"].includes(command ?? "")) throw new Error("Usage: cli-release-version.ts <parse|stamp> TAG [WORKSPACE]");
+  if (!tag || !["parse", "stamp", "verify"].includes(command ?? "")) throw new Error("Usage: cli-release-version.ts <parse|stamp|verify> TAG [WORKSPACE]");
   const release = command === "stamp"
     ? await stampCliReleaseVersion(resolve(directory ?? join(dirname(import.meta.path), "../..")), tag)
+    : command === "verify"
+    ? await verifyCliReleaseVersion(resolve(directory ?? join(dirname(import.meta.path), "../..")), tag)
     : parseCliReleaseTag(tag);
   console.log(JSON.stringify(release));
 }

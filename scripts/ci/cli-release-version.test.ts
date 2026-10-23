@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse } from "yaml";
-import { parseCliReleaseTag, stampCliReleaseVersion } from "./cli-release-version";
+import { parseCliReleaseTag, stampCliReleaseVersion, verifyCliReleaseVersion } from "./cli-release-version";
 import { assertMatchingReleaseReceipt, buildManifest, parseRemoteReleaseTag, planGitHubReleaseUploads, publishStableEntryPoints, writeReleaseObject } from "../release-cli";
 
 const root = resolve(import.meta.dir, "../..");
@@ -65,6 +65,14 @@ describe("CLI tag version stamping", () => {
     await writeFile(join(dir, "Cargo.lock"), files["Cargo.lock"]!.replace('name = "inline-sdk"\nversion = "0.7.18"', 'name = "inline-sdk"\nversion = "0.7.17"'));
     await expect(stampCliReleaseVersion(dir, "cli-v0.8.0-alpha.1")).rejects.toThrow("Unexpected Cargo.lock version");
     expect(await readFile(join(dir, "Cargo.toml"), "utf8")).toBe(files["Cargo.toml"]!);
+  });
+
+  test("verifies committed CLI versions without repairing mismatched release source", async () => {
+    const { dir, files } = await workspace();
+    await expect(verifyCliReleaseVersion(dir, "cli-v0.8.0-alpha.1")).rejects.toThrow("Commit the release version");
+    expect(await readFile(join(dir, "Cargo.toml"), "utf8")).toBe(files["Cargo.toml"]!);
+    await stampCliReleaseVersion(dir, "cli-v0.8.0-alpha.1");
+    expect((await verifyCliReleaseVersion(dir, "cli-v0.8.0-alpha.1")).version).toBe("0.8.0-alpha.1");
   });
 
   test("the hosted stamp command accepts the real workspace and lockfile without changing source", async () => {
@@ -173,7 +181,7 @@ describe("CLI release workflow boundaries", () => {
       const job = workflow.jobs[name];
       expect([job.needs].flat()).toContain("select");
       expect(job.steps.find((step: any) => step.uses?.startsWith("actions/checkout@")).with.ref).toBe("${{ needs.select.outputs.sha }}");
-      expect(job.steps.find((step: any) => step.name === "Stamp tagged release version").run).toContain("cli-release-version.ts stamp");
+      expect(job.steps.find((step: any) => step.name === "Verify committed release version").run).toContain("cli-release-version.ts verify");
     }
     for (const job of Object.values(workflow.jobs) as any[]) for (const step of job.steps) if (step.uses) expect(step.uses).toMatch(/@[a-f0-9]{40}$/);
   });

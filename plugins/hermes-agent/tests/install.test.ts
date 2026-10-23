@@ -62,6 +62,8 @@ describe("inline-hermes installer", () => {
 
   it("prints the package version from command or flag form", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    const manifest = JSON.parse(await readFile(path.join(packageRoot, "package.json"), "utf8")) as { version: string }
+    const expectedVersion = `@inline-chat/hermes-agent-adapter@${manifest.version}`
 
     await expect(main(["version"])).resolves.toBe(0)
     await expect(main(["--version"])).resolves.toBe(0)
@@ -69,9 +71,9 @@ describe("inline-hermes installer", () => {
 
     const versions = log.mock.calls.map((call) => String(call[0]))
     expect(versions).toEqual([
-      "@inline-chat/hermes-agent-adapter@0.0.22",
-      "@inline-chat/hermes-agent-adapter@0.0.22",
-      "@inline-chat/hermes-agent-adapter@0.0.22",
+      expectedVersion,
+      expectedVersion,
+      expectedVersion,
     ])
   })
 

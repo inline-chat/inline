@@ -1,4 +1,4 @@
-// Release versions belong to immutable tags; source manifests stay independent.
+// Release tags and their committed source versions identify the same release.
 export const PACKAGE_CONFIGS = {
   protocol: { key: "protocol", directory: "packages/protocol", name: "@inline-chat/protocol" },
   "bot-api-types": { key: "bot-api-types", directory: "packages/bot-api-types", name: "@inline-chat/bot-api-types" },

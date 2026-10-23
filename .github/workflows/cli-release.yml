@@ -138,9 +138,9 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.0"
-      - name: Stamp tagged release version
+      - name: Verify committed release version
         if: needs.select.outputs.tag != ''
-        run: bun --no-env-file scripts/ci/cli-release-version.ts stamp "$INLINE_CLI_RELEASE_TAG"
+        run: bun --no-env-file scripts/ci/cli-release-version.ts verify "$INLINE_CLI_RELEASE_TAG"
 
       - name: Preflight
         id: config
@@ -358,9 +358,9 @@ jobs:
         with:
           bun-version: "1.4.0"
 
-      - name: Stamp tagged release version
+      - name: Verify committed release version
         if: needs.select.outputs.tag != ''
-        run: bun --no-env-file scripts/ci/cli-release-version.ts stamp "$INLINE_CLI_RELEASE_TAG"
+        run: bun --no-env-file scripts/ci/cli-release-version.ts verify "$INLINE_CLI_RELEASE_TAG"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -457,9 +457,9 @@ jobs:
         with:
           bun-version: "1.4.0"
 
-      - name: Stamp tagged release version
+      - name: Verify committed release version
         if: steps.target.outputs.selected == 'true' && needs.select.outputs.tag != ''
-        run: bun --no-env-file scripts/ci/cli-release-version.ts stamp "$INLINE_CLI_RELEASE_TAG"
+        run: bun --no-env-file scripts/ci/cli-release-version.ts verify "$INLINE_CLI_RELEASE_TAG"
 
       - name: Setup Rust
         if: steps.target.outputs.selected == 'true'
@@ -592,9 +592,9 @@ jobs:
         with:
           bun-version: "1.4.0"
 
-      - name: Stamp tagged release version
+      - name: Verify committed release version
         if: steps.target.outputs.selected == 'true' && needs.select.outputs.tag != ''
-        run: bun --no-env-file scripts/ci/cli-release-version.ts stamp "$INLINE_CLI_RELEASE_TAG"
+        run: bun --no-env-file scripts/ci/cli-release-version.ts verify "$INLINE_CLI_RELEASE_TAG"
 
       - name: Setup Rust
         if: steps.target.outputs.selected == 'true'
@@ -725,8 +725,8 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.0"
-      - name: Stamp tagged release version
-        run: bun --no-env-file scripts/ci/cli-release-version.ts stamp "$INLINE_CLI_RELEASE_TAG"
+      - name: Verify committed release version
+        run: bun --no-env-file scripts/ci/cli-release-version.ts verify "$INLINE_CLI_RELEASE_TAG"
       - name: Read Release Channel
         id: release
         env:

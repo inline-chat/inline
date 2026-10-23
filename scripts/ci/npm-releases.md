@@ -1,24 +1,30 @@
 # npm releases
 
-Push `<package>-vX.Y.Z` on a tested commit from `main`. The seven package keys
+Prepare `<package>-vX.Y.Z` with an automated version commit on `main`. The seven package keys
 are `protocol`, `bot-api-types`, `bot-client`, `realtime-sdk`, `openclaw`,
 `hermes-agent`, and `chat-sdk`. Stable versions publish to `latest`; prereleases
 must begin with `alpha`, `beta`, or `next` and use that dist-tag.
 
 ```sh
-# Check committed HEAD, without changing files or publishing.
-bun run release:npm bot-api-types --version 0.1.3-alpha.1 --dry-run
+# Preview the version files, without changing files or publishing.
+bun run release:npm bot-api-types --version 0.1.4-alpha.1 --dry-run
 
-# One publication action, after reviewing and qualifying the commit.
-git tag bot-api-types-v0.1.3-alpha.1 QUALIFIED_MAIN_SHA
-git push origin bot-api-types-v0.1.3-alpha.1
+# Commit the version, push main, wait for CI, then tag and watch publication.
+bun run release:npm bot-api-types --version 0.1.4-alpha.1 --yes
 ```
 
-The optional wrapper without `--dry-run` pushes the same tag and watches its
-workflow. It uses committed HEAD even if the local worktree has unrelated edits.
-Do not commit release version bumps: the tag version is written into a temporary
-package copy, including Hermes's runtime version carriers. Source versions and
-declared internal dependency requirements stay unchanged.
+Use a checkout with clean tracked files and index. The command updates only the
+selected package's version and Bun workspace lock entry, plus Hermes's runtime
+version carriers or OpenClaw's bounded compatibility table when applicable. It
+commits those files, pushes that commit to main, waits for its release checks,
+then creates and pushes an annotated `<package>-vX.Y.Z` tag. It never force-pushes
+or moves a tag. Existing repository tag rules prevent release-tag deletion and
+updates; use a new version for a different release.
+
+If CI or a push fails, the version commit remains available. Rerun the same
+command to resume without another version commit. If main advances while CI is
+running, the tag still targets the selected version commit. Do not manually edit
+version numbers. Declared internal dependency requirements stay unchanged.
 
 The release first requires the exact commit's main-push CI jobs for shared
 packages, release contracts, candidate packing, and Node 20/26 packed consumers.
@@ -26,7 +32,8 @@ It checks package identity and published internal dependency requirements before
 installing. Publish a changed dependency first when a dependent package names a
 version that is not on npm yet; the workflow does not rewrite those requirements.
 
-Package source checks run before stamping. The publication build uses registry
+The publisher requires the committed package version to match the tag. Package
+source checks run before artifact identity is added. The publication build uses registry
 dependencies outside the workspace, then installs and imports the packed
 artifact. Hermes retains its real-host, source-install, and Umbrel checks.
 The checked tarball and its source/tag/integrity receipt are retained together.

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest"
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const repoRoot = path.resolve(packageRoot, "..", "..")
 const realNpmEnv = { ...process.env, npm_config_dry_run: "false" }
+const sourceVersion = (JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")) as { version: string }).version
 
 type PackFile = {
   path: string
@@ -37,6 +38,7 @@ describe("packed artifact", () => {
     const files = pack.files.map((file) => file.path).sort()
 
     expect(pack.name).toBe("@inline-chat/hermes-agent-adapter")
+    expect(pack.version).toBe(sourceVersion)
     expect(pack.entryCount).toBe(expectedFiles.length)
     expect(files).toEqual(expectedFiles)
     expect(pack.unpackedSize).toBeGreaterThan(1_000_000)
@@ -132,6 +134,7 @@ describe("packed artifact", () => {
         stdio: ["ignore", "pipe", "pipe"],
       })
       const pack = parsePackOutput(raw)
+      expect(pack.version).toBe(sourceVersion)
       const tarball = path.join(packDir, pack.filename)
 
       // Source CI has unreleased workspace dependencies. Install local packed
@@ -164,7 +167,8 @@ describe("packed artifact", () => {
         ? path.join(prefix, "node_modules")
         : path.join(prefix, "lib", "node_modules")
       const hermesManifestPath = path.join(globalModules, "@inline-chat/hermes-agent-adapter/package.json")
-      const hermesManifest = JSON.parse(await readFile(hermesManifestPath, "utf8")) as { dependencies: Record<string, string> }
+      const hermesManifest = JSON.parse(await readFile(hermesManifestPath, "utf8")) as { version: string; dependencies: Record<string, string> }
+      expect(hermesManifest.version).toBe(sourceVersion)
       const sdk = await readInstalledManifest("@inline-chat/realtime-sdk", hermesManifestPath)
       const protocol = await readInstalledManifest("@inline-chat/protocol", sdk.path)
       const sdkSpec = hermesManifest.dependencies["@inline-chat/realtime-sdk"]
@@ -195,7 +199,7 @@ describe("packed artifact", () => {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
       }).trim()
-      expect(version).toBe("@inline-chat/hermes-agent-adapter@0.0.22")
+      expect(version).toBe(`@inline-chat/hermes-agent-adapter@${sourceVersion}`)
 
       const install = execFileSync(bin, ["install", "--hermes-home", hermesHome, "--force", "--json"], {
         cwd: packageRoot,

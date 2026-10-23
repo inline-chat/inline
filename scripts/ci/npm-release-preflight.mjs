@@ -12,6 +12,7 @@ export function validateSourceManifest(manifest, release) {
     throw new Error("Package identity, public access or repository metadata does not match the release tag")
   }
   canonicalSemver(manifest.version)
+  if (manifest.version !== release.version) throw new Error("Commit the package version before creating its release tag")
 }
 
 const view = (name, requirement) => {

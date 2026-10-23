@@ -102,14 +102,15 @@ describe("release main qualification through real Git", () => {
 
 describe("npm declared dependency preflight", () => {
   const release = parseReleaseTag("bot-client-v1.2.3-alpha.1", "npm")
-  const manifest = { name: release.name, version: "0.1.2-alpha.0", repository: { url: "git+https://github.com/inline-chat/inline.git", directory: release.directory }, publishConfig: { access: "public" }, dependencies: { "@inline-chat/bot-api-types": "0.1.3-alpha.0" } }
-  it("keeps source versions and declared requirements independent from the tag", () => {
+  const manifest = { name: release.name, version: release.version, repository: { url: "git+https://github.com/inline-chat/inline.git", directory: release.directory }, publishConfig: { access: "public" }, dependencies: { "@inline-chat/bot-api-types": "0.1.3-alpha.0" } }
+  it("requires a committed release version while preserving declared requirements", () => {
     const before = JSON.stringify(manifest)
     validateSourceManifest(manifest, release)
     const requests: string[] = []
     checkInternalDependencies(manifest, (name: string, version: string) => { requests.push(`${name}@${version}`); return version })
     expect(requests).toEqual(["@inline-chat/bot-api-types@0.1.3-alpha.0"])
     expect(JSON.stringify(manifest)).toBe(before)
+    expect(() => validateSourceManifest({ ...manifest, version: "0.1.2-alpha.0" }, release)).toThrow("Commit the package version")
   })
   it("blocks missing dependencies and workspace/private aliases without rewriting them", () => {
     expect(() => checkInternalDependencies(manifest, () => null)).toThrow("Publish internal dependency")
