@@ -77,8 +77,7 @@ public enum MessageTextPasteboard {
     guard let items = pasteboard.pasteboardItems, items.count == 1, let item = items.first else { return nil }
     if let data = item.data(forType: .init(markdownType)), data.count <= maximumImportBytes,
        let markdown = String(data: data, encoding: .utf8) { return markdown }
-    if let data = item.data(forType: .rtf), let markdown = importedMarkdown(data, type: .rtf) { return markdown }
-    if let data = item.data(forType: .html), let markdown = importedMarkdown(data, type: .html) { return markdown }
+    if let data = item.data(forType: .rtf), let markdown = importedMarkdown(fromRTF: data) { return markdown }
     return nil
   }
   #else
@@ -100,7 +99,7 @@ public enum MessageTextPasteboard {
 
   /// Type availability is enough to enable Paste; read content only after the user invokes it.
   public static func containsFormattedText(in pasteboard: UIPasteboard = .general) -> Bool {
-    pasteboard.contains(pasteboardTypes: [markdownType, "public.rtf", "public.html"])
+    pasteboard.contains(pasteboardTypes: [markdownType, "public.rtf"])
   }
 
   public static func markdown(from pasteboard: UIPasteboard = .general) -> String? {
@@ -111,18 +110,17 @@ public enum MessageTextPasteboard {
          let string = String(data: data, encoding: .utf8) { return string }
     }
     if let data = pasteboard.data(forPasteboardType: "public.rtf"),
-       let markdown = importedMarkdown(data, type: .rtf) { return markdown }
-    if let value = pasteboard.value(forPasteboardType: "public.html") {
-      let data = (value as? Data) ?? (value as? String)?.data(using: .utf8)
-      if let data, let markdown = importedMarkdown(data, type: .html) { return markdown }
-    }
+       let markdown = importedMarkdown(fromRTF: data) { return markdown }
     return nil
   }
   #endif
 
-  private static func importedMarkdown(_ data: Data, type: NSAttributedString.DocumentType) -> String? {
+  /// HTML is not imported: Foundation's HTML reader waits synchronously on a WebKit service, which
+  /// blocked paste for seconds even for tiny input. HTML-only clipboards paste as plain text.
+  private static func importedMarkdown(fromRTF data: Data) -> String? {
     guard !data.isEmpty, data.count <= maximumImportBytes,
-          let text = try? NSAttributedString(data: data, options: [.documentType: type], documentAttributes: nil),
+          let text = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.rtf],
+                                             documentAttributes: nil),
           !text.string.contains("\u{fffc}")
     else { return nil }
     return MessageMarkdown.string(from: text)

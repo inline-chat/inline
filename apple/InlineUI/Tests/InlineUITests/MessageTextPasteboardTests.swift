@@ -76,6 +76,18 @@ struct MessageTextPasteboardTests {
     #expect(pasteboard.string(forType: .string) == "ordinary text\n**already markdown**")
   }
 
+  @Test("HTML-only formatting pastes as plain text instead of going through the blocking HTML reader")
+  func htmlOnlyPastesAsPlainText() {
+    let pasteboard = NSPasteboard.withUniqueName()
+    defer { pasteboard.releaseGlobally() }
+    let item = NSPasteboardItem()
+    item.setString("Bold docs", forType: .string)
+    item.setString(#"<b>Bold</b> <a href="https://example.com/docs">docs</a>"#, forType: .html)
+    #expect(pasteboard.writeObjects([item]))
+    #expect(MessageTextPasteboard.markdown(from: pasteboard) == nil)
+    #expect(pasteboard.string(forType: .string) == "Bold docs")
+  }
+
   @Test("Malformed rich data leaves the plain representation available")
   func malformedRichTextFallback() {
     let pasteboard = NSPasteboard.withUniqueName()
