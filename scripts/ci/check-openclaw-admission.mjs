@@ -26,7 +26,9 @@ execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], 
 const installedHost = JSON.parse(await readFile(path.join(hostDir, "node_modules/openclaw/package.json"), "utf8"))
 if (hostVersion !== "latest") assert.equal(installedHost.version, hostVersion)
 const executable = path.join(hostDir, "node_modules/openclaw/openclaw.mjs")
-const env = { ...process.env, HOME: home, OPENCLAW_STATE_DIR: path.join(home, "state") }
+// The CI matrix may export OPENCLAW_VERSION=latest, but OpenClaw treats it as
+// its compatibility version. Give the real CLI the installed version, not an npm spec.
+const env = { ...process.env, OPENCLAW_VERSION: installedHost.version, HOME: home, OPENCLAW_STATE_DIR: path.join(home, "state") }
 const cli = (args) => execFileSync(process.execPath, [executable, ...args], {
   env, cwd: hostDir, encoding: "utf8", timeout: 90_000,
 })
