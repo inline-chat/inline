@@ -387,7 +387,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/ci/test-cli-installer.py
-          bun --cwd scripts test release-cli.test.ts ci/cli-release-version.test.ts
+          (cd scripts && bun --no-env-file test ./release-cli.test.ts ./ci/cli-release-version.test.ts)
           bun run scripts/release-cli.ts validate-homebrew
           node scripts/check-agent-release-group.mjs --source-only
           bun run --cwd packages/protocol build
