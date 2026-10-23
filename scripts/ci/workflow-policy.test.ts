@@ -75,11 +75,12 @@ describe("public CI contracts", () => {
     expect(source).toContain("github.ref == 'refs/heads/main'")
     expect(source).toContain("cancel-in-progress: false")
     expect(source).toContain("scripts/ci/nightly-tip-gate.py select")
-    expect(source).toContain("scripts/ci/nightly-tip-gate.py qualify-tip")
+    expect(source).toContain("mode=qualify-tip")
+    expect(source).toContain('python3 scripts/ci/nightly-tip-gate.py "$mode"')
     expect(source).toContain("ref: ${{ needs.select.outputs.sha }}")
     expect(source).toContain("INLINE_NIGHTLY_MAIN_SHA: ${{ needs.select.outputs.sha }}")
     expect(tip.jobs.summary.needs).toEqual(["select", "release"])
-    expect(source).toContain("scripts/ci/release-summary.sh \"macOS tip\"")
+    expect(source).toContain('scripts/ci/release-summary.sh "macOS ${MACOS_RELEASE_CHANNEL:-tip}"')
   })
 
   it("gates automatic internal iOS releases with trusted main scripts", () => {
