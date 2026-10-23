@@ -20,3 +20,19 @@ bash scripts/apple/check-source-contracts.sh
 ```
 
 These checks do not replace a build or signed-in device testing.
+
+## Releases
+
+`macOS Tip` and `iOS Early Testers` automatically select green Apple commits on
+main. To publish Beta, run `macOS Beta` on main; it builds, signs and notarizes
+the newest qualified source using the same publisher as Tip. Each channel has
+its own build and feed. Beta retries allocate an unused build number so a
+partial upload never requires overwriting a DMG.
+
+Run `iOS TestFlight` on main to distribute the latest verified internal build to
+the existing External Early Users group. It reuses the Xcode Cloud archive,
+handles beta review and starts testing when approved. Pending Apple review is
+reported as deferred; App Store submission remains in App Store Connect.
+
+Apple publishing jobs use the main-only `apple` GitHub environment. Signing and
+upload credentials shared with the CLI also live in its `cli` environment.

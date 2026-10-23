@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Select green main commits for macOS tip and iOS early tester releases."""
+"""Select green main commits for macOS channels and iOS early tester releases."""
 
 import email.utils
 import hashlib
@@ -22,11 +22,9 @@ REQUIRED_WORKFLOWS = ("apple-validation.yml",)
 IOS_STATUS_CONTEXT = "ios/early-testers"
 # A commit whose checks are not registered yet is pending, not red.
 PENDING_GRACE = timedelta(minutes=30)
-TIP_FEED_URL = "https://public-assets.inline.chat/mac/tip/appcast.xml"
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 COMMIT_DESCRIPTION = re.compile(r"from commit ([0-9a-f]{7,40})")
 SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
-DMG_PATH = re.compile(r"^/mac/tip/([0-9]+)/Inline\.dmg$")
 MIN_TIP_INTERVAL = timedelta(hours=1)
 MAIN_COMMIT_WINDOW = 50
 COMPARE_FILE_LIMIT = 300
@@ -38,6 +36,12 @@ NON_MAC_PATHS = re.compile(r"^(server/|landing/|packages/|plugins/|cli/|crates/|
 def require_sha(value):
     if not SHA_PATTERN.fullmatch(value or ""):
         raise ValueError("Expected a full commit SHA from GitHub")
+    return value
+
+
+def require_channel(value):
+    if value not in ("tip", "beta"):
+        raise ValueError("Expected the tip or beta macOS channel")
     return value
 
 
@@ -53,11 +57,12 @@ def latest_codeql_check(checks):
     return max(matches, key=lambda check: check["id"], default=None)
 
 
-def latest_feed_item(xml):
+def latest_feed_item(xml, channel="tip"):
+    require_channel(channel)
     root = ET.fromstring(xml)
     items = root.findall("./channel/item")
     if not items:
-        raise ValueError("Tip appcast has no release items")
+        raise ValueError(f"{channel} appcast has no release items")
     item = items[-1]
     description = item.findtext("description", default="")
     match = COMMIT_DESCRIPTION.search(description)
@@ -67,16 +72,16 @@ def latest_feed_item(xml):
     minimum = item.findtext(f"{{{SPARKLE_NS}}}minimumSystemVersion", default="").strip()
     enclosure = item.find("enclosure")
     if enclosure is None:
-        raise ValueError("Latest tip appcast item has no DMG enclosure")
+        raise ValueError(f"Latest {channel} appcast item has no DMG enclosure")
     url = enclosure.get("url", "")
     parsed_url = urllib.parse.urlparse(url)
-    dmg_path = DMG_PATH.fullmatch(parsed_url.path)
+    dmg_path = re.fullmatch(rf"/mac/{channel}/([0-9]+)/Inline\.dmg", parsed_url.path)
     signature = enclosure.get(f"{{{SPARKLE_NS}}}edSignature", "")
     if (not version.isdecimal() or not short_version or not minimum
             or hardware != "arm64" or not signature or not dmg_path
             or parsed_url.scheme != "https" or parsed_url.netloc != "public-assets.inline.chat"
             or parsed_url.query or parsed_url.fragment or version != dmg_path.group(1)):
-        raise ValueError("Latest tip appcast item lacks valid signed release metadata")
+        raise ValueError(f"Latest {channel} appcast item lacks valid signed release metadata")
     try:
         size = int(enclosure.get("length", ""))
     except ValueError as error:
@@ -118,7 +123,8 @@ def remote_dmg_sha256(feed_item):
     return digest.hexdigest()
 
 
-def published_tip_matches(sha, tag_sha, release, feed_item, remote_digest):
+def published_tip_matches(sha, tag_sha, release, feed_item, remote_digest, channel="tip"):
+    require_channel(channel)
     if tag_sha != sha or not release or not feed_item or not remote_digest:
         return False
     asset = next((asset for asset in release.get("assets", [])
@@ -128,7 +134,7 @@ def published_tip_matches(sha, tag_sha, release, feed_item, remote_digest):
                 and asset["digest"] == f"sha256:{remote_digest}"
                 and prefix and sha.startswith(prefix)
                 and feed_item["dmg_size"] == asset["size"]
-                and feed_item["dmg_url"].startswith("https://public-assets.inline.chat/mac/tip/"))
+                and feed_item["dmg_url"].startswith(f"https://public-assets.inline.chat/mac/{channel}/"))
 
 
 def mac_relevant(paths):
@@ -152,11 +158,11 @@ def changed_paths(comparison):
     return paths
 
 
-def tip_decision(comparison, feed_item, *, event, now):
+def tip_decision(comparison, feed_item, *, event, now, channel="tip"):
     """Return a skip reason for a candidate that differs from the tip, or None to release it."""
     if comparison is not None:
         if comparison["status"] == "behind":
-            return "candidate is older than the current tip"
+            return f"candidate is older than the current {channel}"
         # A diverged tip (an experimental build) fails open to releasing main.
         if event != "workflow_dispatch" and comparison["status"] == "ahead" \
                 and not mac_relevant(changed_paths(comparison)):
@@ -168,11 +174,12 @@ def tip_decision(comparison, feed_item, *, event, now):
 
 
 class GitHub:
-    def __init__(self, repository, token):
+    def __init__(self, repository, token, channel="tip"):
         if repository != "inline-chat/inline":
             raise ValueError("Nightly tip releases are restricted to inline-chat/inline")
         if not token:
             raise ValueError("GITHUB_TOKEN is required")
+        self.channel = require_channel(channel)
         self.root = f"https://api.github.com/repos/{repository}"
         self.headers = {
             "Accept": "application/vnd.github+json",
@@ -192,7 +199,7 @@ class GitHub:
             raise
 
     def tip_commit(self):
-        reference = self.request("git/ref/tags/tip", missing_ok=True)
+        reference = self.request(f"git/ref/tags/{self.channel}", missing_ok=True)
         if reference is None:
             return None
         target = reference["object"]
@@ -202,7 +209,7 @@ class GitHub:
             if target["type"] != "tag":
                 break
             target = self.request(f"git/tags/{require_sha(target['sha'])}")["object"]
-        raise ValueError("tip tag did not resolve to a commit")
+        raise ValueError(f"{self.channel} tag did not resolve to a commit")
 
     def compare(self, base, head):
         return self.request(f"compare/{base}...{head}")
@@ -223,11 +230,13 @@ class GitHub:
         raise ValueError("Too many check runs to qualify main")
 
 
-def public_feed():
-    request = urllib.request.Request(TIP_FEED_URL, headers={"User-Agent": "inline-nightly-tip-gate"})
+def public_feed(channel="tip"):
+    require_channel(channel)
+    request = urllib.request.Request(f"https://public-assets.inline.chat/mac/{channel}/appcast.xml",
+                                     headers={"User-Agent": "inline-nightly-tip-gate"})
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
-            return latest_feed_item(response.read())
+            return latest_feed_item(response.read(), channel)
     except urllib.error.HTTPError as error:
         if error.code == 404:
             return None
@@ -300,7 +309,7 @@ def tip_outcome(reason):
     return DEFERRED
 
 
-def select_tip(github, event, now):
+def select_tip(github, event, now, channel="tip"):
     """Return (sha, outcome, reason, create_new_appcast)."""
     tag_sha = github.tip_commit()
     sha, running = newest_green_main(github, lambda candidate: candidate == tag_sha, now)
@@ -309,20 +318,20 @@ def select_tip(github, event, now):
     if running and event == "workflow_run":
         return sha, DEFERRED, f"newer main commit {running[:9]} is still in CI", False
     if sha is None:
-        return None, BLOCKED, "no green main commit at or after the current tip", False
+        return None, BLOCKED, f"no green main commit at or after the current {channel}", False
     if sha == tag_sha and event == "workflow_run":
         # Re-hashing the published DMG on every CI completion would be wasteful,
         # so only the scheduled sweep and manual runs repair a partial publication.
-        return sha, CURRENT, "already the current tip", False
-    feed = public_feed()
+        return sha, CURRENT, f"already the current {channel}", False
+    feed = public_feed(channel)
     if sha == tag_sha:
-        release = github.request("releases/tags/tip", missing_ok=True)
+        release = github.request(f"releases/tags/{channel}", missing_ok=True)
         digest = remote_dmg_sha256(feed) if release and feed else None
-        if published_tip_matches(sha, tag_sha, release, feed, digest):
+        if published_tip_matches(sha, tag_sha, release, feed, digest, channel):
             return sha, CURRENT, "already published", False
-        return sha, RELEASE, "repairing a partial tip publication", feed is None
+        return sha, RELEASE, f"repairing a partial {channel} publication", feed is None
     comparison = github.compare(tag_sha, sha) if tag_sha else None
-    problem = tip_decision(comparison, feed, event=event, now=now)
+    problem = tip_decision(comparison, feed, event=event, now=now, channel=channel)
     if problem:
         return sha, tip_outcome(problem), problem, False
     return sha, RELEASE, "newer green main commit", feed is None
@@ -364,11 +373,11 @@ def qualify_commit(github, sha):
         raise ValueError(f"Selected commit {sha} is not on main")
 
 
-def qualify_tip(github, sha):
+def qualify_tip(github, sha, channel="tip"):
     qualify_commit(github, sha)
     tag_sha = github.tip_commit()
     if tag_sha and tag_sha != sha and github.compare(tag_sha, sha)["status"] == "behind":
-        raise ValueError(f"Selected commit {sha} is older than the current tip {tag_sha}")
+        raise ValueError(f"Selected commit {sha} is older than the current {channel} {tag_sha}")
 
 
 def output(**values):
@@ -387,33 +396,34 @@ def decide(label, event, sha, outcome, reason, **extra):
 
 
 def main():
-    github = GitHub(os.environ.get("GITHUB_REPOSITORY"), os.environ.get("GH_TOKEN"))
+    channel = require_channel(os.environ.get("MACOS_RELEASE_CHANNEL", "tip"))
+    github = GitHub(os.environ.get("GITHUB_REPOSITORY"), os.environ.get("GH_TOKEN"), channel)
     mode = sys.argv[1] if len(sys.argv) > 1 else "select"
     event = os.environ.get("GITHUB_EVENT_NAME", "workflow_dispatch")
     if mode == "select-ios":
         sha, outcome, reason = select_ios(github, event, datetime.now(timezone.utc))
         decide("iOS Early Testers", event, sha, outcome, reason)
     elif mode == "select":
-        sha, outcome, reason, create_new_appcast = select_tip(github, event, datetime.now(timezone.utc))
-        decide("macOS tip", event, sha, outcome, reason,
+        sha, outcome, reason, create_new_appcast = select_tip(github, event, datetime.now(timezone.utc), channel)
+        decide(f"macOS {channel}", event, sha, outcome, reason,
                create_new_appcast=str(create_new_appcast).lower())
     elif mode == "qualify":
         sha = require_sha(os.environ.get("EXPECTED_SHA"))
         qualify_commit(github, sha)
         print(f"Requalified green main commit: {sha}")
-    elif mode == "qualify-tip":
+    elif mode in ("qualify-tip", "qualify-macos"):
         sha = require_sha(os.environ.get("EXPECTED_SHA"))
-        qualify_tip(github, sha)
-        print(f"Requalified green main commit for tip: {sha}")
+        qualify_tip(github, sha, channel)
+        print(f"Requalified green main commit for {channel}: {sha}")
     elif mode == "verify":
         sha = require_sha(os.environ.get("EXPECTED_SHA"))
         tag_sha = github.tip_commit()
-        release = github.request("releases/tags/tip", missing_ok=True)
-        feed = public_feed()
+        release = github.request(f"releases/tags/{channel}", missing_ok=True)
+        feed = public_feed(channel)
         remote_digest = remote_dmg_sha256(feed) if feed else None
-        if not published_tip_matches(sha, tag_sha, release, feed, remote_digest):
-            raise ValueError(f"Published tip artifacts do not agree on source commit {sha}")
-        print(f"Verified GitHub tip tag, DMG asset, and current Sparkle feed for {sha}")
+        if not published_tip_matches(sha, tag_sha, release, feed, remote_digest, channel):
+            raise ValueError(f"Published {channel} artifacts do not agree on source commit {sha}")
+        print(f"Verified GitHub {channel} tag, DMG asset, and current Sparkle feed for {sha}")
     else:
         raise ValueError(f"Unknown mode: {mode}")
 

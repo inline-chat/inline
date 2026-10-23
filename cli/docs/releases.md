@@ -132,9 +132,10 @@ persisted policy and actual provider readiness after this new-binary restart.
 
 All CLI jobs that consume release secrets use the `cli` GitHub environment,
 after candidate qualification. Its allowed refs must include `main` and CLI
-release tags. Shared repository Apple/R2 secrets may still be used by the Mac
-workflow until that surface moves to its own environment; declaring the CLI
-environment alone does not remove those shared credentials.
+release tags. Shared signing and R2 credentials have separate copies in `cli`
+and the main-only `apple` environment. The existing `APPLE_NOTARIZATION_KEY`,
+`APPLE_NOTARIZATION_KEY_ID`, `APPLE_NOTARIZATION_ISSUER` and `SENTRY_AUTH_TOKEN`
+repository secrets are retained until a secure migration source is available.
 
 Homebrew uses the dedicated `INLINE_HOMEBREW_DEPLOY_KEY`, registered as a
 write-enabled deploy key only on `inline-chat/homebrew-inline`. The workflow

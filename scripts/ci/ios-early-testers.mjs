@@ -27,13 +27,17 @@ export function makeToken(env, now = Math.floor(Date.now() / 1000)) {
   return `${body}.${sign("sha256", Buffer.from(body), { key, dsaEncoding: "ieee-p1363" }).toString("base64url")}`
 }
 
+/** @param {(url: URL, options: { method: string, body?: string }) => Promise<Response>} fetcher */
 export function appleClient(env, fetcher = fetch) {
-  return async (path, data) => {
+  return async (path, data, method = data ? "POST" : "GET") => {
     const url = new URL(path, ROOT)
     if (url.origin !== ROOT || !url.pathname.startsWith("/v1/")) throw new Error("Unexpected Apple API URL")
+    if (!["GET", "POST", "PATCH"].includes(method) || (method === "GET" && data) || (method !== "GET" && !data)) {
+      throw new Error("Unexpected Apple API method or body")
+    }
     // Do not log JWTs, private keys, request headers, or provider error bodies.
     const response = await fetcher(url, {
-      method: data ? "POST" : "GET", redirect: "error", signal: AbortSignal.timeout(60_000),
+      method, redirect: "error", signal: AbortSignal.timeout(60_000),
       headers: { Authorization: `Bearer ${makeToken(env)}`, "Content-Type": "application/json" },
       ...(data ? { body: JSON.stringify(data) } : {}),
     })
@@ -64,6 +68,7 @@ export async function buildGroups(api, buildId) {
   return members
 }
 
+/** @param {(url: string, options: { body?: string }) => Promise<Response>} fetcher */
 export function publicationReceipt(env = process.env, fetcher = fetch) {
   if (env.GITHUB_REPOSITORY !== "inline-chat/inline" || !env.GH_TOKEN) throw new Error("Trusted GitHub release token required")
   const root = "https://api.github.com/repos/inline-chat/inline"
@@ -120,6 +125,7 @@ export function reusableRun(runs, sha, now = Date.now()) {
     && (run.attributes.executionProgress !== "COMPLETE" || run.attributes.completionStatus === "SUCCEEDED"))
 }
 
+/** @param {(url: string, options: { body?: string }) => Promise<Response>} fetcher */
 export async function ensureSourceTag(sha, env = process.env, fetcher = fetch) {
   if (env.GITHUB_REPOSITORY !== "inline-chat/inline" || !env.GH_TOKEN || !/^[0-9a-f]{40}$/.test(sha)) {
     throw new Error("Source tags require the trusted Inline repository and qualified SHA")

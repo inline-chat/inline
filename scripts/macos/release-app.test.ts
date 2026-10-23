@@ -1,15 +1,16 @@
 import { spawnSync } from "bun";
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { metadataMismatches, type BuiltAppMetadata } from "./app-release-metadata";
 import { macosReleaseSourceDiffPaths, macosReleaseSourceStatusLines } from "./macos-source-snapshot";
 import {
   appcastXmlForBuildAllocation,
+  assertNightlyMainStillSelected,
   decideAppcastFetch,
-  firstVacantTipBuild,
-  nextTipArtifactBuild,
+  firstVacantMacBuild,
+  nextMacArtifactBuild,
   releaseIntegrityGateErrors,
   safeResumeTask,
 } from "./release-app";
@@ -39,6 +40,34 @@ function metadata(overrides: Partial<BuiltAppMetadata> = {}): BuiltAppMetadata {
 }
 
 describe("release integrity helpers", () => {
+  test("the publishing guard qualifies the exact source and channel again, and stops on red CI", () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "inline-macos-channel-guard-"));
+    const scripts = join(rootDir, "scripts/ci");
+    mkdirSync(scripts, { recursive: true });
+    const policy = join(scripts, "nightly-tip-gate.py");
+    const sha = "a".repeat(40);
+    const original = { ...process.env };
+    try {
+      process.env.INLINE_NIGHTLY_MAIN_SHA = sha;
+      process.env.EXPECTED_SHA = "b".repeat(40);
+      process.env.MACOS_RELEASE_CHANNEL = "tip";
+      writeFileSync(policy, `import os,sys\nassert sys.argv[1] == 'qualify-macos'\nassert os.environ['EXPECTED_SHA'] == '${sha}'\nassert os.environ['MACOS_RELEASE_CHANNEL'] == 'beta'\n`);
+      const ctx = { rootDir, channel: "beta" as const, experimentalTip: false, sourceCommit: sha };
+      expect(() => assertNightlyMainStillSelected(ctx)).not.toThrow();
+      expect(() => assertNightlyMainStillSelected({ ...ctx, sourceCommit: "b".repeat(40) })).toThrow("does not match");
+      expect(() => assertNightlyMainStillSelected({ ...ctx, experimentalTip: true })).toThrow("does not match");
+      expect(() => assertNightlyMainStillSelected({ ...ctx, channel: "stable" })).toThrow("does not match");
+      writeFileSync(policy, "raise ValueError('selected commit is no longer green')\n");
+      expect(() => assertNightlyMainStillSelected(ctx)).toThrow("no longer green");
+    } finally {
+      for (const name of ["INLINE_NIGHTLY_MAIN_SHA", "EXPECTED_SHA", "MACOS_RELEASE_CHANNEL"]) {
+        if (original[name] === undefined) delete process.env[name];
+        else process.env[name] = original[name];
+      }
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
   test("resume restarts from the nearest durable prerequisite", () => {
     expect(safeResumeTask("build", "release")).toBe("build");
     expect(safeResumeTask("upload-dmg", "release")).toBe("post-check");
@@ -73,21 +102,21 @@ describe("release integrity helpers", () => {
     expect(readCount).toBe(1);
   });
 
-  test("tip builds stay integer and advance past feed collisions", () => {
+  test("tip and beta builds stay integer and advance past feed collisions", () => {
     const appcast = (versions: string[]) => `<rss><channel>${versions.map((version) => `<item><sparkle:version>${version}</sparkle:version></item>`).join("")}</channel></rss>`;
-    expect(nextTipArtifactBuild("5226", undefined, false)).toBe("5226");
-    expect(nextTipArtifactBuild("5226", undefined, true)).toBe("5227");
-    expect(nextTipArtifactBuild("5226", appcast(["5182"]), false)).toBe("5226");
-    expect(nextTipArtifactBuild("5226", appcast(["5182"]), true)).toBe("5227");
-    expect(nextTipArtifactBuild("5227", appcast(["5227"]), false)).toBe("5228");
-    expect(nextTipArtifactBuild("5226", appcast(["5229"]), true)).toBe("5230");
-    expect(() => nextTipArtifactBuild("5226", appcast([]), false)).toThrow("has no versions");
-    expect(() => nextTipArtifactBuild("5226", appcast(["5226.1"]), true)).toThrow("unsupported");
+    expect(nextMacArtifactBuild("5226", undefined, false)).toBe("5226");
+    expect(nextMacArtifactBuild("5226", undefined, true)).toBe("5227");
+    expect(nextMacArtifactBuild("5226", appcast(["5182"]), false)).toBe("5226");
+    expect(nextMacArtifactBuild("5226", appcast(["5182"]), true)).toBe("5227");
+    expect(nextMacArtifactBuild("5227", appcast(["5227"]), false)).toBe("5228");
+    expect(nextMacArtifactBuild("5226", appcast(["5229"]), true)).toBe("5230");
+    expect(() => nextMacArtifactBuild("5226", appcast([]), false)).toThrow("has no versions");
+    expect(() => nextMacArtifactBuild("5226", appcast(["5226.1"]), true)).toThrow("unsupported");
   });
 
-  test("tip build allocation skips DMGs orphaned before appcast publication", async () => {
+  test("channel build allocation skips DMGs orphaned before appcast publication", async () => {
     const checked: string[] = [];
-    const build = await firstVacantTipBuild("5226", async (candidate) => {
+    const build = await firstVacantMacBuild("5226", async (candidate) => {
       checked.push(candidate);
       return candidate === "5226" || candidate === "5227";
     });

@@ -1,0 +1,54 @@
+name: iOS TestFlight
+
+# Run promotes the latest published Early Testers build to External Early Users.
+# Approved builds start testing; pending review enables automatic tester notification.
+# Apple beta review is submitted if needed; pending review is reported as deferred.
+# No archive, version, source, or audience selection is needed.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  statuses: read
+
+jobs:
+  release:
+    if: github.repository == 'inline-chat/inline' && github.ref == 'refs/heads/main'
+    environment: apple
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - name: Promote latest published internal build to TestFlight
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASC_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER }}
+          ASC_PRIVATE_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
+        run: node scripts/ci/ios-testflight.mjs
+      - name: Report TestFlight availability or pending Apple review
+        if: always()
+        env:
+          RESULT: ${{ steps.publish.outcome }}
+          OUTCOME: ${{ steps.publish.outputs.outcome }}
+          REASON: ${{ steps.publish.outputs.reason }}
+          BUILD: ${{ steps.publish.outputs.build }}
+          SHA: ${{ steps.publish.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$RESULT" != success && "$OUTCOME" != blocked ]]; then
+            OUTCOME=failed REASON="promotion $RESULT; inspect the failed step before retrying"
+          fi
+          bash scripts/ci/release-summary.sh "iOS TestFlight" "$OUTCOME" "$REASON" "$SHA" "Build $BUILD"

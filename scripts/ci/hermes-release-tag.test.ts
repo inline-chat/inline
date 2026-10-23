@@ -181,7 +181,8 @@ describe("Hermes tag release staging", () => {
   })
 
   it("fails before stamping/packing when original source checks or bundle comparison fail", async () => {
-    for (const environment of [{ HERMES_STAGE_FAIL_CHECK: "1" }, { HERMES_STAGE_BAD_BUNDLE: "1" }]) {
+    const environments: Array<Record<string, string>> = [{ HERMES_STAGE_FAIL_CHECK: "1" }, { HERMES_STAGE_BAD_BUNDLE: "1" }]
+    for (const environment of environments) {
       await rm(calls, { force: true })
       expect(stage(["--prepare-only", "--verify-source-bundle", ...releaseArgs], environment).code).not.toBe(0)
       expect((await operations()).map(({ program, args }) => `${program} ${args[0]}`)).toEqual(["npm install", "bun run"])

@@ -6,6 +6,7 @@
     "strict": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
+    "allowJs": true,
     "noEmit": true,
     "types": ["bun", "node"]
   },

@@ -87,6 +87,10 @@ describe("Apple release outcomes", () => {
     const macResult = report(mac, { SELECT_RESULT: "success", RELEASE_RESULT: "success", SHOULD_RELEASE: "true", OUTCOME: "release", REASON: "selected" })
     expect(macResult.exitCode).toBe(0)
     expect(macResult.summary).toContain("macOS tip: Published")
+    const beta = report(mac, { MACOS_RELEASE_CHANNEL: "beta", SELECT_RESULT: "success", RELEASE_RESULT: "success", SHOULD_RELEASE: "true", OUTCOME: "release", REASON: "selected" })
+    expect(beta.exitCode).toBe(0)
+    expect(beta.summary).toContain("macOS beta: Published")
+    expect(beta.summary).toContain("verified on the beta feed")
     for (const outcome of ["published", "already-current"]) {
       const result = report(ios, { GATE_RESULT: "success", PUBLISH_RESULT: "success", SHOULD_RELEASE: "true", GATE_OUTCOME: "release", REASON: "selected", PUBLISH_OUTCOME: outcome, BUILD: "42" })
       expect(result.exitCode).toBe(0)
@@ -109,5 +113,29 @@ describe("Apple release outcomes", () => {
       expect(result.summary).not.toContain(": Published")
       expect(result.summary).not.toContain("resumes the same")
     }
+  })
+})
+
+describe("Apple manual release boundaries", () => {
+  it("beta reuses the macOS publisher and its apple environment with a fixed channel", () => {
+    const beta = workflow("macos-beta.yml") as any
+    expect(Object.keys(beta.on)).toEqual(["workflow_dispatch"])
+    expect(beta.jobs.release.with).toEqual({ channel: "beta" })
+    expect(beta.jobs.release.uses).toBe("./.github/workflows/macos-tip-nightly.yml")
+    expect(beta.jobs.release.if).toContain("refs/heads/main")
+    const mac = workflow("macos-tip-nightly.yml") as any
+    expect(mac.jobs.select.environment).toBeUndefined()
+    expect(mac.jobs.release.environment).toBe("apple")
+    expect(mac.concurrency["cancel-in-progress"]).toBe(false)
+    const steps = mac.jobs.release.steps as Step[]
+    expect(steps[0]?.with?.ref).toBe("${{ needs.select.outputs.sha }}")
+    expect(mac.jobs.release.env.INLINE_NIGHTLY_MAIN_SHA).toBe("${{ needs.select.outputs.sha }}")
+    const qualify = steps.findIndex(step => step.run?.includes("mode=qualify-macos"))
+    const install = steps.findIndex(step => step.run?.includes("bun install"))
+    expect(qualify).toBeGreaterThan(0)
+    expect(install).toBeGreaterThan(qualify)
+    const publisher = steps.find(step => step.run?.includes("bun --no-env-file scripts/macos/release-app.ts"))!.run!
+    expect(publisher).toContain('--channel "$MACOS_RELEASE_CHANNEL" --source-commit "$EXPECTED_SHA"')
+    expect(workflow("ios-early-testers.yml").jobs.release).toMatchObject({ environment: "apple" })
   })
 })

@@ -155,6 +155,58 @@ class NightlyTipGateTests(unittest.TestCase):
                 gate.remote_dmg_sha256(feed)
 
 
+class MacChannelTests(unittest.TestCase):
+    def test_beta_feed_cannot_accept_tip_artifacts(self):
+        beta_xml = feed_xml().replace(b"/mac/tip/", b"/mac/beta/")
+        feed = gate.latest_feed_item(beta_xml, "beta")
+        release = {"assets": [{"name": "Inline.dmg", "size": 123, "digest": f"sha256:{DIGEST}"}]}
+        self.assertTrue(gate.published_tip_matches(SHA, SHA, release, feed, DIGEST, "beta"))
+        self.assertFalse(gate.published_tip_matches(SHA, SHA, release, feed, DIGEST))
+        for xml, channel in [(feed_xml(), "beta"), (beta_xml, "tip")]:
+            with self.assertRaises(ValueError):
+                gate.latest_feed_item(xml, channel)
+        with self.assertRaises(ValueError):
+            gate.require_channel("stable")
+
+    def test_beta_uses_its_own_tag_and_feed(self):
+        github = gate.GitHub("inline-chat/inline", "test-token", "beta")
+        with patch.object(github, "request", return_value={"object": {"type": "commit", "sha": SHA}}) as request:
+            self.assertEqual(github.tip_commit(), SHA)
+        request.assert_called_once_with("git/ref/tags/beta", missing_ok=True)
+        beta_xml = feed_xml().replace(b"/mac/tip/", b"/mac/beta/")
+        with patch.object(gate.urllib.request, "urlopen", return_value=io.BytesIO(beta_xml)) as fetch:
+            gate.public_feed("beta")
+        self.assertEqual(fetch.call_args.args[0].full_url,
+                         "https://public-assets.inline.chat/mac/beta/appcast.xml")
+
+    def test_manual_beta_builds_newest_green_main_without_tip_cadence(self):
+        main = FakeMain([(NEWEST_SHA, "running"), (NEWER_SHA, "success"), (SHA, "success")],
+                        comparison={"status": "ahead", "files": [{"filename": "server/a.ts"}]})
+        with patch.object(gate, "public_feed", return_value={"published_at": NOW}) as feed:
+            result = gate.select_tip(main, "workflow_dispatch", NOW, "beta")
+        self.assertEqual(result[:2], (NEWER_SHA, gate.RELEASE))
+        feed.assert_called_once_with("beta")
+
+    def test_beta_rerun_verifies_existing_artifacts_before_skipping(self):
+        main = FakeMain([(SHA, "success")])
+        feed = gate.latest_feed_item(feed_xml().replace(b"/mac/tip/", b"/mac/beta/"), "beta")
+        release = {"assets": [{"name": "Inline.dmg", "size": 123, "digest": f"sha256:{DIGEST}"}]}
+        with patch.object(main, "request", return_value=release) as request, \
+                patch.object(gate, "public_feed", return_value=feed), \
+                patch.object(gate, "remote_dmg_sha256", return_value=DIGEST):
+            self.assertEqual(gate.select_tip(main, "workflow_dispatch", NOW, "beta")[1], gate.CURRENT)
+            request.assert_called_with("releases/tags/beta", missing_ok=True)
+            release["assets"] = []
+            self.assertEqual(gate.select_tip(main, "workflow_dispatch", NOW, "beta")[1], gate.RELEASE)
+
+    def test_beta_rejects_downgrades(self):
+        github = FakeGitHub()
+        github.tip_commit = lambda: NEWER_SHA
+        github.compare = lambda base, head: {"status": "behind" if base == NEWER_SHA else "ahead"}
+        with self.assertRaisesRegex(ValueError, "older than the current beta"):
+            gate.qualify_tip(github, SHA, "beta")
+
+
 class TipCadenceTests(unittest.TestCase):
     def test_only_known_non_mac_paths_skip_a_build(self):
         self.assertFalse(gate.mac_relevant(["server/src/index.ts", "landing/src/start.ts", "README.md"]))

@@ -15,9 +15,20 @@ on:
   schedule:
     - cron: '17 */3 * * *'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      channel:
+        type: string
+        default: tip
+
+permissions:
+  contents: read
+
+env:
+  MACOS_RELEASE_CHANNEL: ${{ inputs.channel || 'tip' }}
 
 concurrency:
-  group: macos-tip-release
+  group: macos-${{ inputs.channel || 'tip' }}-release
   cancel-in-progress: false
 
 jobs:
@@ -38,18 +49,22 @@ jobs:
       reason: ${{ steps.gate.outputs.reason }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Select newest green main commit for tip
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Select newest green main commit for the channel
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/ci/nightly-tip-gate.py select
 
   release:
-    name: Build, sign, notarize, and publish tip
+    name: Build, sign, notarize, and publish
     needs: select
     if: needs.select.outputs.should_release == 'true'
     runs-on: xcode-27
     timeout-minutes: 120
+    environment: apple
     permissions:
       actions: read
       checks: read
@@ -91,7 +106,11 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          python3 scripts/ci/nightly-tip-gate.py qualify-tip
+          # Older publishers cannot safely qualify Beta at each public mutation.
+          # Wait for this slice to be green before publishing from that channel.
+          mode=qualify-tip
+          if [[ "$MACOS_RELEASE_CHANNEL" == beta ]]; then mode=qualify-macos; fi
+          python3 scripts/ci/nightly-tip-gate.py "$mode"
           test "$(sw_vers -productVersion | cut -d. -f1)" -ge 27
           xcodebuild -version
       - name: Install release tools
@@ -105,7 +124,7 @@ jobs:
           bash scripts/apple/resolve-ci-packages.sh \
             apple/Inline.xcodeproj "${SCHEME:-Inline (macOS)}" \
             "$GITHUB_WORKSPACE/build/InlineMacDirect/reusable" \
-            "$RUNNER_TEMP/tip-package-resolution.log"
+            "$RUNNER_TEMP/macos-package-resolution.log"
       - name: Import Developer ID certificate
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
@@ -116,8 +135,8 @@ jobs:
           test -n "$MACOS_CERTIFICATE"
           test -n "$MACOS_CERTIFICATE_PWD"
           test -n "$MACOS_CI_KEYCHAIN_PWD"
-          certificate_path="$RUNNER_TEMP/inline-tip-signing.p12"
-          keychain_path="$RUNNER_TEMP/inline-tip-signing.keychain-db"
+          certificate_path="$RUNNER_TEMP/inline-macos-signing.p12"
+          keychain_path="$RUNNER_TEMP/inline-macos-signing.keychain-db"
           printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$certificate_path"
           security create-keychain -p "$MACOS_CI_KEYCHAIN_PWD" "$keychain_path"
           security set-keychain-settings -lut 21600 "$keychain_path"
@@ -126,12 +145,12 @@ jobs:
           security list-keychains -d user -s "$keychain_path"
           security import "$certificate_path" -k "$keychain_path" -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" "$keychain_path"
-      - name: Publish frozen tip release
+      - name: Publish the frozen channel release
         env:
           CREATE_NEW_APPCAST: ${{ needs.select.outputs.create_new_appcast }}
         run: |
           set -euo pipefail
-          args=(--channel tip --source-commit "$EXPECTED_SHA")
+          args=(--channel "$MACOS_RELEASE_CHANNEL" --source-commit "$EXPECTED_SHA")
           if [[ "$CREATE_NEW_APPCAST" == 'true' ]]; then
             args+=(--create-new-appcast)
           fi
@@ -153,6 +172,8 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: main
+          persist-credentials: false
           sparse-checkout: scripts/ci
       - name: Report published, already current, deferred, blocked or failed
         env:
@@ -168,9 +189,9 @@ jobs:
             OUTCOME=failed REASON="candidate selection $SELECT_RESULT"
           elif [[ "$SHOULD_RELEASE" == true ]]; then
             if [[ "$RELEASE_RESULT" == success ]]; then
-              OUTCOME=published REASON="signed, notarized and verified on the tip feed"
+              OUTCOME=published REASON="signed, notarized and verified on the ${MACOS_RELEASE_CHANNEL:-tip} feed"
             else
               OUTCOME=failed REASON="release job $RELEASE_RESULT; rerun or resume from the logs"
             fi
           fi
-          bash scripts/ci/release-summary.sh "macOS tip" "$OUTCOME" "$REASON" "$SHA"
+          bash scripts/ci/release-summary.sh "macOS ${MACOS_RELEASE_CHANNEL:-tip}" "$OUTCOME" "$REASON" "$SHA"

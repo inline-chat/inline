@@ -158,7 +158,7 @@ function usage(): string {
     "  --source-commit <sha>              Frozen source commit (printed automatically in resume commands)",
     "  --source-build <build>             Frozen source build number (printed automatically in resume commands)",
     "  --source-snapshot <sha256>         Frozen experimental source snapshot (printed automatically when resuming)",
-    "  --artifact-build <build>           Frozen tip artifact build number (printed automatically when resuming)",
+    "  --artifact-build <build>           Frozen tip/beta artifact build number (printed automatically when resuming)",
     "  --upload-sentry-dsyms            Upload dSYMs to Sentry (default; retained for explicitness)",
     "  --dry-run                         Print what would run, without executing the pipeline",
     "  --skip-build                      Alias for --skip build",
@@ -413,8 +413,8 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (!experimentalTip && sourceSnapshot) {
     die("--source-snapshot is only supported with --experimental-tip.");
   }
-  if (artifactBuild && channel && channel !== "tip") {
-    die("--artifact-build is only supported for tip releases.");
+  if (artifactBuild && channel === "stable") {
+    die("--artifact-build is only supported for tip and beta releases.");
   }
   if (experimentalTip && Boolean(sourceSnapshot) !== Boolean(artifactBuild)) {
     die("--source-snapshot and --artifact-build must be supplied together when resuming an experimental tip release.");
@@ -578,41 +578,41 @@ export function appcastXmlForBuildAllocation(
   return decision === "create-new" ? undefined : readExistingAppcast();
 }
 
-export function nextTipArtifactBuild(baseBuild: string, appcastXml: string | undefined, experimental: boolean): string {
-  if (!/^\d+$/.test(baseBuild)) throw new Error(`Invalid base build for tip release: ${baseBuild}`);
+export function nextMacArtifactBuild(baseBuild: string, appcastXml: string | undefined, experimental: boolean): string {
+  if (!/^\d+$/.test(baseBuild)) throw new Error(`Invalid base build for macOS release: ${baseBuild}`);
   const base = Number.parseInt(baseBuild, 10);
   if (appcastXml === undefined) {
     const first = experimental ? base + 1 : base;
-    if (first > 2_147_483_647) throw new Error("Tip build allocation exceeded the Apple client Int32 limit.");
+    if (first > 2_147_483_647) throw new Error("macOS build allocation exceeded the Apple client Int32 limit.");
     return String(first);
   }
   const versions = [...appcastXml.matchAll(/<(?:[A-Za-z_][\w.-]*:)?version\b[^>]*>\s*([^<]+?)\s*<\//g)]
     .map((match) => match[1]?.trim() ?? "")
     .filter(Boolean);
-  if (!versions.length) throw new Error("Unable to allocate a build because the tip appcast has no versions.");
+  if (!versions.length) throw new Error("Unable to allocate a build because the channel appcast has no versions.");
 
   const parsed = versions.map((version) => {
-    if (!/^\d+$/.test(version)) throw new Error(`Cannot safely allocate after unsupported tip build version: ${version}`);
+    if (!/^\d+$/.test(version)) throw new Error(`Cannot safely allocate after unsupported macOS build version: ${version}`);
     return Number.parseInt(version, 10);
   });
   const latest = Math.max(...parsed);
   const next = experimental ? Math.max(base + 1, latest + 1) : Math.max(base, latest + 1);
-  if (next > 2_147_483_647) throw new Error("Tip build allocation exceeded the Apple client Int32 limit.");
+  if (next > 2_147_483_647) throw new Error("macOS build allocation exceeded the Apple client Int32 limit.");
   return String(next);
 }
 
-export async function firstVacantTipBuild(
+export async function firstVacantMacBuild(
   candidate: string,
   exists: (build: string) => Promise<boolean>,
 ): Promise<string> {
   let build = Number.parseInt(candidate, 10);
   if (!Number.isSafeInteger(build) || build < 1 || build > 2_147_483_647) {
-    throw new Error(`Invalid candidate tip build: ${candidate}`);
+    throw new Error(`Invalid candidate macOS build: ${candidate}`);
   }
   for (let checked = 0; checked < 100 && build <= 2_147_483_647; checked++, build++) {
     if (!await exists(String(build))) return String(build);
   }
-  throw new Error("Unable to allocate an unoccupied tip DMG build in the next 100 numbers.");
+  throw new Error("Unable to allocate an unoccupied macOS DMG build in the next 100 numbers.");
 }
 
 export function safeResumeTask(taskId: string, operation: "release" | "rollback" | "drop-build"): string {
@@ -787,22 +787,23 @@ function assertFrozenSource(ctx: ReleaseContext): void {
   }
 }
 
-function assertNightlyMainStillSelected(ctx: ReleaseContext): void {
+export function assertNightlyMainStillSelected(ctx: Pick<ReleaseContext, "channel" | "experimentalTip" | "sourceCommit" | "rootDir">): void {
   const expected = process.env.INLINE_NIGHTLY_MAIN_SHA;
   if (!expected) return;
-  if (ctx.channel !== "tip" || ctx.experimentalTip || ctx.sourceCommit !== expected) {
-    throw new Error("Tip release source does not match the selected green main commit.");
+  if (!["tip", "beta"].includes(ctx.channel) || ctx.experimentalTip || ctx.sourceCommit !== expected) {
+    throw new Error("macOS release source does not match the selected green main commit.");
   }
   // main may advance during the build; the commit only has to stay green, on main,
-  // and no older than the current tip.
+  // and no older than the current channel.
   const qualification = spawnSync({
-    cmd: ["python3", resolve(ctx.rootDir, "scripts/ci/nightly-tip-gate.py"), "qualify-tip"],
+    cmd: ["python3", resolve(ctx.rootDir, "scripts/ci/nightly-tip-gate.py"), "qualify-macos"],
+    env: { ...process.env, EXPECTED_SHA: expected, MACOS_RELEASE_CHANNEL: ctx.channel },
     stdout: "pipe",
     stderr: "pipe",
   });
   if (qualification.exitCode !== 0) {
     const reason = qualification.stderr.toString().trim().split("\n").at(-1) || "qualification failed";
-    throw new Error(`Refusing to publish the tip release: ${reason}`);
+    throw new Error(`Refusing to publish the ${ctx.channel} release: ${reason}`);
   }
 }
 
@@ -1261,7 +1262,7 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
       args.push("--source-snapshot", ctx.sourceSnapshot, "--artifact-build", ctx.artifactBuild);
     } else {
       args.push("--source-commit", ctx.sourceCommit, "--source-build", ctx.sourceBuild);
-      if (ctx.channel === "tip") args.push("--artifact-build", ctx.artifactBuild || ctx.sourceBuild);
+      if (ctx.channel !== "stable") args.push("--artifact-build", ctx.artifactBuild || ctx.sourceBuild);
     }
     args.push("--derived-data", ctx.derivedData, "--app-path", ctx.appPath, "--dmg-path", ctx.dmgPath);
     if (ctx.createNewAppcast) args.push("--create-new-appcast");
@@ -1325,9 +1326,9 @@ async function main() {
     sourceSnapshot: parsed0.sourceSnapshot,
     artifactBuild: parsed0.artifactBuild,
   };
-  if (!opts.artifactBuild && opts.channel !== "tip") opts.artifactBuild = opts.sourceBuild;
-  if (parsed0.artifactBuild && opts.channel !== "tip") {
-    die("--artifact-build is only supported for tip releases.");
+  if (!opts.artifactBuild && opts.channel === "stable") opts.artifactBuild = opts.sourceBuild;
+  if (parsed0.artifactBuild && opts.channel === "stable") {
+    die("--artifact-build is only supported for tip and beta releases.");
   }
   if (!opts.rollback && !opts.dropBuild && !opts.experimentalTip && (!/^[0-9a-f]{40}$/.test(opts.sourceCommit) || !/^\d+$/.test(opts.sourceBuild))) {
     die("Unable to freeze release source commit/build.");
@@ -1412,20 +1413,20 @@ async function main() {
 
   const runPreflight: Task["run"] = async (ctx, ui) => {
     if (!ctx.rollback && !ctx.dropBuild) {
-      if (ctx.channel === "tip" && buildWillRun(ctx) && !ctx.artifactBuild) {
+      if (ctx.channel !== "stable" && buildWillRun(ctx) && !ctx.artifactBuild) {
         ctx.appcastUrl = defaultAppcastUrl(ctx);
         const fetchDecision = fetchExistingAppcast(ctx, ui);
         const appcastXml = appcastXmlForBuildAllocation(
           fetchDecision,
           () => readFileSync(ctx.appcastPath, "utf8"),
         );
-        const candidate = nextTipArtifactBuild(ctx.sourceBuild, appcastXml, ctx.experimentalTip);
+        const candidate = nextMacArtifactBuild(ctx.sourceBuild, appcastXml, ctx.experimentalTip);
         if (ctx.dryRun || !taskEnabled(ctx, "upload-dmg")) {
           ctx.artifactBuild = candidate;
         } else {
           const { r2, prefix } = getR2Context();
-          ctx.artifactBuild = await firstVacantTipBuild(candidate, (build) =>
-            r2.exists(`${prefix}/tip/${build}/Inline.dmg`));
+          ctx.artifactBuild = await firstVacantMacBuild(candidate, (build) =>
+            r2.exists(`${prefix}/${ctx.channel}/${build}/Inline.dmg`));
         }
       }
       if (ctx.experimentalTip && buildWillRun(ctx)) {

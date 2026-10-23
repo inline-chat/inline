@@ -1,0 +1,19 @@
+name: macOS Beta
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: github.repository == 'inline-chat/inline' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/macos-tip-nightly.yml
+    with:
+      channel: beta
+    secrets: inherit
+    permissions:
+      actions: read
+      checks: read
+      contents: write
