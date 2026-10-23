@@ -543,7 +543,7 @@ struct AcknowledgementTests {
     anchor.acknowledgements = [cursor]
     let model = MessagesProgressiveViewModel(
       peer: child,
-      initialState: .init(messages: [], threadAnchor: anchor, loadedWindowMetadata: .init(messages: [], holes: [])),
+      initialState: .init(messages: [], threadAnchor: .resolved(anchor), loadedWindowMetadata: .init(messages: [], holes: [])),
       database: database, publisher: publisher, currentUserId: 1
     )
     defer { model.dispose() }

@@ -25,13 +25,18 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
 
   private var paths: [Tab: [Destination]] = [:] {
     didSet {
+      // Any navigation supersedes one still waiting for its destination's preparation.
+      pendingPreparedNavigation = nil
       recordNavigation(from: HistoryEntry(tab: selectedTab, path: oldValue[selectedTab] ?? []))
       navigationStateDidChange()
     }
   }
 
+  @ObservationIgnored private var pendingPreparedNavigation: UUID?
+
   public var selectedTab: Tab {
     didSet {
+      pendingPreparedNavigation = nil
       recordNavigation(from: HistoryEntry(tab: oldValue, path: paths[oldValue] ?? []))
       navigationStateDidChange()
     }
@@ -303,6 +308,43 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
   }
 
   public func push(_ destination: Destination, for tab: Tab? = nil) {
+    afterPreparing(destination) { [weak self] in
+      self?.append(destination, for: tab)
+    }
+  }
+
+  /// Applies a path a view chose, such as a NavigationStack push or a sidebar selection. A newly
+  /// shown destination that needs preparation appears once it's ready, as with `push`.
+  public func showPath(_ path: [Destination], for tab: Tab) {
+    guard let destination = path.last, !(paths[tab] ?? []).contains(destination) else {
+      pendingPreparedNavigation = nil
+      paths[tab] = path
+      return
+    }
+    afterPreparing(destination) { [weak self] in
+      self?.paths[tab] = path
+    }
+  }
+
+  /// Runs `show` once the destination's preparation finishes, however long it takes, as Telegram
+  /// waits for a controller to be ready before pushing it. The main thread stays free, and any
+  /// navigation in the meantime, including a tab change, supersedes it.
+  public func afterPreparing(_ destination: Destination, show: @escaping () -> Void) {
+    guard let prepare = destination.preparationBeforeShowing() else {
+      pendingPreparedNavigation = nil
+      show()
+      return
+    }
+    let id = UUID()
+    pendingPreparedNavigation = id
+    Task { [weak self] in
+      await prepare()
+      guard let self, pendingPreparedNavigation == id else { return }
+      show()
+    }
+  }
+
+  private func append(_ destination: Destination, for tab: Tab?) {
     let targetTab = tab ?? selectedTab
     if paths[targetTab] == nil {
       paths[targetTab] = [destination]

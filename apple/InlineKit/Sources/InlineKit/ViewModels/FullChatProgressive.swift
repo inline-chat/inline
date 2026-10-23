@@ -224,9 +224,23 @@ public class MessagesProgressiveViewModel {
   private var didExhaustThreadAnchorFetch = false
 
   public struct InitialState: Sendable {
+    public enum ThreadAnchor: Sendable {
+      /// Not read with the window; the view model reads it when built.
+      case unresolved
+      /// Read with the window: the thread's parent message, or nil when there is none locally.
+      case resolved(FullMessage?)
+    }
+
     public let messages: [FullMessage]
-    public let threadAnchor: FullMessage?
+    public let threadAnchorState: ThreadAnchor
     public let loadedWindowMetadata: LoadedWindowMetadata
+    /// `MessagesPublisher.publicationRevision(for:)` taken before the read. Updates published
+    /// after it reached no view model, so one built from this state reads the chat again.
+    public let publicationRevision: UInt64?
+
+    public var threadAnchor: FullMessage? {
+      if case let .resolved(anchor) = threadAnchorState { anchor } else { nil }
+    }
 
     public var oldestLoadedMessageId: Int64? {
       loadedWindowMetadata.oldestLoadedMessageId
@@ -250,12 +264,14 @@ public class MessagesProgressiveViewModel {
 
     public init(
       messages: [FullMessage],
-      threadAnchor: FullMessage? = nil,
-      loadedWindowMetadata: LoadedWindowMetadata
+      threadAnchor: ThreadAnchor = .unresolved,
+      loadedWindowMetadata: LoadedWindowMetadata,
+      publicationRevision: UInt64? = nil
     ) {
       self.messages = messages
-      self.threadAnchor = threadAnchor
+      threadAnchorState = threadAnchor
       self.loadedWindowMetadata = loadedWindowMetadata
+      self.publicationRevision = publicationRevision
     }
   }
 
@@ -272,6 +288,9 @@ public class MessagesProgressiveViewModel {
   private lazy var initialLimit: Int = Self.defaultInitialLimit()
 
   private let log = Log.scoped("MessagesViewModel", level: .info)
+  /// Lets transcript queries seek the chat's `(chatId, messageId)` index. Known for every
+  /// thread; a direct message's chat is known only when the caller passes it.
+  private let chatId: Int64?
   private let db: AppDatabase
   private let publisher: MessagesPublisher
   private let currentUserId: Int64?
@@ -291,6 +310,7 @@ public class MessagesProgressiveViewModel {
   /// limit, cursor, range, etc are internals to this module. the view layer should not care about this.
   public init(
     peer: Peer,
+    chatId: Int64? = nil,
     reversed: Bool = false,
     initialState: InitialState? = nil,
     database: AppDatabase = .shared,
@@ -302,12 +322,14 @@ public class MessagesProgressiveViewModel {
     self.currentUserId = currentUserId
     accountMutationToken = try? Auth.shared.handle.beginAccountMutation()
     self.peer = peer
+    self.chatId = chatId ?? peer.asThreadId()
     self.reversed = reversed
     if let initialState {
       applyInitialState(initialState)
-      if threadAnchor == nil {
+      if case .unresolved = initialState.threadAnchorState {
         loadThreadAnchorFromLocalIfNeeded()
       }
+      warmReplyThreadAuthors()
     } else {
       loadThreadAnchorFromLocalIfNeeded()
       // get initial batch
@@ -330,7 +352,16 @@ public class MessagesProgressiveViewModel {
         }
       }
       .store(in: &cancellable)
+
+    // A send confirmed or failed, or a message added, edited, deleted or pinned after the
+    // prepared read was published before this subscription. The database has it; read it again.
+    if let revision = initialState?.publicationRevision, revision != publisher.publicationRevision(for: peer) {
+      scheduleReload(animated: false)
+    }
   }
+
+  /// A reload is reading the database, for tests of when one is scheduled.
+  var hasPendingReload: Bool { reloadTask != nil }
 
   private func applyInitialState(_ state: InitialState, around anchorID: Int64? = nil) {
     let projected = state.loadedWindowMetadata.projecting(state.messages, around: anchorID)
@@ -352,29 +383,61 @@ public class MessagesProgressiveViewModel {
   }
 
   private func loadThreadAnchorFromLocalIfNeeded() {
-    guard case let .thread(threadId) = peer else {
+    guard case .thread = peer else {
       threadAnchor = nil
       return
     }
 
     do {
-      let anchor: FullMessage? = try db.reader.read { db -> FullMessage? in
-        guard let chat = try Chat.fetchOne(db, id: threadId),
-              let parentChatId = chat.parentChatId,
-              let parentMessageId = chat.parentMessageId
-        else {
-          return nil
-        }
-
-        return try FullMessage.queryRequest()
-          .filter(Column("chatId") == parentChatId)
-          .filter(Column("messageId") == parentMessageId)
-          .fetchOne(db)
-      }
+      let peer = peer
+      let anchor = try db.reader.read { db in try Self.localThreadAnchor(db, peer: peer) }
       threadAnchor = anchor?.withoutAcknowledgements
     } catch {
       log.error("Failed to load thread anchor message", error: error)
       threadAnchor = nil
+    }
+  }
+
+  /// The thread's parent message as stored locally; nil for direct messages and when it isn't stored.
+  private nonisolated static func localThreadAnchor(_ db: Database, peer: Peer) throws -> FullMessage? {
+    guard case let .thread(threadId) = peer,
+          let chat = try Chat.fetchOne(db, id: threadId),
+          let parentChatId = chat.parentChatId,
+          let parentMessageId = chat.parentMessageId
+    else {
+      return nil
+    }
+
+    return try FullMessage.queryRequest()
+      .filter(Column("chatId") == parentChatId)
+      .filter(Column("messageId") == parentMessageId)
+      .fetchOne(db)
+  }
+
+  /// Reads the latest window and the thread's parent message off the main actor, so a chat
+  /// view can be built from them without reading the database while it is constructed.
+  /// Updates published during the read are reconciled when a view model subscribes.
+  public static func prepareInitialState(
+    peer: Peer,
+    chatId: Int64? = nil,
+    limit: Int = defaultInitialLimit(),
+    database: AppDatabase = .shared,
+    publisher: MessagesPublisher = .shared,
+    currentUserId: Int64? = Auth.shared.getCurrentUserId()
+  ) async throws -> InitialState {
+    let publicationRevision = publisher.publicationRevision(for: peer)
+    return try await database.reader.read { db in
+      let chatId = try chatId ?? historyChatID(for: peer, db: db)
+      let snapshot = try publisherReloadSnapshot(
+        db, peer: peer, chatId: chatId, currentUserId: currentUserId, reversed: false,
+        existingMessages: [], mode: .replaceLatest(limit: limit)
+      )
+      return try InitialState(
+        messages: snapshot.messages,
+        threadAnchor: .resolved(localThreadAnchor(db, peer: peer)),
+        loadedWindowMetadata: snapshot.metadata,
+        publicationRevision: publicationRevision
+      )
     }
   }
 
@@ -452,7 +515,7 @@ public class MessagesProgressiveViewModel {
     invalidatePendingReload()
     let generation = reloadGeneration
     let snapshot = try await Self.publisherReloadSnapshot(
-      database: db, peer: peer, currentUserId: currentUserId, reversed: reversed,
+      database: db, peer: peer, chatId: chatId, currentUserId: currentUserId, reversed: reversed,
       existingMessages: messages, mode: .replaceLatest(limit: initialLimit)
     )
     try Task.checkCancellation()
@@ -460,7 +523,7 @@ public class MessagesProgressiveViewModel {
     loadedWindowMetadataGeneration &+= 1
     applyInitialState(.init(
       messages: snapshot.messages,
-      threadAnchor: threadAnchor,
+      threadAnchor: .resolved(threadAnchor),
       loadedWindowMetadata: snapshot.metadata
     ))
     messages = reapplyingPendingAcknowledgements(to: messages)
@@ -819,6 +882,7 @@ public class MessagesProgressiveViewModel {
     pinChangesDuringReload.removeAll()
     let database = db
     let peer = peer
+    let chatId = chatId
     let currentUserId = currentUserId
     let reversed = reversed
     let existingMessages = messages
@@ -828,6 +892,7 @@ public class MessagesProgressiveViewModel {
         let snapshot = try await Self.publisherReloadSnapshot(
           database: database,
           peer: peer,
+          chatId: chatId,
           currentUserId: currentUserId,
           reversed: reversed,
           existingMessages: existingMessages,
@@ -885,83 +950,97 @@ public class MessagesProgressiveViewModel {
   private nonisolated static func publisherReloadSnapshot(
     database: AppDatabase,
     peer: Peer,
+    chatId: Int64?,
     currentUserId: Int64?,
     reversed: Bool,
     existingMessages: [FullMessage],
     mode: PublisherReloadMode
   ) async throws -> PublisherReloadSnapshot {
     try await database.reader.read { db in
-      let visibleIDs = Set(existingMessages.map(\.id))
-      var query = baseQuery(for: peer, currentUserId: currentUserId)
-        .filter(Column("messageId") > 0)
-        .order(Column("messageId").desc)
-      switch mode {
-        case let .around(anchorID, limit):
-          var rows = try localWindowAroundCoordinate(db, peer: peer, messageID: anchorID, limit: limit) ??
-            baseQuery(for: peer, currentUserId: currentUserId)
-              .filter(visibleIDs.contains(Column("globalId")))
-              .fetchAll(db)
-          // A send shown in this window has no history coordinate yet, or
-          // gained one after it was shown. Keep it by identity.
-          let loadedIDs = Set(rows.map(\.id))
-          let shownPendingIDs = existingMessages.filter { $0.message.messageId <= 0 }.map(\.id)
-          rows += try baseQuery(for: peer, currentUserId: currentUserId)
-            .filter(shownPendingIDs.contains(Column("globalId")))
-            .fetchAll(db)
-            .filter { !loadedIDs.contains($0.id) }
-          let normalized = stableSortedMessages(rows, reversed: reversed)
-          return try PublisherReloadSnapshot(
-            messages: normalized,
-            metadata: loadedWindowMetadata(db, peer: peer, messages: normalized)
-          )
-        case let .replaceLatest(limit), let .mergeLatest(limit):
-          query = query.limit(limit)
-        case let .preserveRange(minDate, maxDate, limit):
-          query = query
-            .filter(Column("date") >= minDate)
-            .filter(Column("date") <= maxDate)
-            .limit(limit)
-      }
-
-      var fetched = try query.fetchAll(db)
-      switch mode {
-        case .replaceLatest, .mergeLatest:
-          fetched += try baseQuery(for: peer, currentUserId: currentUserId)
-            .filter(Column("messageId") <= 0)
-            .order(Column("date").desc)
-            .limit(60)
-            .fetchAll(db)
-        case .preserveRange:
-          // Authoritative history can change a shown row's date before its
-          // publication arrives. Re-read shown identities in this snapshot so
-          // stale date bounds cannot drop a row that still exists.
-          let fetchedIDs = Set(fetched.map(\.id))
-          fetched += try baseQuery(for: peer, currentUserId: currentUserId)
-            .filter(visibleIDs.contains(Column("globalId")))
-            .fetchAll(db)
-            .filter { !fetchedIDs.contains($0.id) }
-        case .around: break
-      }
-      let normalized = stableSortedMessages(fetched, reversed: reversed)
-      let messages = switch mode {
-        case .replaceLatest, .preserveRange, .around:
-          normalized
-        case .mergeLatest:
-          // Reloads also carry history clears and other database-only removals.
-          // Refresh the displayed rows in this same snapshot before merging so
-          // retaining a live window cannot resurrect deleted or stale rows.
-          try mergingLatestMessages(
-            existing: baseQuery(for: peer, currentUserId: currentUserId)
-              .filter(visibleIDs.contains(Column("globalId")))
-              .fetchAll(db),
-            latest: normalized, reversed: reversed
-          )
-      }
-      return try PublisherReloadSnapshot(
-        messages: messages,
-        metadata: loadedWindowMetadata(db, peer: peer, messages: messages)
+      try publisherReloadSnapshot(
+        db, peer: peer, chatId: chatId, currentUserId: currentUserId, reversed: reversed,
+        existingMessages: existingMessages, mode: mode
       )
     }
+  }
+
+  private nonisolated static func publisherReloadSnapshot(
+    _ db: Database,
+    peer: Peer,
+    chatId: Int64?,
+    currentUserId: Int64?,
+    reversed: Bool,
+    existingMessages: [FullMessage],
+    mode: PublisherReloadMode
+  ) throws -> PublisherReloadSnapshot {
+    let visibleIDs = Set(existingMessages.map(\.id))
+    var query = latestWindowQuery(peer: peer, chatId: chatId, currentUserId: currentUserId)
+    switch mode {
+      case let .around(anchorID, limit):
+        var rows = try localWindowAroundCoordinate(db, peer: peer, chatId: chatId, messageID: anchorID, limit: limit) ??
+          baseQuery(for: peer, chatId: chatId, currentUserId: currentUserId)
+            .filter(visibleIDs.contains(Column("globalId")))
+            .fetchAll(db)
+        // A send shown in this window has no history coordinate yet, or
+        // gained one after it was shown. Keep it by identity.
+        let loadedIDs = Set(rows.map(\.id))
+        let shownPendingIDs = existingMessages.filter { $0.message.messageId <= 0 }.map(\.id)
+        rows += try baseQuery(for: peer, chatId: chatId, currentUserId: currentUserId)
+          .filter(shownPendingIDs.contains(Column("globalId")))
+          .fetchAll(db)
+          .filter { !loadedIDs.contains($0.id) }
+        let normalized = stableSortedMessages(rows, reversed: reversed)
+        return try PublisherReloadSnapshot(
+          messages: normalized,
+          metadata: loadedWindowMetadata(db, peer: peer, messages: normalized)
+        )
+      case let .replaceLatest(limit), let .mergeLatest(limit):
+        query = query.limit(limit)
+      case let .preserveRange(minDate, maxDate, limit):
+        query = query
+          .filter(Column("date") >= minDate)
+          .filter(Column("date") <= maxDate)
+          .limit(limit)
+    }
+
+    var fetched = try query.fetchAll(db)
+    switch mode {
+      case .replaceLatest, .mergeLatest:
+        fetched += try baseQuery(for: peer, chatId: chatId, currentUserId: currentUserId)
+          .filter(Column("messageId") <= 0)
+          .order(Column("date").desc)
+          .limit(60)
+          .fetchAll(db)
+      case .preserveRange:
+        // Authoritative history can change a shown row's date before its
+        // publication arrives. Re-read shown identities in this snapshot so
+        // stale date bounds cannot drop a row that still exists.
+        let fetchedIDs = Set(fetched.map(\.id))
+        fetched += try baseQuery(for: peer, chatId: chatId, currentUserId: currentUserId)
+          .filter(visibleIDs.contains(Column("globalId")))
+          .fetchAll(db)
+          .filter { !fetchedIDs.contains($0.id) }
+      case .around: break
+    }
+    let normalized = stableSortedMessages(fetched, reversed: reversed)
+    let messages = switch mode {
+      case .replaceLatest, .preserveRange, .around:
+        normalized
+      case .mergeLatest:
+        // Reloads also carry history clears and other database-only removals.
+        // Refresh the displayed rows in this same snapshot before merging so
+        // retaining a live window cannot resurrect deleted or stale rows.
+        try mergingLatestMessages(
+          existing: baseQuery(for: peer, chatId: chatId, currentUserId: currentUserId)
+            .filter(visibleIDs.contains(Column("globalId")))
+            .fetchAll(db),
+          latest: normalized, reversed: reversed
+        )
+    }
+    return try PublisherReloadSnapshot(
+      messages: messages,
+      metadata: loadedWindowMetadata(db, peer: peer, messages: messages)
+    )
   }
 
   private func reapplyingPendingAcknowledgements(to message: FullMessage) -> FullMessage {
@@ -1370,12 +1449,13 @@ public class MessagesProgressiveViewModel {
   public nonisolated static func localWindowAroundCoordinate(
     _ db: Database,
     peer: Peer,
+    chatId: Int64? = nil,
     messageID: Int64,
     limit: Int
   ) throws -> [FullMessage]? {
     guard 1 ... MessageHistoryHole.positiveMessageIDMax ~= messageID else { return nil }
 
-    let query = baseQuery(for: peer)
+    let query = baseQuery(for: peer, chatId: chatId)
     let totalWindow = max(60, limit)
     let beforeLimit = max(20, totalWindow / 2)
     let exact = try query
@@ -1424,6 +1504,7 @@ public class MessagesProgressiveViewModel {
         try Self.localWindowAroundCoordinate(
           db,
           peer: peer,
+          chatId: chatId,
           messageID: messageId,
           limit: initialLimit
         )
@@ -1469,13 +1550,16 @@ public class MessagesProgressiveViewModel {
   }
 
   private func buildBaseOrderedQuery() -> QueryInterfaceRequest<FullMessage> {
-    baseQuery()
-      .filter(Column("messageId") > 0)
-      .order(Column("messageId").desc)
+    Self.latestWindowQuery(peer: peer, chatId: chatId, currentUserId: currentUserId)
   }
 
-  private nonisolated static func buildBaseOrderedQuery(for peer: Peer) -> QueryInterfaceRequest<FullMessage> {
-    baseQuery(for: peer)
+  /// Saved messages newest first, the query behind opening a chat at its latest messages.
+  nonisolated static func latestWindowQuery(
+    peer: Peer,
+    chatId: Int64?,
+    currentUserId: Int64?
+  ) -> QueryInterfaceRequest<FullMessage> {
+    baseQuery(for: peer, chatId: chatId, currentUserId: currentUserId)
       .filter(Column("messageId") > 0)
       .order(Column("messageId").desc)
   }
@@ -1562,7 +1646,8 @@ public class MessagesProgressiveViewModel {
     }
 
     let result = try db.reader.read { db in
-      try Self.buildAdditionalMessagesQuery(peer: peer, request: request, currentUserId: currentUserId).fetchAll(db)
+      try Self.buildAdditionalMessagesQuery(peer: peer, chatId: chatId, request: request, currentUserId: currentUserId)
+        .fetchAll(db)
     }
     fetchedCount = result.count
     return result
@@ -1571,6 +1656,7 @@ public class MessagesProgressiveViewModel {
   private nonisolated static func fetchAdditionalMessages(
     db appDatabase: AppDatabase,
     peer: Peer,
+    chatId: Int64?,
     request: AdditionalLoadRequest,
     currentUserId: Int64?
   ) async throws -> [FullMessage] {
@@ -1588,7 +1674,8 @@ public class MessagesProgressiveViewModel {
     }
 
     let result = try await appDatabase.reader.read { db in
-      try buildAdditionalMessagesQuery(peer: peer, request: request, currentUserId: currentUserId).fetchAll(db)
+      try buildAdditionalMessagesQuery(peer: peer, chatId: chatId, request: request, currentUserId: currentUserId)
+        .fetchAll(db)
     }
     fetchedCount = result.count
     return result
@@ -1596,10 +1683,11 @@ public class MessagesProgressiveViewModel {
 
   private nonisolated static func buildAdditionalMessagesQuery(
     peer: Peer,
+    chatId: Int64?,
     request: AdditionalLoadRequest,
     currentUserId: Int64?
   ) -> QueryInterfaceRequest<FullMessage> {
-    let query = baseQuery(for: peer, currentUserId: currentUserId)
+    let query = baseQuery(for: peer, chatId: chatId, currentUserId: currentUserId)
 
     switch request.direction {
       case .older:
@@ -1777,7 +1865,7 @@ public class MessagesProgressiveViewModel {
 
     do {
       var messagesBatch = try await Self.fetchAdditionalMessages(
-        db: db, peer: peer, request: request, currentUserId: currentUserId
+        db: db, peer: peer, chatId: chatId, request: request, currentUserId: currentUserId
       )
       let rawCount = messagesBatch.count
       guard !Task.isCancelled, generation == reloadGeneration else { return false }
@@ -1813,11 +1901,12 @@ public class MessagesProgressiveViewModel {
   }
 
   private func baseQuery() -> QueryInterfaceRequest<FullMessage> {
-    Self.baseQuery(for: peer, currentUserId: currentUserId)
+    Self.baseQuery(for: peer, chatId: chatId, currentUserId: currentUserId)
   }
 
   private nonisolated static func baseQuery(
     for peer: Peer,
+    chatId: Int64? = nil,
     currentUserId: Int64? = Auth.shared.getCurrentUserId()
   ) -> QueryInterfaceRequest<FullMessage> {
     var query = FullMessage.queryRequest(currentUserId: currentUserId)
@@ -1831,6 +1920,11 @@ public class MessagesProgressiveViewModel {
         query =
           query
             .filter(Column("peerUserId") == id)
+    }
+    // Peer columns are indexed by date, so filtering on them alone makes SQLite sort or scan
+    // to order by message id. The chat's (chatId, messageId) index serves both directly.
+    if let chatId = chatId ?? peer.asThreadId() {
+      query = query.filter(Column("chatId") == chatId)
     }
     return query
   }
@@ -1929,9 +2023,31 @@ public final class MessagesPublisher {
   private var databaseReadDrainWaiters: [CheckedContinuation<Void, Never>] = []
   private var nextAcknowledgementProjectionToken: Int64 = 1
   private var pendingAcknowledgements: [OptimisticAcknowledgementKey: PendingAcknowledgement] = [:]
+  private var publicationCounts: [Peer: UInt64] = [:]
+  // Pin changes name a chat, not a peer, so they count for every peer.
+  private var pinPublicationCount: UInt64 = 0
+  private var publicationCounter: AnyCancellable?
 
   init(database: AppDatabase) {
     db = database
+    publicationCounter = publisher.sink { [weak self] update in
+      guard let self else { return }
+      switch update {
+        case let .add(change): publicationCounts[change.peer, default: 0] &+= 1
+        case let .update(change): publicationCounts[change.peer, default: 0] &+= 1
+        case let .acknowledgements(change): publicationCounts[change.peer, default: 0] &+= 1
+        case let .delete(change): publicationCounts[change.peer, default: 0] &+= 1
+        case let .reload(peer, _): publicationCounts[peer, default: 0] &+= 1
+        case .pinnedMessages: pinPublicationCount &+= 1
+      }
+    }
+  }
+
+  /// Changes whenever an update that can affect `peer`'s transcript is published. A view model
+  /// built from a database read compares it with the value taken before that read: a difference
+  /// means updates were published while nothing was subscribed to receive them.
+  public func publicationRevision(for peer: Peer) -> UInt64 {
+    publicationCounts[peer, default: 0] &+ pinPublicationCount
   }
 
   /// Process teardown closes admission synchronously before the shared SQLCipher owner drains.

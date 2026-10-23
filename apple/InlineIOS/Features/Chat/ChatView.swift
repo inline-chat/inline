@@ -64,6 +64,7 @@ struct ChatView: View {
   @State private var translationPlacement: ChatTranslationPlacement
   @State private var presentedChatInfo: SpaceChatItem?
   @State private var renameRequested = false
+  @State private var initialMessages: InitialMessages
   @Namespace private var chatInfoTransition
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
@@ -107,6 +108,24 @@ struct ChatView: View {
     case chatInfo
   }
 
+  /// The first message window the list is built from.
+  private enum InitialMessages {
+    /// A read for this chat is still running; the list waits for it off the main thread.
+    case pending
+    /// Nil when nothing was read ahead or the read failed; the list then reads its window itself.
+    case ready(MessagesProgressiveViewModel.InitialState?)
+
+    /// Built in the first frame: from a window read before navigation, or, when nothing read
+    /// ahead (notifications, deep links, restoration, previews), by the list reading it
+    /// synchronously rather than showing an empty chat.
+    @MainActor
+    static func firstFrame(for peer: Peer) -> InitialMessages {
+      let preparation = ChatOpenPreparation.shared
+      if let state = preparation.readyState(for: peer) { return .ready(state) }
+      return preparation.isPreparing(peer: peer) ? .pending : .ready(nil)
+    }
+  }
+
   init(
     peer: Peer,
     contextSpaceId: Int64? = nil,
@@ -127,6 +146,7 @@ struct ChatView: View {
     _translationPlacement = State(
       initialValue: TranslationState.shared.isTranslationEnabled(for: peer) ? .toolbar : .moreMenu
     )
+    _initialMessages = State(initialValue: .firstFrame(for: peer))
     _fullChatViewModel = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peer)
     }
@@ -236,6 +256,11 @@ struct ChatView: View {
     }
     .task {
       await fetchChatIfNeeded()
+    }
+    .task {
+      if case .pending = initialMessages {
+        initialMessages = .ready(await ChatOpenPreparation.shared.state(for: peerId))
+      }
     }
     .task(id: fullChatViewModel.chatItem?.dialog.id) {
       guard !preview, fullChatViewModel.chatItem?.dialog != nil else { return }
@@ -602,7 +627,7 @@ struct ChatView: View {
 
   @ViewBuilder
   private var chatContent: some View {
-    if let chat = fullChatViewModel.chat {
+    if let chat = fullChatViewModel.chat, case let .ready(initialState) = initialMessages {
       ChatViewUIKit(
         peerId: peerId,
         chatId: chat.id,
@@ -612,6 +637,7 @@ struct ChatView: View {
         focusMessageExactly: focusMessageExactly,
         focusRequestRevision: router.presentationResetRevision,
         collapsedMaxId: fullChatViewModel.chatItem?.dialog.collapsedMaxId,
+        initialMessages: initialState,
         isPreview: preview,
         theme: themeManager.snapshot(variant: ThemeAppearanceVariant(colorScheme: colorScheme)),
         onRenameThread: {

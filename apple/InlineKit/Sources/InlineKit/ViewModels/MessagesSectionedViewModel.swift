@@ -93,6 +93,7 @@ public class MessagesSectionedViewModel {
 
   public init(
     peer: Peer,
+    chatId: Int64? = nil,
     reversed: Bool = false,
     initialState: MessagesProgressiveViewModel.InitialState? = nil,
     collapsedMaxId: Int64? = nil,
@@ -102,6 +103,7 @@ public class MessagesSectionedViewModel {
     self.collapsedMaxId = collapsedMaxId
     progressiveViewModel = MessagesProgressiveViewModel(
       peer: peer,
+      chatId: chatId,
       reversed: reversed,
       initialState: initialState,
       database: database,

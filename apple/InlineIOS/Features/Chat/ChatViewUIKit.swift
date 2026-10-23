@@ -11,6 +11,8 @@ public class ChatContainerView: UIView {
   let chatId: Int64?
   let spaceId: Int64?
   private var collapsedMaxId: Int64?
+  /// The first message window, read before this view was built; nil makes the list read it.
+  private let initialMessages: MessagesProgressiveViewModel.InitialState?
   private let isPreview: Bool
   private(set) var theme: IOSThemeSnapshot
   private var lastAppliedDraftSignature: DraftSignature?
@@ -52,7 +54,14 @@ public class ChatContainerView: UIView {
       collapsedMaxId: collapsedMaxId,
       isPreview: isPreview,
       sendAnimationCoordinator: sendAnimationCoordinator,
-      theme: theme
+      theme: theme,
+      viewModel: MessagesSectionedViewModel(
+        peer: peerId,
+        chatId: chatId,
+        reversed: true,
+        initialState: initialMessages,
+        collapsedMaxId: collapsedMaxId
+      )
     )
     if !isPreview {
       collectionView.onContextMenuWillDisplay = { [weak self] in
@@ -201,6 +210,7 @@ public class ChatContainerView: UIView {
     chatId: Int64?,
     spaceId: Int64?,
     collapsedMaxId: Int64? = nil,
+    initialMessages: MessagesProgressiveViewModel.InitialState? = nil,
     isPreview: Bool = false,
     theme: IOSThemeSnapshot
   ) {
@@ -208,6 +218,7 @@ public class ChatContainerView: UIView {
     self.chatId = chatId
     self.spaceId = spaceId
     self.collapsedMaxId = collapsedMaxId
+    self.initialMessages = initialMessages
     self.isPreview = isPreview
     self.theme = theme
 
@@ -965,6 +976,7 @@ struct ChatViewUIKit: UIViewRepresentable {
   let focusMessageExactly: Bool
   let focusRequestRevision: Int
   let collapsedMaxId: Int64?
+  var initialMessages: MessagesProgressiveViewModel.InitialState? = nil
   let isPreview: Bool
   let theme: IOSThemeSnapshot
   var onRenameThread: (() -> Bool)? = nil
@@ -975,6 +987,7 @@ struct ChatViewUIKit: UIViewRepresentable {
       chatId: chatId,
       spaceId: spaceId,
       collapsedMaxId: collapsedMaxId,
+      initialMessages: initialMessages,
       isPreview: isPreview,
       theme: theme
     )

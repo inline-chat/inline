@@ -68,7 +68,7 @@ struct PinnedMessagePublicationTests {
     let publisher = MessagesPublisher(database: database)
     let model = MessagesProgressiveViewModel(
       peer: .thread(id: 81_003),
-      initialState: .init(messages: [reply], threadAnchor: anchor, loadedWindowMetadata: .init(messages: [reply], holes: [])),
+      initialState: .init(messages: [reply], threadAnchor: .resolved(anchor), loadedWindowMetadata: .init(messages: [reply], holes: [])),
       database: database,
       publisher: publisher
     )

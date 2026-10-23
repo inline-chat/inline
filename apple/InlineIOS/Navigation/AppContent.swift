@@ -430,6 +430,13 @@ extension Destination {
     if case .voiceMessage = self { true } else { false }
   }
 
+  /// A chat reads its first message window off the main thread before it is shown, so the list
+  /// is built from it in its first frame.
+  @MainActor func preparationBeforeShowing() -> (@MainActor @Sendable () async -> Void)? {
+    guard let peer = chatPeer else { return nil }
+    return { _ = await ChatOpenPreparation.shared.state(for: peer) }
+  }
+
   /// The conversation represented by the visible route, including child pages
   /// that do not themselves render ChatView.
   var sidebarPeer: Peer? {
@@ -446,9 +453,12 @@ extension Router {
   /// current route as one visit; phone retains its existing push behavior.
   func openPrimaryDestination(_ destination: Destination) {
     if tracksHistory {
-      self[IPadNavigationLane.canonicalTab] = [destination]
-      if selectedTab != IPadNavigationLane.canonicalTab {
-        selectedTab = IPadNavigationLane.canonicalTab
+      afterPreparing(destination) { [weak self] in
+        guard let self else { return }
+        self[IPadNavigationLane.canonicalTab] = [destination]
+        if selectedTab != IPadNavigationLane.canonicalTab {
+          selectedTab = IPadNavigationLane.canonicalTab
+        }
       }
     } else {
       push(destination)

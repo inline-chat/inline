@@ -212,7 +212,10 @@ private struct Fixture {
   @MainActor func model(rows: [FullMessage], parent: FullMessage? = nil) -> MessagesProgressiveViewModel {
     MessagesProgressiveViewModel(
       peer: .thread(id: 1),
-      initialState: .init(messages: rows, threadAnchor: parent, loadedWindowMetadata: metadata(for: rows)),
+      initialState: .init(
+        messages: rows, threadAnchor: parent.map { .resolved($0) } ?? .unresolved,
+        loadedWindowMetadata: metadata(for: rows)
+      ),
       database: database, publisher: publisher, currentUserId: 1
     )
   }

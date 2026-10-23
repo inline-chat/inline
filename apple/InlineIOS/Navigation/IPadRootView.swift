@@ -47,7 +47,7 @@ struct IPadRootView<Sidebar: View>: View {
           }
         )
         if let replacement {
-          path = replacement
+          router.showPath(replacement, for: tab)
         }
       }
     )

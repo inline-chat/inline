@@ -67,6 +67,10 @@ actor ChatOpenPreloader {
       try Task.checkCancellation()
     }
 
+    // Taken before the read, so updates published while it runs are reconciled by the view model.
+    let publicationRevision = await MainActor.run {
+      MessagesPublisher.shared.publicationRevision(for: peer)
+    }
     let payload = try await database.reader.read { db in
       let readSignpostID = OSSignpostID(log: Self.signpostLog)
       os_signpost(
@@ -174,8 +178,9 @@ actor ChatOpenPreloader {
 
       let messagesInitialState = MessagesProgressiveViewModel.InitialState(
         messages: messages,
-        threadAnchor: threadAnchor,
-        loadedWindowMetadata: loadedWindowMetadata
+        threadAnchor: .resolved(threadAnchor),
+        loadedWindowMetadata: loadedWindowMetadata,
+        publicationRevision: publicationRevision
       )
 
       return PreparedChatPayload(
