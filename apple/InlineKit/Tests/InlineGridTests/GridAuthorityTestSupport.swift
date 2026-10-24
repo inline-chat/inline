@@ -179,6 +179,7 @@ final class GridAuthorityMembershipControl {
   var setupGrid: GetGridResult?
   var setupConnection: GridConnectionCredentials?
   private(set) var submissions: [Submission] = []
+  private(set) var prepareConnectionCount = 0
   private(set) var completed = Set<Int>()
   private var pending: [Int: CheckedContinuation<RpcResult.OneOf_Result?, any Error>] = [:]
 
@@ -193,6 +194,7 @@ final class GridAuthorityMembershipControl {
         guard let setupGrid else { throw GridRoomAPIError.invalidResponse }
         return .getGrid(setupGrid)
       case .prepareGridConnection:
+        prepareConnectionCount += 1
         guard let setupConnection else { throw GridRoomAPIError.invalidResponse }
         return .prepareGridConnection(.with { $0.connection = setupConnection })
       case .setGridAvatarMicrophoneEnabled:
