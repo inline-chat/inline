@@ -18,6 +18,7 @@ protocol GridRTCDriver: Sendable {
   func setOutputVolume(_ volume: Float, in room: GridRTCRoomHandle) async
   func quiesceLocally(_ room: GridRTCRoomHandle) async -> GridLocalRoomQuiescenceReceipt
   func diagnosticsSample(_ room: GridRTCRoomHandle) async -> InlineRTCDiagnosticsSample?
+  func connectPhase(_ room: GridRTCRoomHandle) async -> GridRTCConnectPhase?
 }
 
 extension GridRTCDriver {
@@ -32,6 +33,26 @@ extension GridRTCDriver {
   func setOutputVolume(_: Float, in _: GridRTCRoomHandle) async {}
 
   func diagnosticsSample(_: GridRTCRoomHandle) async -> InlineRTCDiagnosticsSample? { nil }
+
+  func connectPhase(_: GridRTCRoomHandle) async -> GridRTCConnectPhase? { nil }
+}
+
+/// Where a slow initial connect is, without identifiers. Once signalling has
+/// joined, the server's join response arrived and a stall lies in ICE, DTLS or
+/// data-channel establishment rather than the WebSocket, TLS or server.
+struct GridRTCConnectPhase: Equatable, Sendable {
+  let signalJoined: Bool
+  let providerState: String
+  let serverRegion: String?
+
+  var logDescription: String {
+    "signal_joined=\(signalJoined) provider_state=\(providerState) region=\(serverRegion ?? "unknown")"
+  }
+
+  /// Region is free text from the server, so it stays in the local log only.
+  var breadcrumbData: [String: Any] {
+    ["signal_joined": signalJoined, "provider_state": providerState]
+  }
 }
 
 actor GridRTCEngine {
@@ -569,9 +590,9 @@ actor GridRTCEngine {
       } catch {
         guard demand.target == target else { continue }
         guard backoffTask == nil else { return }
+        // A retried failure goes straight to backing off: `.failed` is
+        // reserved for states nothing will retry, which need the user.
         lastError = String(describing: error)
-        state = .failed(target, String(describing: error))
-        emitSnapshot()
         recordConnectFailure(error, attempt: recoveryAttempt)
         scheduleBackoff(for: target)
         return
@@ -757,8 +778,9 @@ actor GridRTCEngine {
     guard delay > 0 else { return nil }
     return Task { [weak self] in
       try? await Task.sleep(for: .milliseconds(Int(delay * 1_000)))
-      guard !Task.isCancelled else { return }
-      await self?.initialConnectIsSlow(room: room, target: target, startedAt: startedAt)
+      guard !Task.isCancelled, let self else { return }
+      let phase = await self.driver.connectPhase(room)
+      await self.initialConnectIsSlow(room: room, target: target, startedAt: startedAt, phase: phase)
     }
   }
 
@@ -784,20 +806,22 @@ actor GridRTCEngine {
   private func initialConnectIsSlow(
     room: GridRTCRoomHandle,
     target: InlineRTCSessionID,
-    startedAt: Date
+    startedAt: Date,
+    phase: GridRTCConnectPhase?
   ) {
     guard self.room == room, roomTarget == target, demand.target == target,
           case .connecting = state
     else { return }
     let elapsed = elapsedMilliseconds(since: startedAt)
     log.warning(
-      "GRID_ENGINE phase=rtc_initial_connect_slow session=\(target.rawValue) elapsed_ms=\(elapsed)"
+      "GRID_ENGINE phase=rtc_initial_connect_slow session=\(target.rawValue) elapsed_ms=\(elapsed) \(phase?.logDescription ?? "provider_phase=unknown")"
     )
     PerformanceTrace.breadcrumb(
       "Grid RTC initial connection is slow",
       category: "Grid.RTC",
       level: .warning,
-      data: ["elapsed_ms": elapsed, "attempt": recoveryAttempt]
+      data: (["elapsed_ms": elapsed, "attempt": recoveryAttempt] as [String: Any])
+        .merging(phase?.breadcrumbData ?? [:]) { $1 }
     )
   }
 
@@ -822,6 +846,21 @@ actor GridRTCEngine {
       level: .error,
       data: ["elapsed_ms": elapsed, "attempt": recoveryAttempt]
     )
+    // Recovery never waits on the provider it is recovering from. The phase
+    // is sampled best effort beside it and reported on its own line.
+    let attempt = recoveryAttempt
+    Task { [driver, log] in
+      guard let phase = await driver.connectPhase(room) else { return }
+      log.warning(
+        "GRID_ENGINE phase=rtc_initial_connect_watchdog_phase session=\(target.rawValue) elapsed_ms=\(elapsed) \(phase.logDescription)"
+      )
+      PerformanceTrace.breadcrumb(
+        "Grid RTC initial connection watchdog phase",
+        category: "Grid.RTC",
+        level: .warning,
+        data: (["elapsed_ms": elapsed, "attempt": attempt] as [String: Any]).merging(phase.breadcrumbData) { $1 }
+      )
+    }
     recordAbandonedProviderOperation(
       id: reconcileTaskID,
       operation: "connect",
@@ -834,8 +873,6 @@ actor GridRTCEngine {
     cancelReconcile()
     detach(room)
     beginRetirement(of: room, target: target)
-    state = .failed(target, error.localizedDescription)
-    emitSnapshot()
     scheduleBackoff(for: target)
   }
 
@@ -995,8 +1032,6 @@ actor GridRTCEngine {
     cancelReconcile()
     detach(room)
     beginRetirement(of: room, target: target)
-    state = .failed(target, error.localizedDescription)
-    emitSnapshot()
     scheduleBackoff(for: target)
   }
 

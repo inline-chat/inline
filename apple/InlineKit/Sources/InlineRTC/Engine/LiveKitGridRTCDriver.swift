@@ -463,6 +463,26 @@ actor LiveKitGridRTCDriver: GridRTCDriver {
     )
   }
 
+  func connectPhase(_ room: GridRTCRoomHandle) async -> GridRTCConnectPhase? {
+    guard let context = rooms[room], !context.isLocallyRetired else { return nil }
+    let room = context.room
+    return GridRTCConnectPhase(
+      signalJoined: room.serverNodeId != nil || room.sid != nil,
+      providerState: Self.providerStateName(room.connectionState),
+      serverRegion: room.serverRegion
+    )
+  }
+
+  private static func providerStateName(_ state: ConnectionState) -> String {
+    switch state {
+      case .disconnected: "disconnected"
+      case .connecting: "connecting"
+      case .reconnecting: "reconnecting"
+      case .connected: "connected"
+      case .disconnecting: "disconnecting"
+    }
+  }
+
   private func context(for room: GridRTCRoomHandle) throws -> RoomContext {
     guard let context = rooms[room] else {
       throw LiveKitGridRTCDriverError.roomNotFound
