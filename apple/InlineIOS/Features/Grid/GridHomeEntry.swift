@@ -52,7 +52,7 @@ extension View {
 private struct GridHomeEntryModifier: ViewModifier {
   let isVisible: Bool
   let onOpen: () -> Void
-  private let store = GridRuntime.shared.rooms
+  private let store = GridIOSRuntime.shared.rooms
 
   func body(content: Content) -> some View {
     Group {

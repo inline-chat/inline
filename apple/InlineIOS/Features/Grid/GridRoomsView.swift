@@ -16,7 +16,7 @@ struct GridDestinationView: View {
 
   var body: some View {
     GridRoomsView(
-      store: GridRuntime.shared.rooms,
+      store: GridIOSRuntime.shared.rooms,
       spaces: spaceList.spaces,
       initialSpaceID: initialSpaceID
     )

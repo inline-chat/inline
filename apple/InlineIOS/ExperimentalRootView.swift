@@ -894,7 +894,7 @@ private struct ExperimentalAuthedRootView: View {
   }
 
   private func openGrid() {
-    guard GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).isEligible else { return }
+    guard GridHomeEntryProjection(store: GridIOSRuntime.shared.rooms, spaceID: nil).isEligible else { return }
     openHomeDestination(.grid(initialSpaceID: nav.activeSpaceId))
   }
 
@@ -1198,7 +1198,7 @@ private struct ExperimentalAuthedRootView: View {
       onManage: activeSpace.map { space in
         { openHomeDestination(.spaceSettings(spaceId: space.id)) }
       },
-      onGrid: GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).showsMenuEntry
+      onGrid: GridHomeEntryProjection(store: GridIOSRuntime.shared.rooms, spaceID: nil).showsMenuEntry
         ? openGrid
         : nil
     )

@@ -172,7 +172,7 @@ struct SpaceSettingsView: View {
 
 private struct SpaceGridSettingsSection: View {
   let spaceId: Int64
-  private let store = GridRuntime.shared.rooms
+  private let store = GridIOSRuntime.shared.rooms
   @State private var isUpdating = false
   @State private var failed = false
 

@@ -68,7 +68,7 @@ struct HomeToolbarContent: ToolbarContent {
   @ViewBuilder
   private var dotsButton: some View {
     Menu {
-      if GridHomeEntryProjection(store: GridRuntime.shared.rooms, spaceID: nil).showsMenuEntry {
+      if GridHomeEntryProjection(store: GridIOSRuntime.shared.rooms, spaceID: nil).showsMenuEntry {
         Button("Grid", systemImage: "square.grid.2x2", action: onOpenGrid)
       }
 
