@@ -36,7 +36,8 @@ export const BOT_UPDATE_QUEUE_LIMITS = {
 
 const pollLeaseMs = 55_000
 // Recheck the durable queue when another Machine writes or a local wake is missed.
-const pollFallbackMs = 2_000
+// Same-process appends, replacements and webhook changes wake waiters directly.
+const pollFallbackMs = 10_000
 const deliveryLeaseMs = 30_000
 const cleanupBatchSize = 1_000
 const log = new Log("db.models.botUpdates")
@@ -212,6 +213,13 @@ async function queue(input: {
   return outcome
 }
 
+const currentPoll = (botUserId: number, claim: PollClaim) => and(
+  eq(botUpdateStreams.botUserId, botUserId),
+  eq(botUpdateStreams.pollLeaseToken, claim.token),
+  eq(botUpdateStreams.configGeneration, claim.generation),
+  isNull(botUpdateStreams.webhookUrl),
+)
+
 async function configurePoll(
   botUserId: number,
   claim: PollClaim,
@@ -227,12 +235,7 @@ async function configurePoll(
       ...(input.message_trigger === undefined ? {} : { messageTrigger: input.message_trigger }),
       updatedAt: new Date(),
     })
-    .where(and(
-      eq(botUpdateStreams.botUserId, botUserId),
-      eq(botUpdateStreams.pollLeaseToken, claim.token),
-      eq(botUpdateStreams.configGeneration, claim.generation),
-      isNull(botUpdateStreams.webhookUrl),
-    ))
+    .where(currentPoll(botUserId, claim))
     .returning()
   if (!updated) throw new InlineError(InlineError.ApiError.POLL_CONFLICT)
   return updated
@@ -249,15 +252,31 @@ async function requireCurrentPoll(
   const [stream] = await query
     .select()
     .from(botUpdateStreams)
-    .where(and(
-      eq(botUpdateStreams.botUserId, botUserId),
-      eq(botUpdateStreams.pollLeaseToken, claim.token),
-      eq(botUpdateStreams.configGeneration, claim.generation),
-      isNull(botUpdateStreams.webhookUrl),
-    ))
+    .where(currentPoll(botUserId, claim))
     .limit(1)
   if (!stream) throw new InlineError(InlineError.ApiError.POLL_CONFLICT)
   return stream
+}
+
+/**
+ * Verifies the poll lease and reads the first pending page in one statement,
+ * so an idle long-poll wake costs a single round trip. No row means the lease
+ * was replaced; a row without an update means nothing is pending.
+ */
+async function readFirstPendingPage(botUserId: number, claim: PollClaim, limit: number): Promise<DbBotUpdate[]> {
+  const rows = await db
+    .select({ update: botUpdates })
+    .from(botUpdateStreams)
+    .leftJoin(botUpdates, and(
+      eq(botUpdates.botUserId, botUpdateStreams.botUserId),
+      gt(botUpdates.updateId, botUpdateStreams.acknowledgedUpdateId),
+      gt(botUpdates.expiresAt, new Date()),
+    ))
+    .where(currentPoll(botUserId, claim))
+    .orderBy(asc(botUpdates.updateId))
+    .limit(limit)
+  if (rows.length === 0) throw new InlineError(InlineError.ApiError.POLL_CONFLICT)
+  return rows.flatMap(({ update }) => update ? [update] : [])
 }
 
 async function acknowledgeThrough(
@@ -426,14 +445,26 @@ export const takeUpdatesWithinResponseLimit = (
 }
 
 async function readPending(botUserId: number, limit: number, claim: PollClaim): Promise<BotUpdate[]> {
-  const stream = await requireCurrentPoll(db, botUserId, claim)
+  let batchLimit = Math.min(100, cleanupBatchSize)
+  let rows = await readFirstPendingPage(botUserId, claim, batchLimit)
+  // The lease and the empty page were read in one snapshot; nothing to filter or recheck.
+  if (rows.length === 0) return []
   const candidates: Array<{ row: DbBotUpdate; update: BotUpdate }> = []
   const corrupted: DbBotUpdate[] = []
-  let cursor = stream.acknowledgedUpdateId
   let scanned = 0
-  while (candidates.length < limit && scanned < cleanupBatchSize) {
-    const batchLimit = Math.min(100, cleanupBatchSize - scanned)
-    const rows = await db
+  while (rows.length > 0) {
+    scanned += rows.length
+    for (const row of rows) {
+      try {
+        candidates.push({ row, update: decryptUpdate(row.payloadEncrypted) })
+      } catch {
+        corrupted.push(row)
+      }
+    }
+    if (rows.length < batchLimit || candidates.length >= limit || scanned >= cleanupBatchSize) break
+    const cursor = rows[rows.length - 1]!.updateId
+    batchLimit = Math.min(100, cleanupBatchSize - scanned)
+    rows = await db
       .select()
       .from(botUpdates)
       .where(and(
@@ -443,17 +474,6 @@ async function readPending(botUserId: number, limit: number, claim: PollClaim): 
       ))
       .orderBy(asc(botUpdates.updateId))
       .limit(batchLimit)
-    if (rows.length === 0) break
-    scanned += rows.length
-    cursor = rows[rows.length - 1]!.updateId
-    for (const row of rows) {
-      try {
-        candidates.push({ row, update: decryptUpdate(row.payloadEncrypted) })
-      } catch {
-        corrupted.push(row)
-      }
-    }
-    if (rows.length < batchLimit) break
   }
 
   const { accessible, inaccessible } = await accessibleUpdateRows(botUserId, candidates)
