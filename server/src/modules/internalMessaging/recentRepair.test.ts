@@ -136,7 +136,7 @@ test("no connected sockets skips discovery while bounded expiry cleanup continue
   state.epochs.clear()
   repair.start()
   await repair.poll()
-  state.now += 4_999
+  state.now += 59_999
   await repair.poll()
   expect(state.cleanups).toBe(1)
   state.now += 1

@@ -14,6 +14,8 @@ const POLL_MS = 1_000
 const CATCHUP_POLL_MS = 100
 const LIVE_GRACE_MS = 1_000
 const CLEANUP_MS = 5_000
+// A process without sockets (a warm standby) still expires rows, at a slower cadence.
+const IDLE_CLEANUP_MS = 60_000
 const MAX_PENDING = 4_096
 const MAX_RECEIPTS = 16_384
 const MAX_REPAIRS_PER_TICK = 16
@@ -237,7 +239,7 @@ export class RecentRealtimeRepair {
       const deleted = await this.source.cleanup()
       this.expiredRowsCleaned += deleted
       if (deleted >= 256) this.fullCleanupBatches += 1
-      this.nextCleanupAt = now + (deleted >= 256 ? CATCHUP_POLL_MS : CLEANUP_MS)
+      this.nextCleanupAt = now + (deleted >= 256 ? CATCHUP_POLL_MS : this.users.size > 0 ? CLEANUP_MS : IDLE_CLEANUP_MS)
       if (!this.active) return
     }
     if (this.users.size > 0 && discover) {
