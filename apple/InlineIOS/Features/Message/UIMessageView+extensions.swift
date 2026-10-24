@@ -108,7 +108,7 @@ final class MessageBubbleView: UIView {
     return views
   }
 
-  func highlight(color: UIColor) {
+  func highlight(color: UIColor, fadeIn: TimeInterval = 0.18, hold: TimeInterval = 1.0, fadeOut: TimeInterval = 0.5) {
     let fill: MessageBubbleFillView
     if let highlightFillView {
       fill = highlightFillView
@@ -128,10 +128,12 @@ final class MessageBubbleView: UIView {
 
     // The normal fill updates its gradient with actions disabled, so animating
     // backgroundColor cannot produce a pulse. Keep the highlight independent.
+    let duration = fadeIn + hold + fadeOut
+    guard duration > 0 else { return }
     let pulse = CAKeyframeAnimation(keyPath: "opacity")
-    pulse.values = [0, 1, 1, 0]
-    pulse.keyTimes = [0, 0.2, 0.45, 1]
-    pulse.duration = 0.9
+    pulse.values = [fadeIn > 0 ? 0 : 1, 1, 1, 0]
+    pulse.keyTimes = [0, fadeIn / duration, (fadeIn + hold) / duration, 1].map { NSNumber(value: $0) }
+    pulse.duration = duration
     fill.layer.add(pulse, forKey: "messageHighlight")
   }
 

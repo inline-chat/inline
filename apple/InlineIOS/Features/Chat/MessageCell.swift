@@ -866,13 +866,21 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     onUserTap?(from.id)
   }
 
-  func highlightBubble() {
+  static let focusHighlightFadeIn: TimeInterval = 0.18
+  static let focusHighlightHold: TimeInterval = 1.0
+
+  /// `fadeIn: false` re-applies a highlight interrupted by reconfiguration.
+  func highlightBubble(hold: TimeInterval = focusHighlightHold, fadeIn: Bool = true) {
     guard let messageView else { return }
     guard !isServiceMessage else { return }
     let highlightColor = messageView.outgoing
       ? (theme?.outgoingBubble.uiColor ?? .systemBlue).lighten(by: 0.3)
       : (theme?.primary.uiColor ?? .systemBlue).withAlphaComponent(0.4)
-    messageView.bubbleView.highlight(color: highlightColor)
+    messageView.bubbleView.highlight(
+      color: highlightColor,
+      fadeIn: fadeIn ? Self.focusHighlightFadeIn : 0,
+      hold: hold
+    )
     messageView.highlightMediaOverlay()
   }
 

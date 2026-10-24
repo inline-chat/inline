@@ -29,6 +29,8 @@ class MessageListAppKit: NSViewController {
 
   private let chatRows: ChatRowListViewModel
   private let showUnreadAfter: Int64?
+  /// Link/search target that owns the first viewport instead of the live bottom.
+  private var initialTargetMessageId: Int64?
   private let initialPinnedMessage: PreparedPinnedMessage?
   private let surfaceStyle: ChatViewAppearance.SurfaceStyle
   private let additionalTopContentInset: CGFloat
@@ -157,6 +159,7 @@ class MessageListAppKit: NSViewController {
     chat: Chat,
     showUnreadAfter: Int64? = nil,
     initialState: MessagesProgressiveViewModel.InitialState? = nil,
+    initialTargetMessageId: Int64? = nil,
     collapsedMaxId: Int64? = nil,
     initialPinnedMessage: PreparedPinnedMessage? = nil,
     surfaceStyle: ChatViewAppearance.SurfaceStyle = .content,
@@ -166,6 +169,7 @@ class MessageListAppKit: NSViewController {
     self.peerId = peerId
     self.chat = chat
     self.showUnreadAfter = showUnreadAfter
+    self.initialTargetMessageId = initialTargetMessageId
     self.initialPinnedMessage = initialPinnedMessage
     self.surfaceStyle = surfaceStyle
     self.additionalTopContentInset = additionalTopContentInset
@@ -2219,13 +2223,18 @@ class MessageListAppKit: NSViewController {
         // fullWidthAsyncCalc(maintainScroll: true)
       }
 
-      scrollToBottom(animated: false)
+      // A targeted open must never paint the live bottom first; that also
+      // overrides any later scroll request queued before this first layout.
+      if !centerInitialTargetIfNeeded() {
+        scrollToBottom(animated: false)
+      }
 
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
         guard let self else { return }
         // Finalize heights one last time to ensure no broken heights on initial load
         needsInitialScroll = false
         scheduleAvatarOverlaySync()
+        focusInitialTargetIfNeeded()
       }
     }
 
@@ -2239,6 +2248,34 @@ class MessageListAppKit: NSViewController {
         scrollToBottom(animated: false)
       }
     }
+  }
+
+  /// Positions the first viewport on the initial target without animation.
+  private func centerInitialTargetIfNeeded() -> Bool {
+    guard let targetId = initialTargetMessageId,
+          let stableId = messages.first(where: { $0.message.messageId == targetId })?.id,
+          let row = chatRows.rowIndex(forMessageStableId: stableId)
+    else { return false }
+
+    let viewportHeight = scrollView.contentView.bounds.height
+    let documentHeight = scrollView.documentView?.frame.height ?? 0
+    let maxY = max(0, documentHeight - viewportHeight)
+    let targetY = min(maxY, max(0, tableView.rect(ofRow: row).midY - (viewportHeight / 2)))
+
+    beginProgrammaticScroll()
+    scrollView.contentView.scroll(to: NSPoint(x: 0, y: targetY))
+    scrollView.reflectScrolledClipView(scrollView.contentView)
+    endProgrammaticScroll()
+    return true
+  }
+
+  /// Runs once initial measurement settles: re-centers on final heights,
+  /// highlights the target, and refreshes bottom state skipped during setup.
+  private func focusInitialTargetIfNeeded() {
+    guard let targetId = initialTargetMessageId else { return }
+    initialTargetMessageId = nil
+    handleBoundsChange()
+    scrollToMsgAndHighlight(ScrollToMessageRequest(messageId: targetId, reason: .link))
   }
 
   private func scheduleChatNavigationReadyAfterInitialLayout() {

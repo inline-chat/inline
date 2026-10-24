@@ -105,6 +105,9 @@ final class MessagesCollectionView: UICollectionView {
   private var lastKnownNavBarHeight: CGFloat = 0
   private var needsContentInsetUpdateAfterContextMenu = false
   private var pendingScrollMessageID: Int64?
+  /// Initial opens jump without animation; later inset/layout passes would
+  /// otherwise cancel an in-flight animation and leave the chat at the bottom.
+  private var pendingScrollAnimated = true
   private var pendingScrollLoadTask: Task<Void, Never>?
   private var returnToLatestTask: Task<Void, Never>?
   private var messageFocusRevision: UInt64 = 0
@@ -281,6 +284,9 @@ final class MessagesCollectionView: UICollectionView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
+    if pendingScrollMessageID != nil, pendingScrollLoadTask == nil {
+      resolvePendingMessageScroll()
+    }
     coordinator.syncAvatarOverlay(animate: false)
     reconcileScrollAffordance()
     syncVisibleBubbleGradients()
@@ -408,6 +414,7 @@ final class MessagesCollectionView: UICollectionView {
     returnToLatestTask = nil
     messageFocusRevision &+= 1
     pendingScrollMessageID = messageID
+    pendingScrollAnimated = window != nil
     pendingScrollLoadTask?.cancel()
     pendingScrollLoadTask = nil
 
@@ -533,18 +540,23 @@ final class MessagesCollectionView: UICollectionView {
     ),
       isValidIndexPath(indexPath)
     else { return false }
+    // The row exists but scrolling before the first in-window layout is lost;
+    // keep the request pending for `layoutSubviews`.
+    guard window != nil, bounds.height > 0 else { return true }
 
+    let animated = pendingScrollAnimated
     pendingScrollMessageID = nil
     pendingScrollLoadTask?.cancel()
     pendingScrollLoadTask = nil
     for cell in visibleCells {
       (cell as? MessageCollectionViewCell)?.clearHighlight()
     }
-    scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
+    scrollToItem(at: indexPath, at: .centeredVertically, animated: animated)
     guard shouldHighlight else { return true }
 
     let revision = messageFocusRevision
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+    // An initial open waits out the push transition so the highlight is seen.
+    DispatchQueue.main.asyncAfter(deadline: .now() + (animated ? 0.35 : 0.55)) { [weak self] in
       guard let self, messageFocusRevision == revision,
             let currentIndexPath = findIndexPath(
               forMessageId: displayedMessageID,
@@ -555,6 +567,7 @@ final class MessagesCollectionView: UICollectionView {
       for cell in visibleCells {
         (cell as? MessageCollectionViewCell)?.clearHighlight()
       }
+      coordinator.beginFocusHighlight(messageID: displayedMessageID)
       if isValidIndexPath(currentIndexPath),
          let cell = cellForItem(at: currentIndexPath) as? MessageCollectionViewCell
       {
@@ -1329,6 +1342,8 @@ private extension MessagesCollectionView {
     private var theme: IOSThemeSnapshot
     private let messageViewImplementation: MessageViewImplementation
     private weak var collectionContextMenu: UIContextMenuInteraction?
+    /// Focus highlight that must survive cell reconfiguration until it ends.
+    private var focusHighlight: (messageID: Int64, endsAt: CFTimeInterval)?
     private var reactionPickerPresentation: ReactionEmojiPickerPresentation?
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
@@ -1875,6 +1890,18 @@ private extension MessagesCollectionView {
       olderHistoryPagination.reset()
       newerLoadTask?.cancel()
       return viewModel.loadLocalWindowAroundMessage(messageId: messageID)
+    }
+
+    func beginFocusHighlight(messageID: Int64) {
+      let duration = MessageCollectionViewCell.focusHighlightFadeIn + MessageCollectionViewCell.focusHighlightHold
+      focusHighlight = (messageID, CACurrentMediaTime() + duration)
+    }
+
+    /// Hold time left for a message whose focus highlight is still showing.
+    func focusHighlightRemaining(for messageID: Int64) -> TimeInterval? {
+      guard let focusHighlight, focusHighlight.messageID == messageID else { return nil }
+      let remaining = focusHighlight.endsAt - CACurrentMediaTime()
+      return remaining > 0 ? remaining : nil
     }
 
     func nearestDisplayedMessageID(to coordinate: Int64) -> Int64? {
@@ -2776,6 +2803,14 @@ private extension MessagesCollectionView {
             cell.alpha = 1
             cell.revealSendAnimationTarget()
           }
+        }
+
+        // Reconfiguring or reusing the cell drops its highlight; keep an active one.
+        if !item.isThreadAnchor,
+           let remaining = focusHighlightRemaining(for: message.message.messageId)
+        {
+          cell.clearHighlight()
+          cell.highlightBubble(hold: remaining, fadeIn: false)
         }
 
         cell.onUserTap = { userId in
