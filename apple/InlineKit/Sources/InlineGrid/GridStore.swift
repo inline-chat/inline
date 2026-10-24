@@ -64,6 +64,10 @@ public final class GridRoomService {
   }
 
   @ObservationIgnored private var platformEffects = GridPlatformEffects()
+  /// A cold start may resume the call the server still lists for this
+  /// session, once, until the user's first explicit Grid action in this
+  /// process. Resuming can then never undo a choice the user made.
+  @ObservationIgnored private var mayResumeAfterRestart = true
   @ObservationIgnored private let realtime: RealtimeV2
   @ObservationIgnored private let auth: AuthHandle
   @ObservationIgnored private var authAuthorityObserver: NSObjectProtocol?
@@ -116,6 +120,7 @@ public final class GridRoomService {
   @ObservationIgnored private var mediaInteractionStartedAt: Date?
   @ObservationIgnored private let log = Log.scoped("GridRoomService")
   private static let aloneMediaGraceSeconds = 5
+  private static let connectedCredentialRefreshMargin: TimeInterval = 90
 
   init(
     realtime: RealtimeV2 = Api.realtime,
@@ -488,6 +493,7 @@ public final class GridRoomService {
   }
 
   public func createAndJoin(spaceID: Int64) {
+    mayResumeAfterRestart = false
     guard let accountToken = beginMembershipClaim() else { return }
     let expectedMembershipID = observedMembershipFence()
     let startedAt = Date()
@@ -513,6 +519,7 @@ public final class GridRoomService {
   }
 
   public func join(roomID: Int64) {
+    mayResumeAfterRestart = false
     guard let destination = grids.values.first(where: { $0.rooms.contains(where: { $0.id == roomID }) }),
           let accountToken = beginMembershipClaim()
     else { return }
@@ -548,6 +555,13 @@ public final class GridRoomService {
   /// Explicitly resumes a cold process or moves the same call from another
   /// device. Server ownership alone never admits media after browsing.
   public func moveCallHere() {
+    mayResumeAfterRestart = false
+    moveCall(automatic: false)
+  }
+
+  /// Both paths start listen-only. An automatic resume leaves the saved
+  /// microphone preference alone; the microphone never opens on its own.
+  private func moveCall(automatic: Bool) {
     guard callTransferEnabled, let call = currentCall,
           !membershipMutationInFlight,
           let accountToken = try? auth.beginAccountMutation()
@@ -560,7 +574,7 @@ public final class GridRoomService {
     cancelPendingMembershipClaim = false
     membershipMutationRevision &+= 1
     mediaCoordinator.prepareForExplicitJoin()
-    mediaCoordinator.setMicrophoneEnabled(false)
+    mediaCoordinator.setMicrophoneEnabled(false, persist: !automatic)
     membershipSync.submit(GridMembershipOperation(
       kind: .move(callID: call.callID, roomID: call.roomID),
       spaceID: call.spaceID,
@@ -576,6 +590,7 @@ public final class GridRoomService {
   }
 
   public func leaveCurrentRoom(spaceID: Int64) {
+    mayResumeAfterRestart = false
     // A hanging claim must never make Leave or Cancel unable to stop locally.
     if membershipMutationInFlight {
       withdrawLocalAdmission()
@@ -1354,7 +1369,7 @@ public final class GridRoomService {
         log.debug(
           "GRID_TRACE phase=click_to_connected elapsed_ms=\(totalMilliseconds) rtc_ms=\(rtcConnectMilliseconds ?? -1)"
         )
-      case .microphoneSafetyPaused:
+      case .microphoneEffectiveStateChanged:
         if let grid = grids.values.first(where: { $0.hasCurrentRoomID }) {
           syncMicrophoneStateIfNeeded(grid: grid)
         }
@@ -1587,20 +1602,24 @@ public final class GridRoomService {
       return
     }
     reconcileMediaDemand()
-    // A LiveKit token is only admission material. Once this exact generation
-    // has an established transport, refreshing an expired token on every
-    // presence heartbeat adds server work without helping the active room.
-    // A later disconnect clears this state; the RTC engine then requests fresh
-    // credentials before its next connection attempt.
+    // While connected, keep this generation's token fresh: a rebuild needs one,
+    // and the client may not be able to reach the server then (an iPhone in
+    // the background suspends realtime as soon as media drops). The presence
+    // heartbeat calls this every 30 s, so a refresh lands well before expiry.
     if mediaCoordinator.isConnected(to: target) {
+      guard !mediaCoordinator.hasUsableCredentials(
+        for: target,
+        minimumRemaining: Self.connectedCredentialRefreshMargin
+      ) else {
+        resetCredentialRetry()
+        return
+      }
+    } else if mediaCoordinator.hasUsableCredentials(for: target) {
       resetCredentialRetry()
       return
+    } else {
+      mediaCoordinator.invalidateCredentials(for: target)
     }
-    if mediaCoordinator.hasUsableCredentials(for: target) {
-      resetCredentialRetry()
-      return
-    }
-    mediaCoordinator.invalidateCredentials(for: target)
     guard pendingCredentialTarget != target else { return }
 
     pendingCredentialTarget = target
@@ -2089,6 +2108,20 @@ public final class GridRoomService {
     reconcileLocalAdmission()
     reconcileAvatarStateOwnership()
     reconcileMediaDemand()
+    resumeAfterRestartIfNeeded()
+  }
+
+  /// After a normal restart the server still lists this session in its call.
+  /// Resume it so a restart never pushes the user out of the room.
+  private func resumeAfterRestartIfNeeded() {
+    guard mayResumeAfterRestart, callTransferEnabled,
+          let call = currentCall, call.ownedByCurrentSession, !call.callID.isEmpty,
+          localAdmission == nil, !membershipMutationInFlight,
+          platformEffects.isApplicationActive?() ?? true
+    else { return }
+    mayResumeAfterRestart = false
+    log.debug("GRID_TRACE phase=resume_after_restart")
+    moveCall(automatic: true)
   }
 
   private func admission(

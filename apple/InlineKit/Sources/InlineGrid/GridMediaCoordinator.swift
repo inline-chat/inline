@@ -6,7 +6,9 @@ enum GridMediaCoordinatorEvent: Sendable {
   case credentialsNeeded(GridMediaTarget)
   case connected(GridMediaTarget, rtcConnectMilliseconds: Int?)
   case screenShareContextChanged
-  case microphoneSafetyPaused
+  /// The microphone's effective state changed without a user toggle (a
+  /// safety pause, its resume, or lost permission); sync it to the room.
+  case microphoneEffectiveStateChanged
   case audioEligibilityChanged(Bool)
 }
 
@@ -32,6 +34,10 @@ final class GridMediaCoordinator {
   private var microphoneEnabled: Bool
   private var microphoneCapturePrepared = false
   private var lastSafetyPauseRevision: UInt64 = 0
+  /// iOS: audio is paused for safety (route lost, interruption). Capture stops
+  /// and the room sees the user muted, but their microphone choice is kept
+  /// and returns when they resume audio. Nothing reopens it on its own.
+  private var microphoneSafetyPaused = false
   private var lastAudioEligibility = false
   private var microphoneIntentRevision = 0
   private var activeAutomaticMicrophoneChange: GridAutomaticMicrophoneChange?
@@ -159,9 +165,9 @@ final class GridMediaCoordinator {
     return true
   }
 
-  func hasUsableCredentials(for target: GridMediaTarget) -> Bool {
+  func hasUsableCredentials(for target: GridMediaTarget, minimumRemaining: TimeInterval = 5) -> Bool {
     credentials?.target == target.rtcSessionID
-      && (credentials?.expiresAt.timeIntervalSinceNow ?? 0) > 5
+      && (credentials?.expiresAt.timeIntervalSinceNow ?? 0) > minimumRemaining
   }
 
   func isConnected(to target: GridMediaTarget) -> Bool {
@@ -193,11 +199,14 @@ final class GridMediaCoordinator {
   }
 
   func toggleMicrophone() -> Bool {
-    setMicrophoneEnabled(!microphoneEnabled)
+    // Toggle what the user sees: during a safety pause that is muted.
+    setMicrophoneEnabled(!isMicrophoneEnabled)
   }
 
+  /// `persist: false` changes this call's intent without rewriting the saved
+  /// preference (used when a call resumes on its own after a restart).
   @discardableResult
-  func setMicrophoneEnabled(_ enabled: Bool) -> Bool {
+  func setMicrophoneEnabled(_ enabled: Bool, persist: Bool = true) -> Bool {
     #if os(iOS)
     if enabled, target == nil {
       return false
@@ -206,7 +215,13 @@ final class GridMediaCoordinator {
       microphoneCapturePrepared = true
     }
     #endif
+    // Any explicit choice ends a safety pause; the user has decided.
+    let wasSafetyPaused = microphoneSafetyPaused
+    microphoneSafetyPaused = false
     guard microphoneEnabled != enabled else {
+      if wasSafetyPaused {
+        presentationController.setMicrophoneEnabled(enabled)
+      }
       submitDemand()
       return enabled
     }
@@ -217,7 +232,9 @@ final class GridMediaCoordinator {
     microphoneIntentRevision &+= 1
     microphoneEnabled = enabled
     presentationController.setMicrophoneEnabled(enabled)
-    defaults.set(enabled, forKey: Self.microphoneEnabledKey)
+    if persist {
+      defaults.set(enabled, forKey: Self.microphoneEnabledKey)
+    }
     submitDemand()
     return enabled
   }
@@ -390,6 +407,18 @@ final class GridMediaCoordinator {
   }
 
   func retryAudio() {
+    #if os(iOS)
+    // Resuming audio is the user's action; restore the microphone they chose.
+    if microphoneSafetyPaused {
+      microphoneSafetyPaused = false
+      if microphoneEnabled, target != nil {
+        microphoneCapturePrepared = true
+      }
+      presentationController.setMicrophoneEnabled(microphoneEnabled)
+      submitDemand()
+      broadcast(.microphoneEffectiveStateChanged)
+    }
+    #endif
     engine.retryAudio()
   }
 
@@ -419,8 +448,10 @@ final class GridMediaCoordinator {
     return await engine.requestShutdownReceipt().value
   }
 
+  /// What the room should see: the user's choice, unless capture is paused
+  /// for safety.
   var isMicrophoneEnabled: Bool {
-    microphoneEnabled
+    microphoneEnabled && !microphoneSafetyPaused
   }
 
   var shouldAutoMuteWhenAlone: Bool {
@@ -481,15 +512,19 @@ final class GridMediaCoordinator {
     if snapshot.audio.safetyPauseRevision != lastSafetyPauseRevision {
       lastSafetyPauseRevision = snapshot.audio.safetyPauseRevision
       microphoneCapturePrepared = false
-      setMicrophoneEnabled(false)
-      broadcast(.microphoneSafetyPaused)
+      if microphoneEnabled {
+        microphoneSafetyPaused = true
+        presentationController.setMicrophoneEnabled(false)
+      }
+      submitDemand()
+      broadcast(.microphoneEffectiveStateChanged)
     }
     if snapshot.audio.microphonePermission == .denied || snapshot.audio.microphonePermission == .restricted,
        microphoneEnabled
     {
       microphoneCapturePrepared = false
       setMicrophoneEnabled(false)
-      broadcast(.microphoneSafetyPaused)
+      broadcast(.microphoneEffectiveStateChanged)
     }
     #endif
     presentationController.apply(audio: snapshot.audio)
@@ -517,7 +552,15 @@ final class GridMediaCoordinator {
     } else {
       connectedTarget = nil
     }
-    let audioEligible = target != nil && connectedTarget != nil
+    // Retain realtime while this call is live or recovering for its target,
+    // not only while connected: a background iPhone needs it to renew
+    // presence and fetch credentials during a rebuild. A terminal failure
+    // or a stopped audio engine ends retention so the app can suspend.
+    let isRecoveringTarget = switch snapshot.rtc.state {
+    case .idle, .failed: false
+    default: snapshot.rtc.target == target?.rtcSessionID
+    }
+    let audioEligible = target != nil && (connectedTarget != nil || isRecoveringTarget)
       && (snapshot.audio.isCaptureHealthy || snapshot.audio.isPlayoutHealthy)
     if audioEligible != lastAudioEligibility {
       lastAudioEligibility = audioEligible

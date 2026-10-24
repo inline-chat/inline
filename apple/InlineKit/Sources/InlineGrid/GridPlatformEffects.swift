@@ -18,6 +18,9 @@ public struct GridPlatformEffects {
   public var openScreenShare: ((InlineProtocol.User, InlineRTCScreenShare, GridRoomService) -> Void)?
   public var presentScreenShareChange: ((GridScreenShareChange, GridRoomService) -> Void)?
   public var showError: ((String) -> Void)?
+  /// Whether the app is in the foreground. Unset means always (macOS); iOS
+  /// never starts call media on its own while the app is in the background.
+  public var isApplicationActive: (() -> Bool)?
 
   public init() {}
 }
