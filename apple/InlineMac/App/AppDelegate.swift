@@ -165,6 +165,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       }
       .store(in: &cancellables)
     setupGlobalHotkeys()
+    GridFloatingCallController.shared.start(rooms: dependencies.grid)
     setupNotificationsSoundSetting()
     launchAtLoginController.start()
     TimezoneManager.shared.start()

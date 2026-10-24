@@ -767,6 +767,17 @@ public final class GridRoomService {
     return room
   }
 
+  /// The room this session is joined to, across all loaded space grids.
+  public var currentSessionRoom: GridRoom? {
+    for grid in grids.values where grid.hasCurrentRoomID {
+      if let room = grid.rooms.first(where: { $0.id == grid.currentRoomID }),
+         room.avatars.contains(where: \.ownedByCurrentSession) {
+        return room
+      }
+    }
+    return nil
+  }
+
   public func toggleCurrentMicrophone() {
     guard let grid = grids.values.first(where: { grid in
       guard grid.hasCurrentRoomID,
