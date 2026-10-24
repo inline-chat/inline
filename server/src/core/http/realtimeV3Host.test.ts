@@ -444,7 +444,7 @@ describe("Inline Protocol WebSocket carrier", () => {
       wallClock: () => wall,
       monotonicClock: () => monotonic,
     })))
-    wall += 21_000
+    wall -= 21_000
     monotonic += 500
     const response = transport.handleVerification(
       new Request("https://api.inline.chat/.well-known/inline-protocol"),
@@ -541,7 +541,7 @@ describe("Inline Protocol WebSocket carrier", () => {
     }))
     const transport = makeInlineProtocolRealtimeTransport(runtime)
 
-    wall += 21_000
+    wall -= 21_000
     monotonic += 500
     const request = new Request("http://inline.test/realtime/v3")
 

@@ -249,7 +249,7 @@ describe("shared readiness database probe", () => {
     expect(draining).toMatchObject({ draining: true, ok: false, revision: gitCommitSha, checks: { database: { ok: true }, broker: { ok: false } } })
     shuttingDown = false
     monotonic = 500
-    wall += 21_000
+    wall -= 21_000
     expect((await check()).checks.clock).toMatchObject({ ok: false, error: "clock_step_detected" })
     expect(probes).toBe(1)
   })

@@ -25,7 +25,7 @@ describe("InlineProtocolClock", () => {
     })
   })
 
-  it("detects a wall-clock step relative to monotonic time", () => {
+  it("detects a backward wall-clock step relative to monotonic time", () => {
     let wall = 1_000_000
     let monotonic = 10_000
     const clock = new InlineProtocolClock({
@@ -33,14 +33,34 @@ describe("InlineProtocolClock", () => {
       monotonicClock: () => monotonic,
     })
 
-    wall += 21_000
+    wall -= 21_000
     monotonic += 500
 
     expect(clock.sample()).toMatchObject({
       ok: false,
       error: "clock_step_detected",
-      stepMillis: 20_500,
+      stepMillis: -21_500,
     })
     expect(() => clock.assertHealthy()).toThrow("clock is unhealthy")
+  })
+
+  it("stays healthy across a forward step such as host sleep", () => {
+    let wall = 1_000_000
+    let monotonic = 10_000
+    const clock = new InlineProtocolClock({
+      wallClock: () => wall,
+      monotonicClock: () => monotonic,
+    })
+
+    wall += 48 * 60_000
+    monotonic += 500
+
+    expect(clock.sample()).toMatchObject({
+      ok: true,
+      status: "warning",
+      warning: "clock_step_warning",
+    })
+    expect(() => clock.assertHealthy()).not.toThrow()
+    expect(clock.sample()).toMatchObject({ ok: true, status: "ok" })
   })
 })

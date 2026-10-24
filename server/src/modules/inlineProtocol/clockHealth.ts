@@ -35,10 +35,14 @@ const checkedThreshold = (value: number, name: string): number => {
 const rounded = (value: number): number => Math.round(value)
 
 /**
- * Protects protocol time from large local wall-clock steps and, when supplied
- * a database time sample, from node-to-node UTC offset. A failure is latched:
- * protocol traffic remains disabled until the process restarts with a healthy
- * clock instead of silently resuming after generating unsafe message IDs.
+ * Protects protocol time from large backward wall-clock steps and, when
+ * supplied a database time sample, from node-to-node UTC offset. A failure is
+ * latched: protocol traffic remains disabled until the process restarts with a
+ * healthy clock instead of silently resuming after generating unsafe message IDs.
+ *
+ * Forward steps only warn. Host sleep pauses the monotonic clock on macOS, so a
+ * laptop dev server sees every wake as a forward step, and time moving forward
+ * cannot reorder IDs. A node pushed ahead of its peers still fails the offset check.
  */
 export class InlineProtocolClock {
   readonly #wallClock: () => number
@@ -77,7 +81,7 @@ export class InlineProtocolClock {
       : wallMillis - referenceTimeMillis
 
     if (!this.#failure) {
-      if (Math.abs(stepMillis) >= this.#failureMillis) {
+      if (stepMillis <= -this.#failureMillis) {
         this.#failure = "clock_step_detected"
       } else if (Math.abs(offsetMillis) >= this.#failureMillis) {
         this.#failure = "clock_offset_exceeded"
