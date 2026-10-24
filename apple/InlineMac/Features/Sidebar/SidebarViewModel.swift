@@ -580,7 +580,7 @@ final class SidebarViewModel {
     }
 
     if isInboxMode {
-      let active = projectedItems.filter { $0.open || $0.pinned }
+      let active = projectedItems.filter { $0.archived == false && ($0.open || $0.pinned) }
       let temporary = makeTemporaryItems(from: projectedItems, excluding: active)
       let activeChanged = activeItems != active
       let archivedChanged = archivedItems.isEmpty == false
