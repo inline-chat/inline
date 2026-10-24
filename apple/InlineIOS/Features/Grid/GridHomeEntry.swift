@@ -52,7 +52,6 @@ extension View {
 private struct GridHomeEntryModifier: ViewModifier {
   let isVisible: Bool
   let onOpen: () -> Void
-  @Environment(\.scenePhase) private var scenePhase
   private let store = GridRuntime.shared.rooms
 
   func body(content: Content) -> some View {
@@ -67,12 +66,9 @@ private struct GridHomeEntryModifier: ViewModifier {
         }
       }
     }
+    // Returning from the background reloads Home through the app's Grid
+    // wake hook, so this only covers first appearance.
     .task { await store.loadHome() }
-    .onChange(of: scenePhase) { _, phase in
-      if phase == .active {
-        Task { await store.loadHome() }
-      }
-    }
   }
 }
 
@@ -171,6 +167,7 @@ private struct GridHomeInCallCapsule: View {
   let spaceID: Int64
   let room: GridRoom?
   let onOpen: () -> Void
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// Others in the room; your own face adds nothing here.
   private var others: [GridAvatar] {
@@ -178,16 +175,20 @@ private struct GridHomeInCallCapsule: View {
   }
 
   var body: some View {
+    // Like Telegram's call bar: flat grey while connecting, green once live.
+    let link = GridCallLink(store: store)
+    let tint: Color = link.isInactive ? .secondary : .green
     HStack(spacing: 6) {
       Button(action: onOpen) {
         HStack(spacing: 6) {
           if !others.isEmpty {
             GridStackedAvatars(avatars: others, size: 22, levelForUser: { store.audioLevel(userID: $0) })
           }
-          Text(room.map(GridRoomTitle.title(for:)) ?? String(localized: "Grid"))
+          Text(link.statusText ?? room.map(GridRoomTitle.title(for:)) ?? String(localized: "Grid"))
             .font(.footnote.weight(.semibold))
-            .foregroundStyle(.green)
+            .foregroundStyle(tint)
             .lineLimit(1)
+            .contentTransition(.opacity)
         }
         .padding(.leading, others.isEmpty ? 6 : 0)
         .contentShape(Rectangle())
@@ -200,7 +201,8 @@ private struct GridHomeInCallCapsule: View {
     }
     .padding(.leading, 4)
     .padding(.trailing, 3)
-    .gridHomeCapsuleChrome(tint: .green)
+    .gridHomeCapsuleChrome(tint: tint)
+    .animation(reduceMotion ? nil : .linear(duration: 0.3), value: link)
   }
 }
 

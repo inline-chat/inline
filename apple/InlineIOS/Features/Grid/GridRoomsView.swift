@@ -53,6 +53,8 @@ struct GridRoomsView: View {
       && store.currentCall?.ownedByCurrentSession != false
   }
 
+  /// Retried connection problems show as Reconnecting. The engine reports
+  /// `.failed` only when nothing will retry, which needs the user's action.
   private var actionFailure: GridActionFailure? {
     let hasConnectionFailure = store.media.connectionState == .failed
     let connectionError = hasConnectionFailure ? store.media.lastConnectionError : nil
@@ -276,6 +278,63 @@ private struct GridSpacePicker: View {
   }
 }
 
+// MARK: - Call state
+
+/// The local call's media link as the interface presents it. Being alone in a
+/// room has no media session by design, so that is not a pending state.
+enum GridCallLink: Equatable {
+  case live
+  case alone
+  case connecting
+  case reconnecting
+  /// Nothing will retry; the Grid screen explains why and offers an action.
+  case failed
+
+  @MainActor
+  init(store: GridRoomService) {
+    switch store.media.connectionState {
+      case .connected: self = .live
+      case .disconnected: self = .alone
+      case .connecting: self = store.media.isReconnecting ? .reconnecting : .connecting
+      case .failed: self = .failed
+    }
+  }
+
+  var isPending: Bool {
+    self == .connecting || self == .reconnecting
+  }
+
+  /// Grey rather than green: the call is not carrying audio right now.
+  var isInactive: Bool {
+    isPending || self == .failed
+  }
+
+  var statusText: String? {
+    switch self {
+      case .connecting: String(localized: "Connecting…")
+      case .reconnecting: String(localized: "Reconnecting…")
+      case .failed: String(localized: "Audio unavailable")
+      case .live, .alone: nil
+    }
+  }
+}
+
+/// A rotating arc around your own face while the call connects.
+private struct GridConnectingRing: View {
+  @State private var isRotating = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    Circle()
+      .trim(from: 0, to: reduceMotion ? 1 : 0.3)
+      .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: reduceMotion ? [3, 4] : []))
+      .rotationEffect(.degrees(isRotating ? 360 : 0))
+      .animation(reduceMotion ? nil : .linear(duration: 1).repeatForever(autoreverses: false), value: isRotating)
+      .onAppear { isRotating = true }
+      .accessibilityHidden(true)
+  }
+}
+
 // MARK: - Rooms
 
 enum GridRoomTitle {
@@ -388,7 +447,7 @@ private struct GridRoomCapsule: View {
       if let name = GridRoomTitle.name(of: room) {
         Text(name)
           .font(.caption2.weight(.medium))
-          .foregroundStyle(isCurrent ? Color.green : .secondary)
+          .foregroundStyle(isCurrent ? currentTint : .secondary)
           .lineLimit(1)
           .padding(.leading, 6)
       }
@@ -415,6 +474,11 @@ private struct GridRoomCapsule: View {
     }
   }
 
+  /// Your room greys out while its media connects, then turns green.
+  private var currentTint: Color {
+    GridCallLink(store: store).isInactive ? .secondary : .green
+  }
+
   private var faces: some View {
     HStack(spacing: 6) {
       if room.avatars.isEmpty {
@@ -435,12 +499,12 @@ private struct GridRoomCapsule: View {
     }
     .padding(8)
     .background(
-      isCurrent ? Color.green.opacity(0.14) : Color.primary.opacity(0.05),
+      isCurrent ? currentTint.opacity(0.14) : Color.primary.opacity(0.05),
       in: RoundedRectangle(cornerRadius: 18, style: .continuous)
     )
     .overlay {
       RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .strokeBorder(isCurrent ? Color.green.opacity(0.5) : .clear, lineWidth: 1)
+        .strokeBorder(isCurrent ? currentTint.opacity(0.5) : .clear, lineWidth: 1)
     }
     .overlay(alignment: .bottomTrailing) {
       if room.locked {
@@ -514,6 +578,11 @@ private struct GridRoomFace: View {
       .padding(2)
       .overlay {
         Circle().strokeBorder(speaking ? Color.green : .clear, lineWidth: 2)
+      }
+      .overlay {
+        if isCurrentRoom, avatar.ownedByCurrentSession, GridCallLink(store: store).isPending {
+          GridConnectingRing()
+        }
       }
       .overlay(alignment: .bottomTrailing) {
         if isCurrentRoom, !avatar.microphoneEnabled {
@@ -621,6 +690,13 @@ private struct GridLocalCallControls: View {
           store.retryAudio()
         }
         .disabled(store.membershipMutationInFlight)
+      }
+
+      if let status = GridCallLink(store: store).statusText {
+        Text(status)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .contentTransition(.opacity)
       }
 
       HStack(spacing: 20) {

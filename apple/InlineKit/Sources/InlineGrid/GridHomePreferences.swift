@@ -7,15 +7,18 @@ import InlineProtocol
 final class GridHomePreferences {
   private let defaults: UserDefaults
   private let key = "grid.home.lastOpenedSpaces"
+  /// Read once: views sort spaces on every render, so this stays in memory
+  /// and is written through when it changes.
+  private var timestamps: [String: Double]
 
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
+    timestamps = defaults.dictionary(forKey: key) as? [String: Double] ?? [:]
   }
 
   func recordOpened(spaceID: Int64) {
-    var values = timestamps
-    values[String(spaceID)] = Date().timeIntervalSince1970
-    defaults.set(values, forKey: key)
+    timestamps[String(spaceID)] = Date().timeIntervalSince1970
+    defaults.set(timestamps, forKey: key)
   }
 
   func ordered(_ spaces: [GridHomeSpace]) -> [GridHomeSpace] {
@@ -32,9 +35,5 @@ final class GridHomePreferences {
       if lhsOpened != rhsOpened { return lhsOpened > rhsOpened }
       return lhs.spaceID < rhs.spaceID
     }
-  }
-
-  private var timestamps: [String: Double] {
-    defaults.dictionary(forKey: key) as? [String: Double] ?? [:]
   }
 }

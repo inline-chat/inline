@@ -1,5 +1,6 @@
 import Auth
 import Foundation
+import InlineGrid
 import InlineKit
 import Sentry
 import SwiftUI
@@ -38,6 +39,7 @@ private struct InlineSceneRoot: View {
   @StateObject private var themeManager = ThemeManager.shared
   @State private var sceneID = UUID()
   @State private var didRestoreScene = false
+  @State private var returningFromBackground = false
   @ObservedObject private var auth = Auth.shared
   @SceneStorage("ios.navigation.routerState.v1") private var routerState: Data?
   @Environment(\.scenePhase) private var scenePhase
@@ -100,9 +102,20 @@ private struct InlineSceneRoot: View {
         if newValue == .active {
           appDelegate.sceneRouterRegistry.activate(sceneID)
           synchronizeUserSettings()
+          // After a real trip to the background (not Control Center or a
+          // permission prompt), renew Grid presence and reconnect media now
+          // rather than at the next heartbeat. A process that never opened
+          // Grid has no runtime.
+          if returningFromBackground, auth.isLoggedIn, let grid = GridRuntime.existing {
+            Task { await grid.applicationDidWake() }
+          }
+          returningFromBackground = false
         } else {
           appDelegate.sceneRouterRegistry.deactivate(sceneID)
           Task { await NotificationSyncCleaner.shared.flush() }
+          if newValue == .background {
+            returningFromBackground = true
+          }
         }
       }
       .onChange(of: auth.currentUserId) { oldValue, newValue in

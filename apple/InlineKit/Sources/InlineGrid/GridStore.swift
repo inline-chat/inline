@@ -1634,7 +1634,7 @@ public final class GridRoomService {
       guard currentMediaTarget() == target,
             (try? auth.validateAccountMutation(admission.accountToken)) != nil
       else { return }
-      lastError = String(describing: error)
+      // Retried below with backoff, so it is not an error for the user.
       log.error(
         "GRID_ENGINE phase=credentials_fetch_failed room=\(room.id) generation=\(room.connection.generation)",
         error: error

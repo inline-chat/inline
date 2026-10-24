@@ -19,6 +19,9 @@ public enum GridScreenCaptureIssue: Equatable, Sendable {
 @Observable
 public final class GridMediaPresentation {
   public fileprivate(set) var connectionState: GridMediaConnectionStatus = .disconnected
+  /// True while an established or attempted call is being recovered, as
+  /// opposed to its first connect. Retries never surface as errors.
+  public fileprivate(set) var isReconnecting = false
   public fileprivate(set) var audioState: InlineRTCAudioState = .cold
   public fileprivate(set) var isAudioSafetyPaused = false
   public fileprivate(set) var isMicrophoneEnabled: Bool
@@ -109,6 +112,7 @@ public final class GridMediaPresentation {
 /// presentation reference and therefore cannot feed state back into its owner.
 @MainActor
 final class GridMediaPresentationController {
+  private var lastConnectedTarget: InlineRTCSessionID?
   let presentation: GridMediaPresentation
 
   init(
@@ -211,6 +215,18 @@ final class GridMediaPresentationController {
     case .connected: .connected
     case .failed: .failed
     default: .connecting
+    }
+    // Reconnecting means this target was live and is being recovered, so a
+    // whole recovery reads the same however many steps it passes through.
+    switch snapshot.state {
+    case let .connected(target): lastConnectedTarget = target
+    case .idle: lastConnectedTarget = nil
+    default: break
+    }
+    let recoveringConnectedTarget = lastConnectedTarget != nil && lastConnectedTarget == snapshot.target
+    presentation.isReconnecting = switch snapshot.state {
+    case .connected, .idle, .failed: false
+    default: recoveringConnectedTarget
     }
     presentation.participantAudioLevels = Dictionary(
       uniqueKeysWithValues: snapshot.participants.map {
