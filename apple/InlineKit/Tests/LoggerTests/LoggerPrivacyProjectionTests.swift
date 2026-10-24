@@ -253,6 +253,33 @@ struct LoggerPrivacyProjectionTests {
     #expect(try #require(projection.data["success"] as? Bool))
   }
 
+  @Test("grid connect phase breadcrumbs keep only bounded phase vocabulary")
+  func gridConnectPhaseBreadcrumbProjection() throws {
+    let projection = PerformanceTrace.privacySafeBreadcrumbProjection(
+      message: "Grid RTC initial connection is slow",
+      category: "Grid.RTC",
+      data: [
+        "elapsed_ms": 5_012,
+        "attempt": 1,
+        "signal_joined": true,
+        "provider_state": "connecting",
+        "region": "fra-node-7",
+      ]
+    )
+
+    #expect(projection.category == "Grid.RTC")
+    #expect(try #require(projection.data["signal_joined"] as? Bool))
+    #expect(projection.data["provider_state"] as? String == "connecting")
+    #expect(projection.data["region"] == nil)
+
+    let unknownState = PerformanceTrace.privacySafeBreadcrumbProjection(
+      message: "Grid RTC initial connection is slow",
+      category: "Grid.RTC",
+      data: ["provider_state": "wss://livekit.example/rtc?token=secret"]
+    )
+    #expect(unknownState.data["provider_state"] == nil)
+  }
+
   @Test("performance breadcrumbs bound unknown categories and metrics")
   func performanceBreadcrumbProjectionIsBounded() throws {
     let projection = PerformanceTrace.privacySafeBreadcrumbProjection(

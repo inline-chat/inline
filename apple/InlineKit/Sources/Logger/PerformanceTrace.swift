@@ -154,6 +154,7 @@ public enum PerformanceTrace {
     "inbound_message_too_large",
     "interrupted",
     "requested",
+    "signal_joined",
     "success",
   ]
   private static let breadcrumbOpaqueIdentifierKeys: Set<String> = ["transition_id"]
@@ -174,6 +175,7 @@ public enum PerformanceTrace {
       "unexpected", "timeout", "server_rejected", "protocol", "storage",
     ],
     "fallback_reason": ["deadline", "startup_failure", "operator_preference"],
+    "provider_state": ["disconnected", "connecting", "reconnecting", "connected", "disconnecting"],
   ]
   private static let connectionReasonValues: Set<String> = [
     "none", "user_stop", "auth_lost", "auth_failed", "auth_timeout", "transport_error", "transport_disconnected",
