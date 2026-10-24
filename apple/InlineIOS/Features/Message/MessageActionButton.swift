@@ -10,7 +10,7 @@ final class MessageActionButton: UIButton {
   let spinner = UIActivityIndicatorView(style: .medium)
 
   private var outgoing = false
-  private var usesMessageView2Presentation = false
+  private var usesMinimalPresentation = false
 
   override var isHighlighted: Bool {
     didSet {
@@ -69,8 +69,9 @@ final class MessageActionButton: UIButton {
     setLoading(false)
   }
 
-  func useMessageView2Presentation() {
-    usesMessageView2Presentation = true
+  /// Taller, borderless, regular-weight style for buttons below a bubble.
+  func useMinimalPresentation() {
+    usesMinimalPresentation = true
     titleLabel?.font = .systemFont(ofSize: 14, weight: .regular)
     contentEdgeInsets = UIEdgeInsets(top: 9, left: 12, bottom: 9, right: 12)
     layer.cornerRadius = 12
@@ -85,7 +86,7 @@ final class MessageActionButton: UIButton {
     setTitleColor(textColor, for: .normal)
     setTitleColor(textColor.withAlphaComponent(0.45), for: .disabled)
 
-    if usesMessageView2Presentation {
+    if usesMinimalPresentation {
       layer.borderWidth = 0
       backgroundColor = outgoing
         ? UIColor.white.withAlphaComponent(isDark ? 0.14 : 0.11)

@@ -14,8 +14,8 @@ struct ExperimentalView: View {
   @AppStorage(ExperimentalFeatureFlags.richMessageCopyEditingKey)
   private var richMessageCopyEditingEnabled = false
 
-  @AppStorage(MessageView2Feature.preferenceKey)
-  private var messageView2Enabled = false
+  @AppStorage(NextMessageViewFeature.preferenceKey)
+  private var nextMessageViewEnabled = false
 
   var body: some View {
     List {
@@ -25,7 +25,7 @@ struct ExperimentalView: View {
       } header: {
         Text("Agents")
       } footer: {
-        Text("Show Working with a spinner and expandable agent steps. Requires an opted-in agent; expandable steps also require Message View 2. Restart Inline after changing.")
+        Text("Show Working with a spinner. Requires an opted-in agent. Restart Inline after changing.")
       }
 
       Section {
@@ -62,15 +62,15 @@ struct ExperimentalView: View {
           SettingsItem(
             icon: "text.bubble.fill",
             iconColor: .orange,
-            title: "Message View 2"
+            title: "Next Message View"
           ) {
-            Toggle("Message View 2", isOn: $messageView2Enabled)
+            Toggle("Next Message View", isOn: $nextMessageViewEnabled)
               .labelsHidden()
           }
         } header: {
           Text("Developer Tools")
         } footer: {
-          Text("Uses the experimental iOS message renderer. Reopen the chat after changing this setting.")
+          Text("Uses the next iOS message view as it is built. Until then, chats use the current view. Reopen the chat after changing this setting.")
         }
       }
     }

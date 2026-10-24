@@ -97,18 +97,18 @@ struct ContextMenuKeyboardTests {
     }
   }
 
-  @Test("Native menu displays the bubble before and after arrivals", arguments: [false, true], [false, true])
-  func nativePresentation(outgoing: Bool, usesV2: Bool) async throws {
-    try await checkNativePresentation(outgoing: outgoing, usesV2: usesV2)
+  @Test("Native menu displays the bubble before and after arrivals", arguments: [false, true])
+  func nativePresentation(outgoing: Bool) async throws {
+    try await checkNativePresentation(outgoing: outgoing)
   }
 
-  @Test("Long messages retain the full image in the shaped native preview", arguments: [false, true])
-  func longNativePresentation(usesV2: Bool) async throws {
-    try await checkNativePresentation(outgoing: true, usesV2: usesV2, repetitions: 60)
+  @Test("Long messages retain the full image in the shaped native preview")
+  func longNativePresentation() async throws {
+    try await checkNativePresentation(outgoing: true, repetitions: 60)
   }
 
-  private func checkNativePresentation(outgoing: Bool, usesV2: Bool, repetitions: Int = 3) async throws {
-    let fixture = try await Fixture(usesV2: usesV2, outgoing: outgoing, repetitions: repetitions)
+  private func checkNativePresentation(outgoing: Bool, repetitions: Int = 3) async throws {
+    let fixture = try await Fixture(outgoing: outgoing, repetitions: repetitions)
     defer { fixture.close() }
     fixture.window.makeKeyAndVisible()
     let list = fixture.list
@@ -222,13 +222,13 @@ struct ContextMenuKeyboardTests {
         .applying(CGAffineTransform(scaleX: screen.scale, y: screen.scale))
       let pixels = try #require(screen.cgImage?.cropping(to: rect))
       let image = UIImage(cgImage: pixels, scale: screen.scale, orientation: .up)
-      Attachment.record(Array(try #require(image.pngData())), named: "platter-\(outgoing)-\(usesV2)-\(label).png")
+      Attachment.record(Array(try #require(image.pngData())), named: "platter-\(outgoing)-\(label).png")
       let recognition = VNRecognizeTextRequest()
       recognition.recognitionLevel = .accurate
       try VNImageRequestHandler(cgImage: pixels).perform([recognition])
       let text = recognition.results?.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ") ?? ""
       #expect(text.contains("Keyboard lifecycle regression"))
-      Attachment.record(Array(try #require(screen.pngData())), named: "menu-\(outgoing)-\(usesV2)-\(label).png")
+      Attachment.record(Array(try #require(screen.pngData())), named: "menu-\(outgoing)-\(label).png")
     }
     try await capture("before")
     let count = fixture.displayedMessageCount
@@ -338,9 +338,9 @@ struct ContextMenuKeyboardTests {
     fixture.endMenu(configuration, animator: nil)
   }
 
-  @Test("Menu captures visible pixels before UIKit hides the source", arguments: [false, true])
-  func capturesBeforeHighlight(usesV2: Bool) async throws {
-    let fixture = try await Fixture(usesV2: usesV2)
+  @Test("Menu captures visible pixels before UIKit hides the source")
+  func capturesBeforeHighlight() async throws {
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let list = fixture.list
     let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
@@ -367,9 +367,9 @@ struct ContextMenuKeyboardTests {
     fixture.endMenu(configuration, animator: nil)
   }
 
-  @Test("Native lift uses the touched bubble and restores it with dismissal", arguments: [false, true])
-  func highlightsTouchedBubble(usesV2: Bool) async throws {
-    let fixture = try await Fixture(usesV2: usesV2)
+  @Test("Native lift uses the touched bubble and restores it with dismissal")
+  func highlightsTouchedBubble() async throws {
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let list = fixture.list
     let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
@@ -404,9 +404,9 @@ struct ContextMenuKeyboardTests {
     #expect(!bubble.isHidden)
   }
 
-  @Test("Arrivals remain visible while the menu snapshot stays intact", arguments: [false, true], [false, true])
-  func arrivalsWhileHoldingMenu(animated: Bool, usesV2: Bool) async throws {
-    let fixture = try await Fixture(usesV2: usesV2)
+  @Test("Arrivals remain visible while the menu snapshot stays intact", arguments: [false, true])
+  func arrivalsWhileHoldingMenu(animated: Bool) async throws {
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let list = fixture.list
     let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
@@ -550,9 +550,9 @@ struct ContextMenuKeyboardTests {
     fixture.endMenu(configuration, animator: nil)
   }
 
-  @Test("Reusing a menu source cell restores its original bubble", arguments: [false, true])
-  func restoresReusedSource(usesV2: Bool) async throws {
-    let fixture = try await Fixture(usesV2: usesV2)
+  @Test("Reusing a menu source cell restores its original bubble")
+  func restoresReusedSource() async throws {
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let list = fixture.list
     let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
@@ -569,9 +569,9 @@ struct ContextMenuKeyboardTests {
     fixture.endMenu(configuration, animator: nil)
   }
 
-  @Test("Preparing and reopening a real menu preserves source visibility", arguments: [false, true])
-  func sourceVisibilityAcrossConfigurations(usesV2: Bool) async throws {
-    let fixture = try await Fixture(usesV2: usesV2)
+  @Test("Preparing and reopening a real menu preserves source visibility")
+  func sourceVisibilityAcrossConfigurations() async throws {
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let list = fixture.list
     let indexPath = try #require(list.indexPathsForVisibleItems.sorted().first)
@@ -697,9 +697,9 @@ struct ContextMenuKeyboardTests {
     #expect(!fixture.list.isKeyboardVisible)
   }
 
-  @Test("Menu viewport survives intermediate keyboard frames", arguments: [false, true], [0.0, 20.0, 180.0])
-  func intermediateKeyboardRestoration(usesV2: Bool, distance: Double) async throws {
-    let fixture = try await Fixture(usesV2: usesV2)
+  @Test("Menu viewport survives intermediate keyboard frames", arguments: [0.0, 20.0, 180.0])
+  func intermediateKeyboardRestoration(distance: Double) async throws {
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let list = fixture.list
     fixture.keyboard(height: 300)
@@ -724,7 +724,7 @@ struct ContextMenuKeyboardTests {
 
   @Test("Late focus restoration keeps the viewport captured before menu dismissal")
   func focusRestorationAfterOffsetClamp() async throws {
-    let fixture = try await Fixture(usesV2: false)
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let list = fixture.list
     fixture.keyboard(height: 300)
@@ -747,7 +747,7 @@ struct ContextMenuKeyboardTests {
 
   @Test("Settled keyboard during menu dismissal restores before releasing the viewport")
   func keyboardSettlesBeforeMenuCompletion() async throws {
-    let fixture = try await Fixture(usesV2: false)
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let list = fixture.list
     fixture.keyboard(height: 300)
@@ -767,7 +767,7 @@ struct ContextMenuKeyboardTests {
 
   @Test("Last-message reaction resizing stays above the restored keyboard", arguments: [false, true])
   func reactionResizesDuringKeyboardRestoration(removing: Bool) async throws {
-    let fixture = try await Fixture(usesV2: false)
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let list = fixture.list
     var message = try #require(fixture.model.messages.first)
@@ -802,9 +802,9 @@ struct ContextMenuKeyboardTests {
     #expect(bottom <= visibleBottom + 0.5)
   }
 
-  @Test("Reply navigation supersedes menu keyboard restoration", arguments: [false, true], [false, true])
-  func navigationAfterMenuWithoutKeyboardTransition(usesV2: Bool, hideKeyboard: Bool) async throws {
-    let fixture = try await Fixture(usesV2: usesV2)
+  @Test("Reply navigation supersedes menu keyboard restoration", arguments: [false, true])
+  func navigationAfterMenuWithoutKeyboardTransition(hideKeyboard: Bool) async throws {
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let list = fixture.list
     fixture.keyboard(height: 300)
@@ -821,9 +821,9 @@ struct ContextMenuKeyboardTests {
     #expect(abs(list.contentOffset.y - navigated) < 0.5)
   }
 
-  @Test("Older-message viewport survives arrivals during menu keyboard restoration", arguments: [false, true])
-  func olderMessageAnchorSurvivesArrival(usesV2: Bool) async throws {
-    let fixture = try await Fixture(usesV2: usesV2)
+  @Test("Older-message viewport survives arrivals during menu keyboard restoration")
+  func olderMessageAnchorSurvivesArrival() async throws {
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let list = fixture.list
     fixture.keyboard(height: 300)
@@ -856,7 +856,7 @@ struct ContextMenuKeyboardTests {
     let publisher: MessagesPublisher
     let peer = Peer.user(id: 9_017)
 
-    init(usesV2: Bool = true, outgoing: Bool? = nil, repetitions: Int = 3) async throws {
+    init(outgoing: Bool? = nil, repetitions: Int = 3) async throws {
       let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
       window = UIWindow(windowScene: scene)
       let controller = UIViewController()
@@ -864,7 +864,7 @@ struct ContextMenuKeyboardTests {
       window.isHidden = false
       let database = AppDatabase.empty()
       publisher = MessagesPublisher(database: database)
-      let template = try #require(MessageView2PlaygroundFixtures.scenarios.first).message
+      let template = MessageTestFixtures.compactText()
       let rows = (1 ... 30).reversed().map { index -> FullMessage in
         var value = template
         value.message.globalId = 91_000 + Int64(index)
@@ -887,7 +887,7 @@ struct ContextMenuKeyboardTests {
       list = MessagesCollectionView(
         peerId: peer, chatId: 9_017, spaceId: nil, isPreview: true,
         theme: ThemeManager.shared.snapshot(variant: .light),
-        viewModel: model, messageViewImplementation: usesV2 ? .v2 : .legacy
+        viewModel: model
       )
       controller.view.addSubview(list)
       list.frame = controller.view.bounds

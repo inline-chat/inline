@@ -6,17 +6,14 @@ import UIKit
 @Suite("Chat Dynamic Type", .serialized)
 @MainActor
 struct ChatMessageTextSizeTests {
-  @Test("Both message renderers rebuild cached text at the selected size", arguments: [false, true])
-  func messageFonts(v2: Bool) throws {
-    var message = try #require(MessageView2PlaygroundFixtures.scenarios.first).message
+  @Test("The message view rebuilds cached text at the selected size")
+  func messageFonts() throws {
+    var message = MessageTestFixtures.compactText()
     message.message.text = "Readable text with enough words to wrap into several lines at a larger size."
     message.message.entities = nil
     message.message.blockContentPayload = nil
     let theme = ThemeManager.shared.snapshot(variant: .light)
-    let view: UIMessageView = v2
-      ? UIMessageView2(fullMessage: message, spaceId: nil, displayMode: .normal, bubbleTailSide: .none,
-                      maximumBubbleContentWidth: 280, theme: theme)
-      : UIMessageView(fullMessage: message, spaceId: nil, maximumBubbleContentWidth: 280, theme: theme)
+    let view = UIMessageView(fullMessage: message, spaceId: nil, maximumBubbleContentWidth: 280, theme: theme)
 
     func font(at category: UIContentSizeCategory) throws -> UIFont {
       view.traitOverrides.preferredContentSizeCategory = category
@@ -32,17 +29,16 @@ struct ChatMessageTextSizeTests {
     #expect(try font(at: .large).pointSize == normal.pointSize)
   }
 
-  @Test("Unchanged messages are reconfigured after changing text size", arguments: [false, true])
-  func unchangedCell(v2: Bool) throws {
-    var message = try #require(MessageView2PlaygroundFixtures.scenarios.first).message
+  @Test("Unchanged messages are reconfigured after changing text size")
+  func unchangedCell() throws {
+    var message = MessageTestFixtures.compactText()
     message.message.text = "A message that is already on screen"
     message.message.blockContentPayload = nil
     let cell = MessageCollectionViewCell(frame: CGRect(x: 0, y: 0, width: 320, height: 100))
     func configure() {
       cell.configure(
         with: message, firstInGroup: true, lastInGroup: true, spaceId: nil,
-        collectionWidth: 320, theme: ThemeManager.shared.snapshot(variant: .light),
-        messageViewImplementation: v2 ? .v2 : .legacy
+        collectionWidth: 320, theme: ThemeManager.shared.snapshot(variant: .light)
       )
     }
     cell.traitOverrides.preferredContentSizeCategory = .large
@@ -59,7 +55,7 @@ struct ChatMessageTextSizeTests {
 
   @Test("Status symbols grow with the timestamp in every delivery state", arguments: [MessageSendingStatus.sent, .sending, .failed])
   func statusSymbols(status: MessageSendingStatus) throws {
-    var message = try #require(MessageView2PlaygroundFixtures.scenarios.first).message
+    var message = MessageTestFixtures.compactText()
     message.message.out = true
     message.message.status = status
     let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -106,7 +102,7 @@ struct ChatMessageTextSizeTests {
     window.rootViewController = controller
     window.isHidden = false
     defer { window.isHidden = true }
-    var message = try #require(MessageView2PlaygroundFixtures.scenarios.first).message
+    var message = MessageTestFixtures.compactText()
     message.message.text = text
     message.message.entities = nil
     message.message.blockContentPayload = nil
@@ -149,7 +145,7 @@ struct ChatMessageTextSizeTests {
     window.rootViewController = controller
     window.isHidden = false
     defer { window.isHidden = true }
-    var message = try #require(MessageView2PlaygroundFixtures.scenarios.first).message
+    var message = MessageTestFixtures.compactText()
     message.message.text = "Readable message"
     message.message.entities = nil
     message.message.blockContentPayload = nil
@@ -167,22 +163,20 @@ struct ChatMessageTextSizeTests {
     }
   }
 
-  @Test("Standalone emoji retain their presentation size", arguments: [false, true])
-  func emojiSize(v2: Bool) throws {
+  @Test("Standalone emoji retain their presentation size")
+  func emojiSize() throws {
     let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
     let window = UIWindow(windowScene: scene)
     let controller = UIViewController()
     window.rootViewController = controller
     window.isHidden = false
     defer { window.isHidden = true }
-    var message = try #require(MessageView2PlaygroundFixtures.scenarios.first).message
+    var message = MessageTestFixtures.compactText()
     message.message.text = "😀"
     message.message.entities = nil
     message.message.blockContentPayload = nil
     let theme = ThemeManager.shared.snapshot(variant: .light)
-    let view: UIMessageView = v2
-      ? UIMessageView2(fullMessage: message, spaceId: nil, displayMode: .normal, bubbleTailSide: .none, maximumBubbleContentWidth: 280, theme: theme)
-      : UIMessageView(fullMessage: message, spaceId: nil, maximumBubbleContentWidth: 280, theme: theme)
+    let view = UIMessageView(fullMessage: message, spaceId: nil, maximumBubbleContentWidth: 280, theme: theme)
     controller.view.addSubview(view)
     for category in [UIContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
       view.traitOverrides.preferredContentSizeCategory = category
@@ -202,8 +196,8 @@ struct ChatMessageTextSizeTests {
     }
   }
 
-  @Test("Narrow outgoing emoji keep metadata and acknowledgements clear", arguments: [false, true])
-  func narrowEmojiAcknowledgement(v2: Bool) throws {
+  @Test("Narrow outgoing emoji keep metadata and acknowledgements clear")
+  func narrowEmojiAcknowledgement() throws {
     let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
     let window = UIWindow(windowScene: scene)
     let controller = UIViewController()
@@ -213,7 +207,7 @@ struct ChatMessageTextSizeTests {
     defer { window.isHidden = true }
     for width: CGFloat in [180, 240, 320, 375] {
       for actorCount in [1, 3, 5] {
-        var message = try #require(MessageView2PlaygroundFixtures.scenarios.first).message
+        var message = MessageTestFixtures.compactText()
         message.message.text = "😀"
         message.message.entities = nil
         message.message.blockContentPayload = nil
@@ -225,11 +219,8 @@ struct ChatMessageTextSizeTests {
           ))
         }
         let theme = ThemeManager.shared.snapshot(variant: .light)
-        let view: UIMessageView = v2
-          ? UIMessageView2(fullMessage: message, spaceId: nil, displayMode: .normal,
-                          bubbleTailSide: .none, maximumBubbleContentWidth: width * 0.8, theme: theme)
-          : UIMessageView(fullMessage: message, spaceId: nil,
-                          maximumBubbleContentWidth: width * 0.8, theme: theme)
+        let view = UIMessageView(fullMessage: message, spaceId: nil,
+                                 maximumBubbleContentWidth: width * 0.8, theme: theme)
         controller.view.addSubview(view)
         view.updateTraitsIfNeeded()
         let size = view.systemLayoutSizeFitting(
@@ -242,7 +233,7 @@ struct ChatMessageTextSizeTests {
         let acknowledgement = view.acknowledgementView.convert(view.acknowledgementView.bounds, to: view)
         let bubble = view.bubbleView.contentView.convert(view.bubbleView.contentView.bounds, to: view)
         #expect(metadata.minX >= bubble.minX - 1 && metadata.maxX <= bubble.maxX + 1,
-                "Metadata exceeds bubble width: width=\(width), actors=\(actorCount), v2=\(v2)")
+                "Metadata exceeds bubble width: width=\(width), actors=\(actorCount)")
         let label = view.messageLabel
         label.layoutManager.ensureLayout(for: label.textContainer)
         let glyphs = label.layoutManager.glyphRange(for: label.textContainer)
@@ -250,8 +241,8 @@ struct ChatMessageTextSizeTests {
           .offsetBy(dx: label.textContainerInset.left, dy: label.textContainerInset.top)
         let emoji = label.convert(ink, to: view)
         for frame in [metadata, acknowledgement] {
-          #expect(view.bounds.insetBy(dx: -1, dy: -1).contains(frame), "width=\(width), actors=\(actorCount), v2=\(v2), frame=\(frame)")
-          #expect(!frame.intersects(emoji), "Accessory overlaps emoji: width=\(width), actors=\(actorCount), v2=\(v2)")
+          #expect(view.bounds.insetBy(dx: -1, dy: -1).contains(frame), "width=\(width), actors=\(actorCount), frame=\(frame)")
+          #expect(!frame.intersects(emoji), "Accessory overlaps emoji: width=\(width), actors=\(actorCount)")
         }
         #expect(!metadata.intersects(acknowledgement))
         #expect(view.messageBodyFont.pointSize == 80)
@@ -260,8 +251,8 @@ struct ChatMessageTextSizeTests {
     }
   }
 
-  @Test("An open list reflows Persian and English and stays at the bottom", arguments: [false, true])
-  func liveListReflow(v2: Bool) async throws {
+  @Test("An open list reflows Persian and English and stays at the bottom")
+  func liveListReflow() async throws {
     let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
     let window = UIWindow(windowScene: scene)
     let controller = UIViewController()
@@ -272,7 +263,7 @@ struct ChatMessageTextSizeTests {
     let database = AppDatabase.empty()
     let publisher = MessagesPublisher(database: database)
     let peer = Peer.user(id: 9_007)
-    let template = try #require(MessageView2PlaygroundFixtures.scenarios.first).message
+    let template = MessageTestFixtures.compactText()
     let rows = (1 ... 30).reversed().map { id -> FullMessage in
       var row = template
       row.message.globalId = 90_000 + Int64(id)
@@ -297,8 +288,7 @@ struct ChatMessageTextSizeTests {
     defer { model.dispose() }
     let list = MessagesCollectionView(
       peerId: peer, chatId: 9_007, spaceId: nil, isPreview: true,
-      theme: ThemeManager.shared.snapshot(variant: .light), viewModel: model,
-      messageViewImplementation: v2 ? .v2 : .legacy
+      theme: ThemeManager.shared.snapshot(variant: .light), viewModel: model
     )
     list.frame = CGRect(x: 0, y: 0, width: 350, height: 600)
     controller.view.addSubview(list)
@@ -378,7 +368,8 @@ struct ChatMessageTextSizeTests {
           height: CGFloat.greatestFiniteMagnitude)).height <= view.messageLabel.bounds.height + 1)
       }
     }
-    #expect(list.visibleCells.compactMap { ($0 as? MessageCollectionViewCell)?.message?.message.messageId }.contains(30))
+    let visibleMessageIDs = list.visibleCells.compactMap { ($0 as? MessageCollectionViewCell)?.message?.message.messageId }
+    #expect(visibleMessageIDs.contains(30))
     list.removeFromSuperview()
   }
 

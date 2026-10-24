@@ -137,7 +137,7 @@ final class MessagesCollectionView: UICollectionView {
     self.spaceId = spaceId
     self.isPreview = isPreview
     self.theme = theme
-    let implementation = messageViewImplementation ?? MessageView2Feature.selectedImplementation(
+    let implementation = messageViewImplementation ?? NextMessageViewFeature.selectedImplementation(
       isExperimentAvailable: SettingsBuildAudience.showsDebugTools
     )
     let coordinator = Coordinator(
@@ -1340,6 +1340,7 @@ private extension MessagesCollectionView {
     private let spaceId: Int64?
     private let isPreview: Bool
     private var theme: IOSThemeSnapshot
+    /// `.next` renders with the current message view until the next message view lands.
     private let messageViewImplementation: MessageViewImplementation
     private weak var collectionContextMenu: UIContextMenuInteraction?
     /// Focus highlight that must survive cell reconfiguration until it ends.
@@ -1361,45 +1362,7 @@ private extension MessagesCollectionView {
     private weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
     private var mediaWarmupTask: Task<Void, Never>?
     private var mediaWarmups: [InlineTinyThumbnailWarmup] = []
-    private var v2GeometryAnimator: UIViewPropertyAnimator?
-    private var v2GeometryTransitions: [V2GeometryTransition] = []
-    private var pendingV2GeometryTransitions: [V2GeometryTransition] = []
-    private var pendingV2GeometryViewport: V2GeometryViewport?
-    private var v2GeometryFlushScheduled = false
     private var pendingSnapshotApplies = 0
-
-    @MainActor private struct V2GeometryViewport {
-      let bounds: CGRect
-      let adjustedContentInset: UIEdgeInsets
-      let window: UIWindow
-      let geometry: MessageListGeometrySnapshotV2
-      let anchor: SendAnimationContentAnchor?
-    }
-
-    @MainActor private struct V2GeometryTransition {
-      weak var cell: MessageCollectionViewCell?
-      weak var view: UIMessageView2?
-      let layout: MessageBubbleLayoutV2
-      let generation: UInt
-      let messageID: Int64
-
-      var isCurrent: Bool {
-        guard let cell, let view else { return false }
-        return cell.messageView === view
-          && cell.message?.id == messageID
-          && view.geometryTransitionGeneration == generation
-      }
-
-      func apply() {
-        guard isCurrent else { return }
-        view?.applyGeometryTransition(to: layout, generation: generation)
-      }
-
-      func finish() {
-        guard isCurrent else { return }
-        view?.finishGeometryTransition(generation: generation)
-      }
-    }
 
     private var contextMenuPreview: (
       configuration: UIContextMenuConfiguration,
@@ -2624,17 +2587,6 @@ private extension MessagesCollectionView {
     }
 
     func dispose() {
-      if let animator = v2GeometryAnimator {
-        v2GeometryAnimator = nil
-        if animator.state == .active {
-          animator.stopAnimation(false)
-          animator.finishAnimation(at: .end)
-        }
-      }
-      for transition in v2GeometryTransitions {
-        transition.finish()
-      }
-      v2GeometryTransitions.removeAll()
       olderLoadTask?.cancel()
       olderLoadTask = nil
       olderHistoryPagination.reset()
@@ -2748,11 +2700,6 @@ private extension MessagesCollectionView {
         // Preserve the clock until reveal so the same sending-to-sent transition remains visible.
         let shouldStartFromSendingStatus = sendTargetIdentity != nil && message.message.status == .sent
         let initialMetadataStatus: MessageSendingStatus? = shouldStartFromSendingStatus ? .sending : nil
-        let v2GeometryChangeHandler: ((
-          MessageCollectionViewCell,
-          MessageBubbleLayoutV2,
-          MessageBubbleLayoutV2
-        ) -> Void)? = messageViewImplementation == .v2 ? makeV2GeometryChangeHandler() : nil
 
         cell.grabOverlappingAvatar = { [weak self] sourceView in
           self?.avatarOverlayController.grabAvatar(overlapping: sourceView)
@@ -2760,7 +2707,6 @@ private extension MessagesCollectionView {
 
         let configureCell = {
           cell.isContextMenuSourceHidden = self.contextMenuSourceItem == item
-          cell.onV2GeometryChange = v2GeometryChangeHandler
           cell.configure(
             with: message,
             firstInGroup: firstInGroup,
@@ -2770,8 +2716,7 @@ private extension MessagesCollectionView {
             displayMode: displayMode,
             animateTail: true,
             theme: self.theme,
-            initialMetadataStatus: initialMetadataStatus,
-            messageViewImplementation: self.messageViewImplementation
+            initialMetadataStatus: initialMetadataStatus
           )
         }
 
@@ -2930,218 +2875,6 @@ private extension MessagesCollectionView {
 
       // Set initial data after configuring the data source
       setInitialData()
-    }
-
-    private func makeV2GeometryChangeHandler() -> (
-      MessageCollectionViewCell,
-      MessageBubbleLayoutV2,
-      MessageBubbleLayoutV2
-    ) -> Void {
-      { [weak self] cell, oldLayout, newLayout in
-        self?.enqueueV2GeometryChange(in: cell, from: oldLayout, to: newLayout)
-      }
-    }
-
-    private func enqueueV2GeometryChange(
-      in cell: MessageCollectionViewCell,
-      from oldLayout: MessageBubbleLayoutV2,
-      to newLayout: MessageBubbleLayoutV2
-    ) {
-      guard let view = cell.messageView as? UIMessageView2, let message = cell.message else { return }
-      let transition = V2GeometryTransition(
-        cell: cell, view: view, layout: newLayout,
-        generation: view.geometryTransitionGeneration, messageID: message.id
-      )
-      // Metadata-only updates need no parent layout. If this row already has
-      // queued geometry, retain its latest destination even when this last
-      // update has the same measured size.
-      if oldLayout == newLayout, !view.hasPendingContentTransition,
-         !pendingV2GeometryTransitions.contains(where: { $0.cell === cell })
-      {
-        transition.apply()
-        transition.finish()
-        return
-      }
-      pendingV2GeometryTransitions.removeAll { !$0.isCurrent || $0.cell === cell }
-      pendingV2GeometryTransitions.append(transition)
-      if pendingV2GeometryViewport == nil,
-         let collectionView = currentCollectionView as? MessagesCollectionView,
-         let window = collectionView.window,
-         collectionView.visibleCells.contains(where: { $0 === cell })
-      {
-        // UIKit may resize rows as registration unwinds. Retain the presented
-        // positions now, without forcing layout, so deferral does not add a jump.
-        pendingV2GeometryViewport = V2GeometryViewport(
-          bounds: collectionView.bounds, adjustedContentInset: collectionView.adjustedContentInset,
-          window: window,
-          geometry: MessageListGeometrySnapshotV2(cells: collectionView.visibleCells, window: window),
-          anchor: makeV2GeometryContentAnchor(around: cell, collectionView: collectionView, window: window)
-        )
-      }
-      scheduleV2GeometryFlush()
-    }
-
-    private func scheduleV2GeometryFlush() {
-      guard !v2GeometryFlushScheduled, !pendingV2GeometryTransitions.isEmpty,
-            pendingSnapshotApplies == 0 else { return }
-      v2GeometryFlushScheduled = true
-      // Cell registration can run inside UIKit's idle prefetch/reconfiguration.
-      // Never invalidate or force parent layout on that stack. One coordinator
-      // transaction consumes the latest generation for every changed row.
-      DispatchQueue.main.async { [weak self] in
-        guard let self else { return }
-        v2GeometryFlushScheduled = false
-        guard pendingSnapshotApplies == 0 else { return }
-        flushV2GeometryChanges()
-      }
-    }
-
-    private func flushV2GeometryChanges() {
-      let pending = pendingV2GeometryTransitions.filter(\.isCurrent)
-      let capturedViewport = pendingV2GeometryViewport
-      pendingV2GeometryViewport = nil
-      pendingV2GeometryTransitions.removeAll(keepingCapacity: true)
-      guard let collectionView = currentCollectionView as? MessagesCollectionView,
-            let window = collectionView.window
-      else {
-        for transition in pending {
-          transition.apply()
-          transition.finish()
-        }
-        return
-      }
-      let updates = pending.filter { transition in
-        guard let cell = transition.cell, collectionView.indexPath(for: cell) != nil else {
-          transition.apply()
-          transition.finish()
-          return false
-        }
-        return true
-      }
-      guard let changedCell = updates.first?.cell else { return }
-
-      // Capture the model's destination before finishing at .current changes it
-      // to an intermediate transform. Otherwise rapid updates retain a row offset.
-      // A scroll, keyboard inset adjustment, or resize since enqueue takes
-      // precedence over the old viewport. Never pull the user back to it.
-      let viewport = capturedViewport.flatMap {
-        $0.window === window && $0.bounds == collectionView.bounds
-          && $0.adjustedContentInset == collectionView.adjustedContentInset ? $0 : nil
-      }
-      let geometry = viewport?.geometry
-        ?? MessageListGeometrySnapshotV2(cells: collectionView.visibleCells, window: window)
-      if let activeAnimator = v2GeometryAnimator {
-        v2GeometryAnimator = nil
-        if activeAnimator.state == .active {
-          activeAnimator.stopAnimation(false)
-          activeAnimator.finishAnimation(at: .current)
-        }
-      }
-
-      // Finishing a superseded animator at .current preserves every participating
-      // bubble. Carry its remaining destinations into the replacement animator;
-      // finishing just the previous changed row here would snap it to the end.
-      v2GeometryTransitions = v2GeometryTransitions.filter { transition in
-        guard transition.isCurrent, let cell = transition.cell else { return false }
-        guard collectionView.indexPath(for: cell) != nil else {
-          transition.finish()
-          return false
-        }
-        return !updates.contains { $0.view === transition.view }
-      }
-      v2GeometryTransitions.append(contentsOf: updates)
-      let transitions = v2GeometryTransitions
-
-      let anchor = viewport?.anchor ?? makeV2GeometryContentAnchor(
-        around: changedCell,
-        collectionView: collectionView,
-        window: window
-      )
-
-      UIView.performWithoutAnimation {
-        geometry.applyTargetTransforms()
-        collectionView.collectionViewLayout.invalidateLayout()
-        collectionView.layoutIfNeeded()
-        restoreSendAnimationContentAnchor(anchor, in: collectionView)
-        for transition in transitions where transition.isCurrent {
-          transition.cell?.layoutIfNeeded()
-          transition.view?.layoutIfNeeded()
-        }
-      }
-
-      geometry.restorePresentedPositions(window: window)
-
-      let animations = {
-        geometry.applyTargetTransforms()
-        for transition in transitions {
-          transition.apply()
-        }
-        collectionView.layoutIfNeeded()
-        for transition in transitions where transition.isCurrent {
-          transition.cell?.layoutIfNeeded()
-        }
-      }
-
-      guard !UIAccessibility.isReduceMotionEnabled else {
-        UIView.performWithoutAnimation(animations)
-        for transition in transitions {
-          transition.finish()
-        }
-        v2GeometryTransitions.removeAll()
-        return
-      }
-
-      let animator = UIViewPropertyAnimator(duration: 0.28, curve: .easeInOut)
-      animator.addAnimations(animations)
-      animator.addCompletion { [weak self, weak animator, weak collectionView] _ in
-        guard let self, let animator, v2GeometryAnimator === animator else { return }
-        v2GeometryAnimator = nil
-        v2GeometryTransitions.removeAll()
-        for transition in transitions {
-          transition.finish()
-          if transition.isCurrent, let cell = transition.cell {
-            collectionView?.syncBubbleGradient(for: cell)
-          }
-        }
-      }
-      v2GeometryAnimator = animator
-      animator.startAnimation()
-    }
-
-    private func makeV2GeometryContentAnchor(
-      around changedCell: MessageCollectionViewCell,
-      collectionView: MessagesCollectionView,
-      window: UIWindow
-    ) -> SendAnimationContentAnchor? {
-      // Capture the existing viewport before installing the new row sizes.
-      let changedFrame = changedCell.convert(changedCell.bounds, to: window)
-      let candidates = collectionView.visibleCells.compactMap { cell -> (
-        item: MessageListItem,
-        frame: CGRect,
-        distance: CGFloat
-      )? in
-        guard cell !== changedCell,
-              let indexPath = collectionView.indexPath(for: cell),
-              let item = dataSource.itemIdentifier(for: indexPath)
-        else { return nil }
-        let frame = cell.convert(cell.bounds, to: window)
-        return (item, frame, abs(frame.midY - changedFrame.midY))
-      }
-      if let nearest = candidates.min(by: { $0.distance < $1.distance }) {
-        return SendAnimationContentAnchor(
-          item: nearest.item,
-          frameInWindow: nearest.frame,
-          contentOffset: collectionView.contentOffset
-        )
-      }
-      guard let indexPath = collectionView.indexPath(for: changedCell),
-            let item = dataSource.itemIdentifier(for: indexPath)
-      else { return nil }
-      return SendAnimationContentAnchor(
-        item: item,
-        frameInWindow: changedFrame,
-        contentOffset: collectionView.contentOffset
-      )
     }
 
     private func isFirstInGroup(at indexPath: IndexPath) -> Bool {
@@ -3322,7 +3055,6 @@ private extension MessagesCollectionView {
         }
         defer {
           self.pendingSnapshotApplies -= 1
-          self.scheduleV2GeometryFlush()
           self.scheduleOlderHistoryCheck()
         }
         let durationMs = PerformanceTrace.elapsedMilliseconds(since: startedAt)
@@ -3554,8 +3286,7 @@ private extension MessagesCollectionView {
           collectionWidth: collectionView.bounds.width,
           displayMode: displayMode,
           animateTail: animateTail,
-          theme: theme,
-          messageViewImplementation: messageViewImplementation
+          theme: theme
         )
       }
     }
@@ -3891,11 +3622,7 @@ private extension MessagesCollectionView {
         .filter { snapshot.itemIdentifiers.contains($0) }
       snapshot.reconfigureItems(existingItems + boundaryItems)
       reconfigureVisibleItems(boundaryItems)
-      // V2 owns same-item geometry with one explicit transaction. A simultaneous diffable
-      // reconfigure animation writes the same cell frames and causes bubble-height jumps.
-      let animatesDiffableReconfigure = messageViewImplementation == .legacy
-        && (animated ?? false)
-        && !UIAccessibility.isReduceMotionEnabled
+      let animatesDiffableReconfigure = (animated ?? false) && !UIAccessibility.isReduceMotionEnabled
       safeApplySnapshot(snapshot, animatingDifferences: animatesDiffableReconfigure)
     }
 
@@ -4515,10 +4242,6 @@ private extension MessagesCollectionView {
         return nil
       }
 
-      let mathSource = (cell.messageView as? UIMessageView2).flatMap { view in
-        view.mathSource(atPointInMessageView: collectionView.convert(point, to: view))
-      }
-
       // Check if the touch point is within a view that has its own context menu interaction
       if let messageView = cell.messageView {
         let pointInMessageView = collectionView.convert(point, to: messageView)
@@ -4597,7 +4320,7 @@ private extension MessagesCollectionView {
       return makeContextMenuConfiguration(
         at: indexPath,
         identifier: identifierView,
-        menu: makeMessageActionsMenu(for: fullMessage, cell: cell, mathSource: mathSource)
+        menu: makeMessageActionsMenu(for: fullMessage, cell: cell)
       )
     }
 
@@ -4630,7 +4353,6 @@ private extension MessagesCollectionView {
     private func makeMessageActionsMenu(
       for fullMessage: FullMessage,
       cell: MessageCollectionViewCell,
-      mathSource: String? = nil,
       includeReactionsAction: Bool = false
     ) -> UIMenu {
       let message = fullMessage.message
@@ -4651,12 +4373,6 @@ private extension MessagesCollectionView {
           )
         }
         actions.append(copyAction)
-      }
-
-      if let mathSource {
-        actions.append(UIAction(title: "Copy LaTeX", image: UIImage(systemName: "function")) { _ in
-          UIPasteboard.general.string = mathSource
-        })
       }
 
       if isMessageSending {

@@ -19,7 +19,6 @@ final class MessageBubbleView: UIView {
 
   private let fillLayer = CAShapeLayer()
   private let lightingLayer = CAGradientLayer()
-  private var animatedFillView: MessageBubbleFillView?
   private var highlightFillView: MessageBubbleFillView?
   private var lightingAlphas: (top: CGFloat, bottom: CGFloat)?
   private var lightingVector: (startY: CGFloat, endY: CGFloat)?
@@ -81,31 +80,6 @@ final class MessageBubbleView: UIView {
   override func layoutSubviews() {
     super.layoutSubviews()
     updateShape()
-  }
-
-  /// V2's visible fill follows the same UIView animator as its content. Updating a
-  /// CAShapeLayer path with actions disabled would jump straight to the final size.
-  func useAnimatedGeometry() {
-    guard animatedFillView == nil else { return }
-    let fill = MessageBubbleFillView()
-    fill.isUserInteractionEnabled = false
-    insertSubview(fill, belowSubview: contentView)
-    animatedFillView = fill
-    lightingLayer.isHidden = true
-    updateShape()
-  }
-
-  var geometryTransitionViews: [UIView] {
-    var views = [contentView]
-    if let animatedFillView {
-      views.append(animatedFillView)
-      if let mask = animatedFillView.mask { views.append(mask) }
-    }
-    if let highlightFillView {
-      views.append(highlightFillView)
-      if let mask = highlightFillView.mask { views.append(mask) }
-    }
-    return views
   }
 
   func highlight(color: UIColor, fadeIn: TimeInterval = 0.18, hold: TimeInterval = 1.0, fadeOut: TimeInterval = 0.5) {
@@ -195,9 +169,7 @@ final class MessageBubbleView: UIView {
     CATransaction.setDisableActions(true)
     lightingLayer.startPoint = CGPoint(x: 0.5, y: startY)
     lightingLayer.endPoint = CGPoint(x: 0.5, y: endY)
-    animatedFillView?.gradient.startPoint = lightingLayer.startPoint
-    animatedFillView?.gradient.endPoint = lightingLayer.endPoint
-    lightingLayer.isHidden = animatedFillView != nil || resolvedFillColor.cgColor.alpha <= 0.01
+    lightingLayer.isHidden = resolvedFillColor.cgColor.alpha <= 0.01
     CATransaction.commit()
   }
 
@@ -209,8 +181,6 @@ final class MessageBubbleView: UIView {
     CATransaction.setDisableActions(true)
     lightingLayer.startPoint = CGPoint(x: 0.5, y: 0)
     lightingLayer.endPoint = CGPoint(x: 0.5, y: 1)
-    animatedFillView?.gradient.startPoint = lightingLayer.startPoint
-    animatedFillView?.gradient.endPoint = lightingLayer.endPoint
     CATransaction.commit()
     updateGradientColors()
   }
@@ -234,13 +204,6 @@ final class MessageBubbleView: UIView {
 
   private func updateShape() {
     updateHighlightGeometry()
-    if let animatedFillView {
-      animatedFillView.configure(side: side, scale: traitCollection.displayScale)
-      animatedFillView.frame = bounds
-      animatedFillView.layoutIfNeeded()
-      updateGradientColors()
-      return
-    }
     let color = resolvedFillColor
     let path = visiblePath().cgPath
 
@@ -262,9 +225,7 @@ final class MessageBubbleView: UIView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     lightingLayer.colors = [top.cgColor, bottom.cgColor]
-    animatedFillView?.gradient.colors = lightingLayer.colors
-    animatedFillView?.isHidden = color.cgColor.alpha <= 0.01
-    lightingLayer.isHidden = animatedFillView != nil || color.cgColor.alpha <= 0.01
+    lightingLayer.isHidden = color.cgColor.alpha <= 0.01
     CATransaction.commit()
   }
 

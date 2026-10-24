@@ -10,10 +10,9 @@ import UIKit
 @Suite("Custom Hold message actions", .serialized)
 @MainActor
 struct MessageHoldActionsTests {
-  @Test("Custom Hold keeps a separate full menu without invoking a quick action",
-        arguments: [MessageViewImplementation.legacy, .v2])
-  func fullMenu(implementation: MessageViewImplementation) async throws {
-    let fixture = try await Fixture(implementation: implementation)
+  @Test("Custom Hold keeps a separate full menu without invoking a quick action")
+  func fullMenu() async throws {
+    let fixture = try await Fixture()
     defer { fixture.close() }
     let cell = try fixture.cell()
     let beforeReply = ChatState.shared.getState(peer: fixture.peer).replyingMessageId
@@ -77,10 +76,9 @@ struct MessageHoldActionsTests {
     }
   }
 
-  @Test("Actions target stays inside the free gutter in both message renderers",
-        arguments: [MessageViewImplementation.legacy, .v2], [false, true])
-  func gutter(implementation: MessageViewImplementation, outgoing: Bool) async throws {
-    let fixture = try await Fixture(implementation: implementation, outgoing: outgoing, width: 320)
+  @Test("Actions target stays inside the free gutter", arguments: [false, true])
+  func gutter(outgoing: Bool) async throws {
+    let fixture = try await Fixture(outgoing: outgoing, width: 320)
     defer { fixture.close() }
     let cell = try fixture.cell()
     cell.updateMessageHoldAction(.toggleHeart)
@@ -113,7 +111,6 @@ struct MessageHoldActionsTests {
     let peer = Peer.user(id: 9_190_917)
 
     init(
-      implementation: MessageViewImplementation = .v2,
       outgoing: Bool = true,
       width: CGFloat = 390,
       kind: String = "sent"
@@ -123,7 +120,7 @@ struct MessageHoldActionsTests {
       let controller = UIViewController()
       window.rootViewController = controller
       window.isHidden = false
-      var row = try #require(MessageView2PlaygroundFixtures.scenarios.first).message
+      var row = MessageTestFixtures.compactText()
       row.message.globalId = 9_190_917
       row.message.messageId = 10
       row.message.chatId = 9_190_917
@@ -147,8 +144,7 @@ struct MessageHoldActionsTests {
       )
       list = MessagesCollectionView(
         peerId: peer, chatId: row.message.chatId, spaceId: nil, isPreview: true,
-        theme: ThemeManager.shared.snapshot(variant: .light), viewModel: model,
-        messageViewImplementation: implementation
+        theme: ThemeManager.shared.snapshot(variant: .light), viewModel: model
       )
       controller.view.addSubview(list)
       list.frame = CGRect(x: 0, y: 0, width: width, height: controller.view.bounds.height)

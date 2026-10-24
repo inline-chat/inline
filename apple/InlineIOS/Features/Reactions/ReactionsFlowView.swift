@@ -28,10 +28,6 @@ class ReactionsFlowView: UIView {
   private var totalHeight: CGFloat = 0
   private var cachedViewSizes = [String: CGSize]()
   private var lastLayoutWidth: CGFloat = 0
-  private var v2LayoutWidth: CGFloat?
-  private var synchronizedFinalFrames = [String: CGRect]()
-  private var synchronizedDisappearingSnapshots = [UIView]()
-  private var synchronizedTransitionGeneration: UInt?
 
   var onReactionTap: ((String) -> Void)?
 
@@ -63,31 +59,13 @@ class ReactionsFlowView: UIView {
 
   func configure(
     with groupedReactions: [GroupedReaction],
-    animatedEmoji: String? = nil,
-    synchronizedWithGeometry: Bool = false,
-    synchronizedContentCrossfade: Bool = false,
-    transitionGeneration: UInt? = nil
+    animatedEmoji: String? = nil
   ) {
     // Create a dictionary of new reactions from GroupedReaction
     let newReactions = groupedReactions.reduce(into: [String: GroupedReaction]()) {
       $0[$1.emoji] = $1
     }
-    let previousFrames = reactionViews.mapValues { view in
-      synchronizedWithGeometry ? (view.layer.presentation()?.frame ?? view.frame) : view.frame
-    }
-    clearSynchronizedTransition(normalizeViews: true)
-    let synchronizedSnapshot: UIView? = if synchronizedWithGeometry,
-                                           synchronizedContentCrossfade,
-                                           !reactionViews.isEmpty,
-                                           !groupedReactions.isEmpty,
-                                           bounds.width > 0,
-                                           bounds.height > 0
-    {
-      snapshotView(afterScreenUpdates: false)
-    } else {
-      nil
-    }
-    let synchronizedSnapshotFrame = CGRect(origin: .zero, size: bounds.size)
+    let previousFrames = reactionViews.mapValues(\.frame)
     let shouldAnimate = animatedEmoji != nil && !UIAccessibility.isReduceMotionEnabled
 
     // Find reactions to remove and add
@@ -170,7 +148,7 @@ class ReactionsFlowView: UIView {
           count: groupedReaction.reactions.count,
           byCurrentUser: byCurrentUser,
           reactionUsers: reactionUsers,
-          animated: shouldAnimate && emoji == animatedEmoji && !synchronizedWithGeometry
+          animated: shouldAnimate && emoji == animatedEmoji
         )
         cachedViewSizes.removeValue(forKey: emoji)
       }
@@ -179,24 +157,6 @@ class ReactionsFlowView: UIView {
     // Disable animations temporarily for layout rebuild
     UIView.performWithoutAnimation {
       rebuildLayout(with: Array(reactionViews.values))
-    }
-
-    if synchronizedWithGeometry {
-      synchronizedTransitionGeneration = transitionGeneration
-      synchronizedFinalFrames = reactionFrames
-      for (emoji, view) in reactionViews {
-        guard let finalFrame = reactionFrames[emoji] else { continue }
-        view.frame = finalFrame
-        view.alpha = synchronizedSnapshot == nil ? 1 : 0
-        view.transform = .identity
-      }
-      if let synchronizedSnapshot {
-        synchronizedSnapshot.frame = synchronizedSnapshotFrame
-        synchronizedSnapshot.isUserInteractionEnabled = false
-        addSubview(synchronizedSnapshot)
-        synchronizedDisappearingSnapshots.append(synchronizedSnapshot)
-      }
-      return
     }
 
     // Now animate removals using snapshots
@@ -241,61 +201,6 @@ class ReactionsFlowView: UIView {
     )
   }
 
-  /// Deterministic measurement used by Message View 2. The legacy intrinsic-size path keeps its
-  /// existing screen-relative behavior; V2 supplies the exact bubble-content width for wrapping.
-  func measuredSizeV2(maximumWidth: CGFloat) -> CGSize {
-    guard maximumWidth.isFinite, maximumWidth > 0, !reactionViews.isEmpty else { return .zero }
-    v2LayoutWidth = maximumWidth
-    let layout = calculateLayout(for: Array(reactionViews.values).sorted { $0.emoji < $1.emoji })
-    let usedWidth = reactionFrames.values.reduce(CGFloat.zero) { partial, frame in
-      max(partial, frame.maxX)
-    }
-    // A wrapped flow must keep the width it was measured with. Shrinking it to the widest
-    // existing row can trigger a second, different wrap after the outer message plan is fixed.
-    let resolvedWidth = layout.rows.count > 1 ? maximumWidth : min(maximumWidth, usedWidth)
-    v2LayoutWidth = resolvedWidth
-    totalHeight = layout.totalHeight
-    if hasPendingSynchronizedGeometryTransition {
-      synchronizedFinalFrames = reactionFrames
-    }
-    return CGSize(width: resolvedWidth, height: layout.totalHeight)
-  }
-
-  func setV2LayoutWidth(_ width: CGFloat) {
-    guard width.isFinite, width > 0 else { return }
-    v2LayoutWidth = width
-    setNeedsLayout()
-  }
-
-  var hasPendingSynchronizedGeometryTransition: Bool {
-    !synchronizedFinalFrames.isEmpty
-      || !synchronizedDisappearingSnapshots.isEmpty
-  }
-
-  func applySynchronizedGeometryTransition(generation: UInt) {
-    guard synchronizedTransitionGeneration == generation else { return }
-    for (emoji, view) in reactionViews {
-      if let frame = synchronizedFinalFrames[emoji] {
-        view.frame = frame
-      }
-      view.alpha = 1
-      view.transform = .identity
-    }
-    for snapshot in synchronizedDisappearingSnapshots {
-      snapshot.alpha = 0
-      snapshot.transform = .identity
-    }
-  }
-
-  func finishSynchronizedGeometryTransition(generation: UInt) {
-    guard synchronizedTransitionGeneration == generation else { return }
-    clearSynchronizedTransition(normalizeViews: true)
-  }
-
-  func cancelSynchronizedGeometryTransition() {
-    clearSynchronizedTransition(normalizeViews: true)
-  }
-
   // MARK: - Private Methods
 
   private func animateExistingViewsToNewPositions(
@@ -323,31 +228,6 @@ class ReactionsFlowView: UIView {
         view.frame = newFrame
       }
     }
-  }
-
-  private func clearSynchronizedTransition(normalizeViews: Bool) {
-    guard synchronizedTransitionGeneration != nil
-      || !synchronizedFinalFrames.isEmpty
-      || !synchronizedDisappearingSnapshots.isEmpty
-    else { return }
-
-    if normalizeViews {
-      for (emoji, view) in reactionViews {
-        view.layer.removeAllAnimations()
-        if let frame = synchronizedFinalFrames[emoji] {
-          view.frame = frame
-        }
-        view.alpha = 1
-        view.transform = .identity
-      }
-    }
-    synchronizedFinalFrames.removeAll(keepingCapacity: true)
-    for snapshot in synchronizedDisappearingSnapshots {
-      snapshot.layer.removeAllAnimations()
-      snapshot.removeFromSuperview()
-    }
-    synchronizedDisappearingSnapshots.removeAll(keepingCapacity: true)
-    synchronizedTransitionGeneration = nil
   }
 
   private func rebuildLayout(with views: [MessageReactionView]) {
@@ -397,10 +277,9 @@ class ReactionsFlowView: UIView {
     guard !views.isEmpty else { return (0, []) }
 
     // Use a generous max width to allow reactions to expand naturally
-    let maxWidth = v2LayoutWidth
-      ?? (bounds.width > 0
-        ? max(bounds.width, UIScreen.main.bounds.width * 0.8)
-        : UIScreen.main.bounds.width * 0.8)
+    let maxWidth = bounds.width > 0
+      ? max(bounds.width, UIScreen.main.bounds.width * 0.8)
+      : UIScreen.main.bounds.width * 0.8
     lastLayoutWidth = maxWidth
 
     var rows: [[MessageReactionView]] = []
@@ -574,11 +453,7 @@ class ReactionsFlowView: UIView {
         let emoji = view.emoji
         guard let newFrame = reactionFrames[emoji] else { continue }
 
-        if v2LayoutWidth != nil {
-          if !hasPendingSynchronizedGeometryTransition {
-            view.frame = newFrame
-          }
-        } else if let previousFrame = previousFrames[emoji], !previousFrame.equalTo(newFrame) {
+        if let previousFrame = previousFrames[emoji], !previousFrame.equalTo(newFrame) {
           UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseInOut], animations: {
             view.frame = newFrame
           })

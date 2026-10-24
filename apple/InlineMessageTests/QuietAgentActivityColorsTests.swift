@@ -10,7 +10,7 @@ import UIKit
 struct QuietAgentActivityColorsTests {
   private let source = "Worked\nRead guide and code\nFooter"
 
-  @Test("Both renderers retain standard bubbles and link colors for agent activity", arguments: [false, true])
+  @Test("Agent activity keeps standard bubble and link colors", arguments: [false, true])
   func foregrounds(dark: Bool) throws {
     let theme = IOSThemeSnapshot.resolve(preset: .system, variant: dark ? .dark : .light)
     for outgoing in [false, true] {
@@ -19,79 +19,31 @@ struct QuietAgentActivityColorsTests {
         // when only the disclosure marker changes. Presentation must stay ordinary.
         for quiet in [true, false, true] {
           let full = try message(outgoing: outgoing, forwarded: forwarded, quiet: quiet)
-          let legacy = UIMessageView(
+          let view = UIMessageView(
             fullMessage: full, spaceId: nil, maximumBubbleContentWidth: 300,
             theme: theme, buildHierarchy: false
           )
-          let modern = makeV2(full, theme: theme, mode: .fixtureMeasurement)
           let bubble = outgoing ? theme.outgoingBubble.uiColor : theme.incomingBubble.uiColor
           let primary = outgoing ? UIColor.white : theme.incomingText.uiColor
           let accent = outgoing ? UIColor.white : theme.primary.uiColor
-          for view: UIMessageView in [legacy, modern] {
-            view.setupAppearance()
-            #expect(view.outgoing == outgoing)
-            #expect(view.bubbleColor.isEqual(bubble))
-            #expect(view.textColor.isEqual(primary))
-            let attributed = try #require(view.attributedMessageText())
-            #expect(color(attributed, at: 0)?.isEqual(primary) == true)
-            let link = (source as NSString).range(of: "guide")
-            #expect(color(attributed, at: link.location)?.isEqual(accent) == true)
-            #expect(attributed.attribute(.link, at: link.location, effectiveRange: nil) != nil)
-            let code = (source as NSString).range(of: "code")
-            #expect(color(attributed, at: code.location)?.isEqual(primary) == true)
-            if outgoing {
-              #expect(view.metadataView.textColor.isEqual(UIColor.white.withAlphaComponent(0.7)))
-              #expect(view.metadataView.imageColor.isEqual(UIColor.white.withAlphaComponent(0.7)))
-            }
+          view.setupAppearance()
+          #expect(view.outgoing == outgoing)
+          #expect(view.bubbleColor.isEqual(bubble))
+          #expect(view.textColor.isEqual(primary))
+          let attributed = try #require(view.attributedMessageText())
+          #expect(color(attributed, at: 0)?.isEqual(primary) == true)
+          let link = (source as NSString).range(of: "guide")
+          #expect(color(attributed, at: link.location)?.isEqual(accent) == true)
+          #expect(attributed.attribute(.link, at: link.location, effectiveRange: nil) != nil)
+          let code = (source as NSString).range(of: "code")
+          #expect(color(attributed, at: code.location)?.isEqual(primary) == true)
+          if outgoing {
+            #expect(view.metadataView.textColor.isEqual(UIColor.white.withAlphaComponent(0.7)))
+            #expect(view.metadataView.imageColor.isEqual(UIColor.white.withAlphaComponent(0.7)))
           }
         }
       }
     }
-  }
-
-  #if DEBUG || DEBUG_BUILD
-  @Test("Forwarded activity uses outgoing bubble colors without a decorative icon", arguments: [false, true])
-  func renderedDisclosure(dark: Bool) throws {
-    let theme = IOSThemeSnapshot.resolve(preset: .system, variant: dark ? .dark : .light)
-    let full = try message(outgoing: true, forwarded: true, quiet: true)
-    let measurement = makeV2(full, theme: theme, mode: .fixtureMeasurement)
-    let prepared = try #require(measurement.prepareListLayout(width: 350))
-    let display = makeV2(full, theme: theme, mode: .fixtureDisplay)
-    display.frame.size = prepared.bubble.size
-    #expect(display.installListLayout(prepared, message: full, animated: false))
-    let nodes = descendants(display)
-    let disclosure = try #require(nodes.first {
-      $0.accessibilityLabel == "Worked" && $0.accessibilityTraits.contains(.button)
-    })
-    let title = try #require(descendants(disclosure).compactMap { $0 as? UITextView }.first)
-    #expect(display.bubbleColor.isEqual(theme.outgoingBubble.uiColor))
-    #expect(color(title.attributedText, at: 0)?.isEqual(UIColor.white.withAlphaComponent(0.7)) == true)
-    let icons = descendants(disclosure).compactMap { $0 as? UIImageView }.filter { !$0.isHidden }
-    #expect(icons.count == 1) // The existing expand/collapse chevron only.
-    #expect(icons.allSatisfy { $0.tintColor.isEqual(UIColor.white.withAlphaComponent(0.7)) })
-    let body = try #require(nodes.compactMap { $0 as? UITextView }.first { $0.text == "Read guide and code" })
-    #expect(color(body.attributedText, at: 0)?.isEqual(UIColor.white) == true)
-    #expect(color(body.attributedText, at: 5)?.isEqual(UIColor.white) == true)
-    display.cancelPendingGeometryTransitions()
-  }
-  #endif
-
-  @Test("Changing the activity marker preserves the bubble and metadata colors")
-  func markerPreservesBubbleColors() throws {
-    let theme = IOSThemeSnapshot.resolve(preset: .system, variant: .light)
-    let full = try message(outgoing: true, forwarded: true, quiet: true)
-    let view = makeV2(full, theme: theme, mode: .fixtureDisplay)
-    #expect(view.bubbleColor.isEqual(theme.outgoingBubble.uiColor))
-    #expect(view.metadataView.textColor.isEqual(UIColor.white.withAlphaComponent(0.7)))
-    let ordinary = try message(outgoing: true, forwarded: true, quiet: false)
-    view.applySnapshot(ordinary)
-    #expect(view.bubbleColor.isEqual(theme.outgoingBubble.uiColor))
-    #expect(view.metadataView.textColor.isEqual(UIColor.white.withAlphaComponent(0.7)))
-    #expect(view.textColor.isEqual(UIColor.white))
-    view.applySnapshot(full)
-    #expect(view.bubbleColor.isEqual(theme.outgoingBubble.uiColor))
-    #expect(view.metadataView.textColor.isEqual(UIColor.white.withAlphaComponent(0.7)))
-    view.cancelPendingGeometryTransitions()
   }
 
   private func message(outgoing: Bool, forwarded: Bool, quiet: Bool) throws -> FullMessage {
@@ -128,21 +80,7 @@ struct QuietAgentActivityColorsTests {
     return FullMessage(senderInfo: nil, message: message, reactions: [], repliedToMessage: nil, attachments: [])
   }
 
-  private func makeV2(
-    _ full: FullMessage, theme: IOSThemeSnapshot, mode: UIMessageView2.RenderingMode
-  ) -> UIMessageView2 {
-    UIMessageView2(
-      fullMessage: full, spaceId: nil, displayMode: .normal,
-      bubbleTailSide: full.message.out == true ? .trailing : .leading,
-      maximumBubbleContentWidth: 300, theme: theme, renderingMode: mode
-    )
-  }
-
   private func color(_ text: NSAttributedString, at offset: Int) -> UIColor? {
     text.attribute(.foregroundColor, at: offset, effectiveRange: nil) as? UIColor
-  }
-
-  private func descendants(_ view: UIView) -> [UIView] {
-    [view] + view.subviews.flatMap(descendants)
   }
 }
