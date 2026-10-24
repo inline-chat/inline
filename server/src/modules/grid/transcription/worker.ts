@@ -194,22 +194,27 @@ export async function handleGridTranscriptionWorkerRequest(request: Request): Pr
         return Response.json({ ready: heartbeat.ready })
       }
       const livekit = getLiveKitGridConfig()
+      const claimable = or(
+        and(eq(gridTranscriptionRuns.state, "starting"), isNull(gridTranscriptionRuns.workerId)),
+        and(
+          inArray(gridTranscriptionRuns.state, ["starting", "stopping"]),
+          eq(gridTranscriptionRuns.workerId, workerId),
+        ),
+      )
+      // The worker claims every few seconds while idle. Check without the global
+      // Grid mutation lock first; a run created after this read is claimed next poll.
+      const [candidate] = await db
+        .select({ id: gridTranscriptionRuns.id })
+        .from(gridTranscriptionRuns)
+        .where(claimable)
+        .limit(1)
+      if (!candidate) return new Response(null, { status: 204 })
       const claimed = await db.transaction(async (tx) => {
         await lockGridMutations(tx)
         const [run] = await tx
           .select()
           .from(gridTranscriptionRuns)
-          .where(
-            and(
-              or(
-                and(eq(gridTranscriptionRuns.state, "starting"), isNull(gridTranscriptionRuns.workerId)),
-                and(
-                  inArray(gridTranscriptionRuns.state, ["starting", "stopping"]),
-                  eq(gridTranscriptionRuns.workerId, workerId),
-                ),
-              ),
-            ),
-          )
+          .where(claimable)
           .orderBy(asc(gridTranscriptionRuns.createdAt))
           .for("update")
           .limit(1)
