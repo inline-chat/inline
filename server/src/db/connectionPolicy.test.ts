@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { assertQueryTimeouts, cachedHealthProbe, combineHealthProbes, databaseConnectionPolicy, directDatabaseUrl, makeDatabaseClients, QUERY_TIMEOUTS, HEALTH_TIMEOUTS } from "./connectionPolicy"
+import { assertQueryTimeouts, cachedHealthProbe, combineHealthProbes, databaseApplicationName, databaseConnectionPolicy, directDatabaseUrl, makeDatabaseClients, QUERY_TIMEOUTS, HEALTH_TIMEOUTS } from "./connectionPolicy"
 
 const direct = "postgres://app:secret@db.example/test?sslmode=verify-full"
 const pooled = "postgres://app:secret@db.example:6432/test?sslmode=verify-full"
@@ -102,6 +102,17 @@ describe("database connection safety", () => {
       expect(clients.queryClient.options.ssl).toBe("verify-full")
       expect(clients.healthClient.options.port).toEqual([5432])
       expect(clients.healthClient.options.connection).toMatchObject(HEALTH_TIMEOUTS)
+    } finally { await clients.close() }
+  })
+
+  test("connections carry the origin in their application name", async () => {
+    expect(databaseApplicationName("inline-server", {})).toBe("inline-server")
+    expect(databaseApplicationName("inline-server", { FLY_REGION: "fra" })).toBe("inline-server:fly-fra")
+    expect(databaseApplicationName("inline-health", { FLY_REGION: "fra", INLINE_NODE_NAME: "nbg 1;" })).toBe("inline-health:nbg1")
+    const clients = makeDatabaseClients(pooled, { ...environment, FLY_REGION: "fra" })
+    try {
+      expect(clients.queryClient.options.connection).toEqual({ application_name: "inline-server:fly-fra" })
+      expect(clients.healthClient.options.connection).toMatchObject({ application_name: "inline-health:fly-fra" })
     } finally { await clients.close() }
   })
 

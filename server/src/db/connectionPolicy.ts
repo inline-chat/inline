@@ -170,6 +170,18 @@ export const combineHealthProbes = <T>(
   })
 }
 
+/**
+ * Names connections per origin so Insights can attribute load to each server.
+ * An explicit INLINE_NODE_NAME wins and Fly Machines report their region;
+ * without either the historical unsuffixed name is kept.
+ */
+export const databaseApplicationName = (base: "inline-server" | "inline-health", environment: DatabaseEnvironment): string => {
+  const flyRegion = environment["FLY_REGION"]?.trim()
+  const node = environment["INLINE_NODE_NAME"]?.trim() || (flyRegion ? `fly-${flyRegion}` : "")
+  const safe = node.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 32)
+  return safe ? `${base}:${safe}` : base
+}
+
 export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEnvironment = {}) => {
   const queryPoolMax = environment.INLINE_DATABASE_QUERY_POOL_MAX ?? "10"
   if (!/^(?:[1-9]|10)$/.test(queryPoolMax) || queryPoolMax.trim() !== queryPoolMax) {
@@ -184,13 +196,13 @@ export const makeDatabaseClients = (databaseUrl: string, environment: DatabaseEn
   const queryClient = postgres(policy.queryUrl, {
     max: Number(queryPoolMax), connect_timeout: 5, idle_timeout: 30,
     connection: {
-      application_name: "inline-server",
+      application_name: databaseApplicationName("inline-server", environment),
       ...(policy.mode === "direct" ? QUERY_TIMEOUTS : {}),
     },
   })
   const healthClient = postgres(policy.healthUrl, {
     max: 1, connect_timeout: 2, idle_timeout: 30,
-    connection: { application_name: "inline-health", ...HEALTH_TIMEOUTS },
+    connection: { application_name: databaseApplicationName("inline-health", environment), ...HEALTH_TIMEOUTS },
   })
   prepareQueries(queryClient, preparation)
   const close = () => Promise.all([queryClient.end({ timeout: 5 }), healthClient.end({ timeout: 5 })]).then(() => {})
