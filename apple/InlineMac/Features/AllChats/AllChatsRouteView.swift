@@ -355,7 +355,11 @@ struct AllChatsRouteView: View {
     Task(priority: .userInitiated) {
       do {
         if let dependencies {
-          try await dependencies.appUndo.archiveChat(peer: request.peer, spaceID: request.spaceID)
+          try await dependencies.appUndo.archiveChat(
+            peer: request.peer,
+            spaceID: request.spaceID,
+            using: dependencies
+          )
         } else {
           try await DataManager.shared.updateDialog(
             peerId: request.peer,

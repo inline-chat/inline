@@ -174,7 +174,7 @@ enum ChatMenuActions {
             spaceId: spaceID
           )
         } else {
-          try await dependencies.appUndo.archiveChat(peer: peer, spaceID: spaceID)
+          try await dependencies.appUndo.archiveChat(peer: peer, spaceID: spaceID, using: dependencies)
         }
       } catch {
         await MainActor.run { ToastCenter.shared.showError("Failed to update archive") }
