@@ -499,8 +499,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       voiceButton.widthAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
       voiceButton.heightAnchor.constraint(equalToConstant: ComposeVoiceButton.size),
 
-      voiceInputView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: composeHorizontalInset),
-      voiceInputView.trailingAnchor.constraint(equalTo: composeContent.trailingAnchor, constant: -composeHorizontalInset),
+      // Voice controls use 44pt hit frames; offset so the 32pt primary circle lands on the send button's spot.
+      voiceInputView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: 4),
+      voiceInputView.trailingAnchor.constraint(
+        equalTo: composeContent.trailingAnchor,
+        constant: -composeControlTrailingInset + (44 - buttonSize.width) / 2
+      ),
       voiceInputView.topAnchor.constraint(equalTo: attachmentScrollView.bottomAnchor),
       voiceInputView.bottomAnchor.constraint(equalTo: composeContent.bottomAnchor),
     ])

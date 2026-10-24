@@ -13,7 +13,6 @@ struct ComposeVoiceInputView: View {
 
   var body: some View {
     controls
-      .padding(.horizontal, 4)
       .frame(maxWidth: .infinity, minHeight: ComposeView.minHeight, maxHeight: ComposeView.minHeight)
       .animation(.easeInOut(duration: 0.18), value: viewModel.phase)
       .animation(.easeInOut(duration: 0.14), value: viewModel.isPlaying)
@@ -22,7 +21,7 @@ struct ComposeVoiceInputView: View {
   }
 
   private var controls: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: 0) {
       switch viewModel.phase {
       case .starting:
         discardButton
@@ -34,7 +33,6 @@ struct ComposeVoiceInputView: View {
 
       case .recording:
         discardButton
-        recordingIndicator
         waveform(progress: 1)
         durationLabel
         iconButton("stop.fill", title: "Stop recording", action: onStop)
@@ -71,26 +69,20 @@ struct ComposeVoiceInputView: View {
     .transition(.opacity.combined(with: .scale(scale: 0.98)))
   }
 
-  private var recordingIndicator: some View {
-    Circle()
-      .fill(Color.red)
-      .frame(width: 8, height: 8)
-      .frame(width: 20, height: 20)
-      .accessibilityLabel("Recording")
-  }
-
   private var progressIndicator: some View {
     ProgressView()
       .controlSize(.small)
-      .frame(width: 20, height: 20)
+      .frame(width: VoiceControlMetrics.hitSize, height: VoiceControlMetrics.hitSize)
   }
 
   private var durationLabel: some View {
     Text(Self.format(duration: viewModel.duration))
-      .font(.caption.monospacedDigit())
-      .foregroundStyle(.secondary)
-      .frame(minWidth: 38, alignment: .trailing)
+      .font(.subheadline.monospacedDigit())
+      .foregroundStyle(viewModel.phase == .recording ? .primary : .secondary)
       .lineLimit(1)
+      .fixedSize()
+      .frame(minWidth: VoiceControlMetrics.hitSize)
+      .padding(.trailing, 4)
   }
 
   private var discardButton: some View {
@@ -99,7 +91,6 @@ struct ComposeVoiceInputView: View {
 
   private var sendProgressIndicator: some View {
     progressIndicator
-      .frame(width: 30, height: 30)
       .transition(.opacity.combined(with: .scale(scale: 0.9)))
   }
 
@@ -137,7 +128,7 @@ struct ComposeVoiceInputView: View {
 
   private var reservedIconSpace: some View {
     Color.clear
-      .frame(width: 30, height: 30)
+      .frame(width: VoiceControlMetrics.hitSize, height: VoiceControlMetrics.hitSize)
       .accessibilityHidden(true)
   }
 
@@ -145,13 +136,16 @@ struct ComposeVoiceInputView: View {
     ComposeVoiceWaveformView(
       samples: viewModel.samples,
       progress: progress,
-      foreground: Color(uiColor: .secondaryLabel),
-      background: Color(uiColor: .tertiaryLabel).opacity(0.45),
+      foreground: Color(uiColor: .label).opacity(0.88),
+      background: viewModel.phase == .recording
+        ? Color(uiColor: .label).opacity(0.88)
+        : Color(uiColor: .secondaryLabel).opacity(0.72),
       motion: viewModel.phase == .recording ? .recordingReel : .fixed,
       onSeek: onSeek
     )
-    .frame(height: 36.5)
+    .frame(height: 30)
     .frame(maxWidth: .infinity)
+    .padding(.horizontal, 4)
   }
 
   private func iconButton(
@@ -191,8 +185,6 @@ private struct VoiceIconControl: View {
       Image(systemName: systemName)
     }
     .buttonStyle(VoiceIconButtonStyle(isPrimary: isPrimary))
-    .frame(width: 30, height: 30)
-    .contentShape(Circle())
     .disabled(!isEnabled)
     .accessibilityLabel(title)
   }
@@ -202,21 +194,28 @@ private struct VoiceIconControl: View {
   }
 }
 
+private enum VoiceControlMetrics {
+  /// Apple's minimum comfortable touch target.
+  static let hitSize: CGFloat = 44
+  /// Matches the compose send button so the primary control does not jump when recording starts.
+  static let visualSize: CGFloat = 32
+}
+
+/// Filled circle matching the compose send button, with a full 44pt hit area.
 private struct VoiceIconButtonStyle: ButtonStyle {
   let isPrimary: Bool
   @Environment(\.isEnabled) private var isEnabled
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .font(.system(size: 11, weight: .semibold))
-      .foregroundStyle(isPrimary ? Color.white : Color(uiColor: .secondaryLabel))
-      .frame(width: Self.visualSize, height: Self.visualSize)
-      .contentShape(Circle())
-      .background(
-        Circle()
-          .fill(backgroundColor)
-      )
-      .opacity(opacity(isPressed: configuration.isPressed))
+      .font(.system(size: 14, weight: isPrimary ? .bold : .semibold))
+      .foregroundStyle(isPrimary ? Color.white : Color(uiColor: .label))
+      .frame(width: VoiceControlMetrics.visualSize, height: VoiceControlMetrics.visualSize)
+      .background(Circle().fill(backgroundColor))
+      .scaleEffect(configuration.isPressed ? 0.9 : 1)
+      .opacity(isEnabled ? 1 : 0.45)
+      .frame(width: VoiceControlMetrics.hitSize, height: VoiceControlMetrics.hitSize)
+      .contentShape(Rectangle())
       .animation(.easeInOut(duration: 0.14), value: configuration.isPressed)
       .animation(.easeInOut(duration: 0.14), value: isEnabled)
       .onChange(of: configuration.isPressed) { _, isPressed in
@@ -225,19 +224,10 @@ private struct VoiceIconButtonStyle: ButtonStyle {
       }
   }
 
-  private static let visualSize: CGFloat = 26
-
-  private func opacity(isPressed: Bool) -> Double {
-    guard isEnabled else { return 0.48 }
-    return isPressed ? 0.55 : 1
-  }
-
   private var backgroundColor: Color {
-    if isPrimary {
-      return .accentColor
-    }
-
-    return Color(uiColor: .tertiarySystemFill).opacity(0.9)
+    isPrimary
+      ? Color(uiColor: ThemeManager.shared.selected.accent)
+      : Color(uiColor: .tertiarySystemFill)
   }
 }
 
