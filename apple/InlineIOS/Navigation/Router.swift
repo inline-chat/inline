@@ -26,17 +26,28 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
   private var paths: [Tab: [Destination]] = [:] {
     didSet {
       // Any navigation supersedes one still waiting for its destination's preparation.
-      pendingPreparedNavigation = nil
+      cancelPendingNavigation()
       recordNavigation(from: HistoryEntry(tab: selectedTab, path: oldValue[selectedTab] ?? []))
       navigationStateDidChange()
     }
   }
 
-  @ObservationIgnored private var pendingPreparedNavigation: UUID?
+  private struct PendingNavigation {
+    let id: UUID
+    let destination: Destination
+  }
+
+  private var pendingNavigation: PendingNavigation?
+
+  /// The destination the app asked to show and is still preparing, so the control that asked can
+  /// show the request registered, as Telegram keeps a tapped row lit until its chat is ready.
+  public var pendingPreparedDestination: Destination? {
+    pendingNavigation?.destination
+  }
 
   public var selectedTab: Tab {
     didSet {
-      pendingPreparedNavigation = nil
+      cancelPendingNavigation()
       recordNavigation(from: HistoryEntry(tab: oldValue, path: paths[oldValue] ?? []))
       navigationStateDidChange()
     }
@@ -313,34 +324,33 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
     }
   }
 
-  /// Applies a path a view chose, such as a NavigationStack push or a sidebar selection. A newly
-  /// shown destination that needs preparation appears once it's ready, as with `push`.
-  public func showPath(_ path: [Destination], for tab: Tab) {
-    guard let destination = path.last, !(paths[tab] ?? []).contains(destination) else {
-      pendingPreparedNavigation = nil
-      paths[tab] = path
-      return
-    }
-    afterPreparing(destination) { [weak self] in
-      self?.paths[tab] = path
-    }
-  }
-
   /// Runs `show` once the destination's preparation finishes, however long it takes, as Telegram
   /// waits for a controller to be ready before pushing it. The main thread stays free, and any
   /// navigation in the meantime, including a tab change, supersedes it.
+  ///
+  /// Only for navigation the app requests. SwiftUI applies NavigationStack path and List
+  /// selection writes itself; deferring those leaves its stack disagreeing with the binding,
+  /// and it pops what it just pushed.
   public func afterPreparing(_ destination: Destination, show: @escaping () -> Void) {
     guard let prepare = destination.preparationBeforeShowing() else {
-      pendingPreparedNavigation = nil
+      cancelPendingNavigation()
       show()
       return
     }
     let id = UUID()
-    pendingPreparedNavigation = id
+    pendingNavigation = PendingNavigation(id: id, destination: destination)
     Task { [weak self] in
       await prepare()
-      guard let self, pendingPreparedNavigation == id else { return }
+      guard let self, pendingNavigation?.id == id else { return }
+      pendingNavigation = nil
       show()
+    }
+  }
+
+  /// Observers redraw on every write, so only clear a navigation that is actually pending.
+  private func cancelPendingNavigation() {
+    if pendingNavigation != nil {
+      pendingNavigation = nil
     }
   }
 

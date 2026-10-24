@@ -466,9 +466,7 @@ private struct ExperimentalAuthedRootView: View {
     @Bindable var bindableRouter = router
     @Bindable var bindableNav = nav
 
-    let tab = bindableRouter.selectedTab
-    let path = Binding(get: { router[tab] }, set: { router.showPath($0, for: tab) })
-    return NavigationStack(path: path) {
+    return NavigationStack(path: $bindableRouter[bindableRouter.selectedTab]) {
       rootPage(nav: bindableNav)
         .background(Color(.systemBackground))
         .experimentalRootTitleDisplayMode()

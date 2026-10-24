@@ -418,6 +418,34 @@ private enum ExperimentalHomeStatus: Equatable {
   case error(String)
 }
 
+/// Lights a chat row while it's pressed and while its chat is opening or open. The chat opens once
+/// its messages are read, so without this a tap shows nothing until it appears. Telegram keeps the
+/// tapped row lit the same way, and it fades when you come back, as in a native list.
+private struct ChatRowButtonStyle: ButtonStyle {
+  /// The row's chat is opening or open.
+  let isActive: Bool
+  /// Lets the list hide the separators around a pressed row.
+  let onPressChange: (Bool) -> Void
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func makeBody(configuration: Configuration) -> some View {
+    let isLit = configuration.isPressed || isActive
+    configuration.label
+      .background {
+        // Translucent, so it follows custom theme backgrounds; on white it matches Telegram's row.
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+          .fill(Color(uiColor: .systemFill))
+          .padding(.horizontal, 2)
+          .opacity(isLit ? 1 : 0)
+          // Lights at once on touch; fades when released without opening or when the chat closes.
+          .animation(isLit ? nil : .easeInOut(duration: 0.3), value: isLit)
+      }
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+      .animation(.snappy(duration: 0.16), value: configuration.isPressed)
+      .onChange(of: configuration.isPressed) { _, isPressed in onPressChange(isPressed) }
+  }
+}
+
 private struct ExperimentalChatListView: View {
   enum EmptyStyle {
     case text
@@ -450,6 +478,7 @@ private struct ExperimentalChatListView: View {
   @Environment(ExperimentalHomeActionCoordinator.self) private var homeActions
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var pendingArchiveItem: ChatListItemSnapshot?
+  @State private var pressedChat: Peer?
 
   var body: some View {
     Group {
@@ -634,11 +663,13 @@ private struct ExperimentalChatListView: View {
   }
 
   private func rows(for sectionItems: [ChatListItemSnapshot]) -> some View {
-    ForEach(sectionItems) { item in
+    let separatorsUnderHighlight = separatorsTouchingLitRows(in: sectionItems)
+    return ForEach(sectionItems) { item in
       swipeEnabledRow(for: item)
         .listRowSeparator(.hidden, edges: .top)
         .listRowSeparator(
           chatItemRenderMode == .noLastMessage || item.id == sectionItems.last?.id
+            || separatorsUnderHighlight.contains(item.id)
             ? .hidden
             : .visible,
           edges: .bottom
@@ -652,27 +683,55 @@ private struct ExperimentalChatListView: View {
     }
   }
 
-  private func baseRow(for item: ChatListItemSnapshot) -> some View {
-    let link = NavigationLink(value: Destination.chat(peer: item.peer)) {
-      ExperimentalChatListRow(
-        item: item,
-        layoutMode: chatItemRenderMode.chatListLayoutMode,
-        showsPinnedIndicator: false,
-        showsActivityTime: true,
-        unreadBadgeStyle: unreadBadgeStyle,
-        leadingInset: rowLeadingInset
-      )
-      .equatable()
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(rowContentInsets)
-      .contentShape(.interaction, Rectangle())
+  /// A phone row is lit while pressed, while its chat is opening, and while that chat is open.
+  private func isLit(_ item: ChatListItemSnapshot) -> Bool {
+    guard selection == nil else { return false }
+    let destination = Destination.chat(peer: item.peer)
+    return pressedChat == item.peer
+      || router.pendingPreparedDestination == destination
+      || router.selectedTabPath.contains(destination)
+  }
+
+  /// The rounded highlight stands alone, so the separators above and below a lit row hide with it.
+  private func separatorsTouchingLitRows(in items: [ChatListItemSnapshot]) -> Set<ChatListItemSnapshot.ID> {
+    var ids = Set<ChatListItemSnapshot.ID>()
+    for (index, item) in items.enumerated() where isLit(item) {
+      ids.insert(item.id)
+      if index > 0 { ids.insert(items[index - 1].id) }
     }
+    return ids
+  }
+
+  private func baseRow(for item: ChatListItemSnapshot) -> some View {
+    let row = ExperimentalChatListRow(
+      item: item,
+      layoutMode: chatItemRenderMode.chatListLayoutMode,
+      showsPinnedIndicator: false,
+      showsActivityTime: true,
+      unreadBadgeStyle: unreadBadgeStyle,
+      leadingInset: rowLeadingInset
+    )
+    .equatable()
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(rowContentInsets)
+    .contentShape(.interaction, Rectangle())
+    let destination = Destination.chat(peer: item.peer)
     return Group {
       if selection != nil {
         // ForEach identifies rows by Peer; iPad List selection is a Destination.
-        link.tag(Destination.chat(peer: item.peer))
+        NavigationLink(value: destination) { row }
+          .tag(destination)
       } else {
-        link
+        // The router pushes once the chat's first window is read, so it opens complete. A
+        // NavigationLink would push at once, before that read finishes.
+        Button { router.push(destination) } label: { row }
+          .buttonStyle(ChatRowButtonStyle(isActive: isLit(item)) { isPressed in
+            if isPressed {
+              pressedChat = item.peer
+            } else if pressedChat == item.peer {
+              pressedChat = nil
+            }
+          })
       }
     }
     .navigationLinkIndicatorVisibility(.hidden)
