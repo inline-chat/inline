@@ -1458,7 +1458,39 @@ struct SidebarView: View {
 
   @ViewBuilder
   private func bottomBar(scrollProxy: ScrollViewProxy) -> some View {
-    VStack(spacing: 3) {
+    VStack(spacing: 0) {
+      bottomBarAccessories
+        .padding(.horizontal, SidebarFooterMetrics.accessoryHorizontalPadding)
+        .padding(.top, showsBottomBarAccessories ? SidebarFooterMetrics.accessoryEdgePadding : 0)
+        .padding(
+          .bottom,
+          showsBottomBarAccessories
+            ? SidebarFooterMetrics.accessoryEdgePadding - SidebarFooterMetrics.verticalPadding
+            : 0
+        )
+
+      footerBar
+    }
+    .animation(.smoothSnappy, value: sidebarConnectionState)
+    .animation(AudioNowPlayingPill.visibilityAnimation, value: audioPlayer.item)
+#if SPARKLE
+    .animation(.smoothSnappy, value: updates.showsSidebarAction)
+#endif
+  }
+
+  /// Ordered so the controls people keep reaching for (stop transcription,
+  /// play/pause) sit closest to the footer and stay put; the update action
+  /// arrives asynchronously, so it joins on top without shifting them.
+  @ViewBuilder
+  private var bottomBarAccessories: some View {
+    VStack(spacing: SidebarFooterMetrics.accessorySpacing) {
+#if SPARKLE
+      if updates.showsSidebarAction {
+        installUpdateButton
+          .transition(.opacity)
+      }
+#endif
+
       if let room = gridStore.activeTranscriptionRoom {
         GridTranscriptionSidebarIndicator(
           room: room,
@@ -1471,36 +1503,26 @@ struct SidebarView: View {
           onStop: { try await gridStore.setTranscription(room: room, enabled: false) }
         )
         .id(room.id)
-        .padding(.horizontal, Theme.sidebarItemOuterSpacing + 4)
       }
 
       // Temporarily hide the sidebar connection indicator.
       // if let state = sidebarConnectionState {
       //   SidebarConnectionStatePill(state: state)
-      //     .padding(.horizontal, Theme.sidebarItemOuterSpacing + 4)
       //     .transition(.opacity)
       // }
 
       if audioPlayer.item != nil {
         AudioNowPlayingPill()
-          .padding(.horizontal, Theme.sidebarItemOuterSpacing + 4)
           .transition(AudioNowPlayingPill.visibilityTransition)
       }
-
-#if SPARKLE
-      if updates.showsSidebarAction {
-        installUpdateButton
-          .transition(.opacity)
-      }
-#endif
-
-      footerBar
     }
-    .animation(.smoothSnappy, value: sidebarConnectionState)
-    .animation(AudioNowPlayingPill.visibilityAnimation, value: audioPlayer.item)
+  }
+
+  private var showsBottomBarAccessories: Bool {
 #if SPARKLE
-    .animation(.smoothSnappy, value: updates.showsSidebarAction)
+    if updates.showsSidebarAction { return true }
 #endif
+    return gridStore.activeTranscriptionRoom != nil || audioPlayer.item != nil
   }
 
   @ViewBuilder

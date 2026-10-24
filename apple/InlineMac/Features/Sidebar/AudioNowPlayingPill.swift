@@ -12,6 +12,7 @@ struct AudioNowPlayingPill: View {
   @State private var isHovering = false
 
   private static let pillCornerRadius: CGFloat = 13
+  private static let closeButtonOverhang: CGFloat = 5
   static let visibilityAnimation: Animation = .audioPillAppear
   static let visibilityTransition = AnyTransition
     .scale(scale: 0.86, anchor: .bottom)
@@ -37,10 +38,11 @@ struct AudioNowPlayingPill: View {
         .clipShape(shape)
 
       AudioPillCloseButton(isVisible: isHovering)
-        .offset(x: -5, y: -5)
+        .offset(x: -Self.closeButtonOverhang, y: -Self.closeButtonOverhang)
     }
-    .padding(.top, 5)
-    .padding(.leading, 5)
+    // Keep the overhanging close button inside the hover area.
+    .padding(.top, Self.closeButtonOverhang)
+    .padding(.leading, Self.closeButtonOverhang)
     .onHover { hovering in
       withAnimation(.audioPillSnap) {
         isHovering = hovering
@@ -63,6 +65,10 @@ struct AudioNowPlayingPill: View {
       }
       .disabled(player.sourceURL == nil)
     }
+    // Lay out at the visible pill's size so it aligns with sibling pills; the
+    // overhang spills into the surrounding spacing.
+    .padding(.top, -Self.closeButtonOverhang)
+    .padding(.leading, -Self.closeButtonOverhang)
   }
 
   private var pillBody: some View {

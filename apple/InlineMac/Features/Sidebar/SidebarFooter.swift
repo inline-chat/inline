@@ -7,6 +7,11 @@ enum SidebarFooterMetrics {
   static let cornerRadius: CGFloat = 8
   static let verticalPadding: CGFloat = 6
   static let horizontalPadding: CGFloat = 12
+  /// Pills and the update action stacked above the footer icons.
+  static let accessorySpacing: CGFloat = 6
+  static let accessoryHorizontalPadding: CGFloat = Theme.sidebarItemOuterSpacing + 4
+  /// Gap from the scroll edge above, and from the footer's hover boxes below.
+  static let accessoryEdgePadding: CGFloat = 8
   static let iconPointSize: CGFloat = 13
   static let iconFont: Font = .system(size: iconPointSize, weight: .medium)
 
