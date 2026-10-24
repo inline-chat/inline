@@ -171,7 +171,7 @@ describe("grid", () => {
       .from(gridPresence)
       .where(eq(gridPresence.userId, contexts[0]!.currentUserId))
     expect(presence).toBeDefined()
-    expect(presence!.leaseExpiresAt.getTime() - presence!.joinedAt.getTime()).toBeGreaterThanOrEqual(10 * 60_000)
+    expect(presence!.leaseExpiresAt.getTime() - presence!.joinedAt.getTime()).toBeGreaterThanOrEqual(4 * 60_000)
   })
 
   test("does not mint connection credentials for an expired presence", async () => {

@@ -19,12 +19,12 @@ import { asc, eq, inArray, lte, min } from "drizzle-orm"
 
 const SWEEP_BATCH_SIZE = 100
 // A committed change is probed after this delay, so a burst of joins costs one
-// probe. New presence expires 15 minutes out and new capture runs 30 s out.
+// probe. New presence expires 5 minutes out and new capture runs 30 s out.
 const WAKE_DELAY_MS = 2_000
 // Re-probe after progress; doubles up to the shared idle cap while the lock is
 // busy, a sweep fails, or due work cannot be taken yet.
 const RETRY_INTERVAL_MS = 1_000
-// Leases are 15 minutes and capture runs at most 2 hours; bound the timer anyway.
+// Leases are 5 minutes and capture runs at most 2 hours; bound the timer anyway.
 const MAXIMUM_SLEEP_MS = 60 * 60_000
 const log = new Log("grid.expirySweeper")
 

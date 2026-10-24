@@ -79,10 +79,10 @@ import {
 import { Log } from "@in/server/utils/log"
 import { and, asc, count, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm"
 
-// Heartbeats are normally 30 seconds apart. Keep enough server-independent
-// recovery budget for a user to repair or switch networks without another
-// participant's first reconnect nondeterministically expiring their avatar.
-const PRESENCE_LEASE_MS = 15 * 60_000
+// Heartbeats are normally 30 seconds apart. Ten missed heartbeats leave room
+// to repair or switch networks, while a crashed, killed or suspended client
+// (an iPhone alone in the background) leaves the room within minutes.
+const PRESENCE_LEASE_MS = 5 * 60_000
 const MAX_ROOM_CAPACITY = 25
 const MAX_NAMED_ROOMS_PER_SPACE = 50
 const MAX_ROOM_TITLE_LENGTH = 80
