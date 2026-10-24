@@ -9,17 +9,17 @@ struct DataStorageSettingsDetailView: View {
     Form {
       Section {
         AutoDownloadLimitRow(
-          title: "Media",
+          item: .autoDownloadMedia,
           caps: AutoDownloadLimitCaps.media,
           value: binding(\.mediaMaxMB)
         )
         AutoDownloadLimitRow(
-          title: "Files",
+          item: .autoDownloadFiles,
           caps: AutoDownloadLimitCaps.files,
           value: binding(\.fileMaxMB)
         )
         AutoDownloadLimitRow(
-          title: "Voice Messages",
+          item: .autoDownloadVoiceMessages,
           caps: AutoDownloadLimitCaps.voice,
           value: binding(\.voiceMaxMB)
         )
@@ -43,7 +43,7 @@ struct DataStorageSettingsDetailView: View {
 }
 
 private struct AutoDownloadLimitRow: View {
-  let title: LocalizedStringResource
+  let item: SettingsSearchItem
   let caps: [Int]
   @Binding var value: Int
 
@@ -64,7 +64,7 @@ private struct AutoDownloadLimitRow: View {
           }
         }
         .frame(width: 180)
-        .accessibilityLabel(title)
+        .accessibilityLabel(item.title)
         .accessibilityValue(label(for: selectedValue))
 
         Text(label(for: selectedValue))
@@ -73,8 +73,9 @@ private struct AutoDownloadLimitRow: View {
           .frame(width: 72, alignment: .trailing)
       }
     } label: {
-      SettingsRowLabel(title)
+      SettingsRowLabel(item)
     }
+    .settingsSearchAnchor(item)
   }
 
   private var sliderBinding: Binding<Double> {

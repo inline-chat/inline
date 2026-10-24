@@ -25,8 +25,9 @@ struct AppearanceSettingsDetailView: View {
           .pickerStyle(.menu)
           .fixedSize()
         } label: {
-          SettingsRowLabel("Item Size")
+          SettingsRowLabel(.sidebarItemSize)
         }
+        .settingsSearchAnchor(.sidebarItemSize)
 
         LabeledContent {
           Picker("Chat Icon", selection: $chatSymbol) {
@@ -40,17 +41,19 @@ struct AppearanceSettingsDetailView: View {
           .fixedSize()
         } label: {
           SettingsRowLabel(
-            "Chat Icon",
+            .chatIcon,
             description: "Choose a symbol for chats without a custom emoji."
           )
         }
+        .settingsSearchAnchor(.chatIcon)
 
         Toggle(isOn: $appSettings.sidebarGlassAndTintEnabled) {
           SettingsRowLabel(
-            "Sidebar Tint",
+            .sidebarTint,
             description: "Add a subtle theme color over native sidebars."
           )
         }
+        .settingsSearchAnchor(.sidebarTint)
       } header: {
         SettingsSectionHeader("Sidebar")
       }
@@ -63,8 +66,9 @@ struct AppearanceSettingsDetailView: View {
         LabeledContent {
           UnreadBadgeStylePicker(selection: $appSettings.unreadBadgeStyle)
         } label: {
-          SettingsRowLabel("Unread Badge Style")
+          SettingsRowLabel(.unreadBadgeStyle)
         }
+        .settingsSearchAnchor(.unreadBadgeStyle)
       } header: {
         SettingsSectionHeader("Badges")
       }
@@ -74,10 +78,11 @@ struct AppearanceSettingsDetailView: View {
       Section {
         Toggle(isOn: $appSettings.centeredChats) {
           SettingsRowLabel(
-            "Centered Chats",
+            .centeredChats,
             description: "Keep messages and the composer in a centered column. Turn off to use the full chat width."
           )
         }
+        .settingsSearchAnchor(.centeredChats)
       } header: {
         SettingsSectionHeader("Chat Layout")
       }
@@ -104,10 +109,11 @@ private struct MessagesAppearanceSettingsSection: View {
         .frame(width: 220, alignment: .trailing)
       } label: {
         SettingsRowLabel(
-          "Message Style",
+          .messageStyle,
           description: "Choose how messages are arranged in chats."
         )
       }
+      .settingsSearchAnchor(.messageStyle)
     } header: {
       SettingsSectionHeader("Messages")
     }
@@ -136,10 +142,11 @@ private struct ChatTypographySettingsSection: View {
         }
       } label: {
         SettingsRowLabel(
-          "Fonts",
+          .fonts,
           description: "Comma-separated font families or faces, in fallback order."
         )
       }
+      .settingsSearchAnchor(.fonts)
 
       LabeledContent {
         HStack(spacing: 6) {
@@ -156,8 +163,9 @@ private struct ChatTypographySettingsSection: View {
             .fixedSize()
         }
       } label: {
-        SettingsRowLabel("Size")
+        SettingsRowLabel(.fontSize)
       }
+      .settingsSearchAnchor(.fontSize)
     } header: {
       SettingsSectionHeader(
         "Typography",
@@ -194,8 +202,9 @@ private struct AppearanceAndThemeSettingsSection: View {
       LabeledContent {
         AppearancePicker(selection: $settings.appearance)
       } label: {
-        SettingsRowLabel("Appearance")
+        SettingsRowLabel(.appearance)
       }
+      .settingsSearchAnchor(.appearance)
 
       LabeledContent {
         Button {
@@ -224,10 +233,11 @@ private struct AppearanceAndThemeSettingsSection: View {
         }
       } label: {
         SettingsRowLabel(
-          "Theme",
+          .theme,
           description: "Choose colors for the current light or dark appearance."
         )
       }
+      .settingsSearchAnchor(.theme)
     } header: {
       SettingsSectionHeader("Appearance")
     }
@@ -512,10 +522,11 @@ private struct ToolbarSettingsSection: View {
     Section {
       Toggle(isOn: $usesCompactToolbar) {
         SettingsRowLabel(
-          "Compact Toolbar",
+          .compactToolbar,
           description: "Use less vertical space in chat window toolbars."
         )
       }
+      .settingsSearchAnchor(.compactToolbar)
     } header: {
       SettingsSectionHeader("Toolbar")
     }
@@ -539,10 +550,11 @@ private struct EmojiSkinToneSettingsSection: View {
         .fixedSize()
       } label: {
         SettingsRowLabel(
-          "Preferred Skin Tone",
+          .preferredSkinTone,
           description: "Apply this tone when selecting supported emoji. Explicit variants remain available."
         )
       }
+      .settingsSearchAnchor(.preferredSkinTone)
     } header: {
       SettingsSectionHeader("Emoji")
     }

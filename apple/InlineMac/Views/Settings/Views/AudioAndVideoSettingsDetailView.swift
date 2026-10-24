@@ -57,8 +57,9 @@ private struct AudioInputSettingsRow: View {
       .pickerStyle(.menu)
       .fixedSize()
     } label: {
-      SettingsRowLabel("Input Device")
+      SettingsRowLabel(.inputDevice)
     }
+    .settingsSearchAnchor(.inputDevice)
   }
 
   private var automaticDeviceLabel: String {
@@ -104,8 +105,9 @@ private struct AudioOutputSettingsRow: View {
       .pickerStyle(.menu)
       .fixedSize()
     } label: {
-      SettingsRowLabel("Output Device")
+      SettingsRowLabel(.outputDevice)
     }
+    .settingsSearchAnchor(.outputDevice)
   }
 
   private var automaticDeviceLabel: String {
@@ -134,17 +136,19 @@ private struct GridAudioSettingsSection: View {
     Section {
       Toggle(isOn: $grid.autoUnmuteOnJoin) {
         SettingsRowLabel(
-          "Auto-Unmute on Join",
+          .autoUnmuteOnJoin,
           description: "Open your microphone when you deliberately join a room."
         )
       }
+      .settingsSearchAnchor(.autoUnmuteOnJoin)
 
       Toggle(isOn: $grid.autoMuteWhenAlone) {
         SettingsRowLabel(
-          "Auto-Mute When Alone",
+          .autoMuteWhenAlone,
           description: "Mute your microphone after five seconds alone. It stays muted until you open it again."
         )
       }
+      .settingsSearchAnchor(.autoMuteWhenAlone)
     } header: {
       SettingsSectionHeader("Grid")
     }

@@ -392,9 +392,10 @@ private struct AccountProfileSection: View {
       .padding(.vertical, 4)
     } header: {
       SettingsSectionHeader(
-        "Profile",
+        .profile,
         subtitle: "Your profile is visible to people you chat with."
       )
+      .settingsSearchHeaderAnchor(.profile)
     }
   }
 
@@ -433,18 +434,20 @@ private struct AccountIdentitySection: View {
         }
       } label: {
         SettingsRowLabel(
-          "Username",
+          .username,
           description: "The public name people can use to find your account."
         )
       }
+      .settingsSearchAnchor(.username)
 
       if let email = nonEmpty(email) {
         LabeledContent {
           Text(email)
             .textSelection(.enabled)
         } label: {
-          SettingsRowLabel("Email")
+          SettingsRowLabel(.email)
         }
+        .settingsSearchAnchor(.email)
       }
 
       if let phoneNumber = nonEmpty(phoneNumber) {
@@ -452,8 +455,9 @@ private struct AccountIdentitySection: View {
           Text(phoneNumber)
             .textSelection(.enabled)
         } label: {
-          SettingsRowLabel("Phone")
+          SettingsRowLabel(.phone)
         }
+        .settingsSearchAnchor(.phone)
       }
 
       DisclosureGroup {
@@ -464,8 +468,9 @@ private struct AccountIdentitySection: View {
             .textSelection(.enabled)
         }
       } label: {
-        SettingsRowLabel("Technical Details")
+        SettingsRowLabel(.technicalDetails)
       }
+      .settingsSearchAnchor(.technicalDetails)
     } header: {
       SettingsSectionHeader("Account")
     }
@@ -487,8 +492,9 @@ private struct AccountSignOutSection: View {
           onSignOut()
         }
       } label: {
-        SettingsRowLabel("This Mac")
+        SettingsRowLabel(.signOut)
       }
+      .settingsSearchAnchor(.signOut)
     } header: {
       SettingsSectionHeader("Session")
     }
@@ -548,9 +554,10 @@ struct AccountSessionsSettingsDetailView: View {
         }
       } header: {
         SettingsSectionHeader(
-          "Signed-In Devices",
+          .signedInDevices,
           subtitle: "Revoke anything you do not recognize. Sign out this Mac from the Account page."
         )
+        .settingsSearchHeaderAnchor(.signedInDevices)
       }
     }
     .settingsFormStyle()

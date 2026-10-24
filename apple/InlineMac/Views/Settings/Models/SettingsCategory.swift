@@ -20,6 +20,26 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
 
   var id: String { rawValue }
 
+  /// Sidebar groups, in order. Search uses the same categories so hidden pages never match.
+  static func sidebarGroups(isLoggedIn: Bool) -> [[SettingsCategory]] {
+    var updates: [SettingsCategory] = []
+#if SPARKLE
+    updates.append(.updates)
+#endif
+    let groups: [[SettingsCategory]] = [
+      isLoggedIn ? [.account] : [],
+      [.general, .appearance, .notifications, .audioAndVideo],
+      isLoggedIn ? [.privacy, .dataStorage, .activeSessions] : [.dataStorage],
+      isLoggedIn ? [.connectors, .bots, .hotkeys] : [.hotkeys],
+      updates + [.experimental, .debug],
+    ]
+    return groups.filter { !$0.isEmpty }
+  }
+
+  static func available(isLoggedIn: Bool) -> [SettingsCategory] {
+    sidebarGroups(isLoggedIn: isLoggedIn).flatMap(\.self)
+  }
+
   var title: String {
     switch self {
     case .general:
@@ -55,38 +75,39 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     }
   }
 
-  var iconName: String {
+  /// Image asset shown in the sidebar and search results.
+  var iconImageName: String {
     switch self {
     case .general:
-      return "gear"
+      return "SettingsIconGeneral"
     case .audioAndVideo:
-      return "speaker.wave.2"
+      return "SettingsIconAudioAndVideo"
     case .dataStorage:
-      return "externaldrive"
+      return "SettingsIconDataStorage"
     case .connectors:
-      return "app.connected.to.app.below.fill"
+      return "SettingsIconConnectors"
     case .hotkeys:
-      return "keyboard"
+      return "SettingsIconHotkeys"
     case .appearance:
-      return "paintbrush"
+      return "SettingsIconAppearance"
     case .account:
-      return "person.circle"
+      return "SettingsIconAccount"
     case .activeSessions:
-      return "laptopcomputer.and.iphone"
+      return "SettingsIconActiveSessions"
     case .bots:
-      return "cpu"
+      return "SettingsIconBots"
 #if SPARKLE
     case .updates:
-      return "arrow.triangle.2.circlepath"
+      return "SettingsIconUpdates"
 #endif
     case .notifications:
-      return "bell"
+      return "SettingsIconNotifications"
     case .privacy:
-      return "hand.raised"
+      return "SettingsIconPrivacy"
     case .experimental:
-      return "testtube.2"
+      return "SettingsIconExperimental"
     case .debug:
-      return "ladybug.fill"
+      return "SettingsIconDebug"
     }
   }
 }

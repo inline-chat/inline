@@ -86,8 +86,9 @@ struct UpdatesSettingsDetailView: View {
         .labelsHidden()
         .pickerStyle(.menu)
       } label: {
-        SettingsRowLabel("Automatic Updates")
+        SettingsRowLabel(.automaticUpdates)
       }
+      .settingsSearchAnchor(.automaticUpdates)
 
       LabeledContent {
         Picker("Update Channel", selection: $updates.channel) {
@@ -99,10 +100,11 @@ struct UpdatesSettingsDetailView: View {
         .pickerStyle(.menu)
       } label: {
         SettingsRowLabel(
-          "Update Channel",
+          .updateChannel,
           description: "Beta receives preview releases; Tip receives the latest builds several times a day."
         )
       }
+      .settingsSearchAnchor(.updateChannel)
     } header: {
       SettingsSectionHeader("Automatic Updates")
     }
@@ -114,8 +116,9 @@ struct UpdatesSettingsDetailView: View {
         }
         .disabled(!updates.allowsPrimaryAction)
       } label: {
-        SettingsRowLabel("Software Update")
+        SettingsRowLabel(.softwareUpdate)
       }
+      .settingsSearchAnchor(.softwareUpdate)
     }
   }
 

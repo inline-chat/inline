@@ -23,6 +23,20 @@ struct SettingsRowLabel: View {
     self.dynamicDescription = dynamicDescription
   }
 
+  init(
+    _ item: SettingsSearchItem,
+    description: LocalizedStringResource? = nil
+  ) {
+    self.init(item.title, description: description)
+  }
+
+  init(
+    _ item: SettingsSearchItem,
+    dynamicDescription: String
+  ) {
+    self.init(item.title, dynamicDescription: dynamicDescription)
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 3) {
       Text(title)
@@ -48,6 +62,13 @@ struct SettingsSectionHeader: View {
   ) {
     self.title = title
     self.subtitle = subtitle
+  }
+
+  init(
+    _ item: SettingsSearchItem,
+    subtitle: LocalizedStringResource? = nil
+  ) {
+    self.init(item.title, subtitle: subtitle)
   }
 
   var body: some View {
@@ -264,6 +285,49 @@ private struct SettingsFormStyleModifier: ViewModifier {
   }
 }
 
+extension EnvironmentValues {
+  /// The search result currently being revealed in the detail page.
+  @Entry var settingsHighlightedItem: SettingsSearchItem?
+}
+
+/// Makes a row or section header a search scroll target and briefly highlights it when revealed from search.
+private struct SettingsSearchAnchorModifier: ViewModifier {
+  let item: SettingsSearchItem
+  let isSectionHeader: Bool
+  @Environment(\.settingsHighlightedItem) private var highlightedItem
+
+  func body(content: Content) -> some View {
+    let isHighlighted = highlightedItem == item
+    if isSectionHeader {
+      content
+        .background {
+          if isHighlighted {
+            SettingsSearchHighlight(cornerRadius: 6)
+              .padding(.horizontal, -6)
+              .padding(.vertical, -3)
+          }
+        }
+        .id(item)
+    } else {
+      // The row background follows the grouped section's shape, including its rounded corners.
+      content
+        .listRowBackground(isHighlighted ? SettingsSearchHighlight(cornerRadius: 0) : nil)
+        .id(item)
+    }
+  }
+}
+
+/// Static tint shown while the item is highlighted; the root clears it after a moment.
+private struct SettingsSearchHighlight: View {
+  let cornerRadius: CGFloat
+
+  var body: some View {
+    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+      .fill(Color(nsColor: Theme.accentColor).opacity(0.2))
+      .allowsHitTesting(false)
+  }
+}
+
 private struct SettingsDescriptionStyleModifier: ViewModifier {
   func body(content: Content) -> some View {
     content
@@ -275,6 +339,14 @@ private struct SettingsDescriptionStyleModifier: ViewModifier {
 extension View {
   func settingsFormStyle() -> some View {
     modifier(SettingsFormStyleModifier())
+  }
+
+  func settingsSearchAnchor(_ item: SettingsSearchItem) -> some View {
+    modifier(SettingsSearchAnchorModifier(item: item, isSectionHeader: false))
+  }
+
+  func settingsSearchHeaderAnchor(_ item: SettingsSearchItem) -> some View {
+    modifier(SettingsSearchAnchorModifier(item: item, isSectionHeader: true))
   }
 
   fileprivate func settingsDescriptionStyle() -> some View {

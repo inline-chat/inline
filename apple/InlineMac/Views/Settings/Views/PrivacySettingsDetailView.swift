@@ -9,10 +9,11 @@ struct PrivacySettingsDetailView: View {
       Section {
         Toggle(isOn: $privacy.appearInGlobalSearch) {
           SettingsRowLabel(
-            "Appear in Global Search",
+            .appearInGlobalSearch,
             description: "Allow other people to find you by username in global search."
           )
         }
+        .settingsSearchAnchor(.appearInGlobalSearch)
       } header: {
         SettingsSectionHeader("Discovery")
       }
@@ -20,10 +21,11 @@ struct PrivacySettingsDetailView: View {
       Section {
         Toggle(isOn: $privacy.shareTimeZone) {
           SettingsRowLabel(
-            "Share Time Zone",
+            .shareTimeZone,
             description: "Allow people you chat with to see your local time."
           )
         }
+        .settingsSearchAnchor(.shareTimeZone)
       } header: {
         SettingsSectionHeader("Time Zone")
       }

@@ -40,36 +40,41 @@ struct ExperimentalSettingsDetailView: View {
     Section {
       Toggle(isOn: $agentActivityEnabled) {
         SettingsRowLabel(
-          "Agent Activity",
+          .agentActivity,
           description: "Show Working with a spinner and expandable agent steps. Requires an opted-in agent and Rich Content Renderer. Restart Inline after changing."
         )
       }
+      .settingsSearchAnchor(.agentActivity)
       if #available(macOS 26.0, *) {
         Toggle(isOn: $newThreadAgentPickerEnabled) {
           SettingsRowLabel(
-            "New Thread Agent Picker",
+            .newThreadAgentPicker,
             description: "Choose an agent in the new-thread composer and keep it for future threads. Starts with None."
           )
         }
+        .settingsSearchAnchor(.newThreadAgentPicker)
       }
       Toggle(isOn: $settings.richContentRendererEnabled) {
         SettingsRowLabel(
-          "Rich Content Renderer",
+          .richContentRenderer,
           description: "Render supported agent Markdown as native rich-content blocks in messages."
         )
       }
+      .settingsSearchAnchor(.richContentRenderer)
       Toggle(isOn: $settings.richTextInlineMathEnabled) {
         SettingsRowLabel(
-          "Inline Math Attachments",
+          .inlineMathAttachments,
           description: "Replace supported inline LaTeX with native formula attachments. Display formulas always render normally."
         )
       }
+      .settingsSearchAnchor(.inlineMathAttachments)
       Toggle(isOn: $settings.richTextMultiSurfaceSelectionEnabled) {
         SettingsRowLabel(
-          "Rich Message Multi-Block Selection",
+          .richMessageMultiBlockSelection,
           description: "Select and copy across text blocks within one rich message."
         )
       }
+      .settingsSearchAnchor(.richMessageMultiBlockSelection)
     } header: {
       SettingsSectionHeader("Agents", subtitle: "Prompt workflows, agent controls, and rich responses.")
     }
@@ -79,22 +84,25 @@ struct ExperimentalSettingsDetailView: View {
     Section {
       Toggle(isOn: $richMessageCopyEditingEnabled) {
         SettingsRowLabel(
-          "Rich Copy & Markdown Editing",
+          .richCopyMarkdownEditing,
           description: "Preserve formatting when copying messages. Show Markdown syntax when pasting formatted text or editing a message."
         )
       }
+      .settingsSearchAnchor(.richCopyMarkdownEditing)
       Toggle(isOn: $messageSelectionEnabled) {
         SettingsRowLabel(
-          "Select Multiple Messages",
+          .selectMultipleMessages,
           description: "Select messages to forward or delete together. Right-click a message and choose Select Messages."
         )
       }
+      .settingsSearchAnchor(.selectMultipleMessages)
       Toggle(isOn: $quickForwardEnabled) {
         SettingsRowLabel(
-          "Quick Forward",
+          .quickForward,
           description: "Work in progress. Forward multiple messages with an optional message without opening another chat."
         )
       }
+      .settingsSearchAnchor(.quickForward)
     } header: {
       SettingsSectionHeader("Messages")
     }
@@ -104,10 +112,11 @@ struct ExperimentalSettingsDetailView: View {
     Section {
       Toggle(isOn: $gridTranscriptionEnabled) {
         SettingsRowLabel(
-          "Grid Transcription",
+          .gridTranscription,
           description: "Try meeting transcripts in Grid. The interface is experimental and will be redesigned."
         )
       }
+      .settingsSearchAnchor(.gridTranscription)
     } header: {
       SettingsSectionHeader("Grid")
     }
@@ -116,8 +125,9 @@ struct ExperimentalSettingsDetailView: View {
   private var filesSection: some View {
     Section {
       Toggle(isOn: $fileBrowserEnabled) {
-        SettingsRowLabel("File Browser", description: "Browse files, images, and videos by chat in a separate Files window.")
+        SettingsRowLabel(.fileBrowser, description: "Browse files, images, and videos by chat in a separate Files window.")
       }
+      .settingsSearchAnchor(.fileBrowser)
       .onChange(of: fileBrowserEnabled) { _, enabled in
         if !enabled { FilesWindowController.closeIfOpen() }
       }
@@ -127,10 +137,11 @@ struct ExperimentalSettingsDetailView: View {
       }
       Toggle(isOn: $nativeFileDownloadsEnabled) {
         SettingsRowLabel(
-          "Native File Downloads",
+          .nativeFileDownloads,
           description: "Download documents and videos over the realtime connection."
         )
       }
+      .settingsSearchAnchor(.nativeFileDownloads)
       .disabled(!nativeFileDownloadsAvailable && !nativeFileDownloadsEnabled)
     } header: {
       SettingsSectionHeader("Files")

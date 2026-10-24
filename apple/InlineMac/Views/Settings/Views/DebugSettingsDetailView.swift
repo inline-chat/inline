@@ -35,10 +35,11 @@ struct DebugSettingsDetailView: View {
           }
         } label: {
           SettingsRowLabel(
-            "Sync Engine",
+            .syncEngine,
             description: "Inspect local RealtimeV2 state and run sync debug scenarios."
           )
         }
+        .settingsSearchAnchor(.syncEngine)
 
         LabeledContent {
           Button("Open") {
@@ -46,10 +47,11 @@ struct DebugSettingsDetailView: View {
           }
         } label: {
           SettingsRowLabel(
-            "App Permissions",
+            .appPermissions,
             description: "Check notification, microphone, and local permission state."
           )
         }
+        .settingsSearchAnchor(.appPermissions)
 
         LabeledContent {
           Button("Open") {
@@ -57,10 +59,11 @@ struct DebugSettingsDetailView: View {
           }
         } label: {
           SettingsRowLabel(
-            "Connection Security",
+            .connectionSecurity,
             description: "Verify the active realtime protocol and authentication lifecycle."
           )
         }
+        .settingsSearchAnchor(.connectionSecurity)
 
         LabeledContent {
           Button("Open") {
@@ -68,10 +71,11 @@ struct DebugSettingsDetailView: View {
           }
         } label: {
           SettingsRowLabel(
-            "MacDevtools",
+            .macDevtools,
             description: "Open the internal macOS developer tools window."
           )
         }
+        .settingsSearchAnchor(.macDevtools)
 
 #if DEBUG || DEBUG_BUILD
         LabeledContent {
@@ -81,10 +85,11 @@ struct DebugSettingsDetailView: View {
           .disabled(dependencies?.auth.currentUserId == nil)
         } label: {
           SettingsRowLabel(
-            "Onboarding",
+            .onboarding,
             description: "Open the onboarding flow for this development build."
           )
         }
+        .settingsSearchAnchor(.onboarding)
 
         LabeledContent {
           Button("Open") {
@@ -92,10 +97,11 @@ struct DebugSettingsDetailView: View {
           }
         } label: {
           SettingsRowLabel(
-            "Playground",
+            .playground,
             description: "Inspect UI components and fixture combinations in a standalone window."
           )
         }
+        .settingsSearchAnchor(.playground)
 #endif
       } header: {
         SettingsSectionHeader("Tools")
@@ -108,10 +114,11 @@ struct DebugSettingsDetailView: View {
           }
         } label: {
           SettingsRowLabel(
-            "App Cache",
+            .appCache,
             description: "Clear local app data and sync state, then reload the account from the server."
           )
         }
+        .settingsSearchAnchor(.appCache)
 
         LabeledContent {
           Button("Clear") {
@@ -119,10 +126,11 @@ struct DebugSettingsDetailView: View {
           }
         } label: {
           SettingsRowLabel(
-            "Media Cache",
+            .mediaCache,
             description: "Remove downloaded images, videos, and files without resetting app data."
           )
         }
+        .settingsSearchAnchor(.mediaCache)
 
         LabeledContent {
           Button("Reset") {
@@ -130,10 +138,11 @@ struct DebugSettingsDetailView: View {
           }
         } label: {
           SettingsRowLabel(
-            "Dismissed Popovers",
+            .dismissedPopovers,
             description: "Show informational popovers and notices that were previously dismissed."
           )
         }
+        .settingsSearchAnchor(.dismissedPopovers)
       } header: {
         SettingsSectionHeader("Recovery")
       }
@@ -179,10 +188,11 @@ struct DebugSettingsDetailView: View {
           }
         } label: {
           SettingsRowLabel(
-            "Theme Workshop",
+            .themeWorkshop,
             description: "Tune preset colors live and copy a palette export for production polish."
           )
         }
+        .settingsSearchAnchor(.themeWorkshop)
       } header: {
         SettingsSectionHeader("Appearance")
       }
@@ -201,10 +211,11 @@ struct DebugSettingsDetailView: View {
           .disabled(isDeletingDatabase)
         } label: {
           SettingsRowLabel(
-            "Local Database",
+            .localDatabase,
             description: "Delete this build profile's local SQLite database, then restart Inline."
           )
         }
+        .settingsSearchAnchor(.localDatabase)
       } header: {
         SettingsSectionHeader("Database")
       }

@@ -13,15 +13,17 @@ struct GeneralSettingsDetailView: View {
 #if DEBUG_BUILD
         Toggle(isOn: .constant(false)) {
           SettingsRowLabel(
-            "Launch at Login",
+            .launchAtLogin,
             description: "Unavailable in local debug builds."
           )
         }
+        .settingsSearchAnchor(.launchAtLogin)
           .disabled(true)
 #else
         Toggle(isOn: $appSettings.launchAtLogin) {
-          SettingsRowLabel("Launch at Login")
+          SettingsRowLabel(.launchAtLogin)
         }
+        .settingsSearchAnchor(.launchAtLogin)
 #endif
       } header: {
         SettingsSectionHeader("Startup")
@@ -30,24 +32,27 @@ struct GeneralSettingsDetailView: View {
       Section {
         Toggle(isOn: $appSettings.automaticSpellCorrection) {
           SettingsRowLabel(
-            "Automatic Spell Correction",
+            .automaticSpellCorrection,
             description: "Correct misspelled words while composing messages."
           )
         }
+        .settingsSearchAnchor(.automaticSpellCorrection)
 
         Toggle(isOn: $appSettings.checkSpellingWhileTyping) {
           SettingsRowLabel(
-            "Check Spelling While Typing",
+            .checkSpellingWhileTyping,
             description: "Underline misspelled words while composing messages."
           )
         }
+        .settingsSearchAnchor(.checkSpellingWhileTyping)
 
         Toggle(isOn: $composeSettings.replacePastedLinksWithTitles) {
           SettingsRowLabel(
-            "Shorten Supported Links",
+            .shortenSupportedLinks,
             description: "Turn supported pasted links into compact text links. Press Escape, Undo, or Backspace to restore the URL."
           )
         }
+        .settingsSearchAnchor(.shortenSupportedLinks)
 
         LabeledContent {
           Picker("Send Messages", selection: $appSettings.sendsWithCmdEnter) {
@@ -57,8 +62,9 @@ struct GeneralSettingsDetailView: View {
           .labelsHidden()
           .pickerStyle(.menu)
         } label: {
-          SettingsRowLabel("Send Messages")
+          SettingsRowLabel(.sendMessages)
         }
+        .settingsSearchAnchor(.sendMessages)
       } header: {
         SettingsSectionHeader("Writing")
       }
@@ -66,10 +72,11 @@ struct GeneralSettingsDetailView: View {
       Section {
         Toggle(isOn: $gestureSettings.syncEnabled) {
           SettingsRowLabel(
-            "Sync Message Gestures",
+            .syncMessageGestures,
             description: "Sync double-click, hold, and swipe direction across your devices. Turn off to customize this Mac. Turning it back on uses your synced choices."
           )
         }
+        .settingsSearchAnchor(.syncMessageGestures)
 
         LabeledContent {
           Picker("Double-click", selection: $gestureSettings.doubleTapAction) {
@@ -80,8 +87,9 @@ struct GeneralSettingsDetailView: View {
           .labelsHidden()
           .pickerStyle(.menu)
         } label: {
-          SettingsRowLabel("Double-click")
+          SettingsRowLabel(.doubleClick)
         }
+        .settingsSearchAnchor(.doubleClick)
 
         LabeledContent {
           Picker("Hold", selection: $gestureSettings.holdAction) {
@@ -92,8 +100,9 @@ struct GeneralSettingsDetailView: View {
           .labelsHidden()
           .pickerStyle(.menu)
         } label: {
-          SettingsRowLabel("Hold")
+          SettingsRowLabel(.hold)
         }
+        .settingsSearchAnchor(.hold)
 
         LabeledContent {
           Picker("Swipe to Reply", selection: $gestureSettings.swipeToReplyDirection) {
@@ -105,24 +114,27 @@ struct GeneralSettingsDetailView: View {
           .pickerStyle(.menu)
         } label: {
           SettingsRowLabel(
-            "Swipe to Reply",
+            .swipeToReply,
             description: "Choose which direction to swipe a message when replying."
           )
         }
+        .settingsSearchAnchor(.swipeToReply)
 
         Toggle(isOn: $appSettings.translationUIEnabled) {
           SettingsRowLabel(
-            "Translation Controls",
+            .translationControls,
             description: "Show translation actions for supported messages."
           )
         }
+        .settingsSearchAnchor(.translationControls)
 
         Toggle(isOn: $appSettings.openReplyThreadsInSidePane) {
           SettingsRowLabel(
-            "Open Reply Threads in Side Pane",
+            .openReplyThreadsInSidePane,
             description: "Keep the current chat visible when opening a reply thread."
           )
         }
+        .settingsSearchAnchor(.openReplyThreadsInSidePane)
       } header: {
         SettingsSectionHeader("Messages")
       }
@@ -138,10 +150,11 @@ struct GeneralSettingsDetailView: View {
           .pickerStyle(.menu)
         } label: {
           SettingsRowLabel(
-            "Open Chats Cleanup",
+            .openChatsCleanup,
             dynamicDescription: appSettings.sidebarCleanupInterval.detailText
           )
         }
+        .settingsSearchAnchor(.openChatsCleanup)
       } header: {
         SettingsSectionHeader("Sidebar")
       }

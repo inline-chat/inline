@@ -8,18 +8,20 @@ struct NotificationsSettingsDetailView: View {
       Section {
         Toggle(isOn: $appSettings.showDockBadgeUnreadDMs) {
           SettingsRowLabel(
-            "Dock Badge",
+            .dockBadge,
             description: "Show important unread chats on Inline's Dock icon."
           )
         }
+        .settingsSearchAnchor(.dockBadge)
       } header: {
         SettingsSectionHeader("Dock")
       }
 
       Section {
         Toggle(isOn: $appSettings.notificationSoundEnabled) {
-          SettingsRowLabel("Notification Sounds")
+          SettingsRowLabel(.notificationSounds)
         }
+        .settingsSearchAnchor(.notificationSounds)
       } header: {
         SettingsSectionHeader("Sound")
       }

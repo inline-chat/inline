@@ -7,9 +7,22 @@ import SwiftUI
 @Observable
 final class SettingsNavigationModel {
   var selectedCategory: SettingsCategory
+  var searchQuery = ""
+  /// Search result waiting for its page to scroll it into view; cleared once revealed.
+  var pendingSearchItem: SettingsSearchItem?
+  private(set) var searchFocusRequest = 0
 
   init(selectedCategory: SettingsCategory = .general) {
     self.selectedCategory = selectedCategory
+  }
+
+  func reveal(_ item: SettingsSearchItem) {
+    selectedCategory = item.category
+    pendingSearchItem = item
+  }
+
+  func focusSearch() {
+    searchFocusRequest += 1
   }
 }
 
@@ -20,6 +33,7 @@ struct SettingsRootView: View {
   @State private var navigationHistory: [SettingsCategory]
   @State private var historyIndex = 0
   @State private var isHistoryNavigation = false
+  @State private var highlightedSearchItem: SettingsSearchItem?
   @ObservedObject private var settings = AppSettings.shared
 
   init(navigation: SettingsNavigationModel) {
@@ -32,7 +46,7 @@ struct SettingsRootView: View {
 
   var body: some View {
     NavigationSplitView(columnVisibility: $columnVisibility) {
-      SettingsSidebarView(selectedCategory: $navigation.selectedCategory)
+      SettingsSidebarView(navigation: navigation)
         .frame(minWidth: Metrics.sidebarMinWidth)
         .navigationSplitViewColumnWidth(
           min: Metrics.sidebarMinWidth,
@@ -42,9 +56,18 @@ struct SettingsRootView: View {
         .toolbar(removing: .sidebarToggle)
     } detail: {
       NavigationStack {
-        SettingsDetailView(category: navigation.selectedCategory)
+        ScrollViewReader { proxy in
+          SettingsDetailView(category: navigation.selectedCategory)
+            .environment(\.settingsHighlightedItem, highlightedSearchItem)
+            .task(id: navigation.pendingSearchItem) {
+              await revealPendingSearchItem(using: proxy)
+            }
+        }
       }
       .background(themeBackground)
+      .task(id: highlightedSearchItem) {
+        await clearSearchHighlight()
+      }
     }
     .navigationTitle("Settings")
     .navigationSplitViewStyle(.balanced)
@@ -87,6 +110,25 @@ struct SettingsRootView: View {
   private var themeBackground: Color {
     _ = settings.themeRevision
     return Color(nsColor: Theme.settingsWindowBackgroundColor)
+  }
+
+  private func revealPendingSearchItem(using proxy: ScrollViewProxy) async {
+    guard let item = navigation.pendingSearchItem else { return }
+    // Let a newly selected page lay out its form before scrolling to the row.
+    try? await Task.sleep(for: .milliseconds(80))
+    guard !Task.isCancelled else { return }
+    withAnimation(.easeInOut(duration: 0.25)) {
+      proxy.scrollTo(item, anchor: .center)
+    }
+    highlightedSearchItem = item
+    navigation.pendingSearchItem = nil
+  }
+
+  private func clearSearchHighlight() async {
+    guard highlightedSearchItem != nil else { return }
+    try? await Task.sleep(for: .seconds(1.2))
+    guard !Task.isCancelled else { return }
+    highlightedSearchItem = nil
   }
 
   private var canGoBack: Bool {

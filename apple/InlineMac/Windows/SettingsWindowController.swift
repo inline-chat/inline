@@ -93,6 +93,11 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
     appBridge.activate(ignoringOtherApps: true)
   }
 
+  /// Edit > Find (⌘F) focuses the settings search field.
+  override func performTextFinderAction(_ sender: Any?) {
+    navigation.focusSearch()
+  }
+
   func windowWillClose(_ notification: Notification) {
     appBridge.unregisterWindow()
     Self.shared = nil

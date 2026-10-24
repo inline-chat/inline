@@ -10,7 +10,7 @@ struct HotkeysSettingsDetailView: View {
     Form {
       Section {
         GlobalHotkeySettingsRow(
-          title: "Focus Inline",
+          item: .focusInlineHotkey,
           description: "Bring Inline to the front from any app.",
           configuration: $hotkeySettings.globalFocusHotkey,
           isRecording: recordingAction == .focusInline,
@@ -19,7 +19,7 @@ struct HotkeysSettingsDetailView: View {
         )
 
         GlobalHotkeySettingsRow(
-          title: "Grid Microphone",
+          item: .gridMicrophoneHotkey,
           description: "Mute or unmute your microphone in the active Grid room from any app.",
           configuration: $hotkeySettings.gridMicrophoneHotkey,
           isRecording: recordingAction == .gridMicrophone,
@@ -127,7 +127,7 @@ private enum HotkeyAction: CaseIterable, Equatable {
 }
 
 private struct GlobalHotkeySettingsRow: View {
-  let title: LocalizedStringResource
+  let item: SettingsSearchItem
   let description: LocalizedStringResource
   @Binding var configuration: HotkeySettingsStore.HotkeyConfiguration
   let isRecording: Bool
@@ -155,8 +155,9 @@ private struct GlobalHotkeySettingsRow: View {
           .disabled(configuration.hotkey == nil && !configuration.enabled)
       }
     } label: {
-      SettingsRowLabel(title, description: description)
+      SettingsRowLabel(item, description: description)
     }
+    .settingsSearchAnchor(item)
   }
 
   private var currentHotkeyLabel: String {

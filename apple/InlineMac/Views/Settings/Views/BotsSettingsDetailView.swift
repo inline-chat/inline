@@ -43,9 +43,10 @@ struct BotsSettingsDetailView: View {
         }
       } header: {
         SettingsSectionHeader(
-          "Agent Setup",
+          .agentSetup,
           subtitle: "Install Inline’s CLI and connect Codex, Claude, OpenCode, Amp, Hermes, or OpenClaw."
         )
+        .settingsSearchHeaderAnchor(.agentSetup)
       }
 
       Section {
@@ -90,9 +91,10 @@ struct BotsSettingsDetailView: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
       } header: {
         SettingsSectionHeader(
-          "Create Bot",
+          .createBot,
           subtitle: "Create bots for integrations and automated workflows."
         )
+        .settingsSearchHeaderAnchor(.createBot)
       } footer: {
         Text("Usernames must end with “bot” and are not case-sensitive.")
       }
@@ -171,9 +173,10 @@ struct BotsSettingsDetailView: View {
         }
       } header: {
         SettingsSectionHeader(
-          "Your Bots",
+          .yourBots,
           subtitle: "Manage bots used by integrations and automated workflows."
         )
+        .settingsSearchHeaderAnchor(.yourBots)
       }
 
       MacBotAgentsSection(bots: viewModel.bots)
@@ -851,9 +854,10 @@ private struct MacBotAgentsSection: View {
       }
     } header: {
       SettingsSectionHeader(
-        "Skilled Agents",
+        .skilledAgents,
         subtitle: "Give your bots focused roles people can @mention for repeatable work."
       )
+      .settingsSearchHeaderAnchor(.skilledAgents)
     } footer: {
       Text("Skilled Agents use their bot’s access, memory, and tools.")
     }
