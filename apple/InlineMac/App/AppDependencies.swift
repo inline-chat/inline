@@ -44,6 +44,7 @@ public struct AppDependencies {
   let gridRuntime = tracedLaunchDependency("DependencyGridRuntime") {
     let runtime = GridRuntime.shared
     runtime.configurePlatformEffects(.macOS)
+    GridSleepGuard.start(store: runtime.rooms)
     return runtime
   }
   let commandBarCatalog = tracedLaunchDependency("DependencyCommandCatalog") {
