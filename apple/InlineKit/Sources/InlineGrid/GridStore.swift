@@ -19,6 +19,11 @@ public final class GridRoomService {
   public private(set) var currentCall: GridCurrentCall?
   public private(set) var callTransferEnabled = false
   public private(set) var membershipMutationInFlight = false
+  public var pendingMembership: GridPendingMembership? {
+    membershipMutationInFlight ? submittedMembership : nil
+  }
+
+  private var submittedMembership: GridPendingMembership?
   private var localAdmission: GridLocalAdmission?
   public var hasLocalAdmission: Bool {
     localAdmission != nil
@@ -495,6 +500,7 @@ public final class GridRoomService {
   public func createAndJoin(spaceID: Int64) {
     mayResumeAfterRestart = false
     guard let accountToken = beginMembershipClaim() else { return }
+    submittedMembership = .create(spaceID: spaceID)
     let expectedMembershipID = observedMembershipFence()
     let startedAt = Date()
     mediaCoordinator.prepareForExplicitJoin()
@@ -523,6 +529,7 @@ public final class GridRoomService {
     guard let destination = grids.values.first(where: { $0.rooms.contains(where: { $0.id == roomID }) }),
           let accountToken = beginMembershipClaim()
     else { return }
+    submittedMembership = .join(spaceID: destination.spaceID, roomID: roomID)
     let expectedMembershipID = observedMembershipFence()
     let startedAt = Date()
     mediaInteractionStartedAt = destination.rooms.first(where: { $0.id == roomID })?.avatars.isEmpty == false
@@ -571,6 +578,7 @@ public final class GridRoomService {
     selfReadEpoch &+= 1
     clearLocalAdmission()
     membershipMutationInFlight = true
+    submittedMembership = .move(spaceID: call.spaceID, roomID: call.roomID)
     cancelPendingMembershipClaim = false
     membershipMutationRevision &+= 1
     mediaCoordinator.prepareForExplicitJoin()
@@ -593,6 +601,7 @@ public final class GridRoomService {
     mayResumeAfterRestart = false
     // A hanging claim must never make Leave or Cancel unable to stop locally.
     if membershipMutationInFlight {
+      submittedMembership = .leave(spaceID: spaceID)
       withdrawLocalAdmission()
       for spaceID in Array(grids.keys) {
         _ = optimisticallyLeave(spaceID: spaceID)
@@ -622,6 +631,7 @@ public final class GridRoomService {
       membershipMutationRevision &+= 1
     }
     membershipMutationInFlight = true
+    submittedMembership = .leave(spaceID: spaceID)
     platformEffects.playSound?(.leave)
     membershipSync.submit(GridMembershipOperation(
       kind: .leave(roomID: roomID),
@@ -1467,6 +1477,11 @@ public final class GridRoomService {
         updateMembershipRollbackBaseline(with: response.grids)
         applySnapshot(response.grids)
         clearLocalAdmission()
+        // The leave result is the newest self read. Without it the call just
+        // left would show as paused here until the Home read below lands.
+        if callTransferEnabled {
+          currentCall = response.currentCall
+        }
         await loadHome()
       case let .failed(_, message):
         mediaInteractionStartedAt = nil
@@ -1491,6 +1506,7 @@ public final class GridRoomService {
   private func submitCancelledClaimCleanup(_ call: GridCurrentCall, accountToken: AuthAccountMutationToken) {
     membershipMutationRevision &+= 1
     membershipMutationInFlight = true
+    submittedMembership = .leave(spaceID: call.spaceID)
     membershipSync.submit(GridMembershipOperation(
       kind: .leave(roomID: call.roomID),
       spaceID: call.spaceID,

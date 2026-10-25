@@ -75,7 +75,7 @@ final class GridMediaCoordinator {
     #if os(iOS)
     inputSelection = .automatic
     outputSelection = .automatic
-    microphoneEnabled = false
+    microphoneEnabled = defaults.bool(forKey: Self.microphoneEnabledKey)
     autoUnmuteOnJoin = false
     autoMuteWhenAlone = false
     #else
@@ -189,9 +189,6 @@ final class GridMediaCoordinator {
   @discardableResult
   func withdrawLocalMedia() -> Task<GridMediaShutdownReceipt, Never> {
     microphoneCapturePrepared = false
-    #if os(iOS)
-    setMicrophoneEnabled(false)
-    #endif
     clearCredentials()
     setTarget(nil)
     lastDemand = nil
@@ -208,9 +205,6 @@ final class GridMediaCoordinator {
   @discardableResult
   func setMicrophoneEnabled(_ enabled: Bool, persist: Bool = true) -> Bool {
     #if os(iOS)
-    if enabled, target == nil {
-      return false
-    }
     if enabled {
       microphoneCapturePrepared = true
     }
@@ -239,12 +233,11 @@ final class GridMediaCoordinator {
     return enabled
   }
 
-  /// iOS starts listen-only on a deliberate join;
-  /// transport replacement within that admission preserves intent.
+  /// A join keeps the user's microphone choice, as on the Mac. On iOS a new
+  /// admission never inherits warm capture from a muted microphone.
   func prepareForExplicitJoin() {
     #if os(iOS)
     microphoneCapturePrepared = false
-    setMicrophoneEnabled(false)
     #endif
   }
 
@@ -460,7 +453,9 @@ final class GridMediaCoordinator {
 
   private var microphoneCapturePreparedForDemand: Bool {
     #if os(iOS)
-    microphoneCapturePrepared && target != nil
+    // An open microphone captures as soon as there is a call to send it to;
+    // a muted one stays warm only after an unmute in this admission.
+    (microphoneCapturePrepared || isMicrophoneEnabled) && target != nil
     #else
     target != nil
     #endif
