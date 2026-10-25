@@ -39,9 +39,7 @@ struct GridScreenShareViewer: View {
           }
         }
         .safeAreaInset(edge: .bottom) {
-          if let call = store.currentCall {
-            GridCallDock(store: store, spaceID: call.spaceID)
-          }
+          GridCallDock(store: store)
         }
         .onChange(of: selectedShare?.publicationID) { _, publicationID in
           if publicationID == nil { dismiss() }

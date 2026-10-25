@@ -75,28 +75,41 @@ private struct GridHomeEntryModifier: ViewModifier {
 /// What Home shows above the chat list, most specific first.
 @MainActor
 private enum GridHomeBarState {
-  /// This device carries the call: show the room with its own controls.
-  case inCall(spaceID: Int64, room: GridRoom?)
-  /// The call is owned elsewhere (usually the Mac): offer to move it here.
-  case elsewhere(GridCurrentCall)
+  /// This device is joining or carries the call: the room with its controls.
+  case inCall(GridLocalCall, spaceID: Int64, room: GridRoom?)
+  /// The call is elsewhere (usually the Mac) or paused here: bring it here.
+  case elsewhere(GridCurrentCall, isMoving: Bool)
   /// Others are talking and the user is not: show who and where.
   case live(GridHomeEntryProjection)
   case hidden
 
   init(store: GridRoomService) {
-    if let call = store.currentCall {
-      let room = store.grid(spaceID: call.spaceID)?.rooms.first { $0.id == call.roomID }
-      if call.ownedByCurrentSession {
-        self = store.hasLocalAdmission ? .inCall(spaceID: call.spaceID, room: room) : .elsewhere(call)
+    let call = GridLocalCall(store: store)
+    switch call {
+      case let .claiming(.join, spaceID, roomID):
+        self = .inCall(call, spaceID: spaceID, room: roomID.flatMap { Self.room($0, spaceID: spaceID, store: store) })
         return
-      }
-      if store.callTransferEnabled {
-        self = .elsewhere(call)
+      case let .active(spaceID, roomID, _):
+        self = .inCall(call, spaceID: spaceID, room: Self.room(roomID, spaceID: spaceID, store: store))
         return
-      }
+      case .claiming:
+        // Moving or resuming keeps the capsule the user tapped, now busy.
+        if let current = store.currentCall {
+          self = .elsewhere(current, isMoving: true)
+          return
+        }
+      case let .paused(current), let .elsewhere(current):
+        self = .elsewhere(current, isMoving: false)
+        return
+      case .none:
+        break
     }
     let projection = GridHomeEntryProjection(store: store, spaceID: nil)
     self = projection.showsPill ? .live(projection) : .hidden
+  }
+
+  private static func room(_ roomID: Int64, spaceID: Int64, store: GridRoomService) -> GridRoom? {
+    store.grid(spaceID: spaceID)?.rooms.first { $0.id == roomID }
   }
 }
 
@@ -110,10 +123,10 @@ private struct GridHomeBar: View {
     let state = isVisible ? GridHomeBarState(store: store) : .hidden
     Group {
       switch state {
-        case let .inCall(spaceID, room):
-          GridHomeInCallCapsule(store: store, spaceID: spaceID, room: room, onOpen: onOpen)
-        case let .elsewhere(call):
-          GridHomeElsewhereCapsule(store: store, call: call, onOpen: onOpen)
+        case let .inCall(call, spaceID, room):
+          GridHomeInCallCapsule(store: store, call: call, spaceID: spaceID, room: room, onOpen: onOpen)
+        case let .elsewhere(call, isMoving):
+          GridHomeElsewhereCapsule(store: store, call: call, isMoving: isMoving, onOpen: onOpen)
         case let .live(projection):
           GridHomeLiveCapsule(projection: projection, onOpen: onOpen)
         case .hidden:
@@ -164,6 +177,7 @@ private struct GridHomeLiveCapsule: View {
 
 private struct GridHomeInCallCapsule: View {
   let store: GridRoomService
+  let call: GridLocalCall
   let spaceID: Int64
   let room: GridRoom?
   let onOpen: () -> Void
@@ -175,20 +189,20 @@ private struct GridHomeInCallCapsule: View {
   }
 
   var body: some View {
-    // Like Telegram's call bar: flat grey while connecting, green once live.
-    let link = GridCallLink(store: store)
-    let tint: Color = link.isInactive ? .secondary : .green
     HStack(spacing: 6) {
       Button(action: onOpen) {
         HStack(spacing: 6) {
           if !others.isEmpty {
             GridStackedAvatars(avatars: others, size: 22, levelForUser: { store.audioLevel(userID: $0) })
           }
-          Text(link.statusText ?? room.map(GridRoomTitle.title(for:)) ?? String(localized: "Grid"))
+          Text(room.map(GridRoomTitle.title(for:)) ?? String(localized: "Grid"))
             .font(.footnote.weight(.semibold))
-            .foregroundStyle(tint)
             .lineLimit(1)
             .contentTransition(.opacity)
+          // The Mac's connecting indicator, never "Connecting…" text.
+          if call.isPending {
+            GridConnectingDot()
+          }
         }
         .padding(.leading, others.isEmpty ? 6 : 0)
         .contentShape(Rectangle())
@@ -196,53 +210,50 @@ private struct GridHomeInCallCapsule: View {
       .buttonStyle(.plain)
       .accessibilityHint("Open Grid")
 
-      GridMicrophoneButton(store: store, spaceID: spaceID, style: .compact, onBlocked: onOpen)
-      GridLeaveButton(store: store, spaceID: spaceID, diameter: 26)
+      GridMicrophoneButton(store: store, spaceID: spaceID, style: .compact)
+      GridLeaveButton(store: store, spaceID: spaceID, style: .compact)
     }
     .padding(.leading, 4)
     .padding(.trailing, 3)
-    .gridHomeCapsuleChrome(tint: tint)
-    .animation(reduceMotion ? nil : .linear(duration: 0.3), value: link)
+    .gridHomeCapsuleChrome(tint: nil)
+    .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: call)
   }
 }
 
 private struct GridHomeElsewhereCapsule: View {
   let store: GridRoomService
   let call: GridCurrentCall
+  let isMoving: Bool
   let onOpen: () -> Void
 
   /// Owned by this session but without local media, e.g. after a relaunch.
   private var isPausedHere: Bool { call.ownedByCurrentSession }
 
-  private var label: String {
-    if isPausedHere { return String(localized: "Call paused") }
-    switch call.ownerClientType.lowercased() {
-      case "macos": return String(localized: "On your Mac")
-      case "ios": return String(localized: "On another iPhone")
-      default: return String(localized: "On another device")
-    }
-  }
-
   var body: some View {
     HStack(spacing: 8) {
       Button(action: onOpen) {
         HStack(spacing: 5) {
-          Image(systemName: isPausedHere ? "pause.fill"
-            : call.ownerClientType.lowercased() == "macos" ? "laptopcomputer" : "iphone")
+          Image(systemName: isPausedHere ? "pause.fill" : GridCallOwner.systemImage(for: call))
             .font(.caption)
-          Text(label)
+          Text(isPausedHere ? String(localized: "Call paused") : GridCallOwner.label(for: call))
             .font(.footnote.weight(.medium))
         }
         .foregroundStyle(.secondary)
       }
       .buttonStyle(.plain)
 
-      Button(isPausedHere ? "Resume" : "Move here") { store.moveCallHere() }
-        .font(.footnote.weight(.semibold))
-        .foregroundStyle(.green)
-        .buttonStyle(.plain)
-        .disabled(store.membershipMutationInFlight || !store.callTransferEnabled)
-        .accessibilityHint("Move your Grid call to this iPhone")
+      if isMoving {
+        ProgressView()
+          .controlSize(.small)
+          .accessibilityLabel(isPausedHere ? "Resuming" : "Moving call here")
+      } else {
+        Button(isPausedHere ? "Resume" : "Move here") { store.moveCallHere() }
+          .font(.footnote.weight(.semibold))
+          .foregroundStyle(Color.accentColor)
+          .buttonStyle(.plain)
+          .disabled(!store.callTransferEnabled)
+          .accessibilityHint("Move your Grid call to this iPhone")
+      }
     }
     .padding(.horizontal, 10)
     .gridHomeCapsuleChrome(tint: nil)

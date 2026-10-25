@@ -28,9 +28,7 @@ struct GridRoomsView: View {
   let spaces: [InlineKit.Space]
   @State private var selectedSpaceID: Int64?
   @State private var selectedShare: GridScreenShareSelection?
-  @State private var presentedFailure: GridActionFailure?
   @State private var didLoadHome = false
-  @Environment(\.dismiss) private var dismiss
 
   init(store: GridRoomService, spaces: [InlineKit.Space], initialSpaceID: Int64?) {
     self.store = store
@@ -51,35 +49,6 @@ struct GridRoomsView: View {
   private var canCreateRoom: Bool {
     !store.membershipMutationInFlight && store.callTransferEnabled
       && store.currentCall?.ownedByCurrentSession != false
-  }
-
-  /// Retried connection problems show as Reconnecting. The engine reports
-  /// `.failed` only when nothing will retry, which needs the user's action.
-  private var actionFailure: GridActionFailure? {
-    let hasConnectionFailure = store.media.connectionState == .failed
-    let connectionError = hasConnectionFailure ? store.media.lastConnectionError : nil
-    let audioError: String? = if case let .failed(message) = store.media.audioState {
-      message
-    } else {
-      nil
-    }
-    let storeError = store.membershipMutationInFlight ? nil : store.lastError
-    let errors = [storeError, connectionError, audioError].compactMap(\.self)
-    let hasMediaFailure = hasConnectionFailure || audioError != nil || store.media.providerCircuitOpen
-    let audio = InlineAudioSession.shared
-    if audio.isQuarantined && (store.hasLocalAdmission || !errors.isEmpty)
-      || errors.contains(InlineAudioSessionError.quarantined.localizedDescription)
-    {
-      return .restartRequired
-    }
-    guard !errors.isEmpty || hasMediaFailure else { return nil }
-    if errors.contains(InlineAudioSessionError.recordingOwnsAudio.localizedDescription) {
-      return .recordingConflict
-    }
-    if errors.contains(InlineAudioSessionError.retirementPending.localizedDescription) {
-      return .retirementPending
-    }
-    return hasMediaFailure ? .audio : .update
   }
 
   var body: some View {
@@ -104,9 +73,7 @@ struct GridRoomsView: View {
         }
       }
       .safeAreaInset(edge: .bottom, spacing: 0) {
-        if let spaceID = effectiveSpaceID {
-          GridCallDock(store: store, spaceID: store.currentCall?.spaceID ?? spaceID)
-        }
+        GridCallDock(store: store)
       }
       .task {
         await store.loadHome()
@@ -118,51 +85,16 @@ struct GridRoomsView: View {
           store.recordGridOpened(spaceID: spaceID)
         }
       }
-      .onChange(of: actionFailure, initial: true) { _, failure in
-        if let failure {
-          presentedFailure = failure
-          store.clearLastError()
+      // An error left by an earlier action on Home is stale here.
+      .onAppear { store.clearLastError() }
+      .onChange(of: store.lastError) { _, error in
+        guard let error else { return }
+        store.clearLastError()
+        // As on the Mac, a failed join or room change shows by rolling back.
+        // Only audio that blocks joining needs words.
+        if let message = GridJoinBlock.message(for: error) {
+          ToastManager.shared.showToast(message, type: .error)
         }
-      }
-      .alert(presentedFailure?.title ?? "Unable to update Grid", isPresented: Binding(
-        get: { presentedFailure != nil },
-        set: {
-          if !$0 {
-            presentedFailure = nil
-          }
-        }
-      ), presenting: presentedFailure) { failure in
-        if failure.canRetryAudio && store.hasLocalAdmission {
-          Button("Retry Audio") {
-            guard store.hasLocalAdmission, store.currentCall?.ownedByCurrentSession == true,
-                  !InlineAudioSession.shared.isQuarantined else { return }
-            store.retryAudio()
-          }
-          .disabled(store.membershipMutationInFlight)
-        } else if failure == .update {
-          Button("Refresh") {
-            Task {
-              await store.loadHome()
-              if let spaceID = effectiveSpaceID {
-                await store.load(spaceID: spaceID)
-              }
-            }
-          }
-        }
-        if let call = store.currentCall, call.ownedByCurrentSession {
-          Button("Leave Grid", role: .destructive) {
-            if let current = store.currentCall, current.ownedByCurrentSession {
-              store.leaveCurrentRoom(spaceID: current.spaceID)
-            }
-          }
-        }
-        if failure == .recordingConflict || failure == .restartRequired {
-          Button("Close Grid", role: .cancel) { dismiss() }
-        } else {
-          Button("Cancel", role: .cancel) {}
-        }
-      } message: { failure in
-        Text(failure.message)
       }
       .fullScreenCover(item: $selectedShare) { selection in
         GridScreenShareViewer(store: store, selection: selection)
@@ -206,31 +138,12 @@ struct GridRoomsView: View {
   }
 }
 
-/// Only known recovery messages reach the native surface. SDK and RPC error
-/// descriptions can contain diagnostics that do not belong in the interface.
-private enum GridActionFailure: Equatable {
-  case recordingConflict
-  case restartRequired
-  case retirementPending
-  case audio
-  case update
-
-  var title: LocalizedStringKey {
-    self == .update ? "Unable to update Grid" : "Unable to start Grid audio"
-  }
-
-  var message: String {
-    switch self {
-      case .recordingConflict: InlineAudioSessionError.recordingOwnsAudio.localizedDescription
-      case .restartRequired: InlineAudioSessionError.quarantined.localizedDescription
-      case .retirementPending: InlineAudioSessionError.retirementPending.localizedDescription
-      case .audio: String(localized: "Grid audio could not start. Try again.")
-      case .update: String(localized: "Grid could not be updated. Refresh and try again.")
-    }
-  }
-
-  var canRetryAudio: Bool {
-    self == .audio || self == .retirementPending
+/// Only known audio messages reach the interface. SDK and RPC error
+/// descriptions can contain diagnostics that do not belong there.
+private enum GridJoinBlock {
+  static func message(for error: String) -> String? {
+    let known: [InlineAudioSessionError] = [.recordingOwnsAudio, .quarantined, .retirementPending]
+    return known.map(\.localizedDescription).first { $0 == error }
   }
 }
 
@@ -280,21 +193,111 @@ private struct GridSpacePicker: View {
 
 // MARK: - Call state
 
-/// The local call's media link as the interface presents it. Being alone in a
-/// room has no media session by design, so that is not a pending state.
+/// The one call state every Grid surface on iPhone renders. Home, the rooms
+/// and the dock all derive it here, so they never disagree mid-transition.
+enum GridLocalCall: Equatable {
+  enum Claim: Equatable {
+    case join
+    case move
+    case resume
+  }
+
+  /// Browsing, or a leave is settling.
+  case none
+  /// This iPhone is claiming a room; `roomID` is nil while a new room is made.
+  case claiming(Claim, spaceID: Int64, roomID: Int64?)
+  case active(spaceID: Int64, roomID: Int64, link: GridCallLink)
+  /// Listed for this session without media here, e.g. after a relaunch.
+  case paused(GridCurrentCall)
+  /// Carried by another device.
+  case elsewhere(GridCurrentCall)
+
+  @MainActor
+  init(store: GridRoomService) {
+    switch store.pendingMembership {
+      case .leave:
+        self = .none
+        return
+      case let .create(spaceID):
+        self = .claiming(.join, spaceID: spaceID, roomID: nil)
+        return
+      case let .join(spaceID, roomID):
+        self = .claiming(.join, spaceID: spaceID, roomID: roomID)
+        return
+      case let .move(spaceID, roomID):
+        let isResume = store.currentCall?.ownedByCurrentSession == true
+        self = .claiming(isResume ? .resume : .move, spaceID: spaceID, roomID: roomID)
+        return
+      case nil:
+        break
+    }
+    guard let call = store.currentCall else {
+      self = .none
+      return
+    }
+    if call.ownedByCurrentSession {
+      self = store.hasLocalAdmission
+        ? .active(spaceID: call.spaceID, roomID: call.roomID, link: GridCallLink(store: store, call: call))
+        : .paused(call)
+    } else {
+      self = store.callTransferEnabled ? .elsewhere(call) : .none
+    }
+  }
+
+  var spaceID: Int64? {
+    switch self {
+      case .none: nil
+      case let .claiming(_, spaceID, _), let .active(spaceID, _, _): spaceID
+      case let .paused(call), let .elsewhere(call): call.spaceID
+    }
+  }
+
+  /// The room this iPhone is in or is joining.
+  var localRoomID: Int64? {
+    switch self {
+      case let .claiming(_, _, roomID): roomID
+      case let .active(_, roomID, _): roomID
+      case .none, .paused, .elsewhere: nil
+    }
+  }
+
+  var isClaimingRoom: Bool {
+    if case .claiming(.join, _, _) = self { true } else { false }
+  }
+
+  /// Shown as the Mac's small pulsing dot, never as text.
+  var isPending: Bool {
+    switch self {
+      case .claiming: true
+      case let .active(_, _, link): link.isPending
+      case .none, .paused, .elsewhere: false
+    }
+  }
+}
+
+/// The local call's media link. Being alone in a room has no media session
+/// by design, so that is not a pending state.
 enum GridCallLink: Equatable {
   case live
   case alone
   case connecting
   case reconnecting
-  /// Nothing will retry; the Grid screen explains why and offers an action.
+  /// Nothing will retry; the dock says why and offers an action.
   case failed
 
   @MainActor
-  init(store: GridRoomService) {
+  init(store: GridRoomService, call: GridCurrentCall) {
+    // Read alone from the room, not the transport: tearing down media after
+    // the last person leaves must not read as connecting.
+    let room = store.grid(spaceID: call.spaceID)?.rooms.first { $0.id == call.roomID }
+    if let room, room.avatars.count <= 1 {
+      self = .alone
+      return
+    }
     switch store.media.connectionState {
       case .connected: self = .live
-      case .disconnected: self = .alone
+      // Someone is here and media has not started yet.
+      case .disconnected: self = .connecting
       case .connecting: self = store.media.isReconnecting ? .reconnecting : .connecting
       case .failed: self = .failed
     }
@@ -303,52 +306,47 @@ enum GridCallLink: Equatable {
   var isPending: Bool {
     self == .connecting || self == .reconnecting
   }
-
-  /// Grey rather than green: the call is not carrying audio right now.
-  var isInactive: Bool {
-    isPending || self == .failed
-  }
-
-  var statusText: String? {
-    switch self {
-      case .connecting: String(localized: "Connecting…")
-      case .reconnecting: String(localized: "Reconnecting…")
-      case .failed: String(localized: "Audio unavailable")
-      case .live, .alone: nil
-    }
-  }
 }
 
-/// A rotating arc around your own face while the call connects.
-private struct GridConnectingRing: View {
-  @State private var isRotating = false
+/// The Mac's connecting indicator: a small pulsing accent dot on your face.
+struct GridConnectingDot: View {
+  @State private var isPulsing = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     Circle()
-      .trim(from: 0, to: reduceMotion ? 1 : 0.3)
-      .stroke(Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: reduceMotion ? [3, 4] : []))
-      .rotationEffect(.degrees(isRotating ? 360 : 0))
-      .animation(reduceMotion ? nil : .linear(duration: 1).repeatForever(autoreverses: false), value: isRotating)
-      .onAppear { isRotating = true }
-      .accessibilityHidden(true)
+      .fill(Color.accentColor)
+      .frame(width: 7, height: 7)
+      .scaleEffect(isPulsing ? 1.2 : 0.85)
+      .opacity(isPulsing ? 1 : 0.55)
+      .padding(2)
+      .background(.regularMaterial, in: Circle())
+      .transition(.scale.combined(with: .opacity))
+      .onAppear {
+        guard !reduceMotion else { return }
+        withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+          isPulsing = true
+        }
+      }
+      .accessibilityLabel("Connecting")
   }
 }
 
 // MARK: - Rooms
 
 enum GridRoomTitle {
-  /// Named rooms keep their name; others are described by who is in them.
+  /// Named rooms keep their name; others are described by who else is in them.
   static func title(for room: GridRoom) -> String {
     if let name = name(of: room) {
       return name
     }
-    let names = room.avatars.prefix(2).map { InlineKit.User(from: $0.user).shortDisplayName }
-    switch (names.count, room.avatars.count) {
-      case (0, _): return String(localized: "Empty room")
+    let others = room.avatars.filter { !$0.ownedByCurrentSession }
+    let names = others.prefix(2).map { InlineKit.User(from: $0.user).shortDisplayName }
+    switch (names.count, others.count) {
+      case (0, _): return room.avatars.isEmpty ? String(localized: "Empty room") : String(localized: "Just you")
       case (1, 1): return names[0]
       case (2, 2): return String(localized: "\(names[0]) and \(names[1])")
-      default: return String(localized: "\(names[0]), \(names[1]) +\(room.avatars.count - 2)")
+      default: return String(localized: "\(names[0]), \(names[1]) +\(others.count - 2)")
     }
   }
 
@@ -366,30 +364,38 @@ private struct GridRoomList: View {
   let onViewShare: (GridAvatar, InlineRTCScreenShare) -> Void
 
   var body: some View {
+    let call = GridLocalCall(store: store)
+    // A new room has no id until the server makes it; the add tile stands in.
+    let isCreatingRoom = call.isClaimingRoom && call.localRoomID == nil && call.spaceID == spaceID
     ScrollView {
       if let grid = store.grid(spaceID: spaceID) {
+        // Rooms keep the server's order, as on the Mac: they never jump.
         GridRoomFlowLayout(spacing: 10) {
-          ForEach(sortedRooms(grid.rooms), id: \.id) { room in
-            GridRoomCapsule(store: store, room: room, onViewShare: onViewShare)
+          ForEach(grid.rooms, id: \.id) { room in
+            GridRoomCapsule(store: store, call: call, room: room, onViewShare: onViewShare)
           }
           Button {
             store.createAndJoin(spaceID: spaceID)
           } label: {
-            Image(systemName: "plus")
-              .font(.body.weight(.medium))
-              .foregroundStyle(.secondary)
-              .frame(width: 58, height: 58)
-              .background {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                  .strokeBorder(Color.secondary.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            Group {
+              if isCreatingRoom {
+                ProgressView()
+              } else {
+                Image(systemName: "plus")
               }
-              .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            .font(.body.weight(.medium))
+            .foregroundStyle(.secondary)
+            .frame(width: 58, height: 58)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
           }
           .buttonStyle(.plain)
           .disabled(!canCreateRoom)
           .accessibilityLabel("Create and join a Grid room")
         }
         .padding(16)
+        .animation(.smooth(duration: 0.25), value: grid.rooms.map(\.id))
       } else if store.failedLoadSpaceIDs.contains(spaceID) {
         ContentUnavailableView {
           Label("Couldn't load rooms", systemImage: "wifi.exclamationmark")
@@ -402,22 +408,13 @@ private struct GridRoomList: View {
       }
     }
   }
-
-  /// Your room first, then rooms with people, then empty rooms.
-  private func sortedRooms(_ rooms: [GridRoom]) -> [GridRoom] {
-    let currentRoomID = store.currentCall?.roomID
-    return rooms.enumerated().sorted { lhs, rhs in
-      let lhsRank = lhs.element.id == currentRoomID ? 0 : lhs.element.avatars.isEmpty ? 2 : 1
-      let rhsRank = rhs.element.id == currentRoomID ? 0 : rhs.element.avatars.isEmpty ? 2 : 1
-      return lhsRank == rhsRank ? lhs.offset < rhs.offset : lhsRank < rhsRank
-    }.map(\.element)
-  }
 }
 
-/// A room is a bubble of faces, as in the Mac sidebar. Tap to join; names
-/// and room actions live in the long-press menu.
+/// A room is a bubble of faces, as on the Mac. Tap to join; in your room, tap
+/// your face to mute. Names and room actions live in the long-press menu.
 private struct GridRoomCapsule: View {
   let store: GridRoomService
+  let call: GridLocalCall
   let room: GridRoom
   let onViewShare: (GridAvatar, InlineRTCScreenShare) -> Void
   @State private var isRenaming = false
@@ -425,13 +422,16 @@ private struct GridRoomCapsule: View {
 
   private static let visibleAvatarCount = 4
 
+  /// You are in this room on this iPhone, or joining it.
   private var isCurrent: Bool {
-    store.currentCall?.roomID == room.id && store.currentCall?.ownedByCurrentSession == true
-      && store.hasLocalAdmission
+    call.localRoomID == room.id
   }
 
   private var holdsCallElsewhere: Bool {
-    store.currentCall?.roomID == room.id && !isCurrent
+    switch call {
+      case let .paused(current), let .elsewhere(current): current.roomID == room.id
+      case .none, .claiming, .active: false
+    }
   }
 
   private var isDisabled: Bool {
@@ -447,7 +447,7 @@ private struct GridRoomCapsule: View {
       if let name = GridRoomTitle.name(of: room) {
         Text(name)
           .font(.caption2.weight(.medium))
-          .foregroundStyle(isCurrent ? currentTint : .secondary)
+          .foregroundStyle(.secondary)
           .lineLimit(1)
           .padding(.leading, 6)
       }
@@ -474,11 +474,6 @@ private struct GridRoomCapsule: View {
     }
   }
 
-  /// Your room greys out while its media connects, then turns green.
-  private var currentTint: Color {
-    GridCallLink(store: store).isInactive ? .secondary : .green
-  }
-
   private var faces: some View {
     HStack(spacing: 6) {
       if room.avatars.isEmpty {
@@ -488,7 +483,14 @@ private struct GridRoomCapsule: View {
           .frame(width: 42, height: 42)
       }
       ForEach(room.avatars.prefix(Self.visibleAvatarCount), id: \.user.id) { avatar in
-        GridRoomFace(store: store, avatar: avatar, isCurrentRoom: isCurrent, onViewShare: onViewShare)
+        GridRoomFace(
+          store: store,
+          call: call,
+          avatar: avatar,
+          isCurrentRoom: isCurrent,
+          onViewShare: onViewShare
+        )
+        .transition(.scale(scale: 0.76).combined(with: .opacity))
       }
       if room.avatars.count > Self.visibleAvatarCount {
         Text("+\(room.avatars.count - Self.visibleAvatarCount)")
@@ -499,12 +501,12 @@ private struct GridRoomCapsule: View {
     }
     .padding(8)
     .background(
-      isCurrent ? currentTint.opacity(0.14) : Color.primary.opacity(0.05),
+      isCurrent ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.05),
       in: RoundedRectangle(cornerRadius: 18, style: .continuous)
     )
     .overlay {
       RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .strokeBorder(isCurrent ? currentTint.opacity(0.5) : .clear, lineWidth: 1)
+        .strokeBorder(isCurrent ? Color.accentColor.opacity(0.55) : .clear, lineWidth: 1)
     }
     .overlay(alignment: .bottomTrailing) {
       if room.locked {
@@ -515,6 +517,8 @@ private struct GridRoomCapsule: View {
       }
     }
     .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    .animation(.smooth(duration: 0.25), value: room.avatars.map(\.user.id))
+    .animation(.smooth(duration: 0.25), value: isCurrent)
   }
 
   private func join() {
@@ -539,10 +543,13 @@ private struct GridRoomCapsule: View {
       draftTitle = GridRoomTitle.name(of: room) ?? ""
       isRenaming = true
     }
-    if isCurrent {
+    if isCurrent, case .active = call {
       Button(room.locked ? "Unlock Room" : "Lock Room", systemImage: room.locked ? "lock.open" : "lock") {
         let locked = !room.locked
         Task { await store.toggleRoomLock(roomID: room.id, locked: locked) }
+      }
+      Button("Leave Room", systemImage: "door.left.hand.open", role: .destructive) {
+        store.leaveCurrentRoom(spaceID: room.spaceID)
       }
     }
     if room.avatars.isEmpty {
@@ -556,42 +563,56 @@ private struct GridRoomCapsule: View {
     let title = GridRoomTitle.title(for: room)
     if isCurrent { return String(localized: "\(title), you're here") }
     if holdsCallElsewhere {
-      return store.currentCall?.ownedByCurrentSession == true
-        ? String(localized: "Resume Grid in \(title)") : String(localized: "Move Grid here, \(title)")
+      if case .paused = call {
+        return String(localized: "Resume Grid in \(title)")
+      }
+      return String(localized: "Move Grid here, \(title)")
     }
     return String(localized: "Join \(title)")
   }
 }
 
+/// A face with the Mac's microphone ring: green while the mic is open, wider
+/// as the person speaks. Your own face in your room toggles your microphone.
 private struct GridRoomFace: View {
   let store: GridRoomService
+  let call: GridLocalCall
   let avatar: GridAvatar
   let isCurrentRoom: Bool
   let onViewShare: (GridAvatar, InlineRTCScreenShare) -> Void
 
+  private var isYouHere: Bool {
+    isCurrentRoom && avatar.ownedByCurrentSession
+  }
+
   var body: some View {
-    let speaking = isCurrentRoom && store.audioLevel(userID: avatar.user.id) > 0.01
+    if isYouHere, case let .active(spaceID, _, _) = call {
+      GridMicrophoneToggle(store: store, spaceID: spaceID) { _ in face }
+        .accessibilityHint("Mutes or unmutes your microphone")
+    } else {
+      face
+    }
+  }
+
+  private var face: some View {
+    let level = isCurrentRoom ? store.audioLevel(userID: avatar.user.id) : 0
+    let microphoneOpen = avatar.microphoneEnabled
     let shares = isCurrentRoom ? store.screenShares(avatar: avatar) : []
     let user = InlineKit.User(from: avatar.user)
 
-    UserAvatar(user: user, size: 42)
+    return UserAvatar(user: user, size: 42)
       .padding(2)
       .overlay {
-        Circle().strokeBorder(speaking ? Color.green : .clear, lineWidth: 2)
-      }
-      .overlay {
-        if isCurrentRoom, avatar.ownedByCurrentSession, GridCallLink(store: store).isPending {
-          GridConnectingRing()
-        }
+        Circle()
+          .strokeBorder(
+            microphoneOpen || level > 0.01 ? Color.green.opacity(0.65 + Double(min(level, 1)) * 0.3) : .clear,
+            lineWidth: 1.5 + CGFloat(min(level, 1)) * 1.5
+          )
+          .animation(.easeOut(duration: 0.12), value: level)
       }
       .overlay(alignment: .bottomTrailing) {
-        if isCurrentRoom, !avatar.microphoneEnabled {
-          Image(systemName: "mic.slash.fill")
-            .font(.system(size: 8, weight: .bold))
-            .foregroundStyle(.secondary)
-            .frame(width: 16, height: 16)
-            .background(Color(.systemBackground), in: Circle())
-            .accessibilityLabel("Muted")
+        if isYouHere, call.isPending {
+          GridConnectingDot()
         }
       }
       .overlay(alignment: .topTrailing) {
@@ -605,98 +626,154 @@ private struct GridRoomFace: View {
           } label: {
             Image(systemName: "rectangle.on.rectangle.fill")
               .font(.system(size: 8, weight: .bold))
-              .foregroundStyle(Color.accentColor)
-              .frame(width: 16, height: 16)
-              .background(Color(.systemBackground), in: Circle())
+              .foregroundStyle(.white)
+              .frame(width: 18, height: 18)
+              .background(Color.green, in: Circle())
               .frame(minWidth: 44, minHeight: 44, alignment: .topTrailing)
           }
           .accessibilityLabel("View \(user.displayName)’s screen")
         }
       }
-      .animation(.easeOut(duration: 0.15), value: speaking)
+      .animation(.smooth(duration: 0.2), value: call.isPending)
       .accessibilityLabel(user.displayName)
+      .accessibilityValue(microphoneOpen ? String(localized: "Microphone on") : String(localized: "Muted"))
   }
 }
 
 // MARK: - Call controls
 
-/// Bottom controls for the call in this space: local controls when this device
-/// carries it, otherwise a way to bring it here.
+/// Bottom controls for your call: the same row from the tap on a room until
+/// you leave, otherwise a way to bring the call here.
 struct GridCallDock: View {
   let store: GridRoomService
-  let spaceID: Int64
 
   var body: some View {
+    let call = GridLocalCall(store: store)
     Group {
-      if let call = store.currentCall, call.spaceID == spaceID {
-        if call.ownedByCurrentSession, store.hasLocalAdmission {
-          GridLocalCallControls(store: store, spaceID: spaceID)
-        } else if store.callTransferEnabled {
-          if store.membershipMutationInFlight {
-            GridDockNotice(text: String(localized: "Moving call…"), actionTitle: String(localized: "Cancel")) {
-              store.withdrawLocalAdmission()
-            }
-          } else {
-            GridDockNotice(
-              text: call.ownedByCurrentSession
-                ? String(localized: "Call paused") : String(localized: "On another device"),
-              actionTitle: call.ownedByCurrentSession ? String(localized: "Resume") : String(localized: "Move here")
-            ) {
-              store.moveCallHere()
-            }
+      switch call {
+        case let .claiming(.join, spaceID, _), let .active(spaceID, _, _):
+          GridLocalCallControls(store: store, call: call, spaceID: spaceID)
+        case .claiming(.resume, _, _):
+          // Cancel withdraws this iPhone's claim rather than leaving the room.
+          GridDockNotice(text: String(localized: "Resuming…"), actionTitle: String(localized: "Cancel")) {
+            store.withdrawLocalAdmission()
           }
-        }
-      } else if store.membershipMutationInFlight {
-        GridDockNotice(text: String(localized: "Joining…"), actionTitle: String(localized: "Cancel")) {
-          store.withdrawLocalAdmission()
-        }
+        case .claiming:
+          GridDockNotice(text: String(localized: "Moving call here…"), actionTitle: String(localized: "Cancel")) {
+            store.withdrawLocalAdmission()
+          }
+        case .paused:
+          GridDockNotice(text: String(localized: "Call paused"), actionTitle: String(localized: "Resume")) {
+            store.moveCallHere()
+          }
+          .disabled(!store.callTransferEnabled)
+        case let .elsewhere(current):
+          GridDockNotice(text: GridCallOwner.label(for: current), actionTitle: String(localized: "Move here")) {
+            store.moveCallHere()
+          }
+        case .none:
+          EmptyView()
       }
     }
     .frame(maxWidth: .infinity)
     .padding(.bottom, 12)
+    .animation(.smooth(duration: 0.25), value: call)
+  }
+}
+
+enum GridCallOwner {
+  static func label(for call: GridCurrentCall) -> String {
+    switch call.ownerClientType.lowercased() {
+      case "macos": String(localized: "On your Mac")
+      case "ios": String(localized: "On another iPhone")
+      default: String(localized: "On another device")
+    }
+  }
+
+  static func systemImage(for call: GridCurrentCall) -> String {
+    call.ownerClientType.lowercased() == "macos" ? "laptopcomputer" : "iphone"
   }
 }
 
 private struct GridDockNotice: View {
   let text: String
+  var isProblem = false
   let actionTitle: String
   let action: () -> Void
 
   var body: some View {
-    HStack(spacing: 10) {
+    HStack(spacing: 8) {
+      if isProblem {
+        Image(systemName: "exclamationmark.circle.fill")
+          .foregroundStyle(.orange)
+      }
       Text(text)
-        .font(.footnote)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(isProblem ? .primary : .secondary)
       Button(actionTitle, action: action)
-        .font(.footnote.weight(.semibold))
-        .foregroundStyle(.green)
+        .fontWeight(.semibold)
+        .foregroundStyle(Color.accentColor)
         .buttonStyle(.plain)
     }
+    .font(.footnote)
     .padding(.horizontal, 14)
     .frame(minHeight: 36)
     .gridGlassCapsule()
   }
 }
 
+/// Problems the call can't fix by retrying, as the Mac's small notices above
+/// the controls. Connecting and reconnecting never show here.
+private struct GridCallProblem {
+  let text: String
+  let actionTitle: String
+  let action: () -> Void
+
+  @MainActor
+  init?(store: GridRoomService, call: GridLocalCall, spaceID: Int64) {
+    guard case let .active(_, _, link) = call else { return nil }
+    let media = store.media
+    let leave = { store.leaveCurrentRoom(spaceID: spaceID) }
+    let retry = { store.retryAudio() }
+    if InlineAudioSession.shared.isQuarantined {
+      self.init(InlineAudioSessionError.quarantined.localizedDescription, String(localized: "Leave Room"), leave)
+    } else if media.providerCircuitOpen {
+      self.init(String(localized: "Voice connection paused"), String(localized: "Leave Room"), leave)
+    } else if case let .failed(message) = media.audioState {
+      let known: [InlineAudioSessionError] = [.recordingOwnsAudio, .retirementPending, .routeUnavailable]
+      let text = known.map(\.localizedDescription).first { $0 == message }
+        ?? String(localized: "Grid audio couldn’t start")
+      self.init(text, String(localized: "Try Again"), retry)
+    } else if media.isAudioSafetyPaused {
+      self.init(String(localized: "Audio paused"), String(localized: "Resume"), retry)
+    } else if link == .failed {
+      self.init(String(localized: "Voice connection failed"), String(localized: "Try Again"), retry)
+    } else if media.isMicrophoneEnabled, media.localAudioFlowState == .missing {
+      self.init(String(localized: "Microphone audio stopped"), String(localized: "Try Again"), retry)
+    } else if media.hasRemoteAudioFlowFailure {
+      self.init(String(localized: "Incoming audio stalled"), String(localized: "Try Again"), retry)
+    } else {
+      return nil
+    }
+  }
+
+  private init(_ text: String, _ actionTitle: String, _ action: @escaping () -> Void) {
+    self.text = text
+    self.actionTitle = actionTitle
+    self.action = action
+  }
+}
+
 private struct GridLocalCallControls: View {
   let store: GridRoomService
+  let call: GridLocalCall
   let spaceID: Int64
   private let audio = InlineAudioSession.shared
 
   var body: some View {
     VStack(spacing: 10) {
-      if store.media.isAudioSafetyPaused {
-        GridDockNotice(text: String(localized: "Audio paused"), actionTitle: String(localized: "Resume")) {
-          store.retryAudio()
-        }
-        .disabled(store.membershipMutationInFlight)
-      }
-
-      if let status = GridCallLink(store: store).statusText {
-        Text(status)
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-          .contentTransition(.opacity)
+      if let problem = GridCallProblem(store: store, call: call, spaceID: spaceID) {
+        GridDockNotice(text: problem.text, isProblem: true, actionTitle: problem.actionTitle, action: problem.action)
+          .transition(.move(edge: .bottom).combined(with: .opacity))
       }
 
       HStack(spacing: 20) {
@@ -704,104 +781,59 @@ private struct GridLocalCallControls: View {
         GridNativeAudioRoutePicker(routeName: audio.currentRouteName)
           .frame(width: 52, height: 52)
           .gridGlassCircle()
-        GridLeaveButton(store: store, spaceID: spaceID, diameter: 52)
+        GridLeaveButton(store: store, spaceID: spaceID, style: .large)
       }
     }
   }
 }
 
-/// Mute toggle shared by Home and the Grid screen. Unmuting is only offered
-/// when someone else is in the room, matching iOS listen-only admission.
-struct GridMicrophoneButton: View {
-  enum Style {
-    case compact
-    case large
-  }
-
-  private enum AudioAlert {
-    case microphonePermission
-  }
-
+/// Toggles your microphone, as on the Mac: any time you are in a room, alone
+/// or not. The choice carries into your next join. A tap during an audio
+/// safety pause is the user's decision and ends the pause.
+struct GridMicrophoneToggle<Label: View>: View {
   let store: GridRoomService
   let spaceID: Int64
-  let style: Style
-  /// Compact controls hand a blocked unmute to the full Grid screen.
-  var onBlocked: (() -> Void)?
+  @ViewBuilder let label: (_ isOn: Bool) -> Label
   @State private var requestedUnmute = false
-  @State private var audioAlert: AudioAlert?
+  @State private var showsPermissionAlert = false
   @Environment(\.openURL) private var openURL
 
   private var isOn: Bool { store.media.isMicrophoneEnabled }
 
-  private var canUnmute: Bool {
-    guard !store.media.isAudioSafetyPaused,
-          let roomID = store.currentCall?.roomID,
-          let room = store.grid(spaceID: spaceID)?.rooms.first(where: { $0.id == roomID })
-    else { return false }
-    return room.avatars.count > 1
+  private var isInCall: Bool {
+    guard case let .active(callSpaceID, _, _) = GridLocalCall(store: store) else { return false }
+    return callSpaceID == spaceID
   }
 
   var body: some View {
-    Group {
-      switch style {
-        case .compact:
-          Button(action: toggle) {
-            Image(systemName: isOn ? "mic.fill" : "mic.slash.fill")
-              .font(.system(size: 11, weight: .semibold))
-              .foregroundStyle(isOn ? Color.primary : Color.red)
-              .frame(width: 26, height: 26)
-              .background(Color(.systemBackground).opacity(0.8), in: Circle())
-          }
-          .buttonStyle(.plain)
-        case .large:
-          Button(action: toggle) {
-            Image(systemName: isOn ? "mic.fill" : "mic.slash.fill")
-              .font(.title3.weight(.medium))
-              .foregroundStyle(isOn ? Color.primary : Color.red)
-              .frame(width: 52, height: 52)
-              .gridGlassCircle()
-          }
-          .buttonStyle(.plain)
-      }
-    }
-    .disabled(!isOn && (store.membershipMutationInFlight || (!canUnmute && onBlocked == nil)))
-    .opacity(!isOn && !canUnmute ? 0.5 : 1)
-    .accessibilityLabel(isOn ? String(localized: "Mute microphone") : String(localized: "Unmute microphone"))
-    .onChange(of: store.media.microphonePermission) { _, permission in
-      if requestedUnmute, permission == .denied || permission == .restricted {
-        audioAlert = .microphonePermission
-        requestedUnmute = false
-      } else if permission == .authorized {
-        requestedUnmute = false
-      }
-    }
-    .alert("Microphone access is off", isPresented: Binding(
-      get: { audioAlert != nil },
-      set: {
-        if !$0 {
-          audioAlert = nil
+    Button(action: toggle) { label(isOn) }
+      .buttonStyle(.plain)
+      .disabled(!isInCall)
+      .accessibilityLabel(isOn ? String(localized: "Mute microphone") : String(localized: "Unmute microphone"))
+      .onChange(of: store.media.microphonePermission) { _, permission in
+        if requestedUnmute, permission == .denied || permission == .restricted {
+          showsPermissionAlert = true
+          requestedUnmute = false
+        } else if permission == .authorized {
+          requestedUnmute = false
         }
       }
-    )) {
-      Button("Open Settings") {
-        if let url = URL(string: UIApplication.openSettingsURLString) {
-          openURL(url)
+      .alert("Microphone access is off", isPresented: $showsPermissionAlert) {
+        Button("Open Settings") {
+          if let url = URL(string: UIApplication.openSettingsURLString) {
+            openURL(url)
+          }
         }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text("Allow microphone access in Settings to talk in Grid.")
       }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      Text("Allow microphone access in Settings to talk in Grid.")
-    }
   }
 
   private func toggle() {
     if !isOn {
-      guard canUnmute else {
-        onBlocked?()
-        return
-      }
       if store.media.microphonePermission == .denied || store.media.microphonePermission == .restricted {
-        audioAlert = .microphonePermission
+        showsPermissionAlert = true
         return
       }
       requestedUnmute = true
@@ -812,20 +844,65 @@ struct GridMicrophoneButton: View {
   }
 }
 
-struct GridLeaveButton: View {
+/// The Mac's mic control: green with a white mic when on, plain when muted.
+struct GridMicrophoneButton: View {
+  enum Style {
+    case compact
+    case large
+  }
+
   let store: GridRoomService
   let spaceID: Int64
-  let diameter: CGFloat
+  let style: Style
+
+  private var diameter: CGFloat { style == .large ? 52 : 26 }
 
   var body: some View {
-    Button(role: .destructive) {
+    GridMicrophoneToggle(store: store, spaceID: spaceID) { isOn in
+      let icon = Image(systemName: isOn ? "mic.fill" : "mic.slash.fill")
+        .font(style == .large ? .title3.weight(.medium) : .system(size: 11, weight: .semibold))
+        .foregroundStyle(isOn ? Color.white : Color.primary)
+        .frame(width: diameter, height: diameter)
+        .contentShape(Circle())
+      if isOn {
+        icon.background(Color.green, in: Circle())
+      } else if style == .large {
+        icon.gridGlassCircle()
+      } else {
+        icon.background(Color.primary.opacity(0.08), in: Circle())
+      }
+    }
+    .animation(.easeOut(duration: 0.15), value: store.media.isMicrophoneEnabled)
+  }
+}
+
+/// The Mac's leave control: a pink door.
+struct GridLeaveButton: View {
+  enum Style {
+    case compact
+    case large
+  }
+
+  let store: GridRoomService
+  let spaceID: Int64
+  let style: Style
+
+  private var diameter: CGFloat { style == .large ? 52 : 26 }
+
+  var body: some View {
+    Button {
       store.leaveCurrentRoom(spaceID: spaceID)
     } label: {
-      Image(systemName: "phone.down.fill")
-        .font(.system(size: diameter * 0.38, weight: .semibold))
-        .foregroundStyle(.white)
+      let icon = Image(systemName: "door.left.hand.open")
+        .font(style == .large ? .title3.weight(.medium) : .system(size: 11, weight: .semibold))
+        .foregroundStyle(.pink)
         .frame(width: diameter, height: diameter)
-        .background(Color.red, in: Circle())
+        .contentShape(Circle())
+      if style == .large {
+        icon.gridGlassCircle()
+      } else {
+        icon.background(Color.primary.opacity(0.08), in: Circle())
+      }
     }
     .buttonStyle(.plain)
     .accessibilityLabel("Leave Grid room")
