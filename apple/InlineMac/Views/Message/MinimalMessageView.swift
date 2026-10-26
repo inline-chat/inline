@@ -513,7 +513,7 @@ class MinimalMessageViewAppKit: NSView {
       outgoing: false,
       rowHeight: 24,
       messageFontSize: props.layout.fontSize,
-      presentation: { [message] action in MessageActionPerformer.presentation(for: action, message: message) }
+      presentation: { [message = message.message] action in MessageActionPerformer.presentation(for: action, message: message) }
     )
 
     messageActionRowsView = view
@@ -566,7 +566,7 @@ class MinimalMessageViewAppKit: NSView {
       outgoing: false,
       rowHeight: 24,
       messageFontSize: props.layout.fontSize,
-      presentation: { [message] action in MessageActionPerformer.presentation(for: action, message: message) }
+      presentation: { [message = message.message] action in MessageActionPerformer.presentation(for: action, message: message) }
     )
   }
 
