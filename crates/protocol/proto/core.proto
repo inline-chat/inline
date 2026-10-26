@@ -1382,8 +1382,8 @@ message AgentParticipation {
   int64 bot_user_id = 2;
   AgentParticipationMode mode = 3;
   optional int64 joined_by = 4;
-  // The session that direct input in this chat addresses by default.
-  optional int64 default_session_id = 5;
+  // One work per (chat, bot), so no default session to choose.
+  reserved 5;
   int64 revision = 6;
   // Last change, Unix seconds.
   int64 date = 7;
@@ -1490,15 +1490,14 @@ message GetAgentParticipationsResult {
   repeated AgentParticipation participations = 1;
 }
 
-// The bot itself (joining on a mention or invite), its owner, or a person
-// with a grant on it.
+// The bot itself (joining on a mention or invite), its owner, or a CONFIGURE
+// grantee.
 message SetAgentParticipationInput {
   InputPeer peer_id = 1;
   int64 bot_user_id = 2;
   // Unspecified keeps the current mode (active for a new participation).
   AgentParticipationMode mode = 3;
-  // Bot only: the session that direct input in this chat addresses.
-  optional int64 default_session_id = 4;
+  reserved 4;
   // Bot only: the person whose mention or invite joined the agent.
   optional int64 joined_by = 5;
   // Owner or CONFIGURE grantee. Absent keeps the override; UNSPECIFIED clears
@@ -1520,6 +1519,23 @@ message UpdateAgentSettingsResult { AgentRuntime runtime = 1; }
 message ControlAgentSessionInput {
   int64 agent_session_id = 1;
   AgentSessionControl op = 2;
+}
+
+// Moves a work's canonical publication chat into a subthread of its current
+// chat (spec §5.2), keeping the work, its native identity and its delivery
+// ledger. The parent keeps its status card. Idempotent: a retry after a crash
+// returns moved = false with the same destination, so the bridge publishes
+// everything after the first successful result in the destination only.
+// The session's bot or its owner; both must have access to the destination.
+message MoveAgentSessionInput {
+  int64 agent_session_id = 1;
+  InputPeer destination_peer_id = 2;
+}
+
+message MoveAgentSessionResult {
+  AgentSession agent_session = 1;
+  // False when the work was already published in the destination.
+  bool moved = 2;
 }
 
 message ControlAgentSessionResult {
@@ -1555,9 +1571,8 @@ message ConnectAgentSessionInput {
   // Session this one was started from, owned by the same bot.
   optional int64 parent_agent_session_id = 8;
   AgentSessionRelation relation = 9;
-  // Bridge v2: allow another session for the same chat and bot, for example
-  // after /new. Without it a chat holds at most one session per bot.
-  bool allow_multiple = 10;
+  // One work per (chat, bot): /new creates a new thread instead.
+  reserved 10;
   optional string workspace_label = 11;
 }
 
@@ -1581,8 +1596,8 @@ message GetAgentSessionInput {
   InputPeer peer_id = 1;
   // Bridge bot connection to look up. The authenticated caller must own it.
   int64 bot_user_id = 2;
-  // A specific session in this conversation. When omitted: the participation's
-  // default session, else the most recently connected one.
+  // Must match the conversation's work when given. A conversation holds at
+  // most one work per bot.
   optional int64 agent_session_id = 3;
 }
 
@@ -2282,6 +2297,7 @@ enum Method {
   SET_AGENT_PARTICIPATION = 159;
   UPDATE_AGENT_SETTINGS = 160;
   CONTROL_AGENT_SESSION = 161;
+  MOVE_AGENT_SESSION = 162;
 }
 
 message RpcCall {
@@ -2448,6 +2464,7 @@ message RpcCall {
     SetAgentParticipationInput setAgentParticipation = 160;
     UpdateAgentSettingsInput updateAgentSettings = 161;
     ControlAgentSessionInput controlAgentSession = 162;
+    MoveAgentSessionInput moveAgentSession = 163;
   }
 }
 
@@ -2616,6 +2633,7 @@ message RpcResult {
     SetAgentParticipationResult setAgentParticipation = 160;
     UpdateAgentSettingsResult updateAgentSettings = 161;
     ControlAgentSessionResult controlAgentSession = 162;
+    MoveAgentSessionResult moveAgentSession = 163;
   }
 }
 

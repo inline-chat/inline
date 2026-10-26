@@ -769,6 +769,10 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
 
       case "agentSessionState": {
         const state = serverUpdate.update.agentSessionState
+        // After a move the work is published in another (thread) chat.
+        const sessionPeer = state.chatId !== undefined && state.chatId !== BigInt(chatId)
+          ? { type: { oneofKind: "chat" as const, chat: { chatId: state.chatId } } }
+          : peerId
         inflatedUpdates.push({
           seq: update.seq,
           date: encodeDateStrict(update.date),
@@ -777,7 +781,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
             agentSessionState: {
               agentSession: {
                 id: state.agentSessionId,
-                peerId,
+                peerId: sessionPeer,
                 botUserId: state.botUserId,
                 provider: state.provider,
                 statusMessageId: state.statusMessageId,

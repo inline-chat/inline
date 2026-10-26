@@ -266,6 +266,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "controlAgentSession", controlAgentSession: result }
     }
 
+    case Method.MOVE_AGENT_SESSION: {
+      if (call.input.oneofKind !== "moveAgentSession") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.moveAgentSession(call.input.moveAgentSession, handlerContext.userId)
+      return { oneofKind: "moveAgentSession", moveAgentSession: result }
+    }
+
     case Method.GET_ME: {
       if (call.input.oneofKind !== "getMe") {
         throw RealtimeRpcError.BadRequest()

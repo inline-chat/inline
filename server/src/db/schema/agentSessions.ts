@@ -59,8 +59,8 @@ export const agentSessions = pgTable(
       table.provider,
       table.sessionKeyHash,
     ),
-    // Bridge v2 allows several sessions per (chat, bot), for example after /new.
-    chatBotIndex: index("agent_sessions_chat_bot_idx").on(table.chatId, table.botUserId, table.id),
+    // One work per (chat, bot); /new creates a new thread.
+    chatBotUnique: uniqueIndex("agent_sessions_chat_bot_unique").on(table.chatId, table.botUserId),
     activeStateIndex: index("agent_sessions_active_state_idx")
       .on(table.chatId)
       .where(sql`${table.runState} not in (0, 1)`),

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import {
   AgentGrantOperation,
   AgentGrantRequirement,
@@ -16,12 +16,13 @@ import {
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
 import { db } from "@in/server/db"
 import { UpdatesModel } from "@in/server/db/models/updates"
-import { agentGrants, updates, users } from "@in/server/db/schema"
+import { agentGrants, agentRuntimes, chats, updates, users } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { invokeMessageAction } from "@in/server/functions/messages.invokeMessageAction"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { controlAgentSession } from "@in/server/modules/agentSessions/control"
-import { connectAgentSession } from "@in/server/modules/agentSessions/service"
+import { moveAgentSession } from "@in/server/modules/agentSessions/move"
+import { connectAgentSession, getAgentSession } from "@in/server/modules/agentSessions/service"
 import { getAgentSessionStates, updateAgentSessionState } from "@in/server/modules/agentSessions/state"
 import {
   deleteAgentGrant,
@@ -30,7 +31,12 @@ import {
   setAgentGrant,
 } from "@in/server/modules/agents/grants"
 import { setAgentParticipation } from "@in/server/modules/agents/participation"
-import { reportAgentRuntime, updateAgentSettings } from "@in/server/modules/agents/runtime"
+import {
+  reportAgentRuntime,
+  stopAgentRuntimeSweeper,
+  sweepLapsedAgentRuntimes,
+  updateAgentSettings,
+} from "@in/server/modules/agents/runtime"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { and, desc, eq } from "drizzle-orm"
 
@@ -41,6 +47,7 @@ const rejects = async (promise: Promise<unknown>, code: RpcError_Code) => {
 
 describe("bridge v2 agent server", () => {
   setupTestLifecycle()
+  afterAll(() => stopAgentRuntimeSweeper())
 
   let ownerId = 0
   let botId = 0
@@ -183,7 +190,6 @@ describe("bridge v2 agent server", () => {
       instanceRef: "codex-installation",
       sessionRef: "codex-session",
       relation: 0,
-      allowMultiple: false,
     }, ownerId)
     const agentSessionId = connected.agentSession!.id
     const report = (revision: bigint, runState: AgentRunState) => updateAgentSessionState({
@@ -215,15 +221,26 @@ describe("bridge v2 agent server", () => {
     expect((await controlAgentSession({ agentSessionId, op: AgentSessionControl.PAUSE }, teammateId)).interactionId).toBeGreaterThan(0n)
   })
 
+  test("setting only the output mode never joins the agent to ambient conversation", async () => {
+    const created = await setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: 0, outputMode: AgentOutputMode.FRIENDLY }, ownerId)
+    expect(created.participation?.mode).toBe(AgentParticipationMode.MENTIONS_ONLY)
+    // An existing participation keeps its mode.
+    await setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: AgentParticipationMode.ACTIVE }, ownerId)
+    const kept = await setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: 0, outputMode: AgentOutputMode.DETAILED }, ownerId)
+    expect(kept.participation?.mode).toBe(AgentParticipationMode.ACTIVE)
+  })
+
   test("participation and output mode follow grants", async () => {
     await rejects(setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: AgentParticipationMode.MUTED }, teammateId), RpcError_Code.AGENT_GRANT_REQUIRED)
     const joined = await setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: AgentParticipationMode.ACTIVE, joinedBy: BigInt(teammateId) }, botId)
     expect(joined.participation?.joinedBy).toBe(BigInt(teammateId))
 
+    // Participation settings need CONFIGURE (spec §7), not just any grant.
     await grant(teammateId, [AgentGrantOperation.STEER])
+    await rejects(setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: AgentParticipationMode.MUTED }, teammateId), RpcError_Code.AGENT_GRANT_REQUIRED)
+    await grant(teammateId, [AgentGrantOperation.STEER, AgentGrantOperation.CONFIGURE])
     const muted = await setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: AgentParticipationMode.MUTED }, teammateId)
     expect(muted.participation?.mode).toBe(AgentParticipationMode.MUTED)
-    await rejects(setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: 0, outputMode: AgentOutputMode.FRIENDLY }, teammateId), RpcError_Code.AGENT_GRANT_REQUIRED)
     const friendly = await setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: 0, outputMode: AgentOutputMode.FRIENDLY }, ownerId)
     expect([friendly.participation?.mode, friendly.participation?.outputMode]).toEqual([AgentParticipationMode.MUTED, AgentOutputMode.FRIENDLY])
     const cleared = await setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: 0, outputMode: AgentOutputMode.UNSPECIFIED }, ownerId)
@@ -236,5 +253,63 @@ describe("bridge v2 agent server", () => {
     expect([settings.runtime?.defaultOutputMode, settings.runtime?.executablePath]).toEqual([AgentOutputMode.FRIENDLY, "/opt/codex"])
     const [row] = await db.select().from(agentGrants).where(eq(agentGrants.subjectUserId, teammateId)).orderBy(desc(agentGrants.id))
     expect(row?.revokedAt).toBeNull()
+  })
+
+  test("a lapsed heartbeat is published once to the owner and the agent's chat members", async () => {
+    await setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: AgentParticipationMode.ACTIVE }, botId)
+    await reportAgentRuntime({ provider: AgentSessionProvider.CODEX, status: 1, executablePath: "/opt/codex" }, botId)
+    await db.update(agentRuntimes).set({ lastSeenAt: new Date(Date.now() - 10 * 60_000) }).where(eq(agentRuntimes.botUserId, botId))
+
+    expect(await sweepLapsedAgentRuntimes()).toBe(1)
+    expect(await sweepLapsedAgentRuntimes()).toBe(0)
+
+    const latestRuntime = async (userId: number) => {
+      const [row] = await db.select().from(updates)
+        .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, userId)))
+        .orderBy(desc(updates.seq)).limit(1)
+      const payload = row ? UpdatesModel.decrypt(row).payload.update : undefined
+      return payload?.oneofKind === "userAgentRuntime" ? payload.userAgentRuntime.runtime : undefined
+    }
+    const forOwner = await latestRuntime(ownerId)
+    const forTeammate = await latestRuntime(teammateId)
+    expect(forOwner?.status).toBe(2)
+    expect(forOwner?.executablePath).toBe("/opt/codex")
+    expect(forTeammate?.status).toBe(2)
+    // Members see status, never the owner's local paths.
+    expect(forTeammate?.executablePath).toBeUndefined()
+    expect(await latestRuntime(strangerId)).toBeUndefined()
+  })
+
+  test("one work per thread and bot, moved into a subthread with its identity", async () => {
+    const connect = (sessionRef: string, chat: InputPeer = peer) => connectAgentSession({
+      peerId: chat,
+      botUserId: BigInt(botId),
+      provider: AgentSessionProvider.CODEX,
+      instanceRef: "codex-installation",
+      sessionRef,
+      relation: 0,
+    }, ownerId)
+    const work = (await connect("first")).agentSession!
+    // /new creates a new thread, so a second work in this thread is refused.
+    await rejects(connect("second"), RpcError_Code.BAD_REQUEST)
+
+    const sub = await testUtils.createChat(null, "Subthread", "thread", false, ownerId)
+    if (!sub) throw new Error("subthread not created")
+    await db.update(chats).set({ parentChatId: chatId }).where(eq(chats.id, sub.id))
+    await Promise.all([ownerId, botId].map((id) => testUtils.addParticipant(sub.id, id)))
+    const subPeer: InputPeer = { type: { oneofKind: "chat", chat: { chatId: BigInt(sub.id) } } }
+
+    await rejects(moveAgentSession({ agentSessionId: work.id, destinationPeerId: subPeer }, teammateId), RpcError_Code.BAD_REQUEST)
+    const moved = await moveAgentSession({ agentSessionId: work.id, destinationPeerId: subPeer }, botId)
+    expect(moved.moved).toBe(true)
+    expect(moved.agentSession?.id).toBe(work.id)
+    expect(moved.agentSession?.parentChatId).toBe(BigInt(chatId))
+    // A retry converges instead of publishing in both places.
+    expect((await moveAgentSession({ agentSessionId: work.id, destinationPeerId: subPeer }, botId)).moved).toBe(false)
+    // The native identity now resolves to the subthread, and the parent is free again.
+    expect((await connect("first", subPeer)).state).toBe(2)
+    expect((await getAgentSession({ peerId: peer, botUserId: BigInt(botId) }, ownerId)).connection).toBeUndefined()
+    // Moves only go into a subthread of the work's current chat.
+    await rejects(moveAgentSession({ agentSessionId: work.id, destinationPeerId: peer }, botId), RpcError_Code.BAD_REQUEST)
   })
 })

@@ -1,4 +1,5 @@
 import { controlAgentSession } from "@in/server/modules/agentSessions/control"
+import { moveAgentSession } from "@in/server/modules/agentSessions/move"
 import { getAgentSessionStates, updateAgentSessionState } from "@in/server/modules/agentSessions/state"
 import {
   deleteAgentGrant,
@@ -20,6 +21,7 @@ export const AgentHandlers = {
   updateAgentSessionState,
   getAgentSessionStates,
   controlAgentSession,
+  moveAgentSession,
   listAgentGrants,
   setAgentGrant,
   deleteAgentGrant,

@@ -213,6 +213,9 @@ message ServerChatUpdateAgentSessionState {
   AgentSessionRelation relation = 6;
   optional AgentSessionState state = 7;
   optional string workspace_label = 8;
+  // The work's publication chat when it differs from this bucket's chat
+  // (after a move into a subthread).
+  optional int64 chat_id = 9;
 }
 
 // Snapshot of an agent's participation. The client peer is encoded per
@@ -221,7 +224,7 @@ message ServerChatUpdateAgentParticipation {
   int64 bot_user_id = 1;
   AgentParticipationMode mode = 2;
   optional int64 joined_by = 3;
-  optional int64 default_session_id = 4;
+  reserved 4;
   int64 revision = 5;
   int64 date = 6;
   optional AgentOutputMode output_mode = 7;

@@ -12,7 +12,7 @@ import {
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UsersModel } from "@in/server/db/models/users"
-import { agentParticipations, agentSessions, type DbAgentParticipation, type DbChat } from "@in/server/db/schema"
+import { agentParticipations, type DbAgentParticipation, type DbChat } from "@in/server/db/schema"
 import { insertChatUpdate, pushChatUpdate } from "@in/server/modules/agents/chatUpdates"
 import { resolveAgentAccess, satisfiesGrantRequirement } from "@in/server/modules/agents/grants"
 import { validOutputMode } from "@in/server/modules/agents/runtime"
@@ -20,7 +20,7 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { encodeOutputPeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { and, eq, sql } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 
 export function encodeAgentParticipation(row: DbAgentParticipation, peerId: Peer): AgentParticipation {
   return {
@@ -28,7 +28,6 @@ export function encodeAgentParticipation(row: DbAgentParticipation, peerId: Peer
     botUserId: BigInt(row.botUserId),
     mode: row.mode,
     joinedBy: row.joinedBy === null ? undefined : BigInt(row.joinedBy),
-    defaultSessionId: row.defaultSessionId ?? undefined,
     revision: row.revision,
     date: encodeDateStrict(row.updatedAt),
     outputMode: row.outputMode ?? undefined,
@@ -48,8 +47,8 @@ export async function getAgentParticipations(
 }
 
 /**
- * The bot itself (joining on a mention or invite, choosing its default
- * session), its owner, or a person with any grant on it.
+ * The bot itself (joining on a mention or invite), its owner, or a CONFIGURE
+ * grantee (spec §7).
  */
 export async function setAgentParticipation(
   input: SetAgentParticipationInput,
@@ -74,11 +73,8 @@ export async function setAgentParticipation(
   const actingAsBot = currentUserId === botUserId
   if (!actingAsBot) {
     const access = await resolveAgentAccess(bot, currentUserId)
-    if (!access.isOwner && access.operations === 0) throw RealtimeRpcError.AgentGrantRequired()
-    if (input.defaultSessionId !== undefined || input.joinedBy !== undefined) throw RealtimeRpcError.BadRequest()
-    if (input.outputMode !== undefined && !satisfiesGrantRequirement(access, AgentGrantRequirement.CONFIGURE)) {
-      throw RealtimeRpcError.AgentGrantRequired()
-    }
+    if (!satisfiesGrantRequirement(access, AgentGrantRequirement.CONFIGURE)) throw RealtimeRpcError.AgentGrantRequired()
+    if (input.joinedBy !== undefined) throw RealtimeRpcError.BadRequest()
   } else if (input.outputMode !== undefined) {
     // The output mode is a person's choice in Agent Settings, not the bot's.
     throw RealtimeRpcError.BadRequest()
@@ -87,7 +83,6 @@ export async function setAgentParticipation(
     ? undefined
     : input.outputMode === AgentOutputMode.UNSPECIFIED ? null : input.outputMode
   const joinedBy = await validJoinedBy(input.joinedBy, chat)
-  const defaultSessionId = await validDefaultSession(input.defaultSessionId, chat.id, botUserId)
 
   const { row, durable, lockedChat } = await db.transaction(async (tx) => {
     const now = new Date()
@@ -96,9 +91,12 @@ export async function setAgentParticipation(
       .values({
         chatId: chat.id,
         botUserId,
-        mode: input.mode === AgentParticipationMode.UNSPECIFIED ? AgentParticipationMode.ACTIVE : input.mode,
+        // A new participation created only to set the output mode must not join
+        // the agent to ambient conversation; mentions reach it either way.
+        mode: input.mode !== AgentParticipationMode.UNSPECIFIED
+          ? input.mode
+          : input.outputMode !== undefined ? AgentParticipationMode.MENTIONS_ONLY : AgentParticipationMode.ACTIVE,
         joinedBy: joinedBy ?? (actingAsBot ? null : currentUserId),
-        defaultSessionId: defaultSessionId ?? null,
         outputMode: outputMode ?? null,
       })
       .onConflictDoUpdate({
@@ -107,7 +105,6 @@ export async function setAgentParticipation(
           ...(input.mode === AgentParticipationMode.UNSPECIFIED ? {} : { mode: input.mode }),
           ...(outputMode === undefined ? {} : { outputMode }),
           ...(joinedBy === undefined ? {} : { joinedBy }),
-          ...(defaultSessionId === undefined ? {} : { defaultSessionId }),
           revision: sql`${agentParticipations.revision} + 1`,
           updatedAt: now,
         },
@@ -120,7 +117,6 @@ export async function setAgentParticipation(
         botUserId: BigInt(saved.botUserId),
         mode: saved.mode,
         joinedBy: saved.joinedBy === null ? undefined : BigInt(saved.joinedBy),
-        defaultSessionId: saved.defaultSessionId ?? undefined,
         revision: saved.revision,
         date: encodeDateStrict(saved.updatedAt),
         outputMode: saved.outputMode ?? undefined,
@@ -142,15 +138,4 @@ async function validJoinedBy(input: bigint | undefined, chat: DbChat): Promise<n
   if (!Number.isSafeInteger(userId) || userId <= 0) throw RealtimeRpcError.UserIdInvalid()
   if (!(await AccessGuards.hasChatAccess(chat, userId))) throw RealtimeRpcError.UserIdInvalid()
   return userId
-}
-
-async function validDefaultSession(input: bigint | undefined, chatId: number, botUserId: number): Promise<bigint | undefined> {
-  if (input === undefined) return undefined
-  const [session] = await db
-    .select({ id: agentSessions.id })
-    .from(agentSessions)
-    .where(and(eq(agentSessions.id, input), eq(agentSessions.chatId, chatId), eq(agentSessions.botUserId, botUserId)))
-    .limit(1)
-  if (!session) throw RealtimeRpcError.BadRequest()
-  return session.id
 }
