@@ -2379,6 +2379,7 @@ fn agent_session_connect_input(
         session_ref: session.session_id().as_str().to_owned(),
         project_ref: Some(workspace_id.as_str().to_owned()),
         status_message_id,
+        ..Default::default()
     })
 }
 
@@ -2396,6 +2397,7 @@ fn agent_session_lookup_input(
         session_ref: session.session_id().as_str().to_owned(),
         project_ref: Some(workspace_id.as_str().to_owned()),
         status_message_id: None,
+        ..Default::default()
     })
 }
 
@@ -2669,6 +2671,7 @@ async fn recover_agent_session_binding(
         .get_agent_session(proto::GetAgentSessionInput {
             peer_id: agent_session_peer(binding.chat_id),
             bot_user_id: route.bot_user_id,
+            ..Default::default()
         })
         .await?;
     let Some(connection) = recovered.connection else {

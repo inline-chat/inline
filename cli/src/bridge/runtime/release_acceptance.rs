@@ -67,6 +67,7 @@ impl ClientBackend for AcceptanceBackend {
                 provider: request.provider,
                 status_message_id: request.status_message_id,
                 parent_chat_id: Some(706),
+                ..Default::default()
             };
             *saved = Some(proto::AgentSessionConnection {
                 agent_session: Some(session.clone()),
