@@ -551,11 +551,13 @@ mod tests {
         assert!(context.text.len() <= budget.max_bytes());
         let kept = context.included_message_ids.len() as u64;
         assert!(kept > 0 && kept < 200);
+        // The trigger (msg 100) is the input itself: neither shown nor omitted.
+        assert!(!context.included_message_ids.contains(&100));
         assert_eq!(*context.included_message_ids.last().unwrap(), 200);
-        assert_eq!(context.omitted, 1_000 + 200 - kept);
+        assert_eq!(context.omitted, 1_000 + 199 - kept);
         assert!(context.text.ends_with(&format!(
             "{} more messages; use inline tools to read.",
-            1_000 + 200 - kept
+            1_000 + 199 - kept
         )));
     }
 
