@@ -879,9 +879,9 @@ impl ClaudeMapper {
 
     /// The CLI withdrew a request.
     pub fn cancelled(&mut self, request_id: &str) -> Vec<Event> {
-        // The client reports only requests it was answering, so this always
-        // closes an interaction the stream opened.
-        self.pending.remove(request_id);
+        if self.pending.remove(request_id).is_none() {
+            return Vec::new();
+        }
         InteractionId::new(request_id)
             .map(|id| {
                 vec![Event::InteractionClosed {
@@ -1323,16 +1323,7 @@ fn approval_subject(permission: &PermissionRequest, cwd: Option<&std::path::Path
             network_host: None,
             permissions: None,
         },
-        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => ApprovalSubject::FileChange {
-            paths: input["file_path"]
-                .as_str()
-                .or_else(|| input["notebook_path"].as_str())
-                .map(PathBuf::from)
-                .into_iter()
-                .collect(),
-            reason,
-            grant_root: None,
-        },
+        // Edits keep their full input so the card shows what is written.
         name => ApprovalSubject::Tool {
             name: permission.display_name.clone().unwrap_or_else(|| name.to_string()),
             input: input.clone(),
