@@ -218,7 +218,7 @@ public actor RealtimeAPI: Sendable {
       let msg = wrapMessage(body: .connectionInit(.with {
         $0.token = token
         $0.buildNumber = getBuildNumber()
-        $0.supportsWorking = AgentActivityFeature.isEnabled
+        $0.supportsWorking = true
         #if os(macOS)
         $0.osVersion = getOSVersion()
         #endif

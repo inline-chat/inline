@@ -5,9 +5,6 @@ import SwiftUI
 
 struct ExperimentalView: View {
   @ObservedObject private var auth = Auth.shared
-  @AppStorage(ExperimentalFeatureFlags.agentActivityKey)
-  private var agentActivityEnabled = false
-
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
 
@@ -20,14 +17,6 @@ struct ExperimentalView: View {
   var body: some View {
     List {
       // Use the same purpose-based groups as macOS; see AGENTS.md when adding experiments.
-      Section {
-        Toggle("Agent Activity", isOn: $agentActivityEnabled)
-      } header: {
-        Text("Agents")
-      } footer: {
-        Text("Show Working with a spinner. Requires an opted-in agent. Restart Inline after changing.")
-      }
-
       Section {
         SettingsItem(icon: "arrow.down.document", iconColor: .blue, title: "Native File Downloads") {
           Toggle("Native File Downloads", isOn: $nativeFileDownloadsEnabled)
@@ -75,7 +64,6 @@ struct ExperimentalView: View {
       }
     }
     .listStyle(.insetGrouped)
-    .onAppear { _ = ExperimentalFeatureFlags.agentActivityEnabled }
     .navigationTitle("Experimental")
     .navigationBarTitleDisplayMode(.inline)
   }
