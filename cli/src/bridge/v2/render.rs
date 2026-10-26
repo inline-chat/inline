@@ -194,7 +194,9 @@ impl Renderer {
                 }
                 self.mark_rows_waiting(None);
             }
-            Event::Notice(notice) if notice.level != NoticeLevel::Info => {
+            // Errors are shown in both modes; warnings (config, deprecations)
+            // stay in the logs instead of becoming chat messages.
+            Event::Notice(notice) if notice.level == NoticeLevel::Error => {
                 let mut builder = DocBuilder::new();
                 let kind = if notice.level == NoticeLevel::Error {
                     CalloutKind::Error
@@ -210,7 +212,12 @@ impl Renderer {
                     doc: builder.finish(),
                 });
             }
-            Event::Gap { .. } => {}
+            // Events were lost: the open progress message may be wrong, so
+            // it ends here and the next output starts a fresh one.
+            Event::Gap { .. } => {
+                let elapsed = self.slot_elapsed(now);
+                self.end_slot(elapsed, "Some updates were skipped · worked for", &mut ops);
+            }
             _ => {}
         }
         ops
@@ -392,6 +399,11 @@ impl Renderer {
         };
         let mut builder = DocBuilder::new();
         self.write_rows(&mut builder);
+        if builder.is_empty() {
+            // Nothing but the final answer happened: no progress message.
+            self.slot = None;
+            return;
+        }
         builder.footer(&format!("{verb} {}", elapsed_text(elapsed_ms)));
         let full = self
             .slot

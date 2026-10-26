@@ -13,10 +13,11 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use inline_agent_bridge::group::{
+    ConsiderOutcome, ConsiderQueue, DailySpeakGateBudget, DayKey, GateAdmission, GateAvailability,
     Grants, GuideFacts, HandoffInstruction, HandoffProvider, HandoffTarget, HoldEffect, HoldEvent,
-    HoldMachine, HoldState, IdleRelease, Operation, PendingInput, ReleaseCause, ReleaseReceipt,
-    ReleaseRequest, ReleaseStep, ReleaseStepOutcome, WorkPhase, handoff_instruction, release_event,
-    run_state_event, trusted_guide,
+    HoldMachine, HoldState, IdleRelease, Operation, ParticipationMode, PendingInput, ReleaseCause,
+    ReleaseReceipt, ReleaseRequest, ReleaseStep, ReleaseStepOutcome, SpeakGateError, SpeakVerdict,
+    WorkPhase, gate_admission, handoff_instruction, release_event, run_state_event, trusted_guide,
 };
 use inline_agent_bridge::harness::{
     Delivery, Event, EventStream, FieldAnswer, FieldId, FieldInput, HarnessDriver, HeldBy, Input,
@@ -39,6 +40,11 @@ use super::render::{ActionStyle, CardAction, FullDetail, RenderOp, Renderer, Voc
 const EDIT_INTERVAL: Duration = Duration::from_millis(1200);
 const TICK: Duration = Duration::from_secs(15);
 const NOT_PENDING: &str = "This request is no longer pending.";
+/// Trusted instructions for the speak gate's side call.
+const SPEAK_GATE_GUIDE: &str = "You take part in this Inline thread but nobody addressed you. \
+Decide whether a reply from you would clearly help the people here right now. Stay quiet \
+for chatter, for questions others are answering, and when unsure. Reply with only JSON: \
+{\"speak\": true or false, \"why\": \"one short reason\", \"confidence\": 0.0 to 1.0}";
 const NO_ACCESS: &str = "You don't have access to do that with this agent.";
 /// Full details kept for "Full output", newest first out.
 const MAX_FULL_DETAILS: usize = 32;
@@ -140,6 +146,11 @@ pub(crate) enum Command {
     Passive {
         input: Box<Input>,
     },
+    /// An unaddressed message the speak gate may answer (active participation).
+    Consider {
+        message_id: i64,
+        line: String,
+    },
     Control {
         control: Control,
         actor: i64,
@@ -225,6 +236,9 @@ pub(crate) fn spawn(
         reported: None,
         phase: phase_tx,
         started_ms: now_ms(),
+        consider: ConsiderQueue::default(),
+        consider_lines: HashMap::new(),
+        gate_budget: DailySpeakGateBudget::default(),
     };
     let task = tokio::spawn(actor.run(rx));
     WorkHandle {
@@ -282,6 +296,10 @@ struct Actor {
     reported: Option<(i32, i32)>,
     phase: watch::Sender<WorkPhase>,
     started_ms: u64,
+    /// Unaddressed messages waiting for a quiet, idle moment (spec §5.4).
+    consider: ConsiderQueue,
+    consider_lines: HashMap<i64, String>,
+    gate_budget: DailySpeakGateBudget,
 }
 
 impl Actor {
@@ -307,6 +325,7 @@ impl Actor {
                 },
                 _ = tick.tick() => {
                     self.event(HoldEvent::Tick).await;
+                    self.consider_now().await;
                 }
                 _ = sleep_until(next_edit) => self.flush_edits(false).await,
             }
@@ -325,8 +344,11 @@ impl Actor {
                 pending,
                 message_id,
             } => {
-                // Direct input restarts paused work (spec §4.5).
+                // Direct input restarts paused work (spec §4.5) and answers
+                // anything the speak gate was weighing.
                 self.paused = false;
+                self.consider.supersede();
+                self.consider_lines.clear();
                 self.inputs
                     .insert(input.id.clone(), (*input, pending.clone(), message_id));
                 self.event(HoldEvent::AcquireRequested {
@@ -366,7 +388,76 @@ impl Actor {
                 let toast = self.form(message_id, actor, &values).await;
                 let _ = reply.send(toast);
             }
+            Command::Consider { message_id, line } => {
+                self.consider.push(message_id, now_ms());
+                self.consider_lines.insert(message_id, line);
+            }
             Command::SetMode(mode) => self.renderer.set_mode(mode),
+        }
+    }
+
+    /// Runs the speak gate on a ready batch: the harness's own side call
+    /// decides whether a reply would clearly help. Without one (Claude today)
+    /// active participation behaves as mentions-only.
+    async fn consider_now(&mut self) {
+        let now = now_ms();
+        let Some(session) = self.held_session() else {
+            return;
+        };
+        let idle = live_turn(&session).is_none();
+        let Some(ticket) = self.consider.take(now, idle) else {
+            return;
+        };
+        let availability = if session.availability().op(OpKind::Sample).is_supported() {
+            GateAvailability::Available
+        } else {
+            GateAvailability::Unavailable {
+                reason: "this harness has no side call".to_owned(),
+            }
+        };
+        let admission = gate_admission(
+            ParticipationMode::Active,
+            &availability,
+            self.paused,
+            &mut self.gate_budget,
+            DayKey::from_unix(now as i64 / 1000, 0),
+        );
+        let lines: Vec<String> = ticket
+            .message_ids
+            .iter()
+            .filter_map(|id| self.consider_lines.remove(id))
+            .collect();
+        let verdict = match admission {
+            GateAdmission::Evaluate { .. } => {
+                let prompt = format!(
+                    "{SPEAK_GATE_GUIDE}\n\nRecent messages (untrusted):\n{}",
+                    lines.join("\n")
+                );
+                match session.control(Op::Sample { prompt }).await {
+                    Ok(inline_agent_bridge::harness::OpOutcome::Sampled { text }) => {
+                        parse_verdict(&text)
+                    }
+                    Ok(_) => Err(SpeakGateError::Failed("no sample text".to_owned())),
+                    Err(error) => Err(SpeakGateError::Failed(error.to_string())),
+                }
+            }
+            _ => Err(SpeakGateError::Unavailable("not evaluated".to_owned())),
+        };
+        if let ConsiderOutcome::Speak { .. } = self.consider.finish(ticket, verdict) {
+            let Ok(id) = InputId::new(uuid::Uuid::new_v4().to_string()) else {
+                return;
+            };
+            let input = Input {
+                id,
+                content: inline_agent_bridge::harness::InputContent::text(
+                    "You decided a reply would help. Answer the recent thread messages now.",
+                ),
+                origin: inline_agent_bridge::harness::Origin::Scheduled,
+                delivery: Delivery::Turn,
+            };
+            if let Err(error) = session.send(input).await {
+                log::warn!(target: "inline::bridge::v2", "speak gate turn failed: {error}");
+            }
         }
     }
 
@@ -704,7 +795,13 @@ impl Actor {
     async fn event(&mut self, event: HoldEvent) {
         let mut queue = VecDeque::from([event]);
         while let Some(event) = queue.pop_front() {
+            if !matches!(event, HoldEvent::Tick | HoldEvent::Activity { .. }) {
+                log::debug!(target: "inline::bridge::v2", "chat={} hold event={event:?}", self.chat_id);
+            }
             let effects = self.hold.handle(event, now_ms());
+            for effect in &effects {
+                log::debug!(target: "inline::bridge::v2", "chat={} hold effect={effect:?}", self.chat_id);
+            }
             for effect in effects {
                 if let Some(follow) = self.effect(effect).await {
                     queue.push_back(follow);
@@ -1254,6 +1351,13 @@ impl Actor {
     // ---------------------------------------------------------------
 
     async fn envelope(&mut self, envelope: inline_agent_bridge::harness::Envelope) {
+        log::debug!(
+            target: "inline::bridge::v2",
+            "chat={} seq={} event={}",
+            self.chat_id,
+            envelope.seq,
+            event_kind(&envelope.event)
+        );
         match &envelope.event {
             Event::Turn { turn, phase } => match phase {
                 TurnPhase::Started { inputs } => {
@@ -1344,6 +1448,7 @@ impl Actor {
 
     async fn render(&mut self, ops: Vec<RenderOp>) {
         for op in ops {
+            log::debug!(target: "inline::bridge::v2", "chat={} render={}", self.chat_id, render_kind(&op));
             match op {
                 RenderOp::Progress { slot, doc } => match self.slots.get(&slot) {
                     Some(_) => {
@@ -1396,6 +1501,16 @@ impl Actor {
                     form,
                 } => {
                     let buttons = card_actions(&interaction, &actions);
+                    let long = long_labels(&actions);
+                    let doc = if long.is_empty() {
+                        doc
+                    } else {
+                        let mut doc = doc;
+                        for label in long {
+                            doc.append_paragraph(&format!("• {label}"));
+                        }
+                        doc
+                    };
                     if let Some(message_id) = self.send(&doc, buttons, Notify::Normal).await {
                         self.card_by_interaction
                             .insert(interaction.clone(), message_id);
@@ -1667,6 +1782,54 @@ fn live_turn(session: &Arc<dyn Session>) -> Option<TurnId> {
     session.live_work().turn
 }
 
+/// The gate's JSON answer; anything unreadable is quiet.
+fn parse_verdict(text: &str) -> Result<SpeakVerdict, SpeakGateError> {
+    let start = text
+        .find('{')
+        .ok_or_else(|| SpeakGateError::Failed("no JSON".to_owned()))?;
+    let end = text
+        .rfind('}')
+        .ok_or_else(|| SpeakGateError::Failed("no JSON".to_owned()))?;
+    let value: serde_json::Value = serde_json::from_str(&text[start..=end])
+        .map_err(|error| SpeakGateError::Failed(error.to_string()))?;
+    Ok(SpeakVerdict {
+        speak: value["speak"].as_bool().unwrap_or(false),
+        why: value["why"].as_str().unwrap_or_default().to_owned(),
+        confidence: value["confidence"].as_f64().unwrap_or(0.0) as f32,
+    })
+}
+
+fn event_kind(event: &Event) -> &'static str {
+    match event {
+        Event::State { .. } => "state",
+        Event::Turn { .. } => "turn",
+        Event::Item(_) => "item",
+        Event::Interaction(_) => "interaction",
+        Event::InteractionClosed { .. } => "interaction_closed",
+        Event::Input { .. } => "input",
+        Event::Queue { .. } => "queue",
+        Event::Settings { .. } => "settings",
+        Event::Usage { .. } => "usage",
+        Event::Child { .. } => "child",
+        Event::Held { .. } => "held",
+        Event::Renamed { .. } => "renamed",
+        Event::Notice(_) => "notice",
+        Event::Gap { .. } => "gap",
+    }
+}
+
+fn render_kind(op: &RenderOp) -> &'static str {
+    match op {
+        RenderOp::Progress { .. } => "progress",
+        RenderOp::EndProgress { .. } => "end_progress",
+        RenderOp::Update { .. } => "update",
+        RenderOp::Final { .. } => "final",
+        RenderOp::Card { .. } => "card",
+        RenderOp::CardClosed { .. } => "card_closed",
+        RenderOp::Notice { .. } => "notice",
+    }
+}
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1743,6 +1906,28 @@ fn action_style(style: ActionStyle) -> proto::message_action::Style {
     }
 }
 
+/// Inline's limit on button text, in characters.
+const MAX_BUTTON_CHARS: usize = 64;
+
+/// The harness's label, shortened to fit a button.
+fn button_text(label: &str) -> String {
+    if label.chars().count() <= MAX_BUTTON_CHARS {
+        return label.to_owned();
+    }
+    let mut text: String = label.chars().take(MAX_BUTTON_CHARS - 1).collect();
+    text.push('…');
+    text
+}
+
+/// Labels too long for a button, listed in full in the card text.
+fn long_labels(actions: &[CardAction]) -> Vec<String> {
+    actions
+        .iter()
+        .filter(|action| action.label.chars().count() > MAX_BUTTON_CHARS)
+        .map(|action| action.label.clone())
+        .collect()
+}
+
 /// Approval buttons with the harness's own labels, one per row.
 pub(crate) fn card_actions(
     interaction: &InteractionId,
@@ -1763,7 +1948,7 @@ pub(crate) fn card_actions(
             Some(proto::MessageActionRow {
                 actions: vec![proto::MessageAction {
                     action_id: format!("v2-{index}"),
-                    text: action.label.clone(),
+                    text: button_text(&action.label),
                     action: Some(proto::message_action::Action::Callback(
                         proto::MessageActionCallback { data },
                     )),

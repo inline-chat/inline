@@ -614,7 +614,7 @@ impl Runtime {
                 self.act(message, &group, &decision, required, grants, participation)
                     .await
             }
-            IntakeDecision::Observe { .. } => {
+            IntakeDecision::Observe { consider, .. } => {
                 if let Some(work) = self.works.get(&chat_id)
                     && let Ok(id) = InputId::new(input_id(
                         self.config.bot_user_id,
@@ -638,6 +638,15 @@ impl Runtime {
                             input: Box::new(input),
                         })
                         .await;
+                    if consider {
+                        let _ = work
+                            .tx
+                            .send(Command::Consider {
+                                message_id: group.message_id,
+                                line: format!("{}: {}", group.author.display_name, group.text),
+                            })
+                            .await;
+                    }
                 }
                 Ok(())
             }

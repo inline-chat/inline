@@ -24,6 +24,25 @@ impl Doc {
     pub(crate) fn is_empty(&self) -> bool {
         self.text.trim().is_empty()
     }
+
+    /// Adds a paragraph after the existing content.
+    pub(crate) fn append_paragraph(&mut self, text: &str) {
+        if text.trim().is_empty() {
+            return;
+        }
+        if !self.text.is_empty() {
+            self.text.push('\n');
+        }
+        let offset = self.text.encode_utf16().count() as i64;
+        self.text.push_str(text);
+        self.blocks.push(proto::Block {
+            kind: Some(proto::block::Kind::Paragraph(proto::BlockText {
+                offset,
+                length: text.encode_utf16().count() as i64,
+                ..Default::default()
+            })),
+        });
+    }
 }
 
 /// Status of a disclosure row or step.
@@ -63,6 +82,10 @@ pub(crate) struct DocBuilder {
 impl DocBuilder {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.text.trim().is_empty()
     }
 
     pub(crate) fn finish(mut self) -> Doc {
