@@ -1,0 +1,178 @@
+{
+  "provider": "claude",
+  "harness": "claude-code 2.1.292",
+  "recorded": false,
+  "source": "Agent SDK 0.3.288 SDKUserMessage, SDKMessageOrigin and control request types; Oct 23 path lab (steer now/next, shouldQuery:false, interrupt cancel_queued)",
+  "description": "Delivery mapping (spec 4.2 table) and native provenance (spec 5.1 rule 1) for stream-json stdin, plus the control requests behind each Op.",
+  "deliveries": [
+    {
+      "name": "owner starts a turn",
+      "input": {
+        "id": "0d6a7c1e-1111-4a00-8000-000000000001",
+        "content": {"text": "Fix the failing build"},
+        "origin": {"kind": "owner", "user": 101},
+        "delivery": {"kind": "turn"}
+      },
+      "native": [
+        {
+          "type": "user",
+          "uuid": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+          "parent_tool_use_id": null,
+          "message": {"role": "user", "content": [{"type": "text", "text": "Fix the failing build"}]},
+          "origin": {"kind": "human"}
+        }
+      ]
+    },
+    {
+      "name": "teammate starts a turn",
+      "input": {
+        "id": "0d6a7c1e-1111-4a00-8000-000000000002",
+        "content": {"text": "Can you also check the lint step?"},
+        "origin": {"kind": "teammate", "user": 202},
+        "delivery": {"kind": "turn"}
+      },
+      "native": [
+        {
+          "type": "user",
+          "uuid": "0d6a7c1e-1111-4a00-8000-000000000002",
+          "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+          "parent_tool_use_id": null,
+          "message": {"role": "user", "content": [{"type": "text", "text": "Can you also check the lint step?"}]},
+          "origin": {"kind": "channel", "server": "inline"}
+        }
+      ]
+    },
+    {
+      "name": "another agent addresses this one",
+      "input": {
+        "id": "0d6a7c1e-1111-4a00-8000-000000000003",
+        "content": {"text": "Please review the diff in this thread"},
+        "origin": {"kind": "agent", "bot": 303, "work": {"chat": 9001, "session": "019a2b3c-codex-thread"}},
+        "delivery": {"kind": "turn"}
+      },
+      "native": [
+        {
+          "type": "user",
+          "uuid": "0d6a7c1e-1111-4a00-8000-000000000003",
+          "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+          "parent_tool_use_id": null,
+          "message": {"role": "user", "content": [{"type": "text", "text": "Please review the diff in this thread"}]},
+          "origin": {"kind": "peer", "from": "inline:user:303", "fromSession": "inline:chat:9001"}
+        }
+      ]
+    },
+    {
+      "name": "steer now interrupts the current step",
+      "input": {
+        "id": "0d6a7c1e-1111-4a00-8000-000000000004",
+        "content": {"text": "Stop, use pnpm instead"},
+        "origin": {"kind": "owner", "user": 101},
+        "delivery": {"kind": "steer", "expected_turn": "0d6a7c1e-1111-4a00-8000-000000000001", "priority": "now"}
+      },
+      "native": [
+        {
+          "type": "user",
+          "uuid": "0d6a7c1e-1111-4a00-8000-000000000004",
+          "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+          "parent_tool_use_id": null,
+          "message": {"role": "user", "content": [{"type": "text", "text": "Stop, use pnpm instead"}]},
+          "origin": {"kind": "human"},
+          "priority": "now"
+        }
+      ]
+    },
+    {
+      "name": "steer next is the default while the agent works",
+      "input": {
+        "id": "0d6a7c1e-1111-4a00-8000-000000000005",
+        "content": {"text": "Also keep the old flag"},
+        "origin": {"kind": "owner", "user": 101},
+        "delivery": {"kind": "steer", "expected_turn": "0d6a7c1e-1111-4a00-8000-000000000001", "priority": "next"}
+      },
+      "native": [
+        {
+          "type": "user",
+          "uuid": "0d6a7c1e-1111-4a00-8000-000000000005",
+          "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+          "parent_tool_use_id": null,
+          "message": {"role": "user", "content": [{"type": "text", "text": "Also keep the old flag"}]},
+          "origin": {"kind": "human"},
+          "priority": "next"
+        }
+      ]
+    },
+    {
+      "name": "/queue waits for the current work",
+      "input": {
+        "id": "0d6a7c1e-1111-4a00-8000-000000000006",
+        "content": {"text": "Then write the changelog"},
+        "origin": {"kind": "owner", "user": 101},
+        "delivery": {"kind": "queue"}
+      },
+      "native": [
+        {
+          "type": "user",
+          "uuid": "0d6a7c1e-1111-4a00-8000-000000000006",
+          "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+          "parent_tool_use_id": null,
+          "message": {"role": "user", "content": [{"type": "text", "text": "Then write the changelog"}]},
+          "origin": {"kind": "human"},
+          "priority": "later"
+        }
+      ]
+    },
+    {
+      "name": "ambient conversation is passive context",
+      "input": {
+        "id": "0d6a7c1e-1111-4a00-8000-000000000007",
+        "content": {"text": "[Alice, 10:02] the staging deploy is green again"},
+        "origin": {"kind": "ambient", "chat": 9001},
+        "delivery": {"kind": "passive"}
+      },
+      "native": [
+        {
+          "type": "user",
+          "uuid": "0d6a7c1e-1111-4a00-8000-000000000007",
+          "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+          "parent_tool_use_id": null,
+          "message": {"role": "user", "content": [{"type": "text", "text": "[Alice, 10:02] the staging deploy is green again"}]},
+          "origin": {"kind": "channel", "server": "inline"},
+          "shouldQuery": false
+        }
+      ]
+    }
+  ],
+  "ops": [
+    {
+      "name": "stop keeps queued input (Claude runs it next)",
+      "op": {"op": "interrupt", "cancel_queued": false},
+      "native": [{"type": "control_request", "request_id": "<any>", "request": {"subtype": "interrupt"}}]
+    },
+    {
+      "name": "pause cancels queued input, kept pending in Inline",
+      "op": {"op": "interrupt", "cancel_queued": true},
+      "native": [{"type": "control_request", "request_id": "<any>", "request": {"subtype": "interrupt", "cancel_queued": true}}]
+    },
+    {
+      "name": "model for this thread from the next message",
+      "op": {"op": "settings", "change": {"model": "sonnet"}, "scope": "thread"},
+      "native": [{"type": "control_request", "request_id": "<any>", "request": {"subtype": "set_model", "model": "sonnet"}}]
+    },
+    {
+      "name": "permission mode for this thread",
+      "op": {"op": "settings", "change": {"permission_mode": "acceptEdits"}, "scope": "thread"},
+      "native": [{"type": "control_request", "request_id": "<any>", "request": {"subtype": "set_permission_mode", "mode": "acceptEdits"}}]
+    },
+    {
+      "name": "stop one background task",
+      "op": {"op": "stop_child", "child": {"id": "task-7f3a", "kind": "background_task"}},
+      "native": [{"type": "control_request", "request_id": "<any>", "request": {"subtype": "stop_task", "task_id": "task-7f3a"}}]
+    },
+    {
+      "name": "undo this turn's file changes",
+      "op": {"op": "rewind_files", "to": {"kind": "input", "input": "0d6a7c1e-1111-4a00-8000-000000000001"}},
+      "native": [{"type": "control_request", "request_id": "<any>", "request": {"subtype": "rewind_files", "user_message_id": "0d6a7c1e-1111-4a00-8000-000000000001"}}]
+    }
+  ]
+}
