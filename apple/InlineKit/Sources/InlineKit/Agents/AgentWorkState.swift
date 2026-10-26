@@ -400,6 +400,85 @@ public final class AgentWorkStateStore: ObservableObject {
     }
   }
 
+  // MARK: Sync projection
+
+  /// Writes one durable agent update into the sync transaction that also
+  /// advances its bucket cursor, so a crash can never leave the cursor ahead
+  /// of the state. The same rules as the in-memory `apply` decide what wins.
+  /// Returns whether a row changed; the store then reloads after the commit.
+  @discardableResult
+  public nonisolated static func project(
+    sessionState update: InlineProtocol.UpdateAgentSessionState,
+    db: Database
+  ) throws -> Bool {
+    guard let state = AgentWorkState(session: update.agentSession) else { return false }
+    let decoder = JSONDecoder()
+    let rows = try Row.filter(Column("kind") == Kind.session.rawValue).fetchAll(db)
+    let stored = rows.compactMap { row in
+      (try? decoder.decode(AgentWorkState.self, from: row.payload)).map { (row, $0) }
+    }
+    if let current = stored.first(where: { $0.1.key == state.key })?.1 {
+      if current.sessionID == state.sessionID, current.revision > state.revision { return false }
+      if current.sessionID != state.sessionID, current.updatedAt > state.updatedAt { return false }
+      if current == state { return false }
+    }
+    // A moved session reports its destination; drop it from the chat it left.
+    for (row, existing) in stored where existing.sessionID == state.sessionID && existing.key != state.key {
+      _ = try Row.filter(Column("kind") == row.kind && Column("key") == row.key).deleteAll(db)
+    }
+    try Row(kind: Kind.session.rawValue, key: state.key.storageKey, payload: JSONEncoder().encode(state)).save(db)
+    return true
+  }
+
+  @discardableResult
+  public nonisolated static func project(
+    participation: InlineProtocol.AgentParticipation,
+    db: Database
+  ) throws -> Bool {
+    guard participation.hasPeerID, participation.botUserID > 0 else { return false }
+    let key = AgentWorkState.Key(peer: participation.peerID.toPeer(), botUserID: participation.botUserID)
+    if let row = try Row.filter(Column("kind") == Kind.outputOverride.rawValue && Column("key") == key.storageKey).fetchOne(db),
+       let current = try? JSONDecoder().decode(OutputOverride.self, from: row.payload),
+       current.revision > participation.revision
+    {
+      return false
+    }
+    let mode = participation.hasOutputMode ? AgentThreadOutputMode(participation.outputMode) : nil
+    let value = OutputOverride(key: key, mode: mode, revision: participation.revision)
+    try Row(kind: Kind.outputOverride.rawValue, key: key.storageKey, payload: JSONEncoder().encode(value)).save(db)
+    return true
+  }
+
+  @discardableResult
+  public nonisolated static func project(runtime: InlineProtocol.AgentRuntime, db: Database) throws -> Bool {
+    guard runtime.botUserID > 0 else { return false }
+    let value = OutputDefault(
+      botUserID: runtime.botUserID,
+      mode: AgentThreadOutputMode(runtime.defaultOutputMode),
+      isOffline: runtime.status == .offline
+    )
+    try Row(kind: Kind.outputDefault.rawValue, key: "\(runtime.botUserID)", payload: JSONEncoder().encode(value)).save(db)
+    return true
+  }
+
+  /// Re-reads the committed projection after a sync batch.
+  public func reloadCommitted() {
+    didHydrate = false
+    let local = (outputOverrides, defaultOutputModes)
+    states.removeAll()
+    outputOverrides.removeAll()
+    overrideRevisions.removeAll()
+    defaultOutputModes.removeAll()
+    runtimeBotUserIDs.removeAll()
+    offlineBotUserIDs.removeAll()
+    hydrateIfNeeded()
+    // Without a database (previews, tests) keep the local values.
+    if database == nil {
+      outputOverrides = local.0
+      defaultOutputModes = local.1
+    }
+  }
+
   // MARK: Persistence
 
   private func hydrateIfNeeded() {
@@ -433,7 +512,10 @@ public final class AgentWorkStateStore: ObservableObject {
   private func persist(_ kind: Kind, key: String, value: some Encodable) {
     guard let database, let payload = try? JSONEncoder().encode(value) else { return }
     let row = Row(kind: kind.rawValue, key: key, payload: payload)
-    Task.detached {
+    let generation = generation
+    Task.detached { [weak self] in
+      // A refresh that finished after a logout or reset writes nothing.
+      guard await self?.generation == generation else { return }
       try? await database.dbWriter.write { db in try row.save(db) }
     }
   }

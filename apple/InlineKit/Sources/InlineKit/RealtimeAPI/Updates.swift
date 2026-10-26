@@ -285,18 +285,25 @@ public actor UpdatesEngine: Sendable {
           }
 
         // Durable agent state: catch-up repairs badges, so apply from every
-        // source. The stores are main-actor caches written after the commit.
+        // source. The rows are written in this transaction, with the bucket
+        // cursor; the main-actor cache reloads them after the commit.
         case let .agentSessionState(agentSessionState):
-          deferredEffects.append(.agentSessionState(agentSessionState))
+          if try AgentWorkStateStore.project(sessionState: agentSessionState, db: db) {
+            deferredEffects.append(.agentStateCommitted)
+          }
 
         case let .agentParticipation(agentParticipation):
-          deferredEffects.append(.agentParticipation(agentParticipation))
+          if try AgentWorkStateStore.project(participation: agentParticipation.participation, db: db) {
+            deferredEffects.append(.agentStateCommitted)
+          }
 
         case let .agentGrant(agentGrant):
           deferredEffects.append(.agentGrant(agentGrant))
 
         case let .agentRuntime(agentRuntime):
-          deferredEffects.append(.agentRuntime(agentRuntime))
+          if try AgentWorkStateStore.project(runtime: agentRuntime.runtime, db: db) {
+            deferredEffects.append(.agentStateCommitted)
+          }
 
         case .agentSessionControl:
           // Addressed to the session's bot; the app has nothing to project.
@@ -2034,10 +2041,9 @@ enum DeferredUpdateEffect: Sendable {
   case composeAction(InlineProtocol.UpdateComposeAction)
   case messageActionAnswered(InlineProtocol.UpdateMessageActionAnswered)
   case botPresence(InlineProtocol.UpdateBotPresence)
-  case agentSessionState(InlineProtocol.UpdateAgentSessionState)
-  case agentParticipation(InlineProtocol.UpdateAgentParticipation)
+  /// Agent rows changed in the committed transaction.
+  case agentStateCommitted
   case agentGrant(InlineProtocol.UpdateAgentGrant)
-  case agentRuntime(InlineProtocol.UpdateAgentRuntime)
 
   nonisolated func perform() {
     switch self {
@@ -2047,14 +2053,10 @@ enum DeferredUpdateEffect: Sendable {
         update.apply()
       case let .botPresence(update):
         BotPresenceNotifications.post(update)
-      case let .agentSessionState(update):
-        Task { @MainActor in AgentWorkStateStore.shared.apply(session: update.agentSession) }
-      case let .agentParticipation(update):
-        Task { @MainActor in AgentWorkStateStore.shared.apply(participation: update.participation) }
+      case .agentStateCommitted:
+        Task { @MainActor in AgentWorkStateStore.shared.reloadCommitted() }
       case let .agentGrant(update):
         Task { @MainActor in AgentGrantStore.shared.apply(update) }
-      case let .agentRuntime(update):
-        Task { @MainActor in AgentWorkStateStore.shared.apply(runtime: update.runtime) }
     }
   }
 }
