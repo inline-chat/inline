@@ -195,7 +195,7 @@ describe("bridge v2 fallbacks for older apps", () => {
     for (const range of ranges) expect(text).toContain(range)
     // Form labels and options are in the fallback too, so older apps can answer in text.
     const formRanges = [form.title!, ...form.fields.map((field) => field.label)]
-    for (const range of formRanges) {
+    for (const range of formRanges.filter((range) => range !== undefined)) {
       expect(formText.slice(Number(range.offset), Number(range.offset + range.length)).length).toBe(Number(range.length))
     }
   })
