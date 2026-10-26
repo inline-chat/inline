@@ -42,7 +42,7 @@ pub use hold::{
     CLAUDE_EXIT_GRACE, CLAUDE_IDLE_WINDOW, CODEX_DEFAULT_UNLOAD_DELAY, DetachPhase,
     HELD_ELSEWHERE_PROBE_INTERVAL, HoldEffect, HoldEvent, HoldMachine, HoldState, IdleRelease,
     PendingInput, RELEASE_STEP_TIMEOUT, ReleaseCause, ReleaseReceipt, ReleaseRequest, ReleaseStep,
-    ReleaseStepOutcome, WakeupDisposition, release_steps,
+    ReleaseStepOutcome, WakeupDisposition, release_event, release_steps, run_state_event,
 };
 pub use input::{direct_input, passive_input};
 pub use intake::{

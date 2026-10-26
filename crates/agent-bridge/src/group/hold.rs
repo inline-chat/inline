@@ -32,7 +32,10 @@ use serde::{Deserialize, Serialize};
 
 use super::permissions::Operation;
 use crate::TurnId;
-use crate::harness::{ChildRef, HeldBy, InputId, InteractionId, LiveWork, QueuedInput, UserId};
+use crate::harness::{
+    ChildRef, HeldBy, InputId, InteractionId, LiveWork, QueuedInput, ReleaseOutcome, Released,
+    RunState, UserId,
+};
 
 /// Claude's idle window: Inline-chosen to match Codex's default unload delay,
 /// tunable.
@@ -346,11 +349,32 @@ pub enum HoldEvent {
     /// The connection ended: the Claude process exited, or the Codex
     /// app-server went away.
     Detached,
-    /// Codex `thread/closed`: the thread unloaded and its writer lock is free.
-    NativeClosed,
+    /// The harness released native ownership: `Released { outcome:
+    /// NativeReleased }`, or `RunState::Released` on the stream (Codex
+    /// `thread/closed`). `Unsubscribed` is not this; see [`release_event`].
+    NativeReleased,
     /// A probe found the session free.
     ElsewhereFreed,
     ForkHere,
+}
+
+/// The hold event for a contract release receipt. `Unsubscribed` means the
+/// harness still owns the session ("releasing"), so it is no event at all;
+/// only `NativeReleased` confirms and lets the handoff instruction post.
+pub fn release_event(released: &Released) -> Option<HoldEvent> {
+    match released.outcome {
+        ReleaseOutcome::NativeReleased => Some(HoldEvent::NativeReleased),
+        ReleaseOutcome::Unsubscribed => None,
+    }
+}
+
+/// The hold event for a run state from the session stream.
+pub fn run_state_event(state: &RunState) -> Option<HoldEvent> {
+    match state {
+        RunState::Released => Some(HoldEvent::NativeReleased),
+        RunState::HeldElsewhere { by } => Some(HoldEvent::AcquireConflict { by: by.clone() }),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -389,7 +413,8 @@ pub enum HoldEffect {
         failed: ReleaseReceipt,
         receipts: Vec<ReleaseReceipt>,
     },
-    /// Codex.
+    /// Codex: `Session::release` (unsubscribe). Its `Unsubscribed` receipt
+    /// keeps the thread "releasing".
     Unsubscribe,
     /// Claude: close stdin, then kill after `kill_after_ms`.
     CloseStdin {
@@ -1036,27 +1061,16 @@ impl HoldMachine {
                     phase: DetachPhase::Killing,
                 }
             }
+            // The harness's own confirmation, or the process exiting.
             (
                 S::Detaching {
                     request,
                     receipts,
                     pending,
-                    phase,
+                    ..
                 },
-                event @ (E::NativeClosed | E::Detached),
+                E::NativeReleased | E::Detached,
             ) => {
-                let confirmed = match phase {
-                    DetachPhase::AwaitingNativeClose => true,
-                    DetachPhase::Closing { .. } | DetachPhase::Killing => event == E::Detached,
-                };
-                if !confirmed {
-                    return S::Detaching {
-                        request,
-                        receipts,
-                        pending,
-                        phase,
-                    };
-                }
                 effects.push(HoldEffect::Released {
                     cause: request.cause,
                     receipts,
@@ -1402,6 +1416,46 @@ mod tests {
     }
 
     #[test]
+    fn only_native_release_confirms() {
+        let key = crate::harness::SessionKey {
+            provider: crate::ProviderId::new("codex").unwrap(),
+            session: crate::ProviderSessionId::new("thr").unwrap(),
+        };
+        let released = |outcome| Released {
+            key: key.clone(),
+            outcome,
+            cancelled_interactions: Vec::new(),
+            pending_inputs: Vec::new(),
+            stopped_children: Vec::new(),
+        };
+        assert_eq!(release_event(&released(ReleaseOutcome::Unsubscribed)), None);
+        assert_eq!(
+            release_event(&released(ReleaseOutcome::NativeReleased)),
+            Some(HoldEvent::NativeReleased)
+        );
+        assert_eq!(run_state_event(&RunState::Releasing), None);
+        assert_eq!(
+            run_state_event(&RunState::Released),
+            Some(HoldEvent::NativeReleased)
+        );
+
+        // An Unsubscribed receipt leaves the explicit release showing
+        // "releasing": no handoff instruction yet.
+        let mut machine = codex();
+        held(&mut machine, 0);
+        machine.handle(release(ReleaseCause::ContinueInTerminal), 1);
+        assert!(release_event(&released(ReleaseOutcome::Unsubscribed)).is_none());
+        assert!(matches!(machine.state(), HoldState::Detaching { .. }));
+        assert_eq!(
+            machine.handle(HoldEvent::NativeReleased, 2),
+            [HoldEffect::Released {
+                cause: ReleaseCause::ContinueInTerminal,
+                receipts: Vec::new()
+            }]
+        );
+    }
+
+    #[test]
     fn codex_policy_uses_the_users_unload_delay() {
         assert_eq!(
             IdleRelease::codex(None),
@@ -1457,7 +1511,7 @@ mod tests {
         );
 
         assert_eq!(
-            machine.handle(HoldEvent::NativeClosed, 41 * MIN),
+            machine.handle(HoldEvent::NativeReleased, 41 * MIN),
             [HoldEffect::Released {
                 cause: ReleaseCause::Idle,
                 receipts: Vec::new()
@@ -1493,7 +1547,7 @@ mod tests {
         );
         assert!(machine.handle(HoldEvent::Tick, 60 * MIN).is_empty());
         assert_eq!(
-            machine.handle(HoldEvent::NativeClosed, 61 * MIN),
+            machine.handle(HoldEvent::NativeReleased, 61 * MIN),
             [
                 HoldEffect::Released {
                     cause: ReleaseCause::ContinueInTerminal,
@@ -1518,12 +1572,7 @@ mod tests {
             }]
         );
         assert!(machine.handle(HoldEvent::Tick, 30 * MIN + 5_000).is_empty());
-        // thread/closed means nothing to a Claude process.
-        assert!(
-            machine
-                .handle(HoldEvent::NativeClosed, 30 * MIN + 6_000)
-                .is_empty()
-        );
+        // Closing stdin is not a release: only exit or a native release is.
         assert_eq!(
             machine.handle(HoldEvent::Tick, 30 * MIN + 10_000),
             [HoldEffect::Kill]
@@ -2005,7 +2054,7 @@ mod tests {
             [HoldEffect::Unsubscribe]
         );
         assert_eq!(
-            machine.handle(HoldEvent::NativeClosed, 3),
+            machine.handle(HoldEvent::NativeReleased, 3),
             [
                 HoldEffect::Released {
                     cause: ReleaseCause::Command,
