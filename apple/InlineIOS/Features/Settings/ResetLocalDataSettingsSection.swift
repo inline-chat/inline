@@ -99,6 +99,7 @@ private enum LocalDataResetPerformer {
       await MainActor.run {
         AgentWorkStateStore.shared.removeAll()
         AgentGrantStore.shared.removeAll()
+        MessageFormDraftStore.shared.reset()
       }
       ObjectCache.shared.clear()
 

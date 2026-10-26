@@ -90,6 +90,7 @@ enum LogoutPerformer {
     await MainActor.run {
       AgentWorkStateStore.shared.removeAll()
       AgentGrantStore.shared.removeAll()
+      MessageFormDraftStore.shared.reset()
     }
 
     BotAgentDirectory.shared.clear()

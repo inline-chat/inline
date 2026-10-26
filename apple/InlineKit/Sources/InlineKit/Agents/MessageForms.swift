@@ -11,7 +11,8 @@ public enum MessageFormDraftValue: Equatable, Sendable {
 
 /// In-memory answers for open forms, so scrolling, streaming edits and view
 /// reuse never lose what the viewer typed. Nothing here is persisted: secret
-/// answers live only until submit or until the app quits.
+/// answers live only until submit, until the form closes, until logout, or
+/// until the app quits.
 @MainActor
 public final class MessageFormDraftStore {
   public static let shared = MessageFormDraftStore()
@@ -34,8 +35,25 @@ public final class MessageFormDraftStore {
 
   private var drafts: [Key: [String: MessageFormDraftValue]] = [:]
   private var phases: [Key: Phase] = [:]
+  /// Bumped on every reset; a submission that started before a reset (an
+  /// account switch) must not touch what came after.
+  public private(set) var generation = 0
 
   public init() {}
+
+  /// Drops every draft and submission phase. Called on logout and account
+  /// switch, so one account's unsent answers never reach another.
+  public func reset() {
+    drafts.removeAll()
+    phases.removeAll()
+    generation &+= 1
+  }
+
+  /// Drops one form's answers, secrets included: it closed or was withdrawn.
+  public func discard(_ key: Key) {
+    drafts[key] = nil
+    phases[key] = nil
+  }
 
   public func value(_ key: Key, fieldID: String) -> MessageFormDraftValue? {
     drafts[key]?[fieldID]

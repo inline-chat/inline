@@ -760,6 +760,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       await MainActor.run {
         AgentWorkStateStore.shared.removeAll()
         AgentGrantStore.shared.removeAll()
+        MessageFormDraftStore.shared.reset()
       }
       ObjectCache.shared.clear()
       try await FileCache.shared.clearCache()

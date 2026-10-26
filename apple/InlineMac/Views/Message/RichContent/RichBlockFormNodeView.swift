@@ -82,6 +82,10 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
     guard case let .form(form) = node.kind else { return }
     let message = context.relatedMessage
     let key = MessageFormDraftStore.Key(message: message, formID: form.formID)
+    // A closed form keeps no answers, secrets included.
+    if form.closed {
+      MessageFormDraftStore.shared.discard(key)
+    }
     // Rebuild controls only when the questions change, so a streamed edit of
     // the surrounding text never drops what the viewer is typing.
     if draftKey != key || structure != form.fields {
@@ -562,6 +566,7 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
     guard MessageActionInteractionState.shared.begin(key: loadingKey) else { return }
     MessageFormDraftStore.shared.setPhase(.submitting, key: draftKey)
     refreshSubmitPresentation()
+    let generation = MessageFormDraftStore.shared.generation
     Task { @MainActor [weak self] in
       do {
         let interactionID = try await MessageFormSubmitter.submit(
@@ -569,9 +574,12 @@ final class RichBlockFormNodeView: RichBlockRenderableView, NSTextFieldDelegate,
           formID: node.formID,
           values: values
         )
+        // The account changed while sending: nothing here belongs to it.
+        guard MessageFormDraftStore.shared.generation == generation else { return }
         MessageActionInteractionState.shared.attachInteractionId(interactionID, for: loadingKey)
         MessageFormDraftStore.shared.setPhase(.submitted, key: draftKey)
       } catch {
+        guard MessageFormDraftStore.shared.generation == generation else { return }
         MessageActionInteractionState.shared.fail(key: loadingKey)
         MessageFormDraftStore.shared.setPhase(.editing, key: draftKey)
         ToastCenter.shared.showError(error.localizedDescription)
