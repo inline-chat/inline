@@ -455,7 +455,7 @@ describe("agent session continuity", () => {
     }
   })
 
-  test("requires a second agent bot to use a distinct bound Chat", async () => {
+  test("a second agent bot works in a bound Chat alongside the bound one", async () => {
     await db.update(chats).set({
       agentContext: encodeAgentThreadContext({ botUserId: BigInt(botId) }),
     }).where(eq(chats.id, chatId))
@@ -469,8 +469,8 @@ describe("agent session continuity", () => {
       provider: AgentSessionProvider.CLAUDE,
       instanceRef: "claude-installation",
       sessionRef: "claude-session",
-    }, ownerId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
-    expect(await db.select().from(agentSessions).where(eq(agentSessions.chatId, chatId))).toHaveLength(1)
+    }, ownerId)).resolves.toMatchObject({ state: ConnectAgentSessionState.CREATED })
+    expect(await db.select().from(agentSessions).where(eq(agentSessions.chatId, chatId))).toHaveLength(2)
   })
 
   test("links the bot response and enriches it from later provider history", async () => {
@@ -777,7 +777,7 @@ describe("agent session continuity", () => {
       .rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
   })
 
-  test("a bound Chat only admits its configured bot", async () => {
+  test("a bound Chat pins only its own bot's project", async () => {
     await db.update(chats).set({
       agentContext: encodeAgentThreadContext({ botUserId: BigInt(botId) }),
     }).where(eq(chats.id, chatId))
@@ -792,7 +792,7 @@ describe("agent session continuity", () => {
       provider: AgentSessionProvider.CLAUDE,
       instanceRef: "other-installation",
       sessionRef: "other-session",
-    }, ownerId)).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+    }, ownerId)).resolves.toMatchObject({ state: ConnectAgentSessionState.CREATED })
   })
 
   test("an unbound Chat keeps independent bot sessions", async () => {

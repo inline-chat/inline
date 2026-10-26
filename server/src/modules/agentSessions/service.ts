@@ -279,11 +279,12 @@ export async function connectAgentSession(
   const result = await db.transaction(async (tx) => {
     const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).for("update").limit(1)
     if (!lockedChat) throw RealtimeRpcError.PeerIdInvalid()
+    // A thread bound to an agent pins that agent's project. Other agents can
+    // still work there (spec §5: several agents per thread, one work each).
     const boundContext = chatAgentContext(lockedChat)
-    if (boundContext && Number(boundContext.botUserId) !== botUserId) {
-      throw RealtimeRpcError.BadRequest()
+    if (boundContext && Number(boundContext.botUserId) === botUserId) {
+      ensureSelectedProjectRef(boundContext, projectRef)
     }
-    ensureSelectedProjectRef(boundContext, projectRef)
 
     const [external] = await tx.select().from(agentSessions).where(and(
         eq(agentSessions.botUserId, botUserId),
@@ -312,10 +313,9 @@ export async function connectAgentSession(
       }
     }
 
+    // One work per (thread, agent).
     const [occupied] = await tx.select().from(agentSessions).where(
-      boundContext
-        ? eq(agentSessions.chatId, chat.id)
-        : and(eq(agentSessions.chatId, chat.id), eq(agentSessions.botUserId, botUserId)),
+      and(eq(agentSessions.chatId, chat.id), eq(agentSessions.botUserId, botUserId)),
     ).limit(1)
     if (occupied) throw RealtimeRpcError.BadRequest()
 

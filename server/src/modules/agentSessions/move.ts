@@ -2,7 +2,6 @@ import type { MoveAgentSessionInput, MoveAgentSessionResult } from "@inline-chat
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
 import { agentSessions, chats } from "@in/server/db/schema"
-import { chatAgentContext } from "@in/server/modules/agentConfiguration"
 import { insertChatUpdate, pushChatUpdate } from "@in/server/modules/agents/chatUpdates"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -37,8 +36,6 @@ export async function moveAgentSession(
     AccessGuards.hasChatAccess(destination, session.botUserId),
   ])
   if (!ownerAccess || !botAccess) throw RealtimeRpcError.PeerIdInvalid()
-  const bound = chatAgentContext(destination)
-  if (bound && Number(bound.botUserId) !== session.botUserId) throw RealtimeRpcError.BadRequest()
 
   const result = await db.transaction(async (tx) => {
     // Lock both chats in ID order, then the session, so concurrent moves and

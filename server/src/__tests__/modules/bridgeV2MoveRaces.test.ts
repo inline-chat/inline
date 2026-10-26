@@ -43,7 +43,7 @@ async function waitForWaiters(count: number) {
   while (Date.now() < deadline) {
     const rows = await db.execute(sql`select count(*)::int as n from pg_stat_activity
       where datname = current_database() and wait_event_type = 'Lock'`)
-    if (Number(rows[0]?.n) >= count) return
+    if (Number(rows[0]?.["n"]) >= count) return
     await Bun.sleep(10)
   }
   throw new Error(`did not observe ${count} lock waiters`)
