@@ -1320,6 +1320,24 @@ message AgentRuntime {
   optional string executable_path = 8;
   optional string manifest_hash = 9;
   optional string bridge_version = 10;
+  // The agent's output mode, set in Agent Settings by the owner or a CONFIGURE
+  // grantee. Unspecified means Detailed.
+  AgentOutputMode default_output_mode = 11;
+}
+
+enum AgentOutputMode {
+  // Use the agent's default.
+  AGENT_OUTPUT_MODE_UNSPECIFIED = 0;
+  AGENT_OUTPUT_MODE_DETAILED = 1;
+  AGENT_OUTPUT_MODE_FRIENDLY = 2;
+}
+
+// Work bar controls, relayed to the bot, which maps them to harness operations.
+enum AgentSessionControl {
+  AGENT_SESSION_CONTROL_UNSPECIFIED = 0;
+  AGENT_SESSION_CONTROL_STOP = 1;
+  AGENT_SESSION_CONTROL_PAUSE = 2;
+  AGENT_SESSION_CONTROL_RESUME = 3;
 }
 
 enum AgentGrantOperation {
@@ -1369,6 +1387,9 @@ message AgentParticipation {
   int64 revision = 6;
   // Last change, Unix seconds.
   int64 date = 7;
+  // Per-thread override of the agent's default output mode. Absent means the
+  // default (AgentRuntime.default_output_mode).
+  optional AgentOutputMode output_mode = 8;
 }
 
 // Bot → server heartbeat for the calling bot's runtime.
@@ -1474,11 +1495,36 @@ message GetAgentParticipationsResult {
 message SetAgentParticipationInput {
   InputPeer peer_id = 1;
   int64 bot_user_id = 2;
+  // Unspecified keeps the current mode (active for a new participation).
   AgentParticipationMode mode = 3;
   // Bot only: the session that direct input in this chat addresses.
   optional int64 default_session_id = 4;
   // Bot only: the person whose mention or invite joined the agent.
   optional int64 joined_by = 5;
+  // Owner or CONFIGURE grantee. Absent keeps the override; UNSPECIFIED clears
+  // it back to the agent's default.
+  optional AgentOutputMode output_mode = 6;
+}
+
+// Owner or a CONFIGURE grantee. Absent fields stay unchanged. The bot must
+// have reported its runtime.
+message UpdateAgentSettingsInput {
+  int64 bot_user_id = 1;
+  optional AgentOutputMode default_output_mode = 2;
+}
+
+message UpdateAgentSettingsResult { AgentRuntime runtime = 1; }
+
+// Work bar stop, pause and resume. The owner, or a STEER grantee of the
+// session's bot.
+message ControlAgentSessionInput {
+  int64 agent_session_id = 1;
+  AgentSessionControl op = 2;
+}
+
+message ControlAgentSessionResult {
+  // Same identity the bot sees on UpdateAgentSessionControl.
+  int64 interaction_id = 1;
 }
 
 message SetAgentParticipationResult { AgentParticipation participation = 1; }
@@ -2234,6 +2280,8 @@ enum Method {
   IMPORT_AGENT_GRANTS = 157;
   GET_AGENT_PARTICIPATIONS = 158;
   SET_AGENT_PARTICIPATION = 159;
+  UPDATE_AGENT_SETTINGS = 160;
+  CONTROL_AGENT_SESSION = 161;
 }
 
 message RpcCall {
@@ -2398,6 +2446,8 @@ message RpcCall {
     ImportAgentGrantsInput importAgentGrants = 158;
     GetAgentParticipationsInput getAgentParticipations = 159;
     SetAgentParticipationInput setAgentParticipation = 160;
+    UpdateAgentSettingsInput updateAgentSettings = 161;
+    ControlAgentSessionInput controlAgentSession = 162;
   }
 }
 
@@ -2564,6 +2614,8 @@ message RpcResult {
     ImportAgentGrantsResult importAgentGrants = 158;
     GetAgentParticipationsResult getAgentParticipations = 159;
     SetAgentParticipationResult setAgentParticipation = 160;
+    UpdateAgentSettingsResult updateAgentSettings = 161;
+    ControlAgentSessionResult controlAgentSession = 162;
   }
 }
 
@@ -4533,6 +4585,7 @@ message Update {
     UpdateAgentParticipation agent_participation = 54;
     UpdateAgentGrant agent_grant = 55;
     UpdateAgentRuntime agent_runtime = 56;
+    UpdateAgentSessionControl agent_session_control = 57;
   }
 }
 
@@ -4779,8 +4832,18 @@ message UpdateAgentGrant {
   int64 revision = 4;
 }
 
-// Sent to a bot's owner when its runtime status or setup state changes.
+// Sent to a bot's owner when its runtime status, setup state or settings
+// change, and to the bot when its settings change.
 message UpdateAgentRuntime { AgentRuntime runtime = 1; }
+
+// Sent to the session's bot when someone uses a work bar control.
+message UpdateAgentSessionControl {
+  int64 interaction_id = 1;
+  int64 agent_session_id = 2;
+  AgentSessionControl op = 3;
+  int64 actor_user_id = 4;
+  int64 chat_id = 5;
+}
 
 message UpdateMessageActionAnswered {
   int64 interaction_id = 1;

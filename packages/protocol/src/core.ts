@@ -3340,6 +3340,13 @@ export interface AgentRuntime {
      * @generated from protobuf field: optional string bridge_version = 10;
      */
     bridgeVersion?: string;
+    /**
+     * The agent's output mode, set in Agent Settings by the owner or a CONFIGURE
+     * grantee. Unspecified means Detailed.
+     *
+     * @generated from protobuf field: AgentOutputMode default_output_mode = 11;
+     */
+    defaultOutputMode: AgentOutputMode;
 }
 /**
  * Opt-in access to a bot for one person. No grants means owner-only. Any grant
@@ -3419,6 +3426,13 @@ export interface AgentParticipation {
      * @generated from protobuf field: int64 date = 7;
      */
     date: bigint;
+    /**
+     * Per-thread override of the agent's default output mode. Absent means the
+     * default (AgentRuntime.default_output_mode).
+     *
+     * @generated from protobuf field: optional AgentOutputMode output_mode = 8;
+     */
+    outputMode?: AgentOutputMode;
 }
 /**
  * Bot → server heartbeat for the calling bot's runtime.
@@ -3701,6 +3715,8 @@ export interface SetAgentParticipationInput {
      */
     botUserId: bigint;
     /**
+     * Unspecified keeps the current mode (active for a new participation).
+     *
      * @generated from protobuf field: AgentParticipationMode mode = 3;
      */
     mode: AgentParticipationMode;
@@ -3716,6 +3732,65 @@ export interface SetAgentParticipationInput {
      * @generated from protobuf field: optional int64 joined_by = 5;
      */
     joinedBy?: bigint;
+    /**
+     * Owner or CONFIGURE grantee. Absent keeps the override; UNSPECIFIED clears
+     * it back to the agent's default.
+     *
+     * @generated from protobuf field: optional AgentOutputMode output_mode = 6;
+     */
+    outputMode?: AgentOutputMode;
+}
+/**
+ * Owner or a CONFIGURE grantee. Absent fields stay unchanged. The bot must
+ * have reported its runtime.
+ *
+ * @generated from protobuf message UpdateAgentSettingsInput
+ */
+export interface UpdateAgentSettingsInput {
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
+    /**
+     * @generated from protobuf field: optional AgentOutputMode default_output_mode = 2;
+     */
+    defaultOutputMode?: AgentOutputMode;
+}
+/**
+ * @generated from protobuf message UpdateAgentSettingsResult
+ */
+export interface UpdateAgentSettingsResult {
+    /**
+     * @generated from protobuf field: AgentRuntime runtime = 1;
+     */
+    runtime?: AgentRuntime;
+}
+/**
+ * Work bar stop, pause and resume. The owner, or a STEER grantee of the
+ * session's bot.
+ *
+ * @generated from protobuf message ControlAgentSessionInput
+ */
+export interface ControlAgentSessionInput {
+    /**
+     * @generated from protobuf field: int64 agent_session_id = 1;
+     */
+    agentSessionId: bigint;
+    /**
+     * @generated from protobuf field: AgentSessionControl op = 2;
+     */
+    op: AgentSessionControl;
+}
+/**
+ * @generated from protobuf message ControlAgentSessionResult
+ */
+export interface ControlAgentSessionResult {
+    /**
+     * Same identity the bot sees on UpdateAgentSessionControl.
+     *
+     * @generated from protobuf field: int64 interaction_id = 1;
+     */
+    interactionId: bigint;
 }
 /**
  * @generated from protobuf message SetAgentParticipationResult
@@ -6088,6 +6163,18 @@ export interface RpcCall {
          */
         setAgentParticipation: SetAgentParticipationInput;
     } | {
+        oneofKind: "updateAgentSettings";
+        /**
+         * @generated from protobuf field: UpdateAgentSettingsInput updateAgentSettings = 161;
+         */
+        updateAgentSettings: UpdateAgentSettingsInput;
+    } | {
+        oneofKind: "controlAgentSession";
+        /**
+         * @generated from protobuf field: ControlAgentSessionInput controlAgentSession = 162;
+         */
+        controlAgentSession: ControlAgentSessionInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -7050,6 +7137,18 @@ export interface RpcResult {
          * @generated from protobuf field: SetAgentParticipationResult setAgentParticipation = 160;
          */
         setAgentParticipation: SetAgentParticipationResult;
+    } | {
+        oneofKind: "updateAgentSettings";
+        /**
+         * @generated from protobuf field: UpdateAgentSettingsResult updateAgentSettings = 161;
+         */
+        updateAgentSettings: UpdateAgentSettingsResult;
+    } | {
+        oneofKind: "controlAgentSession";
+        /**
+         * @generated from protobuf field: ControlAgentSessionResult controlAgentSession = 162;
+         */
+        controlAgentSession: ControlAgentSessionResult;
     } | {
         oneofKind: undefined;
     };
@@ -12235,6 +12334,12 @@ export interface Update {
          */
         agentRuntime: UpdateAgentRuntime;
     } | {
+        oneofKind: "agentSessionControl";
+        /**
+         * @generated from protobuf field: UpdateAgentSessionControl agent_session_control = 57;
+         */
+        agentSessionControl: UpdateAgentSessionControl;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -12814,7 +12919,8 @@ export interface UpdateAgentGrant {
     revision: bigint;
 }
 /**
- * Sent to a bot's owner when its runtime status or setup state changes.
+ * Sent to a bot's owner when its runtime status, setup state or settings
+ * change, and to the bot when its settings change.
  *
  * @generated from protobuf message UpdateAgentRuntime
  */
@@ -12823,6 +12929,33 @@ export interface UpdateAgentRuntime {
      * @generated from protobuf field: AgentRuntime runtime = 1;
      */
     runtime?: AgentRuntime;
+}
+/**
+ * Sent to the session's bot when someone uses a work bar control.
+ *
+ * @generated from protobuf message UpdateAgentSessionControl
+ */
+export interface UpdateAgentSessionControl {
+    /**
+     * @generated from protobuf field: int64 interaction_id = 1;
+     */
+    interactionId: bigint;
+    /**
+     * @generated from protobuf field: int64 agent_session_id = 2;
+     */
+    agentSessionId: bigint;
+    /**
+     * @generated from protobuf field: AgentSessionControl op = 3;
+     */
+    op: AgentSessionControl;
+    /**
+     * @generated from protobuf field: int64 actor_user_id = 4;
+     */
+    actorUserId: bigint;
+    /**
+     * @generated from protobuf field: int64 chat_id = 5;
+     */
+    chatId: bigint;
 }
 /**
  * @generated from protobuf message UpdateMessageActionAnswered
@@ -16064,6 +16197,48 @@ export enum AgentRuntimeStatus {
     NEEDS_SETUP = 3
 }
 /**
+ * @generated from protobuf enum AgentOutputMode
+ */
+export enum AgentOutputMode {
+    /**
+     * Use the agent's default.
+     *
+     * @generated from protobuf enum value: AGENT_OUTPUT_MODE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: AGENT_OUTPUT_MODE_DETAILED = 1;
+     */
+    DETAILED = 1,
+    /**
+     * @generated from protobuf enum value: AGENT_OUTPUT_MODE_FRIENDLY = 2;
+     */
+    FRIENDLY = 2
+}
+/**
+ * Work bar controls, relayed to the bot, which maps them to harness operations.
+ *
+ * @generated from protobuf enum AgentSessionControl
+ */
+export enum AgentSessionControl {
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_CONTROL_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_CONTROL_STOP = 1;
+     */
+    STOP = 1,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_CONTROL_PAUSE = 2;
+     */
+    PAUSE = 2,
+    /**
+     * @generated from protobuf enum value: AGENT_SESSION_CONTROL_RESUME = 3;
+     */
+    RESUME = 3
+}
+/**
  * @generated from protobuf enum AgentGrantOperation
  */
 export enum AgentGrantOperation {
@@ -16843,7 +17018,15 @@ export enum Method {
     /**
      * @generated from protobuf enum value: SET_AGENT_PARTICIPATION = 159;
      */
-    SET_AGENT_PARTICIPATION = 159
+    SET_AGENT_PARTICIPATION = 159,
+    /**
+     * @generated from protobuf enum value: UPDATE_AGENT_SETTINGS = 160;
+     */
+    UPDATE_AGENT_SETTINGS = 160,
+    /**
+     * @generated from protobuf enum value: CONTROL_AGENT_SESSION = 161;
+     */
+    CONTROL_AGENT_SESSION = 161
 }
 /**
  * @generated from protobuf enum GridTranscriptionState
@@ -24731,7 +24914,8 @@ class AgentRuntime$Type extends MessageType<AgentRuntime> {
             { no: 7, name: "last_seen", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 8, name: "executable_path", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 9, name: "manifest_hash", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 10, name: "bridge_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 10, name: "bridge_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 11, name: "default_output_mode", kind: "enum", T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
         ]);
     }
     create(value?: PartialMessage<AgentRuntime>): AgentRuntime {
@@ -24739,6 +24923,7 @@ class AgentRuntime$Type extends MessageType<AgentRuntime> {
         message.botUserId = 0n;
         message.provider = 0;
         message.status = 0;
+        message.defaultOutputMode = 0;
         if (value !== undefined)
             reflectionMergePartial<AgentRuntime>(this, message, value);
         return message;
@@ -24777,6 +24962,9 @@ class AgentRuntime$Type extends MessageType<AgentRuntime> {
                     break;
                 case /* optional string bridge_version */ 10:
                     message.bridgeVersion = reader.string();
+                    break;
+                case /* AgentOutputMode default_output_mode */ 11:
+                    message.defaultOutputMode = reader.int32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -24820,6 +25008,9 @@ class AgentRuntime$Type extends MessageType<AgentRuntime> {
         /* optional string bridge_version = 10; */
         if (message.bridgeVersion !== undefined)
             writer.tag(10, WireType.LengthDelimited).string(message.bridgeVersion);
+        /* AgentOutputMode default_output_mode = 11; */
+        if (message.defaultOutputMode !== 0)
+            writer.tag(11, WireType.Varint).int32(message.defaultOutputMode);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24942,7 +25133,8 @@ class AgentParticipation$Type extends MessageType<AgentParticipation> {
             { no: 4, name: "joined_by", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 5, name: "default_session_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 7, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 7, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
         ]);
     }
     create(value?: PartialMessage<AgentParticipation>): AgentParticipation {
@@ -24981,6 +25173,9 @@ class AgentParticipation$Type extends MessageType<AgentParticipation> {
                 case /* int64 date */ 7:
                     message.date = reader.int64().toBigInt();
                     break;
+                case /* optional AgentOutputMode output_mode */ 8:
+                    message.outputMode = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -25014,6 +25209,9 @@ class AgentParticipation$Type extends MessageType<AgentParticipation> {
         /* int64 date = 7; */
         if (message.date !== 0n)
             writer.tag(7, WireType.Varint).int64(message.date);
+        /* optional AgentOutputMode output_mode = 8; */
+        if (message.outputMode !== undefined)
+            writer.tag(8, WireType.Varint).int32(message.outputMode);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26025,7 +26223,8 @@ class SetAgentParticipationInput$Type extends MessageType<SetAgentParticipationI
             { no: 2, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "mode", kind: "enum", T: () => ["AgentParticipationMode", AgentParticipationMode, "AGENT_PARTICIPATION_MODE_"] },
             { no: 4, name: "default_session_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 5, name: "joined_by", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 5, name: "joined_by", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
         ]);
     }
     create(value?: PartialMessage<SetAgentParticipationInput>): SetAgentParticipationInput {
@@ -26056,6 +26255,9 @@ class SetAgentParticipationInput$Type extends MessageType<SetAgentParticipationI
                 case /* optional int64 joined_by */ 5:
                     message.joinedBy = reader.int64().toBigInt();
                     break;
+                case /* optional AgentOutputMode output_mode */ 6:
+                    message.outputMode = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -26083,6 +26285,9 @@ class SetAgentParticipationInput$Type extends MessageType<SetAgentParticipationI
         /* optional int64 joined_by = 5; */
         if (message.joinedBy !== undefined)
             writer.tag(5, WireType.Varint).int64(message.joinedBy);
+        /* optional AgentOutputMode output_mode = 6; */
+        if (message.outputMode !== undefined)
+            writer.tag(6, WireType.Varint).int32(message.outputMode);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26093,6 +26298,208 @@ class SetAgentParticipationInput$Type extends MessageType<SetAgentParticipationI
  * @generated MessageType for protobuf message SetAgentParticipationInput
  */
 export const SetAgentParticipationInput = new SetAgentParticipationInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateAgentSettingsInput$Type extends MessageType<UpdateAgentSettingsInput> {
+    constructor() {
+        super("UpdateAgentSettingsInput", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "default_output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateAgentSettingsInput>): UpdateAgentSettingsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateAgentSettingsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateAgentSettingsInput): UpdateAgentSettingsInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* optional AgentOutputMode default_output_mode */ 2:
+                    message.defaultOutputMode = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateAgentSettingsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        /* optional AgentOutputMode default_output_mode = 2; */
+        if (message.defaultOutputMode !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.defaultOutputMode);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateAgentSettingsInput
+ */
+export const UpdateAgentSettingsInput = new UpdateAgentSettingsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateAgentSettingsResult$Type extends MessageType<UpdateAgentSettingsResult> {
+    constructor() {
+        super("UpdateAgentSettingsResult", [
+            { no: 1, name: "runtime", kind: "message", T: () => AgentRuntime }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateAgentSettingsResult>): UpdateAgentSettingsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateAgentSettingsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateAgentSettingsResult): UpdateAgentSettingsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* AgentRuntime runtime */ 1:
+                    message.runtime = AgentRuntime.internalBinaryRead(reader, reader.uint32(), options, message.runtime);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateAgentSettingsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* AgentRuntime runtime = 1; */
+        if (message.runtime)
+            AgentRuntime.internalBinaryWrite(message.runtime, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateAgentSettingsResult
+ */
+export const UpdateAgentSettingsResult = new UpdateAgentSettingsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ControlAgentSessionInput$Type extends MessageType<ControlAgentSessionInput> {
+    constructor() {
+        super("ControlAgentSessionInput", [
+            { no: 1, name: "agent_session_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "op", kind: "enum", T: () => ["AgentSessionControl", AgentSessionControl, "AGENT_SESSION_CONTROL_"] }
+        ]);
+    }
+    create(value?: PartialMessage<ControlAgentSessionInput>): ControlAgentSessionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.agentSessionId = 0n;
+        message.op = 0;
+        if (value !== undefined)
+            reflectionMergePartial<ControlAgentSessionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ControlAgentSessionInput): ControlAgentSessionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 agent_session_id */ 1:
+                    message.agentSessionId = reader.int64().toBigInt();
+                    break;
+                case /* AgentSessionControl op */ 2:
+                    message.op = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ControlAgentSessionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 agent_session_id = 1; */
+        if (message.agentSessionId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.agentSessionId);
+        /* AgentSessionControl op = 2; */
+        if (message.op !== 0)
+            writer.tag(2, WireType.Varint).int32(message.op);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ControlAgentSessionInput
+ */
+export const ControlAgentSessionInput = new ControlAgentSessionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ControlAgentSessionResult$Type extends MessageType<ControlAgentSessionResult> {
+    constructor() {
+        super("ControlAgentSessionResult", [
+            { no: 1, name: "interaction_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ControlAgentSessionResult>): ControlAgentSessionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.interactionId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ControlAgentSessionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ControlAgentSessionResult): ControlAgentSessionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 interaction_id */ 1:
+                    message.interactionId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ControlAgentSessionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 interaction_id = 1; */
+        if (message.interactionId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.interactionId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ControlAgentSessionResult
+ */
+export const ControlAgentSessionResult = new ControlAgentSessionResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class SetAgentParticipationResult$Type extends MessageType<SetAgentParticipationResult> {
     constructor() {
@@ -29372,7 +29779,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 157, name: "deleteAgentGrant", kind: "message", oneof: "input", T: () => DeleteAgentGrantInput },
             { no: 158, name: "importAgentGrants", kind: "message", oneof: "input", T: () => ImportAgentGrantsInput },
             { no: 159, name: "getAgentParticipations", kind: "message", oneof: "input", T: () => GetAgentParticipationsInput },
-            { no: 160, name: "setAgentParticipation", kind: "message", oneof: "input", T: () => SetAgentParticipationInput }
+            { no: 160, name: "setAgentParticipation", kind: "message", oneof: "input", T: () => SetAgentParticipationInput },
+            { no: 161, name: "updateAgentSettings", kind: "message", oneof: "input", T: () => UpdateAgentSettingsInput },
+            { no: 162, name: "controlAgentSession", kind: "message", oneof: "input", T: () => ControlAgentSessionInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -30339,6 +30748,18 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         setAgentParticipation: SetAgentParticipationInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).setAgentParticipation)
                     };
                     break;
+                case /* UpdateAgentSettingsInput updateAgentSettings */ 161:
+                    message.input = {
+                        oneofKind: "updateAgentSettings",
+                        updateAgentSettings: UpdateAgentSettingsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateAgentSettings)
+                    };
+                    break;
+                case /* ControlAgentSessionInput controlAgentSession */ 162:
+                    message.input = {
+                        oneofKind: "controlAgentSession",
+                        controlAgentSession: ControlAgentSessionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).controlAgentSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -30828,6 +31249,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* SetAgentParticipationInput setAgentParticipation = 160; */
         if (message.input.oneofKind === "setAgentParticipation")
             SetAgentParticipationInput.internalBinaryWrite(message.input.setAgentParticipation, writer.tag(160, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateAgentSettingsInput updateAgentSettings = 161; */
+        if (message.input.oneofKind === "updateAgentSettings")
+            UpdateAgentSettingsInput.internalBinaryWrite(message.input.updateAgentSettings, writer.tag(161, WireType.LengthDelimited).fork(), options).join();
+        /* ControlAgentSessionInput controlAgentSession = 162; */
+        if (message.input.oneofKind === "controlAgentSession")
+            ControlAgentSessionInput.internalBinaryWrite(message.input.controlAgentSession, writer.tag(162, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -31000,7 +31427,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 157, name: "deleteAgentGrant", kind: "message", oneof: "result", T: () => DeleteAgentGrantResult },
             { no: 158, name: "importAgentGrants", kind: "message", oneof: "result", T: () => ImportAgentGrantsResult },
             { no: 159, name: "getAgentParticipations", kind: "message", oneof: "result", T: () => GetAgentParticipationsResult },
-            { no: 160, name: "setAgentParticipation", kind: "message", oneof: "result", T: () => SetAgentParticipationResult }
+            { no: 160, name: "setAgentParticipation", kind: "message", oneof: "result", T: () => SetAgentParticipationResult },
+            { no: 161, name: "updateAgentSettings", kind: "message", oneof: "result", T: () => UpdateAgentSettingsResult },
+            { no: 162, name: "controlAgentSession", kind: "message", oneof: "result", T: () => ControlAgentSessionResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -31967,6 +32396,18 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         setAgentParticipation: SetAgentParticipationResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).setAgentParticipation)
                     };
                     break;
+                case /* UpdateAgentSettingsResult updateAgentSettings */ 161:
+                    message.result = {
+                        oneofKind: "updateAgentSettings",
+                        updateAgentSettings: UpdateAgentSettingsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateAgentSettings)
+                    };
+                    break;
+                case /* ControlAgentSessionResult controlAgentSession */ 162:
+                    message.result = {
+                        oneofKind: "controlAgentSession",
+                        controlAgentSession: ControlAgentSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).controlAgentSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -32456,6 +32897,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* SetAgentParticipationResult setAgentParticipation = 160; */
         if (message.result.oneofKind === "setAgentParticipation")
             SetAgentParticipationResult.internalBinaryWrite(message.result.setAgentParticipation, writer.tag(160, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateAgentSettingsResult updateAgentSettings = 161; */
+        if (message.result.oneofKind === "updateAgentSettings")
+            UpdateAgentSettingsResult.internalBinaryWrite(message.result.updateAgentSettings, writer.tag(161, WireType.LengthDelimited).fork(), options).join();
+        /* ControlAgentSessionResult controlAgentSession = 162; */
+        if (message.result.oneofKind === "controlAgentSession")
+            ControlAgentSessionResult.internalBinaryWrite(message.result.controlAgentSession, writer.tag(162, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -48269,7 +48716,8 @@ class Update$Type extends MessageType<Update> {
             { no: 53, name: "agent_session_state", kind: "message", oneof: "update", T: () => UpdateAgentSessionState },
             { no: 54, name: "agent_participation", kind: "message", oneof: "update", T: () => UpdateAgentParticipation },
             { no: 55, name: "agent_grant", kind: "message", oneof: "update", T: () => UpdateAgentGrant },
-            { no: 56, name: "agent_runtime", kind: "message", oneof: "update", T: () => UpdateAgentRuntime }
+            { no: 56, name: "agent_runtime", kind: "message", oneof: "update", T: () => UpdateAgentRuntime },
+            { no: 57, name: "agent_session_control", kind: "message", oneof: "update", T: () => UpdateAgentSessionControl }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -48608,6 +49056,12 @@ class Update$Type extends MessageType<Update> {
                         agentRuntime: UpdateAgentRuntime.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).agentRuntime)
                     };
                     break;
+                case /* UpdateAgentSessionControl agent_session_control */ 57:
+                    message.update = {
+                        oneofKind: "agentSessionControl",
+                        agentSessionControl: UpdateAgentSessionControl.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).agentSessionControl)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -48785,6 +49239,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateAgentRuntime agent_runtime = 56; */
         if (message.update.oneofKind === "agentRuntime")
             UpdateAgentRuntime.internalBinaryWrite(message.update.agentRuntime, writer.tag(56, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateAgentSessionControl agent_session_control = 57; */
+        if (message.update.oneofKind === "agentSessionControl")
+            UpdateAgentSessionControl.internalBinaryWrite(message.update.agentSessionControl, writer.tag(57, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -50538,6 +50995,85 @@ class UpdateAgentRuntime$Type extends MessageType<UpdateAgentRuntime> {
  * @generated MessageType for protobuf message UpdateAgentRuntime
  */
 export const UpdateAgentRuntime = new UpdateAgentRuntime$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateAgentSessionControl$Type extends MessageType<UpdateAgentSessionControl> {
+    constructor() {
+        super("UpdateAgentSessionControl", [
+            { no: 1, name: "interaction_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "agent_session_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "op", kind: "enum", T: () => ["AgentSessionControl", AgentSessionControl, "AGENT_SESSION_CONTROL_"] },
+            { no: 4, name: "actor_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateAgentSessionControl>): UpdateAgentSessionControl {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.interactionId = 0n;
+        message.agentSessionId = 0n;
+        message.op = 0;
+        message.actorUserId = 0n;
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateAgentSessionControl>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateAgentSessionControl): UpdateAgentSessionControl {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 interaction_id */ 1:
+                    message.interactionId = reader.int64().toBigInt();
+                    break;
+                case /* int64 agent_session_id */ 2:
+                    message.agentSessionId = reader.int64().toBigInt();
+                    break;
+                case /* AgentSessionControl op */ 3:
+                    message.op = reader.int32();
+                    break;
+                case /* int64 actor_user_id */ 4:
+                    message.actorUserId = reader.int64().toBigInt();
+                    break;
+                case /* int64 chat_id */ 5:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateAgentSessionControl, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 interaction_id = 1; */
+        if (message.interactionId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.interactionId);
+        /* int64 agent_session_id = 2; */
+        if (message.agentSessionId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.agentSessionId);
+        /* AgentSessionControl op = 3; */
+        if (message.op !== 0)
+            writer.tag(3, WireType.Varint).int32(message.op);
+        /* int64 actor_user_id = 4; */
+        if (message.actorUserId !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.actorUserId);
+        /* int64 chat_id = 5; */
+        if (message.chatId !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.chatId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateAgentSessionControl
+ */
+export const UpdateAgentSessionControl = new UpdateAgentSessionControl$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateMessageActionAnswered$Type extends MessageType<UpdateMessageActionAnswered> {
     constructor() {
