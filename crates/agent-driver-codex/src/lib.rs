@@ -1,6 +1,7 @@
 //! Direct Codex app-server driver for Inline's local agent bridge.
 
 mod driver;
+pub mod harness;
 mod peer;
 mod process;
 mod protocol;
