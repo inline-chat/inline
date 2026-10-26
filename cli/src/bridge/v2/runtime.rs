@@ -36,6 +36,7 @@ use super::render::{ActionStyle, CardAction, QUESTION_FORM_ID, RenderOp, Rendere
 /// Progress edits are coalesced to at most one per slot in this window.
 const EDIT_INTERVAL: Duration = Duration::from_millis(1200);
 const DEFAULT_HEARTBEAT: Duration = Duration::from_secs(60);
+const NOT_PENDING: &str = "This request is no longer pending.";
 
 /// Identity and settings of one v2 agent.
 #[derive(Clone, Debug)]
@@ -717,6 +718,19 @@ impl Runtime {
         })
     }
 
+    /// The work and pending card behind one card message.
+    fn card(&self, chat_id: i64, message_id: i64) -> Option<(&Work, Card)> {
+        let work = self.works.get(&chat_id)?;
+        let card = work
+            .shared
+            .lock()
+            .expect("work state")
+            .cards
+            .get(&message_id)
+            .cloned()?;
+        Some((work, card))
+    }
+
     async fn on_action(
         &mut self,
         chat_id: i64,
@@ -728,16 +742,11 @@ impl Runtime {
             return Some("This button is no longer active.".to_owned());
         };
         let grants = self.grants_of(actor).await;
-        let work = self.works.get(&chat_id)?;
-        let card = work
-            .shared
-            .lock()
-            .expect("work state")
-            .cards
-            .get(&message_id)
-            .cloned()?;
+        let Some((work, card)) = self.card(chat_id, message_id) else {
+            return Some(NOT_PENDING.to_owned());
+        };
         if card.interaction.as_str() != data.i {
-            return Some("This request is no longer pending.".to_owned());
+            return Some(NOT_PENDING.to_owned());
         }
         let permitted = if card.approval {
             grants.permits(Operation::Approve)
@@ -778,15 +787,12 @@ impl Runtime {
         if !grants.any() {
             return Some("You don't have access to answer this.".to_owned());
         }
-        let work = self.works.get(&chat_id)?;
-        let card = work
-            .shared
-            .lock()
-            .expect("work state")
-            .cards
-            .get(&message_id)
-            .cloned()?;
-        let form = card.form?;
+        let Some((work, card)) = self.card(chat_id, message_id) else {
+            return Some(NOT_PENDING.to_owned());
+        };
+        let Some(form) = card.form else {
+            return Some(NOT_PENDING.to_owned());
+        };
         let answers = form_answers(&form, values);
         match work
             .session
@@ -804,11 +810,14 @@ impl Runtime {
 
     async fn on_control(&mut self, agent_session_id: i64, actor: i64, op: i32) -> Option<String> {
         let grants = self.grants_of(actor).await;
-        let chat_id = self
+        let Some(chat_id) = self
             .works
             .values()
             .find(|work| work.agent_session_id == agent_session_id)
-            .map(|work| work.chat_id)?;
+            .map(|work| work.chat_id)
+        else {
+            return Some("This work is not running on its machine.".to_owned());
+        };
         match proto::AgentSessionControl::try_from(op) {
             Ok(proto::AgentSessionControl::Stop) if grants.permits(Operation::Stop) => {
                 stop(&self.works[&chat_id], false).await;
