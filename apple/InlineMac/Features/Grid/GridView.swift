@@ -79,7 +79,17 @@ struct GridView: View {
       }
     }
     .safeAreaInset(edge: .bottom) {
-      if let currentRoom, hasLocalAdmissionInSpace {
+      // Leaving is instant; while it settles there is nothing to resume.
+      if case .leave = store.pendingMembership {
+        EmptyView()
+      } else if case .create = store.pendingMembership {
+        Button("Cancel") { store.withdrawLocalAdmission() }
+          .padding(.bottom, 18)
+      } else if case .join = store.pendingMembership {
+        // A room switch is a join, not a paused call to resume.
+        Button("Cancel") { store.withdrawLocalAdmission() }
+          .padding(.bottom, 18)
+      } else if let currentRoom, hasLocalAdmissionInSpace {
         GridControlPill(
           media: store.media,
           onToggleMicrophone: { store.toggleMicrophone(spaceID: spaceID) },
