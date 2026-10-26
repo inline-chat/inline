@@ -1,6 +1,7 @@
 import AppKit
 import InlineKit
 import InlineProtocol
+import TextProcessing
 
 /// A bot form (`BlockForm`): native controls laid out from the planned
 /// frames, answers kept in `MessageFormDraftStore`, one submit. Secret
