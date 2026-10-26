@@ -842,36 +842,6 @@ impl<'a, T: TypingTransport> TypingIndicator<'a, T> {
     }
 }
 
-pub(super) async fn attach_changed_file_actions(
-    bot: &InlineClient,
-    chat_id: i64,
-    message_id: InlineId,
-    text: &str,
-    files: &[FileChange],
-    workspace: &Path,
-) {
-    let actions = changed_file_actions(files, workspace);
-    if actions.rows.is_empty() {
-        return;
-    }
-    let request = EditInteractiveMessageRequest {
-        message: EditMessageRequest {
-            chat_id: InlineId::new(chat_id),
-            message_id,
-            text: text.to_string(),
-            external_id: None,
-            parse_markdown: true,
-        },
-        actions,
-    };
-    if let Err(error) = edit_interactive_message_with_retry(bot, request).await {
-        eprintln!(
-            "Could not attach changed-file actions: {}",
-            safe_diagnostic(&error.to_string())
-        );
-    }
-}
-
 pub(super) fn message_retry_delay(attempt: u32) -> Duration {
     let entropy = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -885,35 +855,6 @@ pub(super) fn message_retry_delay_with_entropy(attempt: u32, entropy: u64) -> Du
     let base_ms = 150_u64.saturating_mul(multiplier).min(1_200);
     let percent = 75 + entropy % 51;
     Duration::from_millis(base_ms.saturating_mul(percent) / 100)
-}
-
-pub(super) fn changed_file_actions(files: &[FileChange], workspace: &Path) -> MessageActions {
-    let mut seen = HashSet::new();
-    let rows = files
-        .iter()
-        .filter_map(|file| safe_relative_path(&file.path, workspace))
-        .filter_map(|path| {
-            let text = path.to_str()?.to_string();
-            (!text.trim().is_empty() && text.encode_utf16().count() <= 4096).then_some((path, text))
-        })
-        .filter(|(_, text)| seen.insert(text.clone()))
-        .take(8)
-        .enumerate()
-        .map(|(index, (path, text))| {
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("path");
-            MessageActionRow {
-                actions: vec![MessageActionButton {
-                    action_id: format!("bridge_copy_path_{index}"),
-                    text: truncate_utf16(&format!("Copy Path · {name}"), 64),
-                    kind: MessageActionKind::CopyText { text },
-                }],
-            }
-        })
-        .collect();
-    MessageActions { rows }
 }
 
 const MAX_TRACKED_PATHS_PER_ACTIVITY: usize = 4;

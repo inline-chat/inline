@@ -2476,17 +2476,6 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
             }
         }
     }
-    if let Some(message_id) = final_message_id {
-        attach_changed_file_actions(
-            bot,
-            binding.chat_id,
-            message_id,
-            &final_text,
-            &files,
-            workspace,
-        )
-        .await;
-    }
     if matches!(terminal.0, TurnOutcome::ConnectionLost) && fatal_driver_error.is_none() {
         fatal_driver_error = Some("Agent connection epoch ended".to_string());
     }

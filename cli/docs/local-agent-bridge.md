@@ -274,8 +274,7 @@ for the selected project by default. After a brief ordering gate, the bot
 acknowledges every accepted provider direction with one silent, initially open
 `Working` disclosure. It collapses that same message with elapsed-time copy such
 as `Worked for 2m 14s`, `Stopped after 12s`, or `Failed after 8s`, then sends the
-actual result as a separate message with changed-file and check summaries plus
-a local **Copy Path** action for every safely representable relative path. These
+actual result as a separate message with changed-file and check summaries. These
 ordinary messages arrive in the active conversation without quoting the
 triggering message; only message-specific queue, failure, steering, or question
 states use an explicit reply. While provider work is active, the bot publishes

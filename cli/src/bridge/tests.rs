@@ -985,32 +985,6 @@ fn changed_file_code_labels_handle_backticks_safely() {
 }
 
 #[test]
-fn changed_file_actions_copy_only_safe_relative_paths() {
-    let workspace = Path::new("/tmp/project");
-    let files = vec![
-        FileChange {
-            path: workspace.join("src/lib.rs"),
-            summary: None,
-        },
-        FileChange {
-            path: PathBuf::from("/private/secret/outside.rs"),
-            summary: None,
-        },
-        FileChange {
-            path: workspace.join("../secret/escaped.rs"),
-            summary: None,
-        },
-    ];
-    let actions = changed_file_actions(&files, workspace);
-    assert_eq!(actions.rows.len(), 1);
-    assert_eq!(actions.rows[0].actions[0].text, "Copy Path · lib.rs");
-    assert!(matches!(
-        &actions.rows[0].actions[0].kind,
-        MessageActionKind::CopyText { text } if text == "src/lib.rs"
-    ));
-}
-
-#[test]
 fn unhealthy_provider_status_fails_the_command_gate() {
     let mut status = service::BridgeStatus {
         status: "running".to_string(),
@@ -1051,17 +1025,6 @@ fn changed_file_paths_reject_symlink_workspace_escapes() {
     assert_eq!(
         safe_relative_path(Path::new("linked/secret.txt"), &workspace),
         None
-    );
-    assert!(
-        changed_file_actions(
-            &[FileChange {
-                path: escaped,
-                summary: None,
-            }],
-            &workspace,
-        )
-        .rows
-        .is_empty()
     );
 }
 
