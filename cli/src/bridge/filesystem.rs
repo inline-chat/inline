@@ -127,6 +127,52 @@ fn list_directory(path: &str, after: &str) -> Result<BotFilesystemListing, &'sta
     })
 }
 
+/// `LIST_WORK_FILES`: relative entries from the work's folder, already free of
+/// absolute paths, `~` and `..` (the server rejects any that are not).
+fn work_files_listing(
+    folder: &Path,
+    path: &str,
+    query: Option<&str>,
+    after: &str,
+    limit: usize,
+) -> Result<BotFilesystemListing, &'static str> {
+    if path.len() > 4096 || path.chars().any(char::is_control) || path.starts_with('~') {
+        return Err("That path is not supported.");
+    }
+    let page = super::v2::files::list_work_files(folder, path, query, Some(after), limit).map_err(
+        |error| match error {
+            super::v2::files::FileListError::OutsideFolder => "That folder is not in this work.",
+            super::v2::files::FileListError::FolderUnavailable => {
+                "The work's folder is missing on this machine."
+            }
+        },
+    )?;
+    let path = path.trim_matches('/').to_owned();
+    let parent_path = (!path.is_empty()).then(|| {
+        path.rsplit_once('/')
+            .map_or(String::new(), |(parent, _)| parent.to_owned())
+    });
+    Ok(BotFilesystemListing {
+        path,
+        parent_path,
+        entries: page
+            .entries
+            .into_iter()
+            .filter(|entry| safe_path(Path::new(&entry.path)))
+            .map(|entry| BotFilesystemEntry {
+                name: entry.path,
+                kind: if entry.is_dir {
+                    Kind::Directory
+                } else {
+                    Kind::File
+                } as i32,
+                size: 0,
+            })
+            .collect(),
+        next_after: page.next,
+    })
+}
+
 pub(super) async fn handle_filesystem_event<D: AgentDriver + 'static>(
     bot: &InlineClient,
     event: &ClientEvent,
@@ -141,12 +187,18 @@ pub(super) async fn handle_filesystem_event<D: AgentDriver + 'static>(
         operation,
         path,
         after,
+        agent_session_id,
+        query,
+        limit,
     }) = event
     else {
         return Ok(false);
     };
+    // LIST_WORK_FILES is routed by its work, not by host: the host id may be
+    // empty or a placeholder there.
+    let work_files = *operation == 3;
     // Other hosts sharing this bot must not win the response race.
-    if host_installation_id != &runtime.identity.host_installation_id {
+    if !work_files && host_installation_id != &runtime.identity.host_installation_id {
         return Ok(true);
     }
     let snapshot = runtime.active.snapshot();
@@ -154,7 +206,7 @@ pub(super) async fn handle_filesystem_event<D: AgentDriver + 'static>(
         || bot_user_id.get() != runtime.identity.bot_user_id
     {
         problem("Only the bot owner can browse this machine.")
-    } else if host_installation_id != &runtime.identity.host_installation_id
+    } else if (!work_files && host_installation_id != &runtime.identity.host_installation_id)
         || chat_id.get() != snapshot.binding.chat_id
     {
         problem("This request belongs to a different host or conversation. Reopen Agent Settings.")
@@ -230,6 +282,51 @@ pub(super) async fn handle_filesystem_event<D: AgentDriver + 'static>(
                     _ => problem("Choose an accessible folder."),
                 }
             }
+            3 if agent_session_id.is_some() => {
+                // The folder comes from the work, never from a client path. One
+                // work per (thread, agent), and the server checked that the
+                // session belongs to this bot and this chat, so the chat's bound
+                // folder is the session's folder.
+                match runtime
+                    .store
+                    .chat_workspace(&snapshot.binding.installation_id, chat_id.get())
+                {
+                    Ok(Some(workspace)) => {
+                        let Ok(permit) = BROWSE_SLOTS.clone().try_acquire_owned() else {
+                            let _ = bot
+                                .answer_bot_filesystem(proto::AnswerBotFilesystemInput {
+                                    request_id: *request_id,
+                                    response: Some(problem("The file list is busy. Try again.")),
+                                })
+                                .await;
+                            return Ok(true);
+                        };
+                        let (query, limit) = (query.clone(), limit.unwrap_or(50) as usize);
+                        match tokio::time::timeout(
+                            Duration::from_secs(5),
+                            tokio::task::spawn_blocking(move || {
+                                let _permit = permit;
+                                work_files_listing(
+                                    &workspace.path,
+                                    &path,
+                                    query.as_deref(),
+                                    &after,
+                                    limit,
+                                )
+                            }),
+                        )
+                        .await
+                        {
+                            Ok(Ok(Ok(listing))) => BotFilesystemResponse {
+                                result: Some(Reply::Listing(listing)),
+                            },
+                            Ok(Ok(Err(message))) => problem(message),
+                            _ => problem("The file list could not finish. Try a narrower folder."),
+                        }
+                    }
+                    _ => problem("This conversation has no folder for the agent's work."),
+                }
+            }
             _ => problem("This remote browser operation is not supported."),
         }
     };
@@ -252,6 +349,24 @@ mod tests {
         assert!(resolve_directory("/tmp/.env").is_err());
         assert!(resolve_directory("/tmp/.env.local").is_err());
         assert!(list_directory("", "../").is_err());
+    }
+    #[test]
+    fn work_files_are_relative_and_contained() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), b"x").unwrap();
+        std::fs::write(dir.path().join(".env"), b"secret").unwrap();
+        let listing = work_files_listing(dir.path(), "", None, "", 50).unwrap();
+        assert_eq!(listing.path, "");
+        assert_eq!(listing.parent_path, None);
+        let names: Vec<_> = listing.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["src"]);
+        assert_eq!(listing.entries[0].kind, Kind::Directory as i32);
+        let nested = work_files_listing(dir.path(), "src", None, "", 50).unwrap();
+        assert_eq!(nested.parent_path.as_deref(), Some(""));
+        assert_eq!(nested.entries[0].name, "src/lib.rs");
+        assert!(work_files_listing(dir.path(), "../", None, "", 50).is_err());
+        assert!(work_files_listing(dir.path(), "~", None, "", 50).is_err());
     }
     #[test]
     fn lists_bounded_pages_and_metadata() {

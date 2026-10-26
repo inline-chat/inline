@@ -16,10 +16,19 @@ const MAX_CANDIDATES: usize = 50_000;
 const MAX_WALK_DEPTH: usize = 16;
 const MAX_PAGE: usize = 200;
 
+/// One listed path, relative to the work's folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WorkEntry {
+    pub path: String,
+    pub is_dir: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FilePage {
-    /// Paths relative to the work's folder, `/`-separated.
-    pub paths: Vec<String>,
+    /// Entries relative to the work's folder, `/`-separated. Without a query,
+    /// the requested folder's children (folders included); with a query,
+    /// matching files anywhere below it.
+    pub entries: Vec<WorkEntry>,
     /// Pass back as `after` for the next page.
     pub next: Option<String>,
     /// More files existed than the listing considered.
@@ -62,7 +71,7 @@ pub(crate) fn list_work_files(
         Some(listing) => listing,
         None => walk_files(&folder, &resolved),
     };
-    match query.map(str::trim).filter(|query| !query.is_empty()) {
+    let entries: Vec<WorkEntry> = match query.map(str::trim).filter(|query| !query.is_empty()) {
         Some(query) => {
             let query = query.to_lowercase();
             let mut scored: Vec<(u32, String)> = paths
@@ -70,26 +79,70 @@ pub(crate) fn list_work_files(
                 .filter_map(|path| fuzzy_score(&path, &query).map(|score| (score, path)))
                 .collect();
             scored.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
-            paths = scored.into_iter().map(|(_, path)| path).collect();
+            scored
+                .into_iter()
+                .map(|(_, path)| WorkEntry {
+                    path,
+                    is_dir: false,
+                })
+                .collect()
         }
-        None => paths.sort(),
-    }
-    let start = after.map_or(0, |after| {
-        paths
+        None => {
+            paths.sort();
+            children(&paths, &base_text(&base))
+        }
+    };
+    let start = after.filter(|after| !after.is_empty()).map_or(0, |after| {
+        entries
             .iter()
-            .position(|path| path == after)
+            .position(|entry| entry.path == after)
             .map_or(0, |index| index + 1)
     });
     let limit = limit.clamp(1, MAX_PAGE);
-    let page: Vec<String> = paths.iter().skip(start).take(limit).cloned().collect();
-    let next = (start + page.len() < paths.len())
-        .then(|| page.last().cloned())
+    let page: Vec<WorkEntry> = entries.iter().skip(start).take(limit).cloned().collect();
+    let next = (start + page.len() < entries.len())
+        .then(|| page.last().map(|entry| entry.path.clone()))
         .flatten();
     Ok(FilePage {
-        paths: page,
+        entries: page,
         next,
         truncated,
     })
+}
+
+fn base_text(base: &Path) -> String {
+    base.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Immediate children of `base` from a sorted list of file paths; a folder
+/// appears once, before files of the same name order.
+fn children(paths: &[String], base: &str) -> Vec<WorkEntry> {
+    let prefix = if base.is_empty() {
+        String::new()
+    } else {
+        format!("{base}/")
+    };
+    let mut entries: Vec<WorkEntry> = Vec::new();
+    for path in paths {
+        let Some(rest) = path.strip_prefix(&prefix) else {
+            continue;
+        };
+        let (child, is_dir) = match rest.split_once('/') {
+            Some((folder, _)) => (format!("{prefix}{folder}"), true),
+            None => (path.clone(), false),
+        };
+        if !entries.iter().any(|entry| entry.path == child) {
+            entries.push(WorkEntry {
+                path: child,
+                is_dir,
+            });
+        }
+    }
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    entries
 }
 
 /// `git ls-files` for tracked and untracked, non-ignored files under `base`.
@@ -196,24 +249,44 @@ mod tests {
         dir
     }
 
+    fn paths(page: &FilePage) -> Vec<&str> {
+        page.entries
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect()
+    }
+
     #[test]
     fn lists_relative_paths_without_git_internals() {
         let dir = folder();
         let page = list_work_files(dir.path(), "", None, None, 50).expect("page");
-        assert_eq!(page.paths, ["README.md", "src/main.rs", "src/parser.rs"]);
-        assert!(page.paths.iter().all(|path| !path.starts_with('/')));
+        assert_eq!(
+            page.entries,
+            [
+                WorkEntry {
+                    path: "README.md".to_owned(),
+                    is_dir: false
+                },
+                WorkEntry {
+                    path: "src".to_owned(),
+                    is_dir: true
+                },
+            ]
+        );
+        let src = list_work_files(dir.path(), "src", None, None, 50).expect("src");
+        assert_eq!(paths(&src), ["src/main.rs", "src/parser.rs"]);
     }
 
     #[test]
     fn queries_rank_file_names_and_pages_continue_after_the_cursor() {
         let dir = folder();
         let page = list_work_files(dir.path(), "", Some("pars"), None, 50).expect("page");
-        assert_eq!(page.paths, ["src/parser.rs"]);
-        let first = list_work_files(dir.path(), "", None, None, 2).expect("first");
+        assert_eq!(paths(&page), ["src/parser.rs"]);
+        let first = list_work_files(dir.path(), "src", None, None, 1).expect("first");
         assert_eq!(first.next.as_deref(), Some("src/main.rs"));
         let second =
-            list_work_files(dir.path(), "", None, first.next.as_deref(), 2).expect("second");
-        assert_eq!(second.paths, ["src/parser.rs"]);
+            list_work_files(dir.path(), "src", None, first.next.as_deref(), 1).expect("second");
+        assert_eq!(paths(&second), ["src/parser.rs"]);
         assert_eq!(second.next, None);
     }
 

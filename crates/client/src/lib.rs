@@ -474,6 +474,15 @@ pub enum BotInteractionEvent {
         path: String,
         /// Exclusive filename cursor; never log this value.
         after: String,
+        /// `LIST_WORK_FILES`: the work whose folder is listed.
+        #[serde(default)]
+        agent_session_id: Option<i64>,
+        /// `LIST_WORK_FILES`: file-name query; never log this value.
+        #[serde(default)]
+        query: Option<String>,
+        /// `LIST_WORK_FILES`: requested page size.
+        #[serde(default)]
+        limit: Option<u32>,
     },
     /// A client opened the bot settings surface for a chat.
     ChatSettingsRequested {
