@@ -307,6 +307,9 @@ impl SdkBackend {
             .and_then(|peer| peer.r#type.as_ref())
         {
             Some(proto::peer::Type::Chat(peer)) if peer.chat_id > 0 => peer.chat_id,
+            // Work in a DM (bridge v2): the peer is the other user and a DM
+            // has no parent thread.
+            Some(proto::peer::Type::User(peer)) if peer.user_id > 0 => return Ok(()),
             _ => {
                 return Err(BackendError::new(
                     ClientErrorCategory::ProtocolMismatch,
