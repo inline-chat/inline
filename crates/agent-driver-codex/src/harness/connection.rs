@@ -11,8 +11,9 @@ use inline_agent_bridge::harness::{
     DEFAULT_HUB_CAPACITY, Delivery, EffectiveSettings, Event, EventHub, EventStream,
     ExecutableInfo, ExecutableSource, HarnessDriver, HarnessFuture, Input, InputDisposition,
     InputReceipt, LiveWork, ModeId, Op, OpError, OpOutcome, OpenError, OpenMode, OpenSpec,
-    QueueEntryId, QueueOp, QueuedInput, Released, RunState, RuntimeHealth, RuntimeInfo, SendError,
-    Session, SessionKey, SessionPage, SessionQuery, SessionSummary, SetupReason,
+    QueueEntryId, QueueOp, QueuedInput, ReleaseOutcome, Released, RunState, RuntimeHealth,
+    RuntimeInfo, SendError, Session, SessionKey, SessionPage, SessionQuery, SessionSummary,
+    SetupReason,
 };
 use inline_agent_bridge::{
     DriverError, DriverFuture, DriverModelOption, DriverSettingOption, HostToolConfiguration,
@@ -546,7 +547,21 @@ impl SessionInner {
             if let Event::Queue { entries } = &event {
                 *self.queue.lock().expect("queue poisoned") = entries.clone();
             }
+            let released = matches!(
+                event,
+                Event::State {
+                    state: RunState::Released
+                }
+            );
             self.hub.emit(event);
+            // Stop routing only once Codex confirms the thread unloaded.
+            if released && let Some(connection) = self.connection.upgrade() {
+                connection
+                    .sessions
+                    .lock()
+                    .expect("session map poisoned")
+                    .remove(&self.thread);
+            }
         }
     }
 
@@ -940,13 +955,14 @@ impl Session for CodexSession {
                 })
                 .collect();
             self.inner.emit_all(events);
-            self.connection
-                .sessions
-                .lock()
-                .expect("session map poisoned")
-                .remove(&self.inner.thread);
+            // The thread stays loaded through Codex's grace period; the stream
+            // reports `Released` when `thread/closed` arrives.
+            self.inner.emit_all(vec![Event::State {
+                state: RunState::Releasing,
+            }]);
             Ok(Released {
                 key: self.inner.key.clone(),
+                outcome: ReleaseOutcome::Unsubscribed,
                 cancelled_interactions: cancelled,
                 // Codex keeps its own queue across unload; nothing is held by Inline.
                 pending_inputs: Vec::new(),
