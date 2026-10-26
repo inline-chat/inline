@@ -2300,6 +2300,8 @@ function resolveInlineReplyActions(
       actions: row.map((button, buttonIndex) => ({
         actionId: buildInlineMessageActionId(owner, rowIndex, buttonIndex),
         text: button.text,
+        style: 0,
+        requiredGrant: 0,
         action:
           button.kind === "callback"
             ? {
