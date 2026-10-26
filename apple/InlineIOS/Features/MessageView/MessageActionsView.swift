@@ -85,7 +85,11 @@ final class MessageActionsView: UIView {
         rowStack.distribution = .fillEqually
         for action in row.actions {
           let button = MessageActionButton(type: .system)
-          button.configure(action: action, outgoing: false)
+          button.configure(
+            action: action,
+            outgoing: false,
+            presentation: MessageActionPerformer.presentation(for: action, message: message)
+          )
           button.useMinimalPresentation()
           button.addTarget(self, action: #selector(handleTap(_:)), for: .touchUpInside)
           rowStack.addArrangedSubview(button)
@@ -109,9 +113,14 @@ final class MessageActionsView: UIView {
         guard let message = self?.message,
               event.key.peerId == message.peerId,
               event.key.messageId == message.messageId,
-              let toastText = event.toastText
+              let self
         else { return }
-        ToastManager.shared.showToast(toastText, type: .info)
+        if let toastText = event.toastText {
+          ToastManager.shared.showToast(toastText, type: .info)
+        }
+        if let alert = event.alert {
+          MessageActionPerformer.presentAlert(alert, from: self)
+        }
       }
   }
 
@@ -131,14 +140,13 @@ final class MessageActionsView: UIView {
 
   @objc private func handleTap(_ sender: MessageActionButton) {
     guard let action = sender.messageAction, let message else { return }
-    switch action.action {
-    case .callback:
-      invokeCallback(action, on: message)
-    case let .copyText(copyText):
-      UIPasteboard.general.string = copyText.text
-      ToastManager.shared.showToast("Copied", type: .success, systemImage: "doc.on.doc")
-    case nil:
-      break
+    let presentation = MessageActionPerformer.presentation(for: action, message: message)
+    MessageActionPerformer.run(presentation, from: self) { [weak self] in
+      if presentation.intent == .callback {
+        self?.invokeCallback(action, on: message)
+      } else {
+        MessageActionPerformer.performLocal(presentation.intent)
+      }
     }
   }
 

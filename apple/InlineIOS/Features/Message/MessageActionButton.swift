@@ -1,3 +1,4 @@
+import InlineKit
 import struct InlineProtocol.MessageAction
 import UIKit
 
@@ -10,6 +11,10 @@ final class MessageActionButton: UIButton {
   let spinner = UIActivityIndicatorView(style: .medium)
 
   private var outgoing = false
+  private var style: MessageActionPresentation.Style = .standard
+  /// Set when the viewer lacks the bot grant; the button stays tappable so
+  /// the tap can explain why.
+  private(set) var disabledReason: String?
   private var usesMinimalPresentation = false
 
   override var isHighlighted: Bool {
@@ -60,8 +65,12 @@ final class MessageActionButton: UIButton {
     refreshStyle()
   }
 
-  func configure(action: MessageAction, outgoing: Bool) {
+  func configure(action: MessageAction, outgoing: Bool, presentation: MessageActionPresentation? = nil) {
     self.outgoing = outgoing
+    style = presentation?.style ?? .standard
+    disabledReason = presentation?.disabledReason
+      ?? (presentation?.intent == .unavailable ? String(localized: "This action isn’t available") : nil)
+    accessibilityHint = disabledReason
     messageAction = action
     actionId = action.actionID.trimmingCharacters(in: .whitespacesAndNewlines)
     setTitle(action.text, for: .normal)
@@ -82,9 +91,23 @@ final class MessageActionButton: UIButton {
 
   func refreshStyle() {
     let isDark = traitCollection.userInterfaceStyle == .dark
-    let textColor = outgoing ? UIColor.white : (ThemeManager.shared.selected.primaryTextColor ?? .label)
+    let baseColor = outgoing ? UIColor.white : (ThemeManager.shared.selected.primaryTextColor ?? .label)
+    let styledColor: UIColor = switch style {
+    case .primary: .white
+    case .destructive: outgoing ? .white : .systemRed
+    case .standard: baseColor
+    }
+    let textColor = disabledReason == nil ? styledColor : styledColor.withAlphaComponent(0.45)
     setTitleColor(textColor, for: .normal)
     setTitleColor(textColor.withAlphaComponent(0.45), for: .disabled)
+
+    if style == .primary, disabledReason == nil {
+      layer.borderWidth = 0
+      backgroundColor = outgoing
+        ? UIColor.white.withAlphaComponent(isDark ? 0.28 : 0.24)
+        : ThemeManager.shared.selected.accent
+      return
+    }
 
     if usesMinimalPresentation {
       layer.borderWidth = 0

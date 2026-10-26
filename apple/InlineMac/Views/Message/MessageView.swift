@@ -43,6 +43,7 @@ class MessageViewAppKit: NSView {
   private var translationStateCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
   private var messageActionAnsweredCancellable: AnyCancellable?
+  private var messageActionGrantsCancellable: AnyCancellable?
   private var didResolveMessageSpaceId = false
   private var isResolvingMessageSpaceId = false
   private var resolvedMessageSpaceId: Int64?
@@ -538,6 +539,8 @@ class MessageViewAppKit: NSView {
       messageActionLoadingCancellable = nil
       messageActionAnsweredCancellable?.cancel()
       messageActionAnsweredCancellable = nil
+      messageActionGrantsCancellable?.cancel()
+      messageActionGrantsCancellable = nil
       clearMessageActionRowsConstraints()
       return
     }
@@ -558,7 +561,8 @@ class MessageViewAppKit: NSView {
       loadingActionIds: loadingActionIdsForCurrentMessage(),
       outgoing: usesOutgoingBubbleStyle(for: props),
       rowHeight: 28,
-      messageFontSize: props.layout.fontSize
+      messageFontSize: props.layout.fontSize,
+      presentation: { [message] action in MessageActionPerformer.presentation(for: action, message: message) }
     )
 
     messageActionRowsView = view
@@ -576,6 +580,16 @@ class MessageViewAppKit: NSView {
         self?.refreshMessageActionRowsView()
       }
 
+    // Grants load once per bot; re-render so buttons the viewer cannot use
+    // turn disabled with their reason.
+    messageActionGrantsCancellable = AgentGrantStore.shared.$accessByBotUserID
+      .map { [botUserID = message.fromId] in $0[botUserID] }
+      .removeDuplicates()
+      .dropFirst()
+      .sink { [weak self] _ in
+        self?.refreshMessageActionRowsView()
+      }
+
     messageActionAnsweredCancellable = MessageActionInteractionState.shared.answeredPublisher
       .receive(on: DispatchQueue.main)
       .sink { [weak self] event in
@@ -587,6 +601,9 @@ class MessageViewAppKit: NSView {
         if let toastText = event.toastText {
           ToastCenter.shared.showInfo(toastText)
         }
+        if let alert = event.alert {
+          MessageActionPerformer.presentAlert(alert, in: window)
+        }
       }
   }
 
@@ -597,29 +614,25 @@ class MessageViewAppKit: NSView {
       loadingActionIds: loadingActionIdsForCurrentMessage(),
       outgoing: usesOutgoingBubbleStyle,
       rowHeight: 28,
-      messageFontSize: props.layout.fontSize
+      messageFontSize: props.layout.fontSize,
+      presentation: { [message] action in MessageActionPerformer.presentation(for: action, message: message) }
     )
   }
 
   private func handleMessageActionTap(_ action: MessageAction) {
-    switch action.action {
-      case .callback:
-        MessageGestureTrace.debug(
-          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionIdBytes=\(action.actionID.utf8.count) type=callback"
-        )
+    let presentation = MessageActionPerformer.presentation(for: action, message: message)
+    MessageGestureTrace.debug(
+      "MessageView.handleMessageActionTap messageId=\(message.messageId) actionIdBytes=\(action.actionID.utf8.count) intent=\(presentation.intent) enabled=\(presentation.isEnabled)"
+    )
+    MessageActionPerformer.run(presentation, in: window) { [weak self] in
+      guard let self else { return }
+      if presentation.intent == .callback {
         invokeMessageCallbackAction(action)
-      case let .copyText(copyText):
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(copyText.text, forType: .string)
-        ToastCenter.shared.showSuccess("Copied")
-        MessageGestureTrace.debug(
-          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionIdBytes=\(action.actionID.utf8.count) type=copyText"
-        )
-      case nil:
-        MessageGestureTrace.debug(
-          "MessageView.handleMessageActionTap messageId=\(message.messageId) actionIdBytes=\(action.actionID.utf8.count) type=nil"
-        )
-        break
+      } else {
+        MessageActionPerformer.performLocal(presentation.intent) { [weak self] peer in
+          self?.openChat(peer: peer)
+        }
+      }
     }
   }
 
