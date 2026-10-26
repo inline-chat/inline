@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use inline_agent_driver_claude::mcp::BoxFuture;
+use inline_agent_driver_claude::client::IncomingCall;
 use inline_agent_driver_claude::control::IncomingRequest;
 use inline_agent_driver_claude::{
     CancelSignal, ClaudeClient, ClaudeVersion, ClientConfig, ClientEvent, ControlHandler,
@@ -144,15 +145,11 @@ struct LabHandler {
 }
 
 impl ControlHandler for LabHandler {
-    fn handle(
-        &self,
-        request: IncomingRequest,
-        _cancel: CancelSignal,
-    ) -> BoxFuture<Result<Value, String>> {
+    fn handle(&self, call: IncomingCall, _cancel: CancelSignal) -> BoxFuture<Result<Value, String>> {
         let recorder = self.recorder.clone();
         let policy = self.policy.clone();
         Box::pin(async move {
-            match request {
+            match call.request {
                 IncomingRequest::CanUseTool(permission) => {
                     let decision = policy(&permission);
                     let response = decision.to_value(&permission.input);

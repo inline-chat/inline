@@ -16,10 +16,12 @@
 //! - [`sessions`]: the JSONL session store (list, history, rename, fork,
 //!   subagent transcripts).
 //! - [`agents`]: live sessions (`claude agents --json`) for held detection.
+//! - [`harness`]: the bridge v2 session contract (`HarnessDriver`, `Session`).
 
 pub mod agents;
 pub mod client;
 pub mod control;
+pub mod harness;
 pub mod input;
 pub mod mcp;
 pub mod options;
@@ -30,7 +32,7 @@ pub mod wire;
 
 pub use client::{
     CancelSignal, ClaudeClient, ClientConfig, ClientEvent, ConnectError, ControlError,
-    ControlHandler, EventReceiver, ExitReport, RefuseAll,
+    ControlHandler, EventReceiver, ExitReport, IncomingCall, RefuseAll,
 };
 pub use control::{
     InitializeRequest, InitializeResponse, InterruptReceipt, IncomingRequest, PermissionDecision,

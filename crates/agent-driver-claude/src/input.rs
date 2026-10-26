@@ -137,6 +137,8 @@ pub struct UserMessage {
     /// harness behaves as in its own CLI.
     pub client_composed: bool,
     pub parent_tool_use_id: Option<String>,
+    /// The session the message is for (`""` lets the CLI fill it in).
+    pub session_id: String,
     /// Fields newer CLIs accept that this crate does not model.
     pub extra: Map<String, Value>,
 }
@@ -156,6 +158,7 @@ impl UserMessage {
             origin: None,
             client_composed: false,
             parent_tool_use_id: None,
+            session_id: String::new(),
             extra: Map::new(),
         }
     }
@@ -195,7 +198,7 @@ impl UserMessage {
                 .as_ref()
                 .map_or(Value::Null, |id| json!(id)),
         );
-        map.insert("session_id".into(), json!(""));
+        map.insert("session_id".into(), json!(self.session_id));
         map.insert("uuid".into(), json!(self.uuid));
         if let Some(priority) = self.priority {
             map.insert("priority".into(), json!(priority.as_str()));
