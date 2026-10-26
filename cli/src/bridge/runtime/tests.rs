@@ -749,6 +749,9 @@ async fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
             operation: 1,
             path: String::new(),
             after: String::new(),
+            agent_session_id: None,
+            query: None,
+            limit: None,
         });
     let resolution = conversation_for_settings_event(&route, &unauthorized_filesystem_event, None)
         .await
@@ -795,6 +798,9 @@ async fn unbound_chat_settings_stay_owner_only_and_repair_promoted_cache() {
         operation: 1,
         path: String::new(),
         after: String::new(),
+        agent_session_id: None,
+        query: None,
+        limit: None,
     });
     let resolution = conversation_for_settings_event(&route, &filesystem_event, None)
         .await

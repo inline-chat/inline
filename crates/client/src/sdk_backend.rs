@@ -4214,6 +4214,9 @@ fn bot_event_delivery(event: proto::BotEvent) -> BackendResult<ClientEventDelive
                 operation: input.operation,
                 path: input.path,
                 after: input.after,
+                agent_session_id: input.agent_session_id,
+                query: input.query,
+                limit: input.limit,
             }
         }
         Event::ChatSettingsRequested(request) => {
