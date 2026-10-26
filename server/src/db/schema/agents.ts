@@ -1,5 +1,4 @@
 import { bytea } from "@in/server/db/schema/common"
-import { agentSessions } from "@in/server/db/schema/agentSessions"
 import { chats } from "@in/server/db/schema/chats"
 import { users } from "@in/server/db/schema/users"
 import {
@@ -84,8 +83,6 @@ export const agentParticipations = pgTable(
     // Per-thread AgentOutputMode override; null uses the agent default.
     outputMode: smallint("output_mode"),
     joinedBy: integer("joined_by").references(() => users.id, { onDelete: "set null" }),
-    defaultSessionId: bigint("default_session_id", { mode: "bigint" })
-      .references(() => agentSessions.id, { onDelete: "set null" }),
     revision: bigint("revision", { mode: "bigint" }).default(sql`1`).notNull(),
     createdAt: timestamp("created_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date", precision: 3 }).defaultNow().notNull(),

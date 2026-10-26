@@ -741,6 +741,13 @@ export interface ServerChatUpdateAgentSessionState {
      * @generated from protobuf field: optional string workspace_label = 8;
      */
     workspaceLabel?: string;
+    /**
+     * The work's publication chat when it differs from this bucket's chat
+     * (after a move into a subthread).
+     *
+     * @generated from protobuf field: optional int64 chat_id = 9;
+     */
+    chatId?: bigint;
 }
 /**
  * Snapshot of an agent's participation. The client peer is encoded per
@@ -761,10 +768,6 @@ export interface ServerChatUpdateAgentParticipation {
      * @generated from protobuf field: optional int64 joined_by = 3;
      */
     joinedBy?: bigint;
-    /**
-     * @generated from protobuf field: optional int64 default_session_id = 4;
-     */
-    defaultSessionId?: bigint;
     /**
      * @generated from protobuf field: int64 revision = 5;
      */
@@ -2997,7 +3000,8 @@ class ServerChatUpdateAgentSessionState$Type extends MessageType<ServerChatUpdat
             { no: 5, name: "parent_session_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "relation", kind: "enum", T: () => ["AgentSessionRelation", AgentSessionRelation, "AGENT_SESSION_RELATION_"] },
             { no: 7, name: "state", kind: "message", T: () => AgentSessionState },
-            { no: 8, name: "workspace_label", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 8, name: "workspace_label", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<ServerChatUpdateAgentSessionState>): ServerChatUpdateAgentSessionState {
@@ -3039,6 +3043,9 @@ class ServerChatUpdateAgentSessionState$Type extends MessageType<ServerChatUpdat
                 case /* optional string workspace_label */ 8:
                     message.workspaceLabel = reader.string();
                     break;
+                case /* optional int64 chat_id */ 9:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3075,6 +3082,9 @@ class ServerChatUpdateAgentSessionState$Type extends MessageType<ServerChatUpdat
         /* optional string workspace_label = 8; */
         if (message.workspaceLabel !== undefined)
             writer.tag(8, WireType.LengthDelimited).string(message.workspaceLabel);
+        /* optional int64 chat_id = 9; */
+        if (message.chatId !== undefined)
+            writer.tag(9, WireType.Varint).int64(message.chatId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3092,7 +3102,6 @@ class ServerChatUpdateAgentParticipation$Type extends MessageType<ServerChatUpda
             { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "mode", kind: "enum", T: () => ["AgentParticipationMode", AgentParticipationMode, "AGENT_PARTICIPATION_MODE_"] },
             { no: 3, name: "joined_by", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 4, name: "default_session_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 5, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 7, name: "output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
@@ -3121,9 +3130,6 @@ class ServerChatUpdateAgentParticipation$Type extends MessageType<ServerChatUpda
                     break;
                 case /* optional int64 joined_by */ 3:
                     message.joinedBy = reader.int64().toBigInt();
-                    break;
-                case /* optional int64 default_session_id */ 4:
-                    message.defaultSessionId = reader.int64().toBigInt();
                     break;
                 case /* int64 revision */ 5:
                     message.revision = reader.int64().toBigInt();
@@ -3155,9 +3161,6 @@ class ServerChatUpdateAgentParticipation$Type extends MessageType<ServerChatUpda
         /* optional int64 joined_by = 3; */
         if (message.joinedBy !== undefined)
             writer.tag(3, WireType.Varint).int64(message.joinedBy);
-        /* optional int64 default_session_id = 4; */
-        if (message.defaultSessionId !== undefined)
-            writer.tag(4, WireType.Varint).int64(message.defaultSessionId);
         /* int64 revision = 5; */
         if (message.revision !== 0n)
             writer.tag(5, WireType.Varint).int64(message.revision);

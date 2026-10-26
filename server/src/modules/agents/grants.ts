@@ -26,6 +26,11 @@ const MAX_IMPORT_USERS = 256
 
 const nextRevision = () => sql`nextval('agent_grant_revision')`
 
+/** Serializes every grant write for one bot, so the import's "no rows yet" check never races an edit. */
+async function lockBotGrants(tx: Transaction, botUserId: number): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('agent_grants'), ${botUserId})`)
+}
+
 const grantableOperations = [
   AgentGrantOperation.INVOKE,
   AgentGrantOperation.STEER,
@@ -199,6 +204,7 @@ export async function setAgentGrant(input: SetAgentGrantInput, currentUserId: nu
 
   const live: LiveGrantUpdate[] = []
   const row = await db.transaction(async (tx) => {
+    await lockBotGrants(tx, editor.bot.id)
     const [saved] = await tx
       .insert(agentGrants)
       .values({
@@ -237,6 +243,7 @@ export async function deleteAgentGrant(
 
   const live: LiveGrantUpdate[] = []
   await db.transaction(async (tx) => {
+    await lockBotGrants(tx, editor.bot.id)
     const [revoked] = await tx
       .update(agentGrants)
       .set({
@@ -273,8 +280,7 @@ export async function importAgentGrants(
 
   const live: LiveGrantUpdate[] = []
   await db.transaction(async (tx) => {
-    // Serializes concurrent imports and edits for this bot.
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('agent_grants'), ${editor.bot.id})`)
+    await lockBotGrants(tx, editor.bot.id)
     const [existing] = await tx
       .select({ id: agentGrants.id })
       .from(agentGrants)

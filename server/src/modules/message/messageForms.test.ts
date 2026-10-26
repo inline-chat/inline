@@ -166,3 +166,37 @@ describe("bridge v2 actions and grants", () => {
     expect(() => operationsToMask([AgentGrantOperation.UNSPECIFIED])).toThrow()
   })
 })
+
+describe("bridge v2 fallbacks for older apps", () => {
+  // Shipped apps decode the new kinds as unknown oneof fields. macOS's layout
+  // planner then declines the tree and iOS never renders blocks, so both draw
+  // Message.message with its entities. That text must therefore hold every
+  // block's content.
+  test("every new block's text is part of the flat message text", () => {
+    const b = builder()
+    const { form } = approvalForm()
+    const formText = approvalForm().text
+    const content: BlockContent = {
+      blocks: [
+        { kind: { oneofKind: "disclosure", disclosure: { summary: b.range("Ran tests"), kind: 1, activityKind: 8, children: [], status: 4, meta: b.range("48s") } } },
+        { kind: { oneofKind: "callout", callout: { kind: 4, title: b.range("Failed"), children: [] } } },
+        { kind: { oneofKind: "fields", fields: { fields: [{ label: b.range("Folder"), value: b.range("~/dev/inline"), monospace: true }] } } },
+        { kind: { oneofKind: "steps", steps: { steps: [{ text: b.range("Plan"), status: 2, detail: b.range("Planning") }] } } },
+        { kind: { oneofKind: "meter", meter: { label: b.range("Usage"), value: 1, max: 2, meta: b.range("50%"), tone: 1 } } },
+        { kind: { oneofKind: "diff", diff: { path: b.range("a.rs"), text: b.range("+x"), change: 2, previousPath: b.range("b.rs") } } },
+      ],
+    }
+    const text = b.text()
+    const validated = validateBotBlockContent(text, content)
+    const covered = JSON.stringify(validated, (_, value) => typeof value === "bigint" ? Number(value) : value)
+    const ranges = [...covered.matchAll(/"offset":(\d+),"length":(\d+)/g)].map((match) => text.slice(Number(match[1]), Number(match[1]) + Number(match[2])))
+    expect(ranges).toContain("Ran tests")
+    expect(ranges).toContain("~/dev/inline")
+    for (const range of ranges) expect(text).toContain(range)
+    // Form labels and options are in the fallback too, so older apps can answer in text.
+    const formRanges = [form.title!, ...form.fields.map((field) => field.label)]
+    for (const range of formRanges) {
+      expect(formText.slice(Number(range.offset), Number(range.offset + range.length)).length).toBe(Number(range.length))
+    }
+  })
+})

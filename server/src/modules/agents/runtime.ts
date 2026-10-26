@@ -14,14 +14,18 @@ import {
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
-import { agentRuntimes, type DbAgentRuntime } from "@in/server/db/schema"
+import { agentParticipations, agentRuntimes, agentSessions, chats, type DbAgentRuntime } from "@in/server/db/schema"
+import { chatRecipientUserIds } from "@in/server/modules/agents/chatUpdates"
+import { Log } from "@in/server/utils/log"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { grantsRevision, resolveAgentAccess, satisfiesGrantRequirement } from "@in/server/modules/agents/grants"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { eq } from "drizzle-orm"
+import { and, desc, eq, inArray, lt, ne } from "drizzle-orm"
+
+const log = new Log("Agents.runtime")
 
 export const AGENT_RUNTIME_HEARTBEAT_SECONDS = 60
 /** A runtime that missed this many heartbeats counts as offline. */
@@ -160,7 +164,7 @@ export async function reportAgentRuntime(
   }
 
   const ownerUserId = bot.botCreatorId
-  const { row, changed, durable } = await db.transaction(async (tx) => {
+  const { row, changed } = await db.transaction(async (tx) => {
     const [previous] = await tx.select().from(agentRuntimes).where(eq(agentRuntimes.botUserId, bot.id)).for("update").limit(1)
     const [saved] = previous
       ? await tx.update(agentRuntimes).set(values).where(eq(agentRuntimes.botUserId, bot.id)).returning()
@@ -173,23 +177,13 @@ export async function reportAgentRuntime(
       previous.provider !== saved.provider ||
       previous.machineLabel !== saved.machineLabel ||
       previous.executableVersion !== saved.executableVersion
-    const durable = changed
-      ? await UserBucketUpdates.enqueue({
-          userId: ownerUserId,
-          update: { oneofKind: "userAgentRuntime", userAgentRuntime: { runtime: encodeAgentRuntime(saved, "owner", now.getTime()) } },
-        }, { tx })
-      : undefined
-    return { row: saved, changed, durable }
+    return { row: saved, changed }
   })
 
+  // Any process that serves heartbeats also watches for lapsed ones.
+  startAgentRuntimeSweeper()
   const runtime = encodeAgentRuntime(row, "owner", now.getTime())
-  if (changed && durable) {
-    RealtimeUpdates.pushToUser(ownerUserId, [{
-      seq: durable.seq,
-      date: encodeDateStrict(durable.date),
-      update: { oneofKind: "agentRuntime", agentRuntime: { runtime } },
-    }])
-  }
+  if (changed) await publishRuntimeChange(row, ownerUserId)
   return {
     runtime,
     grantsRevision: await grantsRevision(bot.id),
@@ -210,4 +204,97 @@ export async function getAgentRuntime(
   if (!row) return {}
   const viewer = currentUserId === bot.botCreatorId || currentUserId === bot.id ? "owner" : "other"
   return { runtime: encodeAgentRuntime(row, viewer) }
+}
+
+// ------------------------------------------------------------
+// Runtime changes reach the owner and the agent's chat members
+// ------------------------------------------------------------
+
+const MAX_RUNTIME_AUDIENCE_CHATS = 200
+const MAX_RUNTIME_AUDIENCE_USERS = 500
+
+/** People in chats where the agent takes part or has work, besides the owner and the bot. */
+async function runtimeAudience(botUserId: number, ownerUserId: number): Promise<number[]> {
+  const [participating, working] = await Promise.all([
+    db.select({ chatId: agentParticipations.chatId }).from(agentParticipations)
+      .where(eq(agentParticipations.botUserId, botUserId))
+      .orderBy(desc(agentParticipations.updatedAt)).limit(MAX_RUNTIME_AUDIENCE_CHATS),
+    db.select({ chatId: agentSessions.chatId }).from(agentSessions)
+      .where(eq(agentSessions.botUserId, botUserId))
+      .orderBy(desc(agentSessions.updatedAt)).limit(MAX_RUNTIME_AUDIENCE_CHATS),
+  ])
+  const chatIds = [...new Set([...participating, ...working].map((row) => row.chatId))].slice(0, MAX_RUNTIME_AUDIENCE_CHATS)
+  if (chatIds.length === 0) return []
+  const chatRows = await db.select().from(chats).where(inArray(chats.id, chatIds))
+  const users = new Set<number>()
+  for (const chat of chatRows) {
+    for (const userId of await chatRecipientUserIds(chat)) {
+      if (userId !== ownerUserId && userId !== botUserId) users.add(userId)
+      if (users.size >= MAX_RUNTIME_AUDIENCE_USERS) return [...users]
+    }
+  }
+  return [...users]
+}
+
+/**
+ * Durable user-bucket updates so reconnecting apps render the right status on
+ * the first frame: the owner's view to the owner, the status-only view to
+ * members of the agent's chats.
+ */
+export async function publishRuntimeChange(row: DbAgentRuntime, ownerUserId: number): Promise<void> {
+  const deliveries = [
+    { userId: ownerUserId, runtime: encodeAgentRuntime(row, "owner") },
+    ...(await runtimeAudience(row.botUserId, ownerUserId)).map((userId) => ({ userId, runtime: encodeAgentRuntime(row, "other") })),
+  ]
+  for (const { userId, runtime } of deliveries) {
+    const durable = await UserBucketUpdates.enqueue({ userId, update: { oneofKind: "userAgentRuntime", userAgentRuntime: { runtime } } })
+    RealtimeUpdates.pushToUser(userId, [{
+      seq: durable.seq,
+      date: encodeDateStrict(durable.date),
+      update: { oneofKind: "agentRuntime", agentRuntime: { runtime } },
+    }])
+  }
+}
+
+/**
+ * Marks runtimes whose heartbeats lapsed as offline and publishes the change.
+ * The conditional update claims each lapse once across server processes.
+ */
+export async function sweepLapsedAgentRuntimes(now = Date.now()): Promise<number> {
+  const cutoff = new Date(now - AGENT_RUNTIME_HEARTBEAT_SECONDS * MISSED_HEARTBEATS_OFFLINE * 1_000)
+  const lapsed = await db
+    .update(agentRuntimes)
+    .set({ status: AgentRuntimeStatus.OFFLINE, updatedAt: new Date(now) })
+    .where(and(ne(agentRuntimes.status, AgentRuntimeStatus.OFFLINE), lt(agentRuntimes.lastSeenAt, cutoff)))
+    .returning()
+  for (const row of lapsed) {
+    const bot = await UsersModel.getUserById(row.botUserId)
+    if (bot?.botCreatorId == null) continue
+    try {
+      await publishRuntimeChange(row, bot.botCreatorId)
+    } catch (error) {
+      log.warn("Failed to publish a lapsed agent runtime", { botUserId: row.botUserId, error })
+    }
+  }
+  return lapsed.length
+}
+
+let sweepTimer: ReturnType<typeof setInterval> | undefined
+let sweepInFlight: Promise<unknown> | undefined
+
+export function startAgentRuntimeSweeper(): void {
+  if (sweepTimer) return
+  sweepTimer = setInterval(() => {
+    if (sweepInFlight) return
+    sweepInFlight = sweepLapsedAgentRuntimes()
+      .catch((error: unknown) => log.warn("Agent runtime sweep failed", { error }))
+      .finally(() => { sweepInFlight = undefined })
+  }, AGENT_RUNTIME_HEARTBEAT_SECONDS * 1_000)
+  sweepTimer.unref?.()
+}
+
+export async function stopAgentRuntimeSweeper(): Promise<void> {
+  if (sweepTimer) clearInterval(sweepTimer)
+  sweepTimer = undefined
+  await sweepInFlight
 }

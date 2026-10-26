@@ -3411,12 +3411,6 @@ export interface AgentParticipation {
      */
     joinedBy?: bigint;
     /**
-     * The session that direct input in this chat addresses by default.
-     *
-     * @generated from protobuf field: optional int64 default_session_id = 5;
-     */
-    defaultSessionId?: bigint;
-    /**
      * @generated from protobuf field: int64 revision = 6;
      */
     revision: bigint;
@@ -3700,8 +3694,8 @@ export interface GetAgentParticipationsResult {
     participations: AgentParticipation[];
 }
 /**
- * The bot itself (joining on a mention or invite), its owner, or a person
- * with a grant on it.
+ * The bot itself (joining on a mention or invite), its owner, or a CONFIGURE
+ * grantee.
  *
  * @generated from protobuf message SetAgentParticipationInput
  */
@@ -3720,12 +3714,6 @@ export interface SetAgentParticipationInput {
      * @generated from protobuf field: AgentParticipationMode mode = 3;
      */
     mode: AgentParticipationMode;
-    /**
-     * Bot only: the session that direct input in this chat addresses.
-     *
-     * @generated from protobuf field: optional int64 default_session_id = 4;
-     */
-    defaultSessionId?: bigint;
     /**
      * Bot only: the person whose mention or invite joined the agent.
      *
@@ -3780,6 +3768,41 @@ export interface ControlAgentSessionInput {
      * @generated from protobuf field: AgentSessionControl op = 2;
      */
     op: AgentSessionControl;
+}
+/**
+ * Moves a work's canonical publication chat into a subthread of its current
+ * chat (spec §5.2), keeping the work, its native identity and its delivery
+ * ledger. The parent keeps its status card. Idempotent: a retry after a crash
+ * returns moved = false with the same destination, so the bridge publishes
+ * everything after the first successful result in the destination only.
+ * The session's bot or its owner; both must have access to the destination.
+ *
+ * @generated from protobuf message MoveAgentSessionInput
+ */
+export interface MoveAgentSessionInput {
+    /**
+     * @generated from protobuf field: int64 agent_session_id = 1;
+     */
+    agentSessionId: bigint;
+    /**
+     * @generated from protobuf field: InputPeer destination_peer_id = 2;
+     */
+    destinationPeerId?: InputPeer;
+}
+/**
+ * @generated from protobuf message MoveAgentSessionResult
+ */
+export interface MoveAgentSessionResult {
+    /**
+     * @generated from protobuf field: AgentSession agent_session = 1;
+     */
+    agentSession?: AgentSession;
+    /**
+     * False when the work was already published in the destination.
+     *
+     * @generated from protobuf field: bool moved = 2;
+     */
+    moved: boolean;
 }
 /**
  * @generated from protobuf message ControlAgentSessionResult
@@ -3859,13 +3882,6 @@ export interface ConnectAgentSessionInput {
      */
     relation: AgentSessionRelation;
     /**
-     * Bridge v2: allow another session for the same chat and bot, for example
-     * after /new. Without it a chat holds at most one session per bot.
-     *
-     * @generated from protobuf field: bool allow_multiple = 10;
-     */
-    allowMultiple: boolean;
-    /**
      * @generated from protobuf field: optional string workspace_label = 11;
      */
     workspaceLabel?: string;
@@ -3927,8 +3943,8 @@ export interface GetAgentSessionInput {
      */
     botUserId: bigint;
     /**
-     * A specific session in this conversation. When omitted: the participation's
-     * default session, else the most recently connected one.
+     * Must match the conversation's work when given. A conversation holds at
+     * most one work per bot.
      *
      * @generated from protobuf field: optional int64 agent_session_id = 3;
      */
@@ -6175,6 +6191,12 @@ export interface RpcCall {
          */
         controlAgentSession: ControlAgentSessionInput;
     } | {
+        oneofKind: "moveAgentSession";
+        /**
+         * @generated from protobuf field: MoveAgentSessionInput moveAgentSession = 163;
+         */
+        moveAgentSession: MoveAgentSessionInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -7149,6 +7171,12 @@ export interface RpcResult {
          * @generated from protobuf field: ControlAgentSessionResult controlAgentSession = 162;
          */
         controlAgentSession: ControlAgentSessionResult;
+    } | {
+        oneofKind: "moveAgentSession";
+        /**
+         * @generated from protobuf field: MoveAgentSessionResult moveAgentSession = 163;
+         */
+        moveAgentSession: MoveAgentSessionResult;
     } | {
         oneofKind: undefined;
     };
@@ -17026,7 +17054,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: CONTROL_AGENT_SESSION = 161;
      */
-    CONTROL_AGENT_SESSION = 161
+    CONTROL_AGENT_SESSION = 161,
+    /**
+     * @generated from protobuf enum value: MOVE_AGENT_SESSION = 162;
+     */
+    MOVE_AGENT_SESSION = 162
 }
 /**
  * @generated from protobuf enum GridTranscriptionState
@@ -25131,7 +25163,6 @@ class AgentParticipation$Type extends MessageType<AgentParticipation> {
             { no: 2, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "mode", kind: "enum", T: () => ["AgentParticipationMode", AgentParticipationMode, "AGENT_PARTICIPATION_MODE_"] },
             { no: 4, name: "joined_by", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 5, name: "default_session_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 7, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 8, name: "output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
@@ -25163,9 +25194,6 @@ class AgentParticipation$Type extends MessageType<AgentParticipation> {
                     break;
                 case /* optional int64 joined_by */ 4:
                     message.joinedBy = reader.int64().toBigInt();
-                    break;
-                case /* optional int64 default_session_id */ 5:
-                    message.defaultSessionId = reader.int64().toBigInt();
                     break;
                 case /* int64 revision */ 6:
                     message.revision = reader.int64().toBigInt();
@@ -25200,9 +25228,6 @@ class AgentParticipation$Type extends MessageType<AgentParticipation> {
         /* optional int64 joined_by = 4; */
         if (message.joinedBy !== undefined)
             writer.tag(4, WireType.Varint).int64(message.joinedBy);
-        /* optional int64 default_session_id = 5; */
-        if (message.defaultSessionId !== undefined)
-            writer.tag(5, WireType.Varint).int64(message.defaultSessionId);
         /* int64 revision = 6; */
         if (message.revision !== 0n)
             writer.tag(6, WireType.Varint).int64(message.revision);
@@ -26222,7 +26247,6 @@ class SetAgentParticipationInput$Type extends MessageType<SetAgentParticipationI
             { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
             { no: 2, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "mode", kind: "enum", T: () => ["AgentParticipationMode", AgentParticipationMode, "AGENT_PARTICIPATION_MODE_"] },
-            { no: 4, name: "default_session_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 5, name: "joined_by", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
         ]);
@@ -26248,9 +26272,6 @@ class SetAgentParticipationInput$Type extends MessageType<SetAgentParticipationI
                     break;
                 case /* AgentParticipationMode mode */ 3:
                     message.mode = reader.int32();
-                    break;
-                case /* optional int64 default_session_id */ 4:
-                    message.defaultSessionId = reader.int64().toBigInt();
                     break;
                 case /* optional int64 joined_by */ 5:
                     message.joinedBy = reader.int64().toBigInt();
@@ -26279,9 +26300,6 @@ class SetAgentParticipationInput$Type extends MessageType<SetAgentParticipationI
         /* AgentParticipationMode mode = 3; */
         if (message.mode !== 0)
             writer.tag(3, WireType.Varint).int32(message.mode);
-        /* optional int64 default_session_id = 4; */
-        if (message.defaultSessionId !== undefined)
-            writer.tag(4, WireType.Varint).int64(message.defaultSessionId);
         /* optional int64 joined_by = 5; */
         if (message.joinedBy !== undefined)
             writer.tag(5, WireType.Varint).int64(message.joinedBy);
@@ -26454,6 +26472,114 @@ class ControlAgentSessionInput$Type extends MessageType<ControlAgentSessionInput
  */
 export const ControlAgentSessionInput = new ControlAgentSessionInput$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class MoveAgentSessionInput$Type extends MessageType<MoveAgentSessionInput> {
+    constructor() {
+        super("MoveAgentSessionInput", [
+            { no: 1, name: "agent_session_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "destination_peer_id", kind: "message", T: () => InputPeer }
+        ]);
+    }
+    create(value?: PartialMessage<MoveAgentSessionInput>): MoveAgentSessionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.agentSessionId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<MoveAgentSessionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MoveAgentSessionInput): MoveAgentSessionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 agent_session_id */ 1:
+                    message.agentSessionId = reader.int64().toBigInt();
+                    break;
+                case /* InputPeer destination_peer_id */ 2:
+                    message.destinationPeerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.destinationPeerId);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MoveAgentSessionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 agent_session_id = 1; */
+        if (message.agentSessionId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.agentSessionId);
+        /* InputPeer destination_peer_id = 2; */
+        if (message.destinationPeerId)
+            InputPeer.internalBinaryWrite(message.destinationPeerId, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MoveAgentSessionInput
+ */
+export const MoveAgentSessionInput = new MoveAgentSessionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MoveAgentSessionResult$Type extends MessageType<MoveAgentSessionResult> {
+    constructor() {
+        super("MoveAgentSessionResult", [
+            { no: 1, name: "agent_session", kind: "message", T: () => AgentSession },
+            { no: 2, name: "moved", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MoveAgentSessionResult>): MoveAgentSessionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.moved = false;
+        if (value !== undefined)
+            reflectionMergePartial<MoveAgentSessionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MoveAgentSessionResult): MoveAgentSessionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* AgentSession agent_session */ 1:
+                    message.agentSession = AgentSession.internalBinaryRead(reader, reader.uint32(), options, message.agentSession);
+                    break;
+                case /* bool moved */ 2:
+                    message.moved = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MoveAgentSessionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* AgentSession agent_session = 1; */
+        if (message.agentSession)
+            AgentSession.internalBinaryWrite(message.agentSession, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool moved = 2; */
+        if (message.moved !== false)
+            writer.tag(2, WireType.Varint).bool(message.moved);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MoveAgentSessionResult
+ */
+export const MoveAgentSessionResult = new MoveAgentSessionResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class ControlAgentSessionResult$Type extends MessageType<ControlAgentSessionResult> {
     constructor() {
         super("ControlAgentSessionResult", [
@@ -26559,7 +26685,6 @@ class ConnectAgentSessionInput$Type extends MessageType<ConnectAgentSessionInput
             { no: 7, name: "status_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 8, name: "parent_agent_session_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 9, name: "relation", kind: "enum", T: () => ["AgentSessionRelation", AgentSessionRelation, "AGENT_SESSION_RELATION_"] },
-            { no: 10, name: "allow_multiple", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
             { no: 11, name: "workspace_label", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
@@ -26570,7 +26695,6 @@ class ConnectAgentSessionInput$Type extends MessageType<ConnectAgentSessionInput
         message.instanceRef = "";
         message.sessionRef = "";
         message.relation = 0;
-        message.allowMultiple = false;
         if (value !== undefined)
             reflectionMergePartial<ConnectAgentSessionInput>(this, message, value);
         return message;
@@ -26606,9 +26730,6 @@ class ConnectAgentSessionInput$Type extends MessageType<ConnectAgentSessionInput
                     break;
                 case /* AgentSessionRelation relation */ 9:
                     message.relation = reader.int32();
-                    break;
-                case /* bool allow_multiple */ 10:
-                    message.allowMultiple = reader.bool();
                     break;
                 case /* optional string workspace_label */ 11:
                     message.workspaceLabel = reader.string();
@@ -26652,9 +26773,6 @@ class ConnectAgentSessionInput$Type extends MessageType<ConnectAgentSessionInput
         /* AgentSessionRelation relation = 9; */
         if (message.relation !== 0)
             writer.tag(9, WireType.Varint).int32(message.relation);
-        /* bool allow_multiple = 10; */
-        if (message.allowMultiple !== false)
-            writer.tag(10, WireType.Varint).bool(message.allowMultiple);
         /* optional string workspace_label = 11; */
         if (message.workspaceLabel !== undefined)
             writer.tag(11, WireType.LengthDelimited).string(message.workspaceLabel);
@@ -29781,7 +29899,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 159, name: "getAgentParticipations", kind: "message", oneof: "input", T: () => GetAgentParticipationsInput },
             { no: 160, name: "setAgentParticipation", kind: "message", oneof: "input", T: () => SetAgentParticipationInput },
             { no: 161, name: "updateAgentSettings", kind: "message", oneof: "input", T: () => UpdateAgentSettingsInput },
-            { no: 162, name: "controlAgentSession", kind: "message", oneof: "input", T: () => ControlAgentSessionInput }
+            { no: 162, name: "controlAgentSession", kind: "message", oneof: "input", T: () => ControlAgentSessionInput },
+            { no: 163, name: "moveAgentSession", kind: "message", oneof: "input", T: () => MoveAgentSessionInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -30760,6 +30879,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         controlAgentSession: ControlAgentSessionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).controlAgentSession)
                     };
                     break;
+                case /* MoveAgentSessionInput moveAgentSession */ 163:
+                    message.input = {
+                        oneofKind: "moveAgentSession",
+                        moveAgentSession: MoveAgentSessionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).moveAgentSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -31255,6 +31380,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* ControlAgentSessionInput controlAgentSession = 162; */
         if (message.input.oneofKind === "controlAgentSession")
             ControlAgentSessionInput.internalBinaryWrite(message.input.controlAgentSession, writer.tag(162, WireType.LengthDelimited).fork(), options).join();
+        /* MoveAgentSessionInput moveAgentSession = 163; */
+        if (message.input.oneofKind === "moveAgentSession")
+            MoveAgentSessionInput.internalBinaryWrite(message.input.moveAgentSession, writer.tag(163, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -31429,7 +31557,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 159, name: "getAgentParticipations", kind: "message", oneof: "result", T: () => GetAgentParticipationsResult },
             { no: 160, name: "setAgentParticipation", kind: "message", oneof: "result", T: () => SetAgentParticipationResult },
             { no: 161, name: "updateAgentSettings", kind: "message", oneof: "result", T: () => UpdateAgentSettingsResult },
-            { no: 162, name: "controlAgentSession", kind: "message", oneof: "result", T: () => ControlAgentSessionResult }
+            { no: 162, name: "controlAgentSession", kind: "message", oneof: "result", T: () => ControlAgentSessionResult },
+            { no: 163, name: "moveAgentSession", kind: "message", oneof: "result", T: () => MoveAgentSessionResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -32408,6 +32537,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         controlAgentSession: ControlAgentSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).controlAgentSession)
                     };
                     break;
+                case /* MoveAgentSessionResult moveAgentSession */ 163:
+                    message.result = {
+                        oneofKind: "moveAgentSession",
+                        moveAgentSession: MoveAgentSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).moveAgentSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -32903,6 +33038,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* ControlAgentSessionResult controlAgentSession = 162; */
         if (message.result.oneofKind === "controlAgentSession")
             ControlAgentSessionResult.internalBinaryWrite(message.result.controlAgentSession, writer.tag(162, WireType.LengthDelimited).fork(), options).join();
+        /* MoveAgentSessionResult moveAgentSession = 163; */
+        if (message.result.oneofKind === "moveAgentSession")
+            MoveAgentSessionResult.internalBinaryWrite(message.result.moveAgentSession, writer.tag(163, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

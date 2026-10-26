@@ -16,8 +16,14 @@ import { ChatModel } from "@in/server/db/models/chats"
 import { UsersModel } from "@in/server/db/models/users"
 import { agentSessions, chats, messages, type DbAgentSession, type DbChat } from "@in/server/db/schema"
 import { insertChatUpdate, pushChatUpdate } from "@in/server/modules/agents/chatUpdates"
+import type { ServerUpdate } from "@in/server/protocol/server"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
+import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
+import { decideNotification } from "@in/server/modules/notifications/decision"
+import { resolveEffectiveNotificationMode } from "@in/server/modules/notifications/dialogNotificationSettings"
+import { getInheritedDialogNotificationSettings } from "@in/server/modules/notifications/inheritedDialogNotificationSettings"
+import { normalizeGlobalNotificationMode } from "@in/server/modules/notifications/notificationSettingsCompat"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { encodeOutputPeerFromChat } from "@in/server/realtime/encoders/encodePeer"
@@ -126,6 +132,25 @@ async function statusMessageId(row: DbAgentSession): Promise<bigint | undefined>
   return status ? BigInt(status.messageId) : undefined
 }
 
+/** Chat-bucket snapshot of a session; the client peer is encoded per recipient. */
+export async function agentSessionChatUpdate(row: DbAgentSession): Promise<ServerUpdate["update"]> {
+  const fields = agentSessionV2Fields(row)
+  return {
+    oneofKind: "agentSessionState",
+    agentSessionState: {
+      agentSessionId: row.id,
+      botUserId: BigInt(row.botUserId),
+      provider: row.provider,
+      statusMessageId: await statusMessageId(row),
+      parentSessionId: fields.parentSessionId,
+      relation: fields.relation,
+      state: fields.state,
+      workspaceLabel: fields.workspaceLabel,
+      chatId: BigInt(row.chatId),
+    },
+  }
+}
+
 export async function encodeAgentSessionForViewer(row: DbAgentSession, chat: DbChat, viewerUserId: number): Promise<AgentSession> {
   return {
     id: row.id,
@@ -192,19 +217,7 @@ export async function updateAgentSessionState(
     if (!row) throw RealtimeRpcError.InternalError()
     if (!changed) return { row, applied: true as const }
 
-    const { durable } = await insertChatUpdate(tx, lockedChat.id, {
-      oneofKind: "agentSessionState",
-      agentSessionState: {
-        agentSessionId: row.id,
-        botUserId: BigInt(row.botUserId),
-        provider: row.provider,
-        statusMessageId: await statusMessageId(row),
-        parentSessionId: row.parentSessionId ?? undefined,
-        relation: row.relation,
-        state: stored,
-        workspaceLabel: agentSessionV2Fields(row).workspaceLabel,
-      },
-    })
+    const { durable } = await insertChatUpdate(tx, lockedChat.id, await agentSessionChatUpdate(row))
     return {
       row,
       applied: true as const,
@@ -239,7 +252,23 @@ async function pushAttention(row: DbAgentSession, chat: DbChat): Promise<void> {
   if (!attention || attention.userIds.length === 0) return
   const bot = await UsersModel.getUserById(row.botUserId)
   const name = [bot?.firstName, bot?.lastName].filter(Boolean).join(" ") || "Agent"
-  for (const userId of attention.userIds.map(Number)) {
+  const userIds = attention.userIds.map(Number)
+  const dialogSettings = await getInheritedDialogNotificationSettings(chat.id, userIds)
+  for (const userId of userIds) {
+    // Attention is addressed to these people, so it notifies like a mention:
+    // muted chats and "no notifications" stay silent.
+    const decision = decideNotification({
+      mode: resolveEffectiveNotificationMode({
+        globalMode: normalizeGlobalNotificationMode(await getCachedUserSettings(userId)),
+        dialogNotificationSettings: dialogSettings.get(userId),
+      }),
+      isUrgentNudge: false,
+      isNudge: false,
+      isDM: chat.type === "private",
+      isReplyToUser: false,
+      isExplicitlyMentioned: true,
+    })
+    if (!decision.shouldNotify) continue
     try {
       await Notifications.sendToUser({
         userId,

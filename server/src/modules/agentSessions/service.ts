@@ -24,7 +24,6 @@ import { MessageModel } from "@in/server/db/models/messages"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UsersModel } from "@in/server/db/models/users"
 import {
-  agentParticipations,
   agentSessionMessages,
   agentSessions,
   blockContents,
@@ -57,7 +56,7 @@ import { encodeOutputPeerFromChat, encodePeerFromChat } from "@in/server/realtim
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
-import { and, desc, eq, exists, gt, inArray, ne, or, sql } from "drizzle-orm"
+import { and, eq, exists, gt, inArray, ne, or, sql } from "drizzle-orm"
 import { agentSessionV2Fields, encryptWorkspaceLabel } from "./stateFields"
 import {
   agentSessionHash,
@@ -312,16 +311,10 @@ export async function connectAgentSession(
       }
     }
 
-    // v1 keeps one session per (chat, bot); v2 opts into more, as after /new.
-    // A chat bound to one agent never gains another bot's session.
     const [occupied] = await tx.select().from(agentSessions).where(
       boundContext
-        ? input.allowMultiple
-          ? and(eq(agentSessions.chatId, chat.id), ne(agentSessions.botUserId, botUserId))
-          : eq(agentSessions.chatId, chat.id)
-        : input.allowMultiple
-          ? sql`false`
-          : and(eq(agentSessions.chatId, chat.id), eq(agentSessions.botUserId, botUserId)),
+        ? eq(agentSessions.chatId, chat.id)
+        : and(eq(agentSessions.chatId, chat.id), eq(agentSessions.botUserId, botUserId)),
     ).limit(1)
     if (occupied) throw RealtimeRpcError.BadRequest()
 
@@ -343,12 +336,6 @@ export async function connectAgentSession(
       })
       .onConflictDoNothing()
       .returning()
-    if (created && input.allowMultiple) {
-      // The newest session becomes the one direct input in this chat addresses.
-      await tx.update(agentParticipations)
-        .set({ defaultSessionId: created.id, revision: sql`${agentParticipations.revision} + 1`, updatedAt: new Date() })
-        .where(and(eq(agentParticipations.chatId, chat.id), eq(agentParticipations.botUserId, botUserId)))
-    }
     if (!created) {
       const [concurrentExternal] = await tx.select().from(agentSessions).where(and(
         eq(agentSessions.botUserId, botUserId),
@@ -402,29 +389,18 @@ export async function getAgentSession(
   }
 }
 
-/** The requested session, else the participation default, else the newest. */
+/** The conversation's one work for this bot; a given ID must match it. */
 async function selectedAgentSession(input: {
   chatId: number
   botUserId: number
   sessionId?: bigint
 }): Promise<DbAgentSession | undefined> {
-  const inChat = and(eq(agentSessions.chatId, input.chatId), eq(agentSessions.botUserId, input.botUserId))
-  if (input.sessionId !== undefined) {
-    const [row] = await db.select().from(agentSessions).where(and(inChat, eq(agentSessions.id, input.sessionId))).limit(1)
-    return row
-  }
-  const [participation] = await db
-    .select({ defaultSessionId: agentParticipations.defaultSessionId })
-    .from(agentParticipations)
-    .where(and(eq(agentParticipations.chatId, input.chatId), eq(agentParticipations.botUserId, input.botUserId)))
-    .limit(1)
-  if (participation?.defaultSessionId) {
-    const [row] = await db.select().from(agentSessions)
-      .where(and(inChat, eq(agentSessions.id, participation.defaultSessionId))).limit(1)
-    if (row) return row
-  }
-  const [newest] = await db.select().from(agentSessions).where(inChat).orderBy(desc(agentSessions.id)).limit(1)
-  return newest
+  const [row] = await db.select().from(agentSessions).where(and(
+    eq(agentSessions.chatId, input.chatId),
+    eq(agentSessions.botUserId, input.botUserId),
+  )).limit(1)
+  if (row && input.sessionId !== undefined && row.id !== input.sessionId) return undefined
+  return row
 }
 
 async function prepareSync(input: AgentSessionMessageSync): Promise<PreparedSync> {

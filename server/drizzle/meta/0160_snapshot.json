@@ -1,5 +1,5 @@
 {
-  "id": "7194840d-c19d-409b-b33f-a10371363b41",
+  "id": "3700e1a2-e051-4f16-909f-ed818c52c56c",
   "prevId": "5289272b-822a-4169-9bd6-e11e89173752",
   "version": "7",
   "dialect": "postgresql",
@@ -12971,8 +12971,8 @@
           "method": "btree",
           "with": {}
         },
-        "agent_sessions_chat_bot_idx": {
-          "name": "agent_sessions_chat_bot_idx",
+        "agent_sessions_chat_bot_unique": {
+          "name": "agent_sessions_chat_bot_unique",
           "columns": [
             {
               "expression": "chat_id",
@@ -12985,15 +12985,9 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -13321,12 +13315,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "default_session_id": {
-          "name": "default_session_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
         "revision": {
           "name": "revision",
           "type": "bigint",
@@ -13420,19 +13408,6 @@
           "tableTo": "users",
           "columnsFrom": [
             "joined_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "agent_participations_default_session_id_agent_sessions_id_fk": {
-          "name": "agent_participations_default_session_id_agent_sessions_id_fk",
-          "tableFrom": "agent_participations",
-          "tableTo": "agent_sessions",
-          "columnsFrom": [
-            "default_session_id"
           ],
           "columnsTo": [
             "id"
