@@ -87,7 +87,8 @@ fn content_blocks(input: &Input) -> Vec<Value> {
                 read_base64(&path).map(|data| UserContent::image_block(mime, &data))
             }
             (InputAttachmentKind::File, Some(path)) if mime == "application/pdf" => {
-                read_base64(&path).map(|data| UserContent::pdf_block(&data, attachment.file_name.as_deref()))
+                read_base64(&path)
+                    .map(|data| UserContent::pdf_block(&data, attachment.file_name.as_deref()))
             }
             _ => None,
         };
@@ -96,7 +97,11 @@ fn content_blocks(input: &Input) -> Vec<Value> {
             None => described.push(format!(
                 "- {} ({}){}",
                 attachment.file_name.as_deref().unwrap_or("attachment"),
-                if mime.is_empty() { "unknown type" } else { mime },
+                if mime.is_empty() {
+                    "unknown type"
+                } else {
+                    mime
+                },
                 attachment
                     .local_uri
                     .as_deref()
@@ -120,7 +125,10 @@ fn local_path(uri: &str) -> String {
 }
 
 fn is_api_image(mime: &str) -> bool {
-    matches!(mime, "image/png" | "image/jpeg" | "image/gif" | "image/webp")
+    matches!(
+        mime,
+        "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+    )
 }
 
 fn read_base64(path: &str) -> Option<String> {
@@ -151,7 +159,9 @@ pub enum OpPlan {
 /// user message uuid (they are the same for inputs Inline sent).
 pub fn op_plan(op: &Op) -> OpPlan {
     match op {
-        Op::Interrupt { cancel_queued } => OpPlan::Control(vec![request::interrupt(*cancel_queued)]),
+        Op::Interrupt { cancel_queued } => {
+            OpPlan::Control(vec![request::interrupt(*cancel_queued)])
+        }
         Op::Settings { change, .. } => settings_requests(change),
         Op::Compact => OpPlan::SlashCommand("/compact".into()),
         Op::Clear => OpPlan::SlashCommand("/clear".into()),
@@ -183,11 +193,13 @@ pub fn op_plan(op: &Op) -> OpPlan {
         Op::Archive | Op::Unarchive => {
             OpPlan::Unavailable("Claude Code has no archive; Inline never deletes sessions".into())
         }
-        Op::Review { .. } => OpPlan::Unavailable("Claude has no review operation over its protocol".into()),
+        Op::Review { .. } => {
+            OpPlan::Unavailable("Claude has no review operation over its protocol".into())
+        }
         Op::Goal { .. } => OpPlan::Unavailable("Claude has no session goal operation".into()),
-        Op::McpAuth { .. } => OpPlan::Unavailable(
-            "Claude MCP sign-in runs in the terminal (/mcp)".into(),
-        ),
+        Op::McpAuth { .. } => {
+            OpPlan::Unavailable("Claude MCP sign-in runs in the terminal (/mcp)".into())
+        }
     }
 }
 

@@ -247,7 +247,10 @@ mod tests {
 
     #[test]
     fn passive_context_sets_should_query_false() {
-        let value = UserMessage::text("ambient").with_uuid("p1").passive().to_value();
+        let value = UserMessage::text("ambient")
+            .with_uuid("p1")
+            .passive()
+            .to_value();
         assert_eq!(value["shouldQuery"], json!(false));
         assert!(value.get("priority").is_none());
     }
@@ -273,6 +276,9 @@ mod tests {
         ]));
         let value = message.to_value();
         assert_eq!(value["message"]["content"][1]["type"], json!("image"));
-        assert_eq!(value["message"]["content"][1]["source"]["data"], json!("AAAA"));
+        assert_eq!(
+            value["message"]["content"][1]["source"]["data"],
+            json!("AAAA")
+        );
     }
 }

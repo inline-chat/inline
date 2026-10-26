@@ -3,5 +3,5 @@
 //! v1 stays untouched until a provider passes its stage acceptance.
 
 pub(crate) mod doc;
-pub(crate) mod render;
 pub(crate) mod files;
+pub(crate) mod render;

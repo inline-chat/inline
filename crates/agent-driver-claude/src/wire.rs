@@ -62,8 +62,8 @@ pub fn parse_value(value: Value) -> Result<Frame, FrameError> {
     }
     match value.get("type").and_then(Value::as_str) {
         Some("control_request") => {
-            let request_id = string_field(&value, "request_id")
-                .ok_or(FrameError::MissingField("request_id"))?;
+            let request_id =
+                string_field(&value, "request_id").ok_or(FrameError::MissingField("request_id"))?;
             let request = value
                 .get("request")
                 .cloned()
@@ -541,7 +541,9 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert!(matches!(request, Frame::ControlRequest { ref request_id, .. } if request_id == "r1"));
+        assert!(
+            matches!(request, Frame::ControlRequest { ref request_id, .. } if request_id == "r1")
+        );
 
         let success = parse_line(
             br#"{"type":"control_response","response":{"subtype":"success","request_id":"req_1","response":{"still_queued":[]}}}"#,

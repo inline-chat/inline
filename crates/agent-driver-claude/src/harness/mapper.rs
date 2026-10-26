@@ -14,9 +14,8 @@ use inline_agent_bridge::harness::{
     DecisionId, DecisionKind, DeltaStream, EffectiveSettings, Event, FieldAnswer, FieldId,
     FieldInput, FieldOption, FileChangeKind, FileDiff, FormField, InputFact, InputId, Interaction,
     InteractionId, InteractionKind, InteractionResponse, Item, ItemBody, ItemDelta, ItemId,
-    ItemStatus, ItemUpdate, MessageRole, Notice, NoticeLevel, OpError, QueueEntryId, QuestionForm,
-    QueuedInput, RunState,
-    TokenUsage, TurnPhase, UsageUpdate, UserId, WaitingOn,
+    ItemStatus, ItemUpdate, MessageRole, Notice, NoticeLevel, OpError, QuestionForm, QueueEntryId,
+    QueuedInput, RunState, TokenUsage, TurnPhase, UsageUpdate, UserId, WaitingOn,
 };
 use inline_agent_bridge::{
     AgentMessagePhase, DriverSettingOption, DriverUsageWindow, PlanStep, PlanStepStatus, TurnId,
@@ -25,9 +24,7 @@ use inline_agent_bridge::{
 use serde_json::{Map, Value, json};
 
 use crate::control::{IncomingRequest, InterruptReceipt, PermissionDecision, PermissionRequest};
-use crate::wire::{
-    AssistantMessage, CliMessage, MessageKind, ResultMessage, TaskEvent, UserFrame,
-};
+use crate::wire::{AssistantMessage, CliMessage, MessageKind, ResultMessage, TaskEvent, UserFrame};
 
 /// Decision ids Inline offers for a Claude permission ask.
 pub const ALLOW: &str = "allow";
@@ -204,7 +201,9 @@ impl ClaudeMapper {
             }
             MessageKind::Assistant(assistant) => self.assistant(assistant, &message.raw),
             MessageKind::User(user) => self.user(user),
-            MessageKind::StreamEvent(stream) => self.stream_event(stream.parent_tool_use_id.as_deref(), &stream.event),
+            MessageKind::StreamEvent(stream) => {
+                self.stream_event(stream.parent_tool_use_id.as_deref(), &stream.event)
+            }
             MessageKind::Result(result) => self.result(result),
             MessageKind::Task(task) => self.task(task, &message.raw),
             MessageKind::Status(status) => {
@@ -218,31 +217,39 @@ impl ClaudeMapper {
                     });
                 }
                 if status.status.is_some() || status.compact_result.is_some() {
-                    events.push(notice(NoticeLevel::Info, "status", status_text(status), &message.raw));
+                    events.push(notice(
+                        NoticeLevel::Info,
+                        "status",
+                        status_text(status),
+                        &message.raw,
+                    ));
                 }
                 events
             }
             MessageKind::CompactBoundary => {
                 let id = message.uuid().unwrap_or("compact");
-                vec![Event::Item(
-                    Item::new(
-                        item_id(id),
-                        self.turn.clone(),
-                        ItemUpdate::Completed {
-                            body: ItemBody::Usage {
-                                label: "Context compacted".into(),
-                            },
-                            status: ItemStatus::Completed,
+                vec![Event::Item(Item::new(
+                    item_id(id),
+                    self.turn.clone(),
+                    ItemUpdate::Completed {
+                        body: ItemBody::Usage {
+                            label: "Context compacted".into(),
                         },
-                        message.raw.clone(),
-                    ),
-                )]
+                        status: ItemStatus::Completed,
+                    },
+                    message.raw.clone(),
+                ))]
             }
             MessageKind::RateLimit(limit) => rate_limit(&limit.rate_limit_info),
             // Host-only run-state signal; live work reads it from the client.
             MessageKind::SessionState(_) => Vec::new(),
             MessageKind::BackgroundTasksChanged => {
-                vec![notice(NoticeLevel::Info, "system/background_tasks_changed", None, &message.raw)]
+                vec![notice(
+                    NoticeLevel::Info,
+                    "system/background_tasks_changed",
+                    None,
+                    &message.raw,
+                )]
             }
             MessageKind::System { subtype } => vec![notice(
                 NoticeLevel::Info,
@@ -321,12 +328,16 @@ impl ClaudeMapper {
             "cancelled"
                 if input.as_ref().is_some_and(|input| {
                     self.turn_inputs.contains(input)
-                        || self.facts.contains(&(input.as_str().to_string(), "consumed"))
+                        || self
+                            .facts
+                            .contains(&(input.as_str().to_string(), "consumed"))
                 }) =>
             {
                 Vec::new()
             }
-            "cancelled" => input.map_or_else(Vec::new, |input| self.fact(input, InputFact::Cancelled)),
+            "cancelled" => {
+                input.map_or_else(Vec::new, |input| self.fact(input, InputFact::Cancelled))
+            }
             "discarded" | "refused" => input.map_or_else(Vec::new, |input| {
                 self.fact(
                     input,
@@ -393,13 +404,20 @@ impl ClaudeMapper {
 
     fn assistant(&mut self, assistant: &AssistantMessage, raw: &Value) -> Vec<Event> {
         let mut events = Vec::new();
-        let parent = self.parent(assistant.parent_tool_use_id.as_deref(), assistant.agent_id.as_deref());
+        let parent = self.parent(
+            assistant.parent_tool_use_id.as_deref(),
+            assistant.agent_id.as_deref(),
+        );
         if parent.is_none() {
             events.extend(self.ensure_turn(assistant.uuid.as_deref()));
         }
         if let Some(model) = &assistant.message.model
             && parent.is_none()
-            && self.effective.model.as_ref().is_none_or(|current| &current.value != model)
+            && self
+                .effective
+                .model
+                .as_ref()
+                .is_none_or(|current| &current.value != model)
             && model != "<synthetic>"
         {
             self.effective.model = Some(DriverSettingOption {
@@ -418,7 +436,11 @@ impl ClaudeMapper {
             .clone()
             .or_else(|| assistant.uuid.clone())
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let turn = if parent.is_none() { self.turn.clone() } else { None };
+        let turn = if parent.is_none() {
+            self.turn.clone()
+        } else {
+            None
+        };
         for block in &assistant.message.content {
             let index = self.block_index(&message_id);
             let block_type = block["type"].as_str().unwrap_or("");
@@ -468,10 +490,12 @@ impl ClaudeMapper {
                         && let Ok(child_id) = ChildId::new(id.as_str())
                     {
                         // Until task_started names the task, the tool use stands in.
-                        self.child_by_tool_use.entry(id.clone()).or_insert(ChildRef {
-                            id: child_id,
-                            kind: ChildKind::Subagent,
-                        });
+                        self.child_by_tool_use
+                            .entry(id.clone())
+                            .or_insert(ChildRef {
+                                id: child_id,
+                                kind: ChildKind::Subagent,
+                            });
                     }
                     let item = Item::new(
                         item_id(&id),
@@ -515,7 +539,12 @@ impl ClaudeMapper {
             }
         }
         if let Some(error) = &assistant.error {
-            events.push(notice(NoticeLevel::Warning, "assistant/error", error.as_str().map(str::to_string), raw));
+            events.push(notice(
+                NoticeLevel::Warning,
+                "assistant/error",
+                error.as_str().map(str::to_string),
+                raw,
+            ));
         }
         events
     }
@@ -536,7 +565,11 @@ impl ClaudeMapper {
             match block["type"].as_str() {
                 Some("tool_result") => {
                     let tool_use_id = block["tool_use_id"].as_str().unwrap_or_default();
-                    events.extend(self.tool_result(tool_use_id, block, user.tool_use_result.as_ref()));
+                    events.extend(self.tool_result(
+                        tool_use_id,
+                        block,
+                        user.tool_use_result.as_ref(),
+                    ));
                 }
                 Some("text") => {
                     if let Some(text) = block["text"].as_str() {
@@ -547,12 +580,21 @@ impl ClaudeMapper {
             }
         }
         if !texts.is_empty() && user.is_synthetic != Some(true) {
-            let id = user.uuid.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-            let input = InputId::new(id.as_str()).ok().filter(|_| self.sent.contains(&id));
+            let id = user
+                .uuid
+                .clone()
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let input = InputId::new(id.as_str())
+                .ok()
+                .filter(|_| self.sent.contains(&id));
             events.push(Event::Item(
                 Item::new(
                     item_id(&id),
-                    if parent.is_none() { self.turn.clone() } else { None },
+                    if parent.is_none() {
+                        self.turn.clone()
+                    } else {
+                        None
+                    },
                     ItemUpdate::Completed {
                         body: ItemBody::Message {
                             role: MessageRole::User,
@@ -569,7 +611,12 @@ impl ClaudeMapper {
         events
     }
 
-    fn tool_result(&mut self, tool_use_id: &str, block: &Value, structured: Option<&Value>) -> Vec<Event> {
+    fn tool_result(
+        &mut self,
+        tool_use_id: &str,
+        block: &Value,
+        structured: Option<&Value>,
+    ) -> Vec<Event> {
         let output = result_text(&block["content"]);
         let is_error = block["is_error"].as_bool().unwrap_or(false);
         let status = if self.denied_tool_uses.remove(tool_use_id) {
@@ -604,8 +651,13 @@ impl ClaudeMapper {
         }
         let _ = tool.native;
         vec![Event::Item(
-            Item::new(item_id(tool_use_id), tool.turn, ItemUpdate::Completed { body, status }, native)
-                .with_parent(tool.parent),
+            Item::new(
+                item_id(tool_use_id),
+                tool.turn,
+                ItemUpdate::Completed { body, status },
+                native,
+            )
+            .with_parent(tool.parent),
         )]
     }
 
@@ -627,7 +679,11 @@ impl ClaudeMapper {
                 };
                 let index = event["index"].as_u64().unwrap_or(0);
                 let (stream, text, kind) = match event["delta"]["type"].as_str() {
-                    Some("text_delta") => (DeltaStream::Text, event["delta"]["text"].as_str(), inline_agent_bridge::harness::ItemKind::Message),
+                    Some("text_delta") => (
+                        DeltaStream::Text,
+                        event["delta"]["text"].as_str(),
+                        inline_agent_bridge::harness::ItemKind::Message,
+                    ),
                     Some("thinking_delta") => (
                         DeltaStream::ReasoningSummary,
                         event["delta"]["thinking"].as_str(),
@@ -639,7 +695,11 @@ impl ClaudeMapper {
                     return events;
                 };
                 let parent = self.parent(parent_tool_use_id, None);
-                let turn = if parent.is_none() { self.turn.clone() } else { None };
+                let turn = if parent.is_none() {
+                    self.turn.clone()
+                } else {
+                    None
+                };
                 events.push(Event::Item(
                     Item::new(
                         item_id(&format!("{message_id}:{index}")),
@@ -762,7 +822,12 @@ impl ClaudeMapper {
 
     fn task(&mut self, task: &TaskEvent, raw: &Value) -> Vec<Event> {
         let Ok(id) = ChildId::new(task.task_id.as_str()) else {
-            return vec![notice(NoticeLevel::Info, &format!("system/{}", task.subtype), None, raw)];
+            return vec![notice(
+                NoticeLevel::Info,
+                &format!("system/{}", task.subtype),
+                None,
+                raw,
+            )];
         };
         let child = match self.children.get(&task.task_id) {
             Some(child) => child.clone(),
@@ -776,7 +841,8 @@ impl ClaudeMapper {
             }
         };
         if let Some(tool_use) = &task.tool_use_id {
-            self.child_by_tool_use.insert(tool_use.clone(), child.clone());
+            self.child_by_tool_use
+                .insert(tool_use.clone(), child.clone());
         }
         let (status, title) = match task.subtype.as_str() {
             "task_started" => (ChildStatus::Started, task.description.clone()),
@@ -787,7 +853,10 @@ impl ClaudeMapper {
             ),
             _ => (child_status(task.effective_status()), None),
         };
-        if matches!(status, ChildStatus::Completed | ChildStatus::Failed | ChildStatus::Stopped) {
+        if matches!(
+            status,
+            ChildStatus::Completed | ChildStatus::Failed | ChildStatus::Stopped
+        ) {
             self.children.remove(&task.task_id);
         }
         vec![Event::Child {
@@ -807,7 +876,8 @@ impl ClaudeMapper {
             IncomingRequest::CanUseTool(permission) => {
                 let Ok(id) = InteractionId::new(request_id) else {
                     return RequestMapped::Reply {
-                        response: Ok(PermissionDecision::deny("invalid request id").to_value(&permission.input)),
+                        response: Ok(PermissionDecision::deny("invalid request id")
+                            .to_value(&permission.input)),
                         events: Vec::new(),
                     };
                 };
@@ -815,7 +885,10 @@ impl ClaudeMapper {
                     .agent_id
                     .as_deref()
                     .and_then(|agent| self.children.get(agent).cloned());
-                let item = permission.tool_use_id.as_deref().and_then(|id| ItemId::new(id).ok());
+                let item = permission
+                    .tool_use_id
+                    .as_deref()
+                    .and_then(|id| ItemId::new(id).ok());
                 let (kind, decisions) = if permission.is_ask_user_question() {
                     (
                         InteractionKind::Question {
@@ -842,7 +915,11 @@ impl ClaudeMapper {
                 );
                 RequestMapped::Interaction(vec![Event::Interaction(Interaction {
                     id,
-                    turn: if parent.is_none() { self.turn.clone() } else { None },
+                    turn: if parent.is_none() {
+                        self.turn.clone()
+                    } else {
+                        None
+                    },
                     item,
                     parent,
                     kind,
@@ -852,11 +929,17 @@ impl ClaudeMapper {
             IncomingRequest::UserDialog(dialog) => RequestMapped::Reply {
                 // Undeclared kinds are never answered "cancelled" (that is a
                 // real settlement); an error is discarded and the CLI times out.
-                response: Err(format!("dialog kind {} is not supported", dialog.dialog_kind)),
+                response: Err(format!(
+                    "dialog kind {} is not supported",
+                    dialog.dialog_kind
+                )),
                 events: vec![notice(
                     NoticeLevel::Warning,
                     "request_user_dialog",
-                    Some(format!("Claude asked for a {} dialog Inline cannot show", dialog.dialog_kind)),
+                    Some(format!(
+                        "Claude asked for a {} dialog Inline cannot show",
+                        dialog.dialog_kind
+                    )),
                     request,
                 )],
             },
@@ -869,10 +952,17 @@ impl ClaudeMapper {
                     request,
                 )],
             },
-            IncomingRequest::McpMessage { .. } | IncomingRequest::HookCallback(_) => RequestMapped::NotMine,
+            IncomingRequest::McpMessage { .. } | IncomingRequest::HookCallback(_) => {
+                RequestMapped::NotMine
+            }
             IncomingRequest::Other { subtype, .. } => RequestMapped::Reply {
                 response: Err(format!("Unsupported control request subtype: {subtype}")),
-                events: vec![notice(NoticeLevel::Info, &format!("control_request/{subtype}"), None, request)],
+                events: vec![notice(
+                    NoticeLevel::Info,
+                    &format!("control_request/{subtype}"),
+                    None,
+                    request,
+                )],
             },
         }
     }
@@ -911,13 +1001,17 @@ impl ClaudeMapper {
                     .decisions
                     .iter()
                     .find(|offered| &offered.id == decision)
-                    .ok_or_else(|| OpError::InvalidResponse(format!("decision {decision} was not offered")))?;
+                    .ok_or_else(|| {
+                        OpError::InvalidResponse(format!("decision {decision} was not offered"))
+                    })?;
                 let decision_value = if offered.id.as_str() == DENY {
                     PermissionDecision::deny(
                         message
                             .clone()
                             .filter(|text| !text.trim().is_empty())
-                            .unwrap_or_else(|| "The user doesn't want to proceed with this tool use.".into()),
+                            .unwrap_or_else(|| {
+                                "The user doesn't want to proceed with this tool use.".into()
+                            }),
                     )
                 } else {
                     PermissionDecision::Allow {
@@ -932,9 +1026,14 @@ impl ClaudeMapper {
             }
             InteractionResponse::Answers { answers } => {
                 if !pending.request.is_ask_user_question() {
-                    return Err(OpError::InvalidResponse("this interaction takes a decision".into()));
+                    return Err(OpError::InvalidResponse(
+                        "this interaction takes a decision".into(),
+                    ));
                 }
-                (PermissionDecision::answer_questions(input, answers_map(answers)), None)
+                (
+                    PermissionDecision::answer_questions(input, answers_map(answers)),
+                    None,
+                )
             }
             InteractionResponse::Cancel => (
                 PermissionDecision::deny("The user dismissed this request."),
@@ -988,7 +1087,8 @@ impl ClaudeMapper {
 }
 
 fn item_id(id: &str) -> ItemId {
-    ItemId::new(id).unwrap_or_else(|_| ItemId::new(uuid::Uuid::new_v4().to_string()).expect("uuid id"))
+    ItemId::new(id)
+        .unwrap_or_else(|_| ItemId::new(uuid::Uuid::new_v4().to_string()).expect("uuid id"))
 }
 
 fn notice(level: NoticeLevel, code: &str, message: Option<String>, native: &Value) -> Event {
@@ -1005,7 +1105,11 @@ fn status_text(status: &crate::wire::StatusMessage) -> Option<String> {
         (Some("compacting"), _) => Some("Compacting context".into()),
         (_, Some("failed")) => Some(format!(
             "Compaction failed{}",
-            status.compact_error.as_deref().map(|error| format!(": {error}")).unwrap_or_default()
+            status
+                .compact_error
+                .as_deref()
+                .map(|error| format!(": {error}"))
+                .unwrap_or_default()
         )),
         _ => None,
     }
@@ -1095,7 +1199,12 @@ fn tool_body(block: &Value) -> ItemBody {
     }
 }
 
-fn complete_body(body: ItemBody, output: String, is_error: bool, structured: Option<&Value>) -> ItemBody {
+fn complete_body(
+    body: ItemBody,
+    output: String,
+    is_error: bool,
+    structured: Option<&Value>,
+) -> ItemBody {
     match body {
         ItemBody::Command {
             command,
@@ -1109,12 +1218,19 @@ fn complete_body(body: ItemBody, output: String, is_error: bool, structured: Opt
             actions,
             output: Some(output),
             exit_code: structured
-                .and_then(|value| value["exitCode"].as_i64().or_else(|| value["exit_code"].as_i64()))
+                .and_then(|value| {
+                    value["exitCode"]
+                        .as_i64()
+                        .or_else(|| value["exit_code"].as_i64())
+                })
                 .and_then(|code| i32::try_from(code).ok()),
             duration_ms,
         },
         ItemBody::Tool {
-            name, server, input, ..
+            name,
+            server,
+            input,
+            ..
         } => ItemBody::Tool {
             name,
             server,
@@ -1175,7 +1291,12 @@ fn result_usage(result: &ResultMessage) -> Option<UsageUpdate> {
         .model_usage
         .as_ref()
         .and_then(Value::as_object)
-        .and_then(|models| models.values().filter_map(|model| model["contextWindow"].as_u64()).max());
+        .and_then(|models| {
+            models
+                .values()
+                .filter_map(|model| model["contextWindow"].as_u64())
+                .max()
+        });
     Some(UsageUpdate {
         last: Some(TokenUsage {
             input: input + created,
@@ -1191,7 +1312,10 @@ fn result_usage(result: &ResultMessage) -> Option<UsageUpdate> {
 }
 
 fn rate_limit(info: &Value) -> Vec<Event> {
-    let label = info["rateLimitType"].as_str().unwrap_or("rate_limit").to_string();
+    let label = info["rateLimitType"]
+        .as_str()
+        .unwrap_or("rate_limit")
+        .to_string();
     let window_minutes = match label.as_str() {
         "five_hour" => Some(300),
         label if label.starts_with("seven_day") => Some(10_080),
@@ -1203,7 +1327,8 @@ fn rate_limit(info: &Value) -> Vec<Event> {
         usage: UsageUpdate {
             limits: vec![DriverUsageWindow {
                 label,
-                used_percent: utilization.map_or(0, |value| (value * 100.0).round().clamp(0.0, 100.0) as u8),
+                used_percent: utilization
+                    .map_or(0, |value| (value * 100.0).round().clamp(0.0, 100.0) as u8),
                 window_minutes,
                 resets_at,
             }],
@@ -1251,7 +1376,11 @@ fn child_kind(task: &TaskEvent, raw: &Value) -> ChildKind {
     let task_type = task.task_type.as_deref().unwrap_or("");
     if task_type.contains("bash") || task_type.contains("shell") || task_type.contains("monitor") {
         ChildKind::BackgroundTask
-    } else if task_type.contains("agent") || task_type.contains("workflow") || raw.get("subagent_type").is_some() || task_type.is_empty() {
+    } else if task_type.contains("agent")
+        || task_type.contains("workflow")
+        || raw.get("subagent_type").is_some()
+        || task_type.is_empty()
+    {
         ChildKind::Subagent
     } else {
         ChildKind::Unknown
@@ -1305,11 +1434,19 @@ fn question_form(permission: &PermissionRequest) -> QuestionForm {
 fn answers_map(answers: &[FieldAnswer]) -> Map<String, Value> {
     answers
         .iter()
-        .map(|answer| (answer.field.as_str().to_string(), json!(answer.values.join(", "))))
+        .map(|answer| {
+            (
+                answer.field.as_str().to_string(),
+                json!(answer.values.join(", ")),
+            )
+        })
         .collect()
 }
 
-fn approval_subject(permission: &PermissionRequest, cwd: Option<&std::path::Path>) -> ApprovalSubject {
+fn approval_subject(
+    permission: &PermissionRequest,
+    cwd: Option<&std::path::Path>,
+) -> ApprovalSubject {
     let reason = permission
         .decision_reason
         .clone()
@@ -1325,7 +1462,10 @@ fn approval_subject(permission: &PermissionRequest, cwd: Option<&std::path::Path
         },
         // Edits keep their full input so the card shows what is written.
         name => ApprovalSubject::Tool {
-            name: permission.display_name.clone().unwrap_or_else(|| name.to_string()),
+            name: permission
+                .display_name
+                .clone()
+                .unwrap_or_else(|| name.to_string()),
             input: input.clone(),
             reason: permission.title.clone().or(reason),
         },
@@ -1334,7 +1474,10 @@ fn approval_subject(permission: &PermissionRequest, cwd: Option<&std::path::Path
 
 /// Claude's own choices: allow once, each suggested permission update, and
 /// deny with a message.
-fn approval_decisions(permission: &PermissionRequest, cwd: Option<&std::path::Path>) -> Vec<Decision> {
+fn approval_decisions(
+    permission: &PermissionRequest,
+    cwd: Option<&std::path::Path>,
+) -> Vec<Decision> {
     let mut decisions = vec![Decision {
         id: DecisionId::new(ALLOW).expect("decision id"),
         label: "Yes".into(),
@@ -1370,7 +1513,9 @@ fn approval_decisions(permission: &PermissionRequest, cwd: Option<&std::path::Pa
 }
 
 fn suggestion_label(suggestion: &Value, cwd: Option<&std::path::Path>) -> String {
-    let place = cwd.map(|cwd| format!(" in {}", cwd.display())).unwrap_or_default();
+    let place = cwd
+        .map(|cwd| format!(" in {}", cwd.display()))
+        .unwrap_or_default();
     match suggestion["type"].as_str() {
         Some("addRules") => {
             let rules: Vec<String> = suggestion["rules"]
@@ -1431,7 +1576,16 @@ mod tests {
         assert!(matches!(&events[0], Event::Turn { turn, .. } if turn.as_str() == input.as_str()));
         let events = mapper.message(&message(json!({"type": "result", "subtype": "success",
             "is_error": false, "duration_ms": 5})));
-        let Event::Turn { phase: TurnPhase::Completed { inputs_consumed, outcome, .. }, .. } = events.last().unwrap() else {
+        let Event::Turn {
+            phase:
+                TurnPhase::Completed {
+                    inputs_consumed,
+                    outcome,
+                    ..
+                },
+            ..
+        } = events.last().unwrap()
+        else {
             panic!("turn completed");
         };
         assert_eq!(inputs_consumed, &[input]);
@@ -1443,7 +1597,11 @@ mod tests {
         let mut mapper = ClaudeMapper::new(None);
         let events = mapper.message(&message(json!({"type": "result", "subtype": "success",
             "is_error": false, "num_turns": 0, "user_message_uuids": ["0d6a7c1e-1111-4a00-8000-000000000009"]})));
-        assert!(events.iter().all(|event| !matches!(event, Event::Turn { .. })));
+        assert!(
+            events
+                .iter()
+                .all(|event| !matches!(event, Event::Turn { .. }))
+        );
     }
 
     #[test]
@@ -1466,8 +1624,24 @@ mod tests {
         let mut mapper = ClaudeMapper::new(None);
         let events = mapper.message(&message(json!({"type": "result", "subtype": "success",
             "is_error": true, "result": "Invalid API key · Please run /login", "user_message_uuids": ["0d6a7c1e-1111-4a00-8000-000000000001"]})));
-        assert!(events.iter().any(|event| matches!(event, Event::State { state: RunState::Waiting { on: WaitingOn::Setup { .. } } })));
-        assert!(events.iter().any(|event| matches!(event, Event::Turn { phase: TurnPhase::Completed { outcome: TurnOutcome::AuthenticationRequired, .. }, .. })));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::State {
+                state: RunState::Waiting {
+                    on: WaitingOn::Setup { .. }
+                }
+            }
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::Turn {
+                phase: TurnPhase::Completed {
+                    outcome: TurnOutcome::AuthenticationRequired,
+                    ..
+                },
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -1475,12 +1649,27 @@ mod tests {
         let mut mapper = ClaudeMapper::new(None);
         let t1 = "0d6a7c1e-1111-4a00-8000-000000000001";
         mapper.sent(&InputId::new(t1).unwrap(), true);
-        mapper.message(&message(json!({"type": "command_lifecycle", "command_uuid": t1, "state": "started"})));
-        let events = mapper.message(&message(json!({"type": "command_lifecycle", "command_uuid": t1, "state": "cancelled"})));
+        mapper.message(&message(
+            json!({"type": "command_lifecycle", "command_uuid": t1, "state": "started"}),
+        ));
+        let events = mapper.message(&message(
+            json!({"type": "command_lifecycle", "command_uuid": t1, "state": "cancelled"}),
+        ));
         assert!(events.is_empty(), "{events:?}");
-        let events = mapper.message(&message(json!({"type": "result", "subtype": "success", "is_error": false,
-            "terminal_reason": "aborted_tools", "user_message_uuids": [t1]})));
-        assert!(matches!(events.last(), Some(Event::Turn { phase: TurnPhase::Completed { outcome: TurnOutcome::Interrupted, .. }, .. })));
+        let events = mapper.message(&message(
+            json!({"type": "result", "subtype": "success", "is_error": false,
+            "terminal_reason": "aborted_tools", "user_message_uuids": [t1]}),
+        ));
+        assert!(matches!(
+            events.last(),
+            Some(Event::Turn {
+                phase: TurnPhase::Completed {
+                    outcome: TurnOutcome::Interrupted,
+                    ..
+                },
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -1488,10 +1677,19 @@ mod tests {
         let mut mapper = ClaudeMapper::new(None);
         let p1 = "0d6a7c1e-1111-4a00-8000-000000000007";
         mapper.sent_passive(&InputId::new(p1).unwrap());
-        let mut events = mapper.message(&message(json!({"type": "command_lifecycle", "command_uuid": p1, "state": "started"})));
-        events.extend(mapper.message(&message(json!({"type": "result", "subtype": "success", "is_error": false,
-            "num_turns": 0, "user_message_uuids": [p1]}))));
-        assert!(events.iter().all(|event| !matches!(event, Event::Turn { .. })), "{events:?}");
+        let mut events = mapper.message(&message(
+            json!({"type": "command_lifecycle", "command_uuid": p1, "state": "started"}),
+        ));
+        events.extend(mapper.message(&message(
+            json!({"type": "result", "subtype": "success", "is_error": false,
+            "num_turns": 0, "user_message_uuids": [p1]}),
+        )));
+        assert!(
+            events
+                .iter()
+                .all(|event| !matches!(event, Event::Turn { .. })),
+            "{events:?}"
+        );
     }
 
     #[test]
@@ -1499,8 +1697,11 @@ mod tests {
         let mut mapper = ClaudeMapper::new(Some("/w".into()));
         mapper.message(&message(json!({"type": "assistant", "uuid": "a1",
             "message": {"id": "m1", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "rm -rf /"}}]}})));
-        let RequestMapped::Interaction(_) = mapper.request("r1", &json!({"subtype": "can_use_tool",
-            "tool_name": "Bash", "input": {"command": "rm -rf /"}, "tool_use_id": "t1"})) else {
+        let RequestMapped::Interaction(_) = mapper.request(
+            "r1",
+            &json!({"subtype": "can_use_tool",
+            "tool_name": "Bash", "input": {"command": "rm -rf /"}, "tool_use_id": "t1"}),
+        ) else {
             panic!("interaction");
         };
         let plan = mapper
@@ -1516,8 +1717,24 @@ mod tests {
         assert_eq!(plan.response, json!({"behavior": "deny", "message": "no"}));
         let events = mapper.message(&message(json!({"type": "user", "uuid": "u1",
             "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "no", "is_error": true}]}})));
-        let Event::Item(item) = &events[0] else { panic!() };
-        assert!(matches!(item.update, ItemUpdate::Completed { status: ItemStatus::Declined, .. }));
-        assert!(mapper.answer(&InteractionId::new("r1").unwrap(), &InteractionResponse::Cancel, UserId(1)).is_err());
+        let Event::Item(item) = &events[0] else {
+            panic!()
+        };
+        assert!(matches!(
+            item.update,
+            ItemUpdate::Completed {
+                status: ItemStatus::Declined,
+                ..
+            }
+        ));
+        assert!(
+            mapper
+                .answer(
+                    &InteractionId::new("r1").unwrap(),
+                    &InteractionResponse::Cancel,
+                    UserId(1)
+                )
+                .is_err()
+        );
     }
 }

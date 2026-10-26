@@ -137,7 +137,10 @@ impl ToolServer {
 
     /// Replaces the tool list (the next `tools/list` sees it).
     pub fn set_tools(&self, tools: Vec<ToolDefinition>) {
-        *self.tools.lock().unwrap_or_else(|poison| poison.into_inner()) = tools;
+        *self
+            .tools
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = tools;
     }
 }
 
@@ -195,7 +198,10 @@ impl SdkMcpServer for ToolServer {
                 ready(rpc_result(id, json!({"tools": tools})))
             }
             "tools/call" => {
-                let Some(tool) = params.get("name").and_then(Value::as_str).map(str::to_string)
+                let Some(tool) = params
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
                 else {
                     return ready(rpc_error(id, INVALID_PARAMS, "tools/call needs a name"));
                 };
@@ -346,8 +352,10 @@ mod tests {
         let call = server.handle(json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
             "params": {"name": "slow"}}));
         server
-            .handle(json!({"jsonrpc": "2.0", "method": "notifications/cancelled",
-                "params": {"requestId": 7}}))
+            .handle(
+                json!({"jsonrpc": "2.0", "method": "notifications/cancelled",
+                "params": {"requestId": 7}}),
+            )
             .await;
         let response = call.await.unwrap();
         assert_eq!(response["error"]["message"], json!("tool call cancelled"));

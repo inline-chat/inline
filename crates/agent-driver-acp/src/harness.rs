@@ -13,21 +13,22 @@ use std::sync::{Arc, Mutex};
 use futures_util::StreamExt;
 use inline_agent_bridge::harness::{
     ApprovalSubject, Availability, AvailabilityMatrix, CapabilityManifest, Catalog, CatalogScope,
-    ClosedBy, CompatTier, Decision, DecisionId, DecisionKind, Delivery, DeliveryKind, DeltaStream,
-    Event, EventHub, EventStream, ExecutableInfo, FieldAnswer, FieldId, FieldInput, FieldOption,
-    FileChangeKind, FileDiff, FormField, HarnessDriver, HarnessFuture, Input, InputDisposition,
-    InputId, InputReceipt, Interaction, InteractionId, InteractionKind, InteractionResponse, Item,
-    ItemBody, ItemDelta, ItemId, ItemKind, ItemStatus, ItemUpdate, LiveWork, MessageRole, Notice,
-    NoticeLevel, Op, OpError, OpKind, OpOutcome, OpenError, OpenMode, OpenSpec, QuestionForm,
-    ReleaseOutcome, Released, RunState, RunStateTracker, RuntimeHealth, RuntimeInfo, SendError, Session,
-    SessionKey, SessionPage, SessionQuery, SettingsScope, TurnPhase, UserId, DEFAULT_HUB_CAPACITY,
+    ClosedBy, CompatTier, DEFAULT_HUB_CAPACITY, Decision, DecisionId, DecisionKind, Delivery,
+    DeliveryKind, DeltaStream, Event, EventHub, EventStream, ExecutableInfo, FieldAnswer, FieldId,
+    FieldInput, FieldOption, FileChangeKind, FileDiff, FormField, HarnessDriver, HarnessFuture,
+    Input, InputDisposition, InputId, InputReceipt, Interaction, InteractionId, InteractionKind,
+    InteractionResponse, Item, ItemBody, ItemDelta, ItemId, ItemKind, ItemStatus, ItemUpdate,
+    LiveWork, MessageRole, Notice, NoticeLevel, Op, OpError, OpKind, OpOutcome, OpenError,
+    OpenMode, OpenSpec, QuestionForm, ReleaseOutcome, Released, RunState, RunStateTracker,
+    RuntimeHealth, RuntimeInfo, SendError, Session, SessionKey, SessionPage, SessionQuery,
+    SettingsScope, TurnPhase, UserId,
 };
 use inline_agent_bridge::{
     ActivitySemanticKind, ActivityStatus, ActivityTextStream, AgentDriver, AgentEvent,
     AgentMessageUpdate, ApprovalDecision, ApprovalOption, ApprovalRequest, DriverError,
     DriverFuture, ProviderId, ProviderSessionId, QuestionAnswer, QuestionRequest,
-    ResumeSessionSpec, SessionReplay, SessionSpec, SteeringSupport, TurnId, TurnInput,
-    TurnOptions, TurnOutcome,
+    ResumeSessionSpec, SessionReplay, SessionSpec, SteeringSupport, TurnId, TurnInput, TurnOptions,
+    TurnOutcome,
 };
 use serde_json::{Value, json};
 
@@ -54,15 +55,30 @@ pub fn acp_availability(driver: &dyn AgentDriver) -> AvailabilityMatrix {
         .with_delivery(DeliveryKind::SteerNow, steer)
         .with_delivery(DeliveryKind::Queue, reduced("no native queue"))
         .with_delivery(DeliveryKind::Passive, reduced("no passive context"))
-        .with_op(OpKind::Interrupt, supported_if(capabilities.cancel_turn, "stop is unsupported"))
+        .with_op(
+            OpKind::Interrupt,
+            supported_if(capabilities.cancel_turn, "stop is unsupported"),
+        )
         .with_op(OpKind::InterruptCancelQueued, reduced("no native queue"))
-        .with_op(OpKind::Compact, supported_if(capabilities.compact_session, "compaction is unsupported"))
-        .with_op(OpKind::SettingsThread, supported_if(capabilities.settings_catalog, "settings are unsupported"))
+        .with_op(
+            OpKind::Compact,
+            supported_if(capabilities.compact_session, "compaction is unsupported"),
+        )
+        .with_op(
+            OpKind::SettingsThread,
+            supported_if(capabilities.settings_catalog, "settings are unsupported"),
+        )
         .with_op(OpKind::Answer, Availability::Supported)
         .with_op(OpKind::QueueStart, reduced("no native queue"))
         .with_op(OpKind::QueueEdit, reduced("no native queue"))
-        .with_op(OpKind::SettingsTurn, reduced("settings apply from the next message on"))
-        .with_op(OpKind::SettingsPersisted, reduced("defaults are set in Agent Settings"))
+        .with_op(
+            OpKind::SettingsTurn,
+            reduced("settings apply from the next message on"),
+        )
+        .with_op(
+            OpKind::SettingsPersisted,
+            reduced("defaults are set in Agent Settings"),
+        )
         .with_op(OpKind::Rename, reduced("no session rename"))
         .with_op(OpKind::Archive, reduced("no archive"))
         .with_op(OpKind::Clear, reduced("no clear"))
@@ -130,9 +146,11 @@ impl HarnessDriver for AcpHarness {
             let folder = scope.folder.unwrap_or_else(|| PathBuf::from("/"));
             let settings = self.driver.settings_catalog(&folder).await?;
             let commands = match &scope.session {
-                Some(session) if self.driver.capabilities().session_commands => {
-                    self.driver.session_commands(session).await.unwrap_or_default()
-                }
+                Some(session) if self.driver.capabilities().session_commands => self
+                    .driver
+                    .session_commands(session)
+                    .await
+                    .unwrap_or_default(),
                 _ => Vec::new(),
             };
             Ok(Catalog {
@@ -208,7 +226,10 @@ impl HarnessDriver for AcpHarness {
             inner.emit(Event::Notice(Notice {
                 level: NoticeLevel::Warning,
                 code: "reduced_mode".into(),
-                message: Some(format!("{} runs through ACP in reduced mode", self.provider)),
+                message: Some(format!(
+                    "{} runs through ACP in reduced mode",
+                    self.provider
+                )),
                 native: Value::Null,
             }));
             Ok(Arc::new(AcpSession { inner }) as Arc<dyn Session>)
@@ -240,7 +261,9 @@ struct AcpSessionInner {
 
 impl AcpSessionInner {
     fn state(&self) -> std::sync::MutexGuard<'_, AcpState> {
-        self.state.lock().unwrap_or_else(|poison| poison.into_inner())
+        self.state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
     }
 
     fn emit(&self, event: Event) {
@@ -314,8 +337,7 @@ impl Session for AcpSession {
                         state.first_turn_sent = true;
                         (state.options.clone(), first)
                     };
-                    let turn_input =
-                        turn_input(&input, self.inner.instructions.as_deref(), first);
+                    let turn_input = turn_input(&input, self.inner.instructions.as_deref(), first);
                     let started = self
                         .inner
                         .driver
@@ -385,7 +407,9 @@ impl Session for AcpSession {
                         native: Value::Null,
                     })
                 }
-                (Delivery::Queue | Delivery::Passive, _) => Err(SendError::Unavailable(availability)),
+                (Delivery::Queue | Delivery::Passive, _) => {
+                    Err(SendError::Unavailable(availability))
+                }
             }
         })
     }
@@ -440,7 +464,10 @@ impl Session for AcpSession {
                     Ok(OpOutcome::TurnStarted { turn })
                 }
                 Op::Settings { change, scope } => {
-                    if scope != SettingsScope::Thread || change.folder.is_some() || change.speed.is_some() {
+                    if scope != SettingsScope::Thread
+                        || change.folder.is_some()
+                        || change.speed.is_some()
+                    {
                         return Err(OpError::Unavailable(Availability::unavailable(
                             "only model, reasoning and permissions change here (reduced mode: ACP)",
                         )));
@@ -486,7 +513,11 @@ impl Session for AcpSession {
             let cancelled = self.live_work().interactions;
             let turn = self.inner.state().turn.clone();
             if let Some(turn) = turn {
-                let _ = self.inner.driver.cancel_turn(&self.inner.session, &turn).await;
+                let _ = self
+                    .inner
+                    .driver
+                    .cancel_turn(&self.inner.session, &turn)
+                    .await;
             }
             // The ACP agent process keeps the session loaded; nothing here
             // proves native ownership was given up.
@@ -511,7 +542,10 @@ impl AcpSession {
         let id = interaction.as_str().to_string();
         let (approval, question) = {
             let state = self.inner.state();
-            (state.approvals.get(&id).cloned(), state.questions.get(&id).cloned())
+            (
+                state.approvals.get(&id).cloned(),
+                state.questions.get(&id).cloned(),
+            )
         };
         let picked = match (approval, question, &response) {
             (Some(approval), _, InteractionResponse::Decision { decision, .. }) => {
@@ -520,7 +554,9 @@ impl AcpSession {
                     .strip_prefix("option:")
                     .and_then(|index| index.parse().ok())
                     .filter(|index| *index < approval.options.len())
-                    .ok_or_else(|| OpError::InvalidResponse(format!("decision {decision} was not offered")))?;
+                    .ok_or_else(|| {
+                        OpError::InvalidResponse(format!("decision {decision} was not offered"))
+                    })?;
                 let native = approval_decision(&approval.options[index]);
                 self.inner
                     .driver
@@ -563,7 +599,11 @@ impl AcpSession {
                 None
             }
             (None, None, _) => return Err(OpError::InteractionNotPending),
-            _ => return Err(OpError::InvalidResponse("response does not fit this interaction".into())),
+            _ => {
+                return Err(OpError::InvalidResponse(
+                    "response does not fit this interaction".into(),
+                ));
+            }
         };
         {
             let mut state = self.inner.state();
@@ -604,7 +644,9 @@ fn approval_decision(option: &ApprovalOption) -> ApprovalDecision {
 fn decision(index: usize, option: &ApprovalOption) -> Option<Decision> {
     let (label, kind) = match option {
         ApprovalOption::ApproveOnce => ("Allow once".to_string(), DecisionKind::Accept),
-        ApprovalOption::ApproveForSession => ("Always allow".to_string(), DecisionKind::AcceptForSession),
+        ApprovalOption::ApproveForSession => {
+            ("Always allow".to_string(), DecisionKind::AcceptForSession)
+        }
         ApprovalOption::Reject => ("Reject".to_string(), DecisionKind::Decline),
         ApprovalOption::CancelTurn => ("Reject and stop".to_string(), DecisionKind::Cancel),
         ApprovalOption::ProviderChoice { label, option_id } => (
@@ -730,29 +772,32 @@ fn map_event(inner: &AcpSessionInner, event: AgentEvent, native: Value) -> Vec<E
         AgentEvent::ActivityUpsert { turn_id, activity } => {
             let body = match activity.kind {
                 ActivitySemanticKind::Execute => ItemBody::Command {
-                    command: activity.detail.clone().unwrap_or_else(|| activity.title.clone()),
+                    command: activity
+                        .detail
+                        .clone()
+                        .unwrap_or_else(|| activity.title.clone()),
                     cwd: None,
                     actions: Vec::new(),
                     output: activity.output_snapshot.clone(),
                     exit_code: activity.exit_code,
                     duration_ms: None,
                 },
-                ActivitySemanticKind::Edit | ActivitySemanticKind::Delete | ActivitySemanticKind::Move => {
-                    ItemBody::FileChange {
-                        changes: activity
-                            .paths
-                            .iter()
-                            .map(|path| FileDiff {
-                                path: path.clone(),
-                                change: match activity.kind {
-                                    ActivitySemanticKind::Delete => FileChangeKind::Delete,
-                                    _ => FileChangeKind::Update { moved_to: None },
-                                },
-                                diff: None,
-                            })
-                            .collect(),
-                    }
-                }
+                ActivitySemanticKind::Edit
+                | ActivitySemanticKind::Delete
+                | ActivitySemanticKind::Move => ItemBody::FileChange {
+                    changes: activity
+                        .paths
+                        .iter()
+                        .map(|path| FileDiff {
+                            path: path.clone(),
+                            change: match activity.kind {
+                                ActivitySemanticKind::Delete => FileChangeKind::Delete,
+                                _ => FileChangeKind::Update { moved_to: None },
+                            },
+                            diff: None,
+                        })
+                        .collect(),
+                },
                 ActivitySemanticKind::Think => ItemBody::Reasoning {
                     summary: activity.detail.clone().into_iter().collect(),
                     content: activity.reasoning_content.clone(),
@@ -765,10 +810,17 @@ fn map_event(inner: &AcpSessionInner, event: AgentEvent, native: Value) -> Vec<E
                     error: None,
                 },
             };
-            let first = inner.state().activities.insert(activity.activity_id.clone());
+            let first = inner
+                .state()
+                .activities
+                .insert(activity.activity_id.clone());
             let update = match activity.status {
-                ActivityStatus::Pending | ActivityStatus::InProgress if first => ItemUpdate::Started { body },
-                ActivityStatus::Pending | ActivityStatus::InProgress => ItemUpdate::Updated { body },
+                ActivityStatus::Pending | ActivityStatus::InProgress if first => {
+                    ItemUpdate::Started { body }
+                }
+                ActivityStatus::Pending | ActivityStatus::InProgress => {
+                    ItemUpdate::Updated { body }
+                }
                 ActivityStatus::Completed => ItemUpdate::Completed {
                     body,
                     status: ItemStatus::Completed,
@@ -942,7 +994,10 @@ fn map_event(inner: &AcpSessionInner, event: AgentEvent, native: Value) -> Vec<E
             })]
         }
         AgentEvent::FilesChanged { turn_id, files } => vec![Event::Item(Item::new(
-            item_id(&format!("{turn_id}:files:{}", uuid::Uuid::new_v4().simple())),
+            item_id(&format!(
+                "{turn_id}:files:{}",
+                uuid::Uuid::new_v4().simple()
+            )),
             Some(turn_id),
             ItemUpdate::Completed {
                 body: ItemBody::FileChange {

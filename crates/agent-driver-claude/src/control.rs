@@ -143,13 +143,19 @@ pub enum IncomingRequest {
     CanUseTool(PermissionRequest),
     HookCallback(HookCallbackRequest),
     /// JSON-RPC for an in-process MCP server.
-    McpMessage { server_name: String, message: Value },
+    McpMessage {
+        server_name: String,
+        message: Value,
+    },
     /// An MCP server asked the user for input.
     Elicitation(Value),
     /// A tool-driven blocking dialog (`request_user_dialog`).
     UserDialog(UserDialogRequest),
     /// A subtype this crate does not model.
-    Other { subtype: String, raw: Value },
+    Other {
+        subtype: String,
+        raw: Value,
+    },
 }
 
 impl IncomingRequest {
@@ -519,7 +525,8 @@ mod tests {
             "options": [{"label": "Red"}, {"label": "Blue"}],
             "multiSelect": false
         }]});
-        let raw = json!({"subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": input});
+        let raw =
+            json!({"subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": input});
         let IncomingRequest::CanUseTool(request) = IncomingRequest::parse(&raw) else {
             panic!("permission request");
         };
@@ -531,8 +538,14 @@ mod tests {
         answers.insert("Which color?".into(), json!("Blue"));
         let decision = PermissionDecision::answer_questions(&request.input, answers);
         let value = decision.to_value(&request.input);
-        assert_eq!(value["updatedInput"]["answers"]["Which color?"], json!("Blue"));
-        assert_eq!(value["updatedInput"]["questions"][0]["header"], json!("Color"));
+        assert_eq!(
+            value["updatedInput"]["answers"]["Which color?"],
+            json!("Blue")
+        );
+        assert_eq!(
+            value["updatedInput"]["questions"][0]["header"],
+            json!("Color")
+        );
     }
 
     #[test]
@@ -543,7 +556,10 @@ mod tests {
             IncomingRequest::Other { ref subtype, .. } if subtype == "mcp_message"
         ));
         let raw = json!({"subtype": "side_question"});
-        assert!(matches!(IncomingRequest::parse(&raw), IncomingRequest::Other { .. }));
+        assert!(matches!(
+            IncomingRequest::parse(&raw),
+            IncomingRequest::Other { .. }
+        ));
     }
 
     #[test]
@@ -551,8 +567,7 @@ mod tests {
         let receipt: InterruptReceipt = serde_json::from_value(json!({})).unwrap();
         assert_eq!(receipt, InterruptReceipt::default());
         let receipt: InterruptReceipt =
-            serde_json::from_value(json!({"still_queued": [], "cancelled": ["l1", "l2"]}))
-                .unwrap();
+            serde_json::from_value(json!({"still_queued": [], "cancelled": ["l1", "l2"]})).unwrap();
         assert_eq!(receipt.cancelled.unwrap(), ["l1", "l2"]);
     }
 }

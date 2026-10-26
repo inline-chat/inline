@@ -60,13 +60,16 @@ fn feed(mapper: &mut ClaudeMapper, native: &Value) -> Vec<Event> {
 
 #[test]
 fn claude_fixtures_match_the_mapper() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../agent-bridge/tests/fixtures/harness/claude");
+    let dir =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../agent-bridge/tests/fixtures/harness/claude");
     let mut ran = 0;
     let mut paths: Vec<_> = std::fs::read_dir(&dir)
         .expect("claude fixtures")
         .map(|entry| entry.expect("fixture").path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
         .collect();
     paths.sort();
     for path in paths {
@@ -119,7 +122,11 @@ fn claude_fixtures_match_the_mapper() {
             let answer: InteractionResponse =
                 serde_json::from_value(response["response"].clone()).expect("response");
             let plan = answering
-                .answer(&interaction, &answer, UserId(response["by"].as_i64().unwrap_or(1)))
+                .answer(
+                    &interaction,
+                    &answer,
+                    UserId(response["by"].as_i64().unwrap_or(1)),
+                )
                 .unwrap_or_else(|error| panic!("{name}: response `{}`: {error}", response["name"]));
             assert_eq!(
                 json!({"type": "control_response", "response": {

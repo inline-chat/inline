@@ -31,7 +31,8 @@ const ALWAYS_REMOVE_ENVIRONMENT: &[&str] = &[
 ];
 
 /// Credential prefixes the CLI itself reads.
-const PROVIDER_ENVIRONMENT_PREFIXES: &[&str] = &["ANTHROPIC_", "CLAUDE_", "AWS_", "GOOGLE_", "VERTEX_"];
+const PROVIDER_ENVIRONMENT_PREFIXES: &[&str] =
+    &["ANTHROPIC_", "CLAUDE_", "AWS_", "GOOGLE_", "VERTEX_"];
 
 /// The headless SDK entrypoint class the CLI knows (`sdk-cli`, `sdk-ts`,
 /// `sdk-py`); Inline is a host of the same kind.
@@ -285,7 +286,11 @@ impl LaunchOptions {
     /// The full spawn: program, arguments, environment to set and to remove.
     pub fn command(&self) -> CommandSpec {
         let mut program = self.executable.clone().into_os_string();
-        let mut args: Vec<OsString> = self.cli_arguments().into_iter().map(OsString::from).collect();
+        let mut args: Vec<OsString> = self
+            .cli_arguments()
+            .into_iter()
+            .map(OsString::from)
+            .collect();
         if let Some(host) = &self.process_host {
             let mut hosted: Vec<OsString> = [
                 "bridge",
@@ -306,7 +311,10 @@ impl LaunchOptions {
         }
 
         let mut set: Vec<(OsString, OsString)> = vec![
-            ("CLAUDE_CODE_ENTRYPOINT".into(), self.entrypoint.clone().into()),
+            (
+                "CLAUDE_CODE_ENTRYPOINT".into(),
+                self.entrypoint.clone().into(),
+            ),
             // Ask for session_state_changed frames: they say when the CLI owes
             // no further turn (background agents still running keep it busy).
             ("CLAUDE_CODE_SDK_READS_SESSION_STATE".into(), "1".into()),
@@ -369,11 +377,12 @@ pub fn should_scrub_environment_name(name: &OsStr, allow: &[String]) -> bool {
         return true;
     };
     let uppercase = name.to_ascii_uppercase();
-    if ALWAYS_REMOVE_ENVIRONMENT.contains(&uppercase.as_str()) || uppercase.starts_with("INLINE_")
-    {
+    if ALWAYS_REMOVE_ENVIRONMENT.contains(&uppercase.as_str()) || uppercase.starts_with("INLINE_") {
         return true;
     }
-    if allow.iter().any(|allowed| allowed.eq_ignore_ascii_case(name))
+    if allow
+        .iter()
+        .any(|allowed| allowed.eq_ignore_ascii_case(name))
         || PROVIDER_ENVIRONMENT_PREFIXES
             .iter()
             .any(|prefix| uppercase.starts_with(prefix))
@@ -413,8 +422,14 @@ mod tests {
         let args = options.cli_arguments();
         assert!(args.contains(&"--permission-mode=manual".to_string()));
         assert!(args.contains(&"--session-id=11111111-1111-4111-8111-111111111111".to_string()));
-        assert!(args.windows(2).any(|pair| pair == ["--permission-prompt-tool", "stdio"]));
-        assert!(args.windows(2).any(|pair| pair == ["--input-format", "stream-json"]));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--permission-prompt-tool", "stdio"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--input-format", "stream-json"])
+        );
         assert!(!args.iter().any(|arg| arg.starts_with("--system-prompt")));
         assert!(!args.iter().any(|arg| arg.starts_with("--setting-sources")));
     }
@@ -428,7 +443,12 @@ mod tests {
             new_session_id: Some("b".into()),
         };
         let args = options.cli_arguments();
-        for expected in ["--resume=a", "--fork-session", "--resume-session-at=m3", "--session-id=b"] {
+        for expected in [
+            "--resume=a",
+            "--fork-session",
+            "--resume-session-at=m3",
+            "--session-id=b",
+        ] {
             assert!(args.contains(&expected.to_string()), "{expected}");
         }
         assert_eq!(options.target_session_id(), Some("b"));
@@ -444,16 +464,19 @@ mod tests {
         });
         let command = options.command();
         assert_eq!(command.program, OsString::from("/opt/inline"));
-        assert_eq!(command.args[..7], [
-            "bridge",
-            "provider-host",
-            "--provider-id",
-            "claude",
-            "--lock-file",
-            "/tmp/claude.lock",
-            "--"
-        ]
-        .map(OsString::from));
+        assert_eq!(
+            command.args[..7],
+            [
+                "bridge",
+                "provider-host",
+                "--provider-id",
+                "claude",
+                "--lock-file",
+                "/tmp/claude.lock",
+                "--"
+            ]
+            .map(OsString::from)
+        );
         assert_eq!(command.args[7], OsString::from("/opt/claude"));
     }
 
@@ -468,7 +491,10 @@ mod tests {
             "CLAUDECODE",
             "SERVICE_PASSWORD",
         ] {
-            assert!(should_scrub_environment_name(OsStr::new(name), &[]), "{name}");
+            assert!(
+                should_scrub_environment_name(OsStr::new(name), &[]),
+                "{name}"
+            );
         }
         for name in [
             "PATH",
@@ -480,7 +506,10 @@ mod tests {
             "AWS_ACCESS_KEY_ID",
             "SSH_AUTH_SOCK",
         ] {
-            assert!(!should_scrub_environment_name(OsStr::new(name), &[]), "{name}");
+            assert!(
+                !should_scrub_environment_name(OsStr::new(name), &[]),
+                "{name}"
+            );
         }
         assert!(!should_scrub_environment_name(
             OsStr::new("MY_TOOL_TOKEN"),
@@ -491,7 +520,9 @@ mod tests {
     #[test]
     fn explicit_environment_wins_over_defaults() {
         let mut options = LaunchOptions::new("/opt/claude", "/work");
-        options.env.push(("CLAUDE_CODE_ENTRYPOINT".into(), "custom".into()));
+        options
+            .env
+            .push(("CLAUDE_CODE_ENTRYPOINT".into(), "custom".into()));
         let command = options.command();
         let entrypoints: Vec<_> = command
             .env_set
@@ -500,6 +531,10 @@ mod tests {
             .collect();
         assert_eq!(entrypoints.len(), 1);
         assert_eq!(entrypoints[0].1, OsString::from("custom"));
-        assert!(!command.env_remove.contains(&OsString::from("CLAUDE_CODE_ENTRYPOINT")));
+        assert!(
+            !command
+                .env_remove
+                .contains(&OsString::from("CLAUDE_CODE_ENTRYPOINT"))
+        );
     }
 }

@@ -59,7 +59,11 @@ pub struct IncomingCall {
 pub struct RefuseAll;
 
 impl ControlHandler for RefuseAll {
-    fn handle(&self, call: IncomingCall, _cancel: CancelSignal) -> BoxFuture<Result<Value, String>> {
+    fn handle(
+        &self,
+        call: IncomingCall,
+        _cancel: CancelSignal,
+    ) -> BoxFuture<Result<Value, String>> {
         Box::pin(async move {
             match call.request {
                 IncomingRequest::CanUseTool(permission) => Ok(
@@ -67,9 +71,10 @@ impl ControlHandler for RefuseAll {
                         .to_value(&permission.input),
                 ),
                 IncomingRequest::Elicitation(_) => Ok(json!({"action": "decline"})),
-                IncomingRequest::HookCallback(hook) => {
-                    Err(format!("No hook callback found for ID: {}", hook.callback_id))
-                }
+                IncomingRequest::HookCallback(hook) => Err(format!(
+                    "No hook callback found for ID: {}",
+                    hook.callback_id
+                )),
                 IncomingRequest::UserDialog(dialog) => Err(format!(
                     "dialog kind {} is not supported",
                     dialog.dialog_kind
@@ -144,13 +149,21 @@ impl Default for ClientConfig {
 pub enum ClientEvent {
     Message(CliMessage),
     /// A JSON-looking stdout line that did not parse.
-    Malformed { line: String, error: String },
+    Malformed {
+        line: String,
+        error: String,
+    },
     /// The CLI withdrew a request the handler was answering.
-    RequestCancelled { request_id: String },
+    RequestCancelled {
+        request_id: String,
+    },
     /// The consumer fell behind: `lost` frames were dropped (repair from the
     /// session store) and `partial` streaming chunks were skipped (their
     /// complete messages still arrive).
-    Gap { lost: u64, partial: u64 },
+    Gap {
+        lost: u64,
+        partial: u64,
+    },
     /// The process is gone; nothing follows.
     Exited(ExitReport),
 }
@@ -177,7 +190,10 @@ impl ExitReport {
     /// One line for logs and notices.
     pub fn describe(&self) -> String {
         if let Some(result) = &self.last_error_result {
-            return format!("Claude Code returned an error result: {}", result.error_text());
+            return format!(
+                "Claude Code returned an error result: {}",
+                result.error_text()
+            );
         }
         if let Some(error) = &self.read_error {
             return format!("Claude Code output could not be read: {error}");
@@ -277,8 +293,11 @@ impl Inner {
         let Some(stream) = writer.as_mut() else {
             return Err(ControlError::Closed("stdin is closed".into()));
         };
-        match tokio::time::timeout(self.config.write_timeout, transport::write_line(stream, &line))
-            .await
+        match tokio::time::timeout(
+            self.config.write_timeout,
+            transport::write_line(stream, &line),
+        )
+        .await
         {
             Ok(Ok(())) => Ok(()),
             // Part of the line may have reached the CLI.
@@ -463,10 +482,14 @@ impl ClaudeClient {
             return Err(ControlError::Closed(exit.describe()));
         }
         let counter = inner.counter.fetch_add(1, Ordering::Relaxed) + 1;
-        let request_id = format!("req_{counter}_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        let request_id = format!(
+            "req_{counter}_{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..8]
+        );
         let (sender, receiver) = oneshot::channel();
         lock(&inner.pending).insert(request_id.clone(), sender);
-        let envelope = json!({"type": "control_request", "request_id": request_id, "request": body});
+        let envelope =
+            json!({"type": "control_request", "request_id": request_id, "request": body});
         if let Err(error) = inner.write_json(&envelope).await {
             lock(&inner.pending).remove(&request_id);
             return Err(error);
@@ -481,7 +504,9 @@ impl ClaudeClient {
             Err(_) => {
                 lock(&inner.pending).remove(&request_id);
                 let _ = inner
-                    .write_json(&json!({"type": "control_cancel_request", "request_id": request_id}))
+                    .write_json(
+                        &json!({"type": "control_cancel_request", "request_id": request_id}),
+                    )
                     .await;
                 Err(ControlError::Timeout { subtype })
             }
@@ -521,7 +546,8 @@ impl ClaudeClient {
     }
 
     pub async fn set_model(&self, model: Option<&str>) -> Result<Value, ControlError> {
-        self.request(request::set_model(model), self.timeout()).await
+        self.request(request::set_model(model), self.timeout())
+            .await
     }
 
     pub async fn set_permission_mode(&self, mode: &str) -> Result<Value, ControlError> {
@@ -529,7 +555,10 @@ impl ClaudeClient {
             .await
     }
 
-    pub async fn set_max_thinking_tokens(&self, tokens: Option<u64>) -> Result<Value, ControlError> {
+    pub async fn set_max_thinking_tokens(
+        &self,
+        tokens: Option<u64>,
+    ) -> Result<Value, ControlError> {
         self.request(request::set_max_thinking_tokens(tokens), self.timeout())
             .await
     }
@@ -558,8 +587,11 @@ impl ClaudeClient {
         user_message_id: &str,
         dry_run: bool,
     ) -> Result<Value, ControlError> {
-        self.request(request::rewind_files(user_message_id, dry_run), self.timeout())
-            .await
+        self.request(
+            request::rewind_files(user_message_id, dry_run),
+            self.timeout(),
+        )
+        .await
     }
 
     pub async fn stop_task(&self, task_id: &str) -> Result<Value, ControlError> {
@@ -874,7 +906,11 @@ async fn answer_mcp(inner: &Inner, server_name: &str, message: Value) -> Value {
     let id = message.get("id").cloned().unwrap_or(Value::Null);
     let response = match inner.servers.get(server_name) {
         Some(server) => server.handle(message).await,
-        None => Some(rpc_error(id, -32601, &format!("Server '{server_name}' not found"))),
+        None => Some(rpc_error(
+            id,
+            -32601,
+            &format!("Server '{server_name}' not found"),
+        )),
     };
     // A notification gets no JSON-RPC reply, but its control request still
     // expects an acknowledgement.
@@ -933,7 +969,10 @@ mod tests {
         });
         let request = cli.read().await;
         assert_eq!(request["type"], json!("control_request"));
-        assert_eq!(request["request"], json!({"subtype": "interrupt", "cancel_queued": true}));
+        assert_eq!(
+            request["request"],
+            json!({"subtype": "interrupt", "cancel_queued": true})
+        );
         cli.write(json!({
             "type": "control_response",
             "response": {"subtype": "success", "request_id": request["request_id"],
@@ -1032,20 +1071,24 @@ mod tests {
             ..ClientConfig::default()
         };
         let (_client, _events, mut cli) = harness(config);
-        cli.write(json!({"type": "control_request", "request_id": "m1", "request": {
+        cli.write(
+            json!({"type": "control_request", "request_id": "m1", "request": {
             "subtype": "mcp_message", "server_name": "inline",
             "message": {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-                "params": {"name": "echo", "arguments": {"a": 1}}}}}))
-            .await;
+                "params": {"name": "echo", "arguments": {"a": 1}}}}}),
+        )
+        .await;
         let response = cli.read().await;
         assert_eq!(
             response["response"]["response"]["mcp_response"]["result"]["content"][0]["text"],
             json!("{\"a\":1}")
         );
-        cli.write(json!({"type": "control_request", "request_id": "m2", "request": {
+        cli.write(
+            json!({"type": "control_request", "request_id": "m2", "request": {
             "subtype": "mcp_message", "server_name": "missing",
-            "message": {"jsonrpc": "2.0", "id": 5, "method": "tools/list"}}}))
-            .await;
+            "message": {"jsonrpc": "2.0", "id": 5, "method": "tools/list"}}}),
+        )
+        .await;
         let response = cli.read().await;
         assert_eq!(
             response["response"]["response"]["mcp_response"]["error"]["code"],
@@ -1056,11 +1099,15 @@ mod tests {
     #[tokio::test]
     async fn messages_flow_in_order_and_exit_fails_pending_requests() {
         let (client, mut events, mut cli) = harness(ClientConfig::default());
-        cli.write(json!({"type": "system", "subtype": "session_state_changed", "state": "running"}))
-            .await;
-        cli.write(json!({"type": "result", "subtype": "success", "is_error": true,
-            "startup_failure_reason": "cli_version_too_old", "errors": ["too old"]}))
-            .await;
+        cli.write(
+            json!({"type": "system", "subtype": "session_state_changed", "state": "running"}),
+        )
+        .await;
+        cli.write(
+            json!({"type": "result", "subtype": "success", "is_error": true,
+            "startup_failure_reason": "cli_version_too_old", "errors": ["too old"]}),
+        )
+        .await;
         let pending = tokio::spawn({
             let client = client.clone();
             async move { client.get_context_usage().await }
@@ -1073,7 +1120,10 @@ mod tests {
             match event {
                 ClientEvent::Message(message) => kinds.push(message.message_type().to_string()),
                 ClientEvent::Exited(report) => {
-                    assert_eq!(report.startup_failure(), Some(StartupFailure::CliVersionTooOld));
+                    assert_eq!(
+                        report.startup_failure(),
+                        Some(StartupFailure::CliVersionTooOld)
+                    );
                     break;
                 }
                 other => panic!("unexpected {other:?}"),
@@ -1082,7 +1132,10 @@ mod tests {
         assert_eq!(kinds, ["system", "result"]);
         assert_eq!(client.session_state().borrow().as_deref(), Some("running"));
         // Written, then the process went away: the outcome is unknown.
-        assert!(matches!(pending.await.unwrap(), Err(ControlError::Unknown(_))));
+        assert!(matches!(
+            pending.await.unwrap(),
+            Err(ControlError::Unknown(_))
+        ));
     }
 
     fn fast() -> ClientConfig {
@@ -1096,10 +1149,16 @@ mod tests {
     fn fake_cli(dir: &std::path::Path, body: &str) -> LaunchOptions {
         use std::os::unix::fs::PermissionsExt;
         let path = dir.join("fake-claude");
-        std::fs::write(&path, format!("#!/bin/sh\necho $$ > \"$PID_FILE\"\n{body}\n")).unwrap();
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\necho $$ > \"$PID_FILE\"\n{body}\n"),
+        )
+        .unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let mut options = LaunchOptions::new(&path, dir);
-        options.env.push(("PID_FILE".into(), dir.join("pid").into_os_string()));
+        options
+            .env
+            .push(("PID_FILE".into(), dir.join("pid").into_os_string()));
         options
     }
 
@@ -1156,7 +1215,10 @@ mod tests {
         .await;
         assert!(attempt.is_err(), "initialize never answers");
         let pid = pid_of(dir.path()).await;
-        assert!(gone(pid).await, "process {pid} survived a cancelled connect");
+        assert!(
+            gone(pid).await,
+            "process {pid} survived a cancelled connect"
+        );
     }
 
     #[tokio::test]
@@ -1206,9 +1268,11 @@ mod tests {
             async move { client.mcp_status().await }
         });
         let sent = cli.read().await;
-        cli.write(json!({"type": "control_response", "response": {"subtype": "success",
-            "request_id": sent["request_id"], "response": {"mcpServers": []}}}))
-            .await;
+        cli.write(
+            json!({"type": "control_response", "response": {"subtype": "success",
+            "request_id": sent["request_id"], "response": {"mcpServers": []}}}),
+        )
+        .await;
         let answer = tokio::time::timeout(Duration::from_secs(5), request)
             .await
             .expect("control response arrived while the consumer stalled")
@@ -1232,7 +1296,11 @@ mod tests {
         let lost: u64 = gaps.iter().map(|gap| gap.0).sum();
         let partial: u64 = gaps.iter().map(|gap| gap.1).sum();
         assert!(partial > 0, "partial chunks are dropped first: {gaps:?}");
-        assert_eq!(messages as u64 + lost + partial, 80, "every frame is delivered or counted");
+        assert_eq!(
+            messages as u64 + lost + partial,
+            80,
+            "every frame is delivered or counted"
+        );
     }
 
     #[tokio::test]
@@ -1244,11 +1312,17 @@ mod tests {
         });
         let _ = cli.read().await;
         drop(cli);
-        assert!(matches!(pending.await.unwrap(), Err(ControlError::Unknown(_))));
+        assert!(matches!(
+            pending.await.unwrap(),
+            Err(ControlError::Unknown(_))
+        ));
 
         let (client, _events, _cli) = harness(ClientConfig::default());
         client.end_input().await;
-        assert!(matches!(client.interrupt(false).await, Err(ControlError::Closed(_))));
+        assert!(matches!(
+            client.interrupt(false).await,
+            Err(ControlError::Closed(_))
+        ));
         assert!(matches!(
             client.send(&UserMessage::text("hi")).await,
             Err(ControlError::Closed(_))

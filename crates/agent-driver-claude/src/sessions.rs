@@ -141,7 +141,11 @@ impl SessionStore {
                 }
             }
             None => {
-                for entry in fs::read_dir(self.projects_dir()).into_iter().flatten().flatten() {
+                for entry in fs::read_dir(self.projects_dir())
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                {
                     if entry.path().is_dir() {
                         sessions.extend(read_sessions_from_dir(&entry.path(), None));
                     }
@@ -240,11 +244,17 @@ impl SessionStore {
     pub fn rename(&self, session_id: &str, title: &str, cwd: Option<&Path>) -> io::Result<()> {
         let title = title.trim();
         if title.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "title must be non-empty"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "title must be non-empty",
+            ));
         }
-        let path = self
-            .find(session_id, cwd)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("session {session_id} not found")))?;
+        let path = self.find(session_id, cwd).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("session {session_id} not found"),
+            )
+        })?;
         let line = json!({"type": "custom-title", "customTitle": title, "sessionId": session_id});
         let mut file = OpenOptions::new().append(true).open(path)?;
         file.write_all(format!("{line}\n").as_bytes())
@@ -259,9 +269,12 @@ impl SessionStore {
         up_to_message: Option<&str>,
         title: Option<&str>,
     ) -> io::Result<String> {
-        let path = self
-            .find(session_id, cwd)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("session {session_id} not found")))?;
+        let path = self.find(session_id, cwd).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("session {session_id} not found"),
+            )
+        })?;
         let project_dir = path
             .parent()
             .ok_or_else(|| io::Error::other("session file has no parent"))?
@@ -323,7 +336,14 @@ pub fn sanitize_path(name: &str) -> String {
         .chars()
         .flat_map(|c| {
             let replacement = if c.is_ascii_alphanumeric() { c } else { '-' };
-            std::iter::repeat_n(replacement, if c.is_ascii_alphanumeric() { 1 } else { c.len_utf16() })
+            std::iter::repeat_n(
+                replacement,
+                if c.is_ascii_alphanumeric() {
+                    1
+                } else {
+                    c.len_utf16()
+                },
+            )
         })
         .collect();
     if sanitized.chars().count() <= MAX_SANITIZED_LENGTH {
@@ -337,7 +357,10 @@ pub fn sanitize_path(name: &str) -> String {
 fn simple_hash(text: &str) -> String {
     let mut hash: i32 = 0;
     for unit in text.encode_utf16() {
-        hash = hash.wrapping_shl(5).wrapping_sub(hash).wrapping_add(i32::from(unit));
+        hash = hash
+            .wrapping_shl(5)
+            .wrapping_sub(hash)
+            .wrapping_add(i32::from(unit));
     }
     let mut value = hash.unsigned_abs() as u64;
     if value == 0 {
@@ -581,7 +604,8 @@ fn is_auto_generated_prompt(text: &str) -> bool {
         || text.starts_with("<tick>")
         || text.starts_with("<goal>")
         || text.starts_with("[Request interrupted by user")
-        || (trimmed.starts_with("<ide_opened_file>") && text.trim_end().ends_with("</ide_opened_file>"))
+        || (trimmed.starts_with("<ide_opened_file>")
+            && text.trim_end().ends_with("</ide_opened_file>"))
         || (trimmed.starts_with("<ide_selection>") && text.trim_end().ends_with("</ide_selection>"))
 }
 
@@ -600,7 +624,8 @@ fn parse_transcript_entries(content: &str) -> Vec<Entry> {
             _ => None,
         })
         .filter(|entry| {
-            TRANSCRIPT_TYPES.contains(&entry_type(entry)) && entry.get("uuid").is_some_and(Value::is_string)
+            TRANSCRIPT_TYPES.contains(&entry_type(entry))
+                && entry.get("uuid").is_some_and(Value::is_string)
         })
         .collect()
 }
@@ -614,7 +639,10 @@ fn uuid_of(entry: &Entry) -> &str {
 }
 
 fn parent_of(entry: &Entry) -> Option<&str> {
-    entry.get("parentUuid").and_then(Value::as_str).filter(|parent| !parent.is_empty())
+    entry
+        .get("parentUuid")
+        .and_then(Value::as_str)
+        .filter(|parent| !parent.is_empty())
 }
 
 fn flag(entry: &Entry, key: &str) -> bool {
@@ -625,7 +653,10 @@ fn build_conversation_chain(entries: &[Entry]) -> Vec<Entry> {
     if entries.is_empty() {
         return Vec::new();
     }
-    let by_uuid: HashMap<&str, &Entry> = entries.iter().map(|entry| (uuid_of(entry), entry)).collect();
+    let by_uuid: HashMap<&str, &Entry> = entries
+        .iter()
+        .map(|entry| (uuid_of(entry), entry))
+        .collect();
     let position: HashMap<&str, usize> = entries
         .iter()
         .enumerate()
@@ -634,7 +665,10 @@ fn build_conversation_chain(entries: &[Entry]) -> Vec<Entry> {
     let parents: HashSet<&str> = entries.iter().filter_map(parent_of).collect();
 
     let mut leaves: Vec<&Entry> = Vec::new();
-    for terminal in entries.iter().filter(|entry| !parents.contains(uuid_of(entry))) {
+    for terminal in entries
+        .iter()
+        .filter(|entry| !parents.contains(uuid_of(entry)))
+    {
         let mut seen = HashSet::new();
         let mut current = Some(terminal);
         while let Some(entry) = current {
@@ -654,7 +688,9 @@ fn build_conversation_chain(entries: &[Entry]) -> Vec<Entry> {
     let main: Vec<&Entry> = leaves
         .iter()
         .copied()
-        .filter(|leaf| !flag(leaf, "isSidechain") && leaf.get("teamName").is_none() && !flag(leaf, "isMeta"))
+        .filter(|leaf| {
+            !flag(leaf, "isSidechain") && leaf.get("teamName").is_none() && !flag(leaf, "isMeta")
+        })
         .collect();
     let candidates = if main.is_empty() { &leaves } else { &main };
     let leaf = candidates
@@ -730,7 +766,10 @@ fn recover_parallel_tool_results(
     chain: Vec<Entry>,
     seen: &mut HashSet<String>,
 ) -> Vec<Entry> {
-    let chain_assistants: Vec<&Entry> = chain.iter().filter(|entry| entry_type(entry) == "assistant").collect();
+    let chain_assistants: Vec<&Entry> = chain
+        .iter()
+        .filter(|entry| entry_type(entry) == "assistant")
+        .collect();
     let mut anchor: HashMap<String, String> = HashMap::new();
     for entry in &chain_assistants {
         if let Some(message_id) = assistant_message_id(entry) {
@@ -753,7 +792,8 @@ fn recover_parallel_tool_results(
                         call_owner.insert(call_id, Some(entry));
                     }
                     Some(owner) => {
-                        let same = owner.is_some_and(|owner| assistant_message_id(owner) == Some(message_id));
+                        let same = owner
+                            .is_some_and(|owner| assistant_message_id(owner) == Some(message_id));
                         call_owner.insert(call_id, if same { Some(entry) } else { None });
                     }
                 }
@@ -768,7 +808,9 @@ fn recover_parallel_tool_results(
         if let Some(parent) = parent_of(result) {
             results_by_assistant.entry(parent).or_default().push(result);
         }
-        if let Some(source) = result.get("sourceToolAssistantUUID").and_then(Value::as_str)
+        if let Some(source) = result
+            .get("sourceToolAssistantUUID")
+            .and_then(Value::as_str)
             && let Some(source_entry) = by_uuid.get(source)
             && same_writer(result, source_entry)
         {
@@ -778,7 +820,10 @@ fn recover_parallel_tool_results(
             if let Some(Some(owner)) = call_owner.get(call_id)
                 && same_writer(result, owner)
             {
-                results_by_assistant.entry(uuid_of(owner)).or_default().push(result);
+                results_by_assistant
+                    .entry(uuid_of(owner))
+                    .or_default()
+                    .push(result);
             }
         }
     }
@@ -803,15 +848,25 @@ fn recover_parallel_tool_results(
         if !processed.insert(message_id) {
             continue;
         }
-        let group = siblings.get(message_id).cloned().unwrap_or_else(|| vec![assistant]);
+        let group = siblings
+            .get(message_id)
+            .cloned()
+            .unwrap_or_else(|| vec![assistant]);
         let members: HashSet<&str> = group.iter().map(|member| uuid_of(member)).collect();
-        let mut orphaned_siblings: Vec<&Entry> =
-            group.iter().copied().filter(|member| !seen.contains(uuid_of(member))).collect();
+        let mut orphaned_siblings: Vec<&Entry> = group
+            .iter()
+            .copied()
+            .filter(|member| !seen.contains(uuid_of(member)))
+            .collect();
         let mut orphaned_results: Vec<&Entry> = Vec::new();
         let mut strays: Vec<&Entry> = Vec::new();
         let mut collected: HashSet<&str> = HashSet::new();
         for member in &group {
-            for result in results_by_assistant.get(uuid_of(member)).into_iter().flatten() {
+            for result in results_by_assistant
+                .get(uuid_of(member))
+                .into_iter()
+                .flatten()
+            {
                 let id = uuid_of(result);
                 if seen.contains(id) || !collected.insert(id) {
                     continue;
@@ -826,7 +881,11 @@ fn recover_parallel_tool_results(
         if !strays.is_empty() {
             let mut answered = answered_on_chain.clone();
             for result in &orphaned_results {
-                answered.extend(block_ids(result, "tool_result", "tool_use_id").into_iter().map(str::to_string));
+                answered.extend(
+                    block_ids(result, "tool_result", "tool_use_id")
+                        .into_iter()
+                        .map(str::to_string),
+                );
             }
             strays.sort_by_key(|entry| file_position.get(uuid_of(entry)).copied().unwrap_or(0));
             for result in strays {
@@ -873,7 +932,10 @@ fn recover_parallel_tool_results(
 }
 
 fn build_linear_chain(entries: &[Entry]) -> Vec<Entry> {
-    let by_uuid: HashMap<&str, &Entry> = entries.iter().map(|entry| (uuid_of(entry), entry)).collect();
+    let by_uuid: HashMap<&str, &Entry> = entries
+        .iter()
+        .map(|entry| (uuid_of(entry), entry))
+        .collect();
     let Some(leaf) = entries
         .iter()
         .rev()
@@ -906,8 +968,15 @@ fn to_session_message(entry: Entry) -> SessionMessage {
     SessionMessage {
         message_type: entry_type(&entry).to_string(),
         uuid: uuid_of(&entry).to_string(),
-        session_id: entry.get("sessionId").and_then(Value::as_str).unwrap_or("").to_string(),
-        timestamp: entry.get("timestamp").and_then(Value::as_str).map(str::to_string),
+        session_id: entry
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        timestamp: entry
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         message: entry.get("message").cloned().unwrap_or(Value::Null),
     }
 }
@@ -925,7 +994,9 @@ fn collect_agent_files(dir: &Path) -> Vec<(String, PathBuf)> {
         if path.is_dir() {
             out.extend(collect_agent_files(&path));
         } else if let Some(name) = path.file_name().and_then(|name| name.to_str())
-            && let Some(agent_id) = name.strip_prefix("agent-").and_then(|rest| rest.strip_suffix(".jsonl"))
+            && let Some(agent_id) = name
+                .strip_prefix("agent-")
+                .and_then(|rest| rest.strip_suffix(".jsonl"))
         {
             out.push((agent_id.to_string(), path.clone()));
         }
@@ -952,7 +1023,11 @@ fn build_fork_lines(
 ) -> io::Result<(String, Vec<String>)> {
     let mut transcript: Vec<Entry> = Vec::new();
     let mut content_replacements: Vec<Value> = Vec::new();
-    for line in content.lines().map(str::trim).filter(|line| !line.is_empty()) {
+    for line in content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
         let Ok(Value::Object(entry)) = serde_json::from_str::<Value>(line) else {
             continue;
         };
@@ -973,17 +1048,31 @@ fn build_fork_lines(
         let index = transcript
             .iter()
             .position(|entry| uuid_of(entry) == cutoff)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("message {cutoff} not found")))?;
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("message {cutoff} not found"),
+                )
+            })?;
         transcript.truncate(index + 1);
     }
     let mapping: HashMap<String, String> = transcript
         .iter()
         .map(|entry| (uuid_of(entry).to_string(), uuid::Uuid::new_v4().to_string()))
         .collect();
-    let by_uuid: HashMap<&str, &Entry> = transcript.iter().map(|entry| (uuid_of(entry), entry)).collect();
-    let writable: Vec<&Entry> = transcript.iter().filter(|entry| entry_type(entry) != "progress").collect();
+    let by_uuid: HashMap<&str, &Entry> = transcript
+        .iter()
+        .map(|entry| (uuid_of(entry), entry))
+        .collect();
+    let writable: Vec<&Entry> = transcript
+        .iter()
+        .filter(|entry| entry_type(entry) != "progress")
+        .collect();
     if writable.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("session {session_id} has no messages to fork")));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("session {session_id} has no messages to fork"),
+        ));
     }
     let forked_id = uuid::Uuid::new_v4().to_string();
     let now = iso_now();
@@ -1007,7 +1096,9 @@ fn build_fork_lines(
         if let Some(logical) = original.get("logicalParentUuid").and_then(Value::as_str) {
             forked.insert(
                 "logicalParentUuid".into(),
-                mapping.get(logical).map_or_else(|| json!(logical), |id| json!(id)),
+                mapping
+                    .get(logical)
+                    .map_or_else(|| json!(logical), |id| json!(id)),
             );
         }
         forked.insert("sessionId".into(), json!(forked_id));
@@ -1032,16 +1123,19 @@ fn build_fork_lines(
             .to_string(),
         );
     }
-    let fork_title = title.map(str::trim).filter(|title| !title.is_empty()).map_or_else(
-        || {
-            let derived = last_string_field(content, "customTitle")
-                .or_else(|| last_string_field(content, "aiTitle"))
-                .or_else(|| first_prompt(content))
-                .unwrap_or_else(|| "Forked session".into());
-            format!("{derived} (fork)")
-        },
-        str::to_string,
-    );
+    let fork_title = title
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map_or_else(
+            || {
+                let derived = last_string_field(content, "customTitle")
+                    .or_else(|| last_string_field(content, "aiTitle"))
+                    .or_else(|| first_prompt(content))
+                    .unwrap_or_else(|| "Forked session".into());
+                format!("{derived} (fork)")
+            },
+            str::to_string,
+        );
     lines.push(
         json!({"type": "custom-title", "sessionId": forked_id, "customTitle": fork_title,
             "uuid": uuid::Uuid::new_v4().to_string(), "timestamp": now})
@@ -1088,7 +1182,9 @@ mod tests {
     const S1: &str = "11111111-1111-4111-8111-111111111111";
 
     fn write_session(store: &SessionStore, cwd: &Path, id: &str, lines: &[Value]) -> PathBuf {
-        let dir = store.projects_dir().join(sanitize_path(&canonical_text(cwd)));
+        let dir = store
+            .projects_dir()
+            .join(sanitize_path(&canonical_text(cwd)));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join(format!("{id}.jsonl"));
         let body: String = lines.iter().map(|line| format!("{line}\n")).collect();
@@ -1117,7 +1213,10 @@ mod tests {
 
     #[test]
     fn sanitizes_like_the_cli() {
-        assert_eq!(sanitize_path("/Users/mo/dev/inline"), "-Users-mo-dev-inline");
+        assert_eq!(
+            sanitize_path("/Users/mo/dev/inline"),
+            "-Users-mo-dev-inline"
+        );
         let long = format!("/{}", "a".repeat(300));
         let sanitized = sanitize_path(&long);
         assert!(sanitized.starts_with(&format!("-{}", "a".repeat(199))));
@@ -1137,7 +1236,10 @@ mod tests {
         assert_eq!(session.summary, "Fix the build");
         assert_eq!(session.first_prompt.as_deref(), Some("fix the build"));
         assert_eq!(session.git_branch.as_deref(), Some("main"));
-        assert_eq!(session.created_at.as_deref(), Some("2026-10-26T10:00:00.000Z"));
+        assert_eq!(
+            session.created_at.as_deref(),
+            Some("2026-10-26T10:00:00.000Z")
+        );
         assert_eq!(store.list(None, false, 0, None).len(), 1);
     }
 
@@ -1148,7 +1250,10 @@ mod tests {
         let store = SessionStore::new(config.path());
         write_session(&store, cwd.path(), S1, &conversation());
         let messages = store.messages(S1, Some(cwd.path()), 0, None).unwrap();
-        let uuids: Vec<&str> = messages.iter().map(|message| message.uuid.as_str()).collect();
+        let uuids: Vec<&str> = messages
+            .iter()
+            .map(|message| message.uuid.as_str())
+            .collect();
         assert_eq!(uuids, ["u1", "a1", "a2", "r1", "r2", "a3"]);
     }
 
@@ -1158,7 +1263,9 @@ mod tests {
         let cwd = tempfile::tempdir().unwrap();
         let store = SessionStore::new(config.path());
         write_session(&store, cwd.path(), S1, &conversation());
-        store.rename(S1, "  Inline thread title ", Some(cwd.path())).unwrap();
+        store
+            .rename(S1, "  Inline thread title ", Some(cwd.path()))
+            .unwrap();
         let info = store.info(S1, Some(cwd.path())).unwrap();
         assert_eq!(info.custom_title.as_deref(), Some("Inline thread title"));
         assert!(store.rename(S1, "   ", Some(cwd.path())).is_err());
@@ -1175,10 +1282,18 @@ mod tests {
         let messages = store.messages(&forked, Some(cwd.path()), 0, None).unwrap();
         assert_eq!(messages.len(), 2);
         assert!(messages.iter().all(|message| message.session_id == forked));
-        assert!(messages.iter().all(|message| message.uuid != "u1" && message.uuid != "a1"));
+        assert!(
+            messages
+                .iter()
+                .all(|message| message.uuid != "u1" && message.uuid != "a1")
+        );
         let info = store.info(&forked, Some(cwd.path())).unwrap();
         assert_eq!(info.custom_title.as_deref(), Some("Fix the build (fork)"));
-        assert!(store.fork(S1, Some(cwd.path()), Some("missing"), None).is_err());
+        assert!(
+            store
+                .fork(S1, Some(cwd.path()), Some("missing"), None)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1199,7 +1314,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(store.subagents(S1, Some(cwd.path())), ["abc"]);
-        assert_eq!(store.subagent_messages(S1, "abc", Some(cwd.path())).unwrap().len(), 2);
+        assert_eq!(
+            store
+                .subagent_messages(S1, "abc", Some(cwd.path()))
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]
