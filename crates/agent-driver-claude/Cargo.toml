@@ -13,7 +13,9 @@ keywords = ["inline", "agent", "claude", "coding-agent"]
 categories = ["development-tools"]
 
 [dependencies]
+base64 = "0.22.1"
 futures-util.workspace = true
+inline-agent-bridge = { version = "0.7.18", path = "../agent-bridge" }
 libc = "0.2.172"
 log.workspace = true
 serde.workspace = true

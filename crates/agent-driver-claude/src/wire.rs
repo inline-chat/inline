@@ -185,6 +185,8 @@ impl MessageKind {
                         lenient(raw).map(Self::Task)
                     }
                     "background_tasks_changed" => Some(Self::BackgroundTasksChanged),
+                    // Older or relayed shape of the lifecycle frame.
+                    "command_lifecycle" => lenient(raw).map(Self::CommandLifecycle),
                     "compact_boundary" => Some(Self::CompactBoundary),
                     _ => None,
                 }

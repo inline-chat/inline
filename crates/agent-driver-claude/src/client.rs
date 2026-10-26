@@ -31,8 +31,17 @@ use crate::wire::{self, CliMessage, Frame, MessageKind, ResultMessage, StartupFa
 /// `cancel` fires when the CLI withdraws the request (for example an approval
 /// that became moot after an interrupt); the reply is then not sent.
 pub trait ControlHandler: Send + Sync + 'static {
-    fn handle(&self, request: IncomingRequest, cancel: CancelSignal)
-    -> BoxFuture<Result<Value, String>>;
+    fn handle(&self, call: IncomingCall, cancel: CancelSignal) -> BoxFuture<Result<Value, String>>;
+}
+
+/// One control request from the CLI.
+#[derive(Clone, Debug)]
+pub struct IncomingCall {
+    /// The CLI's request id; answers and cancellations name it.
+    pub request_id: String,
+    pub request: IncomingRequest,
+    /// The native `request` object.
+    pub raw: Value,
 }
 
 /// Refuses everything: permission asks are denied, dialogs left unanswered.
@@ -40,13 +49,9 @@ pub trait ControlHandler: Send + Sync + 'static {
 pub struct RefuseAll;
 
 impl ControlHandler for RefuseAll {
-    fn handle(
-        &self,
-        request: IncomingRequest,
-        _cancel: CancelSignal,
-    ) -> BoxFuture<Result<Value, String>> {
+    fn handle(&self, call: IncomingCall, _cancel: CancelSignal) -> BoxFuture<Result<Value, String>> {
         Box::pin(async move {
-            match request {
+            match call.request {
                 IncomingRequest::CanUseTool(permission) => Ok(
                     crate::control::PermissionDecision::deny("No approver is attached")
                         .to_value(&permission.input),
@@ -638,7 +643,12 @@ fn spawn_request_handler(inner: Arc<Inner>, request_id: String, request: Value) 
             } => Ok(answer_mcp(&inner, &server_name, message).await),
             other => {
                 let mut cancelled = cancel.clone();
-                let handler = inner.config.handler.handle(other, cancel.clone());
+                let call = IncomingCall {
+                    request_id: request_id.clone(),
+                    request: other,
+                    raw: request.clone(),
+                };
+                let handler = inner.config.handler.handle(call, cancel.clone());
                 tokio::select! {
                     outcome = handler => outcome,
                     () = cancelled.cancelled() => {
@@ -770,11 +780,11 @@ mod tests {
     impl ControlHandler for Approver {
         fn handle(
             &self,
-            request: IncomingRequest,
+            call: IncomingCall,
             mut cancel: CancelSignal,
         ) -> BoxFuture<Result<Value, String>> {
             Box::pin(async move {
-                let IncomingRequest::CanUseTool(permission) = request else {
+                let IncomingRequest::CanUseTool(permission) = call.request else {
                     return Err("unexpected".into());
                 };
                 if permission.tool_name == "Wait" {

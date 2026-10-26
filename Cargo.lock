@@ -1391,7 +1391,9 @@ dependencies = [
 name = "inline-agent-driver-claude"
 version = "0.7.18"
 dependencies = [
+ "base64 0.22.1",
  "futures-util",
+ "inline-agent-bridge",
  "libc",
  "log",
  "serde",
