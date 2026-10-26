@@ -23,7 +23,7 @@ use semver::Version;
 use serde_json::{Value, json};
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::delivery::{Request, input_request, op_request};
+use super::delivery::{Request, TurnFacts, input_request, op_request};
 use super::manifest::{self, SchemaSurface};
 use super::mapper::{AnswerPlan, CodexMapper, RequestMapped};
 use crate::peer::{CodexPeer, IncomingMessage, PeerError};
@@ -34,6 +34,9 @@ use crate::process::{
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const QUEUE_PREVIEW_CHARS: usize = 160;
+const QUEUE_PAGE_SIZE: u32 = 100;
+/// Bound on queue pages read in one listing (10,000 entries).
+const QUEUE_MAX_PAGES: usize = 100;
 
 /// How to run Codex for one bot on this machine.
 #[derive(Clone, Debug)]
@@ -565,25 +568,30 @@ impl SessionInner {
         }
     }
 
-    async fn refresh_queue(self: &Arc<Self>) {
+    /// Lists the whole native queue, every page, and publishes it.
+    async fn refresh_queue(self: &Arc<Self>) -> Result<Vec<QueuedInput>, PeerError> {
         let Some(connection) = self.connection.upgrade() else {
-            return;
+            return Err(PeerError::Closed);
         };
-        let Ok(response) = connection
-            .request(Request {
-                method: "thread/queue/list",
-                params: json!({"threadId": self.thread, "limit": 100}),
-            })
-            .await
-        else {
-            return;
-        };
-        let entries = response
-            .get("data")
-            .and_then(Value::as_array)
-            .map(|entries| {
-                entries
-                    .iter()
+        let mut entries = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..QUEUE_MAX_PAGES {
+            let mut params = json!({"threadId": self.thread, "limit": QUEUE_PAGE_SIZE});
+            if let Some(cursor) = &cursor {
+                params["cursor"] = json!(cursor);
+            }
+            let response = connection
+                .request(Request {
+                    method: "thread/queue/list",
+                    params,
+                })
+                .await?;
+            entries.extend(
+                response
+                    .get("data")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
                     .filter_map(|entry| {
                         let preview: String = entry
                             .get("input")
@@ -610,11 +618,22 @@ impl SessionInner {
                                 .and_then(|id| inline_agent_bridge::harness::InputId::new(id).ok()),
                             preview,
                         })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        self.emit_all(vec![Event::Queue { entries }]);
+                    }),
+            );
+            cursor = response
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if cursor.is_none() {
+                self.emit_all(vec![Event::Queue {
+                    entries: entries.clone(),
+                }]);
+                return Ok(entries);
+            }
+        }
+        Err(PeerError::InvalidMessage(
+            "the Codex queue has more pages than this bridge reads".to_owned(),
+        ))
     }
 }
 
@@ -646,7 +665,9 @@ async fn dispatch(
                     session.emit_all(mapped.events);
                     if mapped.refresh_queue {
                         let session = session.clone();
-                        tokio::spawn(async move { session.refresh_queue().await });
+                        tokio::spawn(async move {
+                            let _ = session.refresh_queue().await;
+                        });
                     }
                 }
             }
@@ -891,16 +912,23 @@ impl Session for CodexSession {
             {
                 return self.edit_queue(action).await;
             }
-            let (active, model) = (
-                self.inner
-                    .mapper
-                    .lock()
-                    .expect("mapper poisoned")
-                    .active_turn()
-                    .cloned(),
-                self.inner.model.lock().expect("model poisoned").clone(),
-            );
-            let request = op_request(&self.inner.thread, active.as_ref(), model.as_deref(), &op)?;
+            let (active, last_finished) = {
+                let mapper = self.inner.mapper.lock().expect("mapper poisoned");
+                (
+                    mapper.active_turn().cloned(),
+                    mapper.last_finished_turn().cloned(),
+                )
+            };
+            let model = self.inner.model.lock().expect("model poisoned").clone();
+            let request = op_request(
+                &self.inner.thread,
+                TurnFacts {
+                    active: active.as_ref(),
+                    last_finished: last_finished.as_ref(),
+                },
+                model.as_deref(),
+                &op,
+            )?;
             let response = self.connection.request(request).await.map_err(op_error)?;
             if matches!(op, Op::Compact | Op::Review { .. })
                 && let Some(turn) = response
@@ -974,11 +1002,10 @@ impl Session for CodexSession {
 
 impl CodexSession {
     async fn edit_queue(&self, action: &QueueOp) -> Result<OpOutcome, OpError> {
-        self.inner.refresh_queue().await;
-        let entries = self.inner.queue.lock().expect("queue poisoned").clone();
+        let entries = self.inner.refresh_queue().await.map_err(op_error)?;
         match action {
             QueueOp::Clear => {
-                for entry in entries {
+                for entry in &entries {
                     self.connection
                         .request(Request {
                             method: "thread/queue/delete",
@@ -986,6 +1013,17 @@ impl CodexSession {
                         })
                         .await
                         .map_err(op_error)?;
+                }
+                // Only the entries listed are deleted; input that arrived since
+                // stays queued. Confirm none of the listed ones remain.
+                let remaining = self.inner.refresh_queue().await.map_err(op_error)?;
+                if remaining
+                    .iter()
+                    .any(|queued| entries.iter().any(|entry| entry.entry == queued.entry))
+                {
+                    return Err(OpError::Rejected(
+                        "Codex kept some queued input after clearing".to_owned(),
+                    ));
                 }
             }
             QueueOp::Reorder { entry, position } => {

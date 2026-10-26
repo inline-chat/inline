@@ -106,6 +106,9 @@ struct ItemMemo {
 pub(crate) struct CodexMapper {
     thread: String,
     active_turn: Option<TurnId>,
+    /// The main thread's latest completed, failed or interrupted turn
+    /// (`thread/sample` names it as `expectedTurnId`).
+    last_finished_turn: Option<TurnId>,
     consumed: HashMap<TurnId, Vec<InputId>>,
     seen_inputs: HashSet<InputId>,
     items: HashMap<String, ItemMemo>,
@@ -119,6 +122,7 @@ impl CodexMapper {
         Self {
             thread: thread.into(),
             active_turn: None,
+            last_finished_turn: None,
             consumed: HashMap::new(),
             seen_inputs: HashSet::new(),
             items: HashMap::new(),
@@ -131,6 +135,11 @@ impl CodexMapper {
     /// The running turn on the main thread.
     pub(crate) fn active_turn(&self) -> Option<&TurnId> {
         self.active_turn.as_ref()
+    }
+
+    /// The main thread's latest finished turn.
+    pub(crate) fn last_finished_turn(&self) -> Option<&TurnId> {
+        self.last_finished_turn.as_ref()
     }
 
     /// Records the turn returned by `turn/start` before its notification arrives.
@@ -517,6 +526,9 @@ impl CodexMapper {
         }
         if self.active_turn.as_ref() == Some(&turn) {
             self.active_turn = None;
+        }
+        if parent.is_none() {
+            self.last_finished_turn = Some(turn.clone());
         }
         let error = params
             .pointer("/turn/error/message")

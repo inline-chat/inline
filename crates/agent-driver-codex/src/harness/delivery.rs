@@ -8,7 +8,7 @@
 //! | Passive | `additionalContext` on the next turn, or `thread/inject_items` |
 
 use inline_agent_bridge::harness::{
-    Delivery, GoalOp, Input, InputContent, Op, OpError, Origin, QueueOp, ReviewTarget, RewindPoint,
+    ChildKind, Delivery, GoalOp, Input, InputContent, Op, OpError, Origin, QueueOp, ReviewTarget,
     SettingsScope,
 };
 use inline_agent_bridge::{InputAttachmentKind, TurnId};
@@ -169,14 +169,28 @@ fn passive_item(content: &InputContent, origin: &Origin) -> Value {
     })
 }
 
-/// The request for one operation, given the thread, its running turn and its
+/// Turn facts an operation may need.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct TurnFacts<'a> {
+    /// The running turn.
+    pub active: Option<&'a TurnId>,
+    /// The latest completed, failed or interrupted turn.
+    pub last_finished: Option<&'a TurnId>,
+}
+
+/// The request for one operation, given the thread, its turns and its
 /// effective model (Codex collaboration modes carry the model).
+/// Why Codex offers no file undo.
+pub(crate) const CODEX_NO_FILE_UNDO: &str =
+    "Codex can revert conversation history but not files; undo file changes is not available";
+
 pub(crate) fn op_request(
     thread: &str,
-    active_turn: Option<&TurnId>,
+    turns: TurnFacts<'_>,
     model: Option<&str>,
     op: &Op,
 ) -> Result<Request, OpError> {
+    let active_turn = turns.active;
     let thread_only = |method| Request {
         method,
         params: json!({"threadId": thread}),
@@ -271,17 +285,13 @@ pub(crate) fn op_request(
                 ),
             ));
         }
-        Op::RewindFiles { to } => match to {
-            RewindPoint::Turn { turn } => Request {
-                method: "thread/revert",
-                params: json!({"threadId": thread, "beforeTurnId": turn.as_str()}),
-            },
-            _ => {
-                return Err(OpError::InvalidResponse(
-                    "Codex reverts to a turn".to_owned(),
-                ));
-            }
-        },
+        // `thread/revert` removes conversation history and leaves files as
+        // they are, so it is not a file undo.
+        Op::RewindFiles { .. } => {
+            return Err(OpError::Unavailable(
+                inline_agent_bridge::harness::Availability::unavailable(CODEX_NO_FILE_UNDO),
+            ));
+        }
         Op::Mode { mode } => {
             let model = model.ok_or_else(|| {
                 OpError::Rejected("the session's model is not known yet".to_owned())
@@ -308,14 +318,35 @@ pub(crate) fn op_request(
                 params: json!({"threadId": thread, "origin": "user"}),
             },
         },
-        Op::StopChild { child } => Request {
-            method: "thread/backgroundTerminals/terminate",
-            params: json!({"threadId": thread, "processId": child.id.as_str()}),
+        // Background terminals stop by process ID through the parent thread.
+        // Sub-agents are threads of their own with no qualified stop yet.
+        Op::StopChild { child } => match child.kind {
+            ChildKind::BackgroundTask => Request {
+                method: "thread/backgroundTerminals/terminate",
+                params: json!({"threadId": thread, "processId": child.id.as_str()}),
+            },
+            ChildKind::Subagent | ChildKind::Unknown => {
+                return Err(OpError::Unavailable(
+                    inline_agent_bridge::harness::Availability::unavailable(
+                        "Codex sub-agents stop with their parent's turn",
+                    ),
+                ));
+            }
         },
-        Op::Sample { prompt } => Request {
-            method: "thread/sample",
-            params: json!({"threadId": thread, "prompt": prompt}),
-        },
+        // The sample reads the session as of its latest finished turn and is
+        // rejected while a turn runs.
+        Op::Sample { prompt } => {
+            if active_turn.is_some() {
+                return Err(OpError::Rejected("a turn is running".to_owned()));
+            }
+            let expected = turns.last_finished.ok_or_else(|| {
+                OpError::Rejected("the session has no finished turn yet".to_owned())
+            })?;
+            Request {
+                method: "thread/sample",
+                params: json!({"threadId": thread, "prompt": prompt, "expectedTurnId": expected.as_str()}),
+            }
+        }
         Op::McpAuth { server } => Request {
             method: "mcpServer/oauth/login",
             params: json!({"name": server, "threadId": thread}),
@@ -452,7 +483,10 @@ mod tests {
         let turn = TurnId::new("turn-1").expect("turn");
         let interrupt = op_request(
             "t1",
-            Some(&turn),
+            TurnFacts {
+                active: Some(&turn),
+                last_finished: None,
+            },
             None,
             &Op::Interrupt {
                 cancel_queued: false,
@@ -464,7 +498,10 @@ mod tests {
         assert!(
             op_request(
                 "t1",
-                None,
+                TurnFacts {
+                    active: None,
+                    last_finished: None
+                },
                 None,
                 &Op::Interrupt {
                     cancel_queued: false
@@ -475,7 +512,10 @@ mod tests {
         assert_eq!(
             op_request(
                 "t1",
-                None,
+                TurnFacts {
+                    active: None,
+                    last_finished: None
+                },
                 None,
                 &Op::Queue {
                     action: QueueOp::Start
@@ -486,12 +526,23 @@ mod tests {
             "thread/queue/start"
         );
         assert!(matches!(
-            op_request("t1", None, None, &Op::Clear),
+            op_request(
+                "t1",
+                TurnFacts {
+                    active: None,
+                    last_finished: None
+                },
+                None,
+                &Op::Clear
+            ),
             Err(OpError::Unavailable(_))
         ));
         let review = op_request(
             "t1",
-            None,
+            TurnFacts {
+                active: None,
+                last_finished: None,
+            },
             None,
             &Op::Review {
                 target: ReviewTarget::BaseBranch {
@@ -504,5 +555,75 @@ mod tests {
             review.params["target"],
             json!({"type": "baseBranch", "branch": "main"})
         );
+    }
+
+    #[test]
+    fn sample_names_the_finished_turn_and_undo_and_subagent_stop_say_why() {
+        let finished = TurnId::new("turn-9").expect("turn");
+        let sample = Op::Sample {
+            prompt: "Should I speak?".to_owned(),
+        };
+        let request = op_request(
+            "t1",
+            TurnFacts {
+                active: None,
+                last_finished: Some(&finished),
+            },
+            None,
+            &sample,
+        )
+        .expect("sample");
+        assert_eq!(request.params["expectedTurnId"], "turn-9");
+        assert!(matches!(
+            op_request("t1", TurnFacts::default(), None, &sample),
+            Err(OpError::Rejected(_))
+        ));
+        assert!(matches!(
+            op_request(
+                "t1",
+                TurnFacts {
+                    active: Some(&finished),
+                    last_finished: Some(&finished),
+                },
+                None,
+                &sample
+            ),
+            Err(OpError::Rejected(_))
+        ));
+        let rewind = Op::RewindFiles {
+            to: inline_agent_bridge::harness::RewindPoint::Turn {
+                turn: finished.clone(),
+            },
+        };
+        assert!(matches!(
+            op_request("t1", TurnFacts::default(), None, &rewind),
+            Err(OpError::Unavailable(_))
+        ));
+        let child = |kind| Op::StopChild {
+            child: inline_agent_bridge::harness::ChildRef {
+                id: inline_agent_bridge::harness::ChildId::new("c1").expect("child"),
+                kind,
+            },
+        };
+        assert_eq!(
+            op_request(
+                "t1",
+                TurnFacts::default(),
+                None,
+                &child(ChildKind::BackgroundTask)
+            )
+            .expect("terminal")
+            .method,
+            "thread/backgroundTerminals/terminate"
+        );
+        assert!(matches!(
+            op_request(
+                "t1",
+                TurnFacts::default(),
+                None,
+                &child(ChildKind::Subagent)
+            ),
+            Err(OpError::Unavailable(_))
+        ));
     }
 }

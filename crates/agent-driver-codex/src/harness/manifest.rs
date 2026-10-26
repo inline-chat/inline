@@ -229,7 +229,10 @@ pub(crate) fn build_manifest(
             OpKind::Clear,
             unavailable("Codex has no clear; use /new for a fresh session"),
         )
-        .with_op(OpKind::RewindFiles, gated("thread/revert"))
+        .with_op(
+            OpKind::RewindFiles,
+            unavailable(super::delivery::CODEX_NO_FILE_UNDO),
+        )
         .with_op(OpKind::Mode, gated("collaborationMode/list"))
         .with_op(OpKind::Review, gated("review/start"))
         .with_op(OpKind::Goal, gated("thread/goal/set"))
