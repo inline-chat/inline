@@ -146,6 +146,46 @@ impl DiscoveryTarget {
     }
 }
 
+/// The crash-replay copy of a batch never stores form text: a text answer may
+/// be a secret, and the live submission is the only copy that carries it. A
+/// replay delivers the field as redacted, so the bot asks again.
+fn redact_form_text(updates: &[proto::Update]) -> std::borrow::Cow<'_, [proto::Update]> {
+    use proto::message_form_value::Value;
+    let has_text = |update: &proto::Update| {
+        matches!(
+            &update.update,
+            Some(proto::update::Update::MessageActionInvoked(invoked))
+                if invoked.form.as_ref().is_some_and(|form| form
+                    .values
+                    .iter()
+                    .any(|value| matches!(value.value, Some(Value::Text(_)))))
+        )
+    };
+    if !updates.iter().any(has_text) {
+        return std::borrow::Cow::Borrowed(updates);
+    }
+    std::borrow::Cow::Owned(
+        updates
+            .iter()
+            .cloned()
+            .map(|mut update| {
+                if let Some(proto::update::Update::MessageActionInvoked(invoked)) =
+                    &mut update.update
+                    && let Some(form) = &mut invoked.form
+                {
+                    for value in &mut form.values {
+                        if matches!(value.value, Some(Value::Text(_))) {
+                            value.value = None;
+                            value.redacted = true;
+                        }
+                    }
+                }
+                update
+            })
+            .collect(),
+    )
+}
+
 fn discovery_target(seq: i64) -> DiscoveryTarget {
     if seq == 0 {
         DiscoveryTarget::Latest
@@ -732,7 +772,7 @@ impl SyncManager {
         sidecars: Option<proto::UpdateSidecars>,
     ) -> BackendResult<CommittedSyncBatch> {
         validate_journal_updates(&updates)?;
-        let payload = encode_pending_payload(&updates, sidecars.as_ref())?;
+        let payload = encode_pending_payload(&redact_form_text(&updates), sidecars.as_ref())?;
         self.store
             .save_pending_sync_batch(PendingSyncBatch {
                 key,
@@ -2978,5 +3018,39 @@ mod tests {
         proto::Peer {
             r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id })),
         }
+    }
+
+    #[test]
+    fn replay_copies_never_hold_form_text() {
+        use proto::message_form_value::Value;
+        let update = proto::Update {
+            update: Some(proto::update::Update::MessageActionInvoked(
+                proto::UpdateMessageActionInvoked {
+                    form: Some(proto::MessageFormSubmission {
+                        values: vec![
+                            proto::MessageFormValue {
+                                field_id: "token".to_owned(),
+                                value: Some(Value::Text("synthetic-secret".to_owned())),
+                                redacted: false,
+                            },
+                            proto::MessageFormValue {
+                                field_id: "ok".to_owned(),
+                                value: Some(Value::Toggle(true)),
+                                redacted: false,
+                            },
+                        ],
+                    }),
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        };
+        let redacted = super::redact_form_text(std::slice::from_ref(&update));
+        let Some(proto::update::Update::MessageActionInvoked(invoked)) = &redacted[0].update else {
+            panic!("update");
+        };
+        let values = &invoked.form.as_ref().unwrap().values;
+        assert!(values[0].value.is_none() && values[0].redacted);
+        assert_eq!(values[1].value, Some(Value::Toggle(true)));
     }
 }

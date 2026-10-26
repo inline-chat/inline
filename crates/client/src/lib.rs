@@ -523,8 +523,9 @@ pub struct FormValue {
     pub value: Option<FormFieldValue>,
 }
 
-/// A submitted form field's value.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// A submitted form field's value. Text may be a secret, so it is never
+/// written to logs or the event outbox.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FormFieldValue {
     /// Text, including secret text.
     Text(String),
@@ -539,6 +540,21 @@ pub enum FormFieldValue {
     Toggle(bool),
     /// A number, as the shortest decimal text that round-trips.
     Number(String),
+}
+
+impl fmt::Debug for FormFieldValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text(_) => formatter.write_str("Text(<redacted>)"),
+            Self::Selection { option_ids, other } => formatter
+                .debug_struct("Selection")
+                .field("option_ids", option_ids)
+                .field("has_other", &other.is_some())
+                .finish(),
+            Self::Toggle(value) => formatter.debug_tuple("Toggle").field(value).finish(),
+            Self::Number(value) => formatter.debug_tuple("Number").field(value).finish(),
+        }
+    }
 }
 
 /// Committed client event for apps, bridges, agents, and hosts.
@@ -744,6 +760,13 @@ pub enum ClientEvent {
 }
 
 impl ClientEvent {
+    /// Events delivered to the host but never stored in the event outbox:
+    /// form submissions can carry secrets. A crash before the host handles
+    /// one leaves the form open to submit again.
+    pub const fn is_never_persisted(&self) -> bool {
+        matches!(self, Self::MessageFormSubmitted { .. })
+    }
+
     /// Returns the event delivery reliability class.
     pub const fn reliability(&self) -> EventReliability {
         match self {
