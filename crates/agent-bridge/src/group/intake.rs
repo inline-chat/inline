@@ -14,22 +14,37 @@ use serde::{Deserialize, Serialize};
 use super::caps::LoopVerdict;
 use super::envelope::{Conversation, GroupMessage, Mention, SentVia};
 use super::participation::ParticipationMode;
+use super::permissions::{Grants, Operation};
 
-/// The sender's access to this agent, resolved from server grants and
-/// re-checked by the bridge on every input. A mention never grants access.
+/// Where this agent's work in the thread stands, for picking the operation a
+/// direct input needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Access {
-    Owner,
-    /// Holds an invoke grant (for an agent sender: is one of the owner's own
-    /// agents or is granted as a subject).
-    Grantee,
+pub enum WorkPhase {
+    /// No work in this thread yet.
     None,
+    /// Work exists and no turn runs.
+    Idle,
+    /// A turn runs: direct input steers it.
+    Running,
+    /// Paused (spec §4.5): only direct input or Resume restarts it.
+    Paused,
 }
 
-impl Access {
-    pub const fn may_invoke(self) -> bool {
-        !matches!(self, Self::None)
+/// The operation a direct input needs (spec §7). `/queue`, `/stop`, `/pause`
+/// and `/resume` name theirs; other commands are admitted by their handler
+/// with their own operation, after this check.
+pub fn required_operation(message: &GroupMessage, work: WorkPhase) -> Operation {
+    match message.command().map(|(name, _)| name) {
+        Some("queue") => Operation::Queue,
+        Some("stop") => Operation::Stop,
+        Some("pause") => Operation::Pause,
+        Some("resume") => Operation::Resume,
+        _ => match work {
+            WorkPhase::None | WorkPhase::Idle => Operation::StartWork,
+            WorkPhase::Running => Operation::Steer,
+            WorkPhase::Paused => Operation::Resume,
+        },
     }
 }
 
@@ -169,7 +184,9 @@ pub fn classify_addressee(message: &GroupMessage, bot_user_id: i64) -> Addressee
 pub struct IntakeFacts<'a> {
     pub message: &'a GroupMessage,
     pub bot_user_id: i64,
-    pub access: Access,
+    /// The sender's current grants on this agent. A mention never grants.
+    pub grants: Grants,
+    pub work: WorkPhase,
     /// This agent's participation in the message's thread; `None` when it has
     /// not joined.
     pub participation: Option<ParticipationMode>,
@@ -205,8 +222,13 @@ pub enum SkipReason {
 pub enum IntakeDecision {
     /// Direct input: start work, steer it, queue with `/queue`, or run the
     /// command. Also restarts paused work. `join` is set when the agent was
-    /// not participating yet (a mention joins it in active mode).
-    Act { reason: DirectReason, join: bool },
+    /// not participating yet (a mention joins it in active mode). `required`
+    /// is rechecked against the sender's grants after any wait.
+    Act {
+        reason: DirectReason,
+        join: bool,
+        required: Operation,
+    },
     /// Passive context at the next native boundary. `consider` marks an
     /// unaddressed human message the speak gate may evaluate.
     Observe {
@@ -264,7 +286,8 @@ pub fn decide_intake(facts: IntakeFacts<'_>) -> IntakeDecision {
 
     match classify_addressee(message, facts.bot_user_id) {
         AddresseeKind::Me { reason } => {
-            if !facts.access.may_invoke() {
+            let required = required_operation(message, facts.work);
+            if !facts.grants.permits(required) {
                 return observe_or_skip(ObserveReason::NotGranted, SkipReason::NotGranted);
             }
             if agent_sender && matches!(facts.loop_verdict, LoopVerdict::CapReached { .. }) {
@@ -273,12 +296,13 @@ pub fn decide_intake(facts: IntakeFacts<'_>) -> IntakeDecision {
             IntakeDecision::Act {
                 reason,
                 join: facts.participation.is_none(),
+                required,
             }
         }
         AddresseeKind::Others => observe_or_skip(ObserveReason::AddressedToOthers, ambient_skip),
         AddresseeKind::Unaddressed => {
             let consider = !agent_sender
-                && facts.access.may_invoke()
+                && facts.grants.permits(Operation::StartWork)
                 && facts.participation == Some(ParticipationMode::Active);
             match observe_or_skip(ObserveReason::Unaddressed, ambient_skip) {
                 IntakeDecision::Observe { reason, .. } => {
@@ -368,7 +392,8 @@ mod tests {
         IntakeFacts {
             message,
             bot_user_id: ME,
-            access: Access::Owner,
+            grants: Grants::OWNER,
+            work: WorkPhase::None,
             participation: Some(ParticipationMode::Active),
             loop_verdict: LoopVerdict::Allowed { hops: 0 },
         }
@@ -644,13 +669,14 @@ mod tests {
             ME,
         );
         let mut joining = facts(&message);
-        joining.access = Access::Grantee;
+        joining.grants = Grants::MIGRATED_ALLOWLIST;
         joining.participation = None;
         assert_eq!(
             decide_intake(joining),
             IntakeDecision::Act {
                 reason: DirectReason::LeadingMention,
-                join: true
+                join: true,
+                required: Operation::StartWork
             }
         );
         // Muted agents still take direct input, without rejoining.
@@ -659,7 +685,8 @@ mod tests {
             decide_intake(joining),
             IntakeDecision::Act {
                 reason: DirectReason::LeadingMention,
-                join: false
+                join: false,
+                required: Operation::StartWork
             }
         );
     }
@@ -672,7 +699,7 @@ mod tests {
             ME,
         );
         let mut ungranted = facts(&message);
-        ungranted.access = Access::None;
+        ungranted.grants = Grants::NONE;
         let decision = decide_intake(ungranted);
         assert_eq!(
             decision,
@@ -699,7 +726,7 @@ mod tests {
             "anyone know why CI fails?",
         );
         let mut active = facts(&message);
-        active.access = Access::Grantee;
+        active.grants = Grants::MIGRATED_ALLOWLIST;
         assert_eq!(
             decide_intake(active),
             IntakeDecision::Observe {
@@ -717,7 +744,7 @@ mod tests {
             }
         );
         let mut ungranted = active;
-        ungranted.access = Access::None;
+        ungranted.grants = Grants::NONE;
         assert_eq!(
             decide_intake(ungranted),
             IntakeDecision::Observe {
@@ -763,7 +790,7 @@ mod tests {
             ME,
         );
         let mut agent_facts = facts(&message);
-        agent_facts.access = Access::Grantee;
+        agent_facts.grants = Grants::MIGRATED_ALLOWLIST;
         assert!(matches!(
             decide_intake(agent_facts),
             IntakeDecision::Act { .. }
@@ -798,6 +825,60 @@ mod tests {
     }
 
     #[test]
+    fn direct_input_needs_the_operation_its_effect_has() {
+        let base = mention(
+            message(human(ALICE), Conversation::Group, "@claude go"),
+            "@claude",
+            ME,
+        );
+        let invoke_only = Grants {
+            invoke: true,
+            ..Grants::NONE
+        };
+        let steer_only = Grants {
+            steer: true,
+            ..Grants::NONE
+        };
+        let act = |grants, work, message: &GroupMessage| {
+            let mut f = facts(message);
+            f.grants = grants;
+            f.work = work;
+            matches!(decide_intake(f), IntakeDecision::Act { .. })
+        };
+        // Starting work needs INVOKE; steering, resuming and queueing need STEER.
+        assert!(act(invoke_only, WorkPhase::None, &base));
+        assert!(act(invoke_only, WorkPhase::Idle, &base));
+        assert!(!act(invoke_only, WorkPhase::Running, &base));
+        assert!(!act(invoke_only, WorkPhase::Paused, &base));
+        assert!(!act(steer_only, WorkPhase::None, &base));
+        assert!(act(steer_only, WorkPhase::Running, &base));
+        assert!(act(steer_only, WorkPhase::Paused, &base));
+        let queued = command(base.clone(), "queue", None);
+        assert_eq!(
+            required_operation(&queued, WorkPhase::Idle),
+            Operation::Queue
+        );
+        assert!(!act(invoke_only, WorkPhase::Running, &queued));
+        assert!(act(steer_only, WorkPhase::Running, &queued));
+        // Approve or configure grants alone never start or steer work.
+        for grants in [
+            Grants {
+                approve: true,
+                ..Grants::NONE
+            },
+            Grants {
+                configure: true,
+                view: true,
+                ..Grants::NONE
+            },
+        ] {
+            for work in [WorkPhase::None, WorkPhase::Running, WorkPhase::Paused] {
+                assert!(!act(grants, work, &base));
+            }
+        }
+    }
+
+    #[test]
     fn decision_table_over_senders_modes_and_addressing() {
         let modes = [
             None,
@@ -805,7 +886,7 @@ mod tests {
             Some(ParticipationMode::MentionsOnly),
             Some(ParticipationMode::Muted),
         ];
-        let accesses = [Access::Owner, Access::Grantee, Access::None];
+        let accesses = [Grants::OWNER, Grants::MIGRATED_ALLOWLIST, Grants::NONE];
         for agent_sender in [false, true] {
             let author = if agent_sender {
                 agent(OTHER_BOT)
@@ -826,10 +907,10 @@ mod tests {
             for participation in modes {
                 for access in accesses {
                     let mut f = facts(&direct);
-                    f.access = access;
+                    f.grants = access;
                     f.participation = participation;
                     let decision = decide_intake(f);
-                    if access.may_invoke() {
+                    if access.permits(Operation::StartWork) {
                         assert!(matches!(decision, IntakeDecision::Act { .. }));
                     } else {
                         assert!(!matches!(decision, IntakeDecision::Act { .. }));
@@ -837,7 +918,7 @@ mod tests {
 
                     for ambient_message in [&others, &ambient] {
                         let mut f = facts(ambient_message);
-                        f.access = access;
+                        f.grants = access;
                         f.participation = participation;
                         let decision = decide_intake(f);
                         assert!(!matches!(decision, IntakeDecision::Act { .. }));
@@ -852,7 +933,7 @@ mod tests {
                             considers,
                             std::ptr::eq(ambient_message, &ambient)
                                 && !agent_sender
-                                && access.may_invoke()
+                                && access.permits(Operation::StartWork)
                                 && participation == Some(ParticipationMode::Active)
                         );
                     }

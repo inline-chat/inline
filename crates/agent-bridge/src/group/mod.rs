@@ -4,9 +4,9 @@
 //! provider-neutral, pure rules that let an agent behave as a teammate:
 //! attributed envelopes with native provenance, structured intake (no word
 //! triggers, leading mentions decide the addressee), participation modes, the
-//! speak-gate interface, large surfaced safety caps, bounded join and passive
-//! context, the hold/release state machine, and the title and archive sync
-//! policy. Nothing here performs I/O; the runtime feeds facts in and executes
+//! speak-gate interface, the operation permission table, large surfaced
+//! safety caps, bounded join and passive context, the hold/release state
+//! machine, and the title and archive sync policy. Nothing here performs I/O; the runtime feeds facts in and executes
 //! the returned decisions and effects.
 
 mod caps;
@@ -15,8 +15,10 @@ mod envelope;
 mod guide;
 mod handoff;
 mod hold;
+mod input;
 mod intake;
 mod participation;
+mod permissions;
 mod speak_gate;
 mod sync;
 
@@ -30,25 +32,27 @@ pub use context::{
 };
 pub use envelope::{
     Author, AuthorKind, ClaudeInputFields, ClaudeOrigin, CodexPlacement, Conversation,
-    GroupMessage, INLINE_CHANNEL_SERVER, Mention, MessageEntity, Provenance, ReplyRef, SentVia,
+    GroupMessage, INLINE_CHANNEL_SERVER, Mention, MessageEntity, ReplyRef, SentVia, claude_input,
+    codex_placement, origin_of,
 };
 pub use guide::{GuideFacts, trusted_guide};
 pub use handoff::{HandoffInstruction, HandoffProvider, HandoffTarget, handoff_instruction};
 pub use hold::{
-    CLAUDE_EXIT_GRACE, CLAUDE_IDLE_WINDOW, CODEX_DEFAULT_UNLOAD_DELAY,
-    HELD_ELSEWHERE_PROBE_INTERVAL, HeldBy, HoldEffect, HoldEvent, HoldMachine, HoldState,
-    IdleRelease, LiveItem, LiveWork, PendingInput, RELEASE_STEP_TIMEOUT, ReleaseAction,
-    ReleaseCause, ReleasePhase, ReleaseReceipt, ReleaseRequest, ReleaseStep, ReleaseStepOutcome,
-    WakeupDisposition,
+    CLAUDE_EXIT_GRACE, CLAUDE_IDLE_WINDOW, CODEX_DEFAULT_UNLOAD_DELAY, DetachPhase,
+    HELD_ELSEWHERE_PROBE_INTERVAL, HoldEffect, HoldEvent, HoldMachine, HoldState, IdleRelease,
+    PendingInput, RELEASE_STEP_TIMEOUT, ReleaseCause, ReleaseReceipt, ReleaseRequest, ReleaseStep,
+    ReleaseStepOutcome, WakeupDisposition, release_steps,
 };
+pub use input::{direct_input, passive_input};
 pub use intake::{
-    Access, AddresseeKind, DirectReason, IntakeDecision, IntakeFacts, ObserveReason, SkipReason,
-    classify_addressee, decide_intake, leading_mentions,
+    AddresseeKind, DirectReason, IntakeDecision, IntakeFacts, ObserveReason, SkipReason, WorkPhase,
+    classify_addressee, decide_intake, leading_mentions, required_operation,
 };
 pub use participation::{
     Participation, ParticipationChange, ParticipationError, ParticipationMode,
     apply_participation_change,
 };
+pub use permissions::{Admission, Grants, Operation, admit};
 pub use speak_gate::{
     ConsiderOutcome, ConsiderQueue, ConsiderReadiness, ConsiderTicket, DEFAULT_QUIET_WINDOW_MS,
     GateAdmission, GateAvailability, SpeakGate, SpeakGateError, SpeakGateFuture, SpeakGateRequest,
