@@ -24,6 +24,18 @@ enum RichBlockViewFactory {
       RichBlockQuoteNodeView()
     case .table:
       RichBlockTableNodeView()
+    case .fields:
+      RichBlockFieldsNodeView()
+    case .steps:
+      RichBlockStepsNodeView()
+    case .callout:
+      RichBlockCalloutNodeView()
+    case .meter:
+      RichBlockMeterNodeView()
+    case .diff:
+      RichBlockDiffNodeView()
+    case .form:
+      RichBlockFormNodeView()
     }
   }
 }

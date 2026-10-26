@@ -518,7 +518,11 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
             && table.cells[index].frame.minY == table.cells[index + 1].frame.minY
           guard appendSurface(nodeSurfaces[index], separatorAfter: sameRow ? "\t" : "\n") else { return nil }
         }
-      case .separator, .image, .album, .quote:
+      case .fields, .steps, .callout, .meter, .form:
+        for surface in nodeSurfaces {
+          guard appendSurface(surface, separatorAfter: "\n") else { return nil }
+        }
+      case .separator, .image, .album, .quote, .diff:
         guard nodeSurfaces.isEmpty else { return nil }
       }
     }

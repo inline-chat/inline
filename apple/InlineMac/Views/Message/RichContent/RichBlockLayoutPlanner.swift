@@ -217,6 +217,13 @@ final class RichBlockLayoutPlanner {
           remainingBlocks: &remainingBlocks,
           depth: depth + 1
         ) else { return false }
+      case let .callout(callout):
+        guard consumeStructuralBudget(
+          callout.children,
+          remainingTableCells: &remainingTableCells,
+          remainingBlocks: &remainingBlocks,
+          depth: depth + 1
+        ) else { return false }
       case let .quote(quote):
         guard consumeStructuralBudget(
           quote.children,
@@ -366,8 +373,9 @@ final class RichBlockLayoutPlanner {
     return math.map { RichTextMath.projectInline(value, sourceOffset: offset, snapshot: $0, maximumWidth: maximumWidth) } ?? value
   }
 
-  private struct Builder {
-    private struct TextMeasurement {
+  // Internal so the agent block layout can live in its own file.
+  struct Builder {
+    struct TextMeasurement {
       var height: CGFloat
       var maxLineUsedWidth: CGFloat
       var lastLineUsedWidth: CGFloat
@@ -414,11 +422,11 @@ final class RichBlockLayoutPlanner {
       }
     }
 
-    private mutating func recordMeasuredFrame(_ frame: CGRect) {
+    mutating func recordMeasuredFrame(_ frame: CGRect) {
       measuredMaxX = max(measuredMaxX, frame.maxX)
     }
 
-    private mutating func claimMaximumWidth() {
+    mutating func claimMaximumWidth() {
       claimsMaximumWidth = true
     }
 
@@ -533,18 +541,30 @@ final class RichBlockLayoutPlanner {
         guard disclosure.hasSummary else { return false }
         let direction = disclosure.hasIsRtl ? disclosure.isRtl : inheritedDirection
         let expanded = disclosureOverrides[path] ?? (disclosure.hasInitiallyOpen && disclosure.initiallyOpen)
+        let decoration = disclosureDecoration(disclosure, width: width)
         guard appendText(
           disclosure.summary,
           role: .disclosureSummary(
-            progress: disclosure.kind == .progress,
+            progress: disclosure.kind == .progress || decoration?.status == .running,
             expanded: expanded,
             activity: RichBlockActivityKind(disclosure.activityKind)
           ),
           path: path,
           x: x,
-          width: width,
+          width: max(1, width - (decoration?.reservedWidth ?? 0)),
           inheritedDirection: direction
         ) else { return false }
+        if let decoration {
+          // The summary measured against the narrower width; the row keeps the
+          // full container so status and meta trail the chevron.
+          let index = nodes.count - 1
+          if case var .text(text) = nodes[index].kind {
+            text.disclosure = decoration.value
+            nodes[index].kind = .text(text)
+          }
+          nodes[index].frame.size.width = min(width, nodes[index].frame.width + decoration.reservedWidth)
+          recordMeasuredFrame(nodes[index].frame)
+        }
         guard expanded else { return true }
         height += Self.blockSpacing
         return layout(
@@ -586,6 +606,25 @@ final class RichBlockLayoutPlanner {
           width: max(1, container.width - edgeInset * 2),
           inheritedDirection: inheritedDirection
         )
+      case let .fields(fields):
+        return appendFields(fields, path: path, x: x, width: width, inheritedDirection: inheritedDirection)
+      case let .steps(steps):
+        return appendSteps(steps, path: path, x: x, width: width, inheritedDirection: inheritedDirection)
+      case let .callout(callout):
+        return layout(
+          callout: callout,
+          path: path,
+          x: x,
+          width: width,
+          depth: depth + 1,
+          inheritedDirection: inheritedDirection
+        )
+      case let .meter(meter):
+        return appendMeter(meter, path: path, x: x, width: width, inheritedDirection: inheritedDirection)
+      case let .diff(diff):
+        return appendDiff(diff, path: path, x: x, width: width)
+      case let .form(form):
+        return appendForm(form, path: path, x: x, width: width, inheritedDirection: inheritedDirection)
       }
     }
 
@@ -965,7 +1004,7 @@ final class RichBlockLayoutPlanner {
       return true
     }
 
-    private mutating func appendText(
+    mutating func appendText(
       _ text: InlineProtocol.BlockText,
       role: RichBlockTextRole,
       path: BlockContentPath,
@@ -1075,11 +1114,11 @@ final class RichBlockLayoutPlanner {
       return true
     }
 
-    private func textHeight(_ text: NSAttributedString, width: CGFloat) -> CGFloat {
+    func textHeight(_ text: NSAttributedString, width: CGFloat) -> CGFloat {
       measureText(text, width: width).height
     }
 
-    private func measureText(
+    func measureText(
       _ text: NSAttributedString,
       width: CGFloat,
       singleLine: Bool = false

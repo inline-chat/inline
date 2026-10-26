@@ -15,6 +15,14 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     return view
   }()
   private let shimmer = RichBlockTextShimmerView(frame: .zero)
+  private let statusIcon: NSImageView = {
+    let view = NSImageView()
+    view.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
+    view.isHidden = true
+    return view
+  }()
+  private let metaSurface = RichBlockTextSurface(frame: .zero)
+  private var decoration: RichBlockDisclosureDecoration?
   private let toggleButton: NSButton = {
     let button = RichBlockDisclosureButton(title: "", target: nil, action: nil)
     button.isBordered = false
@@ -44,6 +52,9 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     addSubview(surface)
     addSubview(chevron)
     addSubview(shimmer)
+    addSubview(statusIcon)
+    addSubview(metaSurface)
+    metaSurface.isHidden = true
   }
 
   @available(*, unavailable)
@@ -85,7 +96,10 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
       self?.toggleDisclosure()
     }
     shimmer.apply(color: .white)
-    toggleButton.setAccessibilityLabel(attributed.string)
+    decoration = text.disclosure
+    applyDecoration(context: context)
+    let statusName = decoration?.status.map { ", \($0.accessibilityName)" } ?? ""
+    toggleButton.setAccessibilityLabel(attributed.string + statusName)
     toggleButton.setAccessibilityValue(expanded ? "Expanded" : "Collapsed")
     setContentVisible(context.isContentVisible)
     needsLayout = true
@@ -112,13 +126,53 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     activity = nil
     activityIcon.image = nil
     activityIcon.isHidden = true
+    decoration = nil
+    statusIcon.isHidden = true
+    metaSurface.isHidden = true
+  }
+
+  private func applyDecoration(context: RichBlockRenderContext) {
+    let glyphStatus: RichBlockStatus? = switch decoration?.status {
+    case .waiting?, .failed?, .cancelled?: decoration?.status
+    default: nil
+    }
+    if let glyphStatus {
+      statusIcon.image = NSImage(systemSymbolName: glyphStatus.symbolName, accessibilityDescription: nil)
+      statusIcon.contentTintColor = glyphStatus.tint(context.palette)
+      statusIcon.isHidden = false
+    } else {
+      statusIcon.isHidden = true
+    }
+    if let meta = decoration?.meta {
+      metaSurface.apply(
+        text: context.text(meta, role: .footer, isRTL: false, color: context.palette.tertiary),
+        linkColor: context.palette.link,
+        singleLine: true,
+        onEntityClick: context.interactions.onTextEntityClick
+      )
+      metaSurface.isHidden = false
+    } else {
+      metaSurface.isHidden = true
+    }
+  }
+
+  /// Width the planner reserved at the trailing end for status and meta.
+  private var reservedTrailingWidth: CGFloat {
+    guard let decoration else { return 0 }
+    let glyph = statusIcon.isHidden ? 0 : RichBlockAgentMetrics.disclosureStatusSide + 4
+    let visible = glyph + decoration.metaWidth
+    return visible > 0 ? visible + RichBlockAgentMetrics.disclosureTrailingGap : 0
   }
 
   override func layout() {
     super.layout()
     toggleButton.frame = bounds
+    let reserved = min(reservedTrailingWidth, max(0, bounds.width - 40))
+    let rowBounds = isRTL
+      ? CGRect(x: bounds.minX + reserved, y: bounds.minY, width: bounds.width - reserved, height: bounds.height)
+      : CGRect(x: bounds.minX, y: bounds.minY, width: bounds.width - reserved, height: bounds.height)
     let horizontalLayout = RichBlockDisclosureMetrics.horizontalLayout(
-      bounds: bounds,
+      bounds: rowBounds,
       intrinsicTitleWidth: surface.measuredWidth,
       isRTL: isRTL,
       hasActivityIcon: activity != nil
@@ -127,8 +181,31 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     chevron.frame = horizontalLayout.chevronFrame
     activityIcon.frame = horizontalLayout.activityIconFrame ?? .zero
     shimmer.frame = surface.frame
+    layoutDecoration(after: isRTL ? horizontalLayout.chevronFrame.minX : horizontalLayout.chevronFrame.maxX)
     surface.layoutSubtreeIfNeeded()
     shimmer.updateMask(from: surface)
+  }
+
+  private func layoutDecoration(after edge: CGFloat) {
+    let gap = RichBlockAgentMetrics.disclosureTrailingGap
+    let glyphSide = RichBlockAgentMetrics.disclosureStatusSide
+    let metaWidth = metaSurface.isHidden ? 0 : (decoration?.metaWidth ?? 0)
+    if isRTL {
+      var x = edge - gap
+      if !statusIcon.isHidden {
+        x -= glyphSide
+        statusIcon.frame = CGRect(x: x, y: floor((bounds.height - glyphSide) / 2), width: glyphSide, height: glyphSide)
+        x -= 4
+      }
+      metaSurface.frame = CGRect(x: x - metaWidth, y: 0, width: metaWidth, height: bounds.height)
+    } else {
+      var x = edge + gap
+      if !statusIcon.isHidden {
+        statusIcon.frame = CGRect(x: x, y: floor((bounds.height - glyphSide) / 2), width: glyphSide, height: glyphSide)
+        x += glyphSide + 4
+      }
+      metaSurface.frame = CGRect(x: x, y: 0, width: metaWidth, height: bounds.height)
+    }
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
