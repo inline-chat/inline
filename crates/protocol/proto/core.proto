@@ -5781,12 +5781,26 @@ message RequestBotFilesystemInput {
     OPERATION_UNSPECIFIED = 0;
     LIST = 1;
     REGISTER_FOLDER = 2;
+    // Files in one work's folder for the composer's file picker. The owner or
+    // an INVOKE grantee on the session's bot. Paths are relative to the work's
+    // folder, which is never revealed.
+    LIST_WORK_FILES = 3;
   }
   Operation operation = 4;
-  // Empty starts at the host home directory; otherwise an absolute path.
+  // LIST and REGISTER_FOLDER: empty starts at the host home directory,
+  // otherwise an absolute path. LIST_WORK_FILES: a relative directory, empty
+  // for the work's folder.
   string path = 5;
-  // Exclusive filename cursor for bounded, lexically ordered listing pages.
+  // Exclusive cursor for bounded, lexically ordered listing pages: a filename,
+  // or a relative path for LIST_WORK_FILES.
   string after = 6;
+  // LIST_WORK_FILES: the work whose folder is listed.
+  optional int64 agent_session_id = 7;
+  // LIST_WORK_FILES: match file names under path instead of listing one
+  // directory.
+  optional string query = 8;
+  // LIST_WORK_FILES: page size, at most 200.
+  optional uint32 limit = 9;
 }
 message BotFilesystemEntry {
   string name = 1;
@@ -5800,6 +5814,9 @@ message BotFilesystemEntry {
   Kind kind = 2;
   uint64 size = 3;
 }
+// For LIST_WORK_FILES, path, parent_path and entry names are relative to the
+// work's folder (names are full relative paths, so query results can nest), and
+// next_after is the last entry's name.
 message BotFilesystemListing {
   string path = 1;
   optional string parent_path = 2;
