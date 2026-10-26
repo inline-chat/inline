@@ -39,8 +39,7 @@ export async function getAgentParticipations(
   currentUserId: number,
 ): Promise<GetAgentParticipationsResult> {
   if (!input.peerId) throw RealtimeRpcError.BadRequest()
-  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, { currentUserId })
-  await AccessGuards.ensureChatAccess(chat, currentUserId)
+  const chat = await ChatModel.getAuthorizedChatFromInputPeer(input.peerId, { currentUserId })
   const rows = await db.select().from(agentParticipations).where(eq(agentParticipations.chatId, chat.id))
   const peerId = encodeOutputPeerFromChat(chat, { currentUserId })
   return { participations: rows.map((row) => encodeAgentParticipation(row, peerId)) }
@@ -65,8 +64,7 @@ export async function setAgentParticipation(
   const bot = await UsersModel.getUserById(botUserId)
   if (!bot?.bot || UsersModel.isDeleted(bot)) throw RealtimeRpcError.UserIdInvalid()
 
-  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, { currentUserId })
-  await AccessGuards.ensureChatAccess(chat, currentUserId)
+  const chat = await ChatModel.getAuthorizedChatFromInputPeer(input.peerId, { currentUserId })
   // The agent can only take part where it has access.
   if (!(await AccessGuards.hasChatAccess(chat, botUserId))) throw RealtimeRpcError.UserIdInvalid()
 

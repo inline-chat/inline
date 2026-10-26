@@ -24,7 +24,8 @@ export async function moveAgentSession(
   if (!session || (session.botUserId !== currentUserId && session.ownerUserId !== currentUserId)) {
     throw RealtimeRpcError.BadRequest()
   }
-  const destination = await ChatModel.getChatFromInputPeerUnchecked(input.destinationPeerId, { currentUserId })
+  // The caller is the owner or the bot; both need access to the destination.
+  const destination = await ChatModel.getAuthorizedChatFromInputPeer(input.destinationPeerId, { currentUserId })
 
   if (session.chatId === destination.id) {
     return { agentSession: await encodeAgentSessionForViewer(session, destination, currentUserId), moved: false }

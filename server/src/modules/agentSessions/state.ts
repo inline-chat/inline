@@ -17,7 +17,6 @@ import { UsersModel } from "@in/server/db/models/users"
 import { agentSessions, chats, messages, type DbAgentSession, type DbChat } from "@in/server/db/schema"
 import { insertChatUpdate, pushChatUpdate } from "@in/server/modules/agents/chatUpdates"
 import type { ServerUpdate } from "@in/server/protocol/server"
-import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { decideNotification } from "@in/server/modules/notifications/decision"
@@ -296,8 +295,7 @@ export async function getAgentSessionStates(
   currentUserId: number,
 ): Promise<GetAgentSessionStatesResult> {
   if (input.peerId) {
-    const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, { currentUserId })
-    await AccessGuards.ensureChatAccess(chat, currentUserId)
+    const chat = await ChatModel.getAuthorizedChatFromInputPeer(input.peerId, { currentUserId })
     const rows = await db
       .select()
       .from(agentSessions)
