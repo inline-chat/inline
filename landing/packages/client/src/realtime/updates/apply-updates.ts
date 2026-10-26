@@ -749,6 +749,12 @@ const applyUpdate = (
     case "participantGroupDelete":
     case "spaceSettings":
     case "spaceProfile":
+    // Bridge v2 agent state: the web client does not render it yet.
+    case "agentSessionState":
+    case "agentParticipation":
+    case "agentGrant":
+    case "agentRuntime":
+    case "agentSessionControl":
       deferUpdate(db, update)
       return "deferred"
 

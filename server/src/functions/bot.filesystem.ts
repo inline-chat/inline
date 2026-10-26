@@ -41,8 +41,22 @@ async function authorize(input: RequestBotFilesystemInput, botId: number, actorI
   return target
 }
 
-export async function requestBotFilesystem(input: RequestBotFilesystemInput, context: FunctionContext): Promise<RequestBotFilesystemResult> {
-  validateFilesystemRequest(input)
+/**
+ * A work's host is its session's bot runtime (one bot per machine per
+ * provider), so the app sends no host: the bot comes from the session and
+ * host_installation_id is cleared before relaying.
+ */
+async function withWorkHost(input: RequestBotFilesystemInput): Promise<RequestBotFilesystemInput> {
+  if (input.operation !== RequestBotFilesystemInput_Operation.LIST_WORK_FILES) return input
+  const [session] = await db.select({ botUserId: agentSessions.botUserId })
+    .from(agentSessions).where(eq(agentSessions.id, input.agentSessionId!)).limit(1)
+  if (!session || (input.botUserId !== 0n && input.botUserId !== BigInt(session.botUserId))) throw RealtimeRpcError.BadRequest()
+  return { ...input, botUserId: BigInt(session.botUserId), hostInstallationId: "" }
+}
+
+export async function requestBotFilesystem(rawInput: RequestBotFilesystemInput, context: FunctionContext): Promise<RequestBotFilesystemResult> {
+  validateFilesystemRequest(rawInput)
+  const input = await withWorkHost(rawInput)
   const botId = Number(input.botUserId)
   if (!Number.isSafeInteger(botId) || botId <= 0) throw RealtimeRpcError.BadRequest()
   const target = await authorize(input, botId, context.currentUserId)

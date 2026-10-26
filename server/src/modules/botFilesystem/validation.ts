@@ -9,8 +9,10 @@ export const relativePath = (value: string): boolean =>
   bounded(value, 4096) && !value.startsWith("~") && value.split("/").every(component)
 
 export function validateFilesystemRequest(input: RequestBotFilesystemInput): void {
-  if (!/^[A-Za-z0-9_-]{1,128}$/u.test(input.hostInstallationId)
-    || !bounded(input.path, 4096) || !bounded(input.after, 4096)) {
+  if (!bounded(input.path, 4096) || !bounded(input.after, 4096)) throw RealtimeRpcError.BadRequest()
+  // A work's host comes from its session, so LIST_WORK_FILES ignores this field.
+  if (input.operation !== RequestBotFilesystemInput_Operation.LIST_WORK_FILES
+    && !/^[A-Za-z0-9_-]{1,128}$/u.test(input.hostInstallationId)) {
     throw RealtimeRpcError.BadRequest()
   }
   if (input.operation === RequestBotFilesystemInput_Operation.LIST_WORK_FILES) {

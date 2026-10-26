@@ -49,6 +49,8 @@ test("work file listings stay relative to the work's folder", () => {
   expect(() => validateFilesystemRequest(work)).not.toThrow()
   expect(() => validateFilesystemRequest({ ...work, path: "src", query: "main", limit: 50 })).not.toThrow()
   expect(() => validateFilesystemRequest({ ...work, agentSessionId: undefined })).toThrow()
+  // The host comes from the session; apps send none.
+  expect(() => validateFilesystemRequest({ ...work, hostInstallationId: "", botUserId: 0n })).not.toThrow()
   for (const path of ["/etc", "~/x", "../up", "a/../b"]) {
     expect(() => validateFilesystemRequest({ ...work, path })).toThrow()
   }
