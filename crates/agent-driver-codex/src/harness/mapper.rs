@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use inline_agent_bridge::harness::{
     ApprovalSubject, ChildKind, ChildRef, ChildStatus, ChildUpdate, ClosedBy, CommandAction,
-    Decision, DecisionId, DeltaStream, EffectiveSettings, Event, FieldId, FieldInput, FieldOption,
+    Decision, DeltaStream, EffectiveSettings, Event, FieldId, FieldInput, FieldOption,
     FileChangeKind, FileDiff, FormField, InputFact, InputId, Interaction, InteractionId,
     InteractionKind, InteractionResponse, Item, ItemBody, ItemDelta, ItemId, ItemKind, ItemStatus,
     ItemUpdate, MessageRole, Notice, NoticeLevel, OpError, QuestionForm, RunState, TokenUsage,
@@ -408,6 +408,10 @@ impl CodexMapper {
                 });
             }
             "thread/queue/changed" if parent.is_none() => mapped.refresh_queue = true,
+            // Codex unloaded the thread: native ownership is released.
+            "thread/closed" if parent.is_none() => events.push(Event::State {
+                state: RunState::Released,
+            }),
             "thread/compacted" => {
                 let id = ItemId::new(format!(
                     "compaction:{}",
@@ -1675,6 +1679,8 @@ fn strings(value: Option<&Value>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use inline_agent_bridge::harness::DecisionId;
+
     use super::*;
 
     #[test]
