@@ -142,6 +142,16 @@ impl CodexMapper {
         self.last_finished_turn.as_ref()
     }
 
+    /// Restores turn facts from a `thread/resume` or `thread/fork` response.
+    pub(crate) fn restore_turns(&mut self, active: Option<TurnId>, finished: Option<TurnId>) {
+        if active.is_some() {
+            self.active_turn = active;
+        }
+        if finished.is_some() {
+            self.last_finished_turn = finished;
+        }
+    }
+
     /// Records the turn returned by `turn/start` before its notification arrives.
     pub(crate) fn turn_started_by_request(&mut self, turn: TurnId) {
         self.active_turn = Some(turn);

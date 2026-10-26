@@ -471,10 +471,35 @@ impl HarnessDriver for CodexHarness {
                     "thread/fork"
                 }
             };
-            let response = connection
-                .request(Request { method, params })
-                .await
-                .map_err(open_error)?;
+            // A resume can run input persisted in the native queue and ask for
+            // approval right away, so the session listens before it loads, and
+            // the queue it may run is published first.
+            let early = match &spec.mode {
+                OpenMode::Resume { session } => {
+                    let inner = SessionInner::new(&connection, session.as_str().to_owned())?;
+                    connection
+                        .sessions
+                        .lock()
+                        .expect("session map poisoned")
+                        .insert(inner.thread.clone(), Arc::downgrade(&inner));
+                    let _ = inner.refresh_queue().await;
+                    Some(inner)
+                }
+                _ => None,
+            };
+            let response = match connection.request(Request { method, params }).await {
+                Ok(response) => response,
+                Err(error) => {
+                    if let Some(inner) = &early {
+                        connection
+                            .sessions
+                            .lock()
+                            .expect("session map poisoned")
+                            .remove(&inner.thread);
+                    }
+                    return Err(open_error(error));
+                }
+            };
             let thread = response
                 .pointer("/thread/id")
                 .and_then(Value::as_str)
@@ -484,12 +509,6 @@ impl HarnessDriver for CodexHarness {
                     )))
                 })?
                 .to_owned();
-            let key = SessionKey {
-                provider: ProviderId::new("codex").expect("provider id"),
-                session: ProviderSessionId::new(thread.clone())
-                    .map_err(|error| OpenError::Driver(DriverError::Protocol(error.to_string())))?,
-            };
-            let hub = EventHub::new(key.clone(), DEFAULT_HUB_CAPACITY);
             let settings = EffectiveSettings {
                 model: text(response.get("model")).map(|model| DriverSettingOption {
                     value: model.clone(),
@@ -503,30 +522,68 @@ impl HarnessDriver for CodexHarness {
                 mode: None,
                 folder: text(response.get("cwd")).map(PathBuf::from),
             };
-            let inner = Arc::new(SessionInner {
-                key,
-                thread: thread.clone(),
-                hub,
-                mapper: StdMutex::new(CodexMapper::new(thread.clone())),
-                model: StdMutex::new(settings.model.as_ref().map(|model| model.value.clone())),
-                queue: StdMutex::new(Vec::new()),
-                connection: Arc::downgrade(&connection),
-            });
-            connection
-                .sessions
-                .lock()
-                .expect("session map poisoned")
-                .insert(thread, Arc::downgrade(&inner));
+            let inner = match early {
+                Some(inner) if inner.thread == thread => inner,
+                _ => {
+                    let inner = SessionInner::new(&connection, thread.clone())?;
+                    connection
+                        .sessions
+                        .lock()
+                        .expect("session map poisoned")
+                        .insert(thread, Arc::downgrade(&inner));
+                    inner
+                }
+            };
+            *inner.model.lock().expect("model poisoned") =
+                settings.model.as_ref().map(|model| model.value.clone());
             inner.hub.emit(Event::Settings {
                 effective: settings,
             });
+            // The initial state comes from the thread's own turns: a resumed
+            // thread may already be running one.
+            let (active, finished) = thread_turns(&response);
+            let running = {
+                let mut mapper = inner.mapper.lock().expect("mapper poisoned");
+                mapper.restore_turns(active.clone(), finished);
+                mapper.active_turn().is_some()
+            };
             inner.hub.emit(Event::State {
-                state: RunState::Idle,
+                state: if running {
+                    RunState::Working
+                } else {
+                    RunState::Idle
+                },
             });
             let session: Arc<dyn Session> = Arc::new(CodexSession { inner, connection });
             Ok(session)
         })
     }
+}
+
+/// The running and latest finished turn a `thread/*` response reports.
+fn thread_turns(response: &Value) -> (Option<TurnId>, Option<TurnId>) {
+    let mut active = None;
+    let mut finished = None;
+    for turn in response
+        .pointer("/thread/turns")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(id) = turn
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|id| TurnId::new(id).ok())
+        else {
+            continue;
+        };
+        match turn.get("status").and_then(Value::as_str) {
+            Some("inProgress") => active = Some(id),
+            Some("completed" | "interrupted" | "failed") => finished = Some(id),
+            _ => {}
+        }
+    }
+    (active, finished)
 }
 
 struct SessionInner {
@@ -536,10 +593,30 @@ struct SessionInner {
     mapper: StdMutex<CodexMapper>,
     model: StdMutex<Option<String>>,
     queue: StdMutex<Vec<QueuedInput>>,
+    /// Background terminals still running, from `thread/backgroundTerminals/list`.
+    terminals: StdMutex<Vec<inline_agent_bridge::harness::ChildRef>>,
     connection: Weak<Connection>,
 }
 
 impl SessionInner {
+    fn new(connection: &Arc<Connection>, thread: String) -> Result<Arc<Self>, OpenError> {
+        let key = SessionKey {
+            provider: ProviderId::new("codex").expect("provider id"),
+            session: ProviderSessionId::new(thread.clone())
+                .map_err(|error| OpenError::Driver(DriverError::Protocol(error.to_string())))?,
+        };
+        Ok(Arc::new(Self {
+            hub: EventHub::new(key.clone(), DEFAULT_HUB_CAPACITY),
+            key,
+            mapper: StdMutex::new(CodexMapper::new(thread.clone())),
+            thread,
+            model: StdMutex::new(None),
+            queue: StdMutex::new(Vec::new()),
+            terminals: StdMutex::new(Vec::new()),
+            connection: Arc::downgrade(connection),
+        }))
+    }
+
     fn emit_all(&self, events: Vec<Event>) {
         for event in events {
             if let Event::Settings { effective } = &event
@@ -566,6 +643,99 @@ impl SessionInner {
                     .remove(&self.thread);
             }
         }
+    }
+
+    /// Lists the thread's running background terminals and reports the ones
+    /// that started or ended as child updates.
+    async fn refresh_terminals(self: &Arc<Self>) {
+        use inline_agent_bridge::harness::{
+            ChildId, ChildKind, ChildRef, ChildStatus, ChildUpdate,
+        };
+        let Some(connection) = self.connection.upgrade() else {
+            return;
+        };
+        let mut running = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..QUEUE_MAX_PAGES {
+            let mut params = json!({"threadId": self.thread, "limit": QUEUE_PAGE_SIZE});
+            if let Some(cursor) = &cursor {
+                params["cursor"] = json!(cursor);
+            }
+            let Ok(response) = connection
+                .request(Request {
+                    method: "thread/backgroundTerminals/list",
+                    params,
+                })
+                .await
+            else {
+                // Older Codex or a failed read: keep what is known.
+                return;
+            };
+            for terminal in response
+                .get("data")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let Some(id) = terminal
+                    .get("processId")
+                    .and_then(Value::as_str)
+                    .and_then(|id| ChildId::new(id).ok())
+                else {
+                    continue;
+                };
+                running.push((
+                    ChildRef {
+                        id,
+                        kind: ChildKind::BackgroundTask,
+                    },
+                    terminal
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    terminal.clone(),
+                ));
+            }
+            cursor = response
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if cursor.is_none() {
+                break;
+            }
+        }
+        let previous = std::mem::replace(
+            &mut *self.terminals.lock().expect("terminals poisoned"),
+            running.iter().map(|(child, _, _)| child.clone()).collect(),
+        );
+        let mut events = Vec::new();
+        for (child, title, native) in &running {
+            if !previous.contains(child) {
+                events.push(Event::Child {
+                    update: ChildUpdate {
+                        child: child.clone(),
+                        status: ChildStatus::Running,
+                        title: title.clone(),
+                        accepts_direct_input: false,
+                        native: native.clone(),
+                    },
+                });
+            }
+        }
+        for child in previous {
+            if !running.iter().any(|(running, _, _)| *running == child) {
+                events.push(Event::Child {
+                    update: ChildUpdate {
+                        child,
+                        status: ChildStatus::Completed,
+                        title: None,
+                        accepts_direct_input: false,
+                        native: Value::Null,
+                    },
+                });
+            }
+        }
+        self.emit_all(events);
     }
 
     /// Lists the whole native queue, every page, and publishes it.
@@ -668,6 +838,15 @@ async fn dispatch(
                         tokio::spawn(async move {
                             let _ = session.refresh_queue().await;
                         });
+                    }
+                    // Background terminals can outlive the turn that started
+                    // them; list them so live work and release see them.
+                    if method == "turn/completed"
+                        && params.get("threadId").and_then(Value::as_str)
+                            == Some(session.thread.as_str())
+                    {
+                        let session = session.clone();
+                        tokio::spawn(async move { session.refresh_terminals().await });
                     }
                 }
             }
@@ -953,7 +1132,18 @@ impl Session for CodexSession {
         let mapper = self.inner.mapper.lock().expect("mapper poisoned");
         LiveWork {
             turn: mapper.active_turn().cloned(),
-            children: mapper.children(),
+            children: mapper
+                .children()
+                .into_iter()
+                .chain(
+                    self.inner
+                        .terminals
+                        .lock()
+                        .expect("terminals poisoned")
+                        .iter()
+                        .cloned(),
+                )
+                .collect(),
             interactions: mapper.pending_interactions(),
             queued: self.inner.queue.lock().expect("queue poisoned").clone(),
             wakeups: Vec::new(),
