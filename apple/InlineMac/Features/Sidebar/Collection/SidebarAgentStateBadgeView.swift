@@ -37,18 +37,14 @@ final class SidebarAgentStateBadgeView: NSView {
     guard self.peer != peer else { return }
     self.peer = peer
     apply(AgentWorkStateStore.shared.badgeState(peer: peer, viewerUserID: Auth.shared.getCurrentUserId()))
-    cancellable = AgentWorkStateStore.shared.$states
-      .dropFirst()
-      .sink { [weak self] states in
-        // The publisher fires before the store's property changes; read the
-        // delivered value instead of the store.
-        guard let self, let peer = self.peer else { return }
-        let viewer = Auth.shared.getCurrentUserId()
-        let candidates = states.values.filter { $0.key.peer == peer && $0.runState != .idle }
-        let urgent = candidates.max { lhs, rhs in
-          Self.rank(lhs, viewer: viewer) < Self.rank(rhs, viewer: viewer)
+    cancellable = AgentWorkStateStore.shared.objectWillChange
+      .sink { [weak self] in
+        // objectWillChange fires before the store changes; read it on the
+        // next turn, through the store's offline-aware badge rule.
+        DispatchQueue.main.async {
+          guard let self, let peer = self.peer else { return }
+          self.apply(AgentWorkStateStore.shared.badgeState(peer: peer, viewerUserID: Auth.shared.getCurrentUserId()))
         }
-        self.apply(urgent.flatMap { Self.rank($0, viewer: viewer) > 0 ? $0 : nil })
       }
   }
 
@@ -62,14 +58,6 @@ final class SidebarAgentStateBadgeView: NSView {
   /// The label assistive tech reads with the row, if any.
   var accessibilityDescription: String? { displayed?.title }
 
-  private static func rank(_ state: AgentWorkState, viewer: Int64?) -> Int {
-    switch state.runState {
-    case .waiting: state.isWaiting(for: viewer) ? 4 : 2
-    case .working, .stopping: 3
-    case .heldElsewhere: 1
-    case .paused, .offline, .idle, .unknown: 0
-    }
-  }
 
   private func apply(_ state: AgentWorkState?) {
     guard let state else {

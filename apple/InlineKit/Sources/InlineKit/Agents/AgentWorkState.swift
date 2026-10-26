@@ -201,6 +201,7 @@ public final class AgentWorkStateStore: ObservableObject {
   private struct OutputDefault: Codable {
     var botUserID: Int64
     var mode: AgentThreadOutputMode?
+    var isOffline: Bool?
   }
 
   @Published public private(set) var states: [AgentWorkState.Key: AgentWorkState] = [:]
@@ -208,6 +209,8 @@ public final class AgentWorkStateStore: ObservableObject {
   @Published public private(set) var defaultOutputModes: [Int64: AgentThreadOutputMode] = [:]
   /// Bots that reported a bridge v2 runtime, so their output mode applies.
   @Published public private(set) var runtimeBotUserIDs: Set<Int64> = []
+  /// Bots whose runtime the server reports offline (lapsed heartbeats).
+  @Published public private(set) var offlineBotUserIDs: Set<Int64> = []
 
   private let database: AppDatabase?
   private let log = Log.scoped("AgentWorkStateStore")
@@ -228,14 +231,24 @@ public final class AgentWorkStateStore: ObservableObject {
 
   public func state(peer: Peer, botUserID: Int64) -> AgentWorkState? {
     hydrateIfNeeded()
-    return states[.init(peer: peer, botUserID: botUserID)]
+    return states[.init(peer: peer, botUserID: botUserID)].map(overlaid)
   }
 
   public func states(peer: Peer) -> [AgentWorkState] {
     hydrateIfNeeded()
     return states.values
       .filter { $0.key.peer == peer }
+      .map(overlaid)
       .sorted { $0.key.botUserID < $1.key.botUserID }
+  }
+
+  /// An offline runtime overrides the last-known work state; the state
+  /// itself is kept and returns when the runtime reports again.
+  private func overlaid(_ state: AgentWorkState) -> AgentWorkState {
+    guard offlineBotUserIDs.contains(state.key.botUserID), state.runState != .idle else { return state }
+    var copy = state
+    copy.runState = .offline
+    return copy
   }
 
   /// The most urgent state among a chat's agents, for sidebar badges. Idle,
@@ -280,6 +293,11 @@ public final class AgentWorkStateStore: ObservableObject {
       // it is newer; the server owns the default-session rule.
       if current.sessionID != state.sessionID, current.updatedAt > state.updatedAt { return }
     }
+    // A moved session reports its destination peer; drop it from the chat
+    // it left so the source's work bar and badge clear.
+    for (key, existing) in states where existing.sessionID == state.sessionID && key != state.key {
+      remove(key)
+    }
     guard states[state.key] != state else { return }
     states[state.key] = state
     persist(.session, key: state.key.storageKey, value: state)
@@ -306,10 +324,14 @@ public final class AgentWorkStateStore: ObservableObject {
     let mode = AgentThreadOutputMode(runtime.defaultOutputMode)
     if defaultOutputModes[runtime.botUserID] != mode { defaultOutputModes[runtime.botUserID] = mode }
     if !runtimeBotUserIDs.contains(runtime.botUserID) { runtimeBotUserIDs.insert(runtime.botUserID) }
+    let isOffline = runtime.status == .offline
+    if isOffline != offlineBotUserIDs.contains(runtime.botUserID) {
+      if isOffline { offlineBotUserIDs.insert(runtime.botUserID) } else { offlineBotUserIDs.remove(runtime.botUserID) }
+    }
     persist(
       .outputDefault,
       key: "\(runtime.botUserID)",
-      value: OutputDefault(botUserID: runtime.botUserID, mode: mode)
+      value: OutputDefault(botUserID: runtime.botUserID, mode: mode, isOffline: isOffline)
     )
   }
 
@@ -364,6 +386,7 @@ public final class AgentWorkStateStore: ObservableObject {
     outputOverrides.removeAll()
     defaultOutputModes.removeAll()
     runtimeBotUserIDs.removeAll()
+    offlineBotUserIDs.removeAll()
     overrideRevisions.removeAll()
     guard let database else { return }
     Task.detached {
@@ -393,6 +416,7 @@ public final class AgentWorkStateStore: ObservableObject {
         if let value = try? decoder.decode(OutputDefault.self, from: row.payload) {
           defaultOutputModes[value.botUserID] = value.mode
           runtimeBotUserIDs.insert(value.botUserID)
+          if value.isOffline == true { offlineBotUserIDs.insert(value.botUserID) }
         }
       case nil:
         break
