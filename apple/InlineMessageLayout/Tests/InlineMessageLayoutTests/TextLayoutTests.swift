@@ -105,6 +105,20 @@ struct TextLayoutTests {
     #expect(layout.height(revealingCharacters: layout.length) == layout.size.height)
   }
 
+  @Test("Ink bounds cover marks that reach past the line box")
+  func inkBounds() {
+    let plain = TextLayouter.layout(Fixtures.text("Hello"), maximumWidth: 300, grid: grid)
+    #expect(!plain.inkBounds.isNull)
+    #expect(plain.inkBounds.minY >= 0 && plain.inkBounds.maxY <= plain.size.height)
+
+    let stacked = TextLayouter.layout(
+      Fixtures.text("Z\u{0351}\u{0352}\u{0351}\u{0352}a\u{0300}\u{0300}\u{0300}"),
+      maximumWidth: 300,
+      grid: grid
+    )
+    #expect(stacked.inkBounds.minY < 0, "stacked marks should rise above the line: \(stacked.inkBounds)")
+  }
+
   @Test("Widths narrower than one character still finish")
   func tinyWidth() {
     let layout = TextLayouter.layout(Fixtures.text("Wide"), maximumWidth: 1, grid: grid)

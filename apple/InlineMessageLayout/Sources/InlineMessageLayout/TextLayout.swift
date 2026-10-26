@@ -47,17 +47,40 @@ public struct TextLayout: Sendable {
     public var drawingOrigin: CGPoint { CGPoint(x: frame.minX, y: baseline) }
   }
 
+  /// The typeset text, for attribute lookups when drawing decorations or handling taps.
+  public let text: MessageText
   public internal(set) var lines: [Line]
   public internal(set) var size: CGSize
   public let maximumWidth: CGFloat
-  public let length: Int
+  public var length: Int { text.length }
 
   public var lineCount: Int { lines.count }
+
+  /// Where glyphs actually draw, in text coordinates. Marks, italics and emoji can reach past
+  /// the line boxes, so a drawing surface needs this much room.
+  public var inkBounds: CGRect {
+    lines.reduce(CGRect.null) { bounds, line in
+      let glyphs = CTLineGetBoundsWithOptions(line.ctLine, .useGlyphPathBounds)
+      guard !glyphs.isNull, glyphs.width > 0 || glyphs.height > 0 else { return bounds }
+      return bounds.union(CGRect(
+        x: line.frame.minX + glyphs.minX,
+        y: line.baseline - glyphs.maxY,
+        width: glyphs.width,
+        height: glyphs.height
+      ))
+    }
+  }
   public var lastLine: Line? { lines.last }
   public var firstBaseline: CGFloat { lines.first?.baseline ?? 0 }
   public var lastBaseline: CGFloat { lines.last?.baseline ?? 0 }
 
-  public static let empty = TextLayout(lines: [], size: .zero, maximumWidth: 0, length: 0)
+  public static let empty = TextLayout(text: MessageText(NSAttributedString()), lines: [], size: .zero, maximumWidth: 0)
+
+  /// True when drawing `other` would produce the same pixels: same lines at the same places.
+  public func drawsIdentically(to other: TextLayout) -> Bool {
+    guard lines.count == other.lines.count, size == other.size else { return false }
+    return zip(lines, other.lines).allSatisfy { $0.storage === $1.storage && $0.frame == $1.frame }
+  }
 
   /// Places each line at its paragraph's leading edge within a block of `width`.
   public func aligned(toWidth width: CGFloat) -> TextLayout {
@@ -173,7 +196,7 @@ public enum TextLayouter {
     let length = attributed.length
     let width = TextLayouter.clampedWidth(maximumWidth)
     guard length > 0 else {
-      return TextLayout(lines: [], size: .zero, maximumWidth: width, length: 0)
+      return TextLayout(text: text, lines: [], size: .zero, maximumWidth: width)
     }
 
     let string = attributed.string as NSString
@@ -229,10 +252,10 @@ public enum TextLayouter {
     }
 
     return TextLayout(
+      text: text,
       lines: lines,
       size: CGSize(width: grid.ceil(widest), height: grid.ceil(y)),
-      maximumWidth: width,
-      length: length
+      maximumWidth: width
     )
   }
 

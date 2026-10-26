@@ -9,6 +9,7 @@ public enum MessageLayoutNode: Hashable, Sendable {
   case time
   case acknowledgement
   case reaction(String)
+  case block(String)
 }
 
 /// Where the time sits relative to the content.
@@ -19,6 +20,9 @@ public enum MessageTimePlacement: Hashable, Sendable {
   case reactionsRow
   /// Its own row below the content.
   case below
+  /// A pill over the bottom-trailing corner of large emoji, which have no bubble, or of media
+  /// with no caption.
+  case overlay
 }
 
 /// The complete geometry of one message row. Every frame is in row coordinates, y-down,
@@ -42,10 +46,15 @@ public struct MessageLayout: Sendable {
   public var hiddenNodes: Set<MessageLayoutNode>
   /// Body text, aligned to its frame's width.
   public var text: TextLayout?
+  public var name: TextLayout?
   public var time: TextLayout
   public var timePlacement: MessageTimePlacement
   /// Reaction order as laid out, for accessibility and tests.
   public var reactionOrder: [String]
+  /// Blocks in reading order.
+  public var blockOrder: [String] = []
+  /// Blocks drawn to the bubble's edges; the host clips them to the bubble's shape.
+  public var edgeToEdgeBlocks: Set<String> = []
 
   public func frame(_ node: MessageLayoutNode) -> CGRect? {
     frames[node]
@@ -54,9 +63,13 @@ public struct MessageLayout: Sendable {
   /// Reading order for accessibility.
   public var accessibilityOrder: [MessageLayoutNode] {
     var order: [MessageLayoutNode] = []
-    for node in [MessageLayoutNode.name, .text] where frames[node] != nil {
-      order.append(node)
-    }
+    if frames[.name] != nil { order.append(.name) }
+    // Blocks above the text read before it, the rest after it.
+    let textY = frames[.text]?.minY ?? .greatestFiniteMagnitude
+    let blocks = blockOrder.map(MessageLayoutNode.block)
+    order += blocks.filter { (frames[$0]?.minY ?? 0) < textY }
+    if frames[.text] != nil { order.append(.text) }
+    order += blocks.filter { (frames[$0]?.minY ?? 0) >= textY }
     order += reactionOrder.map(MessageLayoutNode.reaction)
     for node in [MessageLayoutNode.acknowledgement, .time] where frames[node] != nil {
       order.append(node)

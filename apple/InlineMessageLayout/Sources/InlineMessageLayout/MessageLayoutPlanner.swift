@@ -22,9 +22,26 @@ public enum MessageLayoutPlanner {
     let avatarColumn = input.isOutgoing || input.avatar == .none ? 0 : m.avatarSize + m.avatarSpacing
     let laneMinX = m.rowLeadingInset + avatarColumn
     let laneWidth = max(0, input.rowWidth - m.rowLeadingInset - m.rowTrailingInset - avatarColumn)
-    // Bodies keep the tail column even without a tail, so grouped bubbles line up.
-    let maximumBodyWidth = grid.floor(laneWidth * m.maximumBubbleWidthFraction) - m.tailWidth
-    let maximumContentWidth = max(1, maximumBodyWidth - insets.horizontal)
+    let maximumBodyWidth = grid.floor(laneWidth * m.maximumBubbleWidthFraction)
+
+    // Blocks. Large emoji carry none. The first edge-to-edge block above the text sets the body
+    // width, scaled down to fit the lane; a caption wraps to it.
+    let blocks = isEmoji ? [] : input.blocks
+    let edgeIndex = blocks.firstIndex { $0.isEdgeToEdge && $0.position == .aboveText }
+    let edgeSize: CGSize? = edgeIndex.map { index in
+      let block = blocks[index]
+      let wanted = max(1, block.width.preferred)
+      let width = grid.floor(min(maximumBodyWidth, wanted))
+      return CGSize(width: width, height: grid.round(block.height * width / wanted))
+    }
+    let maximumContentWidth = max(1, (edgeSize?.width ?? maximumBodyWidth) - insets.horizontal)
+    let above = blocks.indices.filter { blocks[$0].position == .aboveText }
+    let below = blocks.indices.filter { blocks[$0].position == .belowText }
+    let outside = blocks.indices.filter { blocks[$0].position == .belowBubble }
+    // Blocks under the bubble follow its width; they never widen it.
+    let blocksWidth = blocks.indices.filter { $0 != edgeIndex && blocks[$0].position != .belowBubble }
+      .map { min(blocks[$0].width.demand, maximumContentWidth) }
+      .max() ?? 0
 
     // Measure.
     func typeset(_ text: MessageText, width: CGFloat) -> TextLayout {
@@ -38,19 +55,48 @@ public enum MessageLayoutPlanner {
     let time = typeset(input.footer.time, width: .greatestFiniteMagnitude)
     let name = input.name.map { typeset($0, width: maximumBodyWidth) }
 
-    let statusSize = input.footer.statusSize ?? .zero
-    let timeWidth = time.size.width + (input.footer.statusSize == nil ? 0 : m.timeStatusSpacing + statusSize.width)
-    let timeHeight = max(time.size.height, statusSize.height)
-    let acknowledgement = input.acknowledgementSize
-    let footerWidth = timeWidth + (acknowledgement.map { $0.width + m.acknowledgementSpacing } ?? 0)
-    let footerHeight = max(timeHeight, acknowledgement?.height ?? 0)
-
     let flow = ReactionFlow(
       reactions: input.reactions,
       maximumWidth: maximumContentWidth,
       spacing: m.reactionSpacing,
       rowSpacing: m.reactionRowSpacing
     )
+    // Media with nothing under it carries the time over its bottom-trailing corner.
+    let overlaysMedia = edgeIndex != nil && edgeIndex == above.last && text.lineCount == 0
+      && below.isEmpty && flow.isEmpty
+
+    let statusSize = input.footer.statusSize ?? .zero
+    // Over large emoji and media the time sits in a pill, so its frame includes the pill's padding.
+    let pill = isEmoji || overlaysMedia ? m.timeOverlayPadding : .zero
+    let timeWidth = time.size.width + (input.footer.statusSize == nil ? 0 : m.timeStatusSpacing + statusSize.width)
+      + pill.width * 2
+    let timeHeight = max(time.size.height, statusSize.height) + pill.height * 2
+    let acknowledgement = input.acknowledgementSize
+    let footerWidth = timeWidth + (acknowledgement.map { $0.width + m.acknowledgementSpacing } ?? 0)
+    let footerHeight = max(timeHeight, acknowledgement?.height ?? 0)
+
+    // A fixed-width block with nothing under it, such as a file, takes the time beside its
+    // bottom edge when there is room, instead of a row of its own.
+    let besideBlock: Int? = {
+      guard !isEmoji, text.lineCount == 0, below.isEmpty, flow.isEmpty,
+            let last = above.last, last != edgeIndex,
+            case let .fixed(width) = blocks[last].width,
+            min(width, maximumContentWidth) + m.inlineTimeSpacing + footerWidth <= maximumContentWidth
+      else { return nil }
+      return last
+    }()
+
+    // The region under the above-text blocks: text, then below-text blocks, then reactions and
+    // the footer. Offsets are from the region's top.
+    var belowOffsets: [CGFloat] = []
+    var regionHeight = text.size.height
+    for index in below {
+      if regionHeight > 0 { regionHeight += m.blockSpacing }
+      belowOffsets.append(regionHeight)
+      regionHeight += blocks[index].height
+    }
+    // The time can follow the last line only when nothing sits under the text.
+    let lastLine = below.isEmpty ? text.lastLine : nil
 
     // Place the footer: beside the reactions, inline after the last line, or on its own row.
     let placement: MessageTimePlacement
@@ -60,9 +106,27 @@ public enum MessageLayoutPlanner {
     var reactionsTop: CGFloat = 0
     var alignedText = text
 
-    if !flow.isEmpty {
-      let spacing = isEmoji ? m.emojiReactionsSpacing : m.reactionsTopSpacing
-      reactionsTop = text.size.height > 0 ? text.size.height + spacing : 0
+    if isEmoji {
+      placement = .overlay
+      reactionsTop = flow.isEmpty ? 0 : text.size.height + m.emojiReactionsSpacing
+      contentWidth = grid.ceil(max(text.size.width, flow.size.width, footerWidth))
+      footerTop = max(0, text.size.height - footerHeight)
+      contentHeight = flow.isEmpty ? text.size.height : reactionsTop + flow.size.height
+      alignedText = text.aligned(toWidth: text.size.width)
+    } else if overlaysMedia {
+      placement = .overlay
+      contentWidth = maximumContentWidth
+      footerTop = 0
+      contentHeight = 0
+    } else if let besideBlock {
+      placement = .inline
+      contentWidth = grid.ceil(min(blocks[besideBlock].width.preferred, maximumContentWidth)
+        + m.inlineTimeSpacing + footerWidth)
+      footerTop = 0
+      contentHeight = 0
+    } else if !flow.isEmpty {
+      let spacing = m.reactionsTopSpacing
+      reactionsTop = regionHeight > 0 ? regionHeight + spacing : 0
       let lastRow = flow.rows[flow.rows.count - 1]
       if lastRow.width + m.reactionTimeSpacing + footerWidth <= maximumContentWidth {
         placement = .reactionsRow
@@ -77,12 +141,12 @@ public enum MessageLayoutPlanner {
       }
       contentWidth = grid.ceil(contentWidth)
       alignedText = text.aligned(toWidth: contentWidth)
-    } else if !isEmoji, let lastLine = text.lastLine,
-              text.lineCount == 1 || lastLine.direction == .leftToRight,
+    } else if let lastLine,
+              text.lineCount == 1 || lastLine.direction == input.layoutDirection,
               lastLine.width + m.inlineTimeSpacing + footerWidth <= maximumContentWidth
     {
-      // A right-to-left last line hugs the trailing edge, where the time would go, unless it
-      // is the only line and can sit at the leading edge.
+      // A last line written against the interface direction hugs the trailing edge, where the
+      // time goes, unless it is the only line and can sit at the leading edge.
       placement = .inline
       contentWidth = grid.ceil(max(text.size.width, lastLine.width + m.inlineTimeSpacing + footerWidth))
       // Share the last line's baseline. The time text is centered in its frame and the frame in
@@ -95,31 +159,70 @@ public enum MessageLayoutPlanner {
     } else {
       placement = .below
       contentWidth = grid.ceil(max(text.size.width, footerWidth))
-      footerTop = text.size.height > 0 ? text.size.height + m.timeRowSpacing : 0
+      footerTop = regionHeight > 0 ? regionHeight + m.timeRowSpacing : 0
       contentHeight = footerTop + footerHeight
       alignedText = text.aligned(toWidth: contentWidth)
     }
     contentHeight = grid.ceil(contentHeight)
 
+    // Blocks widen the content; edge-to-edge media fixes it.
+    if !isEmoji {
+      let widened = edgeSize == nil ? grid.ceil(max(contentWidth, blocksWidth)) : maximumContentWidth
+      if widened != contentWidth {
+        contentWidth = widened
+        if !(placement == .inline && text.lineCount == 1) {
+          alignedText = text.aligned(toWidth: contentWidth)
+        }
+      }
+    }
+
+    // Stack the above-text blocks from the body's top. Edge-to-edge media skips the padding.
+    var blockTops: [Int: CGFloat] = [:]
+    var stackBottom: CGFloat = 0
+    var lastWasEdge = false
+    for (position, index) in above.enumerated() {
+      let isEdge = index == edgeIndex
+      if position == 0 {
+        stackBottom = isEdge ? 0 : insets.top
+      } else {
+        stackBottom += lastWasEdge ? insets.top : m.blockSpacing
+      }
+      blockTops[index] = stackBottom
+      stackBottom += isEdge ? edgeSize?.height ?? 0 : blocks[index].height
+      lastWasEdge = isEdge
+    }
+    let regionTop = above.isEmpty ? insets.top : stackBottom + (lastWasEdge ? insets.top : m.blockSpacing)
+
     // Bubble body, in logical coordinates (x from the row's leading edge).
-    let bodyWidth = contentWidth + insets.horizontal
+    let bodyWidth = edgeSize?.width ?? contentWidth + insets.horizontal
     let minimumBodyHeight = hasBubble ? m.cornerRadius * 2 : 0
-    let bodyHeight = max(contentHeight + insets.vertical, minimumBodyHeight)
+    let bodyHeight: CGFloat = if overlaysMedia {
+      max(stackBottom, minimumBodyHeight)
+    } else if besideBlock != nil {
+      max(stackBottom + insets.bottom, minimumBodyHeight)
+    } else {
+      max(regionTop + contentHeight + insets.bottom, minimumBodyHeight)
+    }
     let rowTop = input.isFirstInGroup ? m.groupTopSpacing : m.followUpTopSpacing
+
+    // Bodies sit at the same x with or without a tail, so grouped bubbles line up; the tail
+    // overhangs into the row inset or avatar gap.
+    let bodyX = input.isOutgoing
+      ? input.rowWidth - m.rowTrailingInset - m.bodyEdgeInset - bodyWidth
+      : laneMinX + m.bodyEdgeInset
 
     var frames: [MessageLayoutNode: CGRect] = [:]
     var y = rowTop
     if let name {
+      let nameHeight = max(m.nameMinimumHeight, name.size.height)
       let nameX = input.isOutgoing
-        ? input.rowWidth - m.rowTrailingInset - m.tailWidth - name.size.width - insets.trailing
-        : laneMinX + m.tailWidth + insets.leading
-      frames[.name] = CGRect(x: nameX, y: y, width: name.size.width, height: name.size.height)
-      y += name.size.height + m.nameBottomSpacing
+        ? bodyX + bodyWidth - m.nameLeadingInset - name.size.width
+        : bodyX + m.nameLeadingInset
+      y = m.nameTopSpacing
+      frames[.name] = CGRect(x: nameX, y: y, width: name.size.width, height: nameHeight)
+      y += nameHeight + m.nameBottomSpacing
     }
 
-    let bodyX = input.isOutgoing
-      ? input.rowWidth - m.rowTrailingInset - m.tailWidth - bodyWidth
-      : laneMinX + m.tailWidth
     let body = CGRect(x: bodyX, y: y, width: bodyWidth, height: bodyHeight)
     let tail: BubbleTailSide = hasBubble ? input.tail : .none
     var bubbleFrame = body
@@ -133,10 +236,50 @@ public enum MessageLayoutPlanner {
     }
     frames[.bubble] = bubbleFrame
 
-    let contentOrigin = CGPoint(x: body.minX + insets.leading, y: body.minY + insets.top)
-    if text.lineCount > 0 {
-      frames[.text] = CGRect(
+    let contentOrigin = CGPoint(x: body.minX + insets.leading, y: body.minY + regionTop)
+    func width(of block: MessageLayoutInput.Block) -> CGFloat {
+      switch block.width {
+      case let .fixed(width): min(width, contentWidth)
+      case .flexible: contentWidth
+      }
+    }
+    for index in above {
+      let block = blocks[index]
+      let top = body.minY + (blockTops[index] ?? 0)
+      frames[.block(block.id)] = index == edgeIndex
+        ? CGRect(x: body.minX, y: top, width: body.width, height: edgeSize?.height ?? block.height)
+        : CGRect(x: contentOrigin.x, y: top, width: width(of: block), height: block.height)
+    }
+    for (offset, index) in zip(belowOffsets, below) {
+      let block = blocks[index]
+      frames[.block(block.id)] = CGRect(
         x: contentOrigin.x,
+        y: contentOrigin.y + offset,
+        width: width(of: block),
+        height: block.height
+      )
+    }
+    // Under the bubble, aligned to its side.
+    var outsideBottom = body.maxY
+    for index in outside {
+      let block = blocks[index]
+      let width = switch block.width {
+      case let .fixed(width): min(width, body.width)
+      case .flexible: body.width
+      }
+      outsideBottom += m.belowBubbleSpacing
+      frames[.block(block.id)] = CGRect(
+        x: input.isOutgoing ? body.maxX - width : body.minX,
+        y: outsideBottom,
+        width: width,
+        height: block.height
+      )
+      outsideBottom += block.height
+    }
+    if text.lineCount > 0 {
+      let emojiOffset = isEmoji && input.isOutgoing ? contentWidth - alignedText.size.width : 0
+      frames[.text] = CGRect(
+        x: contentOrigin.x + emojiOffset,
         y: contentOrigin.y,
         width: alignedText.size.width,
         height: alignedText.size.height
@@ -147,8 +290,14 @@ public enum MessageLayoutPlanner {
       frames[.reaction(reaction.id)] = frame.offsetBy(dx: contentOrigin.x, dy: contentOrigin.y + reactionsTop)
     }
 
-    let footerMaxX = contentOrigin.x + contentWidth
-    let footerY = contentOrigin.y + footerTop
+    let footerMaxX = overlaysMedia ? body.maxX - m.mediaOverlayInset : contentOrigin.x + contentWidth
+    let footerY = if overlaysMedia {
+      body.minY + stackBottom - m.mediaOverlayInset - footerHeight
+    } else if besideBlock != nil {
+      body.minY + stackBottom - footerHeight
+    } else {
+      contentOrigin.y + footerTop
+    }
     frames[.time] = CGRect(
       x: footerMaxX - timeWidth,
       y: footerY + (footerHeight - timeHeight) / 2,
@@ -196,15 +345,36 @@ public enum MessageLayoutPlanner {
     }
 
     return MessageLayout(
-      size: CGSize(width: input.rowWidth, height: grid.ceil(bubble.frame.maxY)),
+      size: CGSize(width: input.rowWidth, height: grid.ceil(max(bubble.frame.maxY, outsideBottom))),
       bubble: bubble,
       frames: frames,
       hiddenNodes: input.footer.visibility == .reserved ? [.time] : [],
       text: text.lineCount > 0 ? alignedText : nil,
+      name: name,
       time: time,
       timePlacement: placement,
-      reactionOrder: input.reactions.map(\.id)
+      reactionOrder: input.reactions.map(\.id),
+      blockOrder: blocks.map(\.id),
+      edgeToEdgeBlocks: edgeIndex.map { [blocks[$0].id] } ?? []
     )
+  }
+}
+
+extension MessageLayoutInput.Block.Width {
+  /// The width the block asks for.
+  var preferred: CGFloat {
+    switch self {
+    case let .fixed(width): width
+    case let .flexible(preferred, _): preferred
+    }
+  }
+
+  /// The content width the block needs: its preferred width, at least its minimum.
+  var demand: CGFloat {
+    switch self {
+    case let .fixed(width): width
+    case let .flexible(preferred, minimum): max(preferred, minimum)
+    }
   }
 }
 

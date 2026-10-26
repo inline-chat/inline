@@ -48,6 +48,42 @@ public struct MessageLayoutInput: Hashable, Sendable {
     }
   }
 
+  /// Content stacked in the bubble with the text: a quoted reply, a forward header, a file, a
+  /// voice note, media, a link preview, buttons. The host draws it; the planner only places it.
+  public struct Block: Hashable, Sendable {
+    public enum Position: Hashable, Sendable {
+      case aboveText
+      case belowText
+      /// Under the bubble, outside it, on the bubble's side of the row: bot buttons.
+      case belowBubble
+    }
+
+    public enum Width: Hashable, Sendable {
+      /// The block keeps this width; the bubble widens to fit it.
+      case fixed(CGFloat)
+      /// The block asks for `preferred`, never takes less than `minimum`, and stretches to the
+      /// bubble's content width.
+      case flexible(preferred: CGFloat, minimum: CGFloat)
+    }
+
+    /// Stable identity, so the same block animates between layouts.
+    public var id: String
+    public var position: Position
+    public var width: Width
+    public var height: CGFloat
+    /// Media drawn to the bubble's edges instead of inside its padding. Its fixed width sets the
+    /// bubble's width, and a caption wraps to it. Only the first such block is placed this way.
+    public var isEdgeToEdge: Bool
+
+    public init(id: String, position: Position, width: Width, height: CGFloat, isEdgeToEdge: Bool = false) {
+      self.id = id
+      self.position = position
+      self.width = width
+      self.height = height
+      self.isEdgeToEdge = isEdgeToEdge
+    }
+  }
+
   public enum Avatar: Hashable, Sendable {
     case none
     /// Keeps the avatar column so grouped bubbles line up; nothing is drawn.
@@ -67,6 +103,8 @@ public struct MessageLayoutInput: Hashable, Sendable {
   public var body: Body
   public var footer: Footer
   public var reactions: [Reaction]
+  /// In order; above-text blocks come before the text, below-text blocks after it.
+  public var blocks: [Block]
   /// Acknowledgement pill shown before the time.
   public var acknowledgementSize: CGSize?
   public var metrics: MessageLayoutMetrics
@@ -83,6 +121,7 @@ public struct MessageLayoutInput: Hashable, Sendable {
     body: Body,
     footer: Footer,
     reactions: [Reaction] = [],
+    blocks: [Block] = [],
     acknowledgementSize: CGSize? = nil,
     metrics: MessageLayoutMetrics = .init()
   ) {
@@ -97,6 +136,7 @@ public struct MessageLayoutInput: Hashable, Sendable {
     self.body = body
     self.footer = footer
     self.reactions = reactions
+    self.blocks = blocks
     self.acknowledgementSize = acknowledgementSize
     self.metrics = metrics
   }
@@ -127,12 +167,18 @@ public struct MessageLayoutMetrics: Hashable, Sendable {
   public var followUpTopSpacing: CGFloat = 1
   public var avatarSize: CGFloat = 28
   public var avatarSpacing: CGFloat = 3
+  /// Bubble bodies may use this fraction of the lane.
   public var maximumBubbleWidthFraction: CGFloat = 0.9
+  /// Gap between the lane edge and the bubble body; the tail overhangs into the row inset.
+  public var bodyEdgeInset: CGFloat = 2
   public var bubbleInsets = Insets(top: 8, leading: 12, bottom: 8, trailing: 12)
   public var cornerRadius: CGFloat = 18
   /// How far the tail reaches past the bubble body.
   public var tailWidth: CGFloat = 7
-  public var nameBottomSpacing: CGFloat = 2
+  public var nameTopSpacing: CGFloat = 9
+  public var nameLeadingInset: CGFloat = 4
+  public var nameMinimumHeight: CGFloat = 16
+  public var nameBottomSpacing: CGFloat = 0
   /// Gap between the last text line and an inline time.
   public var inlineTimeSpacing: CGFloat = 6
   /// Gap between text and a time on its own row.
@@ -145,8 +191,27 @@ public struct MessageLayoutMetrics: Hashable, Sendable {
   /// Gap between the last reaction and a time on the same row.
   public var reactionTimeSpacing: CGFloat = 6
   public var emojiInsets = Insets(top: 6, leading: 0, bottom: 6, trailing: 0)
+  /// Padding inside the time pill drawn over large emoji.
+  public var timeOverlayPadding = CGSize(width: 6, height: 3)
   /// Gap between large emoji and the reactions below them.
   public var emojiReactionsSpacing: CGFloat = 8
+  /// Gap between stacked blocks, and between a block and the text.
+  public var blockSpacing: CGFloat = 6
+  /// Distance of the time pill from the corner of media it overlays.
+  public var mediaOverlayInset: CGFloat = 6
+  /// Gap between the bubble and blocks under it, and between those blocks.
+  public var belowBubbleSpacing: CGFloat = 4
 
   public init() {}
+}
+
+public extension MessageLayoutInput {
+  /// The widest content inside a bubble's padding in this row, before blocks narrow it. Hosts
+  /// measure blocks against it.
+  var maximumContentWidth: CGFloat {
+    let m = metrics
+    let avatarColumn = isOutgoing || avatar == .none ? 0 : m.avatarSize + m.avatarSpacing
+    let lane = max(0, rowWidth - m.rowLeadingInset - m.rowTrailingInset - avatarColumn)
+    return max(1, grid.floor(lane * m.maximumBubbleWidthFraction) - m.bubbleInsets.horizontal)
+  }
 }

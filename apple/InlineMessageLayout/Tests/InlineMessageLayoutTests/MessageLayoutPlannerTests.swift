@@ -77,7 +77,7 @@ struct MessageLayoutPlannerTests {
     let rowWidth: CGFloat = 390
     let lane = rowWidth - metrics.rowLeadingInset - metrics.rowTrailingInset
     let layout = MessageLayoutPlanner.layout(Fixtures.message(long, rowWidth: rowWidth))
-    #expect(layout.bubble.body.width <= lane * metrics.maximumBubbleWidthFraction - metrics.tailWidth + 0.5)
+    #expect(layout.bubble.body.width <= lane * metrics.maximumBubbleWidthFraction + 0.5)
 
     let tailed = MessageLayoutPlanner.layout(Fixtures.message("Last", tail: .leading))
     let grouped = MessageLayoutPlanner.layout(Fixtures.message("Earlier", tail: BubbleTailSide.none))
@@ -86,8 +86,9 @@ struct MessageLayoutPlannerTests {
     #expect(grouped.bubble.frame == grouped.bubble.body)
 
     let outgoing = MessageLayoutPlanner.layout(Fixtures.message("Mine", outgoing: true))
-    #expect(outgoing.bubble.frame.maxX == rowWidth - metrics.rowTrailingInset)
-    #expect(outgoing.bubble.body.maxX == rowWidth - metrics.rowTrailingInset - metrics.tailWidth)
+    #expect(outgoing.bubble.body.maxX == rowWidth - metrics.rowTrailingInset - metrics.bodyEdgeInset)
+    #expect(outgoing.bubble.frame.maxX == outgoing.bubble.body.maxX + metrics.tailWidth)
+    #expect(tailed.bubble.body.minX == metrics.rowLeadingInset + metrics.bodyEdgeInset)
   }
 
   @Test("Right-to-left interfaces mirror the row")
@@ -112,15 +113,30 @@ struct MessageLayoutPlannerTests {
     ))
     #expect((multi.text?.lineCount ?? 0) > 1)
     #expect(multi.timePlacement == .below)
+
+    // In a right-to-left interface the same text reads from the leading edge, so the time fits
+    // beside a short last line.
+    let rtlInterface = MessageLayoutPlanner.layout(Fixtures.message(
+      "این یک پیام طولانی است که باید شکسته شود و در خط آخر کوتاه باشد. بله",
+      direction: .rightToLeft
+    ))
+    #expect((rtlInterface.text?.lineCount ?? 0) > 1)
+    #expect(rtlInterface.timePlacement == .inline)
   }
 
-  @Test("Large emoji have no bubble")
-  func emoji() {
-    let layout = MessageLayoutPlanner.layout(Fixtures.message("😀", emoji: true))
+  @Test("Large emoji have no bubble and carry the time in a pill over their corner", arguments: [false, true])
+  func emoji(outgoing: Bool) throws {
+    let layout = MessageLayoutPlanner.layout(Fixtures.message("😀", outgoing: outgoing, emoji: true))
     #expect(!layout.bubble.isVisible)
     #expect(layout.frame(.bubble) == nil)
     #expect(layout.bubble.tail == .none)
-    #expect(layout.timePlacement == .below)
+    #expect(layout.timePlacement == .overlay)
+    let text = try #require(layout.frame(.text))
+    let time = try #require(layout.frame(.time))
+    #expect(abs(time.maxY - text.maxY) <= 0.5)
+    #expect(time.intersects(text))
+    #expect(abs(time.maxX - layout.bubble.body.maxX) <= 0.5)
+    #expect(time.width >= layout.time.size.width + metrics.timeOverlayPadding.width * 2)
   }
 
   @Test("A reserved footer keeps the same geometry and only hides the time")
@@ -154,10 +170,25 @@ struct MessageLayoutPlannerTests {
     let avatar = try #require(layout.frame(.avatar))
     #expect(avatar.maxY == layout.bubble.body.maxY)
     #expect(avatar.minX == metrics.rowLeadingInset)
-    #expect(layout.bubble.frame.minX >= avatar.maxX + metrics.avatarSpacing - 0.5)
+    #expect(layout.bubble.body.minX >= avatar.maxX + metrics.avatarSpacing)
     let reserved = MessageLayoutPlanner.layout(Fixtures.message("With avatar", avatar: .reserved))
     #expect(reserved.frame(.avatar) == nil)
     #expect(reserved.bubble.frame == layout.bubble.frame)
+  }
+
+  @Test("A sender name sits above the bubble and pushes it down")
+  func senderName() throws {
+    var input = Fixtures.message("Hello group", avatar: .reserved)
+    let plain = MessageLayoutPlanner.layout(input)
+    input.name = Fixtures.text("Ava", font: Fixtures.font(13))
+    let named = MessageLayoutPlanner.layout(input)
+    let name = try #require(named.frame(.name))
+    #expect(name.minY == metrics.nameTopSpacing)
+    #expect(name.height >= metrics.nameMinimumHeight)
+    #expect(named.bubble.body.minY == name.maxY + metrics.nameBottomSpacing)
+    #expect(name.minX == named.bubble.body.minX + metrics.nameLeadingInset)
+    #expect(named.size.height > plain.size.height)
+    #expect(named.accessibilityOrder.first == .name)
   }
 
   @Test("Every frame is finite, pixel-aligned and deterministic", arguments: [false, true])
