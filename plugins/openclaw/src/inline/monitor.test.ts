@@ -11752,7 +11752,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("treats mention pattern matches as mentions even when native mentioned is false", async () => {
+  it("ignores word matches such as the agent's name; only structured Inline mentions wake it", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -11776,32 +11776,23 @@ describe("inline/monitor", () => {
       },
     })
 
+    const runtimeLog = vi.fn()
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
       account: buildAccount({
         groupPolicy: "open",
         requireMention: true,
       }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      runtime: { log: runtimeLog, error: vi.fn() } as any,
       abortSignal: new AbortController().signal,
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
 
     await waitFor(() => {
-      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          InboundEventKind: "user_request",
-          WasMentioned: true,
-        }),
-      )
-      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          chatId: 88n,
-          text: "on it",
-        }),
-      )
+      expect(runtimeLog).toHaveBeenCalledWith(expect.stringContaining("inline: drop group chat 88 (no mention)"))
     })
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
 
     await handle.stop()
   })

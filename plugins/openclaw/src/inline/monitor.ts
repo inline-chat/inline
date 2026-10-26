@@ -280,7 +280,6 @@ async function dispatchInlineReplyWithSessionInitRetry<T>(params: {
 type InlineMentionSource =
   | "explicit_bot"
   | "subteam"
-  | "mention_pattern"
   | "implicit_thread"
   | "command_bypass"
   | "none"
@@ -1554,18 +1553,15 @@ function isInlineDialogExplicitlyUnfollowed(followMode: unknown): boolean {
   )
 }
 
+// Only structured Inline addressing wakes the agent; words such as its name never do.
 function resolveInlineMentionSource(params: {
   nativeMentioned: boolean
-  patternMentioned: boolean
   implicitMention: boolean
   shouldBypassMention: boolean
-  wasMentioned: boolean
 }): InlineMentionSource {
   if (params.nativeMentioned) return "explicit_bot"
   if (params.shouldBypassMention) return "command_bypass"
-  if (params.patternMentioned) return "mention_pattern"
   if (params.implicitMention) return "implicit_thread"
-  if (params.wasMentioned) return "mention_pattern"
   return "none"
 }
 
@@ -4360,11 +4356,7 @@ export async function monitorInlineProvider(params: {
       return
     }
 
-    const mentionRegexes = core.channel.mentions.buildMentionRegexes(cfg, route.agentId)
-    const patternMentioned = mentionRegexes.length
-      ? core.channel.mentions.matchesMentionPatterns(rawBody, mentionRegexes)
-      : false
-    const wasMentioned = nativeMentioned || patternMentioned
+    const wasMentioned = nativeMentioned
     const messageTimestamp = Number(msg.date) * 1000
     const pendingReplyThreadContext = replyThreadContext
     const pendingGroupHistoryKey = isGroup
@@ -4468,7 +4460,7 @@ export async function monitorInlineProvider(params: {
     const mentionGate = resolveMentionGatingWithBypass({
       isGroup,
       requireMention,
-      canDetectMention: typeof msg.mentioned === "boolean" || mentionRegexes.length > 0,
+      canDetectMention: typeof msg.mentioned === "boolean",
       wasMentioned,
       implicitMention,
       allowTextCommands,
@@ -4488,10 +4480,8 @@ export async function monitorInlineProvider(params: {
     const mentionSource = isGroup
       ? resolveInlineMentionSource({
           nativeMentioned,
-          patternMentioned,
           implicitMention,
           shouldBypassMention: mentionGate.shouldBypassMention,
-          wasMentioned: mentionGate.effectiveWasMentioned,
         })
       : "none"
     if (isGroup && mentionGate.shouldSkip) {
