@@ -116,6 +116,14 @@ fn every_fixture_decodes_into_the_contract_and_round_trips() {
         for step in entries(&fixture, "steps") {
             for event in entries(step, "events") {
                 let event: Event = round_trip(&path, name(step), event);
+                if let Event::InteractionClosed { id, .. } = &event {
+                    assert!(
+                        decisions_by_interaction.contains_key(id.as_str()),
+                        "{}: {}: closes an interaction no step opened",
+                        path.display(),
+                        name(step)
+                    );
+                }
                 if let Event::Interaction(interaction) = &event {
                     let decisions: BTreeSet<String> = match &interaction.kind {
                         InteractionKind::Approval { decisions, .. } => decisions
