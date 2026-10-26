@@ -3,6 +3,7 @@
 mod descriptor;
 mod driver;
 mod elicitation;
+mod harness;
 mod host_tools;
 mod mapping;
 mod process;
@@ -10,6 +11,7 @@ mod support;
 
 pub use descriptor::{AcpDescriptorError, AcpLaunchDescriptor};
 pub use driver::AcpDriver;
+pub use harness::{AcpHarness, AcpSession, acp_availability};
 pub use host_tools::run_inline_tools_mcp;
 pub use process::{
     AcpLaunchError, AcpProcessStatus, SpawnedAcpDriver, should_scrub_acp_environment_name,

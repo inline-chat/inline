@@ -128,10 +128,10 @@ async fn lab_approvals() {
         .connect(&options, approval_policy(), InitializeRequest::default())
         .await;
     let prompts = [
-        ("a1", r#"@tool Bash {"command":"echo approved-1","description":"lab"}"#),
-        ("a2", r#"@tool Bash {"command":"echo deny-me","description":"lab"}"#),
-        ("a3", r#"@tool Bash {"command":"echo remember-1","description":"lab"}"#),
-        ("a4", r#"@tool Bash {"command":"echo remember-1","description":"lab"}"#),
+        ("a1", r#"@tool Bash {"command":"touch approved-1.txt","description":"lab"}"#),
+        ("a2", r#"@tool Bash {"command":"touch deny-me.txt","description":"lab"}"#),
+        ("a3", r#"@tool Bash {"command":"touch remember-1.txt","description":"lab"}"#),
+        ("a4", r#"@tool Bash {"command":"touch remember-1.txt","description":"lab"}"#),
     ];
     for (index, (uuid, prompt)) in prompts.iter().enumerate() {
         lab.send(&client, &UserMessage::text(*prompt).with_uuid(*uuid))
@@ -148,7 +148,7 @@ async fn lab_approvals() {
     lab.note(json!({"observed": {"asks": asks.len(), "results": result_summary(&lab)}}));
     finish(&lab, &client).await;
     let results = lab.recorder.results();
-    assert!(results[0]["result"].as_str().unwrap().contains("approved-1"));
+    assert!(lab.work_dir.path().join("approved-1.txt").exists());
     assert!(results[1]["result"].as_str().unwrap().contains("lab says no"));
     // The third ask applied the suggested rule; the fourth ran unasked.
     assert_eq!(asks.len(), 3, "asks: {asks:#?}");
@@ -396,7 +396,9 @@ async fn agent_tool_name(lab: &Lab, client: &ClaudeClient) -> String {
         .as_array()
         .map(|tools| tools.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
-    if names.contains(&"Agent") { "Agent" } else { "Task" }.to_string()
+    let tool = if names.contains(&"Agent") { "Agent" } else { "Task" };
+    assert!(names.contains(&tool), "no subagent tool offered: {names:?}");
+    tool.to_string()
 }
 
 async fn subagent(lab_name: &str, background: bool) {
@@ -458,6 +460,7 @@ async fn subagent(lab_name: &str, background: bool) {
         "api": api_parts(&lab),
     }}));
     finish(&lab, &client).await;
+    assert!(sub_messages > 0 || !tasks.is_empty(), "the subagent left no trace");
 }
 
 #[tokio::test]
