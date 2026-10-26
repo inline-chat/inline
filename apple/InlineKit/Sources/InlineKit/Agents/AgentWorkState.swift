@@ -1,3 +1,4 @@
+import Auth
 import Combine
 import Foundation
 import GRDB
@@ -212,6 +213,9 @@ public final class AgentWorkStateStore: ObservableObject {
   private let log = Log.scoped("AgentWorkStateStore")
   private var overrideRevisions: [AgentWorkState.Key: Int64] = [:]
   private var didHydrate = false
+  /// Bumped by `removeAll` (logout, reset) so a refresh started before it,
+  /// or for another account, never repopulates the cleared state.
+  private var generation: UInt64 = 0
 
   public init(database: AppDatabase? = nil) {
     self.database = database
@@ -323,6 +327,8 @@ public final class AgentWorkStateStore: ObservableObject {
   /// Refreshes one chat's sessions, or the viewer's busy sessions everywhere
   /// when `peer` is nil (sidebar badges after launch or reconnect).
   public func refresh(peer: Peer? = nil) async {
+    guard let accountID = Auth.shared.getCurrentUserId() else { return }
+    let generation = generation
     do {
       let response = try await Api.realtime.callRpcDirect(
         method: .getAgentSessionStates,
@@ -330,7 +336,9 @@ public final class AgentWorkStateStore: ObservableObject {
           if let peer { input.peerID = peer.toInputPeer() }
         })
       )
-      guard case let .getAgentSessionStates(result)? = response else { return }
+      guard self.generation == generation, Auth.shared.getCurrentUserId() == accountID,
+            case let .getAgentSessionStates(result)? = response
+      else { return }
       let sessions = result.sessions.compactMap { AgentWorkState(session: $0) }
       if let peer {
         // A chat refresh is complete for that chat: drop agents that left.
@@ -351,6 +359,7 @@ public final class AgentWorkStateStore: ObservableObject {
   }
 
   public func removeAll() {
+    generation &+= 1
     states.removeAll()
     outputOverrides.removeAll()
     defaultOutputModes.removeAll()

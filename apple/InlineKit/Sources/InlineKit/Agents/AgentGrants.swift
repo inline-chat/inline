@@ -57,6 +57,9 @@ public final class AgentGrantStore: ObservableObject {
   private let log = Log.scoped("AgentGrantStore")
   private var inFlight: Set<Int64> = []
   private var failedAt: [Int64: Date] = [:]
+  /// Bumped by `removeAll` (logout, reset) so a load started for another
+  /// account or before the reset never lands.
+  private var generation: UInt64 = 0
 
   public init() {}
 
@@ -66,27 +69,32 @@ public final class AgentGrantStore: ObservableObject {
 
   /// Loads the viewer's grants for a bot once, unless a load failed recently.
   public func ensureLoaded(botUserID: Int64) {
-    guard botUserID > 0, accessByBotUserID[botUserID] == nil, !inFlight.contains(botUserID) else { return }
+    guard botUserID > 0, accessByBotUserID[botUserID] == nil, !inFlight.contains(botUserID),
+          let accountID = Auth.shared.getCurrentUserId()
+    else { return }
     if let failedAt = failedAt[botUserID], Date().timeIntervalSince(failedAt) < 60 { return }
     inFlight.insert(botUserID)
+    let generation = generation
     Task { @MainActor [weak self] in
-      defer { self?.inFlight.remove(botUserID) }
+      defer { if self?.generation == generation { self?.inFlight.remove(botUserID) } }
       do {
         let response = try await Api.realtime.callRpcDirect(
           method: .listAgentGrants,
           input: .listAgentGrants(.with { $0.botUserID = botUserID })
         )
-        guard case let .listAgentGrants(result)? = response else { return }
-        self?.apply(result, botUserID: botUserID)
+        guard let self, self.generation == generation, Auth.shared.getCurrentUserId() == accountID,
+              case let .listAgentGrants(result)? = response
+        else { return }
+        self.apply(result, botUserID: botUserID, viewerUserID: accountID)
       } catch {
-        self?.failedAt[botUserID] = Date()
-        self?.log.debug("Couldn't load grants for bot \(botUserID): \(error)")
+        guard let self, self.generation == generation else { return }
+        self.failedAt[botUserID] = Date()
+        self.log.debug("Couldn't load grants for bot \(botUserID): \(error)")
       }
     }
   }
 
-  public func apply(_ result: InlineProtocol.ListAgentGrantsResult, botUserID: Int64) {
-    guard let viewerUserID = Auth.shared.getCurrentUserId() else { return }
+  public func apply(_ result: InlineProtocol.ListAgentGrantsResult, botUserID: Int64, viewerUserID: Int64) {
     let own = result.grants.first { $0.userID == viewerUserID && $0.botUserID == botUserID }
     store(.init(
       botUserID: botUserID,
@@ -116,8 +124,10 @@ public final class AgentGrantStore: ObservableObject {
   }
 
   public func removeAll() {
+    generation &+= 1
     accessByBotUserID.removeAll()
     failedAt.removeAll()
+    inFlight.removeAll()
   }
 
   private func store(_ access: AgentGrantAccess) {
