@@ -487,6 +487,15 @@ class GlassComposeAppKit: NSView {
   private var isAccessoryBarExpanded = false
   private var newThreadEscapeKeyUnsubscribe: (() -> Void)?
 
+  // Agent controls (thread Compose only): a pill at the editor's leading edge
+  // and the chain row under the editor. Both hug their SwiftUI content.
+  private var agentChain: ComposeAgentChainModel?
+  private var agentPillHost: NSView?
+  private var agentChainHost: NSView?
+  private var agentChainHeightConstraint: NSLayoutConstraint?
+  private var isAgentChainShown = false
+  private static let agentChainRowHeight: CGFloat = 30
+
   // -------
 
   override func viewDidMoveToWindow() {
@@ -585,6 +594,23 @@ class GlassComposeAppKit: NSView {
     }
     draftAttachmentObserverCancel = drafts2.observeAttachmentResults(peer: peerId) { [weak self] result in
       self?.handleDraftAttachmentResult(result)
+    }
+    if layout == .sideControls, #available(macOS 26.0, *) {
+      agentChain = ComposeAgentChainModel(
+        peer: peerId,
+        chatID: chat?.id,
+        peerUser: peerUser,
+        database: dependencies.database,
+        updateAgentContext: { [realtimeV2 = dependencies.realtimeV2, chatID = chat?.id] context in
+          guard let chatID else { return }
+          _ = try await realtimeV2.send(.updateChatInfo(
+            chatID: chatID,
+            title: nil,
+            emoji: nil,
+            agentContext: context
+          ))
+        }
+      )
     }
     setupView()
     setupObservers()
@@ -700,6 +726,23 @@ class GlassComposeAppKit: NSView {
 
         glassAttachmentView = menuButton
         glassTrailingView = capabilities.supportsVoiceMessages ? voiceButton : nil
+
+        if let agentChain {
+          let pillHost = NSHostingView(rootView: ComposeAgentPill(model: agentChain))
+          pillHost.sizingOptions = [.intrinsicContentSize]
+          pillHost.translatesAutoresizingMaskIntoConstraints = false
+          pillHost.setContentHuggingPriority(.required, for: .horizontal)
+          pillHost.setContentCompressionResistancePriority(.required, for: .horizontal)
+          editorRowView.addSubview(pillHost)
+          agentPillHost = pillHost
+
+          let chainHost = NSHostingView(rootView: ComposeAgentChainBar(model: agentChain))
+          chainHost.sizingOptions = []
+          chainHost.translatesAutoresizingMaskIntoConstraints = false
+          chainHost.isHidden = true
+          pillContentView.addSubview(chainHost)
+          agentChainHost = chainHost
+        }
 
       case .accessoryBar:
         let accessoryBarView = NSView()
@@ -845,7 +888,6 @@ class GlassComposeAppKit: NSView {
       glassEditorRowView.topAnchor.constraint(equalTo: attachments.bottomAnchor),
       glassEditorRowView.heightAnchor.constraint(greaterThanOrEqualToConstant: controlMode.glassControlsMinHeight),
 
-      textEditor.leadingAnchor.constraint(equalTo: glassEditorRowView.leadingAnchor),
       textHeightConstraint,
       textEditor.centerYAnchor.constraint(equalTo: glassEditorRowView.centerYAnchor),
     ]
@@ -870,6 +912,16 @@ class GlassComposeAppKit: NSView {
         )
     }
 
+    if let agentPillHost {
+      constraints.append(contentsOf: [
+        agentPillHost.leadingAnchor.constraint(equalTo: glassEditorRowView.leadingAnchor),
+        agentPillHost.bottomAnchor.constraint(equalTo: glassEditorRowView.bottomAnchor),
+        textEditor.leadingAnchor.constraint(equalTo: agentPillHost.trailingAnchor),
+      ])
+    } else {
+      constraints.append(textEditor.leadingAnchor.constraint(equalTo: glassEditorRowView.leadingAnchor))
+    }
+
     switch layout {
       case .sideControls:
         guard let glassAttachmentView else { return }
@@ -891,7 +943,6 @@ class GlassComposeAppKit: NSView {
           glassAttachmentWidthConstraint!,
           glassAttachmentView.heightAnchor.constraint(equalToConstant: controlMode.sideButtonSize),
           glassAttachmentToPillConstraint!,
-          glassEditorRowView.bottomAnchor.constraint(equalTo: glassComposePillContentView.bottomAnchor),
           glassTextTrailingConstraint!,
           sendButton.trailingAnchor.constraint(
             equalTo: glassEditorRowView.trailingAnchor,
@@ -906,6 +957,22 @@ class GlassComposeAppKit: NSView {
           silentModeButton.heightAnchor.constraint(equalToConstant: controlMode.silentButtonSize),
           silentModeToSendConstraint!,
         ])
+
+        if let agentChainHost {
+          let heightConstraint = agentChainHost.heightAnchor.constraint(equalToConstant: 0)
+          agentChainHeightConstraint = heightConstraint
+          constraints.append(contentsOf: [
+            glassEditorRowView.bottomAnchor.constraint(equalTo: agentChainHost.topAnchor),
+            agentChainHost.leadingAnchor.constraint(equalTo: glassComposePillContentView.leadingAnchor),
+            agentChainHost.trailingAnchor.constraint(equalTo: glassComposePillContentView.trailingAnchor),
+            agentChainHost.bottomAnchor.constraint(equalTo: glassComposePillContentView.bottomAnchor),
+            heightConstraint,
+          ])
+        } else {
+          constraints.append(
+            glassEditorRowView.bottomAnchor.constraint(equalTo: glassComposePillContentView.bottomAnchor)
+          )
+        }
 
         if capabilities.showsEmojiButton {
           constraints.append(contentsOf: [
@@ -1043,6 +1110,7 @@ class GlassComposeAppKit: NSView {
     }
     if case .chat = usage {
       setupChatObservers()
+      setupAgentChainObservers()
     }
 
     Publishers.CombineLatest4(
@@ -1077,6 +1145,7 @@ class GlassComposeAppKit: NSView {
     state.replyingToMsgIdPublisher
       .sink { [weak self] replyingToMsgId in
         guard let self else { return }
+        updateAgentReplyTarget(replyingToMsgId)
         updateMessageView(to: replyingToMsgId, kind: .replying, animate: true)
         updateVoiceAvailability()
         focus()
@@ -2107,7 +2176,55 @@ class GlassComposeAppKit: NSView {
   private func getChromeHeight(textEditorHeight: CGFloat) -> CGFloat {
     max(textEditorHeight, controlMode.glassControlsMinHeight) +
       currentAccessoryBarHeight +
+      currentAgentChainHeight +
       viewportBottomInset
+  }
+
+  private var currentAgentChainHeight: CGFloat {
+    isAgentChainShown ? Self.agentChainRowHeight : 0
+  }
+
+  private func setupAgentChainObservers() {
+    guard let agentChain else { return }
+    agentChain.start()
+    Publishers.CombineLatest(agentChain.$isAvailable, agentChain.$isChainOpen)
+      .map { $0 && $1 }
+      .removeDuplicates()
+      .sink { [weak self] shown in
+        // Applied in place so a remembered open chain is part of the first
+        // frame. Only the delivered value is read, never the model's.
+        self?.setAgentChainShown(shown)
+      }
+      .store(in: &cancellables)
+  }
+
+  private func setAgentChainShown(_ shown: Bool) {
+    guard let agentChainHost, isAgentChainShown != shown else { return }
+    isAgentChainShown = shown
+    if shown {
+      agentChainHost.isHidden = false
+      // Grow the outer Compose constraint before making the row mandatory,
+      // as the accessory bar does, so no transient layout is unsatisfiable.
+      updateHeight(animate: false)
+      agentChainHeightConstraint?.constant = Self.agentChainRowHeight
+    } else {
+      agentChainHeightConstraint?.constant = 0
+      updateHeight(animate: false)
+      agentChainHost.isHidden = true
+    }
+  }
+
+  private func refreshAgentDraftTarget() {
+    guard let agentChain, let textStorage = textEditor.textView.textStorage else { return }
+    agentChain.updateDraft(textStorage)
+  }
+
+  private func updateAgentReplyTarget(_ replyingToMsgId: Int64?) {
+    guard let agentChain else { return }
+    let fromID = replyingToMsgId.flatMap { msgId in
+      try? FullMessage.get(messageId: msgId, chatId: chatId ?? 0)?.message.fromId
+    }
+    agentChain.updateReply(toUserID: fromID)
   }
 
   /// Get compose wrapper height
@@ -2195,6 +2312,7 @@ class GlassComposeAppKit: NSView {
   // MARK: - Reply View
 
   private func setupReplyingView() {
+    updateAgentReplyTarget(state.replyingToMsgId)
     if let replyingToMsgId = state.replyingToMsgId {
       updateMessageView(to: replyingToMsgId, kind: .replying, animate: false, shouldUpdateHeight: false)
     }
@@ -2500,6 +2618,7 @@ class GlassComposeAppKit: NSView {
       textEditor
         .getTypingLineHeight() // manually for now, FIXME: make it automatic in texteditor.clear
     textEditor.clear()
+    refreshAgentDraftTarget()
     clearAttachments(updateHeights: false)
     updateSendButtonIfNeeded()
 
@@ -2880,6 +2999,7 @@ class GlassComposeAppKit: NSView {
   private func clearInlineCommandText() {
     textViewContentHeight = textEditor.getTypingLineHeight()
     textEditor.clear()
+    refreshAgentDraftTarget()
     clearDraft()
     updateSendButtonIfNeeded()
     updateHeight()
@@ -3371,6 +3491,7 @@ extension GlassComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     guard let textView = notification.object as? NSTextView else { return }
 
     paragraphDirectionController.textDidChange()
+    refreshAgentDraftTarget()
 
     // Prevent mention style leakage to new text
     textView.updateTypingAttributesIfNeeded()
@@ -4008,6 +4129,7 @@ extension GlassComposeAppKit {
   func setAttributedString(_ attributedString: NSAttributedString) {
     // Set as compose text
     textEditor.replaceAttributedString(attributedString)
+    refreshAgentDraftTarget()
     paragraphDirectionController.refreshAllParagraphDirections()
     textEditor.showPlaceholder(text.isEmpty)
 
