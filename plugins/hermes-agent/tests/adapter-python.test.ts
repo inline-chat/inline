@@ -341,7 +341,7 @@ for legacy_activity_flag in (None, "false", "true"):
         event=types.SimpleNamespace(source=types.SimpleNamespace(chat_id="7", thread_id=None), message_id="1")
         await default_adapter.on_processing_start(event)
         await default_adapter.send_typing("7")
-        assert calls == [("/typing", {"target": {"chatId": "7"}, "state": "start"})]
+        assert calls == [("/typing", {"target": {"chatId": "7"}, "state": "working"})]
     asyncio.run(assert_ordinary_processing())
 os.environ.pop("INLINE_EXPERIMENTAL_AGENT_ACTIVITY", None)
 
@@ -1550,7 +1550,12 @@ if real_node_bin:
     os.environ["INLINE_NODE_BIN"] = real_node_bin
 loopback_bind = InlineAdapter(PlatformConfig(extra={**base_extra, "sidecar_bind": "[::1]"}))
 assert loopback_bind._sidecar_bind == "::1"
-assert loopback_bind._sidecar_base_url() == "http://[::1]:8794"
+assert loopback_bind._sidecar_base_url().startswith("http://[::1]:")
+# Several profiles can share one gateway process: self-started sidecars take free ports.
+assert loopback_bind._sidecar_port != InlineAdapter(PlatformConfig(extra={**base_extra, "sidecar_bind": "[::1]"}))._sidecar_port
+os.environ["INLINE_SIDECAR_AUTOSTART"] = "false"
+assert InlineAdapter(PlatformConfig(extra=base_extra))._sidecar_port == 8794
+os.environ.pop("INLINE_SIDECAR_AUTOSTART", None)
 custom_port = InlineAdapter(PlatformConfig(extra={**base_extra, "sidecar_port": "6543"}))
 assert custom_port._sidecar_port == 6543
 for bad_port in ["0", "-1", "70000", "abc"]:
@@ -2128,7 +2133,7 @@ async def assert_forced_reply_thread_creation():
     async def fake_fetch_message(chat_id, msg_id, **kwargs):
         assert chat_id == "10"
         assert msg_id == "6"
-        return {"id": "6", "chatId": "10", "fromId": "u2", "message": "parent quote"}
+        return {"id": "6", "chatId": "10", "fromId": "u1", "message": "parent quote"}
 
     adapter.handle_message = fake_handle_message
     adapter._get_chat_info = fake_get_chat_info
@@ -2167,7 +2172,7 @@ async def assert_forced_reply_thread_creation():
     assert events[0].auto_skill == ["thread-skill"]
 
     await adapter.send_typing("10", metadata={"thread_id": "99"})
-    assert calls[-1] == ("/typing", {"target": {"chatId": "10"}, "state": "start"})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "10"}, "state": "working"})
 
     trigger_reply = await adapter.send("10", "agent reply", reply_to="7", metadata={"thread_id": "99"})
     assert trigger_reply.success is True
@@ -2178,14 +2183,14 @@ async def assert_forced_reply_thread_creation():
     assert calls[-1] == ("/typing", {"target": {"chatId": "10"}, "state": "stop"})
 
     await adapter.send_typing("10", metadata={"thread_id": "99"})
-    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start"})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "working"})
     await adapter.stop_typing("10", metadata={"thread_id": "99"})
     assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "stop"})
 
     reused_thread = await adapter._create_reply_thread("10", "7", "please investigate the incident", "6")
     assert reused_thread == "99"
     await adapter.send_typing("10", metadata={"thread_id": "99"})
-    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start"})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "working"})
     await adapter.stop_typing("10", metadata={"thread_id": "99"})
     assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "stop"})
 
@@ -2195,6 +2200,11 @@ async def assert_forced_reply_thread_creation():
 
     in_thread_reply = await adapter.send("10", "agent reply", reply_to="sent-2", metadata={"thread_id": "99"})
     assert in_thread_reply.success is True
+    # Answers are plain messages unless they answer another bot.
+    assert "replyToMsgId" not in calls[-1][1]
+    adapter._remember_bot_request("99", "sent-2")
+    bot_answer = await adapter.send("10", "agent reply", reply_to="sent-2", metadata={"thread_id": "99"})
+    assert bot_answer.success is True
     assert calls[-1][1]["replyToMsgId"] == "sent-2"
 
 asyncio.run(assert_forced_reply_thread_creation())
@@ -2523,6 +2533,8 @@ async def assert_inline_reply_context_window():
             "chatId": "10",
             "fromId": "u1",
             "message": "replying here",
+            # Replies to other people need the bot addressed to reach it.
+            "mentioned": True,
             "replyToMsgId": "50",
             "peerId": {"peer": {"oneofKind": "chat"}},
         },
@@ -2692,15 +2704,26 @@ async def assert_explicit_addressing_precedence():
     ))
     assert events == []
 
-    # Explicitly mentioning this bot anywhere still wins over the inferred-address exclusion.
+    # The leading run of mentions decides who a message is for: a later mention of
+    # this bot does not override it (Mo, October 24).
     await adapter._dispatch_message(group_message(
         203,
-        "address-both",
+        "address-other-then-me",
         "@Ada ask @InlineBot too",
         entities=[mention("42", 0, 4), mention("999", 9, 10)],
         mentioned=True,
     ))
-    assert events[-1].text == "@Ada ask @InlineBot too"
+    assert events == []
+
+    # A leading run that includes this bot addresses it.
+    await adapter._dispatch_message(group_message(
+        206,
+        "address-both",
+        "@Ada @InlineBot compare",
+        entities=[mention("42", 0, 4), mention("999", 5, 10)],
+        mentioned=True,
+    ))
+    assert events[-1].text == "@Ada @InlineBot compare"
 
     # Inline entity offsets are UTF-16: an emoji before the mention means it is not leading.
     await adapter._dispatch_message(group_message(
@@ -2753,6 +2776,293 @@ async def assert_explicit_addressing_precedence():
     assert len(follow_calls) == follow_count
 
 asyncio.run(assert_explicit_addressing_precedence())
+
+# New bot rules: each case names the feedback it answers.
+async def assert_multi_bot_rules():
+    def make(extra=None, follow_mode=1):
+        adapter = InlineAdapter(PlatformConfig(extra={
+            **trusted_extra,
+            "require_mention": True,
+            "reply_threads": False,
+            "context_backfill": "off",
+            "observe_unmentioned_messages": False,
+            **(extra or {}),
+        }))
+        adapter._me_id = "999"
+        adapter._me_username = "scout"
+        events = []
+        messages = {
+            "a1": {"id": "a1", "chatId": "10", "fromId": "500", "message": "Vendor A", "sender": {"id": "500", "bot": True}},
+            "m1": {"id": "m1", "chatId": "10", "fromId": "999", "message": "1,284 signups", "sender": {"id": "999", "bot": True}},
+            "h1": {"id": "h1", "chatId": "10", "fromId": "u2", "message": "lunch?", "sender": {"id": "u2", "bot": False}},
+        }
+
+        async def fake_handle_message(event):
+            events.append(event)
+
+        async def fake_get_chat_info(chat_id, **kwargs):
+            return {"chatId": chat_id, "dialogFollowMode": follow_mode} if follow_mode is not None else {"chatId": chat_id}
+
+        async def fake_fetch_message(chat_id, message_id, **kwargs):
+            return messages.get(message_id)
+
+        adapter.handle_message = fake_handle_message
+        adapter._get_chat_info = fake_get_chat_info
+        adapter._fetch_message = fake_fetch_message
+        return adapter, events
+
+    def message(seq, text, *, sender="u1", bot=False, reply_to=None, entities=None, mentioned=False):
+        return {
+            "seq": seq,
+            "chatId": "10",
+            "sender": {"id": sender, "bot": bot},
+            "message": {
+                "id": f"m-{seq}",
+                "chatId": "10",
+                "fromId": sender,
+                "message": text,
+                "mentioned": mentioned,
+                "peerId": {"peer": {"oneofKind": "chat"}},
+                **({"replyToMsgId": reply_to} if reply_to else {}),
+                **({"entities": {"entities": entities}} if entities else {}),
+            },
+        }
+
+    def mention(user_id, offset, length):
+        return {"type": 1, "offset": offset, "length": length, "entity": {"oneofKind": "mention", "mention": {"userId": user_id}}}
+
+    # J21: a reply to another bot leaves this bot quiet even though it follows the thread.
+    adapter, events = make()
+    await adapter._dispatch_message(message(301, "go with this one", reply_to="a1"))
+    assert events == []
+    # ...unless the reply also addresses this bot.
+    await adapter._dispatch_message(message(302, "@scout check it", reply_to="a1", entities=[mention("999", 0, 6)], mentioned=True))
+    assert len(events) == 1
+    # Replies to other people are theirs too (Mo, October 26)...
+    await adapter._dispatch_message(message(303, "sure, after 1pm", reply_to="h1"))
+    assert len(events) == 1
+    # ...but replying to your own earlier message continues your own point.
+    await adapter._dispatch_message(message(304, "also: under $900", sender="u2", reply_to="h1"))
+    assert len(events) == 2
+
+    # J20: explicit unfollow beats a free-response room; mentions still reach the bot.
+    adapter, events = make({"free_response_chats": ["10"]}, follow_mode=2)
+    await adapter._dispatch_message(message(311, "anyone around?"))
+    assert events == []
+    await adapter._dispatch_message(message(312, "@scout you there?", entities=[mention("999", 0, 6)], mentioned=True))
+    assert len(events) == 1
+    adapter, events = make({"require_mention": False}, follow_mode=2)
+    await adapter._dispatch_message(message(313, "anyone around?"))
+    assert events == []
+    # Without an unfollow, the free-response room stays ambient.
+    adapter, events = make({"free_response_chats": ["10"]}, follow_mode=None)
+    await adapter._dispatch_message(message(314, "anyone around?"))
+    assert len(events) == 1
+
+    # J16: neutral (not following) bots answer only when addressed.
+    adapter, events = make(follow_mode=None)
+    await adapter._dispatch_message(message(321, "move the launch to Friday"))
+    assert events == []
+
+    # Delegation hand-back: another bot replying to this bot's message is a request to it,
+    # and the answer quotes that bot so it reaches it.
+    adapter, events = make(follow_mode=None)
+    await adapter._dispatch_message(message(331, "thanks, now break it down by plan", sender="500", bot=True, reply_to="m1"))
+    assert len(events) == 1 and events[0].source.is_bot is True
+    assert adapter._reply_to_for_target("m-331", {"chatId": "10"}) == "m-331"
+    # Plain human requests get plain answers by default.
+    assert adapter._reply_to_for_target("m-321", {"chatId": "10"}) is None
+    first_mode = InlineAdapter(PlatformConfig(extra={**trusted_extra, "reply_to_mode": "first"}))
+    assert first_mode._reply_to_for_target("m-321", {"chatId": "10"}) == "m-321"
+    # Ambient bot output never wakes a following bot.
+    adapter, events = make()
+    await adapter._dispatch_message(message(332, "status: still crawling", sender="500", bot=True))
+    assert events == []
+    # A bot message that starts by addressing someone else is not for this bot, even as a reply to it.
+    await adapter._dispatch_message(message(333, "@ada can you confirm?", sender="500", bot=True, reply_to="m1", entities=[mention("42", 0, 4)]))
+    assert events == []
+
+asyncio.run(assert_multi_bot_rules())
+
+# Commands: the bot the app attached (picked from suggestions) or the server resolved wins;
+# a shared command nobody could assign stays unanswered in groups.
+async def assert_command_targets():
+    adapter = InlineAdapter(PlatformConfig(extra={
+        **trusted_extra, "require_mention": True, "reply_threads": False,
+        "context_backfill": "off", "observe_unmentioned_messages": False,
+    }))
+    adapter._me_id = "999"
+    adapter._me_username = "scout"
+    adapter._advertised_commands = {"help", "status"}
+    events = []
+
+    async def fake_handle_message(event):
+        events.append(event)
+
+    async def fake_get_chat_info(chat_id, **kwargs):
+        return {"chatId": chat_id, "dialogFollowMode": 1}
+
+    adapter.handle_message = fake_handle_message
+    adapter._get_chat_info = fake_get_chat_info
+
+    def command(seq, text, target=None):
+        entity = {"type": 13, "offset": 0, "length": len(text.split()[0])}
+        entity["entity"] = {"oneofKind": "botCommand", "botCommand": {"botUserId": target}} if target else {"oneofKind": None}
+        return {"seq": seq, "chatId": "10", "sender": {"id": "u1", "bot": False}, "message": {
+            "id": f"c-{seq}", "chatId": "10", "fromId": "u1", "message": text,
+            "peerId": {"peer": {"oneofKind": "chat"}}, "entities": {"entities": [entity]},
+        }}
+
+    # Picked for another bot: this bot stays out even though it follows the thread.
+    await adapter._dispatch_message(command(401, "/help", target="500"))
+    assert events == []
+    # Picked for this bot: addressed, even without following.
+    adapter._get_chat_info = lambda chat_id, **kwargs: asyncio.sleep(0, result={"chatId": chat_id})
+    await adapter._dispatch_message(command(402, "/help", target="999"))
+    assert len(events) == 1 and events[0].text == "/help"
+    # Shared command with no bot named: nobody could tell who it was for.
+    adapter._get_chat_info = fake_get_chat_info
+    await adapter._dispatch_message(command(403, "/status now"))
+    assert len(events) == 1
+    # A command this bot doesn't advertise follows the ordinary rules (it follows the thread).
+    await adapter._dispatch_message(command(404, "/compress"))
+    assert len(events) == 2
+
+asyncio.run(assert_command_targets())
+
+# One gateway per bot: Hermes' machine-wide lock is taken before anything starts, keyed by
+# bot id and server rather than the raw token.
+async def assert_bot_lock():
+    adapter = InlineAdapter(PlatformConfig(extra={**base_extra, "token": "4242:in_secret"}))
+    claims = []
+
+    def refuse(scope, identity, description):
+        claims.append((scope, identity, description))
+        return False
+
+    adapter._acquire_platform_lock = refuse
+    started = []
+
+    async def fake_start_sidecar():
+        started.append(True)
+
+    adapter._start_sidecar = fake_start_sidecar
+    assert await adapter.connect() is False
+    assert started == []
+    assert claims and claims[0][0] == "inline-bot" and "bot4242-" in claims[0][1]
+    assert "in_secret" not in claims[0][1]
+
+asyncio.run(assert_bot_lock())
+
+# J19: agents follow and unfollow threads themselves, with a readback of the real state.
+def assert_follow_tool():
+    calls = []
+    state = {"mode": "1"}
+
+    def fake_call(path, body):
+        calls.append((path, body))
+        if path == "/follow-mode":
+            state["mode"] = "1" if body["mode"] == "following" else "2"
+            return {"ok": True, "result": {"mode": body["mode"]}}
+        if path == "/chat":
+            return {"ok": True, "result": {"chatId": "10", "title": "Launch", "dialogFollowMode": state["mode"]}}
+        raise AssertionError(path)
+
+    saved = inline_tools._sidecar_call
+    inline_tools._sidecar_call = fake_call
+    try:
+        out = json.loads(inline_tools._handle_inline_tool({"action": "set_follow_mode", "chat_id": "10", "mode": "unfollowed"}))
+        assert out["success"] is True, out
+        assert out["result"] == {"chatId": "10", "mode": "unfollowed", "message": "Unfollowed; mentions and replies still reach me."}
+        assert [path for path, _ in calls] == ["/follow-mode", "/chat"]
+        chat = json.loads(inline_tools._handle_inline_tool({"action": "get_chat", "chat_id": "10"}))
+        assert chat["result"]["followMode"] == "unfollowed", chat
+        bad = json.loads(inline_tools._handle_inline_tool({"action": "set_follow_mode", "chat_id": "10", "mode": "maybe"}))
+        assert "error" in bad, bad
+        dm = json.loads(inline_tools._handle_inline_tool({"action": "set_follow_mode", "user_id": "7", "mode": "following"}))
+        assert "error" in dm, dm
+    finally:
+        inline_tools._sidecar_call = saved
+
+assert_follow_tool()
+
+# Multiplexed gateways: each profile's tools reach its own bot's sidecar.
+def assert_profile_tool_routing():
+    saved_sidecars = dict(inline_tools._sidecars)
+    saved_home = hermes_constants.get_hermes_home
+    try:
+        inline_tools._sidecars.clear()
+        hermes_constants.get_hermes_home = lambda: Path("/profiles/chief")
+        inline_tools.configure_sidecar(bind="127.0.0.1", port=7001, token="chief-token")
+        hermes_constants.get_hermes_home = lambda: Path("/profiles/scout")
+        inline_tools.configure_sidecar(bind="127.0.0.1", port=7002, token="scout-token")
+        assert inline_tools._sidecar_config() == ("http://127.0.0.1:7002", "scout-token")
+        hermes_constants.get_hermes_home = lambda: Path("/profiles/chief")
+        assert inline_tools._sidecar_config() == ("http://127.0.0.1:7001", "chief-token")
+        hermes_constants.get_hermes_home = lambda: Path("/profiles/other")
+        try:
+            inline_tools._sidecar_config()
+            raise AssertionError("an unknown profile must not reach another profile's bot")
+        except inline_tools.InlineToolError as exc:
+            assert exc.error_kind == "forbidden"
+        # Only profile A runs Inline in a multiplexed gateway: a call from B must not reach A.
+        inline_tools._sidecars.clear()
+        hermes_constants.get_hermes_home = lambda: Path("/profiles/chief")
+        inline_tools.configure_sidecar(bind="127.0.0.1", port=7001, token="chief-token")
+        agent_module = types.ModuleType("agent")
+        secret_scope = types.ModuleType("agent.secret_scope")
+        multiplex = {"active": True}
+        secret_scope.is_multiplex_active = lambda: multiplex["active"]
+        agent_module.secret_scope = secret_scope
+        saved_agent = sys.modules.get("agent"), sys.modules.get("agent.secret_scope")
+        sys.modules["agent"], sys.modules["agent.secret_scope"] = agent_module, secret_scope
+        try:
+            hermes_constants.get_hermes_home = lambda: Path("/profiles/scout")
+            assert inline_tools.check_inline_tool_requirements() is False
+            try:
+                inline_tools._sidecar_config()
+                raise AssertionError("a profile without Inline must not reach another profile's bot")
+            except inline_tools.InlineToolError as exc:
+                assert exc.error_kind == "forbidden"
+            hermes_constants.get_hermes_home = lambda: Path("/profiles/chief")
+            assert inline_tools._sidecar_config() == ("http://127.0.0.1:7001", "chief-token")
+            # A gateway serving one profile keeps its one sidecar whatever home a tool reports.
+            multiplex["active"] = False
+            hermes_constants.get_hermes_home = lambda: Path("/profiles/scout")
+            assert inline_tools._sidecar_config() == ("http://127.0.0.1:7001", "chief-token")
+        finally:
+            for name, module in zip(("agent", "agent.secret_scope"), saved_agent):
+                if module is None:
+                    sys.modules.pop(name, None)
+                else:
+                    sys.modules[name] = module
+    finally:
+        inline_tools._sidecars.clear()
+        inline_tools._sidecars.update(saved_sidecars)
+        hermes_constants.get_hermes_home = saved_home
+
+assert_profile_tool_routing()
+
+# J08: state is owned by one profile and one bot.
+def assert_profile_state_paths():
+    saved_home = hermes_constants.get_hermes_home
+    try:
+        hermes_constants.get_hermes_home = lambda: Path("/profiles/chief")
+        chief = InlineAdapter(PlatformConfig(extra={**base_extra, "token": "chief-token"}))
+        scout = InlineAdapter(PlatformConfig(extra={**base_extra, "token": "scout-token"}))
+        assert chief._state_path.parent == Path("/profiles/chief/inline")
+        assert chief._state_path != scout._state_path
+        assert "chief-token" not in str(chief._state_path)
+        # Real tokens start with the bot id, so rotating a token keeps the cursor.
+        rotated = [InlineAdapter(PlatformConfig(extra={**base_extra, "token": f"4242:in_{secret}"}))._state_path for secret in ("old", "new")]
+        assert rotated[0] == rotated[1] and rotated[0].name.startswith("sdk-state-bot4242-")
+        assert "in_old" not in str(rotated[0])
+        hermes_constants.get_hermes_home = lambda: Path("/profiles/scout")
+        assert InlineAdapter(PlatformConfig(extra={**base_extra, "token": "chief-token"}))._state_path.parent == Path("/profiles/scout/inline")
+    finally:
+        hermes_constants.get_hermes_home = saved_home
+
+assert_profile_state_paths()
 
 async def assert_reply_thread_slash_command():
     with tempfile.TemporaryDirectory() as tmp:
@@ -4078,7 +4388,7 @@ async def assert_transport_helpers():
     assert calls[-1] == ("/delete", {"target": {"chatId": "99"}, "messageId": "777"})
 
     await adapter.send_typing("chat:10", metadata=metadata)
-    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "start"})
+    assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "working"})
 
     await adapter.stop_typing("chat:10", metadata=metadata)
     assert calls[-1] == ("/typing", {"target": {"chatId": "99"}, "state": "stop"})

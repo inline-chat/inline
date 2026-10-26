@@ -9,6 +9,7 @@ import urllib.request
 from typing import Any, Dict, Iterable, Optional
 
 from .message_actions import build_inline_agent_action_id
+from .profile import hermes_home, inline_env, multiplex_active
 
 try:
     from tools.registry import tool_error, tool_result
@@ -76,11 +77,14 @@ INLINE_PLATFORM_GUIDANCE = (
     "Use <footer>Attribution or brief metadata</footer> for a short footer."
 )
 
-_sidecar: Dict[str, Any] = {}
+# Live sidecars by profile home: one gateway process can serve several profiles,
+# and a tool call must reach the sidecar of the bot it runs for.
+_sidecars: Dict[str, Dict[str, Any]] = {}
 
 _ACTION_MANIFEST = [
     ("send_message", "(chat_id?|user_id?, text, buttons?)", "Send a message, including optional agent-owned buttons."),
-    ("get_chat", "(chat_id?)", "Get metadata for a chat or reply thread."),
+    ("get_chat", "(chat_id?)", "Get metadata for a chat or reply thread, including whether you follow it."),
+    ("set_follow_mode", "(chat_id?, mode)", "Follow a thread to join its conversation, or unfollow it to answer only mentions and replies. Applies to you only; mode is following or unfollowed."),
     ("get_messages", "(chat_id?, message_ids)", "Fetch specific Inline messages by ID."),
     ("get_history", "(chat_id?, limit?, anchor_id?)", "Fetch recent or anchored Inline history."),
     ("search_messages", "(chat_id?|user_id?, query, limit?, offset_id?)", "Search Inline message text in a chat, thread, or DM."),
@@ -106,16 +110,31 @@ _PRESENCE_KINDS = ["idle", "happy", "waving", "jumping", "failed", "waiting", "r
 
 
 def configure_sidecar(*, bind: str, port: int, token: str) -> None:
-    """Store live adapter sidecar details for model tools in this process."""
+    """Store live adapter sidecar details for model tools in this profile."""
     if not token:
         return
-    _sidecar.update({"bind": bind, "port": int(port), "token": token})
+    _sidecars[str(hermes_home())] = {"bind": bind, "port": int(port), "token": token}
+
+
+def _current_sidecar() -> Dict[str, Any]:
+    current = _sidecars.get(str(hermes_home()))
+    if current is not None:
+        return current
+    # Only a gateway serving one profile may fall back to its one sidecar; with several
+    # profiles, another profile's sidecar would act as the wrong bot.
+    if len(_sidecars) == 1 and not multiplex_active():
+        return next(iter(_sidecars.values()))
+    if _sidecars:
+        raise InlineToolError("Inline is not connected for this profile", "forbidden")
+    return {}
 
 
 def check_inline_tool_requirements() -> bool:
-    if _sidecar.get("token") or os.getenv("INLINE_SIDECAR_TOKEN"):
+    if multiplex_active():
+        return str(hermes_home()) in _sidecars
+    if _sidecars or inline_env("INLINE_SIDECAR_TOKEN"):
         return True
-    return bool(os.getenv("INLINE_TOKEN") or os.getenv("INLINE_BOT_TOKEN"))
+    return bool(inline_env("INLINE_TOKEN") or inline_env("INLINE_BOT_TOKEN"))
 
 
 def inline_sender_guidance(
@@ -263,6 +282,7 @@ INLINE_TOOL_SCHEMA = {
             "offset_id": {"type": "string", "description": "Offset message ID for search_messages pagination."},
             "kind": {"type": "string", "enum": _PRESENCE_KINDS, "description": "Bot avatar presence/status kind."},
             "comment": {"type": "string", "description": "Optional bot avatar presence/status message."},
+            "mode": {"type": "string", "enum": ["following", "unfollowed"], "description": "set_follow_mode: following joins the thread's conversation; unfollowed limits you to mentions and replies."},
         },
         "required": ["action"],
     },
@@ -290,6 +310,8 @@ def _handle_inline_tool(args: Dict[str, Any], **_: Any) -> str:
         return tool_error(f"inline: unknown action {action or '(empty)'}", allowed_actions=_ACTIONS)
 
     try:
+        if action == "set_follow_mode":
+            return tool_result({"success": True, "action": action, "result": _set_follow_mode(args)})
         path, body = _request_for_action(action, args)
         response = _sidecar_call(path, body)
         result = _compact_result(action, response.get("result") or {})
@@ -462,6 +484,50 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
     raise InlineToolError(f"inline: unimplemented action {action}", "bad_format")
 
 
+def _set_follow_mode(args: Dict[str, Any]) -> Dict[str, Any]:
+    mode = _str(args.get("mode")).lower()
+    if mode not in {"following", "unfollowed"}:
+        raise InlineToolError("set_follow_mode requires mode: following or unfollowed", "bad_format")
+    target = _target(args)
+    if "chatId" not in target:
+        raise InlineToolError("Follow state applies to threads, not direct messages", "unsupported")
+    write_error: Optional[InlineToolError] = None
+    try:
+        _sidecar_call("/follow-mode", {"target": target, "mode": mode})
+    except InlineToolError as exc:
+        if exc.error_kind != "transient":
+            raise
+        write_error = exc
+    # Report the state the server holds, not the one requested: a lost response can
+    # still have applied the change.
+    chat = _sidecar_call("/chat", {"target": target}).get("result") or {}
+    actual = _follow_mode_from_chat(chat)
+    if actual == mode:
+        return {"chatId": target["chatId"], "mode": actual, "message": _FOLLOW_CONFIRMATIONS[mode]}
+    if write_error:
+        raise write_error
+    raise InlineToolError(f"Follow state is {actual or 'default'} after the change", "unknown")
+
+
+_FOLLOW_CONFIRMATIONS = {
+    "following": "Following this chat.",
+    "unfollowed": "Unfollowed; mentions and replies still reach me.",
+}
+
+
+def _follow_mode_from_chat(chat: Dict[str, Any]) -> Optional[str]:
+    value = chat.get("dialogFollowMode") if isinstance(chat, dict) else None
+    dialog = chat.get("dialog") if isinstance(chat, dict) else None
+    if value is None and isinstance(dialog, dict):
+        value = dialog.get("followMode")
+    text = _str(value).lower()
+    if text in {"1", "following"}:
+        return "following"
+    if text in {"2", "unfollowed"}:
+        return "unfollowed"
+    return None
+
+
 def _sidecar_call(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
     base_url, token = _sidecar_config()
     request = urllib.request.Request(
@@ -496,11 +562,12 @@ def _sidecar_call(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _sidecar_config() -> tuple[str, str]:
-    token = _str(_sidecar.get("token")) or _str(os.getenv("INLINE_SIDECAR_TOKEN"))
+    _sidecar = _current_sidecar()
+    token = _str(_sidecar.get("token")) or _str(inline_env("INLINE_SIDECAR_TOKEN"))
     if not token:
         raise InlineToolError("Inline sidecar token is not configured; start the Inline gateway adapter first", "forbidden")
-    bind = _normalize_bind(_sidecar.get("bind") or os.getenv("INLINE_SIDECAR_BIND"))
-    port = _normalize_port(_sidecar.get("port") or os.getenv("INLINE_SIDECAR_PORT"))
+    bind = _normalize_bind(_sidecar.get("bind") or inline_env("INLINE_SIDECAR_BIND"))
+    port = _normalize_port(_sidecar.get("port") or inline_env("INLINE_SIDECAR_PORT"))
     host = f"[{bind}]" if ":" in bind and not bind.startswith("[") else bind
     return f"http://{host}:{port}", token
 
@@ -723,6 +790,8 @@ def _compact_chat(chat: Dict[str, Any]) -> Dict[str, Any]:
     ]:
         if source in chat and chat[source] is not None and dest not in out:
             out[dest] = chat[source]
+    if "chatId" in out:
+        out["followMode"] = _follow_mode_from_chat(chat) or "default"
     return out
 
 

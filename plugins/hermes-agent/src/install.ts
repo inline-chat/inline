@@ -600,6 +600,7 @@ async function hasPluginFiles(dir: string): Promise<boolean> {
     "__init__.py",
     "adapter.py",
     "message_actions.py",
+    "profile.py",
     path.join("sidecar", "index.mjs"),
   ]
   const checks = files.map((file) => exists(path.join(dir, file)))

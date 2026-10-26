@@ -7,21 +7,64 @@ description: "Connect an existing Hermes Agent to Inline, locally or on an Umbre
 
 Use Hermes Agent `>=0.21.3`, Node.js `>=20`, npm, and the
 [Inline CLI](/docs/cli). Hermes `0.21.3`, shipped in the official Umbrel app,
-requires adapter `0.0.20` or later.
+requires adapter `0.0.20` or later. Running several Hermes profiles in one
+gateway (the default since Hermes `0.22.0`) requires adapter `1.0.0`.
 Run setup as the user and in the container that already runs Hermes, with the
 same `HERMES_HOME` and profile. Setup adds an Inline channel to that agent;
 it does not migrate or replace its models, memory, skills, or other channels.
 
 ## Supported versions
 
-| Hermes version | Latest supported Inline adapter |
-| --- | --- |
-| `0.21.3` (Umbrel app `2026.9.14`) | `0.0.20` |
-| `0.21.4` | `0.0.20` |
-| `0.21.5` | `0.0.20` |
+| Hermes version | Adapter `0.0.x` | Adapter `1.0.0` |
+| --- | --- | --- |
+| `0.21.3` (Umbrel app `2026.9.14`) – `0.21.5` | Supported from `0.0.20` | Supported |
+| `0.22.0` and later, one profile | Supported | Supported |
+| `0.22.0` and later, several profiles in one gateway | Not supported: every profile connects as the launch profile's bot and shares its state | Supported |
 
-Earlier Hermes versions are not covered by this release. Compatibility work for
-those versions is separate; use the matching supported host and adapter above.
+Hermes `0.22.0` runs every profile in one gateway process by default. Adapter
+`1.0.0` reads each profile's Inline settings and token from that profile, keeps
+one state file per profile and bot, and refuses to connect a bot another
+gateway is already using. On Hermes `0.21.x` it reads them from the gateway's
+environment, as before.
+
+Hermes `/branch` stays in the current Inline thread: Hermes opens branch
+threads only on its built-in platforms.
+
+Earlier Hermes versions are not covered. Compatibility work for those versions
+is separate; use a supported host and adapter above.
+
+## Upgrading to 1.0
+
+Adapter `1.0.0` changes how the bot decides a message is for it and how it
+answers. Review these before upgrading:
+
+- **Only Inline addressing wakes the bot.** Words such as its name no longer
+  do, and `INLINE_MENTION_PATTERNS` is removed. Mentions, replies to the bot,
+  commands for it, direct messages and threads it follows still work.
+- **A message that starts by mentioning someone else isn't for the bot**, even
+  if it mentions the bot later, replies to it, or sits in a thread it follows.
+- **Replies to other people or bots don't wake it** unless they mention it.
+  Replying to your own earlier message still continues the conversation.
+- **Unfollow wins in free-response chats.** Mentions and replies still reach
+  the bot.
+- **Bots enter a thread through its first message.** A thread follows the bots
+  its first message mentions. A thread only you and one bot can see, or one
+  under a bot's direct message, follows that bot. A bot mentioned later answers
+  once without following. The agent can follow or unfollow a thread itself.
+- **Answers quote the request only when answering another bot**, so that bot
+  sees the answer. Set `INLINE_REPLY_TO_MODE=first` to quote every answer.
+- **Commands go to the bot they name.** Picking a command from Inline's
+  suggestions names its bot. A command several bots offer, typed without a
+  name, goes to the bot you replied to or the one bot following the thread;
+  otherwise no bot runs it.
+- **The bot shows Working instead of typing** while it works. Older Inline apps
+  show typing.
+- **State moves into each profile.** The SDK state file is now
+  `$HERMES_HOME/inline/sdk-state-bot<id>-<server>.json`, one per bot. The default
+  profile reuses the old `~/.hermes/inline/sdk-state.json` once; other profiles
+  start from the upgrade, so messages sent while the gateway restarts may not
+  be picked up.
+- **The sidecar takes a free local port** unless `INLINE_SIDECAR_PORT` is set.
 
 ## Agent setup prompt
 

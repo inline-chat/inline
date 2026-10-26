@@ -4,7 +4,7 @@ Install the official Inline platform adapter for Hermes Agent.
 
 ## Requirements
 
-- Hermes Agent `>=0.21.3` (validated against `0.21.5`)
+- Hermes Agent `>=0.21.3` (validated against `0.21.5` and `0.22.5`; several profiles in one gateway need Hermes `0.22.0` or later)
 - Node.js `20` or newer
 - The Inline CLI for guided bot creation, or an existing Inline bot/user token
 

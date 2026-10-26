@@ -253,7 +253,7 @@
         "inline-hermes": "dist/install.js",
       },
       "dependencies": {
-        "@inline-chat/realtime-sdk": "0.0.18",
+        "@inline-chat/realtime-sdk": "0.0.20",
         "yaml": "2.9.0",
       },
       "devDependencies": {

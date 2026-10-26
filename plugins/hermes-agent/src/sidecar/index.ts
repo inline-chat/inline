@@ -22,6 +22,7 @@ import {
   MessageActionRow,
   MessageActions,
   MessageActionToast,
+  UpdateComposeAction_ComposeAction,
   type InlineSdkClientOptions,
   type InlineSdkGetMessagesParams,
   type InlineSdkSendMessageParams,
@@ -32,10 +33,6 @@ import {
   type BotChatSettingsResponse,
 } from "@inline-chat/realtime-sdk"
 
-// The server contract defines UNFOLLOWED = 2, but the currently published
-// protocol package predates that generated enum member. Keep the compatibility
-// value named and typed until the dependency catches up.
-const DIALOG_FOLLOW_MODE_UNFOLLOWED = 2 as DialogFollowMode
 import {
   SidecarError,
   asOptionalRecord,
@@ -429,12 +426,20 @@ async function endpointDelete(res: ServerResponse, body: unknown) {
 async function endpointTyping(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
-  const typing = (readOptionalString(record, "state") ?? "start") !== "stop"
+  const state = readOptionalString(record, "state") ?? "start"
   if ("userId" in target) {
     writeJson(res, 200, { ok: true, result: { skipped: "typing is chat-only" } })
     return
   }
-  await client.sendTyping({ chatId: target.chatId, typing })
+  if (state === "working") {
+    // The server shows WORKING as typing to clients that have not opted in to it.
+    await client.invokeUncheckedRaw(Method.SEND_COMPOSE_ACTION, {
+      oneofKind: "sendComposeAction",
+      sendComposeAction: { peerId: inputPeerFromTarget(target), action: UpdateComposeAction_ComposeAction.WORKING },
+    })
+  } else {
+    await client.sendTyping({ chatId: target.chatId, typing: state !== "stop" })
+  }
   writeJson(res, 200, { ok: true, result: {} })
 }
 
@@ -587,7 +592,7 @@ async function endpointFollowMode(res: ServerResponse, body: unknown) {
   const mode = readRequiredString(record, "mode")
   const followMode = mode === "following"
     ? DialogFollowMode.FOLLOWING
-    : mode === "unfollowed" ? DIALOG_FOLLOW_MODE_UNFOLLOWED : null
+    : mode === "unfollowed" ? DialogFollowMode.UNFOLLOWED : null
   if (followMode == null) {
     throw new SidecarError("mode must be following or unfollowed", "bad_format")
   }

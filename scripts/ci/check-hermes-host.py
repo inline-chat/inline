@@ -471,7 +471,7 @@ async def exercise_ordinary_presentation():
                 calls.append((request.url.path, body))
                 if request.url.path == "/chat":
                     return httpx.Response(200, json={"ok": True, "result": {"id": "6101", "title": "Offline fixture"}})
-                if request.url.path == "/typing" and body["state"] == "start":
+                if request.url.path == "/typing" and body["state"] == "working":
                     typing_started.set()
                 if request.url.path == "/send" and failed_send:
                     return httpx.Response(400, json={"ok": False, "error": "rejected fixture reply", "errorKind": "bad_format"})
@@ -502,7 +502,7 @@ async def exercise_ordinary_presentation():
                 await asyncio.wait_for(wait_idle(), timeout=10)
                 assert outcomes == ["failure" if failed_send else "success"], outcomes
                 typing = [body for route, body in calls if route == "/typing"]
-                assert typing and any(body["state"] == "start" for body in typing)
+                assert typing and any(body["state"] == "working" for body in typing)
                 assert typing[-1]["state"] == "stop"
                 assert all("experimentalAgentActivity" not in body for body in typing)
                 reactions = [body for route, body in calls if route == "/reaction"]

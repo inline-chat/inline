@@ -262,6 +262,7 @@ const expectedFiles = [
   "plugin/inline/cli.py",
   "plugin/inline/message_actions.py",
   "plugin/inline/plugin.yaml",
+  "plugin/inline/profile.py",
   "plugin/inline/sidecar/index.mjs",
   "plugin/inline/telemetry.py",
   "plugin/inline/tools.py",

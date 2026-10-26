@@ -307,6 +307,7 @@ Access control follows Hermes' native platform model:
 | `INLINE_STRICT_MENTION` | Requires an @mention on every group turn, including replies to the bot and followed threads. Defaults to `false`. |
 | `INLINE_ALLOWED_CHATS` | Comma-separated group/thread chat ids where the bot may respond. Parent chat ids also match their Inline reply threads. DMs are not filtered. Empty means no chat restriction. |
 | `INLINE_FREE_RESPONSE_CHATS` | Comma-separated group/thread chat ids where no mention is required. Parent chat ids also match their Inline reply threads. Useful for dedicated agent rooms. |
+| `INLINE_REPLY_TO_MODE` | When answers quote the message they answer. `bots` (default) quotes only requests from other bots, so the answer reaches them; `first` quotes the first chunk of every answer; `off` never quotes. Action cards and child-thread destinations keep their anchors. |
 | `INLINE_REPLY_THREADS` | Controls top-level reply-thread creation. `auto` creates a child reply thread only for an explicit thread request; `on` always creates; `off` stays flat. Existing child-thread conversations always remain in their thread. Defaults to `auto`. |
 | `INLINE_CONTEXT_BACKFILL` | Automatic context mode. `selective` is the default, `off` disables automatic history windows, and `always` restores recent-history backfill on every turn. |
 | `INLINE_THREAD_CONTEXT_LIMIT` | Max current chat/thread messages for selective thread or mention-gap context. Must be `0` through `100`; defaults to `30`. |
@@ -322,12 +323,12 @@ Access control follows Hermes' native platform model:
 | `INLINE_COMMAND_LIMIT` | Caps native Inline bot command sync. Must be `1` through `100`; defaults to `100`. |
 | `INLINE_MEDIA_MAX_MB` | Maximum inbound media download size for URL-backed Inline attachments. Defaults to `25`. |
 | `INLINE_UPLOAD_MAX_MB` | Maximum outbound local file upload size. The Python adapter and Node sidecar both enforce it before upload bytes are read. Defaults to `300`. |
-| `INLINE_STATE_PATH` | Persistent Inline SDK state file. Defaults to `~/.hermes/inline/sdk-state.json`. |
+| `INLINE_STATE_PATH` | Persistent Inline SDK state file. Defaults to one file per profile and bot under the profile's `inline/` folder. The default profile reuses the older shared `~/.hermes/inline/sdk-state.json` once; other profiles catch up from now. |
 | `INLINE_RPC_TIMEOUT_MS` | Realtime RPC timeout for the Node sidecar. |
 | `INLINE_CONNECT_TIMEOUT_MS` | Adapter startup timeout while waiting for the sidecar to become realtime-ready. Defaults to `20000`. |
 | `INLINE_CONNECT_RETRY_INITIAL_MS` | Initial sidecar retry delay after realtime startup failure. Defaults to `1000`. |
 | `INLINE_CONNECT_RETRY_MAX_MS` | Maximum sidecar retry delay after repeated realtime startup failures. Defaults to `15000`. |
-| `INLINE_SIDECAR_PORT` | Fixed loopback port for the sidecar. Must be `1` through `65535`. Defaults to `8794`; `test-send` uses a random free port. |
+| `INLINE_SIDECAR_PORT` | Fixed loopback port for the sidecar. Must be `1` through `65535`. Defaults to a free port per adapter, so several profiles can share one gateway; `8794` when `INLINE_SIDECAR_AUTOSTART=false`. |
 | `INLINE_SIDECAR_BIND` | Sidecar bind host. Must be loopback: `127.0.0.1`, `localhost`, or `::1`. Defaults to `127.0.0.1`. |
 | `INLINE_HERMES_SENTRY_DSN` | Explicitly enables adapter and sidecar error reporting to the configured collector. Reporting is disabled when unset. |
 | `INLINE_PLUGIN_TELEMETRY` | Set to `off`, `0`, or `false` to disable explicitly configured plugin error reporting. `DO_NOT_TRACK=1` is also honored. |

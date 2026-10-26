@@ -125,8 +125,12 @@ optional_env:
     description: "Human label for the home target"
     prompt: "Home target display name"
     password: false
+  - name: INLINE_REPLY_TO_MODE
+    description: "When answers quote the message they answer: bots (default, only requests from other bots), first, or off"
+    prompt: "Reply quoting mode"
+    password: false
   - name: INLINE_SIDECAR_PORT
-    description: "Loopback port for the Node sidecar, 1-65535 (default 8794)"
+    description: "Loopback port for the Node sidecar, 1-65535 (default: a free port; 8794 with autostart off)"
     prompt: "Sidecar port"
     password: false
   - name: INLINE_SIDECAR_BIND

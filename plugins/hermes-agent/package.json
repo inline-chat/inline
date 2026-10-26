@@ -35,6 +35,7 @@
     "plugin/inline/cli.py",
     "plugin/inline/message_actions.py",
     "plugin/inline/plugin.yaml",
+    "plugin/inline/profile.py",
     "plugin/inline/telemetry.py",
     "plugin/inline/tools.py",
     "plugin/inline/sidecar/index.mjs"
@@ -64,7 +65,7 @@
     "check": "bun run typecheck && bun run lint && bun run test"
   },
   "dependencies": {
-    "@inline-chat/realtime-sdk": "0.0.18",
+    "@inline-chat/realtime-sdk": "0.0.20",
     "yaml": "2.9.0"
   },
   "devDependencies": {
