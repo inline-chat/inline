@@ -878,7 +878,7 @@ impl InlineClient {
             .request(ClientRequest::InvokeRpc { method, input })
             .await?
         {
-            ClientResponse::RpcResult(result) => Ok(result),
+            ClientResponse::RpcResult(result) => Ok(*result),
             other => unreachable!("invoke_rpc returned {other:?}"),
         }
     }
@@ -1371,7 +1371,7 @@ impl ClientRunner {
                 .backend
                 .invoke_rpc(method, input)
                 .await
-                .map(ClientResponse::RpcResult),
+                .map(|result| ClientResponse::RpcResult(Box::new(result))),
             ClientRequest::SyncAgentSessionMessages(request) => self
                 .backend
                 .sync_agent_session_messages(request)
@@ -1666,7 +1666,7 @@ async fn handle_concurrent_request(
         ClientRequest::InvokeRpc { method, input } => backend
             .invoke_rpc(method, input)
             .await
-            .map(ClientResponse::RpcResult),
+            .map(|result| ClientResponse::RpcResult(Box::new(result))),
         ClientRequest::SyncAgentSessionMessages(request) => backend
             .sync_agent_session_messages(request)
             .await
@@ -1942,7 +1942,7 @@ enum ClientResponse {
     AgentSessionConnected(proto::ConnectAgentSessionResult),
     AgentSession(proto::GetAgentSessionResult),
     AgentSessionMessagesSynced(proto::SyncAgentSessionMessagesResult),
-    RpcResult(proto::rpc_result::Result),
+    RpcResult(Box<proto::rpc_result::Result>),
 }
 
 #[cfg(test)]
