@@ -141,6 +141,14 @@ final class ComposeAgentChainModel: ObservableObject {
     target.flatMap { AgentWorkStateStore.shared.state(peer: peer, botUserID: $0.botUserID)?.sessionID }
   }
 
+  /// The owner or an INVOKE grantee; unknown grants show the button and the
+  /// server decides.
+  var canReferenceFiles: Bool {
+    guard let target else { return false }
+    AgentGrantStore.shared.ensureLoaded(botUserID: target.botUserID)
+    return AgentGrantStore.shared.access(botUserID: target.botUserID)?.satisfies(.invoke) ?? true
+  }
+
   func insertFileReference(_ entry: AgentWorkFileEntry) {
     onInsertText?(AgentWorkFiles.referenceText(for: entry) + " ")
   }
@@ -629,6 +637,7 @@ struct ComposeAgentChainBar: View {
 
         Spacer(minLength: 0)
 
+        if model.canReferenceFiles {
         Button {
           isShowingFiles.toggle()
         } label: {
@@ -646,10 +655,15 @@ struct ComposeAgentChainBar: View {
           placement: .above
         )
         .popover(isPresented: $isShowingFiles, arrowEdge: .bottom) {
-          ComposeAgentFilePicker(sessionID: model.workSessionID) { entry in
+          ComposeAgentFilePicker(
+            peer: model.peer,
+            botUserID: model.target?.botUserID ?? 0,
+            sessionID: model.workSessionID
+          ) { entry in
             model.insertFileReference(entry)
             isShowingFiles = false
           }
+        }
         }
 
         Button {
@@ -732,6 +746,8 @@ private struct ComposeAgentUsagePopover: View {
 /// never a mention entity; nothing it lists is cached.
 @available(macOS 26.0, *)
 private struct ComposeAgentFilePicker: View {
+  let peer: InlineKit.Peer
+  let botUserID: Int64
   let sessionID: Int64?
   let select: (AgentWorkFileEntry) -> Void
 
@@ -843,6 +859,8 @@ private struct ComposeAgentFilePicker: View {
     }
     do {
       let page = try await AgentWorkFiles.listing.list(
+        peer: peer,
+        botUserID: botUserID,
         agentSessionID: sessionID,
         relativePath: path,
         query: query.isEmpty ? nil : query,
