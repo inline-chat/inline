@@ -3182,6 +3182,12 @@ actor Sync {
         .user
       case .chatOpen:
         .user
+      case let .agentSessionState(payload):
+        .chat(peer: payload.agentSession.peerID)
+      case let .agentParticipation(payload):
+        .chat(peer: payload.participation.peerID)
+      case .agentGrant, .agentRuntime, .agentSessionControl:
+        .user
       default:
         nil
     }
@@ -3415,6 +3421,9 @@ actor BucketActor {
     switch update.update {
       case .acknowledgement:
         true
+      case .agentSessionState, .agentParticipation, .agentGrant, .agentRuntime:
+        // Thin agent state; catch-up repairs work bars and sidebar badges.
+        true
       case .participantAdd:
         true
       case .spaceMemberDelete:
@@ -3462,6 +3471,8 @@ actor BucketActor {
       case .chatOpen:
         true
       case .messageActionInvoked, .messageActionAnswered:
+        true
+      case .agentSessionState, .agentParticipation, .agentGrant, .agentRuntime, .agentSessionControl:
         true
       case .dialogFollowMode, .dialogCollapsedMaxID, .dialogTranslation:
         true

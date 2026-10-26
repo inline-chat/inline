@@ -92,11 +92,15 @@ final class ComposeAgentChainModel: ObservableObject {
         }
         .store(in: &cancellables)
     }
-    AgentWorkStateStore.shared.$states
-      .sink { [weak self] _ in
-        Task { @MainActor [weak self] in self?.refreshAvailability() }
-      }
-      .store(in: &cancellables)
+    let store = AgentWorkStateStore.shared
+    Publishers.Merge(
+      store.$outputOverrides.map { _ in () },
+      store.$defaultOutputModes.map { _ in () }
+    )
+    .sink { [weak self] _ in
+      Task { @MainActor [weak self] in self?.refreshAvailability() }
+    }
+    .store(in: &cancellables)
     resolve()
   }
 
@@ -248,17 +252,10 @@ final class ComposeAgentChainModel: ObservableObject {
     }
   }
 
-  func outputMode(for botUserID: Int64) -> AgentOutputMode {
-    if let chatID, let state = AgentWorkStateStore.shared.state(chatID: chatID, botUserID: botUserID)
-    {
-      return state.outputMode
-    }
-    if case let .select(value, _)? = settingsDocument?.item(ComposeAgentSettingsItem.outputMode)?.control,
-       let mode = AgentOutputMode(rawValue: value)
-    {
-      return mode
-    }
-    return .detailed
+  func outputMode(for botUserID: Int64) -> AgentThreadOutputMode {
+    // The thread's override, else the agent's default; both are synced and
+    // cached locally, so this is right on the first frame.
+    AgentWorkStateStore.shared.outputMode(peer: peer, botUserID: botUserID)
   }
 
   // MARK: Presentation
@@ -490,7 +487,6 @@ final class ComposeAgentChainModel: ObservableObject {
 enum ComposeAgentSettingsItem {
   static let model = "agent.model"
   static let reasoning = "agent.reasoning"
-  static let outputMode = "agent.output_mode"
   static let folder = "workspace.folder"
   static let project = "workspace.project"
   static let usage = "account.usage"

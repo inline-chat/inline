@@ -752,6 +752,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       await Transactions.shared.clearAllAndWait()
       try requireLocalDataResetMayContinue()
       await AgentConfigurationCatalogStore.shared.clear()
+      await MainActor.run {
+        AgentWorkStateStore.shared.removeAll()
+        AgentGrantStore.shared.removeAll()
+      }
       ObjectCache.shared.clear()
       try await FileCache.shared.clearCache()
       await dependencies.commandBarCatalog.reset()

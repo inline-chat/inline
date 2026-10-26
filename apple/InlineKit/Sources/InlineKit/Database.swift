@@ -1434,6 +1434,17 @@ public extension AppDatabase {
     // TODOs:
     // - Add indexes for performance
     // - Add timestamp integer types instead of Date for performance and faster sort, less storage
+    migrator.registerMigration("agent work state") { db in
+      // Last known Agent run state, participation and runtime per account,
+      // so the work bar, sidebar and Compose render it on their first frame.
+      try db.create(table: "agentClientState") { table in
+        table.column("kind", .text).notNull()
+        table.column("key", .text).notNull()
+        table.column("payload", .blob).notNull()
+        table.primaryKey(["kind", "key"])
+      }
+    }
+
     return migrator
   }
 }

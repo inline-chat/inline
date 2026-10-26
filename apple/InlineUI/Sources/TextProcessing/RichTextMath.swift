@@ -57,6 +57,7 @@ public enum RichTextMath {
           for item in list.items { visit(item.children, depth: depth + 1) }
         case let .quote(quote): visit(quote.children, depth: depth + 1)
         case let .disclosure(disclosure): visit(disclosure.children, depth: depth + 1)
+        case let .callout(callout): visit(callout.children, depth: depth + 1)
         default: break
         }
       }
@@ -135,6 +136,7 @@ public enum RichTextMath {
           append(disclosure.summary, role: .disclosure(progress: disclosure.kind == .progress))
           visit(disclosure.children, depth: depth + 1)
         case let .quote(quote): visit(quote.children, depth: depth + 1)
+        case let .callout(callout): visit(callout.children, depth: depth + 1)
         case let .list(list):
           for item in list.items { visit(item.children, depth: depth + 1) }
         case let .table(table):
