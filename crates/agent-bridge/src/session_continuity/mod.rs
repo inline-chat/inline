@@ -1,11 +1,12 @@
 //! Provider-neutral contracts for browsing and observing durable agent sessions.
 //!
-//! These contracts compose with [`crate::AgentDriver`]. The turn driver remains
-//! the single owner of session creation/resume, input, steering, interruption,
-//! approvals, and questions; this module adds catalog and session-wide live
-//! observation without creating a parallel execution path.
+//! The v1 observation contracts here compose with [`crate::AgentDriver`]. The
+//! bridge v2 session-scoped contract in [`harness`] grows this module into the
+//! primary live path: drivers that implement it own input, steering,
+//! interruption, approvals and questions through one session stream.
 
 mod contract;
+pub mod harness;
 mod reducer;
 mod types;
 

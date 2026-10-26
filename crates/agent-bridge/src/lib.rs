@@ -54,6 +54,8 @@ pub use session::{
     PreparedSessionThread, ProviderSessionManager, ProviderWorkLease, SessionManagerError,
     SessionOpenOutcome,
 };
+/// Bridge v2 session-scoped harness contract (spec §4.2).
+pub use session_continuity::harness;
 pub use session_continuity::{
     AgentSessionCatalog, AgentSessionConnection, AttachSessionRequest, AttachedSession,
     CatalogCapabilities, DEFAULT_HISTORY_MESSAGE_LIMIT, DEFAULT_HISTORY_TEXT_BYTES,
