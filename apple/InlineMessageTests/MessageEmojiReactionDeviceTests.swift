@@ -53,7 +53,8 @@ struct MessageEmojiReactionDeviceTests {
     var checked = 0
     let list = MessagesCollectionView(
       peerId: .user(id: 9_007), chatId: 9_007, spaceId: nil, isPreview: true,
-      theme: ThemeManager.shared.snapshot(variant: .light), viewModel: model
+      theme: ThemeManager.shared.snapshot(variant: .light), viewModel: model,
+      messageViewImplementation: .legacy
     )
     for tone in EmojiSkinTone.allCases {
       EmojiSkinTonePreferenceStore.set(tone)

@@ -144,7 +144,8 @@ struct MessageHoldActionsTests {
       )
       list = MessagesCollectionView(
         peerId: peer, chatId: row.message.chatId, spaceId: nil, isPreview: true,
-        theme: ThemeManager.shared.snapshot(variant: .light), viewModel: model
+        theme: ThemeManager.shared.snapshot(variant: .light), viewModel: model,
+        messageViewImplementation: .legacy
       )
       controller.view.addSubview(list)
       list.frame = CGRect(x: 0, y: 0, width: width, height: controller.view.bounds.height)

@@ -288,7 +288,8 @@ struct ChatMessageTextSizeTests {
     defer { model.dispose() }
     let list = MessagesCollectionView(
       peerId: peer, chatId: 9_007, spaceId: nil, isPreview: true,
-      theme: ThemeManager.shared.snapshot(variant: .light), viewModel: model
+      theme: ThemeManager.shared.snapshot(variant: .light), viewModel: model,
+      messageViewImplementation: .legacy
     )
     list.frame = CGRect(x: 0, y: 0, width: 350, height: 600)
     controller.view.addSubview(list)

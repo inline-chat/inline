@@ -887,7 +887,7 @@ struct ContextMenuKeyboardTests {
       list = MessagesCollectionView(
         peerId: peer, chatId: 9_017, spaceId: nil, isPreview: true,
         theme: ThemeManager.shared.snapshot(variant: .light),
-        viewModel: model
+        viewModel: model, messageViewImplementation: .legacy
       )
       controller.view.addSubview(list)
       list.frame = controller.view.bounds
