@@ -562,6 +562,20 @@ def _resolve_inline_targeted_command(text: str, bot_username: Optional[str]) -> 
     return f"/{match.group(1)}{match.group(3) or ''}", True, True
 
 
+def _session_chat_id(chat_id: str, chat_type: str, thread_id: Optional[str], parent_chat_id: Optional[str]) -> str:
+    """The chat a turn's native session is keyed on.
+
+    Inline reply threads are chats of their own, and follow-ups inside one are keyed on
+    the thread (``group:C:C``), as native Hermes keys a Discord thread. A group message
+    that opens or continues a thread from its parent chat is keyed the same way, so the
+    opener and its follow-ups share one conversation. DM threads keep their current
+    keys until their semantics are decided.
+    """
+    if chat_type == "group" and thread_id and parent_chat_id == chat_id and thread_id != chat_id:
+        return str(thread_id)
+    return chat_id
+
+
 def _inline_command_name(text: str) -> str:
     match = re.match(r"^\s*/([a-z0-9_][a-z0-9_-]*)", str(text or ""), re.IGNORECASE)
     return match.group(1).lower() if match else ""
@@ -2772,7 +2786,7 @@ class InlineAdapter(BasePlatformAdapter):
             }
 
         source = self.build_source(
-            chat_id=chat_id,
+            chat_id=_session_chat_id(chat_id, chat_type, thread_id, parent_chat_id),
             chat_name=chat_name,
             chat_type=chat_type,
             user_id=from_id,
@@ -4952,7 +4966,10 @@ class InlineAdapter(BasePlatformAdapter):
             if (kind and kind != "message.new") or raw_message.get("_inlineAgentAction"):
                 return None
         source = getattr(event, "source", None)
-        chat_id = str(getattr(source, "chat_id", None) or "").strip()
+        # React where the message physically is: an opener that starts a reply thread is keyed
+        # to the thread's session but still lives in the parent chat.
+        physical_chat_id = raw_message.get("chatId") if isinstance(raw_message, dict) else None
+        chat_id = str(physical_chat_id or getattr(source, "chat_id", None) or "").strip()
         message_id = str(getattr(event, "message_id", None) or "").strip()
         if not chat_id or not message_id:
             return None

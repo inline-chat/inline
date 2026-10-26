@@ -2158,9 +2158,16 @@ async def assert_forced_reply_thread_creation():
         "title": "please investigate the incident",
     })]
     assert len(events) == 1
-    assert events[0].source.chat_id == "10"
+    # The opener is keyed on the new thread, like its follow-ups (group:99:99), so they
+    # share one conversation; the message itself still lives in the parent chat.
+    assert events[0].source.chat_id == "99"
     assert events[0].source.thread_id == "99"
     assert events[0].source.parent_chat_id == "10"
+    assert events[0].raw_message["chatId"] == "10"
+    adapter._processing_reactions = True
+    reaction = adapter._processing_reaction_target(events[0])
+    assert reaction is not None and reaction[1] == {"chatId": "10"} and reaction[2] == "7"
+    adapter._processing_reactions = False
     assert events[0].channel_prompt.startswith("Thread prompt\n\nYou are handling an Inline message.")
     assert "This turn is already scoped to an Inline reply thread." in events[0].channel_prompt
     assert events[0].metadata["inline"]["thread_id"] == "99"
