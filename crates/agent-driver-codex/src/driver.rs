@@ -327,7 +327,7 @@ fn normalized_audio_mime_type(value: &str) -> Option<&str> {
     .then_some(mime_type)
 }
 
-fn inline_thread_config() -> BTreeMap<String, Value> {
+pub(crate) fn inline_thread_config() -> BTreeMap<String, Value> {
     BTreeMap::from([(
         DEFAULT_MODE_REQUEST_USER_INPUT.to_string(),
         Value::Bool(true),
@@ -1790,7 +1790,7 @@ async fn dispatch_incoming<W>(
     }
 }
 
-async fn execute_host_tool_call(
+pub(crate) async fn execute_host_tool_call(
     configuration: HostToolConfiguration,
     params: &Value,
 ) -> HostToolResult {
