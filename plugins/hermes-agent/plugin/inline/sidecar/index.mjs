@@ -34,7 +34,7 @@ var __toESM = (mod, isNodeMode, target) => {
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/json-typings.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/json-typings.js
 var require_json_typings = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.isJsonObject = exports.typeofJsonValue = undefined;
@@ -55,7 +55,7 @@ var require_json_typings = __commonJS(function(exports) {
   exports.isJsonObject = isJsonObject;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/base64.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/base64.js
 var require_base64 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.base64encode = exports.base64decode = undefined;
@@ -147,7 +147,7 @@ var require_base64 = __commonJS(function(exports) {
   exports.base64encode = base64encode;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/protobufjs-utf8.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/protobufjs-utf8.js
 var require_protobufjs_utf8 = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.utf8read = undefined;
@@ -184,7 +184,7 @@ var require_protobufjs_utf8 = __commonJS(function(exports) {
   exports.utf8read = utf8read;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-format-contract.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/binary-format-contract.js
 var require_binary_format_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.WireType = exports.mergeBinaryOptions = exports.UnknownFieldHandler = undefined;
@@ -224,7 +224,7 @@ var require_binary_format_contract = __commonJS(function(exports) {
   })(WireType = exports.WireType || (exports.WireType = {}));
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/goog-varint.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/goog-varint.js
 var require_goog_varint = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.varint32read = exports.varint32write = exports.int64toString = exports.int64fromString = exports.varint64write = exports.varint64read = undefined;
@@ -391,7 +391,7 @@ var require_goog_varint = __commonJS(function(exports) {
   exports.varint32read = varint32read;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/pb-long.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/pb-long.js
 var require_pb_long = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.PbLong = exports.PbULong = exports.detectBi = undefined;
@@ -575,7 +575,7 @@ var require_pb_long = __commonJS(function(exports) {
   PbLong.ZERO = new PbLong(0, 0);
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-reader.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/binary-reader.js
 var require_binary_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.BinaryReader = exports.binaryReadOptions = undefined;
@@ -697,7 +697,7 @@ var require_binary_reader = __commonJS(function(exports) {
   exports.BinaryReader = BinaryReader;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/assert.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/assert.js
 var require_assert = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.assertFloat32 = exports.assertUInt32 = exports.assertInt32 = exports.assertNever = exports.assert = undefined;
@@ -741,7 +741,7 @@ var require_assert = __commonJS(function(exports) {
   exports.assertFloat32 = assertFloat32;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/binary-writer.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/binary-writer.js
 var require_binary_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.BinaryWriter = exports.binaryWriteOptions = undefined;
@@ -896,7 +896,7 @@ var require_binary_writer = __commonJS(function(exports) {
   exports.BinaryWriter = BinaryWriter;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/json-format-contract.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/json-format-contract.js
 var require_json_format_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.mergeJsonOptions = exports.jsonWriteOptions = exports.jsonReadOptions = undefined;
@@ -926,14 +926,14 @@ var require_json_format_contract = __commonJS(function(exports) {
   exports.mergeJsonOptions = mergeJsonOptions;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/message-type-contract.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/message-type-contract.js
 var require_message_type_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MESSAGE_TYPE = undefined;
   exports.MESSAGE_TYPE = Symbol.for("protobuf-ts/message-type");
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/lower-camel-case.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/lower-camel-case.js
 var require_lower_camel_case = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.lowerCamelCase = undefined;
@@ -961,7 +961,7 @@ var require_lower_camel_case = __commonJS(function(exports) {
   exports.lowerCamelCase = lowerCamelCase;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-info.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-info.js
 var require_reflection_info = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.readMessageOption = exports.readFieldOption = exports.readFieldOptions = exports.normalizeFieldInfo = exports.RepeatType = exports.LongType = exports.ScalarType = undefined;
@@ -1035,7 +1035,7 @@ var require_reflection_info = __commonJS(function(exports) {
   exports.readMessageOption = readMessageOption;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/oneof.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/oneof.js
 var require_oneof = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.getSelectedOneofValue = exports.clearOneofValue = exports.setUnknownOneofValue = exports.setOneofValue = exports.getOneofValue = exports.isOneofGroup = undefined;
@@ -1095,7 +1095,7 @@ var require_oneof = __commonJS(function(exports) {
   exports.getSelectedOneofValue = getSelectedOneofValue;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-type-check.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-type-check.js
 var require_reflection_type_check = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionTypeCheck = undefined;
@@ -1296,7 +1296,7 @@ var require_reflection_type_check = __commonJS(function(exports) {
   exports.ReflectionTypeCheck = ReflectionTypeCheck;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-long-convert.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-long-convert.js
 var require_reflection_long_convert = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionLongConvert = undefined;
@@ -1314,7 +1314,7 @@ var require_reflection_long_convert = __commonJS(function(exports) {
   exports.reflectionLongConvert = reflectionLongConvert;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-reader.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-reader.js
 var require_reflection_json_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionJsonReader = undefined;
@@ -1588,7 +1588,7 @@ var require_reflection_json_reader = __commonJS(function(exports) {
   exports.ReflectionJsonReader = ReflectionJsonReader;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-writer.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-json-writer.js
 var require_reflection_json_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionJsonWriter = undefined;
@@ -1791,7 +1791,7 @@ var require_reflection_json_writer = __commonJS(function(exports) {
   exports.ReflectionJsonWriter = ReflectionJsonWriter;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-scalar-default.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-scalar-default.js
 var require_reflection_scalar_default = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionScalarDefault = undefined;
@@ -1823,7 +1823,7 @@ var require_reflection_scalar_default = __commonJS(function(exports) {
   exports.reflectionScalarDefault = reflectionScalarDefault;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-reader.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-reader.js
 var require_reflection_binary_reader = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionBinaryReader = undefined;
@@ -1983,7 +1983,7 @@ var require_reflection_binary_reader = __commonJS(function(exports) {
   exports.ReflectionBinaryReader = ReflectionBinaryReader;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-writer.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-binary-writer.js
 var require_reflection_binary_writer = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.ReflectionBinaryWriter = undefined;
@@ -2181,7 +2181,7 @@ var require_reflection_binary_writer = __commonJS(function(exports) {
   exports.ReflectionBinaryWriter = ReflectionBinaryWriter;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-create.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-create.js
 var require_reflection_create = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionCreate = undefined;
@@ -2215,7 +2215,7 @@ var require_reflection_create = __commonJS(function(exports) {
   exports.reflectionCreate = reflectionCreate;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-merge-partial.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-merge-partial.js
 var require_reflection_merge_partial = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionMergePartial = undefined;
@@ -2282,7 +2282,7 @@ var require_reflection_merge_partial = __commonJS(function(exports) {
   exports.reflectionMergePartial = reflectionMergePartial;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-equals.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-equals.js
 var require_reflection_equals = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.reflectionEquals = undefined;
@@ -2350,7 +2350,7 @@ var require_reflection_equals = __commonJS(function(exports) {
   }
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/message-type.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/message-type.js
 var require_message_type = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.MessageType = undefined;
@@ -2456,7 +2456,7 @@ var require_message_type = __commonJS(function(exports) {
   exports.MessageType = MessageType;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/reflection-contains-message-type.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/reflection-contains-message-type.js
 var require_reflection_contains_message_type = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.containsMessageType = undefined;
@@ -2467,7 +2467,7 @@ var require_reflection_contains_message_type = __commonJS(function(exports) {
   exports.containsMessageType = containsMessageType;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/enum-object.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/enum-object.js
 var require_enum_object = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.listEnumNumbers = exports.listEnumNames = exports.listEnumValues = exports.isEnumObject = undefined;
@@ -2519,7 +2519,7 @@ var require_enum_object = __commonJS(function(exports) {
   exports.listEnumNumbers = listEnumNumbers;
 });
 
-// ../../node_modules/.bun/@protobuf-ts+runtime@2.11.1/node_modules/@protobuf-ts/runtime/build/commonjs/index.js
+// node_modules/@protobuf-ts/runtime/build/commonjs/index.js
 var require_commonjs = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   var json_typings_1 = require_json_typings();
@@ -2702,7 +2702,7 @@ var require_commonjs = __commonJS(function(exports) {
   } });
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/constants.js
+// node_modules/ws/lib/constants.js
 var require_constants = __commonJS(function(exports, module) {
   var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
   var hasBlob = typeof Blob !== "undefined";
@@ -2722,7 +2722,7 @@ var require_constants = __commonJS(function(exports, module) {
   };
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/buffer-util.js
+// node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS(function(exports, module) {
   var { EMPTY_BUFFER } = require_constants();
   var FastBuffer = Buffer[Symbol.species];
@@ -2800,7 +2800,7 @@ var require_buffer_util = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/limiter.js
+// node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS(function(exports, module) {
   var kDone = Symbol("kDone");
   var kRun = Symbol("kRun");
@@ -2832,7 +2832,7 @@ var require_limiter = __commonJS(function(exports, module) {
   module.exports = Limiter;
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/permessage-deflate.js
+// node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS(function(exports, module) {
   var zlib = __require("zlib");
   var bufferUtil = require_buffer_util();
@@ -3096,7 +3096,7 @@ var require_permessage_deflate = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/validation.js
+// node_modules/ws/lib/validation.js
 var require_validation = __commonJS(function(exports, module) {
   var { isUtf8 } = __require("buffer");
   var { hasBlob } = require_constants();
@@ -3283,7 +3283,7 @@ var require_validation = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/receiver.js
+// node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS(function(exports, module) {
   var { Writable } = __require("stream");
   var PerMessageDeflate = require_permessage_deflate();
@@ -3677,7 +3677,7 @@ var require_receiver = __commonJS(function(exports, module) {
   module.exports = Receiver;
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/sender.js
+// node_modules/ws/lib/sender.js
 var require_sender = __commonJS(function(exports, module) {
   var { Duplex } = __require("stream");
   var { randomFillSync } = __require("crypto");
@@ -4036,7 +4036,7 @@ var require_sender = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/event-target.js
+// node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS(function(exports, module) {
   var { kForOnEventAttribute, kListener } = require_constants();
   var kCode = Symbol("kCode");
@@ -4187,7 +4187,7 @@ var require_event_target = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/extension.js
+// node_modules/ws/lib/extension.js
 var require_extension = __commonJS(function(exports, module) {
   var { tokenChars } = require_validation();
   function push(dest, name, elem) {
@@ -4352,7 +4352,7 @@ var require_extension = __commonJS(function(exports, module) {
   module.exports = { format, parse };
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/websocket.js
+// node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS(function(exports, module) {
   var EventEmitter = __require("events");
   var https = __require("https");
@@ -4409,11 +4409,23 @@ var require_websocket = __commonJS(function(exports, module) {
         this._isServer = false;
         this._redirects = 0;
         if (protocols === undefined) {
-          protocols = [];
+          if (!options || options.protocols === undefined) {
+            protocols = [];
+          } else if (Array.isArray(options.protocols)) {
+            protocols = options.protocols;
+          } else {
+            protocols = [options.protocols];
+          }
         } else if (!Array.isArray(protocols)) {
           if (typeof protocols === "object" && protocols !== null) {
             options = protocols;
-            protocols = [];
+            if (options.protocols === undefined) {
+              protocols = [];
+            } else if (Array.isArray(options.protocols)) {
+              protocols = options.protocols;
+            } else {
+              protocols = [options.protocols];
+            }
           } else {
             protocols = [protocols];
           }
@@ -4532,7 +4544,6 @@ var require_websocket = __commonJS(function(exports, module) {
         }
         return;
       }
-      this._readyState = WebSocket.CLOSING;
       this._sender.close(code, data, !this._isServer, (err) => {
         if (err)
           return;
@@ -4541,6 +4552,7 @@ var require_websocket = __commonJS(function(exports, module) {
           this._socket.end();
         }
       });
+      this._readyState = WebSocket.CLOSING;
       setCloseTimer(this);
     }
     pause() {
@@ -4728,6 +4740,7 @@ var require_websocket = __commonJS(function(exports, module) {
       socketPath: undefined,
       hostname: undefined,
       protocol: undefined,
+      protocols: undefined,
       timeout: undefined,
       method: "GET",
       host: undefined,
@@ -5124,7 +5137,7 @@ var require_websocket = __commonJS(function(exports, module) {
   }
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/stream.js
+// node_modules/ws/lib/stream.js
 var require_stream = __commonJS(function(exports, module) {
   var WebSocket = require_websocket();
   var { Duplex } = __require("stream");
@@ -5227,7 +5240,7 @@ var require_stream = __commonJS(function(exports, module) {
   module.exports = createWebSocketStream;
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/subprotocol.js
+// node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS(function(exports, module) {
   var { tokenChars } = require_validation();
   function parse(header) {
@@ -5272,7 +5285,7 @@ var require_subprotocol = __commonJS(function(exports, module) {
   module.exports = { parse };
 });
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/lib/websocket-server.js
+// node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS(function(exports, module) {
   var EventEmitter = __require("events");
   var http = __require("http");
@@ -6038,7 +6051,7 @@ import { timingSafeEqual } from "node:crypto";
 import { mkdir, readFile as readFile3, stat } from "node:fs/promises";
 import path from "node:path";
 
-// ../../packages/protocol/dist/core.js
+// node_modules/@inline-chat/protocol/dist/core.js
 var import_runtime = __toESM(require_commonjs(), 1);
 var import_runtime2 = __toESM(require_commonjs(), 1);
 var import_runtime3 = __toESM(require_commonjs(), 1);
@@ -6182,7 +6195,6 @@ var RpcError_Code;
   RpcError_Code2[RpcError_Code2["URL_PREVIEW_UNAVAILABLE"] = 18] = "URL_PREVIEW_UNAVAILABLE";
   RpcError_Code2[RpcError_Code2["AGENT_SESSION_MESSAGE_IMMUTABLE"] = 19] = "AGENT_SESSION_MESSAGE_IMMUTABLE";
   RpcError_Code2[RpcError_Code2["SPACE_INVITE_INVALID"] = 20] = "SPACE_INVITE_INVALID";
-  RpcError_Code2[RpcError_Code2["MEDIA_NOT_OWNED"] = 21] = "MEDIA_NOT_OWNED";
 })(RpcError_Code || (RpcError_Code = {}));
 var SyncSkippedSequence_Reason;
 (function(SyncSkippedSequence_Reason2) {
@@ -6292,13 +6304,6 @@ var AuthBeginResult_Delivery;
   AuthBeginResult_Delivery2[AuthBeginResult_Delivery2["EMAIL"] = 1] = "EMAIL";
   AuthBeginResult_Delivery2[AuthBeginResult_Delivery2["SMS"] = 2] = "SMS";
 })(AuthBeginResult_Delivery || (AuthBeginResult_Delivery = {}));
-var AuthUpgradeDeclined_Reason;
-(function(AuthUpgradeDeclined_Reason2) {
-  AuthUpgradeDeclined_Reason2[AuthUpgradeDeclined_Reason2["REASON_UNSPECIFIED"] = 0] = "REASON_UNSPECIFIED";
-  AuthUpgradeDeclined_Reason2[AuthUpgradeDeclined_Reason2["DISABLED"] = 1] = "DISABLED";
-  AuthUpgradeDeclined_Reason2[AuthUpgradeDeclined_Reason2["INELIGIBLE"] = 2] = "INELIGIBLE";
-  AuthUpgradeDeclined_Reason2[AuthUpgradeDeclined_Reason2["SOURCE_REJECTED"] = 3] = "SOURCE_REJECTED";
-})(AuthUpgradeDeclined_Reason || (AuthUpgradeDeclined_Reason = {}));
 var UploadFailure_Code;
 (function(UploadFailure_Code2) {
   UploadFailure_Code2[UploadFailure_Code2["UPLOAD_FAILURE_CODE_UNSPECIFIED"] = 0] = "UPLOAD_FAILURE_CODE_UNSPECIFIED";
@@ -6321,12 +6326,6 @@ var BotFilesystemEntry_Kind;
   BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["SYMLINK"] = 3] = "SYMLINK";
   BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["OTHER"] = 4] = "OTHER";
 })(BotFilesystemEntry_Kind || (BotFilesystemEntry_Kind = {}));
-var TransportPreference;
-(function(TransportPreference2) {
-  TransportPreference2[TransportPreference2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  TransportPreference2[TransportPreference2["V3"] = 1] = "V3";
-  TransportPreference2[TransportPreference2["LEGACY"] = 2] = "LEGACY";
-})(TransportPreference || (TransportPreference = {}));
 var DialogFollowMode;
 (function(DialogFollowMode2) {
   DialogFollowMode2[DialogFollowMode2["DIALOG_FOLLOW_MODE_UNSPECIFIED"] = 0] = "DIALOG_FOLLOW_MODE_UNSPECIFIED";
@@ -6771,8 +6770,7 @@ class ConnectionInit$Type extends import_runtime4.MessageType {
       { no: 7, name: "device_name", kind: "scalar", opt: true, T: 9 },
       { no: 8, name: "client_type", kind: "scalar", opt: true, T: 9 },
       { no: 9, name: "time_zone", kind: "scalar", opt: true, T: 9 },
-      { no: 10, name: "supports_working", kind: "scalar", opt: true, T: 8 },
-      { no: 11, name: "transfer_only", kind: "scalar", opt: true, T: 8 }
+      { no: 10, name: "supports_working", kind: "scalar", opt: true, T: 8 }
     ]);
   }
   create(value) {
@@ -6817,9 +6815,6 @@ class ConnectionInit$Type extends import_runtime4.MessageType {
         case 10:
           message.supportsWorking = reader.bool();
           break;
-        case 11:
-          message.transferOnly = reader.bool();
-          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -6852,8 +6847,6 @@ class ConnectionInit$Type extends import_runtime4.MessageType {
       writer.tag(9, import_runtime.WireType.LengthDelimited).string(message.timeZone);
     if (message.supportsWorking !== undefined)
       writer.tag(10, import_runtime.WireType.Varint).bool(message.supportsWorking);
-    if (message.transferOnly !== undefined)
-      writer.tag(11, import_runtime.WireType.Varint).bool(message.transferOnly);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7185,9 +7178,7 @@ var Ack = new Ack$Type;
 
 class ConnectionOpen$Type extends import_runtime4.MessageType {
   constructor() {
-    super("ConnectionOpen", [
-      { no: 1, name: "upgraded_session_transport", kind: "enum", opt: true, T: () => ["TransportPreference", TransportPreference, "TRANSPORT_PREFERENCE_"] }
-    ]);
+    super("ConnectionOpen", []);
   }
   create(value) {
     const message = globalThis.Object.create(this.messagePrototype);
@@ -7196,27 +7187,9 @@ class ConnectionOpen$Type extends import_runtime4.MessageType {
     return message;
   }
   internalBinaryRead(reader, length, options, target) {
-    let message = target ?? this.create(), end = reader.pos + length;
-    while (reader.pos < end) {
-      let [fieldNo, wireType] = reader.tag();
-      switch (fieldNo) {
-        case 1:
-          message.upgradedSessionTransport = reader.int32();
-          break;
-        default:
-          let u = options.readUnknownField;
-          if (u === "throw")
-            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-          let d = reader.skip(wireType);
-          if (u !== false)
-            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-      }
-    }
-    return message;
+    return target ?? this.create();
   }
   internalBinaryWrite(message, writer, options) {
-    if (message.upgradedSessionTransport !== undefined)
-      writer.tag(1, import_runtime.WireType.Varint).int32(message.upgradedSessionTransport);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -24636,8 +24609,7 @@ class UpdateBotProfileInput$Type extends import_runtime4.MessageType {
     super("UpdateBotProfileInput", [
       { no: 1, name: "bot_user_id", kind: "scalar", T: 3, L: 0 },
       { no: 2, name: "name", kind: "scalar", opt: true, T: 9 },
-      { no: 3, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 },
-      { no: 4, name: "username", kind: "scalar", opt: true, T: 9 }
+      { no: 3, name: "photo_file_unique_id", kind: "scalar", opt: true, T: 9 }
     ]);
   }
   create(value) {
@@ -24661,9 +24633,6 @@ class UpdateBotProfileInput$Type extends import_runtime4.MessageType {
         case 3:
           message.photoFileUniqueId = reader.string();
           break;
-        case 4:
-          message.username = reader.string();
-          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -24682,8 +24651,6 @@ class UpdateBotProfileInput$Type extends import_runtime4.MessageType {
       writer.tag(2, import_runtime.WireType.LengthDelimited).string(message.name);
     if (message.photoFileUniqueId !== undefined)
       writer.tag(3, import_runtime.WireType.LengthDelimited).string(message.photoFileUniqueId);
-    if (message.username !== undefined)
-      writer.tag(4, import_runtime.WireType.LengthDelimited).string(message.username);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26039,8 +26006,7 @@ class RegisterDeviceInput$Type extends import_runtime4.MessageType {
       { no: 1, name: "apple_push_token", kind: "scalar", T: 9 },
       { no: 2, name: "push_content_encryption_key", kind: "message", T: () => PushContentEncryptionKey },
       { no: 3, name: "push_content_version", kind: "scalar", opt: true, T: 13 },
-      { no: 4, name: "notification_method", kind: "message", T: () => PushNotificationMethod },
-      { no: 5, name: "supports_filtered_sync_pushes", kind: "scalar", opt: true, T: 8 }
+      { no: 4, name: "notification_method", kind: "message", T: () => PushNotificationMethod }
     ]);
   }
   create(value) {
@@ -26067,9 +26033,6 @@ class RegisterDeviceInput$Type extends import_runtime4.MessageType {
         case 4:
           message.notificationMethod = PushNotificationMethod.internalBinaryRead(reader, reader.uint32(), options, message.notificationMethod);
           break;
-        case 5:
-          message.supportsFilteredSyncPushes = reader.bool();
-          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -26090,8 +26053,6 @@ class RegisterDeviceInput$Type extends import_runtime4.MessageType {
       writer.tag(3, import_runtime.WireType.Varint).uint32(message.pushContentVersion);
     if (message.notificationMethod)
       PushNotificationMethod.internalBinaryWrite(message.notificationMethod, writer.tag(4, import_runtime.WireType.LengthDelimited).fork(), options).join();
-    if (message.supportsFilteredSyncPushes !== undefined)
-      writer.tag(5, import_runtime.WireType.Varint).bool(message.supportsFilteredSyncPushes);
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -37872,8 +37833,7 @@ class RealtimeV3Request$Type extends import_runtime4.MessageType {
       { no: 5, name: "finish_http_upload", kind: "message", oneof: "body", T: () => FinishHttpUploadRequest },
       { no: 6, name: "connection_init", kind: "message", oneof: "body", T: () => ConnectionInit },
       { no: 7, name: "auth_begin_browser", kind: "message", oneof: "body", T: () => AuthBeginBrowserRequest },
-      { no: 8, name: "auth_browser_status", kind: "message", oneof: "body", T: () => AuthBrowserStatusRequest },
-      { no: 10, name: "auth_upgrade_session", kind: "message", oneof: "body", T: () => AuthUpgradeSessionRequest }
+      { no: 8, name: "auth_browser_status", kind: "message", oneof: "body", T: () => AuthBrowserStatusRequest }
     ]);
   }
   create(value) {
@@ -37936,12 +37896,6 @@ class RealtimeV3Request$Type extends import_runtime4.MessageType {
             authBrowserStatus: AuthBrowserStatusRequest.internalBinaryRead(reader, reader.uint32(), options, message.body.authBrowserStatus)
           };
           break;
-        case 10:
-          message.body = {
-            oneofKind: "authUpgradeSession",
-            authUpgradeSession: AuthUpgradeSessionRequest.internalBinaryRead(reader, reader.uint32(), options, message.body.authUpgradeSession)
-          };
-          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -37970,8 +37924,6 @@ class RealtimeV3Request$Type extends import_runtime4.MessageType {
       AuthBeginBrowserRequest.internalBinaryWrite(message.body.authBeginBrowser, writer.tag(7, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.body.oneofKind === "authBrowserStatus")
       AuthBrowserStatusRequest.internalBinaryWrite(message.body.authBrowserStatus, writer.tag(8, import_runtime.WireType.LengthDelimited).fork(), options).join();
-    if (message.body.oneofKind === "authUpgradeSession")
-      AuthUpgradeSessionRequest.internalBinaryWrite(message.body.authUpgradeSession, writer.tag(10, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -37991,8 +37943,7 @@ class RealtimeV3Response$Type extends import_runtime4.MessageType {
       { no: 6, name: "finish_http_upload", kind: "message", oneof: "body", T: () => FinishHttpUploadResult },
       { no: 7, name: "auth_begin_browser", kind: "message", oneof: "body", T: () => AuthBeginBrowserResult },
       { no: 8, name: "auth_browser_status", kind: "message", oneof: "body", T: () => AuthBrowserStatusResult },
-      { no: 9, name: "connection_open", kind: "message", oneof: "body", T: () => ConnectionOpen },
-      { no: 10, name: "auth_upgrade_session", kind: "message", oneof: "body", T: () => AuthUpgradeSessionResult }
+      { no: 9, name: "connection_open", kind: "message", oneof: "body", T: () => ConnectionOpen }
     ]);
   }
   create(value) {
@@ -38061,12 +38012,6 @@ class RealtimeV3Response$Type extends import_runtime4.MessageType {
             connectionOpen: ConnectionOpen.internalBinaryRead(reader, reader.uint32(), options, message.body.connectionOpen)
           };
           break;
-        case 10:
-          message.body = {
-            oneofKind: "authUpgradeSession",
-            authUpgradeSession: AuthUpgradeSessionResult.internalBinaryRead(reader, reader.uint32(), options, message.body.authUpgradeSession)
-          };
-          break;
         default:
           let u = options.readUnknownField;
           if (u === "throw")
@@ -38097,8 +38042,6 @@ class RealtimeV3Response$Type extends import_runtime4.MessageType {
       AuthBrowserStatusResult.internalBinaryWrite(message.body.authBrowserStatus, writer.tag(8, import_runtime.WireType.LengthDelimited).fork(), options).join();
     if (message.body.oneofKind === "connectionOpen")
       ConnectionOpen.internalBinaryWrite(message.body.connectionOpen, writer.tag(9, import_runtime.WireType.LengthDelimited).fork(), options).join();
-    if (message.body.oneofKind === "authUpgradeSession")
-      AuthUpgradeSessionResult.internalBinaryWrite(message.body.authUpgradeSession, writer.tag(10, import_runtime.WireType.LengthDelimited).fork(), options).join();
     let u = options.writeUnknownFields;
     if (u !== false)
       (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -38450,177 +38393,6 @@ class AuthAuthorized$Type extends import_runtime4.MessageType {
   }
 }
 var AuthAuthorized = new AuthAuthorized$Type;
-
-class AuthUpgradeSessionRequest$Type extends import_runtime4.MessageType {
-  constructor() {
-    super("AuthUpgradeSessionRequest", [
-      { no: 1, name: "bearer_token", kind: "scalar", opt: true, T: 9 }
-    ]);
-  }
-  create(value) {
-    const message = globalThis.Object.create(this.messagePrototype);
-    if (value !== undefined)
-      import_runtime3.reflectionMergePartial(this, message, value);
-    return message;
-  }
-  internalBinaryRead(reader, length, options, target) {
-    let message = target ?? this.create(), end = reader.pos + length;
-    while (reader.pos < end) {
-      let [fieldNo, wireType] = reader.tag();
-      switch (fieldNo) {
-        case 1:
-          message.bearerToken = reader.string();
-          break;
-        default:
-          let u = options.readUnknownField;
-          if (u === "throw")
-            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-          let d = reader.skip(wireType);
-          if (u !== false)
-            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-      }
-    }
-    return message;
-  }
-  internalBinaryWrite(message, writer, options) {
-    if (message.bearerToken !== undefined)
-      writer.tag(1, import_runtime.WireType.LengthDelimited).string(message.bearerToken);
-    let u = options.writeUnknownFields;
-    if (u !== false)
-      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-    return writer;
-  }
-}
-var AuthUpgradeSessionRequest = new AuthUpgradeSessionRequest$Type;
-
-class AuthUpgradeSessionResult$Type extends import_runtime4.MessageType {
-  constructor() {
-    super("AuthUpgradeSessionResult", [
-      { no: 1, name: "authorized", kind: "message", oneof: "state", T: () => AuthAuthorized },
-      { no: 2, name: "not_bound", kind: "message", oneof: "state", T: () => AuthUpgradeNotBound },
-      { no: 3, name: "declined", kind: "message", oneof: "state", T: () => AuthUpgradeDeclined }
-    ]);
-  }
-  create(value) {
-    const message = globalThis.Object.create(this.messagePrototype);
-    message.state = { oneofKind: undefined };
-    if (value !== undefined)
-      import_runtime3.reflectionMergePartial(this, message, value);
-    return message;
-  }
-  internalBinaryRead(reader, length, options, target) {
-    let message = target ?? this.create(), end = reader.pos + length;
-    while (reader.pos < end) {
-      let [fieldNo, wireType] = reader.tag();
-      switch (fieldNo) {
-        case 1:
-          message.state = {
-            oneofKind: "authorized",
-            authorized: AuthAuthorized.internalBinaryRead(reader, reader.uint32(), options, message.state.authorized)
-          };
-          break;
-        case 2:
-          message.state = {
-            oneofKind: "notBound",
-            notBound: AuthUpgradeNotBound.internalBinaryRead(reader, reader.uint32(), options, message.state.notBound)
-          };
-          break;
-        case 3:
-          message.state = {
-            oneofKind: "declined",
-            declined: AuthUpgradeDeclined.internalBinaryRead(reader, reader.uint32(), options, message.state.declined)
-          };
-          break;
-        default:
-          let u = options.readUnknownField;
-          if (u === "throw")
-            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-          let d = reader.skip(wireType);
-          if (u !== false)
-            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-      }
-    }
-    return message;
-  }
-  internalBinaryWrite(message, writer, options) {
-    if (message.state.oneofKind === "authorized")
-      AuthAuthorized.internalBinaryWrite(message.state.authorized, writer.tag(1, import_runtime.WireType.LengthDelimited).fork(), options).join();
-    if (message.state.oneofKind === "notBound")
-      AuthUpgradeNotBound.internalBinaryWrite(message.state.notBound, writer.tag(2, import_runtime.WireType.LengthDelimited).fork(), options).join();
-    if (message.state.oneofKind === "declined")
-      AuthUpgradeDeclined.internalBinaryWrite(message.state.declined, writer.tag(3, import_runtime.WireType.LengthDelimited).fork(), options).join();
-    let u = options.writeUnknownFields;
-    if (u !== false)
-      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-    return writer;
-  }
-}
-var AuthUpgradeSessionResult = new AuthUpgradeSessionResult$Type;
-
-class AuthUpgradeNotBound$Type extends import_runtime4.MessageType {
-  constructor() {
-    super("AuthUpgradeNotBound", []);
-  }
-  create(value) {
-    const message = globalThis.Object.create(this.messagePrototype);
-    if (value !== undefined)
-      import_runtime3.reflectionMergePartial(this, message, value);
-    return message;
-  }
-  internalBinaryRead(reader, length, options, target) {
-    return target ?? this.create();
-  }
-  internalBinaryWrite(message, writer, options) {
-    let u = options.writeUnknownFields;
-    if (u !== false)
-      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-    return writer;
-  }
-}
-var AuthUpgradeNotBound = new AuthUpgradeNotBound$Type;
-
-class AuthUpgradeDeclined$Type extends import_runtime4.MessageType {
-  constructor() {
-    super("AuthUpgradeDeclined", [
-      { no: 1, name: "reason", kind: "enum", T: () => ["AuthUpgradeDeclined.Reason", AuthUpgradeDeclined_Reason] }
-    ]);
-  }
-  create(value) {
-    const message = globalThis.Object.create(this.messagePrototype);
-    message.reason = 0;
-    if (value !== undefined)
-      import_runtime3.reflectionMergePartial(this, message, value);
-    return message;
-  }
-  internalBinaryRead(reader, length, options, target) {
-    let message = target ?? this.create(), end = reader.pos + length;
-    while (reader.pos < end) {
-      let [fieldNo, wireType] = reader.tag();
-      switch (fieldNo) {
-        case 1:
-          message.reason = reader.int32();
-          break;
-        default:
-          let u = options.readUnknownField;
-          if (u === "throw")
-            throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
-          let d = reader.skip(wireType);
-          if (u !== false)
-            (u === true ? import_runtime2.UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
-      }
-    }
-    return message;
-  }
-  internalBinaryWrite(message, writer, options) {
-    if (message.reason !== 0)
-      writer.tag(1, import_runtime.WireType.Varint).int32(message.reason);
-    let u = options.writeUnknownFields;
-    if (u !== false)
-      (u == true ? import_runtime2.UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
-    return writer;
-  }
-}
-var AuthUpgradeDeclined = new AuthUpgradeDeclined$Type;
 
 class AuthInviteRequired$Type extends import_runtime4.MessageType {
   constructor() {
@@ -41168,7 +40940,7 @@ class AnswerBotFilesystemResult$Type extends import_runtime4.MessageType {
 }
 var AnswerBotFilesystemResult = new AnswerBotFilesystemResult$Type;
 
-// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/utils.js
+// node_modules/@noble/hashes/esm/utils.js
 /*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) */
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
@@ -41228,7 +41000,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/_md.js
+// node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE);
@@ -41349,7 +41121,7 @@ var SHA256_IV = /* @__PURE__ */ Uint32Array.from([
   1541459225
 ]);
 
-// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/sha2.js
+// node_modules/@noble/hashes/esm/sha2.js
 var SHA256_K = /* @__PURE__ */ Uint32Array.from([
   1116352408,
   1899447441,
@@ -41489,7 +41261,7 @@ class SHA256 extends HashMD {
 }
 var sha256 = /* @__PURE__ */ createHasher(() => new SHA256);
 
-// ../../packages/protocol/dist/transfers.js
+// node_modules/@inline-chat/protocol/dist/transfers.js
 var INLINE_TRANSFER_PART_SIZE = 512 * 1024;
 var INLINE_UPLOAD_MAX_PARTS = 1000;
 var INLINE_MEDIA_UPLOAD_MAX_BYTES = {
@@ -41498,61 +41270,8 @@ var INLINE_MEDIA_UPLOAD_MAX_BYTES = {
   document: 500000000,
   voice: 20000000
 };
-var TRANSFER_RPC_METHODS = new Set([
-  Method.GET_FILE_PART,
-  Method.SAVE_UPLOAD_PART,
-  Method.GET_UPLOAD_STATE,
-  Method.CREATE_UPLOAD,
-  Method.FINISH_UPLOAD,
-  Method.CANCEL_UPLOAD
-]);
-var READ_ONLY_RPC_METHODS = new Set([
-  Method.GET_ME,
-  Method.GET_PEER_PHOTO,
-  Method.GET_CHAT_HISTORY,
-  Method.GET_SPACE_MEMBERS,
-  Method.GET_CHAT_PARTICIPANTS,
-  Method.GET_CHATS,
-  Method.GET_USER_SETTINGS,
-  Method.GET_UPDATES_STATE,
-  Method.GET_CHAT,
-  Method.GET_UPDATES,
-  Method.SEARCH_MESSAGES,
-  Method.LIST_BOTS,
-  Method.REVEAL_BOT_TOKEN,
-  Method.GET_MESSAGES,
-  Method.GET_BOT_COMMANDS,
-  Method.GET_PEER_BOT_COMMANDS,
-  Method.GET_BOT_PRESENCE,
-  Method.GET_SESSIONS,
-  Method.CHECK_USERNAME,
-  Method.GET_SPACE_URL_PREVIEW_EXCLUSIONS,
-  Method.GET_USER_GROUPS,
-  Method.GET_SPACE_SETTINGS,
-  Method.GET_SPACE,
-  Method.GET_THREAD_REFERENCES,
-  Method.GET_THREAD_SUBTHREADS,
-  Method.GET_PEER_BOTS,
-  Method.GET_MY_BOT_CAPABILITIES,
-  Method.GET_GRID,
-  Method.GET_GRID_HOME,
-  Method.GET_EXTERNAL_PROFILE_PHOTO,
-  Method.GET_CHAT_TRANSCRIPT,
-  Method.SEARCH_EXTERNAL_RESOURCES,
-  Method.LIST_CONNECTORS,
-  Method.SEARCH_USERS,
-  Method.RESOLVE_URL_PREVIEW,
-  Method.GET_BOT_AGENT,
-  Method.LIST_BOT_AGENTS,
-  Method.GET_CONNECTOR_CONFIG,
-  Method.GET_UPLOAD_STATE
-]);
-var REPLAY_EXEMPT_METHODS = new Set([
-  ...TRANSFER_RPC_METHODS,
-  ...READ_ONLY_RPC_METHODS
-]);
 
-// ../../packages/protocol/dist/uploads.js
+// node_modules/@inline-chat/protocol/dist/uploads.js
 var HASH_READ_SIZE = 1024 * 1024;
 var DEFAULT_GLOBAL_CONCURRENCY = 3;
 var DEFAULT_UPLOAD_CONCURRENCY = 2;
@@ -41985,7 +41704,7 @@ class NativeUploadError extends Error {
   }
 }
 
-// ../../packages/sdk/dist/ids.js
+// node_modules/@inline-chat/realtime-sdk/dist/ids.js
 class InlineIdError extends Error {
   constructor(message) {
     super(message);
@@ -42004,7 +41723,7 @@ var asInlineId = (value, fieldName = "id") => {
   return BigInt(value);
 };
 
-// ../../packages/sdk/dist/utils/async-channel.js
+// node_modules/@inline-chat/realtime-sdk/dist/utils/async-channel.js
 class ChannelConsumerError extends Error {
   constructor(message) {
     super(message);
@@ -42306,7 +42025,7 @@ class AcknowledgedAsyncChannel {
   }
 }
 
-// ../../packages/sdk/dist/realtime/ping-pong.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/ping-pong.js
 class PingPongService {
   log;
   crypto;
@@ -42435,7 +42154,7 @@ class PingPongService {
 }
 var isCrypto = (value) => typeof value === "object" && value !== null && ("getRandomValues" in value) && typeof value.getRandomValues === "function";
 
-// ../../packages/sdk/dist/realtime/transport.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/transport.js
 class TransportError extends Error {
   code;
   constructor(message, code = "generic") {
@@ -42457,7 +42176,7 @@ class TransportError extends Error {
   }
 }
 
-// ../../packages/sdk/dist/sdk/errors.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/errors.js
 class InlineSdkAuthenticationError extends Error {
   code;
   reason;
@@ -42482,7 +42201,7 @@ function authenticationErrorFromConnectionReason(reason) {
   }
 }
 
-// ../../packages/sdk/dist/realtime/protocol-client.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/protocol-client.js
 var emptyRpcInput = { oneofKind: undefined };
 var defaultRpcTimeoutMs = 30000;
 var defaultMaxPendingRpcRequests = 64;
@@ -42997,7 +42716,7 @@ function describeConnectionError(error) {
   return `server connection error${suffix}: ${message}`;
 }
 
-// ../../node_modules/.bun/ws@8.21.3/node_modules/ws/wrapper.mjs
+// node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -43007,7 +42726,7 @@ var import_subprotocol = __toESM(require_subprotocol(), 1);
 var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 
-// ../../packages/sdk/dist/realtime/ws-transport.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/ws-transport.js
 class WebSocketTransport {
   events = new AsyncChannel;
   url;
@@ -43246,14 +42965,62 @@ function redactUrlForDiagnostics(raw) {
   }
 }
 
-// ../../packages/sdk/dist/realtime/v3-connection.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-connection.js
 import { randomBytes } from "node:crypto";
-import { gunzipSync } from "node:zlib";
 
-// ../../packages/protocol/dist/secure/node.js
-import { createCipheriv, createDecipheriv } from "node:crypto";
-
-// ../../node_modules/.bun/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/utils.js
+// node_modules/@inline-chat/protocol/dist/secure/bytes.js
+var MAX_PACKET_BYTES = 16 * 1024 * 1024;
+var concatBytes = (...parts) => {
+  const length = parts.reduce((sum, part) => sum + part.length, 0);
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
+};
+var xorBytes = (left, right) => {
+  if (left.length !== right.length)
+    throw new RangeError("XOR inputs must have equal length");
+  const result = new Uint8Array(left.length);
+  for (let index = 0;index < result.length; index += 1) {
+    result[index] = left[index] ^ right[index];
+  }
+  return result;
+};
+var equalBytes = (left, right) => {
+  let difference = left.length ^ right.length;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0;index < length; index += 1) {
+    difference |= (left[index] ?? 0) ^ (right[index] ?? 0);
+  }
+  return difference === 0;
+};
+var reverseBytes = (bytes) => Uint8Array.from(bytes).reverse();
+var int32LE = (value) => {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setInt32(0, value, true);
+  return bytes;
+};
+var uint32LE = (value) => {
+  const bytes = new Uint8Array(4);
+  new DataView(bytes.buffer).setUint32(0, value, true);
+  return bytes;
+};
+var int64LE = (value) => {
+  const bytes = new Uint8Array(8);
+  new DataView(bytes.buffer).setBigInt64(0, value, true);
+  return bytes;
+};
+var readInt32LE = (bytes, offset) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getInt32(offset, true);
+var readInt64LE = (bytes, offset) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigInt64(offset, true);
+var hexToBytes = (hex) => {
+  if (hex.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(hex))
+    throw new RangeError("Invalid hexadecimal bytes");
+  return Uint8Array.from({ length: hex.length / 2 }, (_, index) => Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16));
+};
+// node_modules/@noble/ciphers/esm/utils.js
 /*! noble-ciphers - MIT License (c) 2023 Paul Miller (paulmillr.com) */
 function isBytes2(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
@@ -43345,7 +43112,7 @@ function copyBytes(bytes) {
   return Uint8Array.from(bytes);
 }
 
-// ../../node_modules/.bun/@noble+ciphers@1.3.0/node_modules/@noble/ciphers/esm/aes.js
+// node_modules/@noble/ciphers/esm/aes.js
 var BLOCK_SIZE = 16;
 var POLY = 283;
 function mul2(n) {
@@ -43578,206 +43345,7 @@ var ecb = /* @__PURE__ */ wrapCipher({ blockSize: 16 }, function aesecb(key, opt
   };
 });
 
-// ../../packages/protocol/dist/secure/aesPure.js
-var BLOCK_BYTES = 16;
-var makePureAesBackend = () => ({
-  name: "pure-js",
-  igeEncrypt: (plaintext, key, iv) => {
-    const result = new Uint8Array(plaintext.length);
-    let previousCipher = iv.subarray(0, 16);
-    let previousPlain = iv.subarray(16, 32);
-    const scratch = new Uint8Array(BLOCK_BYTES);
-    for (let offset = 0;offset < plaintext.length; offset += BLOCK_BYTES) {
-      const plain = plaintext.subarray(offset, offset + BLOCK_BYTES);
-      for (let index = 0;index < BLOCK_BYTES; index += 1)
-        scratch[index] = plain[index] ^ previousCipher[index];
-      const encrypted = ecb(key, { disablePadding: true }).encrypt(scratch);
-      for (let index = 0;index < BLOCK_BYTES; index += 1)
-        result[offset + index] = encrypted[index] ^ previousPlain[index];
-      previousCipher = result.subarray(offset, offset + BLOCK_BYTES);
-      previousPlain = plain;
-    }
-    return result;
-  },
-  igeDecrypt: (ciphertext, key, iv) => {
-    const result = new Uint8Array(ciphertext.length);
-    let previousCipher = iv.subarray(0, 16);
-    let previousPlain = iv.subarray(16, 32);
-    const scratch = new Uint8Array(BLOCK_BYTES);
-    for (let offset = 0;offset < ciphertext.length; offset += BLOCK_BYTES) {
-      const encrypted = ciphertext.subarray(offset, offset + BLOCK_BYTES);
-      for (let index = 0;index < BLOCK_BYTES; index += 1)
-        scratch[index] = encrypted[index] ^ previousPlain[index];
-      const decrypted = ecb(key, { disablePadding: true }).decrypt(scratch);
-      for (let index = 0;index < BLOCK_BYTES; index += 1)
-        result[offset + index] = decrypted[index] ^ previousCipher[index];
-      previousCipher = encrypted;
-      previousPlain = result.subarray(offset, offset + BLOCK_BYTES);
-    }
-    return result;
-  },
-  createCtr: (key, iv) => {
-    const counterKey = key.slice();
-    const counter = iv.slice();
-    let keystream = new Uint8Array(0);
-    let position = 0;
-    return {
-      process: (input) => {
-        const output = new Uint8Array(input.length);
-        for (let index = 0;index < input.length; index += 1) {
-          if (position === keystream.length) {
-            keystream = Uint8Array.from(ecb(counterKey, { disablePadding: true }).encrypt(counter));
-            position = 0;
-            for (let byte = counter.length - 1;byte >= 0; byte -= 1) {
-              counter[byte] = counter[byte] + 1 & 255;
-              if (counter[byte] !== 0)
-                break;
-            }
-          }
-          output[index] = input[index] ^ keystream[position];
-          position += 1;
-        }
-        return output;
-      }
-    };
-  }
-});
-
-// ../../packages/protocol/dist/secure/aesBackend.js
-var current;
-var setAesBackend = (backend) => {
-  const previous = getAesBackend();
-  current = backend;
-  return previous;
-};
-var getAesBackend = () => current ?? (current = pureAesBackend());
-var pure;
-var pureAesBackend = () => pure ?? (pure = makePureAesBackend());
-
-// ../../packages/protocol/dist/secure/node.js
-var BLOCK_BYTES2 = 16;
-var toUint8Array = (buffer) => {
-  const copy = new Uint8Array(buffer.byteLength);
-  copy.set(buffer);
-  return copy;
-};
-var igeEncrypt = (plaintext, key, iv) => {
-  const length = plaintext.length;
-  const input = new Uint8Array(length);
-  input.set(plaintext.subarray(0, Math.min(BLOCK_BYTES2, length)));
-  for (let index = BLOCK_BYTES2;index < Math.min(2 * BLOCK_BYTES2, length); index += 1) {
-    input[index] = plaintext[index] ^ iv[index];
-  }
-  for (let index = 2 * BLOCK_BYTES2;index < length; index += 1) {
-    input[index] = plaintext[index] ^ plaintext[index - 2 * BLOCK_BYTES2];
-  }
-  const cipher = createCipheriv("aes-256-cbc", key, iv.subarray(0, BLOCK_BYTES2));
-  cipher.setAutoPadding(false);
-  const chained = cipher.update(input);
-  const tail = cipher.final();
-  if (chained.length !== length || tail.length !== 0)
-    throw new RangeError("AES-CBC produced an unexpected length");
-  const output = new Uint8Array(length);
-  for (let index = 0;index < Math.min(BLOCK_BYTES2, length); index += 1) {
-    output[index] = chained[index] ^ iv[BLOCK_BYTES2 + index];
-  }
-  for (let index = BLOCK_BYTES2;index < length; index += 1) {
-    output[index] = chained[index] ^ plaintext[index - BLOCK_BYTES2];
-  }
-  return output;
-};
-var igeDecrypt = (ciphertext, key, iv) => {
-  const length = ciphertext.length;
-  const decipher = createDecipheriv("aes-256-ecb", key, null);
-  decipher.setAutoPadding(false);
-  const output = new Uint8Array(length);
-  const scratch = new Uint8Array(BLOCK_BYTES2);
-  let previousCipher = iv.subarray(0, BLOCK_BYTES2);
-  let previousPlain = iv.subarray(BLOCK_BYTES2, 2 * BLOCK_BYTES2);
-  for (let offset = 0;offset < length; offset += BLOCK_BYTES2) {
-    for (let index = 0;index < BLOCK_BYTES2; index += 1) {
-      scratch[index] = ciphertext[offset + index] ^ previousPlain[index];
-    }
-    const decrypted = decipher.update(scratch);
-    if (decrypted.length !== BLOCK_BYTES2)
-      throw new RangeError("AES-ECB produced an unexpected length");
-    for (let index = 0;index < BLOCK_BYTES2; index += 1) {
-      output[offset + index] = decrypted[index] ^ previousCipher[index];
-    }
-    previousCipher = ciphertext.subarray(offset, offset + BLOCK_BYTES2);
-    previousPlain = output.subarray(offset, offset + BLOCK_BYTES2);
-  }
-  if (decipher.final().length !== 0)
-    throw new RangeError("AES-ECB produced trailing bytes");
-  return output;
-};
-var createCtr = (key, iv) => {
-  const cipher = createCipheriv("aes-256-ctr", key, iv);
-  return { process: (input) => toUint8Array(cipher.update(input)) };
-};
-var nodeAesBackend = {
-  name: "node-crypto",
-  igeEncrypt,
-  igeDecrypt,
-  createCtr
-};
-var installNodeAesBackend = () => {
-  setAesBackend(nodeAesBackend);
-};
-
-// ../../packages/protocol/dist/secure/bytes.js
-var MAX_PACKET_BYTES = 16 * 1024 * 1024;
-var concatBytes2 = (...parts) => {
-  const length = parts.reduce((sum, part) => sum + part.length, 0);
-  const result = new Uint8Array(length);
-  let offset = 0;
-  for (const part of parts) {
-    result.set(part, offset);
-    offset += part.length;
-  }
-  return result;
-};
-var xorBytes = (left, right) => {
-  if (left.length !== right.length)
-    throw new RangeError("XOR inputs must have equal length");
-  const result = new Uint8Array(left.length);
-  for (let index = 0;index < result.length; index += 1) {
-    result[index] = left[index] ^ right[index];
-  }
-  return result;
-};
-var equalBytes2 = (left, right) => {
-  let difference = left.length ^ right.length;
-  const length = Math.max(left.length, right.length);
-  for (let index = 0;index < length; index += 1) {
-    difference |= (left[index] ?? 0) ^ (right[index] ?? 0);
-  }
-  return difference === 0;
-};
-var reverseBytes = (bytes) => Uint8Array.from(bytes).reverse();
-var int32LE = (value) => {
-  const bytes = new Uint8Array(4);
-  new DataView(bytes.buffer).setInt32(0, value, true);
-  return bytes;
-};
-var uint32LE = (value) => {
-  const bytes = new Uint8Array(4);
-  new DataView(bytes.buffer).setUint32(0, value, true);
-  return bytes;
-};
-var int64LE = (value) => {
-  const bytes = new Uint8Array(8);
-  new DataView(bytes.buffer).setBigInt64(0, value, true);
-  return bytes;
-};
-var readInt32LE = (bytes, offset) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getInt32(offset, true);
-var readInt64LE = (bytes, offset) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigInt64(offset, true);
-var hexToBytes = (hex) => {
-  if (hex.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(hex))
-    throw new RangeError("Invalid hexadecimal bytes");
-  return Uint8Array.from({ length: hex.length / 2 }, (_, index) => Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16));
-};
-// ../../node_modules/.bun/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/legacy.js
+// node_modules/@noble/hashes/esm/legacy.js
 var SHA1_IV = /* @__PURE__ */ Uint32Array.from([
   1732584193,
   4023233417,
@@ -43852,14 +43420,14 @@ class SHA1 extends HashMD {
 }
 var sha1 = /* @__PURE__ */ createHasher(() => new SHA1);
 
-// ../../packages/protocol/dist/secure/crypto.js
-var BLOCK_BYTES3 = 16;
+// node_modules/@inline-chat/protocol/dist/secure/crypto.js
+var BLOCK_BYTES = 16;
 var assertLength = (name, bytes, length) => {
   if (bytes.length !== length)
     throw new RangeError(`${name} must be ${length} bytes`);
 };
-var sha1Digest = (...parts) => sha1(concatBytes2(...parts));
-var sha256Digest = (...parts) => sha256(concatBytes2(...parts));
+var sha1Digest = (...parts) => sha1(concatBytes(...parts));
+var sha256Digest = (...parts) => sha256(concatBytes(...parts));
 var authKeyId = (authKey) => {
   assertLength("auth_key", authKey, 256);
   return sha1Digest(authKey).slice(12, 20);
@@ -43871,58 +43439,104 @@ var deriveV2Aes = (authKey, msgKey, direction) => {
   const sha256A = sha256Digest(msgKey, authKey.slice(x, x + 36));
   const sha256B = sha256Digest(authKey.slice(40 + x, 76 + x), msgKey);
   return {
-    key: concatBytes2(sha256A.slice(0, 8), sha256B.slice(8, 24), sha256A.slice(24, 32)),
-    iv: concatBytes2(sha256B.slice(0, 8), sha256A.slice(8, 24), sha256B.slice(24, 32))
+    key: concatBytes(sha256A.slice(0, 8), sha256B.slice(8, 24), sha256A.slice(24, 32)),
+    iv: concatBytes(sha256B.slice(0, 8), sha256A.slice(8, 24), sha256B.slice(24, 32))
   };
 };
-var computeV2MsgKeyDigest = (authKey, plaintext, direction) => {
+var computeV2MsgKey = (authKey, plaintext, direction) => {
   assertLength("auth_key", authKey, 256);
   const x = direction === "client-to-server" ? 0 : 8;
-  return sha256Digest(authKey.slice(88 + x, 120 + x), plaintext);
+  return sha256Digest(authKey.slice(88 + x, 120 + x), plaintext).slice(8, 24);
 };
-var msgKeyFromDigest = (digest) => digest.slice(8, 24);
-var quickAckIdFromDigest = (digest) => new DataView(digest.buffer, digest.byteOffset, 4).getUint32(0, true) & 2147483647;
-var computeV2MsgKey = (authKey, plaintext, direction) => msgKeyFromDigest(computeV2MsgKeyDigest(authKey, plaintext, direction));
+var computeV2QuickAckId = (authKey, plaintext, direction) => {
+  assertLength("auth_key", authKey, 256);
+  const x = direction === "client-to-server" ? 0 : 8;
+  const digest = sha256Digest(authKey.slice(88 + x, 120 + x), plaintext);
+  return new DataView(digest.buffer, digest.byteOffset, 4).getUint32(0, true) & 2147483647;
+};
 var aesIgeEncrypt = (plaintext, key, iv) => {
   assertLength("AES-256 key", key, 32);
   assertLength("AES-IGE IV", iv, 32);
-  if (plaintext.length % BLOCK_BYTES3 !== 0)
+  if (plaintext.length % BLOCK_BYTES !== 0)
     throw new RangeError("AES-IGE plaintext must be block aligned");
-  return getAesBackend().igeEncrypt(plaintext, key, iv);
+  const result = new Uint8Array(plaintext.length);
+  let previousCipher = iv.slice(0, 16);
+  let previousPlain = iv.slice(16, 32);
+  for (let offset = 0;offset < plaintext.length; offset += BLOCK_BYTES) {
+    const plain = plaintext.slice(offset, offset + BLOCK_BYTES);
+    const encrypted = ecb(key, { disablePadding: true }).encrypt(xorBytes(plain, previousCipher));
+    const output = xorBytes(encrypted, previousPlain);
+    result.set(output, offset);
+    previousCipher = Uint8Array.from(output);
+    previousPlain = Uint8Array.from(plain);
+  }
+  return result;
 };
 var aesIgeDecrypt = (ciphertext, key, iv) => {
   assertLength("AES-256 key", key, 32);
   assertLength("AES-IGE IV", iv, 32);
-  if (ciphertext.length % BLOCK_BYTES3 !== 0)
+  if (ciphertext.length % BLOCK_BYTES !== 0)
     throw new RangeError("AES-IGE ciphertext must be block aligned");
-  return getAesBackend().igeDecrypt(ciphertext, key, iv);
+  const result = new Uint8Array(ciphertext.length);
+  let previousCipher = iv.slice(0, 16);
+  let previousPlain = iv.slice(16, 32);
+  for (let offset = 0;offset < ciphertext.length; offset += BLOCK_BYTES) {
+    const encrypted = ciphertext.slice(offset, offset + BLOCK_BYTES);
+    const decrypted = ecb(key, { disablePadding: true }).decrypt(xorBytes(encrypted, previousPlain));
+    const plain = xorBytes(decrypted, previousCipher);
+    result.set(plain, offset);
+    previousCipher = Uint8Array.from(encrypted);
+    previousPlain = Uint8Array.from(plain);
+  }
+  return result;
 };
 
 class AesCtrStream {
-  #state;
+  #key;
+  #counter;
+  #keystream = new Uint8Array(0);
+  #position = 0;
   constructor(key, iv) {
     assertLength("AES-256 key", key, 32);
     assertLength("AES-CTR IV", iv, 16);
-    this.#state = getAesBackend().createCtr(key.slice(), iv.slice());
+    this.#key = key.slice();
+    this.#counter = iv.slice();
   }
   process(input) {
-    return this.#state.process(input);
+    const output = new Uint8Array(input.length);
+    for (let index = 0;index < input.length; index += 1) {
+      if (this.#position === this.#keystream.length) {
+        this.#keystream = Uint8Array.from(ecb(this.#key, { disablePadding: true }).encrypt(this.#counter));
+        this.#position = 0;
+        this.#incrementCounter();
+      }
+      output[index] = input[index] ^ this.#keystream[this.#position];
+      this.#position += 1;
+    }
+    return output;
+  }
+  #incrementCounter() {
+    for (let index = this.#counter.length - 1;index >= 0; index -= 1) {
+      this.#counter[index] = this.#counter[index] + 1 & 255;
+      if (this.#counter[index] !== 0)
+        return;
+    }
   }
 }
 
-// ../../packages/protocol/dist/secure/tl.js
+// node_modules/@inline-chat/protocol/dist/secure/tl.js
 var TL_VECTOR_CONSTRUCTOR = 481674261;
 var encodeTlBytes = (value) => {
   if (value.length > 16777215 || value.length > MAX_PACKET_BYTES)
     throw new RangeError("TL bytes exceed the supported limit");
   const header = value.length < 254 ? Uint8Array.of(value.length) : Uint8Array.of(254, value.length & 255, value.length >>> 8 & 255, value.length >>> 16 & 255);
   const padding = new Uint8Array((4 - (header.length + value.length) % 4) % 4);
-  return concatBytes2(header, value, padding);
+  return concatBytes(header, value, padding);
 };
 var encodeTlVector = (elements) => {
   if (elements.length > 8192)
     throw new RangeError("TL vector exceeds the supported limit");
-  return concatBytes2(uint32LE(TL_VECTOR_CONSTRUCTOR), int32LE(elements.length), ...elements);
+  return concatBytes(uint32LE(TL_VECTOR_CONSTRUCTOR), int32LE(elements.length), ...elements);
 };
 
 class TlReader {
@@ -43996,17 +43610,17 @@ class TlReader {
   }
 }
 
-// ../../packages/protocol/dist/secure/binding.js
+// node_modules/@inline-chat/protocol/dist/secure/binding.js
 var BindingConstructor = {
   bindAuthKeyInner: 1973679973,
   bindTempAuthKey: 3453233669
 };
 var keyIdLong = (key) => new DataView(authKeyId(key).buffer).getBigInt64(0, true);
-var encodeBindAuthKeyInner = (value) => concatBytes2(uint32LE(BindingConstructor.bindAuthKeyInner), int64LE(value.nonce), int64LE(value.temporaryAuthKeyId), int64LE(value.permanentAuthKeyId), int64LE(value.temporarySessionId), int32LE(value.expiresAt));
+var encodeBindAuthKeyInner = (value) => concatBytes(uint32LE(BindingConstructor.bindAuthKeyInner), int64LE(value.nonce), int64LE(value.temporaryAuthKeyId), int64LE(value.permanentAuthKeyId), int64LE(value.temporarySessionId), int32LE(value.expiresAt));
 var encodeBindTempAuthKey = (value) => {
   if (value.encryptedMessage.length !== 104)
     throw new RangeError("Binding proof must be exactly 104 bytes");
-  return concatBytes2(uint32LE(BindingConstructor.bindTempAuthKey), int64LE(value.permanentAuthKeyId), int64LE(value.nonce), int32LE(value.expiresAt), encodeTlBytes(value.encryptedMessage));
+  return concatBytes(uint32LE(BindingConstructor.bindTempAuthKey), int64LE(value.permanentAuthKeyId), int64LE(value.nonce), int32LE(value.expiresAt), encodeTlBytes(value.encryptedMessage));
 };
 var deriveV1Aes = (authKey, messageKey) => {
   if (authKey.length !== 256 || messageKey.length !== 16)
@@ -44016,8 +43630,8 @@ var deriveV1Aes = (authKey, messageKey) => {
   const c = sha1Digest(authKey.slice(64, 96), messageKey);
   const d = sha1Digest(messageKey, authKey.slice(96, 128));
   return {
-    key: concatBytes2(a.slice(0, 8), b.slice(8, 20), c.slice(4, 16)),
-    iv: concatBytes2(a.slice(8, 20), b.slice(0, 8), c.slice(16, 20), d.slice(0, 8))
+    key: concatBytes(a.slice(0, 8), b.slice(8, 20), c.slice(4, 16)),
+    iv: concatBytes(a.slice(8, 20), b.slice(0, 8), c.slice(16, 20), d.slice(0, 8))
   };
 };
 var createTemporaryKeyBindingProof = (input) => {
@@ -44031,17 +43645,17 @@ var createTemporaryKeyBindingProof = (input) => {
     temporarySessionId: input.temporarySessionId,
     expiresAt: input.expiresAt
   });
-  const plaintextWithoutPadding = concatBytes2(input.randomInt128, int64LE(input.messageId), int32LE(0), int32LE(inner.length), inner);
+  const plaintextWithoutPadding = concatBytes(input.randomInt128, int64LE(input.messageId), int32LE(0), int32LE(inner.length), inner);
   const messageKey = sha1Digest(plaintextWithoutPadding).slice(4, 20);
   const { key, iv } = deriveV1Aes(input.permanentAuthKey, messageKey);
-  return concatBytes2(authKeyId(input.permanentAuthKey), messageKey, aesIgeEncrypt(concatBytes2(plaintextWithoutPadding, input.randomPadding), key, iv));
+  return concatBytes(authKeyId(input.permanentAuthKey), messageKey, aesIgeEncrypt(concatBytes(plaintextWithoutPadding, input.randomPadding), key, iv));
 };
-// ../../packages/protocol/dist/secure/application.js
+// node_modules/@inline-chat/protocol/dist/secure/application.js
 var INLINE_RESULT_CONSTRUCTOR = 2889735252;
 var INLINE_UPDATE_CONSTRUCTOR = 3695258776;
 var INLINE_INVOKE_CONSTRUCTOR = 3950856870;
 var INLINE_REALTIME_LAYER = 3;
-var encodeInlineInvoke = (payload, layer = INLINE_REALTIME_LAYER) => concatBytes2(uint32LE(INLINE_INVOKE_CONSTRUCTOR), int32LE(layer), encodeTlBytes(payload));
+var encodeInlineInvoke = (payload, layer = INLINE_REALTIME_LAYER) => concatBytes(uint32LE(INLINE_INVOKE_CONSTRUCTOR), int32LE(layer), encodeTlBytes(payload));
 var decodeInlineApplicationObject = (bytes) => {
   if (bytes.length < 8)
     throw new RangeError("Truncated Inline application object");
@@ -44061,7 +43675,7 @@ var decodeInlineApplicationObject = (bytes) => {
     return { kind: "update", payload };
   throw new RangeError("Unknown Inline application constructor");
 };
-// ../../packages/protocol/dist/secure/carrier.js
+// node_modules/@inline-chat/protocol/dist/secure/carrier.js
 var FORBIDDEN_PREFIXES = new Set([1145128264, 1414745936, 542393671, 1230262351, 4008636142, 3722304989, 33620758]);
 var encodeAbridgedPacket = (payload, quickAckRequested = false) => {
   if (payload.length === 0 || payload.length > MAX_PACKET_BYTES || payload.length % 4 !== 0)
@@ -44069,10 +43683,10 @@ var encodeAbridgedPacket = (payload, quickAckRequested = false) => {
   const words = payload.length / 4;
   const quickAckBit = quickAckRequested ? 128 : 0;
   if (words < 127)
-    return concatBytes2(Uint8Array.of(words | quickAckBit), payload);
+    return concatBytes(Uint8Array.of(words | quickAckBit), payload);
   if (words > 16777215)
     throw new RangeError("Abridged payload is too large");
-  return concatBytes2(Uint8Array.of(127 | quickAckBit, words & 255, words >>> 8 & 255, words >>> 16 & 255), payload);
+  return concatBytes(Uint8Array.of(127 | quickAckBit, words & 255, words >>> 8 & 255, words >>> 16 & 255), payload);
 };
 var decodeAbridgedFrame = (frame) => {
   if (frame.length === 4 && (frame[0] & 128) !== 0) {
@@ -44114,9 +43728,9 @@ var createObfuscatedClientHeader = (randomHeader, dc = 1) => {
   const outbound = new AesCtrStream(plaintext.slice(8, 40), plaintext.slice(40, 56));
   const inbound = new AesCtrStream(reversed.slice(8, 40), reversed.slice(40, 56));
   const encryptedHeader = outbound.process(plaintext);
-  return { wireHeader: concatBytes2(plaintext.slice(0, 56), encryptedHeader.slice(56)), outbound, inbound };
+  return { wireHeader: concatBytes(plaintext.slice(0, 56), encryptedHeader.slice(56)), outbound, inbound };
 };
-// ../../packages/protocol/dist/secure/handshake.js
+// node_modules/@inline-chat/protocol/dist/secure/handshake.js
 var TELEGRAM_DH_PRIME = hexToBytes("c71caeb9c6b1c9048e6c522f70f13f73980d40238e3e21c14934d037563d930f" + "48198a0aa7c14058229493d22530f4dbfa336f6e0ac925139543aed44cce7c372" + "0fd51f69458705ac68cd4fe6b6b13abdc9746512969328454f18faf8c595f642" + "477fe96bb2a941d5bcd1d4ac8cc49880708fa9b378e3c4f3a9060bee67cf9a4a" + "4a695811051907e162753b56b0f6b410dba74d8a84b2a14b3144e0ef1284754f" + "d17ed950d5965b4b9dd46582db1178d169c6bc465b0d6ff9ca3928fef5b9ae4e" + "418fc15e83ebea0f87fa9ff5eed70050ded2849f47bf959d956850ce929851f0d" + "8115f635b105ee2e4e15d04b2454bf6f4fadf034b10403119cd8e3b92fcc5b");
 
 class RsaPadRetry extends Error {
@@ -44164,10 +43778,10 @@ var rsaPadAttempt = (serializedInner, randomPadding, tempKey, modulusBytes, expo
   if (tempKey.length !== 32 || modulusBytes.length !== 256 || exponentBytes.length === 0) {
     throw new RangeError("Invalid RSA_PAD key material");
   }
-  const dataWithPadding = concatBytes2(serializedInner, randomPadding);
-  const dataWithHash = concatBytes2(reverseBytes(dataWithPadding), sha256Digest(tempKey, dataWithPadding));
+  const dataWithPadding = concatBytes(serializedInner, randomPadding);
+  const dataWithHash = concatBytes(reverseBytes(dataWithPadding), sha256Digest(tempKey, dataWithPadding));
   const aesEncrypted = aesIgeEncrypt(dataWithHash, tempKey, new Uint8Array(32));
-  const keyAesEncrypted = concatBytes2(xorBytes(tempKey, sha256Digest(aesEncrypted)), aesEncrypted);
+  const keyAesEncrypted = concatBytes(xorBytes(tempKey, sha256Digest(aesEncrypted)), aesEncrypted);
   const modulus = bigEndianBytesToBigInt(modulusBytes);
   const candidate = bigEndianBytesToBigInt(keyAesEncrypted);
   if (candidate >= modulus)
@@ -44194,8 +43808,8 @@ var deriveTemporaryAes = (newNonce, serverNonce) => {
   const nonceServer = sha1Digest(newNonce, serverNonce);
   const serverNonceHash = sha1Digest(serverNonce, newNonce);
   return {
-    key: concatBytes2(nonceServer, serverNonceHash.slice(0, 12)),
-    iv: concatBytes2(serverNonceHash.slice(12, 20), sha1Digest(newNonce, newNonce), newNonce.slice(0, 4))
+    key: concatBytes(nonceServer, serverNonceHash.slice(0, 12)),
+    iv: concatBytes(serverNonceHash.slice(12, 20), sha1Digest(newNonce, newNonce), newNonce.slice(0, 4))
   };
 };
 var authKeyAuxHash = (authKey) => sha1Digest(authKey).slice(0, 8);
@@ -44277,7 +43891,7 @@ var validateDhParameters = (primeBytes, generator, randomBytes, rounds = 64) => 
   if (prime <= 1n << 2047n || prime >= 1n << 2048n || !generatorMatchesPrime(prime, generator)) {
     throw new RangeError("Unsafe DH parameters");
   }
-  if (!equalBytes2(primeBytes, TELEGRAM_DH_PRIME)) {
+  if (!equalBytes(primeBytes, TELEGRAM_DH_PRIME)) {
     if (!isProbablePrime(prime, randomBytes, rounds) || !isProbablePrime((prime - 1n) / 2n, randomBytes, rounds)) {
       throw new RangeError("DH prime is not safe");
     }
@@ -44335,7 +43949,7 @@ var factorPq = (pqBytes, randomBytes, maximumAttempts = 32) => {
   }
   throw new RangeError("Unable to factor pq challenge");
 };
-// ../../packages/protocol/dist/secure/handshakeSchema.js
+// node_modules/@inline-chat/protocol/dist/secure/handshakeSchema.js
 var HandshakeConstructor = {
   resPq: 85337187,
   pQInnerDataDc: 2851430293,
@@ -44357,7 +43971,7 @@ var fixed = (name, value, length) => {
     throw new RangeError(`${name} must be ${length} bytes`);
   return value;
 };
-var encodeReqPqMulti = (nonce) => concatBytes2(constructor(HandshakeConstructor.reqPqMulti), fixed("nonce", nonce, 16));
+var encodeReqPqMulti = (nonce) => concatBytes(constructor(HandshakeConstructor.reqPqMulti), fixed("nonce", nonce, 16));
 var decodeResPq = (body) => {
   const reader = constructorReader(body, HandshakeConstructor.resPq);
   const nonce = reader.readFixed(16);
@@ -44367,8 +43981,8 @@ var decodeResPq = (body) => {
   reader.expectEnd();
   return { nonce, serverNonce, pq, fingerprints };
 };
-var encodePqInnerData = (value) => concatBytes2(constructor(value.temporary ? HandshakeConstructor.pQInnerDataTempDc : HandshakeConstructor.pQInnerDataDc), encodeTlBytes(value.pq), encodeTlBytes(value.p), encodeTlBytes(value.q), fixed("nonce", value.nonce, 16), fixed("server_nonce", value.serverNonce, 16), fixed("new_nonce", value.newNonce, 32), int32LE(value.dc), ...value.temporary ? [int32LE(value.expiresIn ?? 0)] : []);
-var encodeReqDhParams = (value) => concatBytes2(constructor(HandshakeConstructor.reqDhParams), fixed("nonce", value.nonce, 16), fixed("server_nonce", value.serverNonce, 16), encodeTlBytes(value.p), encodeTlBytes(value.q), int64LE(value.fingerprint), encodeTlBytes(value.encryptedData));
+var encodePqInnerData = (value) => concatBytes(constructor(value.temporary ? HandshakeConstructor.pQInnerDataTempDc : HandshakeConstructor.pQInnerDataDc), encodeTlBytes(value.pq), encodeTlBytes(value.p), encodeTlBytes(value.q), fixed("nonce", value.nonce, 16), fixed("server_nonce", value.serverNonce, 16), fixed("new_nonce", value.newNonce, 32), int32LE(value.dc), ...value.temporary ? [int32LE(value.expiresIn ?? 0)] : []);
+var encodeReqDhParams = (value) => concatBytes(constructor(HandshakeConstructor.reqDhParams), fixed("nonce", value.nonce, 16), fixed("server_nonce", value.serverNonce, 16), encodeTlBytes(value.p), encodeTlBytes(value.q), int64LE(value.fingerprint), encodeTlBytes(value.encryptedData));
 var decodeServerDhParamsOk = (body) => {
   const reader = constructorReader(body, HandshakeConstructor.serverDhParamsOk);
   const value = { nonce: reader.readFixed(16), serverNonce: reader.readFixed(16), encryptedAnswer: reader.readBytes() };
@@ -44406,8 +44020,8 @@ var decodeServerDhInnerDataPrefix = (plaintext) => {
   };
   return { value, consumed: 4 + reader.offset };
 };
-var encodeClientDhInnerData = (value) => concatBytes2(constructor(HandshakeConstructor.clientDhInnerData), fixed("nonce", value.nonce, 16), fixed("server_nonce", value.serverNonce, 16), int64LE(value.retryId), encodeTlBytes(value.gB));
-var encodeSetClientDhParams = (nonce, serverNonce, encryptedData) => concatBytes2(constructor(HandshakeConstructor.setClientDhParams), fixed("nonce", nonce, 16), fixed("server_nonce", serverNonce, 16), encodeTlBytes(encryptedData));
+var encodeClientDhInnerData = (value) => concatBytes(constructor(HandshakeConstructor.clientDhInnerData), fixed("nonce", value.nonce, 16), fixed("server_nonce", value.serverNonce, 16), int64LE(value.retryId), encodeTlBytes(value.gB));
+var encodeSetClientDhParams = (nonce, serverNonce, encryptedData) => concatBytes(constructor(HandshakeConstructor.setClientDhParams), fixed("nonce", nonce, 16), fixed("server_nonce", serverNonce, 16), encodeTlBytes(encryptedData));
 var decodeDhGen = (body) => {
   if (body.length !== 52)
     throw new RangeError("Invalid DH generation response");
@@ -44420,7 +44034,7 @@ var decodeDhGen = (body) => {
 var encodeUnencryptedRecord = (messageId, body) => {
   if (body.length === 0 || body.length % 4 !== 0)
     throw new RangeError("Unencrypted handshake body must be aligned");
-  return concatBytes2(new Uint8Array(8), int64LE(messageId), int32LE(body.length), body);
+  return concatBytes(new Uint8Array(8), int64LE(messageId), int32LE(body.length), body);
 };
 var decodeUnencryptedRecord = (packet) => {
   if (packet.length < 24 || readInt64LE(packet, 0) !== 0n)
@@ -44439,7 +44053,7 @@ var constructorReaderPrefix = (body, expected) => {
     throw new RangeError("Unexpected TL constructor");
   return new TlReader(body.slice(4));
 };
-// ../../packages/protocol/dist/secure/handshakeState.js
+// node_modules/@inline-chat/protocol/dist/secure/handshakeState.js
 var PQ = hexToBytes("17ed48941a08f981");
 var P = hexToBytes("494c553b");
 var Q = hexToBytes("53911073");
@@ -44474,7 +44088,7 @@ class InlineHandshakeClient {
   }
   #receivePq(body, phase) {
     const response = decodeResPq(body);
-    if (!equalBytes2(response.nonce, phase.nonce))
+    if (!equalBytes(response.nonce, phase.nonce))
       throw new RangeError("Handshake nonce mismatch");
     const rsaKey = this.configuration.rsaKeys.find((key) => response.fingerprints.includes(key.fingerprint));
     if (!rsaKey)
@@ -44514,7 +44128,7 @@ class InlineHandshakeClient {
     const response = decodeServerDhParams(body);
     this.#requireNonceChain(response.nonce, response.serverNonce, phase.nonce, phase.serverNonce);
     if (response.kind === "fail") {
-      if (!equalBytes2(response.newNonceHash, serverDhFailureHash(phase.newNonce))) {
+      if (!equalBytes(response.newNonceHash, serverDhFailureHash(phase.newNonce))) {
         throw new RangeError("Invalid server DH failure confirmation");
       }
       this.#phase = { kind: "complete" };
@@ -44524,7 +44138,7 @@ class InlineHandshakeClient {
     const plaintext = aesIgeDecrypt(response.encryptedAnswer, temporary.key, temporary.iv);
     const decoded = decodeServerDhInnerDataPrefix(plaintext.slice(20));
     const paddingLength = plaintext.length - 20 - decoded.consumed;
-    if (paddingLength < 0 || paddingLength > 15 || !equalBytes2(plaintext.slice(0, 20), sha1Digest(plaintext.slice(20, 20 + decoded.consumed)))) {
+    if (paddingLength < 0 || paddingLength > 15 || !equalBytes(plaintext.slice(0, 20), sha1Digest(plaintext.slice(20, 20 + decoded.consumed)))) {
       throw new RangeError("Invalid server DH inner confirmation");
     }
     const inner = decoded.value;
@@ -44557,7 +44171,7 @@ class InlineHandshakeClient {
     });
     const paddingLength = (16 - (20 + serialized.length) % 16) % 16;
     const temporary = deriveTemporaryAes(value.newNonce, value.serverNonce);
-    const encrypted = aesIgeEncrypt(concatBytes2(sha1Digest(serialized), serialized, this.configuration.randomBytes(paddingLength)), temporary.key, temporary.iv);
+    const encrypted = aesIgeEncrypt(concatBytes(sha1Digest(serialized), serialized, this.configuration.randomBytes(paddingLength)), temporary.key, temporary.iv);
     this.#phase = { kind: "dh-result", ...value, exponent, authKey };
     return encodeSetClientDhParams(value.nonce, value.serverNonce, encrypted);
   }
@@ -44565,7 +44179,7 @@ class InlineHandshakeClient {
     const response = decodeDhGen(body);
     this.#requireNonceChain(response.nonce, response.serverNonce, phase.nonce, phase.serverNonce);
     const index = response.kind === "ok" ? 1 : response.kind === "retry" ? 2 : 3;
-    if (!equalBytes2(response.nonceHash, newNonceHash(phase.newNonce, index, phase.authKey))) {
+    if (!equalBytes(response.nonceHash, newNonceHash(phase.newNonce, index, phase.authKey))) {
       throw new RangeError("Invalid DH generation confirmation");
     }
     if (response.kind === "fail")
@@ -44599,7 +44213,7 @@ class InlineHandshakeClient {
     };
   }
   #requireNonceChain(actualNonce, actualServer, nonce, serverNonce) {
-    if (!equalBytes2(actualNonce, nonce) || !equalBytes2(actualServer, serverNonce)) {
+    if (!equalBytes(actualNonce, nonce) || !equalBytes(actualServer, serverNonce)) {
       throw new RangeError("Handshake nonce chain mismatch");
     }
   }
@@ -44609,7 +44223,7 @@ var makeRsaPublicKey = (modulus, exponent) => ({
   exponent,
   fingerprint: rsaPublicKeyFingerprint(modulus, exponent)
 });
-// ../../packages/protocol/dist/secure/record.js
+// node_modules/@inline-chat/protocol/dist/secure/record.js
 class InvalidEncryptedRecord extends Error {
   constructor() {
     super("Invalid Inline Protocol encrypted record");
@@ -44630,13 +44244,13 @@ var encryptRecord = (authKey, direction, fields, padding) => {
     throw new RangeError("Record body must be aligned and within limits");
   if (padding.length < 12 || padding.length > 1024)
     throw new RangeError("Record padding must be 12...1024 bytes");
-  const plaintext = concatBytes2(int64LE(fields.serverSalt), int64LE(fields.sessionId), int64LE(fields.messageId), int32LE(fields.sequenceNumber), int32LE(fields.body.length), fields.body, padding);
+  const plaintext = concatBytes(int64LE(fields.serverSalt), int64LE(fields.sessionId), int64LE(fields.messageId), int32LE(fields.sequenceNumber), int32LE(fields.body.length), fields.body, padding);
   if (plaintext.length % 16 !== 0 || 24 + plaintext.length > MAX_PACKET_BYTES) {
     throw new RangeError("Record plaintext must be block aligned and fit the carrier limit");
   }
   const msgKey = computeV2MsgKey(authKey, plaintext, direction);
   const { key, iv } = deriveV2Aes(authKey, msgKey, direction);
-  return concatBytes2(authKeyId(authKey), msgKey, aesIgeEncrypt(plaintext, key, iv));
+  return concatBytes(authKeyId(authKey), msgKey, aesIgeEncrypt(plaintext, key, iv));
 };
 var decryptRecordWithMetadata = (record, authKey, validation) => {
   try {
@@ -44646,10 +44260,9 @@ var decryptRecordWithMetadata = (record, authKey, validation) => {
     const msgKey = record.slice(8, 24);
     const { key, iv } = deriveV2Aes(authKey, msgKey, validation.direction);
     const plaintext = aesIgeDecrypt(record.slice(24), key, iv);
-    const digest = computeV2MsgKeyDigest(authKey, plaintext, validation.direction);
-    const expectedMsgKey = msgKeyFromDigest(digest);
-    const validKeyId = equalBytes2(receivedKeyId, authKeyId(authKey));
-    const validMessageKey = equalBytes2(msgKey, expectedMsgKey);
+    const expectedMsgKey = computeV2MsgKey(authKey, plaintext, validation.direction);
+    const validKeyId = equalBytes(receivedKeyId, authKeyId(authKey));
+    const validMessageKey = equalBytes(msgKey, expectedMsgKey);
     if (!validKeyId || !validMessageKey)
       throw new InvalidEncryptedRecord;
     const bodyLength = readInt32LE(plaintext, 28);
@@ -44675,7 +44288,7 @@ var decryptRecordWithMetadata = (record, authKey, validation) => {
       throw new RecoverableEncryptedRecordError(48, fields);
     return {
       fields,
-      quickAckId: quickAckIdFromDigest(digest)
+      quickAckId: computeV2QuickAckId(authKey, plaintext, validation.direction)
     };
   } catch (error) {
     if (error instanceof InvalidEncryptedRecord || error instanceof RecoverableEncryptedRecordError)
@@ -44684,7 +44297,7 @@ var decryptRecordWithMetadata = (record, authKey, validation) => {
   }
 };
 var decryptRecord = (record, authKey, validation) => decryptRecordWithMetadata(record, authKey, validation).fields;
-// ../../packages/protocol/dist/secure/session.js
+// node_modules/@inline-chat/protocol/dist/secure/session.js
 class MessageIdGenerator {
   #last = 0n;
   next(estimatedServerUnixMillis, randomLowBits, modulo) {
@@ -44746,10 +44359,8 @@ class AuthenticatedServerClock {
     return this.#serverUnixMilliseconds + elapsed;
   }
 }
-// ../../packages/protocol/dist/secure/service.js
-var MAX_CONTAINER_MESSAGES = 1024;
+// node_modules/@inline-chat/protocol/dist/secure/service.js
 var MAX_SERVICE_MESSAGE_IDS = 8192;
-var MAX_GZIP_OUTPUT_BYTES = MAX_PACKET_BYTES;
 var ServiceConstructor = {
   rpcResult: 4082920705,
   rpcError: 558156313,
@@ -44788,7 +44399,7 @@ var ServiceConstructor = {
   httpWait: 2459514271
 };
 var constructor2 = (value) => uint32LE(value);
-var fixedBody = (id, ...parts) => concatBytes2(constructor2(id), ...parts);
+var fixedBody = (id, ...parts) => concatBytes(constructor2(id), ...parts);
 var requireAlignedBody = (body) => {
   if (body.length < 4 || body.length > MAX_PACKET_BYTES || body.length % 4 !== 0) {
     throw new RangeError("MTProto body must be non-empty, bounded, and four-byte aligned");
@@ -44804,19 +44415,6 @@ var decodeMessageIds = (body, expected) => {
   const ids = reader.readVector((item) => item.readLong(), MAX_SERVICE_MESSAGE_IDS);
   reader.expectEnd();
   return ids;
-};
-var encodeMessageContainer = (messages) => {
-  if (messages.length < 1 || messages.length > MAX_CONTAINER_MESSAGES) {
-    throw new RangeError("Invalid message-container count");
-  }
-  const encoded = messages.map((message) => {
-    requireAlignedBody(message.body);
-    if (readInt32LE(message.body, 0) >>> 0 === ServiceConstructor.msgContainer) {
-      throw new RangeError("Nested message containers are forbidden");
-    }
-    return concatBytes2(int64LE(message.messageId), int32LE(message.sequenceNumber), int32LE(message.body.length), message.body);
-  });
-  return fixedBody(ServiceConstructor.msgContainer, int32LE(messages.length), ...encoded);
 };
 var decodeRpcResult = (body) => {
   const reader = readerFor(body, ServiceConstructor.rpcResult);
@@ -44852,19 +44450,6 @@ var decodeBadMessageNotification = (body) => {
   };
 };
 var encodePing = (pingId) => fixedBody(ServiceConstructor.ping, int64LE(pingId));
-var decodeGzipPacked = (body, gunzip, maximumOutputBytes = MAX_GZIP_OUTPUT_BYTES) => {
-  if (maximumOutputBytes < 4 || maximumOutputBytes > MAX_GZIP_OUTPUT_BYTES) {
-    throw new RangeError("Invalid gzip output limit");
-  }
-  const reader = readerFor(body, ServiceConstructor.gzipPacked);
-  const packed = reader.readBytes();
-  reader.expectEnd();
-  const unpacked = gunzip(packed, maximumOutputBytes);
-  if (unpacked.length < 4 || unpacked.length > maximumOutputBytes || unpacked.length % 4 !== 0) {
-    throw new RangeError("Invalid decompressed MTProto object");
-  }
-  return unpacked;
-};
 var serviceConstructor = (body) => {
   requireAlignedBody(body);
   return readInt32LE(body, 0) >>> 0;
@@ -44875,7 +44460,7 @@ var readerFor = (body, expected) => {
     throw new RangeError("Unexpected service constructor");
   return new TlReader(body.slice(4));
 };
-// ../../packages/protocol/dist/secure/serverSession.js
+// node_modules/@inline-chat/protocol/dist/secure/serverSession.js
 var MAX_DEFERRED_INVOKE_AFTER_BYTES = 32 * 1024 * 1024;
 var NON_CONTENT_CONSTRUCTORS = new Set([
   ServiceConstructor.msgContainer,
@@ -44891,8 +44476,7 @@ var NON_CONTENT_CONSTRUCTORS = new Set([
   ServiceConstructor.pong,
   ServiceConstructor.httpWait
 ]);
-// ../../packages/sdk/dist/realtime/v3-connection.js
-installNodeAesBackend();
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-connection.js
 var BOOL_TRUE = 2574415285;
 var CONNECT_TIMEOUT_MS = 30000;
 var REQUEST_TIMEOUT_MS = 60000;
@@ -44903,12 +44487,47 @@ var DEFAULT_MAX_PENDING_REQUESTS = 64;
 var DEFAULT_MAX_PENDING_REQUEST_BYTES = 32 * 1024 * 1024;
 var TEMPORARY_KEY_LIFETIME_MILLISECONDS = 86400000;
 var TEMPORARY_KEY_ROTATION_MILLISECONDS = TEMPORARY_KEY_LIFETIME_MILLISECONDS * 0.8;
-var ACK_FLUSH_DELAY_MS = 30000;
-var ACK_FLUSH_PENDING = 16;
-var MAXIMUM_GZIP_OUTPUT_BYTES = 16 * 1024 * 1024;
-var gunzip = (packed, maximumOutputBytes) => Uint8Array.from(gunzipSync(packed, { maxOutputLength: Math.min(maximumOutputBytes, MAXIMUM_GZIP_OUTPUT_BYTES) }));
-var unpackGzip = (body) => serviceConstructor(body) === ServiceConstructor.gzipPacked ? decodeGzipPacked(body, gunzip, MAXIMUM_GZIP_OUTPUT_BYTES) : body;
-var readOnlyRpcMethods = READ_ONLY_RPC_METHODS;
+var readOnlyRpcMethods = new Set([
+  Method.GET_ME,
+  Method.GET_PEER_PHOTO,
+  Method.GET_CHAT_HISTORY,
+  Method.GET_SPACE_MEMBERS,
+  Method.GET_CHAT_PARTICIPANTS,
+  Method.GET_CHATS,
+  Method.GET_USER_SETTINGS,
+  Method.GET_UPDATES_STATE,
+  Method.GET_CHAT,
+  Method.GET_UPDATES,
+  Method.SEARCH_MESSAGES,
+  Method.LIST_BOTS,
+  Method.REVEAL_BOT_TOKEN,
+  Method.GET_MESSAGES,
+  Method.GET_BOT_COMMANDS,
+  Method.GET_PEER_BOT_COMMANDS,
+  Method.GET_BOT_PRESENCE,
+  Method.GET_SESSIONS,
+  Method.CHECK_USERNAME,
+  Method.GET_SPACE_URL_PREVIEW_EXCLUSIONS,
+  Method.GET_USER_GROUPS,
+  Method.GET_SPACE_SETTINGS,
+  Method.GET_SPACE,
+  Method.GET_THREAD_REFERENCES,
+  Method.GET_THREAD_SUBTHREADS,
+  Method.GET_PEER_BOTS,
+  Method.GET_MY_BOT_CAPABILITIES,
+  Method.GET_GRID,
+  Method.GET_GRID_HOME,
+  Method.GET_EXTERNAL_PROFILE_PHOTO,
+  Method.GET_CHAT_TRANSCRIPT,
+  Method.SEARCH_EXTERNAL_RESOURCES,
+  Method.LIST_CONNECTORS,
+  Method.SEARCH_USERS,
+  Method.RESOLVE_URL_PREVIEW,
+  Method.GET_BOT_AGENT,
+  Method.LIST_BOT_AGENTS,
+  Method.GET_CONNECTOR_CONFIG,
+  Method.GET_UPLOAD_STATE
+]);
 var temporaryAuthorizationNeedsRotation = (expiresAt, authenticatedServerNowMilliseconds) => {
   if (!Number.isSafeInteger(expiresAt) || !Number.isFinite(authenticatedServerNowMilliseconds))
     return true;
@@ -45064,9 +44683,6 @@ class InlineProtocolV3Connection {
   #closing = false;
   #didNotifyClose = false;
   #rotationTimer;
-  #pendingAcknowledgements = new Set;
-  #sentContainers = new Map;
-  #acknowledgementTimer;
   #rotationDue = false;
   constructor(options) {
     this.#options = options;
@@ -45114,12 +44730,6 @@ class InlineProtocolV3Connection {
       clearTimeout(this.#rotationTimer);
       this.#rotationTimer = undefined;
     }
-    try {
-      if (this.#authorization && this.#carrier)
-        this.#flushAcknowledgements();
-    } catch {
-      this.#takeAcknowledgements();
-    }
     const socket = this.#socket;
     this.#socket = undefined;
     const closed = new InlineProtocolV3Error("closed", "Inline Protocol connection closed");
@@ -45141,7 +44751,7 @@ class InlineProtocolV3Connection {
   }
   async#invoke(request, onDispatched, signal) {
     const payload = RealtimeV3Request.toBinary(request);
-    const result = await this.#sendContent(encodeInlineInvoke(payload, INLINE_REALTIME_LAYER), onDispatched, signal);
+    const result = await this.#sendContent(encodeInlineInvoke(payload), onDispatched, signal);
     let application2;
     try {
       application2 = decodeInlineApplicationObject(result);
@@ -45422,7 +45032,7 @@ class InlineProtocolV3Connection {
       if (this.#pendingContent.get(initialMessageId) !== pending)
         return;
       try {
-        this.#sendContentRecord(initialMessageId, sequenceNumber, body);
+        this.#sendEncrypted(initialMessageId, sequenceNumber, body, true);
         onDispatched?.();
       } catch (error) {
         this.#pendingContent.delete(initialMessageId);
@@ -45449,10 +45059,9 @@ class InlineProtocolV3Connection {
   }
   async#runReceiveLoop() {
     for (;; ) {
-      const record2 = await this.#receiveEncrypted();
-      if (record2.sequenceNumber % 2 === 1)
-        this.#queueAcknowledgement(record2.messageId);
-      const fields = { ...record2, body: unpackGzip(record2.body) };
+      const fields = await this.#receiveEncrypted();
+      if (fields.sequenceNumber % 2 === 1)
+        await this.#sendAcknowledgements([fields.messageId]);
       const constructor3 = serviceConstructor(fields.body);
       if (constructor3 === ServiceConstructor.newSessionCreated) {
         this.#setServerSalt(readInt64LE(fields.body, 20));
@@ -45472,14 +45081,10 @@ class InlineProtocolV3Connection {
         if (!pending)
           continue;
         this.#pendingContent.delete(result.requestMessageId);
-        for (const [containerId, container] of this.#sentContainers) {
-          if (container.requestMessageId === result.requestMessageId)
-            this.#sentContainers.delete(containerId);
-        }
         this.#releasePending(pending.body);
         clearTimeout(pending.timeout);
         pending.removeAbortListener?.();
-        pending.resolve({ messageId: result.requestMessageId, result: unpackGzip(result.result) });
+        pending.resolve({ messageId: result.requestMessageId, result: result.result });
         continue;
       }
       if (constructor3 === ServiceConstructor.pong) {
@@ -45509,12 +45114,7 @@ class InlineProtocolV3Connection {
     }
   }
   #handleBadMessage(body, serverMessageId) {
-    const notification = decodeBadMessageNotification(body);
-    const container = this.#sentContainers.get(notification.badMessageId);
-    const carried = container && container.sequenceNumber === notification.badSequenceNumber ? this.#pendingContent.get(container.requestMessageId) : undefined;
-    if (container)
-      this.#sentContainers.delete(notification.badMessageId);
-    const bad = carried ? { ...notification, badMessageId: container.requestMessageId, badSequenceNumber: carried.sequenceNumber } : notification;
+    const bad = decodeBadMessageNotification(body);
     const pending = this.#pendingContent.get(bad.badMessageId);
     const probeEntry = [...this.#pendingProbes.entries()].find(([, value]) => value.messageId === bad.badMessageId);
     if (!pending && !probeEntry || bad.badSequenceNumber !== (pending ?? probeEntry[1]).sequenceNumber) {
@@ -45594,56 +45194,9 @@ class InlineProtocolV3Connection {
     this.#sampleAuthenticatedServerMessage(fields.messageId);
     return fields;
   }
-  #queueAcknowledgement(messageId) {
-    this.#pendingAcknowledgements.add(messageId);
-    if (this.#pendingAcknowledgements.size >= ACK_FLUSH_PENDING) {
-      this.#flushAcknowledgements();
-      return;
-    }
-    if (this.#acknowledgementTimer === undefined) {
-      this.#acknowledgementTimer = setTimeout(() => {
-        this.#acknowledgementTimer = undefined;
-        try {
-          this.#flushAcknowledgements();
-        } catch {}
-      }, ACK_FLUSH_DELAY_MS);
-      this.#acknowledgementTimer.unref?.();
-    }
-  }
-  #takeAcknowledgements() {
-    if (this.#acknowledgementTimer !== undefined)
-      clearTimeout(this.#acknowledgementTimer);
-    this.#acknowledgementTimer = undefined;
-    const messageIds = [...this.#pendingAcknowledgements];
-    this.#pendingAcknowledgements.clear();
-    return messageIds;
-  }
-  #flushAcknowledgements() {
-    const messageIds = this.#takeAcknowledgements();
-    if (messageIds.length === 0)
-      return;
-    this.#sendEncrypted(this.#nextClientMessageId(), this.#sequenceNumbers.next(false), encodeMsgsAck(messageIds), false);
-  }
-  #sendContentRecord(messageId, sequenceNumber, body) {
-    const acknowledgements = serviceConstructor(body) === INLINE_INVOKE_CONSTRUCTOR ? this.#takeAcknowledgements() : [];
-    if (acknowledgements.length === 0) {
-      this.#sendEncrypted(messageId, sequenceNumber, body, true);
-      return;
-    }
-    const acknowledgementMessageId = this.#nextClientMessageId();
-    const nonContentSequenceNumber = this.#sequenceNumbers.next(false);
-    const container = encodeMessageContainer([
-      { messageId, sequenceNumber, body },
-      { messageId: acknowledgementMessageId, sequenceNumber: nonContentSequenceNumber, body: encodeMsgsAck(acknowledgements) }
-    ]);
-    const containerMessageId = this.#nextClientMessageId();
-    if (this.#sentContainers.size >= 128) {
-      const oldest = this.#sentContainers.keys().next().value;
-      if (oldest !== undefined)
-        this.#sentContainers.delete(oldest);
-    }
-    this.#sentContainers.set(containerMessageId, { requestMessageId: messageId, sequenceNumber: nonContentSequenceNumber });
-    this.#sendEncrypted(containerMessageId, nonContentSequenceNumber, container, true);
+  async#sendAcknowledgements(messageIds) {
+    const body = encodeMsgsAck(messageIds);
+    this.#sendEncrypted(this.#nextClientMessageId(), this.#sequenceNumbers.next(false), body, false);
   }
   #sendEncrypted(messageId, sequenceNumber, body, quickAck) {
     const authorization = this.#authorization;
@@ -45696,14 +45249,12 @@ class InlineProtocolV3Connection {
   }
 }
 
-// ../../packages/sdk/dist/realtime/v3-transport.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/v3-transport.js
 var pendingUpdateCapacity = 256;
 var pendingUpdateByteCapacity = 8 * 1024 * 1024;
 var transportEventByteCapacity = 8 * 1024 * 1024;
 var rejectedBeforeExecutionRetryLimit = 2;
 var rejectedBeforeExecutionRetryDelayMs = 1000;
-var transferIdleTimeoutMs = 110000;
-var transferCarrierFailed = (error) => error instanceof InlineProtocolV3Error && error.code !== "unauthorized";
 var transportEventByteLength = (event) => event.type === "message" ? ServerProtocolMessage.toBinary(event.message).byteLength : 32;
 var cloneAuthorization2 = (value) => ({
   ...value,
@@ -45734,7 +45285,6 @@ class InlineProtocolV3Transport {
   #flushingUpdates = false;
   #rotationDue = false;
   #activeRequests = 0;
-  #transfer;
   constructor(options) {
     this.#options = options;
     this.#log = options.logger ?? {};
@@ -45777,7 +45327,6 @@ class InlineProtocolV3Transport {
     await this.events.send({ type: "stopping" });
     const connection = this.#connection;
     this.#connection = undefined;
-    this.#closeTransfer();
     await connection?.close();
   }
   async stopConnection() {
@@ -45786,7 +45335,6 @@ class InlineProtocolV3Transport {
     this.#connection = undefined;
     if (this.#state !== "idle")
       this.#state = "connecting";
-    this.#closeTransfer();
     await connection?.close();
   }
   async reconnect(options) {
@@ -45850,41 +45398,24 @@ class InlineProtocolV3Transport {
       case "rpcCall": {
         this.#activeRequests += 1;
         let response;
-        const generation = this.#generation;
-        const transfer = TRANSFER_RPC_METHODS.has(message.body.rpcCall.method) ? await this.#acquireTransfer(generation) : undefined;
         try {
           const request = { body: { oneofKind: "rpc", rpc: message.body.rpcCall } };
-          const invokeOn = async (target, current2) => {
-            for (let attempt = 0;; attempt += 1) {
-              try {
-                return await target.invoke(request);
-              } catch (error) {
-                if (!(error instanceof InlineProtocolV3Error) || error.code !== "rejected-before-execution") {
-                  throw error;
-                }
-                if (attempt >= rejectedBeforeExecutionRetryLimit) {
-                  throw TransportError.capacityExceeded("Inline Protocol application remained overloaded before execution");
-                }
-                await new Promise((resolve) => setTimeout(resolve, rejectedBeforeExecutionRetryDelayMs));
-                if (!current2()) {
-                  throw TransportError.rejectedBeforeExecution("Inline Protocol connection changed before rejected work could be redelivered");
-                }
+          for (let attempt = 0;; attempt += 1) {
+            try {
+              response = await connection.invoke(request);
+              break;
+            } catch (error) {
+              if (!(error instanceof InlineProtocolV3Error) || error.code !== "rejected-before-execution") {
+                throw error;
+              }
+              if (attempt >= rejectedBeforeExecutionRetryLimit) {
+                throw TransportError.capacityExceeded("Inline Protocol application remained overloaded before execution");
+              }
+              await new Promise((resolve) => setTimeout(resolve, rejectedBeforeExecutionRetryDelayMs));
+              if (this.#state !== "connected" || this.#connection !== connection || this.#rotationDue) {
+                throw TransportError.rejectedBeforeExecution("Inline Protocol connection changed before rejected work could be redelivered");
               }
             }
-          };
-          const mainIsCurrent = () => this.#state === "connected" && this.#connection === connection && !this.#rotationDue;
-          if (transfer) {
-            try {
-              response = await invokeOn(transfer, () => this.#transfer?.connection === transfer);
-            } catch (error) {
-              if (!transferCarrierFailed(error))
-                throw error;
-              this.#log.warn?.("Inline Protocol transfer connection failed; using the main connection", error);
-              this.#closeTransfer(transfer);
-              response = await invokeOn(connection, mainIsCurrent);
-            }
-          } else {
-            response = await invokeOn(connection, mainIsCurrent);
           }
         } catch (error) {
           if (error instanceof InlineProtocolV3Error && error.code === "commit-outcome-unknown") {
@@ -45896,8 +45427,6 @@ class InlineProtocolV3Transport {
           throw error;
         } finally {
           this.#activeRequests -= 1;
-          if (transfer)
-            this.#releaseTransfer(transfer);
           this.#maybeRotate();
         }
         if (response.body.oneofKind === "rpcResult") {
@@ -46072,91 +45601,6 @@ class InlineProtocolV3Transport {
     await this.#flushPendingUpdates(generation);
     this.#maybeRotate();
   }
-  async#acquireTransfer(generation) {
-    if (this.#options.rsaPublicKeys.length === 0 || this.#state !== "connected")
-      return;
-    if (this.#transfer && this.#transfer.generation !== generation)
-      this.#closeTransfer();
-    let transfer = this.#transfer;
-    if (!transfer) {
-      const opening = this.#openTransfer();
-      transfer = { generation, opening, active: 0 };
-      this.#transfer = transfer;
-    }
-    transfer.active += 1;
-    if (transfer.idleTimer)
-      clearTimeout(transfer.idleTimer);
-    transfer.idleTimer = undefined;
-    try {
-      const connection = await transfer.opening;
-      if (this.#transfer !== transfer || this.#generation !== generation) {
-        transfer.active -= 1;
-        return;
-      }
-      transfer.connection = connection;
-      return connection;
-    } catch (error) {
-      transfer.active -= 1;
-      if (this.#transfer === transfer)
-        this.#transfer = undefined;
-      this.#log.warn?.("Inline Protocol transfer connection unavailable; using the main connection", error);
-      return;
-    }
-  }
-  async#openTransfer() {
-    let source;
-    const connection = await InlineProtocolV3Connection.connect({
-      url: this.#options.url,
-      rsaPublicKeys: this.#options.rsaPublicKeys,
-      temporary: true,
-      requestTimeoutMs: this.#options.requestTimeoutMs,
-      onClose: () => {
-        if (source && this.#transfer?.connection === source)
-          this.#transfer = undefined;
-      }
-    });
-    source = connection;
-    try {
-      await connection.bindTemporary(this.#credentials.permanent);
-      const opened = await connection.invoke({
-        body: { oneofKind: "connectionInit", connectionInit: { token: "", transferOnly: true } }
-      });
-      if (opened.body.oneofKind !== "connectionOpen") {
-        throw new InlineProtocolV3Error("protocol", "Transfer connection was not accepted");
-      }
-      return connection;
-    } catch (error) {
-      await connection.close();
-      throw error;
-    }
-  }
-  #releaseTransfer(connection) {
-    const transfer = this.#transfer;
-    if (!transfer || transfer.connection !== connection)
-      return;
-    transfer.active = Math.max(0, transfer.active - 1);
-    if (transfer.active > 0)
-      return;
-    if (transfer.idleTimer)
-      clearTimeout(transfer.idleTimer);
-    transfer.idleTimer = setTimeout(() => {
-      if (this.#transfer === transfer && transfer.active === 0)
-        this.#closeTransfer();
-    }, transferIdleTimeoutMs);
-    transfer.idleTimer.unref?.();
-  }
-  #closeTransfer(only) {
-    const transfer = this.#transfer;
-    if (!transfer || only && transfer.connection !== only)
-      return;
-    this.#transfer = undefined;
-    if (transfer.idleTimer)
-      clearTimeout(transfer.idleTimer);
-    transfer.opening.then((connection) => connection.close(), () => {});
-  }
-  get hasTransferConnection() {
-    return this.#transfer?.connection !== undefined;
-  }
   #rotationBecameDue(generation, source) {
     if (this.#generation !== generation || this.#connection !== source || this.#state === "idle")
       return;
@@ -46199,7 +45643,6 @@ class InlineProtocolV3Transport {
     this.#pendingUpdates = [];
     this.#pendingUpdateBytes = 0;
     this.#rotationDue = false;
-    this.#closeTransfer();
     const connection = this.#connection;
     this.#connection = undefined;
     await connection?.close();
@@ -46258,7 +45701,7 @@ class InlineProtocolV3Transport {
   }
 }
 
-// ../../packages/sdk/dist/realtime/production-trust-roots.js
+// node_modules/@inline-chat/realtime-sdk/dist/realtime/production-trust-roots.js
 var INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS = [
   {
     modulus: "y4mCEOAFrQU02g6WBGLvsy6hBh9jOfV6Hg6lvKvnRKj2vybdLTISXilcYbN2ItUfXhFf7Tk660OLhD7lBv2Pme9YVmWswHJ9j7PyyIa6klTiBLSADPPCuknvID1X7bX-Ut5IwmJDciSITHy0Qxf5yGnhRWPWOgxWDt4EdwHiOd9uHwCxLn9k8LfIXN2DOT8aPH306IB0IWMsTlnXBZ7om8nZniJG0NWG1u-BJDEk4Hz8eko1cF4wc-naVY4qcDh9zD9iXrbMJ5b8aw2JG11dvJGEBmWqjPcPJy1VqFNAZOxGUf-LXWRTnNuwECRpgvqm5oO_CFfwXUvM5W1Tw7lIVQ",
@@ -46272,7 +45715,7 @@ var INLINE_PROTOCOL_PRODUCTION_PUBLIC_KEYS = [
   }
 ];
 
-// ../../packages/sdk/dist/sdk/types.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/types.js
 var rpcInputKindByMethod = {
   0: undefined,
   1: "getMe",
@@ -46412,10 +45855,10 @@ var rpcResultKindByMethod = {
   132: "deleteBotAgent"
 };
 
-// ../../packages/sdk/dist/sdk/logger.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/logger.js
 var noopLogger = {};
 
-// ../../packages/sdk/dist/sdk/sdk-version.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/sdk-version.js
 import { readFileSync } from "node:fs";
 var cached = null;
 var getSdkVersion = () => {
@@ -46439,7 +45882,7 @@ var getSdkVersion = () => {
   return cached;
 };
 
-// ../../packages/sdk/dist/sdk/inline-sdk-client.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/inline-sdk-client.js
 var nowSeconds = () => BigInt(Math.floor(Date.now() / 1000));
 var sdkLayer = 1;
 var defaultApiBaseUrl = "https://api.inline.chat";
@@ -49260,7 +48703,7 @@ var resolveRealtimeV3Url = (baseUrl) => {
   return url.toString();
 };
 var hasMethodMapping = (method) => Object.prototype.hasOwnProperty.call(rpcInputKindByMethod, method) && Object.prototype.hasOwnProperty.call(rpcResultKindByMethod, method);
-// ../../packages/sdk/dist/sdk/bot-capabilities.js
+// node_modules/@inline-chat/realtime-sdk/dist/sdk/bot-capabilities.js
 async function registerBotCapabilitiesWithRetry(params) {
   const retryDelaysMs = params.retryDelaysMs ?? [500, 2000, 5000];
   const wait = params.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
@@ -49279,10 +48722,10 @@ async function registerBotCapabilitiesWithRetry(params) {
     }
   }
 }
-// ../../packages/sdk/dist/state/json-file-state-store.js
+// node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
 import { readFile, rename, writeFile } from "node:fs/promises";
 
-// ../../packages/sdk/dist/state/serde.js
+// node_modules/@inline-chat/realtime-sdk/dist/state/serde.js
 var serializeStateV1 = (state) => {
   const json = {
     version: 1,
@@ -49341,7 +48784,7 @@ var isStateJsonV1 = (value) => {
   return true;
 };
 
-// ../../packages/sdk/dist/state/json-file-state-store.js
+// node_modules/@inline-chat/realtime-sdk/dist/state/json-file-state-store.js
 class JsonFileStateStore {
   path;
   constructor(path) {
@@ -49362,7 +48805,7 @@ class JsonFileStateStore {
     await rename(tempPath, this.path);
   }
 }
-// ../../packages/protocol/dist/vectors.js
+// node_modules/@inline-chat/protocol/dist/vectors.js
 var portableCoreV1Vector = {
   authKeyHex: Array.from({ length: 256 }, (_, index) => index.toString(16).padStart(2, "0")).join(""),
   direction: "client-to-server",
