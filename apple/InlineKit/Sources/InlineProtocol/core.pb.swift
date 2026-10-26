@@ -26101,11 +26101,45 @@ public nonisolated struct RequestBotFilesystemInput: Sendable {
 
   public var operation: RequestBotFilesystemInput.Operation = .unspecified
 
-  /// Empty starts at the host home directory; otherwise an absolute path.
+  /// LIST and REGISTER_FOLDER: empty starts at the host home directory,
+  /// otherwise an absolute path. LIST_WORK_FILES: a relative directory, empty
+  /// for the work's folder.
   public var path: String = String()
 
-  /// Exclusive filename cursor for bounded, lexically ordered listing pages.
+  /// Exclusive cursor for bounded, lexically ordered listing pages: a filename,
+  /// or a relative path for LIST_WORK_FILES.
   public var after: String = String()
+
+  /// LIST_WORK_FILES: the work whose folder is listed.
+  public var agentSessionID: Int64 {
+    get {_agentSessionID ?? 0}
+    set {_agentSessionID = newValue}
+  }
+  /// Returns true if `agentSessionID` has been explicitly set.
+  public var hasAgentSessionID: Bool {self._agentSessionID != nil}
+  /// Clears the value of `agentSessionID`. Subsequent reads from it will return its default value.
+  public mutating func clearAgentSessionID() {self._agentSessionID = nil}
+
+  /// LIST_WORK_FILES: match file names under path instead of listing one
+  /// directory.
+  public var query: String {
+    get {_query ?? String()}
+    set {_query = newValue}
+  }
+  /// Returns true if `query` has been explicitly set.
+  public var hasQuery: Bool {self._query != nil}
+  /// Clears the value of `query`. Subsequent reads from it will return its default value.
+  public mutating func clearQuery() {self._query = nil}
+
+  /// LIST_WORK_FILES: page size, at most 200.
+  public var limit: UInt32 {
+    get {_limit ?? 0}
+    set {_limit = newValue}
+  }
+  /// Returns true if `limit` has been explicitly set.
+  public var hasLimit: Bool {self._limit != nil}
+  /// Clears the value of `limit`. Subsequent reads from it will return its default value.
+  public mutating func clearLimit() {self._limit = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -26114,6 +26148,11 @@ public nonisolated struct RequestBotFilesystemInput: Sendable {
     case unspecified // = 0
     case list // = 1
     case registerFolder // = 2
+
+    /// Files in one work's folder for the composer's file picker. The owner or
+    /// an INVOKE grantee on the session's bot. Paths are relative to the work's
+    /// folder, which is never revealed.
+    case listWorkFiles // = 3
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -26125,6 +26164,7 @@ public nonisolated struct RequestBotFilesystemInput: Sendable {
       case 0: self = .unspecified
       case 1: self = .list
       case 2: self = .registerFolder
+      case 3: self = .listWorkFiles
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -26134,6 +26174,7 @@ public nonisolated struct RequestBotFilesystemInput: Sendable {
       case .unspecified: return 0
       case .list: return 1
       case .registerFolder: return 2
+      case .listWorkFiles: return 3
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -26143,6 +26184,7 @@ public nonisolated struct RequestBotFilesystemInput: Sendable {
       .unspecified,
       .list,
       .registerFolder,
+      .listWorkFiles,
     ]
 
   }
@@ -26150,6 +26192,9 @@ public nonisolated struct RequestBotFilesystemInput: Sendable {
   public init() {}
 
   fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _agentSessionID: Int64? = nil
+  fileprivate var _query: String? = nil
+  fileprivate var _limit: UInt32? = nil
 }
 
 public nonisolated struct BotFilesystemEntry: Sendable {
@@ -26214,6 +26259,9 @@ public nonisolated struct BotFilesystemEntry: Sendable {
   public init() {}
 }
 
+/// For LIST_WORK_FILES, path, parent_path and entry names are relative to the
+/// work's folder (names are full relative paths, so query results can nest), and
+/// next_after is the last entry's name.
 public nonisolated struct BotFilesystemListing: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -62077,7 +62125,7 @@ nonisolated extension TranscribeVoiceDraftResult: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension RequestBotFilesystemInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RequestBotFilesystemInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}bot_user_id\0\u{3}host_installation_id\0\u{1}operation\0\u{1}path\0\u{1}after\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}bot_user_id\0\u{3}host_installation_id\0\u{1}operation\0\u{1}path\0\u{1}after\0\u{3}agent_session_id\0\u{1}query\0\u{1}limit\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -62091,6 +62139,9 @@ nonisolated extension RequestBotFilesystemInput: SwiftProtobuf.Message, SwiftPro
       case 4: try { try decoder.decodeSingularEnumField(value: &self.operation) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self.path) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.after) }()
+      case 7: try { try decoder.decodeSingularInt64Field(value: &self._agentSessionID) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self._query) }()
+      case 9: try { try decoder.decodeSingularUInt32Field(value: &self._limit) }()
       default: break
       }
     }
@@ -62119,6 +62170,15 @@ nonisolated extension RequestBotFilesystemInput: SwiftProtobuf.Message, SwiftPro
     if !self.after.isEmpty {
       try visitor.visitSingularStringField(value: self.after, fieldNumber: 6)
     }
+    try { if let v = self._agentSessionID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
+    } }()
+    try { if let v = self._query {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 8)
+    } }()
+    try { if let v = self._limit {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 9)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -62129,13 +62189,16 @@ nonisolated extension RequestBotFilesystemInput: SwiftProtobuf.Message, SwiftPro
     if lhs.operation != rhs.operation {return false}
     if lhs.path != rhs.path {return false}
     if lhs.after != rhs.after {return false}
+    if lhs._agentSessionID != rhs._agentSessionID {return false}
+    if lhs._query != rhs._query {return false}
+    if lhs._limit != rhs._limit {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
 }
 
 nonisolated extension RequestBotFilesystemInput.Operation: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0OPERATION_UNSPECIFIED\0\u{1}LIST\0\u{1}REGISTER_FOLDER\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0OPERATION_UNSPECIFIED\0\u{1}LIST\0\u{1}REGISTER_FOLDER\0\u{1}LIST_WORK_FILES\0")
 }
 
 nonisolated extension BotFilesystemEntry: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

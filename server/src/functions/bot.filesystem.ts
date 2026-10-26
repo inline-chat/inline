@@ -1,12 +1,14 @@
 import { db } from "@in/server/db"
-import { users, userNotDeleted } from "@in/server/db/schema"
+import { agentSessions, users, userNotDeleted } from "@in/server/db/schema"
+import { UsersModel } from "@in/server/db/models/users"
+import { resolveAgentAccess, satisfiesGrantRequirement } from "@in/server/modules/agents/grants"
 import { and, eq } from "drizzle-orm"
-import { BotFilesystemResponse, type AnswerBotFilesystemInput, type AnswerBotFilesystemResult, type RequestBotFilesystemInput, type RequestBotFilesystemResult } from "@inline-chat/protocol/core"
+import { AgentGrantRequirement, BotFilesystemResponse, RequestBotFilesystemInput_Operation, type AnswerBotFilesystemInput, type AnswerBotFilesystemResult, type RequestBotFilesystemInput, type RequestBotFilesystemResult } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "./_types"
 import { getCurrentBotOrThrow } from "./bot.capabilitiesShared"
 import { resolveCapableBotForPeer } from "./bot.chatSettingsShared"
 import { botFilesystemBroker } from "@in/server/modules/botFilesystem/broker"
-import { validateFilesystemRequest, validateFilesystemResponse } from "@in/server/modules/botFilesystem/validation"
+import { validateFilesystemRequest, validateFilesystemResponse, validateFilesystemResponseFor } from "@in/server/modules/botFilesystem/validation"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { getRealtimeBotConnection, sendMessageToRealtimeBotConnection } from "@in/server/realtime/message"
 import { requestRemoteBot } from "@in/server/modules/internalMessaging/privateBot"
@@ -19,12 +21,31 @@ async function requireOwner(botId: number, actorId: number): Promise<void> {
   if (!bot) throw RealtimeRpcError.BadRequest()
 }
 
+/**
+ * Host browsing stays owner-only. A work's own files are open to the owner and
+ * INVOKE grantees, who can already ask the agent to read them.
+ */
+async function authorize(input: RequestBotFilesystemInput, botId: number, actorId: number): Promise<{ chatId: number }> {
+  const target = await resolveCapableBotForPeer({ peerId: input.peerId, botUserId: input.botUserId, version: 1, actorUserId: actorId })
+  if (input.operation !== RequestBotFilesystemInput_Operation.LIST_WORK_FILES) {
+    await requireOwner(botId, actorId)
+    return target
+  }
+  const [session] = await db.select({ chatId: agentSessions.chatId, botUserId: agentSessions.botUserId })
+    .from(agentSessions).where(eq(agentSessions.id, input.agentSessionId!)).limit(1)
+  if (!session || session.botUserId !== botId || session.chatId !== target.chatId) throw RealtimeRpcError.BadRequest()
+  const bot = await UsersModel.getUserById(botId)
+  if (!bot) throw RealtimeRpcError.BadRequest()
+  const access = await resolveAgentAccess(bot, actorId)
+  if (!satisfiesGrantRequirement(access, AgentGrantRequirement.INVOKE)) throw RealtimeRpcError.AgentGrantRequired()
+  return target
+}
+
 export async function requestBotFilesystem(input: RequestBotFilesystemInput, context: FunctionContext): Promise<RequestBotFilesystemResult> {
   validateFilesystemRequest(input)
   const botId = Number(input.botUserId)
   if (!Number.isSafeInteger(botId) || botId <= 0) throw RealtimeRpcError.BadRequest()
-  await requireOwner(botId, context.currentUserId)
-  const target = await resolveCapableBotForPeer({ peerId: input.peerId, botUserId: input.botUserId, version: 1, actorUserId: context.currentUserId })
+  const target = await authorize(input, botId, context.currentUserId)
   const connection = getRealtimeBotConnection(botId)
   if (!connection) {
     const bytes = crypto.getRandomValues(new Uint8Array(8))
@@ -38,10 +59,10 @@ export async function requestBotFilesystem(input: RequestBotFilesystemInput, con
       } } } },
     })
     const response = remote.status === "replied"
-      ? validateFilesystemResponse(BotFilesystemResponse.fromBinary(Buffer.from(remote.response, "base64")))
+      ? validateFilesystemResponseFor(input, validateFilesystemResponse(BotFilesystemResponse.fromBinary(Buffer.from(remote.response, "base64"))))
       : { result: { oneofKind: "problem" as const, problem: "The remote machine is unavailable. Try again." } }
-    await requireOwner(botId, context.currentUserId)
-    await resolveCapableBotForPeer({ peerId: input.peerId, botUserId: input.botUserId, version: 1, actorUserId: context.currentUserId })
+    // Access is checked again: it may have changed while the bot answered.
+    await authorize(input, botId, context.currentUserId)
     return { response }
   }
   const pending = botFilesystemBroker.create(botId, connection.connectionId)
@@ -56,9 +77,8 @@ export async function requestBotFilesystem(input: RequestBotFilesystemInput, con
   } catch {
     botFilesystemBroker.answer(pending.id, botId, connection.connectionId, { result: { oneofKind: "problem", problem: "Couldn’t reach the remote machine." } })
   }
-  const response = await pending.response
-  await requireOwner(botId, context.currentUserId)
-  await resolveCapableBotForPeer({ peerId: input.peerId, botUserId: input.botUserId, version: 1, actorUserId: context.currentUserId })
+  const response = validateFilesystemResponseFor(input, await pending.response)
+  await authorize(input, botId, context.currentUserId)
   return { response }
 }
 

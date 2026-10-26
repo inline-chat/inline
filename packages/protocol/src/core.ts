@@ -15669,17 +15669,39 @@ export interface RequestBotFilesystemInput {
      */
     operation: RequestBotFilesystemInput_Operation;
     /**
-     * Empty starts at the host home directory; otherwise an absolute path.
+     * LIST and REGISTER_FOLDER: empty starts at the host home directory,
+     * otherwise an absolute path. LIST_WORK_FILES: a relative directory, empty
+     * for the work's folder.
      *
      * @generated from protobuf field: string path = 5;
      */
     path: string;
     /**
-     * Exclusive filename cursor for bounded, lexically ordered listing pages.
+     * Exclusive cursor for bounded, lexically ordered listing pages: a filename,
+     * or a relative path for LIST_WORK_FILES.
      *
      * @generated from protobuf field: string after = 6;
      */
     after: string;
+    /**
+     * LIST_WORK_FILES: the work whose folder is listed.
+     *
+     * @generated from protobuf field: optional int64 agent_session_id = 7;
+     */
+    agentSessionId?: bigint;
+    /**
+     * LIST_WORK_FILES: match file names under path instead of listing one
+     * directory.
+     *
+     * @generated from protobuf field: optional string query = 8;
+     */
+    query?: string;
+    /**
+     * LIST_WORK_FILES: page size, at most 200.
+     *
+     * @generated from protobuf field: optional uint32 limit = 9;
+     */
+    limit?: number;
 }
 /**
  * @generated from protobuf enum RequestBotFilesystemInput.Operation
@@ -15696,7 +15718,15 @@ export enum RequestBotFilesystemInput_Operation {
     /**
      * @generated from protobuf enum value: REGISTER_FOLDER = 2;
      */
-    REGISTER_FOLDER = 2
+    REGISTER_FOLDER = 2,
+    /**
+     * Files in one work's folder for the composer's file picker. The owner or
+     * an INVOKE grantee on the session's bot. Paths are relative to the work's
+     * folder, which is never revealed.
+     *
+     * @generated from protobuf enum value: LIST_WORK_FILES = 3;
+     */
+    LIST_WORK_FILES = 3
 }
 /**
  * @generated from protobuf message BotFilesystemEntry
@@ -15741,6 +15771,10 @@ export enum BotFilesystemEntry_Kind {
     OTHER = 4
 }
 /**
+ * For LIST_WORK_FILES, path, parent_path and entry names are relative to the
+ * work's folder (names are full relative paths, so query results can nest), and
+ * next_after is the last entry's name.
+ *
  * @generated from protobuf message BotFilesystemListing
  */
 export interface BotFilesystemListing {
@@ -59405,7 +59439,10 @@ class RequestBotFilesystemInput$Type extends MessageType<RequestBotFilesystemInp
             { no: 3, name: "host_installation_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "operation", kind: "enum", T: () => ["RequestBotFilesystemInput.Operation", RequestBotFilesystemInput_Operation] },
             { no: 5, name: "path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 6, name: "after", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 6, name: "after", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "agent_session_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "query", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "limit", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
     create(value?: PartialMessage<RequestBotFilesystemInput>): RequestBotFilesystemInput {
@@ -59442,6 +59479,15 @@ class RequestBotFilesystemInput$Type extends MessageType<RequestBotFilesystemInp
                 case /* string after */ 6:
                     message.after = reader.string();
                     break;
+                case /* optional int64 agent_session_id */ 7:
+                    message.agentSessionId = reader.int64().toBigInt();
+                    break;
+                case /* optional string query */ 8:
+                    message.query = reader.string();
+                    break;
+                case /* optional uint32 limit */ 9:
+                    message.limit = reader.uint32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -59472,6 +59518,15 @@ class RequestBotFilesystemInput$Type extends MessageType<RequestBotFilesystemInp
         /* string after = 6; */
         if (message.after !== "")
             writer.tag(6, WireType.LengthDelimited).string(message.after);
+        /* optional int64 agent_session_id = 7; */
+        if (message.agentSessionId !== undefined)
+            writer.tag(7, WireType.Varint).int64(message.agentSessionId);
+        /* optional string query = 8; */
+        if (message.query !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.query);
+        /* optional uint32 limit = 9; */
+        if (message.limit !== undefined)
+            writer.tag(9, WireType.Varint).uint32(message.limit);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
