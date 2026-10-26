@@ -393,7 +393,13 @@ impl CodexMapper {
                         events.push(Event::State { state });
                     }
                     Some("systemError") => {
-                        events.push(notice(NoticeLevel::Error, method, params));
+                        let mut event = notice(NoticeLevel::Error, method, params);
+                        if let Event::Notice(notice) = &mut event {
+                            notice.message = string(params.pointer("/status/message"))
+                                .or_else(|| string(params.pointer("/status/error/message")))
+                                .or_else(|| Some("Codex reported a system error".to_owned()));
+                        }
+                        events.push(event);
                     }
                     _ => events.push(notice(NoticeLevel::Info, method, params)),
                 }

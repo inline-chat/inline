@@ -328,10 +328,18 @@ fn normalized_audio_mime_type(value: &str) -> Option<&str> {
 }
 
 pub(crate) fn inline_thread_config() -> BTreeMap<String, Value> {
-    BTreeMap::from([(
-        DEFAULT_MODE_REQUEST_USER_INPUT.to_string(),
-        Value::Bool(true),
-    )])
+    BTreeMap::from([
+        (
+            DEFAULT_MODE_REQUEST_USER_INPUT.to_string(),
+            Value::Bool(true),
+        ),
+        // The feature above is marked under development; its warning would
+        // otherwise open every session.
+        (
+            "suppress_unstable_features_warning".to_string(),
+            Value::Bool(true),
+        ),
+    ])
 }
 
 const CONTROL_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
