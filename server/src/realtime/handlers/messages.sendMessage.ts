@@ -36,6 +36,7 @@ export const sendMessage = async (
     {
       currentSessionId: handlerContext.sessionId,
       currentUserId: handlerContext.userId,
+      isBot: handlerContext.isBot,
     },
   )
 

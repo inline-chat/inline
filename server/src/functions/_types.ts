@@ -3,6 +3,9 @@ export type FunctionContext = {
   currentSessionId: number
   /** Present for realtime RPCs whose authorization is bound to one socket. */
   currentConnectionId?: string
-  /** Authenticated bot calls use the existing edit path for silent streaming updates. */
+  /**
+   * Whether the authenticated account is a bot, when the entry point knows it (realtime sockets
+   * and the Bot API do). Undefined means unknown: look the user up rather than assume a person.
+   */
   isBot?: boolean
 }

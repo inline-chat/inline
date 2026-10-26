@@ -11,6 +11,7 @@ const chat: DbChat = {
   description: null,
   lastMsgId: 7,
   messageIdCounter: 7,
+  conversationStarted: true,
   spaceId: null,
   publicThread: null,
   threadNumber: null,
