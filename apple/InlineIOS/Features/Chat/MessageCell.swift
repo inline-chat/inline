@@ -1,5 +1,6 @@
 import InlineIOSUI
 import InlineKit
+import InlineMessageLayout
 import InlineTheme
 import InlineUI
 import Logger
@@ -34,6 +35,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   }
 
   private func updateContextMenuSourceVisibility() {
+    nextMessageView?.bubbleContentView.isHidden = isContextMenuSourceHidden
     guard let messageView else { return }
     let source: UIView = messageView.fullMessage.message.isServiceMessage
       ? messageView.serviceContainerView : messageView.bubbleView
@@ -68,6 +70,13 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private var selfSizingTraitSignature: SelfSizingTraitSignature?
   private var collectionWidth: CGFloat = 0
   private var theme: IOSThemeSnapshot?
+  private var messageViewImplementation: MessageViewImplementation = .legacy
+  /// The next message view, used when this row's message is a kind it supports.
+  private(set) var nextMessageView: MessageView?
+  private var nextLayout: MessageLayout?
+  /// The row width `nextLayout` was planned for.
+  private var nextLayoutWidth: CGFloat = 0
+  private static let nextTextLayoutCache = TextLayoutCache()
 
   // MARK: - Props
 
@@ -171,7 +180,16 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    guard allowsMessageActions, usesCustomHoldAction, messageActionsMenuProvider != nil, let messageView else {
+    if let nextMessageView, !nextMessageView.isHidden {
+      // A swipe to reply translates the view.
+      nextMessageView.untransformedFrame = contentView.bounds
+      // The plan is for one width; the row can arrive with another, or none at configure time.
+      if contentView.bounds.width > 0, abs(contentView.bounds.width - nextLayoutWidth) > 0.5 {
+        applyNextLayout(motion: .immediate)
+      }
+    }
+    let bubbleView: UIView? = showsNextMessageView ? nextMessageView?.bubbleView : messageView?.bubbleView
+    guard allowsMessageActions, usesCustomHoldAction, messageActionsMenuProvider != nil, let bubbleView else {
       messageActionsButton?.isHidden = true
       return
     }
@@ -180,7 +198,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
     // Use the empty side of the row so both renderers and media bubbles retain
     // their existing geometry. Keep a 44pt target wherever the gutter permits.
-    let bubble = messageView.bubbleView.convert(messageView.bubbleView.bounds, to: contentView)
+    let bubble = bubbleView.convert(bubbleView.bounds, to: contentView)
     let gutterWidth = outgoing ? bubble.minX : contentView.bounds.width - bubble.maxX
     let width = min(44, max(0, gutterWidth))
     let height = min(44, contentView.bounds.height)
@@ -199,6 +217,10 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     setupContentSize()
     setupSwipeGestures()
     setupReplyIndicator()
+    registerForTraitChanges([UITraitDisplayScale.self]) { (cell: MessageCollectionViewCell, _: UITraitCollection) in
+      guard cell.showsNextMessageView else { return }
+      cell.applyNextLayout(motion: .immediate)
+    }
   }
 
   @available(*, unavailable)
@@ -215,8 +237,29 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     displayMode: MessageDisplayMode = .normal,
     animateTail: Bool = true,
     theme: IOSThemeSnapshot,
-    initialMetadataStatus: MessageSendingStatus? = nil
+    initialMetadataStatus: MessageSendingStatus? = nil,
+    messageViewImplementation: MessageViewImplementation = .legacy
   ) {
+    self.messageViewImplementation = messageViewImplementation
+    if messageViewImplementation == .next, MessageViewContent.supports(message, displayMode: displayMode) {
+      configureNext(
+        with: message,
+        firstInGroup: firstInGroup,
+        lastInGroup: lastInGroup,
+        spaceId: spaceId,
+        collectionWidth: collectionWidth,
+        displayMode: displayMode,
+        theme: theme
+      )
+      return
+    }
+    if let nextMessageView, !nextMessageView.isHidden {
+      // A row that leaves the next view rebuilds the current one from scratch.
+      nextMessageView.isHidden = true
+      nextLayout = nil
+      self.message = nil
+    }
+
     let newOutgoing = message.message.out == true
     var animatedReactionEmoji: String?
 
@@ -398,6 +441,25 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   func sendAnimationTargetPresentationInWindow() -> SendMessageAnimationTargetPresentation? {
     snapshotSendAnimationTargetWithStableVisibleContent {
+      if showsNextMessageView {
+        guard let geometry = nextSendAnimationGeometryInWindow(),
+              let snapshot = nextMessageView?.sendAnimationBubbleSnapshot()
+        else { return nil }
+        snapshot.frame = CGRect(origin: .zero, size: geometry.bubbleFrame.size)
+        snapshot.backgroundColor = .clear
+        snapshot.isOpaque = false
+        snapshot.clipsToBounds = false
+        snapshot.isUserInteractionEnabled = false
+        return SendMessageAnimationTargetPresentation(
+          cellFrame: geometry.cellFrame,
+          bubbleFrame: geometry.bubbleFrame,
+          textFrame: geometry.textFrame,
+          bubbleSnapshotView: snapshot,
+          textFrameInBubble: geometry.textFrameInBubble,
+          textFirstBaselineYInWindow: geometry.textFirstBaselineYInWindow,
+          textFirstBaselineYInBubble: geometry.textFirstBaselineYInBubble
+        )
+      }
       guard let messageView else { return nil }
 
       return withSendAnimationFittedTargetLayout { geometry in
@@ -484,6 +546,9 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   private func sendAnimationFittedTargetHeight() -> CGFloat? {
     guard bounds.width > 0 else { return nil }
+    if showsNextMessageView {
+      return nextLayout?.size.height
+    }
 
     layoutIfNeeded()
     contentView.layoutIfNeeded()
@@ -590,6 +655,9 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     layoutIfNeeded()
     contentView.layoutIfNeeded()
 
+    if showsNextMessageView {
+      return nextSendAnimationGeometryInWindow()
+    }
     guard let window, let messageView else { return nil }
 
     messageView.layoutIfNeeded()
@@ -671,6 +739,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     prevText = nil
     message = nil
     theme = nil
+    nextLayout = nil
+    nextLayoutWidth = 0
     resetSelfSizingState()
 
     // Reset delegate
@@ -698,6 +768,14 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
       layoutAttributes.bounds.width > 0
     else {
       return layoutAttributes
+    }
+
+    // The next view's height is planned, never measured from views.
+    if showsNextMessageView, let height = nextRowHeight(forWidth: layoutAttributes.bounds.width) {
+      var frame = layoutAttributes.frame
+      frame.size.height = height
+      attributes.frame = frame
+      return attributes
     }
 
     setNeedsLayout()
@@ -796,6 +874,13 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   /// `fadeIn: false` re-applies a highlight interrupted by reconfiguration.
   func highlightBubble(hold: TimeInterval = focusHighlightHold, fadeIn: Bool = true) {
+    if showsNextMessageView, let nextMessageView, let theme {
+      let color = outgoing
+        ? theme.outgoingBubble.uiColor.lighten(by: 0.3)
+        : theme.primary.uiColor.withAlphaComponent(0.4)
+      nextMessageView.bubbleView.highlight(color: color, fadeIn: fadeIn ? Self.focusHighlightFadeIn : 0, hold: hold)
+      return
+    }
     guard let messageView else { return }
     guard !isServiceMessage else { return }
     let highlightColor = messageView.outgoing
@@ -810,6 +895,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   }
 
   func clearHighlight() {
+    nextMessageView?.bubbleView.clearHighlight()
     guard let messageView else { return }
     guard !isServiceMessage else { return }
     messageView.bubbleView.clearHighlight()
@@ -902,6 +988,7 @@ extension MessageCollectionViewCell {
     let boundedTranslation = swipeDirection.horizontalSign * maxTranslation * progress
 
     messageView?.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
+    nextMessageView?.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
     nameLabel.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
     avatarView?.transform = CGAffineTransform(translationX: boundedTranslation, y: 0)
     swipedAvatarOverlayView?.transform = CGAffineTransform(
@@ -930,6 +1017,7 @@ extension MessageCollectionViewCell {
     guard swipeDirection.accepts(adjustedTranslation) else {
       UIView.animate(withDuration: 0.4) {
         self.messageView?.transform = .identity
+        self.nextMessageView?.transform = .identity
         self.nameLabel.transform = .identity
         self.avatarView?.transform = .identity
         self.swipedAvatarOverlayView?.transform = .identity
@@ -947,6 +1035,7 @@ extension MessageCollectionViewCell {
 
     UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.7, initialSpringVelocity: 0.5) {
       self.messageView?.transform = .identity
+      self.nextMessageView?.transform = .identity
       self.nameLabel.transform = .identity
       self.avatarView?.transform = .identity
       self.swipedAvatarOverlayView?.transform = .identity
@@ -967,6 +1056,7 @@ extension MessageCollectionViewCell {
     swipeActive = false
 
     messageView?.transform = .identity
+    nextMessageView?.transform = .identity
     nameLabel.transform = .identity
     avatarView?.transform = .identity
     swipedAvatarOverlayView?.transform = .identity
@@ -1232,7 +1322,7 @@ extension MessageCollectionViewCell {
       return nil
     }
 
-    let bubbleTop = max(contentView.bounds.minY, topBubblePadding)
+    let bubbleTop = max(contentView.bounds.minY, showsNextMessageView ? (nextLayout?.bubble.frame.minY ?? 0) : topBubblePadding)
     let localFrame = CGRect(
       x: contentView.bounds.minX,
       y: bubbleTop,
@@ -1346,10 +1436,16 @@ extension MessageCollectionViewCell {
     guard self.theme != theme else { return }
     self.theme = theme
     messageView?.applyTheme(theme)
+    if showsNextMessageView {
+      applyNextLayout(motion: .immediate)
+    }
   }
 
   func updateContinuousBubbleGradient(in viewport: UIView) {
     messageView?.updateContinuousBubbleGradient(in: viewport)
+    if showsNextMessageView {
+      nextMessageView?.updateContinuousBubbleGradient(in: viewport)
+    }
   }
 }
 
@@ -1363,5 +1459,137 @@ extension UIColor {
       blue: min(b + (1 - b) * percentage, 1.0),
       alpha: a
     )
+  }
+}
+
+// MARK: - Next message view
+
+extension MessageCollectionViewCell {
+  var showsNextMessageView: Bool {
+    nextMessageView.map { !$0.isHidden } ?? false
+  }
+
+  /// Applies a newer version of the shown message with `motion`. The list calls this inside the
+  /// animation that resizes the row, so the bubble, its contents and the row move together.
+  @discardableResult
+  func applyNextUpdate(_ message: FullMessage, motion: MessageMotion) -> Bool {
+    guard showsNextMessageView,
+          self.message?.id == message.id,
+          MessageViewContent.supports(message, displayMode: displayMode)
+    else { return false }
+    prevText = message.displayText
+    self.message = message
+    canReply = message.canReply && displayMode != .threadAnchor
+    applyNextLayout(motion: motion)
+    updateSwipeAvailability()
+    return true
+  }
+
+  fileprivate func configureNext(
+    with message: FullMessage,
+    firstInGroup: Bool,
+    lastInGroup: Bool,
+    spaceId: Int64?,
+    collectionWidth: CGFloat,
+    displayMode: MessageDisplayMode,
+    theme: IOSThemeSnapshot
+  ) {
+    if messageView != nil || !showsNextMessageView {
+      resetCell()
+    }
+    resetSelfSizingState()
+    configuredContentSizeCategory = traitCollection.preferredContentSizeCategory
+    prevText = message.displayText
+    self.message = message
+    self.firstInGroup = firstInGroup
+    self.lastInGroup = lastInGroup
+    self.spaceId = spaceId
+    self.collectionWidth = collectionWidth
+    self.displayMode = displayMode
+    self.theme = theme
+    isThread = message.peerId.isThread
+    outgoing = message.message.out == true
+    canReply = message.canReply && displayMode != .threadAnchor
+    contentView.transform = Self.contentTransform
+
+    let view = nextMessageView ?? makeNextMessageView()
+    view.isHidden = false
+    view.spaceId = spaceId
+    applyNextLayout(motion: .immediate)
+    updateSwipeAvailability()
+  }
+
+  fileprivate func applyNextLayout(motion: MessageMotion) {
+    let width = contentView.bounds.width > 0 ? contentView.bounds.width : collectionWidth
+    guard let nextMessageView, let message,
+          let content = nextContent(for: message, width: width)
+    else { return }
+    let layout = MessageLayoutPlanner.layout(content.input, cache: Self.nextTextLayoutCache)
+    nextLayout = layout
+    nextLayoutWidth = width
+    nextMessageView.apply(content, layout: layout, motion: motion)
+    setNeedsLayout()
+  }
+
+  fileprivate func nextRowHeight(forWidth width: CGFloat) -> CGFloat? {
+    if abs(width - nextLayoutWidth) <= 0.5, let nextLayout {
+      return nextLayout.size.height
+    }
+    guard let message, let content = nextContent(for: message, width: width) else { return nil }
+    return MessageLayoutPlanner.layout(content.input, cache: Self.nextTextLayoutCache).size.height
+  }
+
+  private func nextContent(for message: FullMessage, width: CGFloat) -> MessageViewContent? {
+    guard let theme, width > 0 else { return nil }
+    let threadIncoming = usesThreadLayout && !outgoing
+    let avatar: MessageLayoutInput.Avatar = threadIncoming ? (showsCellAvatar ? .visible : .reserved) : .none
+    return MessageViewContent.make(message, context: MessageRowContext(
+      rowWidth: width,
+      isFirstInGroup: firstInGroup,
+      isLastInGroup: lastInGroup,
+      showsName: threadIncoming && firstInGroup,
+      avatar: avatar,
+      theme: theme,
+      traits: traitCollection
+    ))
+  }
+
+  fileprivate func nextSendAnimationGeometryInWindow() -> SendMessageAnimationTargetGeometry? {
+    guard let window, let nextMessageView, let frames = nextMessageView.sendAnimationTargetFrames() else {
+      return nil
+    }
+    let cellFrame = convert(bounds, to: window)
+    let bubbleFrame = nextMessageView.convert(frames.bubble, to: window)
+    let textFrame = nextMessageView.convert(frames.text, to: window)
+    let textFrameInBubble = frames.text.offsetBy(dx: -frames.bubble.minX, dy: -frames.bubble.minY)
+    let baselineInWindow = nextMessageView.convert(CGPoint(x: 0, y: frames.firstBaseline), to: window).y
+    guard cellFrame.isFiniteAndVisible, bubbleFrame.isFiniteAndVisible, textFrame.isFiniteAndVisible,
+          baselineInWindow.isFinite
+    else { return nil }
+    return SendMessageAnimationTargetGeometry(
+      cellFrame: cellFrame,
+      bubbleFrame: bubbleFrame,
+      textFrame: textFrame,
+      textFrameInBubble: textFrameInBubble,
+      textFrameInLabel: frames.textInTextView,
+      textFirstBaselineYInWindow: baselineInWindow,
+      textFirstBaselineYInBubble: frames.firstBaseline - frames.bubble.minY
+    )
+  }
+
+  private func makeNextMessageView() -> MessageView {
+    let view = MessageView()
+    view.onReactionsMenu = { [weak self] message in
+      self?.onReactionsMenu?(message)
+    }
+    view.onAvatarTap = { [weak self] in
+      self?.handleAvatarTap()
+    }
+    view.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
+      self?.onPhotoTap?(message, sourceView, sourceImage, url)
+    }
+    contentView.insertSubview(view, at: 0)
+    nextMessageView = view
+    return view
   }
 }

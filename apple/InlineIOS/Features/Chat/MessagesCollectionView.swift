@@ -4,6 +4,7 @@ import ContextMenuAccessoryStructs
 import GRDB
 import InlineIOSUI
 import InlineKit
+import InlineMessageLayout
 import InlineTheme
 import InlineUI
 import Logger
@@ -1340,7 +1341,7 @@ private extension MessagesCollectionView {
     private let spaceId: Int64?
     private let isPreview: Bool
     private var theme: IOSThemeSnapshot
-    /// `.next` renders with the current message view until the next message view lands.
+    /// `.next` draws supported message kinds with the next message view.
     private let messageViewImplementation: MessageViewImplementation
     private weak var collectionContextMenu: UIContextMenuInteraction?
     /// Focus highlight that must survive cell reconfiguration until it ends.
@@ -1363,6 +1364,8 @@ private extension MessagesCollectionView {
     private var mediaWarmupTask: Task<Void, Never>?
     private var mediaWarmups: [InlineTinyThumbnailWarmup] = []
     private var pendingSnapshotApplies = 0
+    /// Message updates held while a context menu owns a preview of their bubble.
+    private var deferredNextUpdateIDs: Set<Int64> = []
 
     private var contextMenuPreview: (
       configuration: UIContextMenuConfiguration,
@@ -1626,6 +1629,7 @@ private extension MessagesCollectionView {
         self?.contextMenuSourceItem = nil
         self?.updateContextMenuSourceVisibility(in: collectionView)
         collectionView.onContextMenuDidEnd?()
+        defer { self?.flushDeferredNextUpdates() }
         // Focus restoration can synchronously deliver one more keyboard frame.
         animateDismissal()
         collectionView.contextMenuPhase = .idle
@@ -2716,7 +2720,8 @@ private extension MessagesCollectionView {
             displayMode: displayMode,
             animateTail: true,
             theme: self.theme,
-            initialMetadataStatus: initialMetadataStatus
+            initialMetadataStatus: initialMetadataStatus,
+            messageViewImplementation: self.messageViewImplementation
           )
         }
 
@@ -3286,7 +3291,8 @@ private extension MessagesCollectionView {
           collectionWidth: collectionView.bounds.width,
           displayMode: displayMode,
           animateTail: animateTail,
-          theme: theme
+          theme: theme,
+          messageViewImplementation: messageViewImplementation
         )
       }
     }
@@ -3618,12 +3624,67 @@ private extension MessagesCollectionView {
       }.filter { snapshot.itemIdentifiers.contains($0) }
       guard !existingItems.isEmpty else { return }
 
+      // Visible rows drawn by the next view animate their own content and height together;
+      // only the rest go through diffable reconfiguration.
+      let animatedInPlace = messageViewImplementation == .next
+        ? applyNextMessageUpdates(existingItems)
+        : []
+      let reconfiguredItems = existingItems.filter { !animatedInPlace.contains($0) }
       let boundaryItems = groupBoundaryItems(around: existingItems, in: snapshot)
-        .filter { snapshot.itemIdentifiers.contains($0) }
-      snapshot.reconfigureItems(existingItems + boundaryItems)
+        .filter { snapshot.itemIdentifiers.contains($0) && !animatedInPlace.contains($0) }
+      guard !reconfiguredItems.isEmpty || !boundaryItems.isEmpty else { return }
+      snapshot.reconfigureItems(reconfiguredItems + boundaryItems)
       reconfigureVisibleItems(boundaryItems)
       let animatesDiffableReconfigure = (animated ?? false) && !UIAccessibility.isReduceMotionEnabled
       safeApplySnapshot(snapshot, animatingDifferences: animatesDiffableReconfigure)
+    }
+
+    /// Applies new message versions to visible next-view rows in one animation: each view moves
+    /// its nodes and the collection resizes the rows on the same curve. Returns the items handled.
+    private func applyNextMessageUpdates(_ items: [MessageListItem]) -> Set<MessageListItem> {
+      guard let collectionView = currentCollectionView else { return [] }
+      // While a context menu is up or flying back, UIKit owns a preview of the source bubble.
+      // Changing the bubble under it tears the preview, so replay these once the menu ends.
+      if (collectionView as? MessagesCollectionView)?.isContextMenuInteractionActive == true {
+        deferredNextUpdateIDs.formUnion(items.compactMap(\.messageStableId))
+        return Set(items)
+      }
+      var updates: [(cell: MessageCollectionViewCell, message: FullMessage)] = []
+      var handled = Set<MessageListItem>()
+      for item in Set(items) {
+        guard let indexPath = dataSource.indexPath(for: item),
+              let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell,
+              cell.showsNextMessageView,
+              let model = model(for: item),
+              case let .message(message, displayMode) = model.content,
+              cell.message?.id == message.id,
+              cell.displayMode == displayMode,
+              MessageViewContent.supports(message, displayMode: displayMode)
+        else { continue }
+        updates.append((cell, message))
+        handled.insert(item)
+      }
+      guard !updates.isEmpty else { return [] }
+
+      let motion = MessageMotion.standard.resolved(reduceMotion: UIAccessibility.isReduceMotionEnabled)
+      motion.animate {
+        for update in updates {
+          update.cell.applyNextUpdate(update.message, motion: motion)
+          update.cell.invalidateIntrinsicContentSize()
+        }
+        collectionView.layoutIfNeeded()
+      }
+      return handled
+    }
+
+    private func flushDeferredNextUpdates() {
+      guard !deferredNextUpdateIDs.isEmpty else { return }
+      let ids = Array(deferredNextUpdateIDs)
+      deferredNextUpdateIDs.removeAll()
+      // Let UIKit finish removing the menu before the bubble starts moving.
+      DispatchQueue.main.async { [weak self] in
+        self?.applyUpdatedMessages(ids, animated: true)
+      }
     }
 
     func resetVisibleReadCandidate() {
@@ -4242,6 +4303,13 @@ private extension MessagesCollectionView {
         return nil
       }
 
+      // Links in the next view get their own long-press sheet.
+      if cell.showsNextMessageView, let nextMessageView = cell.nextMessageView,
+         nextMessageView.linkURL(at: collectionView.convert(point, to: nextMessageView)) != nil
+      {
+        return nil
+      }
+
       // Check if the touch point is within a view that has its own context menu interaction
       if let messageView = cell.messageView {
         let pointInMessageView = collectionView.convert(point, to: messageView)
@@ -4271,7 +4339,11 @@ private extension MessagesCollectionView {
         return nil
       }
       if cell.usesCustomHoldAction {
-        cell.messageView?.performMessageGestureAction(cell.messageHoldAction)
+        if cell.showsNextMessageView {
+          cell.nextMessageView?.performMessageGestureAction(cell.messageHoldAction)
+        } else {
+          cell.messageView?.performMessageGestureAction(cell.messageHoldAction)
+        }
         return nil
       }
 
@@ -4784,10 +4856,9 @@ private extension MessagesCollectionView {
         // cannot empty the menu after the source cell changes or gets reused.
         if (collectionView as? MessagesCollectionView)?.isContextMenuInteractionActive == false,
            let currentIndexPath = dataSource.indexPath(for: state.item),
-           let cell = collectionView.cellForItem(at: currentIndexPath) as? MessageCollectionViewCell,
-           let messageView = cell.messageView
+           let cell = collectionView.cellForItem(at: currentIndexPath) as? MessageCollectionViewCell
         {
-          if let preview = liveTargetedPreview(for: messageView) {
+          if let preview = liveTargetedPreview(for: cell) {
             return preview
           }
         }
@@ -4812,21 +4883,20 @@ private extension MessagesCollectionView {
       // the menu's message again; never target a different row if it was removed.
       guard let state = contextMenuPreview, state.configuration === configuration,
             let currentIndexPath = dataSource.indexPath(for: state.item),
-            let cell = collectionView.cellForItem(at: currentIndexPath) as? MessageCollectionViewCell,
-            let messageView = cell.messageView else { return nil }
+            let cell = collectionView.cellForItem(at: currentIndexPath) as? MessageCollectionViewCell
+      else { return nil }
       // Pair the native lift with its real destination. Returning another
       // detached bitmap here leaves UIKit suppressing the original source
       // while the returning preview fades away, producing a blank slot.
       contextMenuSourceItem = nil
       updateContextMenuSourceVisibility(in: collectionView)
-      return liveTargetedPreview(for: messageView)
+      return liveTargetedPreview(for: cell)
     }
 
     // MARK: - Private
 
-    private func liveTargetedPreview(for messageView: UIMessageView) -> UITargetedPreview? {
-      let geometry = contextMenuPreviewGeometry(for: messageView)
-      guard !geometry.view.isHidden, let window = geometry.view.window else { return nil }
+    private func liveTargetedPreview(for cell: MessageCollectionViewCell) -> UITargetedPreview? {
+      guard let geometry = contextMenuPreviewGeometry(for: cell), !geometry.view.isHidden, let window = geometry.view.window else { return nil }
       let parameters = UIPreviewParameters()
       parameters.backgroundColor = .clear
       let path = geometry.path
@@ -4842,21 +4912,31 @@ private extension MessagesCollectionView {
       return preserveBubbleShape(in: UITargetedPreview(view: geometry.view, parameters: parameters, target: target))
     }
 
-    private func contextMenuPreviewGeometry(for messageView: UIMessageView) -> (
+    private func contextMenuPreviewGeometry(for cell: MessageCollectionViewCell) -> (
       view: UIView, rect: CGRect, path: UIBezierPath
-    ) {
+    )? {
       let sourceView: UIView
       let path: UIBezierPath
-      if messageView.fullMessage.message.isServiceMessage {
+      let bubbleRect: CGRect
+      if cell.showsNextMessageView, let nextMessageView = cell.nextMessageView {
+        // The bubble-sized container holds everything drawn inside the bubble.
+        sourceView = nextMessageView.bubbleContentView
+        bubbleRect = sourceView.bounds
+        path = nextMessageView.bubbleView.visiblePath()
+      } else if let messageView = cell.messageView, messageView.fullMessage.message.isServiceMessage {
         sourceView = messageView.serviceContainerView
+        bubbleRect = sourceView.bounds
         path = UIBezierPath(roundedRect: sourceView.bounds, cornerRadius: sourceView.layer.cornerRadius)
-      } else {
+      } else if let messageView = cell.messageView {
         sourceView = messageView.bubbleView
+        bubbleRect = sourceView.bounds
         path = messageView.bubbleView.visiblePath()
+      } else {
+        return nil
       }
       // The tail can extend a fraction of a point outside the bubble's bounds.
       // Round outward in pixels so the bitmap and its mask contain its full tip.
-      let extent = sourceView.bounds.union(path.bounds)
+      let extent = bubbleRect.union(path.bounds)
       let scale = sourceView.window?.screen.scale ?? sourceView.traitCollection.displayScale
       let rect = CGRect(
         x: floor(extent.minX * scale) / scale,
@@ -4878,9 +4958,8 @@ private extension MessagesCollectionView {
     private func targetedPreview(for indexPath: IndexPath) -> UITargetedPreview? {
       guard let collectionView = currentCollectionView,
             let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell,
-            let messageView = cell.messageView else { return nil }
+            let geometry = contextMenuPreviewGeometry(for: cell) else { return nil }
 
-      let geometry = contextMenuPreviewGeometry(for: messageView)
       let parameters = UIPreviewParameters()
       parameters.backgroundColor = .clear
       parameters.visiblePath = geometry.path

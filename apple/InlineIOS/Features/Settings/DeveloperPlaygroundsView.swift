@@ -4,8 +4,11 @@ import SwiftUI
 struct DeveloperPlaygroundsView: View {
   var body: some View {
     List {
-      Text("No playgrounds yet.")
-        .foregroundStyle(.secondary)
+      NavigationLink {
+        NextMessageViewPlaygroundView()
+      } label: {
+        SettingsItem(icon: "text.bubble.fill", iconColor: .orange, title: "Next Message View")
+      }
     }
     .listStyle(.insetGrouped)
     .navigationTitle("Playgrounds")

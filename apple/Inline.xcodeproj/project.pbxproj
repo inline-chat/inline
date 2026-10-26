@@ -73,6 +73,7 @@
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */ = {isa = PBXBuildFile; productRef = D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */; };
+		F1A0B1C32F10432100A1B2C3 /* InlineMessageLayout in Frameworks */ = {isa = PBXBuildFile; productRef = F1A0B1C22F10432100A1B2C3 /* InlineMessageLayout */; };
 		D4ACD0012F1B000000000001 /* MacDevtools in Frameworks */ = {isa = PBXBuildFile; productRef = D4ACD0022F1B000000000001 /* MacDevtools */; };
 		D4B53A112F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A102F1C000100000001 /* InlineSearch */; };
 		D4B53A132F1C000100000001 /* InlineSearch in Frameworks */ = {isa = PBXBuildFile; productRef = D4B53A122F1C000100000001 /* InlineSearch */; };
@@ -145,6 +146,7 @@
 		CD5326842CE113CD00EC348D /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		CD5326862CE1149700EC348D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		CD82F7F52F3618650012BA81 /* InlineIOSUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineIOSUI; sourceTree = "<group>"; };
+		F1A0B1C42F10432100A1B2C3 /* InlineMessageLayout */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineMessageLayout; sourceTree = "<group>"; };
 		E5A100012FA0000100000001 /* InlineSyntaxHighlighting */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineSyntaxHighlighting; sourceTree = "<group>"; };
 		E60906022FA1000100000001 /* InlineMessageTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = InlineMessageTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -305,6 +307,7 @@
 				D6B90A012F49000100000001 /* InlineAvatarRendering in Frameworks */,
 				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
 				D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */,
+				F1A0B1C32F10432100A1B2C3 /* InlineMessageLayout in Frameworks */,
 				E609060C2FA1000100000001 /* InlineSyntaxHighlighting in Frameworks */,
 				A83010012F52000100000001 /* InlineAppIntents in Frameworks */,
 				A9F100012F52000100000001 /* InlineTheme in Frameworks */,
@@ -387,6 +390,7 @@
 				CD092C4B2EDC6D8200E867E5 /* InlineMacUI */,
 				E5A100012FA0000100000001 /* InlineSyntaxHighlighting */,
 				CD82F7F52F3618650012BA81 /* InlineIOSUI */,
+				F1A0B1C42F10432100A1B2C3 /* InlineMessageLayout */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				B7020C432DCE1534007099D9 /* InlineShareExtension */,
 				E60906052FA1000100000001 /* InlineMessageTests */,
@@ -519,6 +523,7 @@
 				CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */,
 				CD735FEF2E493C8E00F7BFFE /* Translation */,
 				D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */,
+				F1A0B1C22F10432100A1B2C3 /* InlineMessageLayout */,
 				E5A100022FA0000100000001 /* InlineSyntaxHighlighting */,
 				A83010002F52000100000001 /* InlineAppIntents */,
 				A9F100002F52000100000001 /* InlineTheme */,
@@ -2320,6 +2325,10 @@
 		D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineIOSUI;
+		};
+		F1A0B1C22F10432100A1B2C3 /* InlineMessageLayout */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineMessageLayout;
 		};
 		D4ACD0022F1B000000000001 /* MacDevtools */ = {
 			isa = XCSwiftPackageProductDependency;
