@@ -545,7 +545,7 @@ final class RichBlockLayoutPlanner {
         guard appendText(
           disclosure.summary,
           role: .disclosureSummary(
-            progress: disclosure.kind == .progress || decoration?.status == .running,
+            progress: disclosure.kind == .progress || decoration?.value.status == .running,
             expanded: expanded,
             activity: RichBlockActivityKind(disclosure.activityKind)
           ),
