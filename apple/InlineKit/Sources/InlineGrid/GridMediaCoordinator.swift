@@ -33,6 +33,12 @@ final class GridMediaCoordinator {
   private let defaults: UserDefaults
   private var microphoneEnabled: Bool
   private var microphoneCapturePrepared = false
+  /// iOS treats a room like a phone call: while this device is in one, the
+  /// audio session and microphone run even alone, so someone who joins later
+  /// is heard after the app has gone to the background. The Mac keeps idle
+  /// presence without audio.
+  private let holdsAudioWhileInRoom: Bool
+  private var localAudioHeld = false
   private var lastSafetyPauseRevision: UInt64 = 0
   /// iOS: audio is paused for safety (route lost, interruption). Capture stops
   /// and the room sees the user muted, but their microphone choice is kept
@@ -66,9 +72,11 @@ final class GridMediaCoordinator {
     engine: InlineRTCSession,
     defaults: UserDefaults,
     inputPreferences: AudioInputPreferenceStore,
-    outputPreferences: AudioOutputPreferenceStore
+    outputPreferences: AudioOutputPreferenceStore,
+    holdsAudioWhileInRoom: Bool = GridMediaCoordinator.platformHoldsAudioWhileInRoom
   ) {
     self.engine = engine
+    self.holdsAudioWhileInRoom = holdsAudioWhileInRoom
     self.defaults = defaults
     self.inputPreferences = inputPreferences
     self.outputPreferences = outputPreferences
@@ -137,6 +145,25 @@ final class GridMediaCoordinator {
     platformEffects = effects
   }
 
+  #if os(iOS)
+  static let platformHoldsAudioWhileInRoom = true
+  #else
+  static let platformHoldsAudioWhileInRoom = false
+  #endif
+
+  /// Whether this device is in a room on its own authority, with or without a
+  /// media room. Entering arms capture like a phone call; leaving disarms it.
+  func setInRoom(_ inRoom: Bool) {
+    let held = holdsAudioWhileInRoom && inRoom
+    guard held != localAudioHeld else { return }
+    localAudioHeld = held
+    microphoneCapturePrepared = held
+    if held, presentation.microphonePermission == .notDetermined {
+      engine.requestMicrophonePermission()
+    }
+    submitDemand()
+  }
+
   func setTarget(_ target: GridMediaTarget?) {
     // A media generation can disappear while the admitted user remains alone.
     // Capture demand already requires a target. Preserve microphone intent and
@@ -189,6 +216,7 @@ final class GridMediaCoordinator {
   @discardableResult
   func withdrawLocalMedia() -> Task<GridMediaShutdownReceipt, Never> {
     microphoneCapturePrepared = false
+    localAudioHeld = false
     clearCredentials()
     setTarget(nil)
     lastDemand = nil
@@ -204,11 +232,9 @@ final class GridMediaCoordinator {
   /// preference (used when a call resumes on its own after a restart).
   @discardableResult
   func setMicrophoneEnabled(_ enabled: Bool, persist: Bool = true) -> Bool {
-    #if os(iOS)
-    if enabled {
+    if holdsAudioWhileInRoom, enabled {
       microphoneCapturePrepared = true
     }
-    #endif
     // Any explicit choice ends a safety pause; the user has decided.
     let wasSafetyPaused = microphoneSafetyPaused
     microphoneSafetyPaused = false
@@ -233,12 +259,12 @@ final class GridMediaCoordinator {
     return enabled
   }
 
-  /// A join keeps the user's microphone choice, as on the Mac. On iOS a new
-  /// admission never inherits warm capture from a muted microphone.
+  /// A join keeps the user's microphone choice, as on the Mac. Capture for
+  /// the new room is armed when its admission lands (`setInRoom`).
   func prepareForExplicitJoin() {
-    #if os(iOS)
-    microphoneCapturePrepared = false
-    #endif
+    if holdsAudioWhileInRoom {
+      microphoneCapturePrepared = false
+    }
   }
 
   func applyAutoUnmuteOnJoin() -> GridAutomaticMicrophoneChange? {
@@ -404,14 +430,16 @@ final class GridMediaCoordinator {
     // Resuming audio is the user's action; restore the microphone they chose.
     if microphoneSafetyPaused {
       microphoneSafetyPaused = false
-      if microphoneEnabled, target != nil {
-        microphoneCapturePrepared = true
-      }
       presentationController.setMicrophoneEnabled(microphoneEnabled)
-      submitDemand()
       broadcast(.microphoneEffectiveStateChanged)
     }
     #endif
+    // A safety pause disarms capture whether or not the mic was open; resuming
+    // rearms it for the room this device is in.
+    if holdsAudioWhileInRoom, target != nil || localAudioHeld {
+      microphoneCapturePrepared = true
+    }
+    submitDemand()
     engine.retryAudio()
   }
 
@@ -452,13 +480,11 @@ final class GridMediaCoordinator {
   }
 
   private var microphoneCapturePreparedForDemand: Bool {
-    #if os(iOS)
-    // An open microphone captures as soon as there is a call to send it to;
-    // a muted one stays warm only after an unmute in this admission.
-    (microphoneCapturePrepared || isMicrophoneEnabled) && target != nil
-    #else
-    target != nil
-    #endif
+    if holdsAudioWhileInRoom {
+      // Armed for the room, alone or not, until a safety pause or leaving.
+      return microphoneCapturePrepared && (target != nil || localAudioHeld)
+    }
+    return target != nil
   }
 
   private func submitDemand() {
@@ -471,6 +497,7 @@ final class GridMediaCoordinator {
       credentials: credentials,
       microphoneEnabled: microphoneEnabled,
       microphoneCapturePrepared: microphoneCapturePreparedForDemand,
+      holdsLocalAudio: localAudioHeld,
       screenCaptureSource: screenCaptureSource,
       screenShareQualityProfile: screenShareQualityProfile,
       input: inputSelection,
@@ -555,7 +582,10 @@ final class GridMediaCoordinator {
     case .idle, .failed: false
     default: snapshot.rtc.target == target?.rtcSessionID
     }
-    let audioEligible = target != nil && (connectedTarget != nil || isRecoveringTarget)
+    // Holding audio alone keeps the realtime connection and its presence
+    // heartbeat alive in the background, as a connected call does.
+    let callAudio = target != nil && (connectedTarget != nil || isRecoveringTarget)
+    let audioEligible = (callAudio || (target == nil && localAudioHeld))
       && (snapshot.audio.isCaptureHealthy || snapshot.audio.isPlayoutHealthy)
     if audioEligible != lastAudioEligibility {
       lastAudioEligibility = audioEligible

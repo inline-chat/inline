@@ -164,7 +164,9 @@ actor GridRTCEngine {
     if !nextDemand.microphoneCapturePrepared { nextDemand.microphoneEnabled = false }
     guard nextDemand != demand else { return }
     let previousTarget = demand.target
-    if previousTarget != nextDemand.target { mediaDemandEpoch &+= 1 }
+    if previousTarget != nextDemand.target || demand.holdsLocalAudio != nextDemand.holdsLocalAudio {
+      mediaDemandEpoch &+= 1
+    }
     demandRevision &+= 1
     let admissionRevision = demandRevision
     demand = nextDemand
@@ -190,7 +192,10 @@ actor GridRTCEngine {
         try await waitForRetirementsBeforeConnect(target: target)
         guard demandRevision == admissionRevision else { return }
       }
-      try await audio.setMediaDemandActive(nextDemand.target != nil, epoch: mediaDemandEpoch)
+      try await audio.setMediaDemandActive(
+        nextDemand.target != nil || nextDemand.holdsLocalAudio,
+        epoch: mediaDemandEpoch
+      )
     } catch {
       guard !Task.isCancelled else { return }
       guard demandRevision == admissionRevision else { return }
@@ -318,12 +323,19 @@ actor GridRTCEngine {
     )
   }
 
+  /// A media room's lease, or the local one while the device holds audio
+  /// alone. Swapping between them never drops capture: the new lease commits
+  /// before the old one is released.
+  private var desiredDemandAudioLease: GridAudioLease? {
+    guard demand.microphoneCapturePrepared else { return nil }
+    if let target = demand.target { return .connectionDemand(target) }
+    return demand.holdsLocalAudio ? .localAdmission : nil
+  }
+
   private func replaceDemandAudioLease(for target: InlineRTCSessionID?) async {
     guard target == demand.target else { return }
     let revision = demandRevision
-    let nextLease = demand.microphoneCapturePrepared
-      ? target.map(GridAudioLease.connectionDemand)
-      : nil
+    let nextLease = desiredDemandAudioLease
     guard nextLease != demandAudioLease else { return }
     if let nextLease {
       await audio.acquireCaptureLease(nextLease)
@@ -343,9 +355,7 @@ actor GridRTCEngine {
   }
 
   private func releaseSupersededDemandAudioLease(_ lease: GridAudioLease?) async {
-    let currentIntent = demand.microphoneCapturePrepared
-      ? demand.target.map(GridAudioLease.connectionDemand)
-      : nil
+    let currentIntent = desiredDemandAudioLease
     if let lease, lease != currentIntent {
       await audio.releaseCaptureLease(lease)
     }
@@ -1983,6 +1993,7 @@ actor GridRTCEngine {
 
   private func reportMediaQuiescenceIfReady() async {
     guard demand.target == nil,
+          !demand.holdsLocalAudio,
           room == nil,
           retirementTasks.isEmpty,
           failedLocalQuiescence.isEmpty,

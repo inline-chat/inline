@@ -1671,6 +1671,38 @@ struct GridRTCEngineTests {
     try await eventuallyRTC { await audio.holdsCaptureLease(lease) == false }
   }
 
+  @Test("room audio held alone stays prepared and active from alone to joined and back", .timeLimit(.minutes(1)))
+  func localAudioSurvivesMediaRoomChanges() async throws {
+    let audioDriver = RTCFakeAudioDriver(initiallyRecordingActive: false)
+    let audio = GridAudioEngine(driver: audioDriver, permissionDriver: TestGridMicrophonePermissionDriver())
+    let rtc = GridRTCEngine(audio: audio, driver: FakeGridRTCDriver())
+    let target = InlineRTCSessionID("grid-test:1:61:1")
+    let alone = InlineRTCDemand(microphoneCapturePrepared: true, holdsLocalAudio: true)
+
+    await rtc.setDemand(alone)
+    try await eventuallyRTC { await audio.holdsCaptureLease(.localAdmission) }
+    try await eventuallyRTC { await audioDriver.operations().contains("prepared:true") }
+    let aloneOperationCount = await audioDriver.operations().count
+
+    var joined = demand(target: target, microphoneEnabled: true)
+    joined.holdsLocalAudio = true
+    await rtc.setDemand(joined)
+    try await eventuallyRTC { await rtc.currentSnapshot().state == .connected(target) }
+    #expect(await audio.holdsCaptureLease(.connectionDemand(target)))
+    #expect(!(await audio.holdsCaptureLease(.localAdmission)))
+
+    await rtc.setDemand(alone)
+    try await eventuallyRTC { await audio.holdsCaptureLease(.localAdmission) }
+    try await eventuallyRTC { await rtc.currentSnapshot().state == .idle }
+    let handoff = await audioDriver.operations().dropFirst(aloneOperationCount)
+    #expect(!handoff.contains("prepared:false"))
+    #expect(!handoff.contains { $0.hasPrefix("media:false") })
+
+    await rtc.setDemand(InlineRTCDemand())
+    try await eventuallyRTC { !(await audio.holdsCaptureLease(.localAdmission)) }
+    try await eventuallyRTC { await audioDriver.operations().contains { $0.hasPrefix("media:false") } }
+  }
+
   @Test("leave proves local quiescence before becoming idle")
   func leaveQuiescesLocallyFirst() async throws {
     let audio = GridAudioEngine(

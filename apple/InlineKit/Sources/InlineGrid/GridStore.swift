@@ -132,7 +132,8 @@ public final class GridRoomService {
     userDefaults: UserDefaults = .standard,
     engine: InlineRTCSession,
     auth: AuthHandle = Auth.shared.handle,
-    sendGridTransaction: GridRoomAPI.Send? = nil
+    sendGridTransaction: GridRoomAPI.Send? = nil,
+    holdsAudioWhileInRoom: Bool = GridMediaCoordinator.platformHoldsAudioWhileInRoom
   ) {
     self.realtime = realtime
     self.auth = auth
@@ -158,7 +159,8 @@ public final class GridRoomService {
       engine: engine,
       defaults: userDefaults,
       inputPreferences: inputPreferences,
-      outputPreferences: outputPreferences
+      outputPreferences: outputPreferences,
+      holdsAudioWhileInRoom: holdsAudioWhileInRoom
     )
     self.mediaCoordinator = mediaCoordinator
     media = mediaCoordinator.presentation
@@ -995,6 +997,9 @@ public final class GridRoomService {
     if screenShareNotificationTarget != target {
       resetScreenSharePresentationEdges(target: target)
     }
+    // Arm room audio before the target so being joined by someone never
+    // passes through a demand with no audio at all.
+    mediaCoordinator.setInRoom(currentAdmittedRoom() != nil)
     mediaCoordinator.setTarget(target)
     reconcileAloneAutoMute()
     reconcileScreenShareAloneGrace()
@@ -1909,14 +1914,16 @@ public final class GridRoomService {
     )
   }
 
-  private func currentMediaTarget() -> GridMediaTarget? {
+  /// The room this device is in on its own authority, with or without a
+  /// media room (alone has none).
+  private func currentAdmittedRoom() -> (admission: GridLocalAdmission, room: GridRoom)? {
     guard let admission = localAdmission,
           (try? auth.validateAccountMutation(admission.accountToken)) != nil,
           acceptedOwnedRoom?.spaceID == admission.spaceID,
           acceptedOwnedRoom?.roomID == admission.roomID,
           acceptedOwnedRoom?.membershipID == admission.membershipID,
           let grid = grids[admission.spaceID], grid.enabled,
-          let room = grid.rooms.first(where: { $0.id == admission.roomID }), room.hasConnection,
+          let room = grid.rooms.first(where: { $0.id == admission.roomID }),
           room.avatars.contains(where: { $0.ownedByCurrentSession && $0.membershipID == admission.membershipID })
     else { return nil }
     if callTransferEnabled {
@@ -1924,6 +1931,13 @@ public final class GridRoomService {
             call.callID == admission.callID, call.membershipID == admission.membershipID
       else { return nil }
     }
+    return (admission, room)
+  }
+
+  private func currentMediaTarget() -> GridMediaTarget? {
+    guard let admitted = currentAdmittedRoom(), admitted.room.hasConnection else { return nil }
+    let admission = admitted.admission
+    let room = admitted.room
     return GridMediaTarget(
       callID: admission.callID,
       membershipID: admission.membershipID,
@@ -2216,6 +2230,7 @@ public final class GridRoomService {
     avatarStateSync.setOwnedRoom(nil)
     mediaCoordinator.clearCredentials()
     mediaCoordinator.setTarget(nil)
+    mediaCoordinator.setInRoom(false)
     mediaInteractionStartedAt = nil
     resetScreenSharePresentationEdges()
   }

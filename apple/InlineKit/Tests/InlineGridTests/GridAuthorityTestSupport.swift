@@ -26,7 +26,8 @@ final class GridAuthorityTestFixture {
   init(
     configurationBlocked: Bool = false,
     control: GridAuthorityMembershipControl? = nil,
-    defaultsValues: [String: Bool] = [:]
+    defaultsValues: [String: Bool] = [:],
+    holdsAudioWhileInRoom: Bool = false
   ) {
     self.control = control
     defaults = UserDefaults(suiteName: "grid-authority-test-\(namespace)")!
@@ -57,7 +58,7 @@ final class GridAuthorityTestFixture {
     }
     service = GridRoomService(
       realtime: realtime, userDefaults: defaults, engine: engine, auth: auth,
-      sendGridTransaction: send
+      sendGridTransaction: send, holdsAudioWhileInRoom: holdsAudioWhileInRoom
     )
   }
 

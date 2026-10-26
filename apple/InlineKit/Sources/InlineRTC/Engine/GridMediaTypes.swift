@@ -48,9 +48,13 @@ public struct InlineRTCDemand: Equatable, Sendable {
   public var target: InlineRTCSessionID?
   public var credentials: InlineRTCCredentials?
   public var microphoneEnabled: Bool
-  /// Explicit capture preparation for this locally admitted call. iOS keeps
-  /// this false until the user unmutes; a prior OS permission is not intent.
+  /// Explicit capture preparation for this locally admitted call; a prior OS
+  /// permission is not intent.
   public var microphoneCapturePrepared: Bool
+  /// The device is in a room and keeps the audio session and prepared capture
+  /// running even without a media room, like a phone call. iOS can't start
+  /// the microphone from the background, so a later arrival needs it running.
+  public var holdsLocalAudio: Bool
   public var screenCaptureSource: InlineRTCScreenCaptureSource?
   public var screenShareQualityProfile: InlineRTCScreenShareQualityProfile
   public var input: AudioInputSelection
@@ -62,6 +66,7 @@ public struct InlineRTCDemand: Equatable, Sendable {
     credentials: InlineRTCCredentials? = nil,
     microphoneEnabled: Bool = false,
     microphoneCapturePrepared: Bool = false,
+    holdsLocalAudio: Bool = false,
     screenCaptureSource: InlineRTCScreenCaptureSource? = nil,
     screenShareQualityProfile: InlineRTCScreenShareQualityProfile = .automatic,
     input: AudioInputSelection = .automatic,
@@ -72,6 +77,7 @@ public struct InlineRTCDemand: Equatable, Sendable {
     self.credentials = credentials
     self.microphoneEnabled = microphoneEnabled
     self.microphoneCapturePrepared = microphoneCapturePrepared
+    self.holdsLocalAudio = holdsLocalAudio
     self.screenCaptureSource = screenCaptureSource
     self.screenShareQualityProfile = screenShareQualityProfile
     self.input = input
@@ -94,6 +100,8 @@ enum GridAudioDriverEvent: Equatable, Sendable {
 enum GridAudioLease: Equatable, Hashable, Sendable {
   case connectionDemand(InlineRTCSessionID)
   case rtcLifecycle(UUID)
+  /// The device is in a room with no media room yet (alone).
+  case localAdmission
 }
 
 public enum InlineRTCAudioState: Equatable, Sendable {

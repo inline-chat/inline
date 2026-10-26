@@ -52,6 +52,38 @@ struct GridMicrophoneIntentTests {
     await fixture.close()
   }
 
+  @Test("a phone in a room keeps audio running alone and through arrivals; the Mac idles alone", arguments: [true, false])
+  func roomAudioRunsAlone(holdsAudio: Bool) async throws {
+    let control = GridAuthorityMembershipControl()
+    let fixture = GridAuthorityTestFixture(control: control, holdsAudioWhileInRoom: holdsAudio)
+    do {
+      let room = try await GridMicrophoneIntentRoom(fixture: fixture, control: control)
+      try await eventuallyGridAuthority { await fixture.audio.runtimeHealth().isRecording }
+
+      // The last other person leaves: no media room remains.
+      await room.apply(occupants: 1, generation: 3)
+      try await eventuallyGridAuthority { fixture.service.media.connectionState == .disconnected }
+      try await eventuallyGridAuthority { await fixture.audio.runtimeHealth().isRecording == holdsAudio }
+      try await Task.sleep(for: .milliseconds(100))
+      #expect(await fixture.audio.runtimeHealth().isRecording == holdsAudio)
+      #expect(await fixture.audio.runtimeHealth().isPlaying == holdsAudio)
+      #expect(fixture.service.hasLocalAdmission)
+
+      // Someone arrives while the phone may be in the background.
+      await room.apply(occupants: 2, generation: 4)
+      try await eventuallyGridAuthority { fixture.service.media.connectionState == .connected }
+      #expect(await fixture.audio.runtimeHealth().isRecording)
+
+      // Leaving releases the room's audio on both platforms.
+      fixture.service.leaveCurrentRoom(spaceID: 42)
+      try await eventuallyGridAuthority { await !fixture.audio.runtimeHealth().isRecording }
+    } catch {
+      await fixture.close()
+      throw error
+    }
+    await fixture.close()
+  }
+
   #if os(macOS)
   enum SoloEnd: CaseIterable {
     case settingDisabled, withdraw, failedJoin, failedJoinWithAutoUnmute
