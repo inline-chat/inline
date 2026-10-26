@@ -51,3 +51,7 @@ fixture fails CI. Each driver also runs its own mapper over its provider's files
 
 Responses may also carry `after_step` (apply the answer right after that
 step), `by` (the answering Inline user) and the `events` the answer emits.
+
+Pending recordings: Claude 2.1.292 sends lifecycle frames as top-level
+`{"type": "command_lifecycle"}`, not `system/command_lifecycle`. The Claude
+fixtures switch to the recorded shape when W2's labs capture real frames.

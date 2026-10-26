@@ -249,6 +249,33 @@ pub struct OpenSpec {
     /// Resume cursor from the journal, when the harness supports replay.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after: Option<SessionCheckpoint>,
+    /// The effective output mode (thread override, else the agent default).
+    /// Claude's Friendly mode is a launch flag (`--brief`, which enables
+    /// `SendUserMessage`), so it is fixed when the session opens; a change on a
+    /// live session applies at the next open (after an idle release or an
+    /// explicit `/release`) and never restarts work in progress. Codex renders
+    /// both modes from the same stream and ignores it.
+    #[serde(default, skip_serializing_if = "OutputMode::is_detailed")]
+    pub output_mode: OutputMode,
+}
+
+/// How an agent's work is shown (spec §6): one explicit setting per agent,
+/// overridable per thread.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputMode {
+    /// Every item the harness reports, as collapsible progress rows.
+    #[default]
+    Detailed,
+    /// Only the harness's short prose updates, then the final answer.
+    Friendly,
+}
+
+impl OutputMode {
+    /// Whether this is the default mode.
+    pub fn is_detailed(&self) -> bool {
+        *self == Self::Detailed
+    }
 }
 
 /// Open mode.
@@ -377,6 +404,8 @@ impl LiveWork {
 pub struct Released {
     /// The session.
     pub key: SessionKey,
+    /// Whether native ownership is already released or still pending.
+    pub outcome: ReleaseOutcome,
     /// Interactions cancelled by the release.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cancelled_interactions: Vec<InteractionId>,
@@ -386,6 +415,18 @@ pub struct Released {
     /// Children stopped by the release.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stopped_children: Vec<ChildRef>,
+}
+
+/// How far a release has gone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleaseOutcome {
+    /// This bridge stopped listening, but the harness still owns the session
+    /// for now. The stream reports `RunState::Released` when it lets go;
+    /// until then the apps show "releasing".
+    Unsubscribed,
+    /// The harness released native ownership; another client may take it.
+    NativeReleased,
 }
 
 #[cfg(test)]
@@ -416,6 +457,7 @@ mod tests {
             instructions: None,
             title: None,
             after: None,
+            output_mode: OutputMode::Detailed,
         };
         let encoded = serde_json::to_value(&spec).expect("encode");
         assert_eq!(

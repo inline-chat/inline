@@ -26,6 +26,11 @@ pub enum RunState {
         /// Who holds it.
         by: HeldBy,
     },
+    /// This bridge let the session go and the harness has not confirmed yet
+    /// (Codex keeps an unsubscribed thread loaded until its grace period ends).
+    Releasing,
+    /// The harness confirmed the release; another client may take the session.
+    Released,
     /// The machine or bridge is not connected.
     Offline,
     /// Not known yet. Never inferred idle from an unknown event.
