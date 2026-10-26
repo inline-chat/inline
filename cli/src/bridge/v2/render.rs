@@ -38,8 +38,13 @@ pub(crate) enum Vocabulary {
 pub(crate) enum RenderOp {
     /// Create (first time) or silently edit the progress message `slot`.
     Progress { slot: u32, doc: Doc },
-    /// Last edit of progress message `slot`; it no longer changes.
-    EndProgress { slot: u32, doc: Doc },
+    /// Last edit of progress message `slot`; it no longer changes. `full`
+    /// holds the untruncated detail of rows the message shows cut short.
+    EndProgress {
+        slot: u32,
+        doc: Doc,
+        full: Vec<FullDetail>,
+    },
     /// A short Friendly update message.
     Update { doc: Doc },
     /// The final answer: a separate message that notifies.
@@ -58,6 +63,13 @@ pub(crate) enum RenderOp {
     },
     /// A warning or error outside a card.
     Notice { doc: Doc },
+}
+
+/// The untruncated detail of one row whose message shows only its end.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FullDetail {
+    pub title: String,
+    pub text: String,
 }
 
 /// One button on a card, carrying the harness's own label.
@@ -127,6 +139,10 @@ impl Renderer {
             final_answer: None,
             interactions: HashMap::new(),
         }
+    }
+
+    pub(crate) fn mode(&self) -> OutputMode {
+        self.mode
     }
 
     pub(crate) fn set_mode(&mut self, mode: OutputMode) {
@@ -377,10 +393,28 @@ impl Renderer {
         let mut builder = DocBuilder::new();
         self.write_rows(&mut builder);
         builder.footer(&format!("{verb} {}", elapsed_text(elapsed_ms)));
+        let full = self
+            .slot
+            .as_ref()
+            .map(|slot| {
+                slot.rows
+                    .iter()
+                    .filter_map(|row| {
+                        let body = row.body.as_ref()?;
+                        let text = row_full_text(body, &row.delta)?;
+                        Some(FullDetail {
+                            title: row_title(self.vocabulary, body).0,
+                            text,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         self.slot = None;
         ops.push(RenderOp::EndProgress {
             slot: id,
             doc: builder.finish(),
+            full,
         });
     }
 
@@ -801,6 +835,60 @@ fn row_detail(builder: &mut DocBuilder, body: &ItemBody, delta: &str) {
     }
 }
 
+/// A row's whole detail as plain text, when its message shows only the end.
+fn row_full_text(body: &ItemBody, delta: &str) -> Option<String> {
+    let long = |text: &str| text.chars().count() > MAX_DETAIL_CHARS;
+    match body {
+        ItemBody::Command {
+            command, output, ..
+        } => {
+            let output = output.as_deref().unwrap_or(delta);
+            long(output).then(|| format!("$ {command}\n\n{output}"))
+        }
+        ItemBody::FileChange { changes } => changes
+            .iter()
+            .any(|change| change.diff.as_deref().is_some_and(long))
+            .then(|| {
+                changes
+                    .iter()
+                    .map(|change| {
+                        format!(
+                            "--- {}\n{}",
+                            change.path.display(),
+                            change.diff.as_deref().unwrap_or("")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            }),
+        ItemBody::Reasoning { summary, .. } => {
+            let text = if summary.is_empty() {
+                delta.to_owned()
+            } else {
+                summary.join("\n\n")
+            };
+            long(&text).then_some(text)
+        }
+        ItemBody::Tool { input, output, .. } => {
+            let input = if input.is_null() {
+                String::new()
+            } else {
+                serde_json::to_string_pretty(input).unwrap_or_default()
+            };
+            let output = output
+                .as_deref()
+                .or((!delta.is_empty()).then_some(delta))
+                .unwrap_or("");
+            (long(&input) || long(output)).then(|| format!("{input}\n\n{output}"))
+        }
+        ItemBody::Plan { text, .. } => {
+            let text = text.as_deref().or((!delta.is_empty()).then_some(delta))?;
+            long(text).then(|| text.to_owned())
+        }
+        _ => None,
+    }
+}
+
 fn card_action(decision: &Decision) -> CardAction {
     CardAction {
         decision: decision.id.to_string(),
@@ -1054,7 +1142,7 @@ mod tests {
         let ended: Vec<(u32, String)> = ops
             .iter()
             .filter_map(|op| match op {
-                RenderOp::EndProgress { slot, doc } => Some((*slot, doc.text.clone())),
+                RenderOp::EndProgress { slot, doc, .. } => Some((*slot, doc.text.clone())),
                 _ => None,
             })
             .collect();
@@ -1068,6 +1156,56 @@ mod tests {
             "the final answer is its own message"
         );
         assert!(matches!(ops.last(), Some(RenderOp::Final { doc }) if doc.text == "Done."));
+    }
+
+    #[test]
+    fn long_output_is_kept_whole_for_the_full_output_button() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let long = format!("FIRST LINE\n{}", "x".repeat(MAX_DETAIL_CHARS + 10));
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (
+                    1_000,
+                    completed(
+                        "c1",
+                        ItemBody::Command {
+                            command: "cargo test".to_owned(),
+                            cwd: None,
+                            actions: Vec::new(),
+                            output: Some(long.clone()),
+                            exit_code: Some(0),
+                            duration_ms: Some(1200),
+                        },
+                        None,
+                    ),
+                ),
+                (
+                    2_000,
+                    turn(TurnPhase::Completed {
+                        outcome: TurnOutcome::Completed,
+                        inputs_consumed: vec![],
+                        error: None,
+                        duration_ms: None,
+                    }),
+                ),
+            ],
+        );
+        let (doc, full) = ops
+            .iter()
+            .find_map(|op| match op {
+                RenderOp::EndProgress { doc, full, .. } => Some((doc, full)),
+                _ => None,
+            })
+            .expect("end");
+        assert!(
+            !doc.text.contains("FIRST LINE"),
+            "the message shows only the end"
+        );
+        assert_eq!(full.len(), 1);
+        assert!(full[0].text.contains("FIRST LINE"));
+        assert!(full[0].text.ends_with(&long));
     }
 
     #[test]

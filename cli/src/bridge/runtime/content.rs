@@ -13,13 +13,13 @@ use super::super::render_inline_text;
 const MAX_LOCAL_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 const ATTACHMENT_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 
-pub(super) struct InboundContent {
+pub(in crate::bridge) struct InboundContent {
     pub text: String,
     pub unsupported_notice: Option<String>,
     pub attachments: Vec<InputAttachment>,
 }
 
-pub(super) fn normalize_inbound_content(
+pub(in crate::bridge) fn normalize_inbound_content(
     content: &MessageContent,
     entities: &[MessageEntityRecord],
     addressed_bot: i64,
@@ -93,7 +93,7 @@ pub(super) fn normalize_inbound_content(
 /// The original Inline URL remains available as a transport fallback, but
 /// provider adapters should prefer the local URI so queued work and repeated
 /// reads do not depend on a temporary signed URL.
-pub(super) async fn materialize_inbound_attachments(
+pub(in crate::bridge) async fn materialize_inbound_attachments(
     attachments: &[InputAttachment],
     cache_dir: &Path,
 ) -> Vec<InputAttachment> {

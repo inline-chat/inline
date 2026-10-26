@@ -2015,6 +2015,7 @@ async fn run_provider_installation(
                 account.host_label.clone()
             },
             allowlist: policy.allowed_user_ids().collect(),
+            owner_control: owner_control.clone(),
             bot,
             inline_events,
             readiness: shared_provider_readiness.as_ref(),
@@ -3109,6 +3110,7 @@ struct V2Launch<'a> {
     workspace: PathBuf,
     machine_label: String,
     allowlist: Vec<i64>,
+    owner_control: Option<Arc<OwnerControl>>,
     bot: InlineClient,
     inline_events: inline_client::LosslessEventReceiver,
     readiness: Option<&'a ProviderReadiness>,
@@ -3126,6 +3128,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         workspace,
         machine_label,
         allowlist,
+        owner_control,
         bot,
         mut inline_events,
         readiness,
@@ -3191,10 +3194,20 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
             executable_path: Some(executable.display().to_string()),
             accept_messages_after: installation.accept_messages_after,
             allowlist,
+            ledger_path: installation.state_dir.join("v2-ledger.sqlite"),
+            attachments_dir: installation.state_dir.join("attachments"),
         },
         bot.clone(),
+        Arc::new(v2::runtime::OwnerConnection(owner_control.ok_or_else(
+            || {
+                io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "bridge v2 needs the owner connection to record its work",
+                )
+            },
+        )?)),
         harness,
-    );
+    )?;
     if let Some(readiness) = readiness {
         readiness.mark_ready(&installation.installation_id);
     }
