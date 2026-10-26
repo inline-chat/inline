@@ -29,6 +29,10 @@ pub struct EventHub {
 struct HubState {
     next_seq: u64,
     checkpoint: Option<SessionCheckpoint>,
+    /// Receives from the hub's creation, for the first subscriber: a driver
+    /// can emit while opening (resume can start a turn or ask for approval)
+    /// before anyone has called `events()`.
+    initial: Option<(broadcast::Receiver<Envelope>, u64)>,
 }
 
 impl EventHub {
@@ -39,13 +43,15 @@ impl EventHub {
 
     /// A hub that continues after `last_seq` (reattach after a journal replay).
     pub fn starting_after(key: SessionKey, capacity: usize, last_seq: u64) -> Self {
-        let (sender, _) = broadcast::channel(capacity.max(16));
+        let (sender, receiver) = broadcast::channel(capacity.max(16));
+        let first = last_seq.saturating_add(1);
         Self {
             key,
             sender,
             state: Mutex::new(HubState {
-                next_seq: last_seq.saturating_add(1),
+                next_seq: first,
                 checkpoint: None,
+                initial: Some((receiver, first)),
             }),
         }
     }
@@ -82,10 +88,17 @@ impl EventHub {
     }
 
     /// Subscribes from the next event on.
+    /// A stream of envelopes. The first subscriber also gets everything
+    /// emitted since the hub was created; later ones start now.
     pub fn subscribe(&self) -> EventStream {
-        let receiver = self.sender.subscribe();
+        let (receiver, expected) = {
+            let mut state = self.state.lock().expect("event hub poisoned");
+            match state.initial.take() {
+                Some(initial) => initial,
+                None => (self.sender.subscribe(), state.next_seq),
+            }
+        };
         let key = self.key.clone();
-        let expected = self.next_seq();
         Box::pin(futures_util::stream::unfold(
             (receiver, key, expected, None::<Envelope>),
             |(mut receiver, key, expected, pending)| async move {
@@ -224,6 +237,18 @@ mod tests {
         assert_eq!(cursor.observe(&first), CursorStep::Next);
         assert_eq!(cursor.observe(&second), CursorStep::Next);
         assert_eq!(cursor.observe(&first), CursorStep::Duplicate);
+    }
+
+    #[tokio::test]
+    async fn the_first_subscriber_sees_events_emitted_while_opening() {
+        let hub = EventHub::new(key(), 16);
+        hub.emit(notice("during-open"));
+        let mut first = hub.subscribe();
+        let mut later = hub.subscribe();
+        hub.emit(notice("after"));
+        assert_eq!(first.next().await.expect("early").seq, 1);
+        assert_eq!(first.next().await.expect("late").seq, 2);
+        assert_eq!(later.next().await.expect("late only").seq, 2);
     }
 
     #[tokio::test]
