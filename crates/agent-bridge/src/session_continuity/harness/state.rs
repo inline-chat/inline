@@ -147,17 +147,19 @@ impl RunStateTracker {
         let before = self.state.clone();
         match event {
             Event::State { state } => {
-                self.state = state.clone();
+                // A harness reporting idle after Inline's pause does not end the pause.
+                if !(matches!(self.state, RunState::Paused) && matches!(state, RunState::Idle)) {
+                    self.state = state.clone();
+                }
                 if !matches!(state, RunState::Waiting { .. }) {
                     self.open_interactions.clear();
                 }
             }
             Event::Turn { phase, .. } => match phase {
                 TurnPhase::Started { .. } => {
+                    // Resume (or another client) starting a turn ends the pause.
                     self.stopping = false;
-                    if !matches!(self.state, RunState::Paused) {
-                        self.state = RunState::Working;
-                    }
+                    self.state = RunState::Working;
                 }
                 TurnPhase::Completed { .. } => {
                     self.stopping = false;
@@ -294,6 +296,16 @@ mod tests {
         ));
         assert_eq!(tracker.apply(&unknown), None);
         assert_eq!(tracker.state(), &RunState::Working);
+    }
+
+    #[test]
+    fn a_new_turn_ends_the_pause_but_harness_idle_does_not() {
+        let mut tracker = RunStateTracker::new(RunState::Paused);
+        tracker.apply(&Event::State {
+            state: RunState::Idle,
+        });
+        assert_eq!(tracker.state(), &RunState::Paused);
+        assert_eq!(tracker.apply(&turn_started()), Some(RunState::Working));
     }
 
     #[test]
