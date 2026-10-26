@@ -615,7 +615,7 @@ class MessageViewAppKit: NSView {
       outgoing: usesOutgoingBubbleStyle,
       rowHeight: 28,
       messageFontSize: props.layout.fontSize,
-      presentation: { [message = message.message] action in MessageActionPerformer.presentation(for: action, message: message) }
+      presentation: { [message] action in MessageActionPerformer.presentation(for: action, message: message) }
     )
   }
 
