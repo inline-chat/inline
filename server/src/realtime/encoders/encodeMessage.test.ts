@@ -262,7 +262,7 @@ describe("encodeFullMessage block photos", () => {
       blocks: [{
         kind: {
           oneofKind: "disclosure" as const,
-          disclosure: {
+          disclosure: { status: 0,
             summary: { offset: 0n, length: 0n },
             kind: BlockDisclosure_Kind.DEFAULT,
             activityKind: BlockDisclosure_ActivityKind.UNSPECIFIED,

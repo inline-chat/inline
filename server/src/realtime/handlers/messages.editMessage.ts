@@ -18,7 +18,8 @@ export const editMessage = async (
       text: input.text,
       entities: input.entities,
       actions: input.actions,
-      parseMarkdown: input.parseMarkdown ?? (handlerContext.isBot ? true : undefined),
+      parseMarkdown: input.blockContent ? input.parseMarkdown : input.parseMarkdown ?? (handlerContext.isBot ? true : undefined),
+      botBlockContent: input.blockContent,
     },
     {
       currentSessionId: handlerContext.sessionId,

@@ -97,25 +97,47 @@ export const TBotMedia = t.Union([
   t.Object({ type: t.Literal("nudge") }),
 ])
 
+const botMessageActionOptions = {
+  style: t.Optional(t.Union([t.Literal("primary"), t.Literal("destructive")])),
+  confirm: t.Optional(t.Object({ title: t.String(), text: t.Optional(t.String()), confirm_text: t.Optional(t.String()) })),
+  required_grant: t.Optional(t.Union([
+    t.Literal("access"), t.Literal("invoke"), t.Literal("steer"), t.Literal("approve"),
+    t.Literal("view"), t.Literal("configure"), t.Literal("owner"),
+  ])),
+}
+
 export const TBotMessageAction = t.Union([
   t.Object({
     action_id: t.String(),
     text: t.String(),
     type: t.Literal("callback"),
     callback_data: t.String(),
+    ...botMessageActionOptions,
   }),
   t.Object({
     action_id: t.String(),
     text: t.String(),
     type: t.Literal("callback"),
     callback_data_base64: t.String(),
+    ...botMessageActionOptions,
   }),
-  t.Object({ action_id: t.String(), text: t.String(), type: t.Literal("callback") }),
+  t.Object({ action_id: t.String(), text: t.String(), type: t.Literal("callback"), ...botMessageActionOptions }),
   t.Object({
     action_id: t.String(),
     text: t.String(),
     type: t.Literal("copy_text"),
     copy_text: t.String(),
+    ...botMessageActionOptions,
+  }),
+  t.Object({ action_id: t.String(), text: t.String(), type: t.Literal("open_url"), url: t.String(), ...botMessageActionOptions }),
+  t.Object({
+    action_id: t.String(),
+    text: t.String(),
+    type: t.Literal("open_link"),
+    chat_id: t.Optional(t.Number()),
+    user_id: t.Optional(t.Number()),
+    message_id: t.Optional(t.Number()),
+    ...botMessageActionOptions,
   }),
 ])
 

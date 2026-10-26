@@ -1,3 +1,4 @@
+import type { BlockContent } from "@inline-chat/protocol/core"
 import { MessageEntity_Type, type InputPeer, type MessageActions, type MessageEntities, type Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel, MessageRevisionConflict } from "@in/server/db/models/messages"
@@ -13,6 +14,7 @@ import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { prepareBlockContent, type PreparedBlockContent } from "@in/server/modules/message/blockContentStorage"
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
+import { validateBotBlockContent } from "@in/server/modules/message/botBlockContent"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
 import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
@@ -36,6 +38,8 @@ type Input = {
   entities?: MessageEntities
   actions?: MessageActions
   parseMarkdown?: boolean
+  /** Bot-supplied structural content over the unparsed `text`; requires `text`. */
+  botBlockContent?: BlockContent
   expectedRevision?: number
   expectedVoiceId?: number
 }
@@ -79,7 +83,17 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     })
     throw RealtimeRpcError.BadRequest()
   }
-  const normalizedActions = normalizeAndValidateMessageActions(input.actions)
+  let botBlockContent: BlockContent | undefined
+  if (input.botBlockContent) {
+    const sender = await UsersModel.getUserById(currentUserId)
+    if (!sender?.bot || input.parseMarkdown || input.text === undefined) throw RealtimeRpcError.BadRequest()
+    botBlockContent = validateBotBlockContent(input.text, input.botBlockContent)
+  }
+  // Action IDs must not collide with the form IDs the message will carry.
+  const normalizedActions = normalizeAndValidateMessageActions(
+    input.actions,
+    input.text === undefined ? fullMessage.blockContent : botBlockContent,
+  )
   if (normalizedActions !== undefined) {
     const sender = await UsersModel.getUserById(currentUserId)
     if (!sender?.bot) {
@@ -112,14 +126,15 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
 
   let preparedBlockContent: PreparedBlockContent | null | undefined =
     input.text === undefined ? undefined : null
-  if (input.text !== undefined && outgoingText.blockContent) {
+  const nextBlockContent = botBlockContent ?? outgoingText.blockContent
+  if (input.text !== undefined && nextBlockContent) {
     try {
       preparedBlockContent = prepareBlockContent({
         text: outgoingText.text,
         entities,
         parsed: {
-          blockContent: outgoingText.blockContent,
-          imageSources: outgoingText.blockImageSources ?? [],
+          blockContent: nextBlockContent,
+          imageSources: botBlockContent ? [] : outgoingText.blockImageSources ?? [],
         },
       }) ?? null
     } catch (error) {

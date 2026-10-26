@@ -399,6 +399,8 @@ export function updateBucket(userId: number, update: Update, peerChatIds?: Pick<
     case "deleteMessages": return peer(value.deleteMessages.peerId)
     case "deleteChat": return peer(value.deleteChat.peerId)
     case "pinnedMessages": return peer(value.pinnedMessages.peerId)
+    case "agentSessionState": return peer(value.agentSessionState.agentSession?.peerId)
+    case "agentParticipation": return peer(value.agentParticipation.participation?.peerId)
     case "clearChatHistory": return value.clearChatHistory.target.oneofKind === "peerId"
       ? peer(value.clearChatHistory.target.peerId)
       : value.clearChatHistory.target.oneofKind === "spaceId" ? space(value.clearChatHistory.target.spaceId) : undefined
@@ -412,7 +414,8 @@ export function updateBucket(userId: number, update: Update, peerChatIds?: Pick<
     case "dialogNotificationSettings": case "chatOpen": case "dialogFollowMode": case "updatedUser":
     case "chatPermissions": case "dialogCollapsedMaxId": case "userAddedToChat": case "userRemovedFromChat":
     case "updateUserSettings": case "dialogFolder": case "dialogTranslation":
-    case "messageActionInvoked": case "messageActionAnswered": return { kind: "user", userId }
+    case "messageActionInvoked": case "messageActionAnswered":
+    case "agentGrant": case "agentRuntime": case "agentSessionControl": return { kind: "user", userId }
     default: return undefined
   }
 }

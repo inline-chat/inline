@@ -1,7 +1,11 @@
 import {
+  BlockCallout_Kind,
+  BlockDiff_Change,
   BlockDisclosure_ActivityKind,
   BlockDisclosure_Kind,
   BlockList_Kind,
+  BlockMeter_Tone,
+  BlockStatus,
   BlockTable_Alignment,
   MessageEntity_Type,
   type Block,
@@ -22,6 +26,7 @@ import { annotateBlockContentDirections } from "./blockDirection"
 import { parseMarkdownWithSourceMap, type ParsedMarkdownWithSourceMap } from "./parseMarkdown"
 import { linkLabelEnd } from "../translation2/entities/linkSyntax"
 import type { MarkdownReference } from "./markdownDocument"
+import { messageFormLimits, validateFormDefinition } from "./messageForms"
 
 const disclosureActivityKinds: Record<string, BlockDisclosure_ActivityKind> = {
   reasoning: BlockDisclosure_ActivityKind.REASONING,
@@ -54,7 +59,13 @@ export const blockContentLimits = {
   maxImageDimension: 16_384,
   maxImageRatio: 100,
   maxStrippedThumbnailBytes: 8 * 1_024,
+  maxFieldRows: 64,
+  maxSteps: 256,
 } as const
+
+function inEnum(value: number, min: number, max: number): boolean {
+  return Number.isInteger(value) && value >= min && value <= max
+}
 
 export type BlockImageSource = {
   path: number[]
@@ -296,6 +307,7 @@ function parseRegion(
               activityKind:
                 disclosureActivityKinds[summary[2] ?? ""] ?? BlockDisclosure_ActivityKind.UNSPECIFIED,
               initiallyOpen: details[1] !== undefined,
+              status: BlockStatus.UNSPECIFIED,
               children: coalesceImages(
                 parseRegion(markdown, legacy, summaryLine.next, childrenEnd, context),
               ),
@@ -725,6 +737,8 @@ export function validateBlockContent(
   let blockCount = 0
   let imageCount = 0
   let tableCellCount = 0
+  let formCount = 0
+  const formIds = new Set<string>()
 
   const validateText = (range: BlockText | undefined): void => {
     if (!range || range.offset < 0n || range.length < 0n) {
@@ -846,7 +860,62 @@ export function validateBlockContent(
           if (block.kind.disclosure.summary?.isRtl !== undefined) {
             throw new Error("Disclosure summary direction must be absent")
           }
+          if (!inEnum(block.kind.disclosure.status, BlockStatus.UNSPECIFIED, BlockStatus.CANCELLED)) {
+            throw new Error("Invalid disclosure status")
+          }
+          if (block.kind.disclosure.meta) validateText(block.kind.disclosure.meta)
           visit(block.kind.disclosure.children, depth + 1, listDepth, suppressLeafDirection)
+          break
+        case "diff": {
+          const diff = block.kind.diff
+          validateText(diff.path)
+          if (diff.text) validateText(diff.text)
+          if (diff.previousPath) validateText(diff.previousPath)
+          if (!inEnum(diff.change, BlockDiff_Change.UNSPECIFIED, BlockDiff_Change.RENAMED)) throw new Error("Invalid diff change")
+          if ((diff.language?.length ?? 0) > 64) throw new Error("Diff language is too long")
+          break
+        }
+        case "fields":
+          if (block.kind.fields.fields.length === 0 || block.kind.fields.fields.length > blockContentLimits.maxFieldRows) {
+            throw new Error("Invalid block fields")
+          }
+          for (const field of block.kind.fields.fields) {
+            validateText(field.label)
+            validateText(field.value)
+          }
+          break
+        case "steps":
+          if (block.kind.steps.steps.length === 0 || block.kind.steps.steps.length > blockContentLimits.maxSteps) {
+            throw new Error("Invalid block steps")
+          }
+          for (const step of block.kind.steps.steps) {
+            validateText(step.text)
+            if (step.detail) validateText(step.detail)
+            if (!inEnum(step.status, BlockStatus.UNSPECIFIED, BlockStatus.CANCELLED)) throw new Error("Invalid step status")
+          }
+          break
+        case "callout":
+          if (!inEnum(block.kind.callout.kind, BlockCallout_Kind.UNSPECIFIED, BlockCallout_Kind.ERROR)) {
+            throw new Error("Invalid callout kind")
+          }
+          if (block.kind.callout.title) validateText(block.kind.callout.title)
+          if (!block.kind.callout.title && block.kind.callout.children.length === 0) throw new Error("Empty callout")
+          visit(block.kind.callout.children, depth + 1, listDepth, suppressLeafDirection)
+          break
+        case "meter": {
+          const meter = block.kind.meter
+          validateText(meter.label)
+          if (meter.meta) validateText(meter.meta)
+          if (!Number.isFinite(meter.value) || !Number.isFinite(meter.max) || meter.max <= 0) throw new Error("Invalid meter")
+          if (!inEnum(meter.tone, BlockMeter_Tone.UNSPECIFIED, BlockMeter_Tone.CRITICAL)) throw new Error("Invalid meter tone")
+          break
+        }
+        case "form":
+          formCount += 1
+          if (formCount > messageFormLimits.maxFormsPerMessage) throw new Error("Too many forms")
+          if (formIds.has(block.kind.form.formId)) throw new Error("Duplicate form id")
+          formIds.add(block.kind.form.formId)
+          validateFormDefinition(block.kind.form, validateText)
           break
         case "quote":
           if (block.kind.quote.children.length === 0) throw new Error("Empty block quote")
