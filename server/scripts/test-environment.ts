@@ -6,6 +6,10 @@ const runtimeVariables = [
   "BUN_TEST_WORKER_ID", "JEST_WORKER_ID",
 ] as const
 
+// Opt-ins for local end-to-end suites that need tools outside the test DB
+// (the bridge v2 run builds and drives the Rust CLI with a local Codex).
+const optInVariables = ["INLINE_BRIDGE_V2_E2E_TARGET"] as const
+
 export const testDefaults = {
   NODE_ENV: "test",
   TZ: "UTC",
@@ -25,7 +29,7 @@ export function createTestEnvironment(
   databaseUrl = "postgres://localhost:1/inline_unit_test",
 ): Record<string, string> {
   const environment: Record<string, string> = { ...testDefaults }
-  for (const key of runtimeVariables) {
+  for (const key of [...runtimeVariables, ...optInVariables]) {
     if (inherited[key] !== undefined) environment[key] = inherited[key]
   }
   environment["DATABASE_URL"] = databaseUrl

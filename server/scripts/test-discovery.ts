@@ -5,6 +5,10 @@ import { execFileSync } from "node:child_process"
 export type TestLane = "bun" | "effect" | "effect-bun" | "preview"
 export type TestRecord = { path: string; lane: TestLane; usesDatabase: boolean }
 const testFile = /\.(test|spec)\.tsx?$/
+// End-to-end suites need tools beyond the test database (a built CLI, an
+// installed harness). They are discovered only on request, never skipped.
+const endToEndFile = /\.e2e\.(test|spec)\.tsx?$/
+const includeEndToEnd = process.env["INLINE_E2E"] === "1"
 
 function imports(text: string, path: string): string[] {
   return new Bun.Transpiler({ loader: path.endsWith(".tsx") ? "tsx" : "ts" }).scanImports(text).map((entry) => entry.path)
@@ -34,7 +38,7 @@ export function discoverTests(root: string): TestRecord[] {
       if (entry.name.startsWith(".") || ["node_modules", "dist", "fixtures"].includes(entry.name)) continue
       const path = join(directory, entry.name)
       if (entry.isDirectory()) walk(path)
-      else if (testFile.test(entry.name)) files.push(path)
+      else if (testFile.test(entry.name) && (includeEndToEnd || !endToEndFile.test(entry.name))) files.push(path)
     }
   }
   for (const directory of ["src", "scripts", "packages/url-preview/src"]) walk(resolve(root, directory))

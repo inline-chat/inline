@@ -93,7 +93,11 @@ impl FakeModel {
         let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
         let number = {
             let mut requests = self.requests.lock().unwrap();
-            requests.push(body);
+            requests.push(json!({
+                "request": request_line.trim(),
+                "model": body.get("model"),
+                "tools": body.get("tools").and_then(Value::as_array).map(Vec::len),
+            }));
             requests.len()
         };
         let output = {
@@ -212,6 +216,7 @@ async fn bot_texts(owner: &InlineClient, chat_id: i64, bot_user_id: i64) -> Vec<
 }
 
 async fn wait_for(
+    model: &FakeModel,
     owner: &InlineClient,
     chat_id: i64,
     bot_user_id: i64,
@@ -226,7 +231,8 @@ async fn wait_for(
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "timed out waiting for {what}; bot said: {texts:#?}"
+            "timed out waiting for {what}; bot said: {texts:#?}; model saw: {:#?}",
+            model.requests.lock().unwrap()
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -247,6 +253,10 @@ async fn send(owner: &InlineClient, chat_id: i64, text: &str) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs the server side of the bridge v2 end-to-end test"]
 async fn codex_round_trip_through_inline() {
+    let _ = env_logger::builder()
+        .is_test(true)
+        .parse_filters("inline::bridge::v2=debug,inline_agent_driver_codex=debug")
+        .try_init();
     let bot_user_id: i64 = env("INLINE_V2_E2E_BOT_USER_ID").parse().unwrap();
     let owner_user_id: i64 = env("INLINE_V2_E2E_OWNER_USER_ID").parse().unwrap();
     let chat_id: i64 = env("INLINE_V2_E2E_DM_CHAT_ID").parse().unwrap();
@@ -260,8 +270,11 @@ async fn codex_round_trip_through_inline() {
     let (model, base_url) = FakeModel::start(vec![
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_ANSWER_ONE"}]}),
-        json!({"type": "function_call", "call_id": "call-1", "name": "shell",
-            "arguments": json!({"command": ["sh", "-c", "echo E2E_RAN > ran.txt"],
+        // Escalation makes Codex ask for approval before running it.
+        json!({"type": "function_call", "call_id": "call-1", "name": "exec_command",
+            "arguments": json!({"cmd": "echo E2E_RAN > ran.txt",
+                "sandbox_permissions": "require_escalated",
+                "justification": "Write the e2e marker",
                 "workdir": folder.display().to_string()}).to_string()}),
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_ANSWER_TWO"}]}),
@@ -272,15 +285,15 @@ async fn codex_round_trip_through_inline() {
     std::fs::write(
         codex_home.join("config.toml"),
         format!(
-            "model_provider = \"inline_e2e\"\nmodel = \"gpt-5\"\napproval_policy = \"untrusted\"\n\
-             sandbox_mode = \"workspace-write\"\n\n[model_providers.inline_e2e]\nname = \"Inline E2E\"\n\
+            "model_provider = \"inline_e2e\"\nmodel = \"gpt-5\"\napproval_policy = \"on-request\"\n\
+             sandbox_mode = \"read-only\"\nthread_unload_delay_secs = 1\n\n[model_providers.inline_e2e]\nname = \"Inline E2E\"\n\
              base_url = \"{base_url}\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n\
              supports_websockets = false\n\n[analytics]\nenabled = false\n\n[feedback]\nenabled = false\n"
         ),
     )
     .unwrap();
     // SAFETY: set before any thread reads the environment for Codex.
-    unsafe { std::env::set_var("CODEX_HOME", &codex_home) };
+    unsafe { isolate_codex(&codex_home) };
 
     let executable = which_codex();
     let harness: Arc<dyn HarnessDriver> =
@@ -334,11 +347,18 @@ async fn codex_round_trip_through_inline() {
 
     // 1. A DM message runs a turn and the answer arrives.
     send(&owner, chat_id, "Say the first answer").await;
-    wait_for(&owner, chat_id, bot_user_id, "the first answer", |texts| {
-        texts
-            .iter()
-            .any(|(_, text)| text.contains("E2E_ANSWER_ONE"))
-    })
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the first answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_ANSWER_ONE"))
+        },
+    )
     .await;
     assert!(model.request_count() >= 1);
 
@@ -362,9 +382,14 @@ async fn codex_round_trip_through_inline() {
     // 2. A command needs approval: the card carries Codex's own choices, and
     // the owner's approval runs it.
     send(&owner, chat_id, "Run the check").await;
-    let texts = wait_for(&owner, chat_id, bot_user_id, "the approval card", |texts| {
-        texts.iter().any(|(_, text)| text.contains("echo E2E_RAN"))
-    })
+    let texts = wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the approval card",
+        |texts| texts.iter().any(|(_, text)| text.contains("echo E2E_RAN")),
+    )
     .await;
     let card = texts
         .iter()
@@ -385,11 +410,18 @@ async fn codex_round_trip_through_inline() {
         )
         .await
         .unwrap();
-    wait_for(&owner, chat_id, bot_user_id, "the second answer", |texts| {
-        texts
-            .iter()
-            .any(|(_, text)| text.contains("E2E_ANSWER_TWO"))
-    })
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the second answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_ANSWER_TWO"))
+        },
+    )
     .await;
     assert_eq!(
         std::fs::read_to_string(folder.join("ran.txt"))
@@ -432,6 +464,7 @@ async fn codex_round_trip_through_inline() {
     // 3. /release hands the session back with a resume command.
     send(&owner, chat_id, "/release").await;
     wait_for(
+        &model,
         &owner,
         chat_id,
         bot_user_id,
@@ -472,6 +505,19 @@ async fn approve_action(owner: &InlineClient, chat_id: i64, message_id: i64) -> 
         .expect("the card has decision buttons")
 }
 
+/// Points Codex at the temporary home and keeps its fake-model requests off
+/// any proxy (a system proxy would otherwise get 127.0.0.1 too).
+///
+/// # Safety
+/// Call before other threads read the environment.
+unsafe fn isolate_codex(codex_home: &std::path::Path) {
+    unsafe {
+        std::env::set_var("CODEX_HOME", codex_home);
+        std::env::set_var("NO_PROXY", "127.0.0.1,localhost");
+        std::env::set_var("no_proxy", "127.0.0.1,localhost");
+    }
+}
+
 fn which_codex() -> std::path::PathBuf {
     if let Ok(path) = std::env::var("INLINE_V2_E2E_CODEX") {
         return path.into();
@@ -483,4 +529,83 @@ fn which_codex() -> std::path::PathBuf {
         }
     }
     panic!("codex is not installed");
+}
+
+/// Codex and the fake model alone, without Inline: isolates model wiring.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "runs the installed Codex against a local fake model"]
+async fn codex_reaches_the_fake_model() {
+    use futures_util::StreamExt;
+    use inline_agent_bridge::harness::{
+        Delivery, Input, InputContent, InputId, OpenMode, OpenSpec, Origin, UserId,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("project");
+    std::fs::create_dir_all(&folder).unwrap();
+    let (model, base_url) = FakeModel::start(vec![json!({"type": "message", "role": "assistant",
+        "content": [{"type": "output_text", "text": "E2E_ANSWER_ONE"}]})])
+    .await;
+    let codex_home = dir.path().join("codex-home");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    std::fs::write(
+        codex_home.join("config.toml"),
+        format!(
+            "model_provider = \"inline_e2e\"\nmodel = \"gpt-5\"\napproval_policy = \"on-request\"\n\
+             sandbox_mode = \"read-only\"\nthread_unload_delay_secs = 1\n\n[model_providers.inline_e2e]\nname = \"Inline E2E\"\n\
+             base_url = \"{base_url}\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n\
+             supports_websockets = false\n"
+        ),
+    )
+    .unwrap();
+    // SAFETY: set before Codex starts.
+    unsafe { isolate_codex(&codex_home) };
+    let harness = inline_agent_driver_codex::harness::CodexHarness::new(
+        inline_agent_driver_codex::harness::CodexHarnessConfig {
+            launch: inline_agent_driver_codex::CodexLaunchConfig {
+                executable: which_codex(),
+                ..Default::default()
+            },
+            source: ExecutableSource::Path,
+            pinned_sha256: None,
+            bridge_version: env!("CARGO_PKG_VERSION").to_owned(),
+            cache_root: dir.path().join("cache"),
+        },
+    );
+    let session = harness
+        .open(OpenSpec {
+            mode: OpenMode::Start,
+            folder: folder.clone(),
+            settings: Default::default(),
+            instructions: None,
+            title: None,
+            after: None,
+            output_mode: Default::default(),
+        })
+        .await
+        .unwrap();
+    let mut events = session.events();
+    session
+        .send(Input {
+            id: InputId::new(uuid::Uuid::new_v4().to_string()).unwrap(),
+            content: InputContent::text("hello"),
+            origin: Origin::Owner { user: UserId(1) },
+            delivery: Delivery::Turn,
+        })
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while let Ok(Some(envelope)) = tokio::time::timeout_at(deadline, events.next()).await {
+        eprintln!("EVENT {:?}", envelope.event);
+        if matches!(
+            envelope.event,
+            inline_agent_bridge::harness::Event::Turn {
+                phase: inline_agent_bridge::harness::TurnPhase::Completed { .. },
+                ..
+            }
+        ) {
+            break;
+        }
+    }
+    eprintln!("MODEL SAW {:#?}", model.requests.lock().unwrap());
+    assert!(model.request_count() >= 1, "the model was reached");
 }
