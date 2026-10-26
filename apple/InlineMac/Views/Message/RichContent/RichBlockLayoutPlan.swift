@@ -56,6 +56,12 @@ enum RichBlockRenderKind: String, Codable, Hashable {
   case album
   case quote
   case table
+  case fields
+  case steps
+  case callout
+  case meter
+  case diff
+  case form
 }
 
 struct RichBlockLayoutPlan: Codable, Hashable {
@@ -71,6 +77,8 @@ struct RichBlockLayoutPlan: Codable, Hashable {
     var role: RichBlockTextRole
     var literal: String?
     var isRTL: Bool
+    /// Disclosure summaries only: status glyph and trailing meta.
+    var disclosure: RichBlockDisclosureDecoration? = nil
   }
 
   struct CodeNode: Codable, Hashable {
@@ -135,6 +143,12 @@ struct RichBlockLayoutPlan: Codable, Hashable {
     case album(AlbumNode)
     case quote(QuoteNode)
     case table(TableNode)
+    case fields(RichBlockFieldsNode)
+    case steps(RichBlockStepsNode)
+    case callout(RichBlockCalloutNode)
+    case meter(RichBlockMeterNode)
+    case diff(RichBlockDiffNode)
+    case form(RichBlockFormNode)
   }
 
   struct Node: Codable, Hashable {
@@ -161,6 +175,18 @@ struct RichBlockLayoutPlan: Codable, Hashable {
         return .quote
       case .table:
         return .table
+      case .fields:
+        return .fields
+      case .steps:
+        return .steps
+      case .callout:
+        return .callout
+      case .meter:
+        return .meter
+      case .diff:
+        return .diff
+      case .form:
+        return .form
       }
     }
   }
