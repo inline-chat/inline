@@ -25,7 +25,10 @@
         "duration_ms": 9120,
         "result": "Done, and the old flag is kept.",
         "terminal_reason": "completed",
-        "user_message_uuids": ["0d6a7c1e-1111-4a00-8000-000000000001", "0d6a7c1e-1111-4a00-8000-000000000005"],
+        "user_message_uuids": [
+          "0d6a7c1e-1111-4a00-8000-000000000001",
+          "0d6a7c1e-1111-4a00-8000-000000000005"
+        ],
         "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
         "uuid": "b0000000-0000-4000-8000-000000000001"
       },
@@ -36,7 +39,10 @@
           "phase": {
             "phase": "completed",
             "outcome": "completed",
-            "inputs_consumed": ["0d6a7c1e-1111-4a00-8000-000000000001", "0d6a7c1e-1111-4a00-8000-000000000005"],
+            "inputs_consumed": [
+              "0d6a7c1e-1111-4a00-8000-000000000001",
+              "0d6a7c1e-1111-4a00-8000-000000000005"
+            ],
             "duration_ms": 9120
           }
         }
@@ -50,7 +56,9 @@
         "is_error": true,
         "duration_ms": 3050,
         "terminal_reason": "aborted_tools",
-        "user_message_uuids": ["0d6a7c1e-1111-4a00-8000-000000000002"],
+        "user_message_uuids": [
+          "0d6a7c1e-1111-4a00-8000-000000000002"
+        ],
         "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
         "uuid": "b0000000-0000-4000-8000-000000000002"
       },
@@ -61,7 +69,9 @@
           "phase": {
             "phase": "completed",
             "outcome": "interrupted",
-            "inputs_consumed": ["0d6a7c1e-1111-4a00-8000-000000000002"],
+            "inputs_consumed": [
+              "0d6a7c1e-1111-4a00-8000-000000000002"
+            ],
             "duration_ms": 3050
           }
         }
@@ -74,11 +84,22 @@
         "response": {
           "subtype": "success",
           "request_id": "req-int-1",
-          "response": {"still_queued": [], "cancelled": ["0d6a7c1e-1111-4a00-8000-000000000006"]}
+          "response": {
+            "still_queued": [],
+            "cancelled": [
+              "0d6a7c1e-1111-4a00-8000-000000000006"
+            ]
+          }
         }
       },
       "events": [
-        {"type": "input", "id": "0d6a7c1e-1111-4a00-8000-000000000006", "fact": {"fact": "cancelled"}}
+        {
+          "type": "input",
+          "id": "0d6a7c1e-1111-4a00-8000-000000000006",
+          "fact": {
+            "fact": "cancelled"
+          }
+        }
       ]
     },
     {
@@ -98,7 +119,10 @@
         {
           "type": "child",
           "update": {
-            "child": {"id": "task-7f3a", "kind": "subagent"},
+            "child": {
+              "id": "task-7f3a",
+              "kind": "subagent"
+            },
             "status": "started",
             "title": "Audit the parser tests",
             "native": {
@@ -124,16 +148,49 @@
         "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
         "parent_tool_use_id": "toolu_task1",
         "agent_id": "task-7f3a",
-        "message": {"id": "msg_02A", "role": "assistant", "model": "claude-haiku-5-5", "content": [{"type": "tool_use", "id": "toolu_grep1", "name": "Grep", "input": {"pattern": "emptyInput"}}]}
+        "message": {
+          "id": "msg_02A",
+          "role": "assistant",
+          "model": "claude-haiku-5-5",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_grep1",
+              "name": "Grep",
+              "input": {
+                "pattern": "emptyInput"
+              }
+            }
+          ]
+        }
       },
       "events": [
         {
           "type": "item",
           "id": "toolu_grep1",
-          "parent": {"id": "task-7f3a", "kind": "subagent"},
+          "parent": {
+            "id": "task-7f3a",
+            "kind": "subagent"
+          },
           "kind": "tool",
-          "update": {"op": "started", "body": {"kind": "tool", "name": "Grep", "input": {"pattern": "emptyInput"}}},
-          "native": {"type": "tool_use", "id": "toolu_grep1", "name": "Grep", "input": {"pattern": "emptyInput"}}
+          "update": {
+            "op": "started",
+            "body": {
+              "kind": "tool",
+              "name": "Grep",
+              "input": {
+                "pattern": "emptyInput"
+              }
+            }
+          },
+          "native": {
+            "type": "tool_use",
+            "id": "toolu_grep1",
+            "name": "Grep",
+            "input": {
+              "pattern": "emptyInput"
+            }
+          }
         }
       ]
     },
@@ -154,7 +211,10 @@
         {
           "type": "child",
           "update": {
-            "child": {"id": "task-7f3a", "kind": "subagent"},
+            "child": {
+              "id": "task-7f3a",
+              "kind": "subagent"
+            },
             "status": "completed",
             "title": "Two tests cover empty input; one is skipped.",
             "native": {
@@ -177,7 +237,11 @@
       "native": {
         "type": "system",
         "subtype": "compact_boundary",
-        "compact_metadata": {"trigger": "manual", "pre_tokens": 180000, "post_tokens": 22000},
+        "compact_metadata": {
+          "trigger": "manual",
+          "pre_tokens": 180000,
+          "post_tokens": 22000
+        },
         "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
         "uuid": "b0000000-0000-4000-8000-000000000006"
       },
@@ -186,11 +250,22 @@
           "type": "item",
           "id": "b0000000-0000-4000-8000-000000000006",
           "kind": "usage",
-          "update": {"op": "completed", "body": {"kind": "usage", "label": "Context compacted"}, "status": "completed"},
+          "update": {
+            "op": "completed",
+            "body": {
+              "kind": "usage",
+              "label": "Context compacted"
+            },
+            "status": "completed"
+          },
           "native": {
             "type": "system",
             "subtype": "compact_boundary",
-            "compact_metadata": {"trigger": "manual", "pre_tokens": 180000, "post_tokens": 22000},
+            "compact_metadata": {
+              "trigger": "manual",
+              "pre_tokens": 180000,
+              "post_tokens": 22000
+            },
             "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
             "uuid": "b0000000-0000-4000-8000-000000000006"
           }
@@ -201,22 +276,107 @@
       "name": "rate limits become usage windows",
       "native": {
         "type": "rate_limit_event",
-        "rate_limit_info": {"status": "allowed_warning", "rateLimitType": "five_hour", "utilization": 0.82, "resetsAt": 1793000000},
+        "rate_limit_info": {
+          "status": "allowed_warning",
+          "rateLimitType": "five_hour",
+          "utilization": 0.82,
+          "resetsAt": 1793000000
+        },
         "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
         "uuid": "b0000000-0000-4000-8000-000000000007"
       },
       "events": [
         {
           "type": "usage",
-          "usage": {"limits": [{"label": "five_hour", "used_percent": 82, "window_minutes": 300, "resets_at": 1793000000}]}
+          "usage": {
+            "limits": [
+              {
+                "label": "five_hour",
+                "used_percent": 82,
+                "window_minutes": 300,
+                "resets_at": 1793000000
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "a pending approval that the interrupt will withdraw",
+      "native": {
+        "type": "control_request",
+        "request_id": "req-perm-2",
+        "request": {
+          "subtype": "can_use_tool",
+          "tool_name": "Write",
+          "input": {
+            "file_path": "/work/inline/CHANGELOG.md",
+            "content": "- fix empty input"
+          },
+          "tool_use_id": "toolu_write1"
+        }
+      },
+      "events": [
+        {
+          "type": "interaction",
+          "id": "req-perm-2",
+          "item": "toolu_write1",
+          "kind": {
+            "kind": "approval",
+            "subject": {
+              "kind": "tool",
+              "name": "Write",
+              "input": {
+                "file_path": "/work/inline/CHANGELOG.md",
+                "content": "- fix empty input"
+              }
+            },
+            "decisions": [
+              {
+                "id": "allow",
+                "label": "Yes",
+                "kind": "accept",
+                "native": {
+                  "behavior": "allow"
+                }
+              },
+              {
+                "id": "deny",
+                "label": "No, and tell Claude what to do differently",
+                "kind": "decline",
+                "accepts_message": true,
+                "native": {
+                  "behavior": "deny"
+                }
+              }
+            ]
+          },
+          "native": {
+            "subtype": "can_use_tool",
+            "tool_name": "Write",
+            "input": {
+              "file_path": "/work/inline/CHANGELOG.md",
+              "content": "- fix empty input"
+            },
+            "tool_use_id": "toolu_write1"
+          }
         }
       ]
     },
     {
       "name": "control_cancel_request withdraws a pending approval",
-      "native": {"type": "control_cancel_request", "request_id": "req-perm-2"},
+      "native": {
+        "type": "control_cancel_request",
+        "request_id": "req-perm-2"
+      },
       "events": [
-        {"type": "interaction_closed", "id": "req-perm-2", "by": {"kind": "cancelled"}}
+        {
+          "type": "interaction_closed",
+          "id": "req-perm-2",
+          "by": {
+            "kind": "cancelled"
+          }
+        }
       ]
     }
   ]

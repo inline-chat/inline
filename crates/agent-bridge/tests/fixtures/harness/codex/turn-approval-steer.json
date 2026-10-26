@@ -7,126 +7,573 @@
   "deliveries": [
     {
       "name": "turn",
-      "input": {"id": "in-1", "content": {"text": "Fix the build"}, "origin": {"kind": "owner", "user": 101}, "delivery": {"kind": "turn"}},
-      "native": [{"method": "turn/start", "params": {"threadId": "thr-1", "input": [{"type": "text", "text": "Fix the build"}], "clientUserMessageId": "inline-agent-bridge:v2:in-1"}}]
+      "input": {
+        "id": "in-1",
+        "content": {
+          "text": "Fix the build"
+        },
+        "origin": {
+          "kind": "owner",
+          "user": 101
+        },
+        "delivery": {
+          "kind": "turn"
+        }
+      },
+      "native": [
+        {
+          "method": "turn/start",
+          "params": {
+            "threadId": "thr-1",
+            "input": [
+              {
+                "type": "text",
+                "text": "Fix the build"
+              }
+            ],
+            "clientUserMessageId": "inline-agent-bridge:v2:in-1"
+          }
+        }
+      ]
     },
     {
       "name": "steer (now and next both map to Codex's single steer)",
-      "input": {"id": "in-2", "content": {"text": "Use pnpm"}, "origin": {"kind": "owner", "user": 101}, "delivery": {"kind": "steer", "expected_turn": "turn-1", "priority": "next"}},
-      "native": [{"method": "turn/steer", "params": {"threadId": "thr-1", "input": [{"type": "text", "text": "Use pnpm"}], "clientUserMessageId": "inline-agent-bridge:v2:in-2", "expectedTurnId": "turn-1"}}]
+      "input": {
+        "id": "in-2",
+        "content": {
+          "text": "Use pnpm"
+        },
+        "origin": {
+          "kind": "owner",
+          "user": 101
+        },
+        "delivery": {
+          "kind": "steer",
+          "expected_turn": "turn-1",
+          "priority": "next"
+        }
+      },
+      "native": [
+        {
+          "method": "turn/steer",
+          "params": {
+            "threadId": "thr-1",
+            "input": [
+              {
+                "type": "text",
+                "text": "Use pnpm"
+              }
+            ],
+            "clientUserMessageId": "inline-agent-bridge:v2:in-2",
+            "expectedTurnId": "turn-1"
+          }
+        }
+      ]
     },
     {
       "name": "queue",
-      "input": {"id": "in-3", "content": {"text": "Then the changelog"}, "origin": {"kind": "owner", "user": 101}, "delivery": {"kind": "queue"}},
-      "native": [{"method": "thread/queue/add", "params": {"threadId": "thr-1", "input": [{"type": "text", "text": "Then the changelog"}], "clientUserMessageId": "inline-agent-bridge:v2:in-3"}}]
+      "input": {
+        "id": "in-3",
+        "content": {
+          "text": "Then the changelog"
+        },
+        "origin": {
+          "kind": "owner",
+          "user": 101
+        },
+        "delivery": {
+          "kind": "queue"
+        }
+      },
+      "native": [
+        {
+          "method": "thread/queue/add",
+          "params": {
+            "threadId": "thr-1",
+            "input": [
+              {
+                "type": "text",
+                "text": "Then the changelog"
+              }
+            ],
+            "clientUserMessageId": "inline-agent-bridge:v2:in-3"
+          }
+        }
+      ]
     },
     {
       "name": "passive ambient context",
-      "input": {"id": "in-4", "content": {"text": "[alice] staging is green"}, "origin": {"kind": "ambient", "chat": 9001}, "delivery": {"kind": "passive"}},
-      "native": [{"method": "thread/inject_items", "params": {"threadId": "thr-1", "items": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Conversation in Inline chat 9001 that did not address you.\n\n[alice] staging is green"}]}]}}]
+      "input": {
+        "id": "in-4",
+        "content": {
+          "text": "[alice] staging is green"
+        },
+        "origin": {
+          "kind": "ambient",
+          "chat": 9001
+        },
+        "delivery": {
+          "kind": "passive"
+        }
+      },
+      "native": [
+        {
+          "method": "thread/inject_items",
+          "params": {
+            "threadId": "thr-1",
+            "items": [
+              {
+                "type": "message",
+                "role": "user",
+                "content": [
+                  {
+                    "type": "input_text",
+                    "text": "Conversation in Inline chat 9001 that did not address you.\n\n[alice] staging is green"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
     }
   ],
   "steps": [
     {
       "name": "turn started",
-      "native": {"method": "turn/started", "params": {"threadId": "thr-1", "turn": {"id": "turn-1", "status": "inProgress", "items": []}}},
-      "events": [{"type": "turn", "turn": "turn-1", "phase": {"phase": "started"}}]
+      "native": {
+        "method": "turn/started",
+        "params": {
+          "threadId": "thr-1",
+          "turn": {
+            "id": "turn-1",
+            "status": "inProgress",
+            "items": []
+          }
+        }
+      },
+      "events": [
+        {
+          "type": "turn",
+          "turn": "turn-1",
+          "phase": {
+            "phase": "started"
+          }
+        }
+      ]
     },
     {
       "name": "the user message echo is the consumption fact",
-      "native": {"method": "item/started", "params": {"threadId": "thr-1", "turnId": "turn-1", "item": {"type": "userMessage", "id": "item-u1", "clientId": "inline-agent-bridge:v2:in-1", "content": [{"type": "text", "text": "Fix the build"}]}}},
+      "native": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thr-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "userMessage",
+            "id": "item-u1",
+            "clientId": "inline-agent-bridge:v2:in-1",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the build"
+              }
+            ]
+          }
+        }
+      },
       "events": [
-        {"type": "input", "id": "in-1", "fact": {"fact": "consumed", "turn": "turn-1"}},
         {
-          "type": "item", "id": "item-u1", "turn": "turn-1", "kind": "message",
-          "update": {"op": "started", "body": {"kind": "message", "role": "user", "text": "Fix the build", "input": "in-1"}},
-          "native": {"type": "userMessage", "id": "item-u1", "clientId": "inline-agent-bridge:v2:in-1", "content": [{"type": "text", "text": "Fix the build"}]}
+          "type": "input",
+          "id": "in-1",
+          "fact": {
+            "fact": "consumed",
+            "turn": "turn-1"
+          }
+        },
+        {
+          "type": "item",
+          "id": "item-u1",
+          "turn": "turn-1",
+          "kind": "message",
+          "update": {
+            "op": "started",
+            "body": {
+              "kind": "message",
+              "role": "user",
+              "text": "Fix the build",
+              "input": "in-1"
+            }
+          },
+          "native": {
+            "type": "userMessage",
+            "id": "item-u1",
+            "clientId": "inline-agent-bridge:v2:in-1",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fix the build"
+              }
+            ]
+          }
         }
       ]
     },
     {
       "name": "commentary delta",
-      "native": {"method": "item/agentMessage/delta", "params": {"threadId": "thr-1", "turnId": "turn-1", "itemId": "item-a1", "delta": "Running the tests"}},
-      "events": [{"type": "item", "id": "item-a1", "turn": "turn-1", "kind": "message", "update": {"op": "delta", "delta": {"stream": "text", "text": "Running the tests"}}}]
-    },
-    {
-      "name": "command approval with the 0.164 union and Codex's labels",
       "native": {
-        "id": 41, "method": "item/commandExecution/requestApproval",
+        "method": "item/agentMessage/delta",
         "params": {
-          "threadId": "thr-1", "turnId": "turn-1", "itemId": "item-c1", "command": "cargo test", "cwd": "/work/inline",
-          "reason": "Run the test suite",
-          "availableDecisions": ["accept", {"acceptWithExecpolicyAmendment": {"execpolicy_amendment": ["cargo", "test"]}}, "cancel"]
+          "threadId": "thr-1",
+          "turnId": "turn-1",
+          "itemId": "item-a1",
+          "delta": "Running the tests"
         }
       },
       "events": [
         {
-          "type": "interaction", "id": "41", "turn": "turn-1", "item": "item-c1",
+          "type": "item",
+          "id": "item-a1",
+          "turn": "turn-1",
+          "kind": "message",
+          "update": {
+            "op": "delta",
+            "delta": {
+              "stream": "text",
+              "text": "Running the tests"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "command approval with the 0.164 union and Codex's labels",
+      "native": {
+        "id": 41,
+        "method": "item/commandExecution/requestApproval",
+        "params": {
+          "threadId": "thr-1",
+          "turnId": "turn-1",
+          "itemId": "item-c1",
+          "command": "cargo test",
+          "cwd": "/work/inline",
+          "reason": "Run the test suite",
+          "availableDecisions": [
+            "accept",
+            {
+              "acceptWithExecpolicyAmendment": {
+                "execpolicy_amendment": [
+                  "cargo",
+                  "test"
+                ]
+              }
+            },
+            "cancel"
+          ]
+        }
+      },
+      "events": [
+        {
+          "type": "interaction",
+          "id": "41",
+          "turn": "turn-1",
+          "item": "item-c1",
           "kind": {
             "kind": "approval",
-            "subject": {"kind": "command", "command": "cargo test", "cwd": "/work/inline", "reason": "Run the test suite"},
+            "subject": {
+              "kind": "command",
+              "command": "cargo test",
+              "cwd": "/work/inline",
+              "reason": "Run the test suite"
+            },
             "decisions": [
-              {"id": "accept", "label": "Yes, proceed", "kind": "accept", "native": "accept"},
-              {"id": "acceptWithExecpolicyAmendment:1", "label": "Yes, and don't ask again for commands that start with `cargo test`", "kind": "accept_and_remember", "native": {"acceptWithExecpolicyAmendment": {"execpolicy_amendment": ["cargo", "test"]}}},
-              {"id": "cancel", "label": "No, and tell Codex what to do differently", "kind": "cancel", "accepts_message": true, "native": "cancel"}
+              {
+                "id": "accept",
+                "label": "Yes, proceed",
+                "kind": "accept",
+                "native": "accept"
+              },
+              {
+                "id": "acceptWithExecpolicyAmendment:1",
+                "label": "Yes, and don't ask again for commands that start with `cargo test`",
+                "kind": "accept_and_remember",
+                "native": {
+                  "acceptWithExecpolicyAmendment": {
+                    "execpolicy_amendment": [
+                      "cargo",
+                      "test"
+                    ]
+                  }
+                }
+              },
+              {
+                "id": "cancel",
+                "label": "No, and tell Codex what to do differently",
+                "kind": "cancel",
+                "accepts_message": true,
+                "native": "cancel"
+              }
             ]
           },
           "native": {
-            "threadId": "thr-1", "turnId": "turn-1", "itemId": "item-c1", "command": "cargo test", "cwd": "/work/inline",
+            "threadId": "thr-1",
+            "turnId": "turn-1",
+            "itemId": "item-c1",
+            "command": "cargo test",
+            "cwd": "/work/inline",
             "reason": "Run the test suite",
-            "availableDecisions": ["accept", {"acceptWithExecpolicyAmendment": {"execpolicy_amendment": ["cargo", "test"]}}, "cancel"]
+            "availableDecisions": [
+              "accept",
+              {
+                "acceptWithExecpolicyAmendment": {
+                  "execpolicy_amendment": [
+                    "cargo",
+                    "test"
+                  ]
+                }
+              },
+              "cancel"
+            ]
           }
         }
       ]
     },
     {
       "name": "an unknown dialog is cancelled safely with a visible notice",
-      "native": {"id": 42, "method": "item/futureDialog/request", "params": {"threadId": "thr-1", "turnId": "turn-1"}},
+      "native": {
+        "id": 42,
+        "method": "item/futureDialog/request",
+        "params": {
+          "threadId": "thr-1",
+          "turnId": "turn-1"
+        }
+      },
       "events": [
-        {"type": "interaction", "id": "42", "turn": "turn-1", "kind": {"kind": "dialog", "dialog": "item/futureDialog/request"}, "native": {"threadId": "thr-1", "turnId": "turn-1"}},
-        {"type": "interaction_closed", "id": "42", "by": {"kind": "cancelled"}},
-        {"type": "notice", "level": "warning", "code": "item/futureDialog/request", "message": "Codex asked for `item/futureDialog/request`, which Inline cannot show yet; it was cancelled.", "native": {"threadId": "thr-1", "turnId": "turn-1"}}
+        {
+          "type": "interaction",
+          "id": "42",
+          "turn": "turn-1",
+          "kind": {
+            "kind": "dialog",
+            "dialog": "item/futureDialog/request"
+          },
+          "native": {
+            "threadId": "thr-1",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "type": "interaction_closed",
+          "id": "42",
+          "by": {
+            "kind": "cancelled"
+          }
+        },
+        {
+          "type": "notice",
+          "level": "warning",
+          "code": "item/futureDialog/request",
+          "message": "Codex asked for `item/futureDialog/request`, which Inline cannot show yet; it was cancelled.",
+          "native": {
+            "threadId": "thr-1",
+            "turnId": "turn-1"
+          }
+        }
       ]
     },
     {
       "name": "command completes",
-      "native": {"method": "item/completed", "params": {"threadId": "thr-1", "turnId": "turn-1", "item": {"type": "commandExecution", "id": "item-c1", "command": "cargo test", "cwd": "/work/inline", "status": "completed", "commandActions": [], "aggregatedOutput": "ok", "exitCode": 0, "durationMs": 1200}}},
+      "native": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thr-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "commandExecution",
+            "id": "item-c1",
+            "command": "cargo test",
+            "cwd": "/work/inline",
+            "status": "completed",
+            "commandActions": [],
+            "aggregatedOutput": "ok",
+            "exitCode": 0,
+            "durationMs": 1200
+          }
+        }
+      },
       "events": [
         {
-          "type": "item", "id": "item-c1", "turn": "turn-1", "kind": "command",
-          "update": {"op": "completed", "body": {"kind": "command", "command": "cargo test", "cwd": "/work/inline", "output": "ok", "exit_code": 0, "duration_ms": 1200}, "status": "completed"},
-          "native": {"type": "commandExecution", "id": "item-c1", "command": "cargo test", "cwd": "/work/inline", "status": "completed", "commandActions": [], "aggregatedOutput": "ok", "exitCode": 0, "durationMs": 1200}
+          "type": "item",
+          "id": "item-c1",
+          "turn": "turn-1",
+          "kind": "command",
+          "update": {
+            "op": "completed",
+            "body": {
+              "kind": "command",
+              "command": "cargo test",
+              "cwd": "/work/inline",
+              "output": "ok",
+              "exit_code": 0,
+              "duration_ms": 1200
+            },
+            "status": "completed"
+          },
+          "native": {
+            "type": "commandExecution",
+            "id": "item-c1",
+            "command": "cargo test",
+            "cwd": "/work/inline",
+            "status": "completed",
+            "commandActions": [],
+            "aggregatedOutput": "ok",
+            "exitCode": 0,
+            "durationMs": 1200
+          }
         }
       ]
     },
     {
       "name": "the steer's echo is consumed by the same turn",
-      "native": {"method": "item/started", "params": {"threadId": "thr-1", "turnId": "turn-1", "item": {"type": "userMessage", "id": "item-u2", "clientId": "inline-agent-bridge:v2:in-2", "content": [{"type": "text", "text": "Use pnpm"}]}}},
+      "native": {
+        "method": "item/started",
+        "params": {
+          "threadId": "thr-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "userMessage",
+            "id": "item-u2",
+            "clientId": "inline-agent-bridge:v2:in-2",
+            "content": [
+              {
+                "type": "text",
+                "text": "Use pnpm"
+              }
+            ]
+          }
+        }
+      },
       "events": [
-        {"type": "input", "id": "in-2", "fact": {"fact": "consumed", "turn": "turn-1"}},
         {
-          "type": "item", "id": "item-u2", "turn": "turn-1", "kind": "message",
-          "update": {"op": "started", "body": {"kind": "message", "role": "user", "text": "Use pnpm", "input": "in-2"}},
-          "native": {"type": "userMessage", "id": "item-u2", "clientId": "inline-agent-bridge:v2:in-2", "content": [{"type": "text", "text": "Use pnpm"}]}
+          "type": "input",
+          "id": "in-2",
+          "fact": {
+            "fact": "consumed",
+            "turn": "turn-1"
+          }
+        },
+        {
+          "type": "item",
+          "id": "item-u2",
+          "turn": "turn-1",
+          "kind": "message",
+          "update": {
+            "op": "started",
+            "body": {
+              "kind": "message",
+              "role": "user",
+              "text": "Use pnpm",
+              "input": "in-2"
+            }
+          },
+          "native": {
+            "type": "userMessage",
+            "id": "item-u2",
+            "clientId": "inline-agent-bridge:v2:in-2",
+            "content": [
+              {
+                "type": "text",
+                "text": "Use pnpm"
+              }
+            ]
+          }
         }
       ]
     },
     {
       "name": "final answer phase",
-      "native": {"method": "item/completed", "params": {"threadId": "thr-1", "turnId": "turn-1", "item": {"type": "agentMessage", "id": "item-a2", "text": "Fixed; tests pass.", "phase": "final_answer"}}},
+      "native": {
+        "method": "item/completed",
+        "params": {
+          "threadId": "thr-1",
+          "turnId": "turn-1",
+          "item": {
+            "type": "agentMessage",
+            "id": "item-a2",
+            "text": "Fixed; tests pass.",
+            "phase": "final_answer"
+          }
+        }
+      },
       "events": [
         {
-          "type": "item", "id": "item-a2", "turn": "turn-1", "kind": "message", "phase": "final_answer",
-          "update": {"op": "completed", "body": {"kind": "message", "role": "assistant", "text": "Fixed; tests pass."}, "status": "completed"},
-          "native": {"type": "agentMessage", "id": "item-a2", "text": "Fixed; tests pass.", "phase": "final_answer"}
+          "type": "item",
+          "id": "item-a2",
+          "turn": "turn-1",
+          "kind": "message",
+          "phase": "final_answer",
+          "update": {
+            "op": "completed",
+            "body": {
+              "kind": "message",
+              "role": "assistant",
+              "text": "Fixed; tests pass."
+            },
+            "status": "completed"
+          },
+          "native": {
+            "type": "agentMessage",
+            "id": "item-a2",
+            "text": "Fixed; tests pass.",
+            "phase": "final_answer"
+          }
         }
       ]
     },
     {
       "name": "turn completed with both inputs consumed",
-      "native": {"method": "turn/completed", "params": {"threadId": "thr-1", "turn": {"id": "turn-1", "status": "completed", "durationMs": 48000}}},
+      "native": {
+        "method": "turn/completed",
+        "params": {
+          "threadId": "thr-1",
+          "turn": {
+            "id": "turn-1",
+            "status": "completed",
+            "durationMs": 48000
+          }
+        }
+      },
       "events": [
-        {"type": "turn", "turn": "turn-1", "phase": {"phase": "completed", "outcome": "completed", "inputs_consumed": ["in-1", "in-2"], "duration_ms": 48000}}
+        {
+          "type": "turn",
+          "turn": "turn-1",
+          "phase": {
+            "phase": "completed",
+            "outcome": "completed",
+            "inputs_consumed": [
+              "in-1",
+              "in-2"
+            ],
+            "duration_ms": 48000
+          }
+        }
+      ]
+    },
+    {
+      "name": "after an unsubscribe, Codex unloading the thread confirms the release",
+      "native": {
+        "method": "thread/closed",
+        "params": {
+          "threadId": "thr-1"
+        }
+      },
+      "events": [
+        {
+          "type": "state",
+          "state": {
+            "state": "released"
+          }
+        }
       ]
     }
   ],
@@ -136,9 +583,34 @@
       "after_step": "command approval with the 0.164 union and Codex's labels",
       "interaction": "41",
       "by": 101,
-      "response": {"kind": "decision", "decision": "acceptWithExecpolicyAmendment:1"},
-      "events": [{"type": "interaction_closed", "id": "41", "by": {"kind": "inline", "user": 101, "decision": "acceptWithExecpolicyAmendment:1"}}],
-      "native": {"id": 41, "result": {"decision": {"acceptWithExecpolicyAmendment": {"execpolicy_amendment": ["cargo", "test"]}}}}
+      "response": {
+        "kind": "decision",
+        "decision": "acceptWithExecpolicyAmendment:1"
+      },
+      "events": [
+        {
+          "type": "interaction_closed",
+          "id": "41",
+          "by": {
+            "kind": "inline",
+            "user": 101,
+            "decision": "acceptWithExecpolicyAmendment:1"
+          }
+        }
+      ],
+      "native": {
+        "id": 41,
+        "result": {
+          "decision": {
+            "acceptWithExecpolicyAmendment": {
+              "execpolicy_amendment": [
+                "cargo",
+                "test"
+              ]
+            }
+          }
+        }
+      }
     }
   ]
 }
