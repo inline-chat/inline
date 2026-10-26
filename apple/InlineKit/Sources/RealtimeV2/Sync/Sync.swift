@@ -3421,9 +3421,6 @@ actor BucketActor {
     switch update.update {
       case .acknowledgement:
         true
-      case .agentSessionState, .agentParticipation, .agentGrant, .agentRuntime:
-        // Thin agent state; catch-up repairs work bars and sidebar badges.
-        true
       case .participantAdd:
         true
       case .spaceMemberDelete:
@@ -3473,6 +3470,7 @@ actor BucketActor {
       case .messageActionInvoked, .messageActionAnswered:
         true
       case .agentSessionState, .agentParticipation, .agentGrant, .agentRuntime, .agentSessionControl:
+        // Thin agent state; catch-up repairs work bars and sidebar badges.
         true
       case .dialogFollowMode, .dialogCollapsedMaxID, .dialogTranslation:
         true
