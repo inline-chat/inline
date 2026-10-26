@@ -1207,6 +1207,11 @@ enum AgentRunState {
   // Another client (terminal, provider app) holds the native session.
   AGENT_RUN_STATE_HELD_ELSEWHERE = 6;
   AGENT_RUN_STATE_OFFLINE = 7;
+  // Explicitly released from Inline; the harness has not let go of the native
+  // session yet, so a terminal or app cannot take it over until RELEASED.
+  AGENT_RUN_STATE_RELEASING = 8;
+  // The harness released the native session; another client may continue it.
+  AGENT_RUN_STATE_RELEASED = 9;
 }
 
 enum AgentWaitingReason {
@@ -4835,7 +4840,13 @@ message UpdateMessageActionInvoked {
 }
 
 // A chat member's view of an agent session's run state changed.
-message UpdateAgentSessionState { AgentSession agent_session = 1; }
+message UpdateAgentSessionState {
+  AgentSession agent_session = 1;
+  // The chat whose update bucket carries this update. It differs from
+  // agent_session.peer_id in the chat a work moved out of; apps use it for the
+  // bucket's sequence and drop the work from that chat.
+  optional Peer bucket_peer_id = 2;
+}
 
 message UpdateAgentParticipation {
   AgentParticipation participation = 1;

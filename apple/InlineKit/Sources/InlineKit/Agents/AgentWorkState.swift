@@ -58,13 +58,17 @@ public enum AgentWorkRunState: Codable, Equatable, Sendable {
   case stopping
   case paused
   case heldElsewhere(label: String?)
+  /// Released from Inline; the harness still holds the native session.
+  case releasing
+  /// The harness let go; a terminal or the provider's app can continue it.
+  case released
   case offline
   case unknown
 
   public var isActive: Bool {
     switch self {
     case .working, .waiting, .stopping: true
-    case .idle, .paused, .heldElsewhere, .offline, .unknown: false
+    case .idle, .paused, .heldElsewhere, .releasing, .released, .offline, .unknown: false
     }
   }
 
@@ -87,6 +91,8 @@ public enum AgentWorkRunState: Codable, Equatable, Sendable {
     case .heldElsewhere:
       let label = state.hasHeldBy && state.heldBy.hasLabel ? state.heldBy.label : ""
       self = .heldElsewhere(label: label.isEmpty ? nil : label)
+    case .releasing: self = .releasing
+    case .released: self = .released
     case .offline: self = .offline
     case .unknown, .UNRECOGNIZED: self = .unknown
     }
@@ -446,8 +452,8 @@ public final class AgentWorkStateStore: ObservableObject {
     switch state.runState {
     case .waiting: state.isWaiting(for: viewer) ? 4 : 2
     case .working, .stopping: 3
-    case .heldElsewhere: 1
-    case .paused, .offline, .idle, .unknown: 0
+    case .heldElsewhere, .releasing: 1
+    case .paused, .released, .offline, .idle, .unknown: 0
     }
   }
 }

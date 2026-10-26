@@ -29,6 +29,7 @@ import { encodeOutputPeerFromChat } from "@in/server/realtime/encoders/encodePee
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Log } from "@in/server/utils/log"
 import { and, desc, eq, gt, inArray, notInArray } from "drizzle-orm"
+import { AgentSessionMovedError, MAX_MOVE_RETRIES } from "./moved"
 import { agentSessionV2Fields, decryptAgentSessionState, encryptAgentSessionState } from "./stateFields"
 
 const log = new Log("AgentSessions.runState")
@@ -54,7 +55,7 @@ function boundedText(value: string | undefined): string | undefined {
 
 /** Validates a bridge report and drops fields that do not apply to its run state. */
 export function normalizeAgentSessionState(input: AgentSessionState): AgentSessionState {
-  if (!inEnum(input.runState, AgentRunState.UNKNOWN, AgentRunState.OFFLINE)) throw RealtimeRpcError.BadRequest()
+  if (!inEnum(input.runState, AgentRunState.UNKNOWN, AgentRunState.RELEASED)) throw RealtimeRpcError.BadRequest()
   if (!inEnum(input.waitingReason, AgentWaitingReason.UNSPECIFIED, AgentWaitingReason.SETUP)) throw RealtimeRpcError.BadRequest()
   if (input.revision <= 0n) throw RealtimeRpcError.BadRequest()
   if (input.queuedCount > MAX_QUEUED_COUNT) throw RealtimeRpcError.BadRequest()
@@ -171,8 +172,25 @@ export async function updateAgentSessionState(
   currentUserId: number,
 ): Promise<UpdateAgentSessionStateResult> {
   if (!input.state) throw RealtimeRpcError.BadRequest()
+  if (input.agentSessionId <= 0n) throw RealtimeRpcError.BadRequest()
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await updateAgentSessionStateOnce(input, input.state, currentUserId)
+    } catch (error) {
+      // The work moved between reading its chat and locking it: report in
+      // the new chat, with that chat's attention audience.
+      if (error instanceof AgentSessionMovedError && attempt < MAX_MOVE_RETRIES) continue
+      throw error
+    }
+  }
+}
+
+async function updateAgentSessionStateOnce(
+  input: UpdateAgentSessionStateInput,
+  state: AgentSessionState,
+  currentUserId: number,
+): Promise<UpdateAgentSessionStateResult> {
   const sessionId = input.agentSessionId
-  if (sessionId <= 0n) throw RealtimeRpcError.BadRequest()
   const [session] = await db.select().from(agentSessions).where(eq(agentSessions.id, sessionId)).limit(1)
   // Only the session's bot, or the owner who connected it, reports its state.
   if (!session || (session.botUserId !== currentUserId && session.ownerUserId !== currentUserId)) {
@@ -181,16 +199,17 @@ export async function updateAgentSessionState(
   const [chat] = await db.select().from(chats).where(eq(chats.id, session.chatId)).limit(1)
   if (!chat) throw RealtimeRpcError.PeerIdInvalid()
 
-  const normalized = normalizeAgentSessionState(input.state)
+  const normalized = normalizeAgentSessionState(state)
   const audience = await attentionAudience(chat, session.botUserId, normalized.attention)
   if (normalized.attention) normalized.attention.userIds = audience.map(BigInt)
 
   const result = await db.transaction(async (tx) => {
-    // Lock order: chat, then session, as the chat update below needs both.
+    // Lock order for every writer of a work: its chat, then the session.
     const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, session.chatId)).for("update").limit(1)
     if (!lockedChat) throw RealtimeRpcError.PeerIdInvalid()
     const [current] = await tx.select().from(agentSessions).where(eq(agentSessions.id, session.id)).for("update").limit(1)
     if (!current) throw RealtimeRpcError.BadRequest()
+    if (current.chatId !== lockedChat.id) throw new AgentSessionMovedError()
     if (normalized.revision <= current.stateRevision) return { row: current, applied: false as const }
 
     const previous = decryptAgentSessionState(current.stateEncrypted)
@@ -229,7 +248,7 @@ export async function updateAgentSessionState(
   if (result.applied && "durable" in result && result.durable) {
     await pushChatUpdate(chat, result.durable, (peerId) => ({
       oneofKind: "agentSessionState",
-      agentSessionState: { agentSession: { ...agentSession, peerId } },
+      agentSessionState: { agentSession: { ...agentSession, peerId }, bucketPeerId: peerId },
     }))
     if (result.attentionChanged) await pushAttention(result.row, chat)
   }
@@ -310,7 +329,7 @@ export async function getAgentSessionStates(
     .select()
     .from(agentSessions)
     .where(and(
-      notInArray(agentSessions.runState, [AgentRunState.UNKNOWN, AgentRunState.IDLE]),
+      notInArray(agentSessions.runState, [AgentRunState.UNKNOWN, AgentRunState.IDLE, AgentRunState.RELEASED]),
       gt(agentSessions.stateUpdatedAt, since),
     ))
     .orderBy(desc(agentSessions.stateUpdatedAt))

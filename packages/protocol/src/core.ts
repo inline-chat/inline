@@ -12911,6 +12911,14 @@ export interface UpdateAgentSessionState {
      * @generated from protobuf field: AgentSession agent_session = 1;
      */
     agentSession?: AgentSession;
+    /**
+     * The chat whose update bucket carries this update. It differs from
+     * agent_session.peer_id in the chat a work moved out of; apps use it for the
+     * bucket's sequence and drop the work from that chat.
+     *
+     * @generated from protobuf field: optional Peer bucket_peer_id = 2;
+     */
+    bucketPeerId?: Peer;
 }
 /**
  * @generated from protobuf message UpdateAgentParticipation
@@ -16170,7 +16178,20 @@ export enum AgentRunState {
     /**
      * @generated from protobuf enum value: AGENT_RUN_STATE_OFFLINE = 7;
      */
-    OFFLINE = 7
+    OFFLINE = 7,
+    /**
+     * Explicitly released from Inline; the harness has not let go of the native
+     * session yet, so a terminal or app cannot take it over until RELEASED.
+     *
+     * @generated from protobuf enum value: AGENT_RUN_STATE_RELEASING = 8;
+     */
+    RELEASING = 8,
+    /**
+     * The harness released the native session; another client may continue it.
+     *
+     * @generated from protobuf enum value: AGENT_RUN_STATE_RELEASED = 9;
+     */
+    RELEASED = 9
 }
 /**
  * @generated from protobuf enum AgentWaitingReason
@@ -50963,7 +50984,8 @@ export const UpdateMessageActionInvoked = new UpdateMessageActionInvoked$Type();
 class UpdateAgentSessionState$Type extends MessageType<UpdateAgentSessionState> {
     constructor() {
         super("UpdateAgentSessionState", [
-            { no: 1, name: "agent_session", kind: "message", T: () => AgentSession }
+            { no: 1, name: "agent_session", kind: "message", T: () => AgentSession },
+            { no: 2, name: "bucket_peer_id", kind: "message", T: () => Peer }
         ]);
     }
     create(value?: PartialMessage<UpdateAgentSessionState>): UpdateAgentSessionState {
@@ -50980,6 +51002,9 @@ class UpdateAgentSessionState$Type extends MessageType<UpdateAgentSessionState> 
                 case /* AgentSession agent_session */ 1:
                     message.agentSession = AgentSession.internalBinaryRead(reader, reader.uint32(), options, message.agentSession);
                     break;
+                case /* optional Peer bucket_peer_id */ 2:
+                    message.bucketPeerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.bucketPeerId);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -50995,6 +51020,9 @@ class UpdateAgentSessionState$Type extends MessageType<UpdateAgentSessionState> 
         /* AgentSession agent_session = 1; */
         if (message.agentSession)
             AgentSession.internalBinaryWrite(message.agentSession, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional Peer bucket_peer_id = 2; */
+        if (message.bucketPeerId)
+            Peer.internalBinaryWrite(message.bucketPeerId, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

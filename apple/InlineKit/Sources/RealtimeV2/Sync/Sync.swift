@@ -3183,7 +3183,8 @@ actor Sync {
       case .chatOpen:
         .user
       case let .agentSessionState(payload):
-        .chat(peer: payload.agentSession.peerID)
+        // A moved work's update in the chat it left names that chat's bucket.
+        .chat(peer: payload.hasBucketPeerID ? payload.bucketPeerID : payload.agentSession.peerID)
       case let .agentParticipation(payload):
         .chat(peer: payload.participation.peerID)
       case .agentGrant, .agentRuntime, .agentSessionControl:

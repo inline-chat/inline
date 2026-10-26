@@ -57,6 +57,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { and, eq, exists, gt, inArray, ne, or, sql } from "drizzle-orm"
+import { AgentSessionMovedError, MAX_MOVE_RETRIES } from "./moved"
 import { agentSessionV2Fields, encryptWorkspaceLabel } from "./stateFields"
 import {
   agentSessionHash,
@@ -645,19 +646,38 @@ export async function syncAgentSessionMessages(
   if (input.messages.length === 0 || input.messages.length > MAX_BATCH_SIZE) {
     throw RealtimeRpcError.BadRequest()
   }
-  const context = await loadSyncContext(input.agentSessionId, botUserId)
   const prepared = await Promise.all(input.messages.map(prepareSync))
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await syncAgentSessionMessagesOnce(input, botUserId, prepared)
+    } catch (error) {
+      // The work moved to another chat between reading and locking; publish
+      // in its new chat.
+      if (error instanceof AgentSessionMovedError && attempt < MAX_MOVE_RETRIES) continue
+      throw error
+    }
+  }
+}
 
+async function syncAgentSessionMessagesOnce(
+  input: SyncAgentSessionMessagesInput,
+  botUserId: number,
+  prepared: Awaited<ReturnType<typeof prepareSync>>[],
+): Promise<SyncAgentSessionMessagesResult> {
+  const context = await loadSyncContext(input.agentSessionId, botUserId)
   const projected: ProjectedUpdate[] = []
   const results = await db.transaction(async (tx) => {
+    // Every writer of a work locks its chat, then the session (moves lock
+    // both chats in ID order first), and checks the session is still there.
+    const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, context.chat.id)).for("update").limit(1)
     const [lockedSession] = await tx
       .select()
       .from(agentSessions)
       .where(and(eq(agentSessions.id, context.session.id), eq(agentSessions.botUserId, botUserId)))
       .for("update")
       .limit(1)
-    const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, context.chat.id)).for("update").limit(1)
     if (!lockedSession || !lockedChat) throw RealtimeRpcError.BadRequest()
+    if (lockedSession.chatId !== lockedChat.id) throw new AgentSessionMovedError()
 
     let nextMessageId = Math.max(lockedChat.lastMsgId ?? 0, lockedChat.messageIdCounter ?? 0)
     let lastCreatedMessageId: number | undefined

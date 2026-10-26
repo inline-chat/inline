@@ -503,6 +503,13 @@ public nonisolated enum AgentRunState: SwiftProtobuf.Enum, Swift.CaseIterable {
   /// Another client (terminal, provider app) holds the native session.
   case heldElsewhere // = 6
   case offline // = 7
+
+  /// Explicitly released from Inline; the harness has not let go of the native
+  /// session yet, so a terminal or app cannot take it over until RELEASED.
+  case releasing // = 8
+
+  /// The harness released the native session; another client may continue it.
+  case released // = 9
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -519,6 +526,8 @@ public nonisolated enum AgentRunState: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 5: self = .paused
     case 6: self = .heldElsewhere
     case 7: self = .offline
+    case 8: self = .releasing
+    case 9: self = .released
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -533,6 +542,8 @@ public nonisolated enum AgentRunState: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .paused: return 5
     case .heldElsewhere: return 6
     case .offline: return 7
+    case .releasing: return 8
+    case .released: return 9
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -547,6 +558,8 @@ public nonisolated enum AgentRunState: SwiftProtobuf.Enum, Swift.CaseIterable {
     .paused,
     .heldElsewhere,
     .offline,
+    .releasing,
+    .released,
   ]
 
 }
@@ -22060,11 +22073,24 @@ public nonisolated struct UpdateAgentSessionState: Sendable {
   /// Clears the value of `agentSession`. Subsequent reads from it will return its default value.
   public mutating func clearAgentSession() {self._agentSession = nil}
 
+  /// The chat whose update bucket carries this update. It differs from
+  /// agent_session.peer_id in the chat a work moved out of; apps use it for the
+  /// bucket's sequence and drop the work from that chat.
+  public var bucketPeerID: Peer {
+    get {_bucketPeerID ?? Peer()}
+    set {_bucketPeerID = newValue}
+  }
+  /// Returns true if `bucketPeerID` has been explicitly set.
+  public var hasBucketPeerID: Bool {self._bucketPeerID != nil}
+  /// Clears the value of `bucketPeerID`. Subsequent reads from it will return its default value.
+  public mutating func clearBucketPeerID() {self._bucketPeerID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _agentSession: AgentSession? = nil
+  fileprivate var _bucketPeerID: Peer? = nil
 }
 
 public nonisolated struct UpdateAgentParticipation: Sendable {
@@ -26466,7 +26492,7 @@ nonisolated extension AgentSessionRelation: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension AgentRunState: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_RUN_STATE_UNKNOWN\0\u{1}AGENT_RUN_STATE_IDLE\0\u{1}AGENT_RUN_STATE_WORKING\0\u{1}AGENT_RUN_STATE_WAITING\0\u{1}AGENT_RUN_STATE_STOPPING\0\u{1}AGENT_RUN_STATE_PAUSED\0\u{1}AGENT_RUN_STATE_HELD_ELSEWHERE\0\u{1}AGENT_RUN_STATE_OFFLINE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_RUN_STATE_UNKNOWN\0\u{1}AGENT_RUN_STATE_IDLE\0\u{1}AGENT_RUN_STATE_WORKING\0\u{1}AGENT_RUN_STATE_WAITING\0\u{1}AGENT_RUN_STATE_STOPPING\0\u{1}AGENT_RUN_STATE_PAUSED\0\u{1}AGENT_RUN_STATE_HELD_ELSEWHERE\0\u{1}AGENT_RUN_STATE_OFFLINE\0\u{1}AGENT_RUN_STATE_RELEASING\0\u{1}AGENT_RUN_STATE_RELEASED\0")
 }
 
 nonisolated extension AgentWaitingReason: SwiftProtobuf._ProtoNameProviding {
@@ -55641,7 +55667,7 @@ nonisolated extension UpdateMessageActionInvoked: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension UpdateAgentSessionState: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateAgentSessionState"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}agent_session\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}agent_session\0\u{3}bucket_peer_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -55650,6 +55676,7 @@ nonisolated extension UpdateAgentSessionState: SwiftProtobuf.Message, SwiftProto
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._agentSession) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._bucketPeerID) }()
       default: break
       }
     }
@@ -55663,11 +55690,15 @@ nonisolated extension UpdateAgentSessionState: SwiftProtobuf.Message, SwiftProto
     try { if let v = self._agentSession {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
+    try { if let v = self._bucketPeerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateAgentSessionState, rhs: UpdateAgentSessionState) -> Bool {
     if lhs._agentSession != rhs._agentSession {return false}
+    if lhs._bucketPeerID != rhs._bucketPeerID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -53,6 +53,16 @@ struct AgentWorkPresentation: Equatable {
       symbolName = "macwindow.on.rectangle"
       tone = .quiet
       isAnimated = false
+    case .releasing:
+      title = String(localized: "Releasing…")
+      symbolName = "arrow.uturn.right.circle"
+      tone = .quiet
+      isAnimated = true
+    case .released:
+      title = String(localized: "Released to terminal or app")
+      symbolName = "arrow.uturn.right.circle.fill"
+      tone = .quiet
+      isAnimated = false
     case .offline:
       title = String(localized: "Offline")
       symbolName = "bolt.horizontal.circle"

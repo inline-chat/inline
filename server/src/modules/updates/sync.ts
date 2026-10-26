@@ -791,6 +791,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
                 state: state.state,
                 workspaceLabel: state.workspaceLabel,
               },
+              bucketPeerId: peerId,
             },
           },
         })

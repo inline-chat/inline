@@ -70,7 +70,12 @@ export async function moveAgentSession(
   const agentSession = await encodeAgentSessionForViewer(result.row, destination, currentUserId)
   if (result.moved) {
     for (const { chat, durable } of [result.source, result.target]) {
-      await pushChatUpdate(chat, durable, () => ({ oneofKind: "agentSessionState", agentSessionState: { agentSession } }))
+      // Each chat's update names its own bucket; in the source it also tells
+      // apps the work is now published elsewhere.
+      await pushChatUpdate(chat, durable, (bucketPeerId) => ({
+        oneofKind: "agentSessionState",
+        agentSessionState: { agentSession, bucketPeerId },
+      }))
     }
   }
   return { agentSession, moved: result.moved }
