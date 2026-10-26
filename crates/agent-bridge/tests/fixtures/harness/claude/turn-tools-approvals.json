@@ -1,0 +1,387 @@
+{
+  "provider": "claude",
+  "harness": "claude-code 2.1.292",
+  "recorded": false,
+  "source": "Agent SDK 0.3.288 message and control types; Oct 23 path lab scenarios 1, 4, 5, 8",
+  "description": "One owner turn: init settings, lifecycle, thinking, a Bash call behind an approval with a suggested rule, a Read, an AskUserQuestion form, the final text, the result with consumed inputs and usage, and an unknown frame kept as a notice.",
+  "steps": [
+    {
+      "name": "init reports the resolved model and the effective permission mode",
+      "native": {
+        "type": "system",
+        "subtype": "init",
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+        "cwd": "/work/inline",
+        "model": "claude-sonnet-5-5",
+        "permissionMode": "default",
+        "claude_code_version": "2.1.292",
+        "tools": ["Bash", "Read", "Edit", "AskUserQuestion"],
+        "slash_commands": ["compact", "review"],
+        "uuid": "a0000000-0000-4000-8000-000000000001"
+      },
+      "events": [
+        {
+          "type": "settings",
+          "effective": {
+            "model": {"value": "claude-sonnet-5-5", "label": "claude-sonnet-5-5", "disabled": false},
+            "permission_mode": "default",
+            "folder": "/work/inline"
+          }
+        }
+      ]
+    },
+    {
+      "name": "the owner's input starts the turn",
+      "native": {
+        "type": "system",
+        "subtype": "command_lifecycle",
+        "command_uuid": "0d6a7c1e-1111-4a00-8000-000000000001",
+        "state": "started",
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70"
+      },
+      "events": [
+        {
+          "type": "turn",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "phase": {"phase": "started", "inputs": ["0d6a7c1e-1111-4a00-8000-000000000001"]}
+        }
+      ]
+    },
+    {
+      "name": "thinking summary",
+      "native": {
+        "type": "assistant",
+        "uuid": "a0000000-0000-4000-8000-000000000002",
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+        "parent_tool_use_id": null,
+        "message": {"id": "msg_01A", "role": "assistant", "model": "claude-sonnet-5-5", "content": [{"type": "thinking", "thinking": "The build fails in the test step; run it first."}]}
+      },
+      "events": [
+        {
+          "type": "item",
+          "id": "msg_01A:0",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "kind": "reasoning",
+          "update": {"op": "completed", "body": {"kind": "reasoning", "summary": ["The build fails in the test step; run it first."]}, "status": "completed"},
+          "native": {"type": "thinking", "thinking": "The build fails in the test step; run it first."}
+        }
+      ]
+    },
+    {
+      "name": "Bash tool use starts a command item",
+      "native": {
+        "type": "assistant",
+        "uuid": "a0000000-0000-4000-8000-000000000003",
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+        "parent_tool_use_id": null,
+        "message": {"id": "msg_01B", "role": "assistant", "model": "claude-sonnet-5-5", "content": [{"type": "tool_use", "id": "toolu_bash1", "name": "Bash", "input": {"command": "npm test", "description": "Run the tests"}}]}
+      },
+      "events": [
+        {
+          "type": "item",
+          "id": "toolu_bash1",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "kind": "command",
+          "update": {"op": "started", "body": {"kind": "command", "command": "npm test"}},
+          "native": {"type": "tool_use", "id": "toolu_bash1", "name": "Bash", "input": {"command": "npm test", "description": "Run the tests"}}
+        }
+      ]
+    },
+    {
+      "name": "can_use_tool opens an approval with Claude's own choices",
+      "native": {
+        "type": "control_request",
+        "request_id": "req-perm-1",
+        "request": {
+          "subtype": "can_use_tool",
+          "tool_name": "Bash",
+          "input": {"command": "npm test", "description": "Run the tests"},
+          "permission_suggestions": [
+            {"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm test:*"}], "behavior": "allow", "destination": "localSettings"}
+          ],
+          "decision_reason": "Bash commands require approval in default mode",
+          "tool_use_id": "toolu_bash1"
+        }
+      },
+      "events": [
+        {
+          "type": "interaction",
+          "id": "req-perm-1",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "item": "toolu_bash1",
+          "kind": {
+            "kind": "approval",
+            "subject": {"kind": "command", "command": "npm test", "cwd": "/work/inline", "reason": "Bash commands require approval in default mode"},
+            "decisions": [
+              {"id": "allow", "label": "Yes", "kind": "accept", "native": {"behavior": "allow"}},
+              {
+                "id": "allow:suggestion:0",
+                "label": "Yes, and don't ask again for npm test:* commands in /work/inline",
+                "kind": "accept_and_remember",
+                "native": {"behavior": "allow", "updatedPermissions": [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm test:*"}], "behavior": "allow", "destination": "localSettings"}]}
+              },
+              {"id": "deny", "label": "No, and tell Claude what to do differently", "kind": "decline", "accepts_message": true, "native": {"behavior": "deny"}}
+            ]
+          },
+          "native": {
+            "subtype": "can_use_tool",
+            "tool_name": "Bash",
+            "input": {"command": "npm test", "description": "Run the tests"},
+            "permission_suggestions": [
+              {"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm test:*"}], "behavior": "allow", "destination": "localSettings"}
+            ],
+            "decision_reason": "Bash commands require approval in default mode",
+            "tool_use_id": "toolu_bash1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "tool result completes the command",
+      "native": {
+        "type": "user",
+        "uuid": "a0000000-0000-4000-8000-000000000004",
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+        "parent_tool_use_id": null,
+        "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_bash1", "content": "1 failing: parser handles empty input", "is_error": true}]}
+      },
+      "events": [
+        {
+          "type": "item",
+          "id": "toolu_bash1",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "kind": "command",
+          "update": {"op": "completed", "body": {"kind": "command", "command": "npm test", "output": "1 failing: parser handles empty input"}, "status": "failed"},
+          "native": {"type": "tool_result", "tool_use_id": "toolu_bash1", "content": "1 failing: parser handles empty input", "is_error": true}
+        }
+      ]
+    },
+    {
+      "name": "Read keeps Claude's tool vocabulary",
+      "native": {
+        "type": "assistant",
+        "uuid": "a0000000-0000-4000-8000-000000000005",
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+        "parent_tool_use_id": null,
+        "message": {"id": "msg_01C", "role": "assistant", "model": "claude-sonnet-5-5", "content": [{"type": "tool_use", "id": "toolu_read1", "name": "Read", "input": {"file_path": "/work/inline/src/parser.ts"}}]}
+      },
+      "events": [
+        {
+          "type": "item",
+          "id": "toolu_read1",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "kind": "tool",
+          "update": {"op": "started", "body": {"kind": "tool", "name": "Read", "input": {"file_path": "/work/inline/src/parser.ts"}}},
+          "native": {"type": "tool_use", "id": "toolu_read1", "name": "Read", "input": {"file_path": "/work/inline/src/parser.ts"}}
+        }
+      ]
+    },
+    {
+      "name": "AskUserQuestion becomes a question form",
+      "native": {
+        "type": "control_request",
+        "request_id": "req-ask-1",
+        "request": {
+          "subtype": "can_use_tool",
+          "tool_name": "AskUserQuestion",
+          "input": {
+            "questions": [
+              {
+                "question": "Which package manager should the fix use?",
+                "header": "Package manager",
+                "multiSelect": false,
+                "options": [
+                  {"label": "pnpm", "description": "Matches the lockfile"},
+                  {"label": "npm", "description": "Matches the CI script"}
+                ]
+              }
+            ]
+          },
+          "tool_use_id": "toolu_ask1"
+        }
+      },
+      "events": [
+        {
+          "type": "interaction",
+          "id": "req-ask-1",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "item": "toolu_ask1",
+          "kind": {
+            "kind": "question",
+            "form": {
+              "fields": [
+                {
+                  "id": "Which package manager should the fix use?",
+                  "header": "Package manager",
+                  "prompt": "Which package manager should the fix use?",
+                  "input": {
+                    "kind": "select",
+                    "options": [
+                      {"label": "pnpm", "description": "Matches the lockfile"},
+                      {"label": "npm", "description": "Matches the CI script"}
+                    ],
+                    "allow_other": true
+                  },
+                  "required": true
+                }
+              ]
+            }
+          },
+          "native": {
+            "subtype": "can_use_tool",
+            "tool_name": "AskUserQuestion",
+            "input": {
+              "questions": [
+                {
+                  "question": "Which package manager should the fix use?",
+                  "header": "Package manager",
+                  "multiSelect": false,
+                  "options": [
+                    {"label": "pnpm", "description": "Matches the lockfile"},
+                    {"label": "npm", "description": "Matches the CI script"}
+                  ]
+                }
+              ]
+            },
+            "tool_use_id": "toolu_ask1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "final text has no phase; the turn's last text is the answer",
+      "native": {
+        "type": "assistant",
+        "uuid": "a0000000-0000-4000-8000-000000000006",
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+        "parent_tool_use_id": null,
+        "message": {"id": "msg_01D", "role": "assistant", "model": "claude-sonnet-5-5", "content": [{"type": "text", "text": "Fixed the empty-input case; tests pass with pnpm."}]}
+      },
+      "events": [
+        {
+          "type": "item",
+          "id": "msg_01D:0",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "kind": "message",
+          "update": {"op": "completed", "body": {"kind": "message", "role": "assistant", "text": "Fixed the empty-input case; tests pass with pnpm."}, "status": "completed"},
+          "native": {"type": "text", "text": "Fixed the empty-input case; tests pass with pnpm."}
+        }
+      ]
+    },
+    {
+      "name": "result ends the turn with consumed inputs and usage",
+      "native": {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "duration_ms": 48211,
+        "num_turns": 4,
+        "result": "Fixed the empty-input case; tests pass with pnpm.",
+        "terminal_reason": "completed",
+        "user_message_uuids": ["0d6a7c1e-1111-4a00-8000-000000000001"],
+        "usage": {"input_tokens": 1200, "cache_read_input_tokens": 30000, "output_tokens": 640},
+        "modelUsage": {"claude-sonnet-5-5": {"contextWindow": 200000, "costUSD": 0.041}},
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+        "uuid": "a0000000-0000-4000-8000-000000000007"
+      },
+      "events": [
+        {
+          "type": "usage",
+          "usage": {
+            "last": {"input": 1200, "cached_input": 30000, "output": 640, "reasoning": 0, "total": 31840},
+            "context_window": 200000
+          }
+        },
+        {
+          "type": "turn",
+          "turn": "0d6a7c1e-1111-4a00-8000-000000000001",
+          "phase": {
+            "phase": "completed",
+            "outcome": "completed",
+            "inputs_consumed": ["0d6a7c1e-1111-4a00-8000-000000000001"],
+            "duration_ms": 48211
+          }
+        }
+      ]
+    },
+    {
+      "name": "unknown frames are kept as notices, never dropped or read as idle",
+      "native": {
+        "type": "prompt_suggestion",
+        "suggestions": ["Run the full suite"],
+        "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+        "uuid": "a0000000-0000-4000-8000-000000000008"
+      },
+      "events": [
+        {
+          "type": "notice",
+          "level": "info",
+          "code": "prompt_suggestion",
+          "native": {
+            "type": "prompt_suggestion",
+            "suggestions": ["Run the full suite"],
+            "session_id": "5b1f8c1e-7d1a-4c55-9a0e-2f3c4d5e6f70",
+            "uuid": "a0000000-0000-4000-8000-000000000008"
+          }
+        }
+      ]
+    }
+  ],
+  "responses": [
+    {
+      "name": "allow with the suggested rule",
+      "interaction": "req-perm-1",
+      "response": {"kind": "decision", "decision": "allow:suggestion:0"},
+      "native": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "req-perm-1",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {"command": "npm test", "description": "Run the tests"},
+            "updatedPermissions": [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "npm test:*"}], "behavior": "allow", "destination": "localSettings"}]
+          }
+        }
+      }
+    },
+    {
+      "name": "deny with the person's message",
+      "interaction": "req-perm-1",
+      "response": {"kind": "decision", "decision": "deny", "message": "Use pnpm test instead"},
+      "native": {
+        "type": "control_response",
+        "response": {"subtype": "success", "request_id": "req-perm-1", "response": {"behavior": "deny", "message": "Use pnpm test instead"}}
+      }
+    },
+    {
+      "name": "answer the question form",
+      "interaction": "req-ask-1",
+      "response": {"kind": "answers", "answers": [{"field": "Which package manager should the fix use?", "values": ["pnpm"]}]},
+      "native": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "req-ask-1",
+          "response": {
+            "behavior": "allow",
+            "updatedInput": {
+              "questions": [
+                {
+                  "question": "Which package manager should the fix use?",
+                  "header": "Package manager",
+                  "multiSelect": false,
+                  "options": [
+                    {"label": "pnpm", "description": "Matches the lockfile"},
+                    {"label": "npm", "description": "Matches the CI script"}
+                  ]
+                }
+              ],
+              "answers": {"Which package manager should the fix use?": "pnpm"}
+            }
+          }
+        }
+      }
+    }
+  ]
+}
