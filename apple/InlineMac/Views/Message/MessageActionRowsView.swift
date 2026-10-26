@@ -1,4 +1,5 @@
 import AppKit
+import InlineKit
 import struct InlineProtocol.MessageAction
 import struct InlineProtocol.MessageActionRow
 import InlineMacUI
@@ -33,7 +34,8 @@ final class MessageActionRowsView: NSView {
     loadingActionIds: Set<String>,
     outgoing: Bool,
     rowHeight: CGFloat,
-    messageFontSize: CGFloat
+    messageFontSize: CGFloat,
+    presentation: (MessageAction) -> MessageActionPresentation
   ) {
     self.rowHeight = rowHeight
 
@@ -48,6 +50,7 @@ final class MessageActionRowsView: NSView {
         let actionId = action.actionID.trimmingCharacters(in: .whitespacesAndNewlines)
         buttonView.configure(
           action: action,
+          presentation: presentation(action),
           isLoading: loadingActionIds.contains(actionId),
           outgoing: outgoing,
           rowHeight: rowHeight,
@@ -120,6 +123,8 @@ final class MessageActionRowsView: NSView {
 final class MessageActionButtonView: NSView {
   private struct AppearanceStyle {
     var title: String
+    var style: MessageActionPresentation.Style
+    var disabledReason: String?
     var isLoading: Bool
     var outgoing: Bool
     var rowHeight: CGFloat
@@ -179,6 +184,7 @@ final class MessageActionButtonView: NSView {
 
   func configure(
     action: MessageAction,
+    presentation: MessageActionPresentation,
     isLoading: Bool,
     outgoing: Bool,
     rowHeight: CGFloat,
@@ -188,6 +194,10 @@ final class MessageActionButtonView: NSView {
     self.action = action
     appearanceStyle = AppearanceStyle(
       title: action.text,
+      style: presentation.style,
+      // Unavailable intents (a malformed link) read as disabled too.
+      disabledReason: presentation.disabledReason
+        ?? (presentation.intent == .unavailable ? String(localized: "This action isn’t available") : nil),
       isLoading: isLoading,
       outgoing: outgoing,
       rowHeight: rowHeight,
@@ -300,6 +310,11 @@ final class MessageActionButtonView: NSView {
       MessageGestureTrace.debug("MessageActionButtonView.mouseDown ignored reason=loadingOrMissingAction")
       return
     }
+    // A disabled action still reaches the owner view, which explains why.
+    if appearanceStyle?.disabledReason != nil {
+      handleTap()
+      return
+    }
 
     setPressed(true)
     guard let window else {
@@ -341,8 +356,13 @@ final class MessageActionButtonView: NSView {
     let appearance = effectiveAppearance
     let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     let fontSize = max(11, min(appearanceStyle.messageFontSize, appearanceStyle.rowHeight - 8))
-    let textColor: NSColor = (appearanceStyle.outgoing ? NSColor.white : NSColor.labelColor)
-      .resolvedColor(with: appearance)
+    let isDisabled = appearanceStyle.disabledReason != nil
+    let baseTextColor: NSColor = switch appearanceStyle.style {
+    case .primary: NSColor.white
+    case .destructive: appearanceStyle.outgoing ? NSColor.white : NSColor.systemRed
+    case .standard: appearanceStyle.outgoing ? NSColor.white : NSColor.labelColor
+    }
+    let textColor = baseTextColor.resolvedColor(with: appearance)
     let disabledColor = textColor.withAlphaComponent(0.45)
     let paragraphStyle = NSMutableParagraphStyle()
     paragraphStyle.alignment = .center
@@ -352,12 +372,12 @@ final class MessageActionButtonView: NSView {
       string: appearanceStyle.title,
       attributes: [
         .font: NSFont.systemFont(ofSize: fontSize, weight: .medium),
-        .foregroundColor: appearanceStyle.isLoading ? disabledColor : textColor,
+        .foregroundColor: appearanceStyle.isLoading || isDisabled ? disabledColor : textColor,
         .paragraphStyle: paragraphStyle,
       ]
     )
-    titleField.toolTip = appearanceStyle.title
-    toolTip = appearanceStyle.title
+    titleField.toolTip = appearanceStyle.disabledReason ?? appearanceStyle.title
+    toolTip = appearanceStyle.disabledReason ?? appearanceStyle.title
 
     if appearanceStyle.isLoading {
       spinner.startAnimation(nil)
@@ -368,7 +388,11 @@ final class MessageActionButtonView: NSView {
     }
 
     let backgroundColor: NSColor
-    if appearanceStyle.outgoing {
+    if appearanceStyle.style == .primary, !isDisabled {
+      backgroundColor = appearanceStyle.outgoing
+        ? .white.withAlphaComponent(isDark ? 0.3 : 0.26)
+        : NSColor.controlAccentColor.resolvedColor(with: appearance)
+    } else if appearanceStyle.outgoing {
       backgroundColor = .white.withAlphaComponent(isDark ? 0.18 : 0.14)
     } else {
       let incomingBase = Theme.messageBubbleSecondaryBgColor.resolvedColor(with: appearance)
@@ -380,7 +404,7 @@ final class MessageActionButtonView: NSView {
       }
     }
 
-    let hoverOverlay = isHovered ? (isDark ? 0.035 : 0.025) : 0
+    let hoverOverlay = isHovered && !isDisabled ? (isDark ? 0.035 : 0.025) : 0
     let resolvedBackground = backgroundColor.blended(withFraction: hoverOverlay, of: .black) ?? backgroundColor
     let alpha: CGFloat = appearanceStyle.isLoading ? 1 : (isPressed ? 0.88 : 1)
 
@@ -424,6 +448,14 @@ final class MessageActionButtonView: NSView {
 
   override func accessibilityLabel() -> String? {
     appearanceStyle?.title
+  }
+
+  override func accessibilityHelp() -> String? {
+    appearanceStyle?.disabledReason
+  }
+
+  override func isAccessibilityEnabled() -> Bool {
+    appearanceStyle?.disabledReason == nil
   }
 
   override func accessibilityPerformPress() -> Bool {

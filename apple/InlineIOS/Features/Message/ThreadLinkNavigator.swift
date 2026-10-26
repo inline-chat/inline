@@ -49,7 +49,7 @@ enum ThreadLinkNavigator {
     }
   }
 
-  private static func navigate(to peer: Peer) {
+  static func navigate(to peer: Peer) {
     var userInfo: [AnyHashable: Any] = [:]
     if let userId = peer.asUserId() {
       userInfo["peerUserId"] = userId

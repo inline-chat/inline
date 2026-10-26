@@ -1043,6 +1043,9 @@ class UIMessageView: UIView {
             type: .info
           )
         }
+        if let alert = event.alert {
+          MessageActionPerformer.presentAlert(alert, from: self)
+        }
       }
   }
 
@@ -1066,18 +1069,13 @@ class UIMessageView: UIView {
   @objc func handleMessageActionButtonTap(_ sender: MessageActionButton) {
     guard let action = sender.messageAction else { return }
 
-    switch action.action {
-      case .callback:
-        invokeMessageCallbackAction(action)
-      case let .copyText(copyText):
-        UIPasteboard.general.string = copyText.text
-        ToastManager.shared.showToast(
-          "Copied",
-          type: .success,
-          systemImage: "doc.on.doc"
-        )
-      case nil:
-        break
+    let presentation = MessageActionPerformer.presentation(for: action, message: message)
+    MessageActionPerformer.run(presentation, from: self) { [weak self] in
+      if presentation.intent == .callback {
+        self?.invokeMessageCallbackAction(action)
+      } else {
+        MessageActionPerformer.performLocal(presentation.intent)
+      }
     }
   }
 
