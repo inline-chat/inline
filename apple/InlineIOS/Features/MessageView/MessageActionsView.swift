@@ -15,6 +15,7 @@ final class MessageActionsView: UIView {
   private var message: Message?
   private var loadingSubscription: AnyCancellable?
   private var answeredSubscription: AnyCancellable?
+  private var grantsSubscription: AnyCancellable?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -104,6 +105,13 @@ final class MessageActionsView: UIView {
 
   private func subscribe() {
     guard loadingSubscription == nil else { return }
+    // Grants load once per bot; re-render so buttons the viewer cannot use
+    // turn disabled with their reason.
+    grantsSubscription = AgentGrantStore.shared.$accessByBotUserID
+      .removeDuplicates()
+      .dropFirst()
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in self?.refreshPresentations() }
     loadingSubscription = MessageActionInteractionState.shared.loadingPublisher
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in self?.updateLoading() }
@@ -122,6 +130,20 @@ final class MessageActionsView: UIView {
           MessageActionPerformer.presentAlert(alert, from: self)
         }
       }
+  }
+
+  private func refreshPresentations() {
+    guard let message else { return }
+    for row in Self.rows(for: message) {
+      for action in row.actions {
+        buttons[action.actionID]?.configure(
+          action: action,
+          outgoing: false,
+          presentation: MessageActionPerformer.presentation(for: action, message: message)
+        )
+      }
+    }
+    updateLoading()
   }
 
   private func updateLoading() {
