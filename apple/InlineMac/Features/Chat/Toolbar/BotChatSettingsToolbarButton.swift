@@ -8,8 +8,20 @@ struct BotChatSettingsToolbarButton: View {
   @ObservedObject var agentThreadModel: AgentThreadToolbarModel
   let toolbarState: ChatToolbarState
   let updateAgentContext: (InlineProtocol.AgentThreadContext) async throws -> Void
+  @ObservedObject private var agentWorkStore = AgentWorkStateStore.shared
 
   private var anchor: ChatToolbarState.Anchor { .button(.botSettings) }
+
+  /// The agent these settings are for: the thread's own agent, else the bot
+  /// selected in the popover.
+  private var settingsBotUserID: Int64? {
+    agentThreadModel.context?.botUserID ?? coordinator.selectedBotID
+  }
+
+  /// Output mode applies to bridge v2 agents, which report a runtime.
+  private var showsOutputMode: Bool {
+    settingsBotUserID.map { agentWorkStore.runtimeBotUserIDs.contains($0) } ?? false
+  }
 
   var body: some View {
     Button {
@@ -34,12 +46,18 @@ struct BotChatSettingsToolbarButton: View {
     ), arrowEdge: .bottom) {
       BotChatSettingsPopover(
         coordinator: coordinator,
-        showsThreadConfiguration: agentThreadModel.context != nil,
+        showsThreadConfiguration: agentThreadModel.context != nil || showsOutputMode,
         threadConfiguration: {
-          AgentThreadSettingsSection(
-            model: agentThreadModel,
-            update: updateAgentContext
-          )
+          VStack(alignment: .leading, spacing: 0) {
+            AgentThreadSettingsSection(
+              model: agentThreadModel,
+              update: updateAgentContext
+            )
+            if showsOutputMode, let botUserID = settingsBotUserID {
+              if agentThreadModel.context != nil { Divider().padding(.horizontal, 12) }
+              AgentOutputModeSettingsSection(peer: coordinator.peer, botUserID: botUserID)
+            }
+          }
         },
         remoteFolderPicker: { hostInstallationID, botUserID, hostLabel in
           guard let parent = NSApp.keyWindow?.parent ?? NSApp.mainWindow ?? NSApp.keyWindow else {
@@ -87,6 +105,10 @@ struct BotChatSettingsToolbarButton: View {
           )
         }
       )
+      .task(id: settingsBotUserID) {
+        guard let botUserID = settingsBotUserID else { return }
+        await AgentOutputModeSettingsLoader.load(peer: coordinator.peer, botUserID: botUserID)
+      }
     }
   }
 }

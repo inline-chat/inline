@@ -205,6 +205,8 @@ public final class AgentWorkStateStore: ObservableObject {
   @Published public private(set) var states: [AgentWorkState.Key: AgentWorkState] = [:]
   @Published public private(set) var outputOverrides: [AgentWorkState.Key: AgentThreadOutputMode] = [:]
   @Published public private(set) var defaultOutputModes: [Int64: AgentThreadOutputMode] = [:]
+  /// Bots that reported a bridge v2 runtime, so their output mode applies.
+  @Published public private(set) var runtimeBotUserIDs: Set<Int64> = []
 
   private let database: AppDatabase?
   private let log = Log.scoped("AgentWorkStateStore")
@@ -299,6 +301,7 @@ public final class AgentWorkStateStore: ObservableObject {
     guard runtime.botUserID > 0 else { return }
     let mode = AgentThreadOutputMode(runtime.defaultOutputMode)
     if defaultOutputModes[runtime.botUserID] != mode { defaultOutputModes[runtime.botUserID] = mode }
+    if !runtimeBotUserIDs.contains(runtime.botUserID) { runtimeBotUserIDs.insert(runtime.botUserID) }
     persist(
       .outputDefault,
       key: "\(runtime.botUserID)",
@@ -351,6 +354,7 @@ public final class AgentWorkStateStore: ObservableObject {
     states.removeAll()
     outputOverrides.removeAll()
     defaultOutputModes.removeAll()
+    runtimeBotUserIDs.removeAll()
     overrideRevisions.removeAll()
     guard let database else { return }
     Task.detached {
@@ -379,6 +383,7 @@ public final class AgentWorkStateStore: ObservableObject {
       case .outputDefault:
         if let value = try? decoder.decode(OutputDefault.self, from: row.payload) {
           defaultOutputModes[value.botUserID] = value.mode
+          runtimeBotUserIDs.insert(value.botUserID)
         }
       case nil:
         break
