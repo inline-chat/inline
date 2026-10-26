@@ -272,7 +272,7 @@ INLINE_TOOL_SCHEMA = {
             "skill_key": {"type": "string", "description": "Optional harness skill key for create_agent or update_agent."},
             "instructions": {"type": "string", "description": "Optional specialized Agent instructions for create_agent or update_agent."},
             "description": {"type": "string", "description": "Optional thread or Agent description."},
-            "emoji": {"type": "string", "description": "Optional thread or Agent emoji, or reaction emoji for reaction actions."},
+            "emoji": {"type": "string", "description": "Reaction emoji for reaction actions. For create_chat, create_thread and update_chat, one fitting emoji helps people spot the chat in their list; pass one unless the topic is sensitive or serious. Also an Agent's emoji."},
             "space_id": {"type": "string", "description": "Optional parent space ID for create_chat."},
             "participant_user_ids": {
                 "type": "array",
