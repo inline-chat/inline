@@ -14,13 +14,12 @@ use std::time::{Duration, Instant};
 
 use inline_agent_bridge::harness::{
     Availability, AvailabilityMatrix, CapabilityManifest, Catalog, CatalogMode, CatalogScope,
-    CompatTier, Delivery, DeliveryKind, Envelope, Event, EventHub, EventStream, ExecutableInfo,
-    ExecutableSource, ForkPoint, HarnessDriver, HarnessFuture, HeldBy, HeldSurface, Input,
-    InputDisposition, InputReceipt, InteractionId, LiveWork, ModeId, Op, OpError, OpKind,
-    OpOutcome, OpenError, OpenMode, OpenSpec, OutputMode, QueueEntryId, ReleaseOutcome, Released,
-    RunState, RunStateTracker,
-    RuntimeHealth, RuntimeInfo, SendError, Session, SessionKey, SessionPage, SessionQuery,
-    SessionSummary, SettingsScope, SetupReason, DEFAULT_HUB_CAPACITY,
+    CompatTier, DEFAULT_HUB_CAPACITY, Delivery, DeliveryKind, Envelope, Event, EventHub,
+    EventStream, ExecutableInfo, ExecutableSource, ForkPoint, HarnessDriver, HarnessFuture, HeldBy,
+    HeldSurface, Input, InputDisposition, InputReceipt, InteractionId, LiveWork, ModeId, Op,
+    OpError, OpKind, OpOutcome, OpenError, OpenMode, OpenSpec, OutputMode, QueueEntryId,
+    ReleaseOutcome, Released, RunState, RunStateTracker, RuntimeHealth, RuntimeInfo, SendError,
+    Session, SessionKey, SessionPage, SessionQuery, SessionSummary, SettingsScope, SetupReason,
 };
 use inline_agent_bridge::{
     DriverCommand, DriverCommandInput, DriverError, DriverFuture, DriverModelOption,
@@ -96,7 +95,11 @@ impl ClaudeHarnessConfig {
         // Checkpoints make "undo this turn's changes" available (rewind_files).
         options.enable_file_checkpointing = true;
         if !self.mcp_servers.is_empty() {
-            let names: Vec<&str> = self.mcp_servers.iter().map(|(name, _)| name.as_str()).collect();
+            let names: Vec<&str> = self
+                .mcp_servers
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect();
             options.mcp_config = Some(crate::mcp::sdk_server_config(&names).to_string());
         }
         options
@@ -141,7 +144,9 @@ impl ClaudeHarness {
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, HarnessState> {
-        self.state.lock().unwrap_or_else(|poison| poison.into_inner())
+        self.state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
     }
 
     fn store(&self) -> Option<SessionStore> {
@@ -156,13 +161,16 @@ impl ClaudeHarness {
                 path: executable.display().to_string(),
             });
         }
-        let spec = self.config.launch(cwd.to_path_buf(), SessionStart::Fresh).command();
-        let (version, text) = probe(&spec, Duration::from_secs(10)).await.map_err(|error| {
-            SetupReason::ExecutableChanged {
+        let spec = self
+            .config
+            .launch(cwd.to_path_buf(), SessionStart::Fresh)
+            .command();
+        let (version, text) = probe(&spec, Duration::from_secs(10))
+            .await
+            .map_err(|error| SetupReason::ExecutableChanged {
                 path: executable.display().to_string(),
                 detail: error.to_string(),
-            }
-        })?;
+            })?;
         let mut state = self.state();
         if let Some(previous) = state.version
             && previous != version
@@ -211,13 +219,19 @@ impl ClaudeHarness {
         let mut options = self.config.launch(cwd, session);
         let dropped = options.retain_supported(&self.help());
         if !dropped.is_empty() {
-            log::info!("claude does not support {}; launching without", dropped.join(", "));
+            log::info!(
+                "claude does not support {}; launching without",
+                dropped.join(", ")
+            );
         }
         options
     }
 
     async fn live_sessions(&self, cwd: &std::path::Path) -> Vec<LiveSession> {
-        let spec = self.config.launch(cwd.to_path_buf(), SessionStart::Fresh).command();
+        let spec = self
+            .config
+            .launch(cwd.to_path_buf(), SessionStart::Fresh)
+            .command();
         list_live_sessions(&spec, false, Duration::from_secs(10))
             .await
             .unwrap_or_default()
@@ -247,10 +261,15 @@ impl ClaudeHarness {
             },
             availability: availability(capabilities),
             methods: capabilities.iter().cloned().collect(),
-            server_requests: ["can_use_tool", "mcp_message", "hook_callback", "elicitation"]
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
+            server_requests: [
+                "can_use_tool",
+                "mcp_message",
+                "hook_callback",
+                "elicitation",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
             notifications: Default::default(),
             item_types: Default::default(),
             approval_decisions: Default::default(),
@@ -306,20 +325,38 @@ pub fn availability(capabilities: &[String]) -> AvailabilityMatrix {
             unavailable("Claude runs queued input on its own once the current work ends"),
         )
         .with_op(OpKind::SettingsThread, Availability::Supported)
-        .with_op(OpKind::SettingsTurn, unavailable("Claude settings apply from the next message on"))
-        .with_op(OpKind::SettingsPersisted, unavailable("defaults are set in Agent Settings"))
+        .with_op(
+            OpKind::SettingsTurn,
+            unavailable("Claude settings apply from the next message on"),
+        )
+        .with_op(
+            OpKind::SettingsPersisted,
+            unavailable("defaults are set in Agent Settings"),
+        )
         .with_op(OpKind::Compact, Availability::Supported)
         .with_op(OpKind::Clear, Availability::Supported)
         .with_op(OpKind::Rename, Availability::Supported)
         .with_op(OpKind::Archive, unavailable("Claude Code has no archive"))
         .with_op(OpKind::RewindFiles, Availability::Supported)
         .with_op(OpKind::Mode, Availability::Supported)
-        .with_op(OpKind::Review, unavailable("Claude has no review operation over its protocol"))
-        .with_op(OpKind::Goal, unavailable("Claude has no session goal operation"))
+        .with_op(
+            OpKind::Review,
+            unavailable("Claude has no review operation over its protocol"),
+        )
+        .with_op(
+            OpKind::Goal,
+            unavailable("Claude has no session goal operation"),
+        )
         .with_op(OpKind::StopChild, Availability::Supported)
         .with_op(OpKind::Answer, Availability::Supported)
-        .with_op(OpKind::Sample, unavailable("the Claude speak gate is not wired yet"))
-        .with_op(OpKind::McpAuth, unavailable("Claude MCP sign-in runs in the terminal (/mcp)"))
+        .with_op(
+            OpKind::Sample,
+            unavailable("the Claude speak gate is not wired yet"),
+        )
+        .with_op(
+            OpKind::McpAuth,
+            unavailable("Claude MCP sign-in runs in the terminal (/mcp)"),
+        )
 }
 
 impl HarnessDriver for ClaudeHarness {
@@ -396,7 +433,9 @@ impl HarnessDriver for ClaudeHarness {
                 .as_ref()
                 .and_then(|cursor| cursor.as_str().parse::<usize>().ok())
                 .unwrap_or(0);
-            let limit = query.limit.map_or(SESSION_PAGE_SIZE, |limit| (limit as usize).clamp(1, 200));
+            let limit = query
+                .limit
+                .map_or(SESSION_PAGE_SIZE, |limit| (limit as usize).clamp(1, 200));
             let folder = query.folder.clone();
             let infos = tokio::task::spawn_blocking(move || {
                 store.list(folder.as_deref(), true, offset, Some(limit + 1))
@@ -442,7 +481,10 @@ impl HarnessDriver for ClaudeHarness {
                     path: spec.folder.display().to_string(),
                 }));
             }
-            let version = self.validate(&spec.folder).await.map_err(OpenError::NeedsSetup)?;
+            let version = self
+                .validate(&spec.folder)
+                .await
+                .map_err(OpenError::NeedsSetup)?;
             let (start, resumed) = match &spec.mode {
                 OpenMode::Start => (SessionStart::new_session(), None),
                 OpenMode::Resume { session } => {
@@ -477,7 +519,8 @@ impl HarnessDriver for ClaudeHarness {
                 ),
             };
             if let SessionStart::Fork {
-                at_message: Some(_), ..
+                at_message: Some(_),
+                ..
             } = &start
                 && !self.help().contains("--resume-session-at")
             {
@@ -516,7 +559,9 @@ impl HarnessDriver for ClaudeHarness {
             };
             let initialize = InitializeRequest {
                 append_system_prompt: spec.instructions.clone(),
-                title: matches!(spec.mode, OpenMode::Start).then(|| spec.title.clone()).flatten(),
+                title: matches!(spec.mode, OpenMode::Start)
+                    .then(|| spec.title.clone())
+                    .flatten(),
                 per_task_stop_affordance: true,
                 ..InitializeRequest::default()
             };
@@ -565,19 +610,23 @@ fn held_by(live: &LiveSession) -> HeldBy {
 }
 
 fn catalog_from(init: &InitializeResponse, permission_modes: &[String]) -> Catalog {
-    let option = |value: &str, label: Option<&str>, description: Option<&str>| DriverSettingOption {
-        value: value.to_string(),
-        label: label.unwrap_or(value).to_string(),
-        description: description.map(str::to_string),
-        disabled: false,
-    };
+    let option =
+        |value: &str, label: Option<&str>, description: Option<&str>| DriverSettingOption {
+            value: value.to_string(),
+            label: label.unwrap_or(value).to_string(),
+            description: description.map(str::to_string),
+            disabled: false,
+        };
     Catalog {
         models: init
             .models
             .iter()
             .map(|model| DriverModelOption {
                 value: model.value.clone(),
-                label: model.display_name.clone().unwrap_or_else(|| model.value.clone()),
+                label: model
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| model.value.clone()),
                 description: model.description.clone(),
                 reasoning: model
                     .supported_effort_levels
@@ -670,7 +719,9 @@ impl SessionInner {
     }
 
     fn mapper(&self) -> std::sync::MutexGuard<'_, ClaudeMapper> {
-        self.mapper.lock().unwrap_or_else(|poison| poison.into_inner())
+        self.mapper
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
     }
 
     fn capabilities(&self) -> Vec<String> {
@@ -710,7 +761,9 @@ impl ControlHandler for SessionHandler {
                         .insert(call.request_id.clone(), sender);
                     inner.emit_all(events);
                     drop(cancel);
-                    receiver.await.unwrap_or_else(|_| Err("session closed".into()))
+                    receiver
+                        .await
+                        .unwrap_or_else(|_| Err("session closed".into()))
                 }
                 RequestMapped::Reply { response, events } => {
                     inner.emit_all(events);
@@ -740,7 +793,9 @@ impl ClaudeSession {
     ) -> Result<Self, OpenError> {
         let slot = Arc::new(Mutex::new(None));
         let config = ClientConfig {
-            handler: Arc::new(SessionHandler { inner: slot.clone() }),
+            handler: Arc::new(SessionHandler {
+                inner: slot.clone(),
+            }),
             mcp_servers,
             ..ClientConfig::default()
         };
@@ -785,13 +840,19 @@ impl ClaudeSession {
     }
 
     async fn write(&self, message: &UserMessage) -> Result<(), SendError> {
-        self.inner.client.send(message).await.map_err(|error| match error {
-            // Nothing was written.
-            ControlError::Closed(reason) => SendError::Driver(DriverError::ProcessExited(reason)),
-            // A failed or stalled write: the CLI may or may not have read it.
-            ControlError::Unknown(reason) => SendError::Unknown(reason),
-            other => SendError::Driver(DriverError::Protocol(other.to_string())),
-        })
+        self.inner
+            .client
+            .send(message)
+            .await
+            .map_err(|error| match error {
+                // Nothing was written.
+                ControlError::Closed(reason) => {
+                    SendError::Driver(DriverError::ProcessExited(reason))
+                }
+                // A failed or stalled write: the CLI may or may not have read it.
+                ControlError::Unknown(reason) => SendError::Unknown(reason),
+                other => SendError::Driver(DriverError::Protocol(other.to_string())),
+            })
     }
 
     async fn requests(&self, requests: Vec<Value>) -> Result<Value, OpError> {
@@ -986,7 +1047,9 @@ impl Session for ClaudeSession {
                         return Err(OpError::InteractionNotPending);
                     };
                     if reply.send(Ok(plan.response.clone())).is_err() {
-                        return Err(OpError::Unknown("the ask was withdrawn while answering".into()));
+                        return Err(OpError::Unknown(
+                            "the ask was withdrawn while answering".into(),
+                        ));
                     }
                     self.inner.emit_all(plan.events);
                     return Ok(OpOutcome::Accepted {
@@ -1138,10 +1201,12 @@ fn op_error(error: ControlError) -> OpError {
 fn open_error(error: ConnectError) -> OpenError {
     if let Some(failure) = error.startup_failure() {
         return match failure {
-            crate::wire::StartupFailure::SessionHeldByBackground => OpenError::HeldElsewhere(HeldBy {
-                surface: HeldSurface::Background,
-                detail: Some("running as a background session".into()),
-            }),
+            crate::wire::StartupFailure::SessionHeldByBackground => {
+                OpenError::HeldElsewhere(HeldBy {
+                    surface: HeldSurface::Background,
+                    detail: Some("running as a background session".into()),
+                })
+            }
             other => OpenError::NeedsSetup(setup_reason(other.reason(), &error.to_string())),
         };
     }

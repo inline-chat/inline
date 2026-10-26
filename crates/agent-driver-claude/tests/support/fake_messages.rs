@@ -70,7 +70,9 @@ pub struct FakeMessages {
 
 impl FakeMessages {
     pub async fn start() -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind fake API");
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind fake API");
         let address = listener.local_addr().expect("fake API address");
         let served = Arc::new(Mutex::new(Vec::new()));
         let log = served.clone();
@@ -102,7 +104,9 @@ impl FakeMessages {
     pub fn conversation_calls(&self) -> Vec<Served> {
         self.served()
             .into_iter()
-            .filter(|served| served.path.starts_with("/v1/messages") && !served.path.contains("count_tokens"))
+            .filter(|served| {
+                served.path.starts_with("/v1/messages") && !served.path.contains("count_tokens")
+            })
             .filter(|served| !served.tool_names().is_empty())
             .collect()
     }
@@ -216,7 +220,9 @@ fn plan_reply(body: &Value) -> Plan {
     let parts = last_user_parts(body);
     if has_tool_result {
         return Plan {
-            blocks: vec![json!({"type": "text", "text": format!("FAKE-DONE {}", parts.join(" | "))})],
+            blocks: vec![
+                json!({"type": "text", "text": format!("FAKE-DONE {}", parts.join(" | "))}),
+            ],
             stop_reason: "end_turn",
             delay: Duration::ZERO,
         };
@@ -399,5 +405,7 @@ async fn write_stream(stream: &mut TcpStream, model: &str, plan: &Plan) -> std::
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }

@@ -30,14 +30,20 @@ pub struct StderrTail {
 
 impl StderrTail {
     fn push(&self, bytes: &[u8]) {
-        let mut tail = self.inner.lock().unwrap_or_else(|poison| poison.into_inner());
+        let mut tail = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         tail.extend(bytes);
         let overflow = tail.len().saturating_sub(STDERR_TAIL_BYTES);
         tail.drain(..overflow);
     }
 
     pub fn text(&self) -> String {
-        let tail = self.inner.lock().unwrap_or_else(|poison| poison.into_inner());
+        let tail = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let bytes: Vec<u8> = tail.iter().copied().collect();
         String::from_utf8_lossy(&bytes).into_owned()
     }

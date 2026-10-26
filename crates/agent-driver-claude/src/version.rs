@@ -62,7 +62,10 @@ pub mod capability {
 }
 
 /// Runs `<claude> --version` with the launch environment.
-pub async fn probe(spec: &CommandSpec, timeout: Duration) -> std::io::Result<(ClaudeVersion, String)> {
+pub async fn probe(
+    spec: &CommandSpec,
+    timeout: Duration,
+) -> std::io::Result<(ClaudeVersion, String)> {
     let mut command = tokio::process::Command::new(&spec.program);
     command
         .arg("--version")
@@ -77,7 +80,9 @@ pub async fn probe(spec: &CommandSpec, timeout: Duration) -> std::io::Result<(Cl
     }
     let output = tokio::time::timeout(timeout, command.output())
         .await
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "claude --version timed out"))??;
+        .map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "claude --version timed out")
+        })??;
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let version = ClaudeVersion::parse(&text).ok_or_else(|| {
         std::io::Error::new(

@@ -16,9 +16,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use inline_agent_driver_claude::mcp::BoxFuture;
 use inline_agent_driver_claude::client::IncomingCall;
 use inline_agent_driver_claude::control::IncomingRequest;
+use inline_agent_driver_claude::mcp::BoxFuture;
 use inline_agent_driver_claude::{
     CancelSignal, ClaudeClient, ClaudeVersion, ClientConfig, ClientEvent, ControlHandler,
     InitializeRequest, InitializeResponse, LaunchOptions, PermissionDecision, PermissionRequest,
@@ -43,7 +43,10 @@ pub struct Recorder {
 impl Recorder {
     fn elapsed_ms(&self) -> u128 {
         let mut started = self.started.lock().unwrap();
-        started.get_or_insert_with(Instant::now).elapsed().as_millis()
+        started
+            .get_or_insert_with(Instant::now)
+            .elapsed()
+            .as_millis()
     }
 
     pub fn note(&self, direction: &str, value: Value) {
@@ -58,7 +61,9 @@ impl Recorder {
             ClientEvent::Malformed { line, error } => {
                 json!({"lab": "malformed", "line": line, "error": error})
             }
-            ClientEvent::Gap { lost, partial } => json!({"lab": "gap", "lost": lost, "partial": partial}),
+            ClientEvent::Gap { lost, partial } => {
+                json!({"lab": "gap", "lost": lost, "partial": partial})
+            }
             ClientEvent::RequestCancelled { request_id } => {
                 json!({"lab": "request_cancelled", "request_id": request_id})
             }
@@ -133,7 +138,11 @@ impl Recorder {
 
     pub async fn wait_results(&self, count: usize, timeout: Duration) -> bool {
         self.wait_for(&format!("{count} results"), timeout, |frames| {
-            frames.iter().filter(|frame| frame["type"] == "result").count() >= count
+            frames
+                .iter()
+                .filter(|frame| frame["type"] == "result")
+                .count()
+                >= count
         })
         .await
     }
@@ -146,7 +155,11 @@ struct LabHandler {
 }
 
 impl ControlHandler for LabHandler {
-    fn handle(&self, call: IncomingCall, _cancel: CancelSignal) -> BoxFuture<Result<Value, String>> {
+    fn handle(
+        &self,
+        call: IncomingCall,
+        _cancel: CancelSignal,
+    ) -> BoxFuture<Result<Value, String>> {
         let recorder = self.recorder.clone();
         let policy = self.policy.clone();
         Box::pin(async move {
@@ -207,7 +220,11 @@ impl Lab {
             recorder: Recorder::default(),
             out: std::env::var_os("CLAUDE_LAB_OUT").map(PathBuf::from),
         };
-        eprintln!("lab {name}: claude {} at {}", lab.version, lab.bin.display());
+        eprintln!(
+            "lab {name}: claude {} at {}",
+            lab.version,
+            lab.bin.display()
+        );
         Some(lab)
     }
 
@@ -229,12 +246,18 @@ impl Lab {
         options.retain_supported(&self.help);
         options.model = Some("claude-sonnet-4-5".into());
         options.env = vec![
-            ("ANTHROPIC_BASE_URL".into(), self.api.base_url.clone().into()),
+            (
+                "ANTHROPIC_BASE_URL".into(),
+                self.api.base_url.clone().into(),
+            ),
             ("ANTHROPIC_API_KEY".into(), "sk-ant-lab-dummy".into()),
             ("CLAUDE_CONFIG_DIR".into(), self.config_dir.path().into()),
             ("DISABLE_AUTOUPDATER".into(), "1".into()),
             ("DISABLE_TELEMETRY".into(), "1".into()),
-            ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(), "1".into()),
+            (
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(),
+                "1".into(),
+            ),
             ("DISABLE_ERROR_REPORTING".into(), "1".into()),
         ];
         options
@@ -257,8 +280,7 @@ impl Lab {
             }),
             ..ClientConfig::default()
         };
-        let (client, mut events) =
-            ClaudeClient::spawn(options, config).expect("spawn claude");
+        let (client, mut events) = ClaudeClient::spawn(options, config).expect("spawn claude");
         let recorder = self.recorder.clone();
         tokio::spawn(async move {
             while let Some(event) = events.recv().await {
@@ -290,7 +312,11 @@ impl Lab {
         (client, response)
     }
 
-    pub async fn send(&self, client: &ClaudeClient, message: &inline_agent_driver_claude::UserMessage) {
+    pub async fn send(
+        &self,
+        client: &ClaudeClient,
+        message: &inline_agent_driver_claude::UserMessage,
+    ) {
         self.recorder.note("out", message.to_value());
         client.send(message).await.expect("send user message");
     }
@@ -313,7 +339,12 @@ impl Lab {
             .map(|entry| format!("{entry}\n"))
             .collect();
         std::fs::write(directory.join(format!("{}.jsonl", self.name)), frames).expect("frames");
-        let api: Vec<Value> = self.api.served().iter().map(|served| served.summary()).collect();
+        let api: Vec<Value> = self
+            .api
+            .served()
+            .iter()
+            .map(|served| served.summary())
+            .collect();
         std::fs::write(
             directory.join(format!("{}.api.json", self.name)),
             serde_json::to_string_pretty(&api).unwrap(),

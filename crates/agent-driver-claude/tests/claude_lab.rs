@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inline_agent_driver_claude::{
-    ClaudeClient, InitializeRequest, PermissionDecision, PermissionRequest, Priority,
-    SessionStart, UserMessage,
+    ClaudeClient, InitializeRequest, PermissionDecision, PermissionRequest, Priority, SessionStart,
+    UserMessage,
 };
 use serde_json::{Map, Value, json};
 use support::{Lab, Policy, allow_all};
@@ -29,7 +29,9 @@ async fn wait_tool_use(lab: &Lab) -> bool {
                 frame["type"] == "assistant"
                     && frame["message"]["content"]
                         .as_array()
-                        .is_some_and(|blocks| blocks.iter().any(|block| block["type"] == "tool_use"))
+                        .is_some_and(|blocks| {
+                            blocks.iter().any(|block| block["type"] == "tool_use")
+                        })
             })
         })
         .await
@@ -97,7 +99,12 @@ async fn lab_turn_text() {
     finish(&lab, &client).await;
     let result = &lab.recorder.results()[0];
     assert_eq!(result["subtype"], "success");
-    assert!(result["result"].as_str().unwrap_or_default().contains("FAKE-OK"));
+    assert!(
+        result["result"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("FAKE-OK")
+    );
 }
 
 fn approval_policy() -> Policy {
@@ -128,10 +135,22 @@ async fn lab_approvals() {
         .connect(&options, approval_policy(), InitializeRequest::default())
         .await;
     let prompts = [
-        ("a1", r#"@tool Bash {"command":"touch approved-1.txt","description":"lab"}"#),
-        ("a2", r#"@tool Bash {"command":"touch deny-me.txt","description":"lab"}"#),
-        ("a3", r#"@tool Bash {"command":"touch remember-1.txt","description":"lab"}"#),
-        ("a4", r#"@tool Bash {"command":"touch remember-1.txt","description":"lab"}"#),
+        (
+            "a1",
+            r#"@tool Bash {"command":"touch approved-1.txt","description":"lab"}"#,
+        ),
+        (
+            "a2",
+            r#"@tool Bash {"command":"touch deny-me.txt","description":"lab"}"#,
+        ),
+        (
+            "a3",
+            r#"@tool Bash {"command":"touch remember-1.txt","description":"lab"}"#,
+        ),
+        (
+            "a4",
+            r#"@tool Bash {"command":"touch remember-1.txt","description":"lab"}"#,
+        ),
     ];
     for (index, (uuid, prompt)) in prompts.iter().enumerate() {
         lab.send(&client, &UserMessage::text(*prompt).with_uuid(*uuid))
@@ -149,7 +168,12 @@ async fn lab_approvals() {
     finish(&lab, &client).await;
     let results = lab.recorder.results();
     assert!(lab.work_dir.path().join("approved-1.txt").exists());
-    assert!(results[1]["result"].as_str().unwrap().contains("lab says no"));
+    assert!(
+        results[1]["result"]
+            .as_str()
+            .unwrap()
+            .contains("lab says no")
+    );
     // The third ask applied the suggested rule; the fourth ran unasked.
     assert_eq!(asks.len(), 3, "asks: {asks:#?}");
 }
@@ -199,7 +223,10 @@ async fn lab_ask_user_question() {
     finish(&lab, &client).await;
     let result = &lab.recorder.results()[0];
     assert!(
-        result["result"].as_str().unwrap_or_default().contains("Blue"),
+        result["result"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Blue"),
         "{result:#}"
     );
 }
@@ -226,7 +253,9 @@ async fn steer(lab_name: &str, priority: Priority) {
     let expected = if priority == Priority::Next { 1 } else { 2 };
     lab.recorder.wait_results(expected, TURN).await;
     // Any further turn the CLI owes.
-    lab.recorder.wait_results(expected + 1, Duration::from_secs(5)).await;
+    lab.recorder
+        .wait_results(expected + 1, Duration::from_secs(5))
+        .await;
     lab.note(json!({"observed": {
         "lifecycle_t1": lab.recorder.lifecycle("t1"),
         "lifecycle_s1": lab.recorder.lifecycle("s1"),
@@ -264,7 +293,9 @@ async fn lab_passive_idle() {
     let client = start_bypass(&lab).await;
     lab.send(
         &client,
-        &UserMessage::text("PASSIVE-IDLE-1").with_uuid("p1").passive(),
+        &UserMessage::text("PASSIVE-IDLE-1")
+            .with_uuid("p1")
+            .passive(),
     )
     .await;
     lab.recorder.wait_results(1, Duration::from_secs(10)).await;
@@ -284,10 +315,16 @@ async fn lab_passive_idle() {
         "api": api_parts(&lab),
     }}));
     finish(&lab, &client).await;
-    assert_eq!(calls_after_passive, 0, "passive input must not call the model");
+    assert_eq!(
+        calls_after_passive, 0,
+        "passive input must not call the model"
+    );
     let last_call = lab.api.conversation_calls().last().cloned().unwrap();
     let seen = serde_json::to_string(&last_call.body["messages"]).unwrap();
-    assert!(seen.contains("PASSIVE-IDLE-1"), "passive text reached the next turn");
+    assert!(
+        seen.contains("PASSIVE-IDLE-1"),
+        "passive text reached the next turn"
+    );
 }
 
 #[tokio::test]
@@ -314,11 +351,11 @@ async fn lab_passive_during_turn() {
     lab.send(&client, &UserMessage::text("next turn").with_uuid("q1"))
         .await;
     assert!(lab.recorder.wait_results(results_before + 1, TURN).await);
-    let first_seen = lab
-        .api
-        .conversation_calls()
-        .iter()
-        .position(|call| serde_json::to_string(&call.body["messages"]).unwrap().contains("PASSIVE-MID-1"));
+    let first_seen = lab.api.conversation_calls().iter().position(|call| {
+        serde_json::to_string(&call.body["messages"])
+            .unwrap()
+            .contains("PASSIVE-MID-1")
+    });
     lab.note(json!({"observed": {
         "first_call_with_passive": first_seen,
         "calls": lab.api.conversation_calls().len(),
@@ -396,7 +433,11 @@ async fn agent_tool_name(lab: &Lab, client: &ClaudeClient) -> String {
         .as_array()
         .map(|tools| tools.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
-    let tool = if names.contains(&"Agent") { "Agent" } else { "Task" };
+    let tool = if names.contains(&"Agent") {
+        "Agent"
+    } else {
+        "Task"
+    };
     assert!(names.contains(&tool), "no subagent tool offered: {names:?}");
     tool.to_string()
 }
@@ -429,7 +470,9 @@ async fn subagent(lab_name: &str, background: bool) {
     if background {
         lab.recorder
             .wait_for("task_notification", TURN, |frames| {
-                frames.iter().any(|frame| frame["subtype"] == "task_notification")
+                frames
+                    .iter()
+                    .any(|frame| frame["subtype"] == "task_notification")
             })
             .await;
         // The parent continues on its own once the agent reports.
@@ -441,16 +484,18 @@ async fn subagent(lab_name: &str, background: bool) {
         .into_iter()
         .filter(|frame| {
             frame["type"] == "system"
-                && frame["subtype"]
-                    .as_str()
-                    .is_some_and(|subtype| subtype.starts_with("task_") || subtype == "background_tasks_changed")
+                && frame["subtype"].as_str().is_some_and(|subtype| {
+                    subtype.starts_with("task_") || subtype == "background_tasks_changed"
+                })
         })
         .collect();
     let sub_messages = lab
         .recorder
         .frames()
         .into_iter()
-        .filter(|frame| !frame["parent_tool_use_id"].is_null() && frame.get("parent_tool_use_id").is_some())
+        .filter(|frame| {
+            !frame["parent_tool_use_id"].is_null() && frame.get("parent_tool_use_id").is_some()
+        })
         .count();
     lab.note(json!({"observed": {
         "tool": tool,
@@ -460,7 +505,10 @@ async fn subagent(lab_name: &str, background: bool) {
         "api": api_parts(&lab),
     }}));
     finish(&lab, &client).await;
-    assert!(sub_messages > 0 || !tasks.is_empty(), "the subagent left no trace");
+    assert!(
+        sub_messages > 0 || !tasks.is_empty(),
+        "the subagent left no trace"
+    );
 }
 
 #[tokio::test]
@@ -489,17 +537,13 @@ async fn lab_brief_mode() {
     lab.send(&client, &UserMessage::text("hello brief").with_uuid("b0"))
         .await;
     assert!(lab.recorder.wait_results(1, TURN).await);
-    let definition = lab
-        .api
-        .conversation_calls()
-        .first()
-        .and_then(|call| {
-            call.body["tools"]
-                .as_array()?
-                .iter()
-                .find(|tool| tool["name"] == "SendUserMessage")
-                .cloned()
-        });
+    let definition = lab.api.conversation_calls().first().and_then(|call| {
+        call.body["tools"]
+            .as_array()?
+            .iter()
+            .find(|tool| tool["name"] == "SendUserMessage")
+            .cloned()
+    });
     lab.note(json!({"send_user_message_tool": definition}));
     let Some(definition) = definition else {
         finish(&lab, &client).await;
@@ -512,7 +556,10 @@ async fn lab_brief_mode() {
         let Some(name) = name.as_str() else { continue };
         let property = &schema["properties"][name];
         let value = match property["type"].as_str() {
-            Some("string") => match property["enum"].as_array().and_then(|values| values.first()) {
+            Some("string") => match property["enum"]
+                .as_array()
+                .and_then(|values| values.first())
+            {
                 Some(first) => first.clone(),
                 None => json!("BRIEF-UPDATE-1"),
             },
@@ -555,7 +602,9 @@ async fn resume_and_check(lab: &Lab, session_id: &str) -> (bool, usize) {
     let history = calls
         .get(calls_before..)
         .and_then(|new_calls| new_calls.last())
-        .map_or(0, |call| call.body["messages"].as_array().map_or(0, Vec::len));
+        .map_or(0, |call| {
+            call.body["messages"].as_array().map_or(0, Vec::len)
+        });
     let init_sessions: Vec<Value> = lab
         .recorder
         .of("system", Some("init"))

@@ -35,7 +35,7 @@ pub use client::{
     ControlHandler, EventReceiver, ExitReport, IncomingCall, RefuseAll,
 };
 pub use control::{
-    InitializeRequest, InitializeResponse, InterruptReceipt, IncomingRequest, PermissionDecision,
+    IncomingRequest, InitializeRequest, InitializeResponse, InterruptReceipt, PermissionDecision,
     PermissionRequest,
 };
 pub use input::{Origin, Priority, UserContent, UserMessage};

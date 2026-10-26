@@ -47,7 +47,10 @@ pub async fn list_live_sessions(
     let output = tokio::time::timeout(timeout, command.output())
         .await
         .map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::TimedOut, "claude agents --json timed out")
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "claude agents --json timed out",
+            )
         })??;
     if !output.status.success() {
         return Err(std::io::Error::other(format!(
@@ -71,8 +74,7 @@ pub fn holder<'a>(
     own_pids: &[u32],
 ) -> Option<&'a LiveSession> {
     sessions.iter().find(|session| {
-        session.session_id == session_id
-            && !session.pid.is_some_and(|pid| own_pids.contains(&pid))
+        session.session_id == session_id && !session.pid.is_some_and(|pid| own_pids.contains(&pid))
     })
 }
 
