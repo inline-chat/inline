@@ -867,6 +867,22 @@ impl InlineClient {
         }
     }
 
+    /// Invokes one realtime RPC by method and raw input, for agent runtime
+    /// calls that have no typed request.
+    pub async fn invoke_rpc(
+        &self,
+        method: proto::Method,
+        input: proto::rpc_call::Input,
+    ) -> Result<proto::rpc_result::Result, ClientRequestError> {
+        match self
+            .request(ClientRequest::InvokeRpc { method, input })
+            .await?
+        {
+            ClientResponse::RpcResult(result) => Ok(result),
+            other => unreachable!("invoke_rpc returned {other:?}"),
+        }
+    }
+
     /// Updates status through the runner.
     ///
     /// This is public so early hosts and tests can exercise the event/status
@@ -1351,6 +1367,11 @@ impl ClientRunner {
                 .get_agent_session(request)
                 .await
                 .map(ClientResponse::AgentSession),
+            ClientRequest::InvokeRpc { method, input } => self
+                .backend
+                .invoke_rpc(method, input)
+                .await
+                .map(ClientResponse::RpcResult),
             ClientRequest::SyncAgentSessionMessages(request) => self
                 .backend
                 .sync_agent_session_messages(request)
@@ -1642,6 +1663,10 @@ async fn handle_concurrent_request(
             .get_agent_session(request)
             .await
             .map(ClientResponse::AgentSession),
+        ClientRequest::InvokeRpc { method, input } => backend
+            .invoke_rpc(method, input)
+            .await
+            .map(ClientResponse::RpcResult),
         ClientRequest::SyncAgentSessionMessages(request) => backend
             .sync_agent_session_messages(request)
             .await
@@ -1780,6 +1805,10 @@ enum ClientRequest {
     ConnectAgentSession(proto::ConnectAgentSessionInput),
     GetAgentSession(proto::GetAgentSessionInput),
     SyncAgentSessionMessages(proto::SyncAgentSessionMessagesInput),
+    InvokeRpc {
+        method: proto::Method,
+        input: proto::rpc_call::Input,
+    },
 }
 
 impl ClientRequest {
@@ -1838,6 +1867,7 @@ impl ClientRequest {
             Self::ConnectAgentSession(_) => "connect_agent_session",
             Self::GetAgentSession(_) => "get_agent_session",
             Self::SyncAgentSessionMessages(_) => "sync_agent_session_messages",
+            Self::InvokeRpc { .. } => "invoke_rpc",
         }
     }
 }
@@ -1912,6 +1942,7 @@ enum ClientResponse {
     AgentSessionConnected(proto::ConnectAgentSessionResult),
     AgentSession(proto::GetAgentSessionResult),
     AgentSessionMessagesSynced(proto::SyncAgentSessionMessagesResult),
+    RpcResult(proto::rpc_result::Result),
 }
 
 #[cfg(test)]

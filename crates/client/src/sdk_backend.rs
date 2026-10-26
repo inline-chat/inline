@@ -42,17 +42,18 @@ use crate::{
     ClientEventDelivery, ClientStatusSnapshot, ClientStore, ConnectRequest, CreateDmRequest,
     CreateReplyThreadRequest, CreateThreadRequest, CreatedChat, DeleteChatRequest,
     DeleteMessageRequest, DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder,
-    DialogsPage, DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, HistoryPage,
-    HistoryRequest, InMemoryStore, InitialEventPolicy, InlineId, InvokeBotChatSettingsItemRequest,
-    MediaKind, MessageActionKind, MessageActions, MessageContent, MessageMutation, MessageRecord,
-    NotificationMode, OperationOutcome, PeerRef, PinMessageRequest, RandomId, ReactRequest,
-    ReadRequest, RealtimeConnectRequest, RealtimeConnector, RemoveChatParticipantRequest,
-    RequestBotChatSettingsRequest, SendInteractiveTextRequest, SendNotificationMode,
-    SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest, SpaceMemberRecord, SpaceMemberRole,
-    SpaceRecord, StoreError, StoredReaction, StoredReadState, StoredSession, StoredTransaction,
-    SyncConfig, SyncState, TransactionId, TransactionIdentity, TransactionState, TypingRequest,
-    UpdateChatInfoRequest, UpdateDialogFollowModeRequest, UpdateDialogNotificationsRequest,
-    UploadRequest, UploadThumbnail, UserRecord, UserSettingsRecord, VERSION,
+    DialogsPage, DialogsRequest, EditInteractiveMessageRequest, EditMessageRequest, FormFieldValue,
+    FormValue, HistoryPage, HistoryRequest, InMemoryStore, InitialEventPolicy, InlineId,
+    InvokeBotChatSettingsItemRequest, MediaKind, MessageActionKind, MessageActions, MessageContent,
+    MessageMutation, MessageRecord, NotificationMode, OperationOutcome, PeerRef, PinMessageRequest,
+    RandomId, ReactRequest, ReadRequest, RealtimeConnectRequest, RealtimeConnector,
+    RemoveChatParticipantRequest, RequestBotChatSettingsRequest, SendInteractiveTextRequest,
+    SendNotificationMode, SendTextOutcome, SendTextRequest, SetMarkedUnreadRequest,
+    SpaceMemberRecord, SpaceMemberRole, SpaceRecord, StoreError, StoredReaction, StoredReadState,
+    StoredSession, StoredTransaction, SyncConfig, SyncState, TransactionId, TransactionIdentity,
+    TransactionState, TypingRequest, UpdateChatInfoRequest, UpdateDialogFollowModeRequest,
+    UpdateDialogNotificationsRequest, UploadRequest, UploadThumbnail, UserRecord,
+    UserSettingsRecord, VERSION,
 };
 
 use self::bot_settings::{
@@ -478,8 +479,22 @@ impl SdkBackend {
     where
         R: RpcRequest,
     {
+        let result = self
+            .invoke_realtime(session, R::METHOD, request.into_rpc_input())
+            .await?;
+        R::response_from_rpc_result(result).map_err(realtime_error_to_backend)
+    }
+
+    /// Invokes one RPC by method, with the same session and authority handling
+    /// as typed calls.
+    async fn invoke_realtime(
+        &self,
+        session: &StoredSession,
+        method: proto::Method,
+        input: proto::rpc_call::Input,
+    ) -> BackendResult<proto::rpc_result::Result> {
         let realtime = self.ensure_realtime(session).await?;
-        match realtime.call(request).await {
+        match realtime.invoke(method, input).await {
             Ok(response) => Ok(response),
             Err(error) => {
                 if realtime_error_closes_session(&error) {
@@ -2539,6 +2554,18 @@ impl ClientBackend for SdkBackend {
         })
     }
 
+    fn invoke_rpc(
+        &self,
+        method: proto::Method,
+        input: proto::rpc_call::Input,
+    ) -> BoxFuture<'static, BackendResult<proto::rpc_result::Result>> {
+        let backend = self.clone();
+        Box::pin(async move {
+            let session = backend.require_session().await?;
+            backend.invoke_realtime(&session, method, input).await
+        })
+    }
+
     fn receive_events(&self) -> BoxFuture<'static, BackendResult<Vec<ClientEvent>>> {
         let backend = self.clone();
         Box::pin(async move {
@@ -3998,6 +4025,46 @@ impl SdkBackend {
                         .map_err(store_error_to_backend)?;
                     events.push(ClientEvent::UserSettingsChanged {});
                 }
+                Some(proto::update::Update::MessageActionInvoked(update))
+                    if update.form.is_some() =>
+                {
+                    let values = update
+                        .form
+                        .map(|form| form.values.into_iter().map(form_value_from_proto).collect())
+                        .unwrap_or_default();
+                    events.push(ClientEvent::MessageFormSubmitted {
+                        interaction_id: InlineId::new(update.interaction_id),
+                        chat_id: InlineId::new(update.chat_id),
+                        message_id: InlineId::new(update.message_id),
+                        actor_user_id: InlineId::new(update.actor_user_id),
+                        form_id: update.action_id,
+                        values,
+                    });
+                }
+                Some(proto::update::Update::AgentSessionControl(update)) => {
+                    events.push(ClientEvent::AgentSessionControlRequested {
+                        interaction_id: InlineId::new(update.interaction_id),
+                        chat_id: InlineId::new(update.chat_id),
+                        agent_session_id: InlineId::new(update.agent_session_id),
+                        actor_user_id: InlineId::new(update.actor_user_id),
+                        op: update.op,
+                    });
+                }
+                Some(proto::update::Update::AgentGrant(update)) => {
+                    events.push(ClientEvent::AgentAccessChanged {
+                        chat_id: None,
+                        user_id: Some(InlineId::new(update.user_id)),
+                    });
+                }
+                Some(proto::update::Update::AgentParticipation(update)) => {
+                    events.push(ClientEvent::AgentAccessChanged {
+                        chat_id: update
+                            .participation
+                            .and_then(|participation| participation.peer_id)
+                            .and_then(|peer| chat_id_from_peer(&peer)),
+                        user_id: None,
+                    });
+                }
                 Some(proto::update::Update::MessageActionInvoked(update)) => {
                     events.push(ClientEvent::MessageActionInvoked {
                         interaction_id: InlineId::new(update.interaction_id),
@@ -4109,6 +4176,27 @@ impl SdkBackend {
             }
         }
         Ok(events)
+    }
+}
+
+fn form_value_from_proto(value: proto::MessageFormValue) -> FormValue {
+    use proto::message_form_value::Value;
+    let field_value = if value.redacted {
+        None
+    } else {
+        value.value.map(|value| match value {
+            Value::Text(text) => FormFieldValue::Text(text),
+            Value::Selection(selection) => FormFieldValue::Selection {
+                option_ids: selection.option_ids,
+                other: selection.other_text,
+            },
+            Value::Toggle(toggle) => FormFieldValue::Toggle(toggle),
+            Value::Number(number) => FormFieldValue::Number(number.to_string()),
+        })
+    };
+    FormValue {
+        field_id: value.field_id,
+        value: field_value,
     }
 }
 

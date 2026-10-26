@@ -409,6 +409,21 @@ pub trait ClientBackend: fmt::Debug + Send + Sync + 'static {
         request: proto::ConnectAgentSessionInput,
     ) -> BoxFuture<'static, BackendResult<proto::ConnectAgentSessionResult>>;
 
+    /// Invokes one realtime RPC by method and raw input. Used for agent
+    /// runtime calls that have no typed request of their own.
+    fn invoke_rpc(
+        &self,
+        _method: proto::Method,
+        _input: proto::rpc_call::Input,
+    ) -> BoxFuture<'static, BackendResult<proto::rpc_result::Result>> {
+        Box::pin(async {
+            Err(BackendError::new(
+                ClientErrorCategory::Unsupported,
+                "raw RPC calls are unavailable in this backend",
+            ))
+        })
+    }
+
     /// Recovers the durable agent session connected to one conversation.
     fn get_agent_session(
         &self,

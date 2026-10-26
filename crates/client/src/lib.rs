@@ -514,6 +514,33 @@ pub enum BotInteractionEvent {
     },
 }
 
+/// One submitted form field.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormValue {
+    /// The field ID.
+    pub field_id: String,
+    /// The value; `None` when the server redacted a secret.
+    pub value: Option<FormFieldValue>,
+}
+
+/// A submitted form field's value.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FormFieldValue {
+    /// Text, including secret text.
+    Text(String),
+    /// Selected option IDs and the optional "Other" answer.
+    Selection {
+        /// Selected option IDs.
+        option_ids: Vec<String>,
+        /// The "Other" text.
+        other: Option<String>,
+    },
+    /// A toggle.
+    Toggle(bool),
+    /// A number, as the shortest decimal text that round-trips.
+    Number(String),
+}
+
 /// Committed client event for apps, bridges, agents, and hosts.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -589,6 +616,41 @@ pub enum ClientEvent {
         action_id: String,
         /// Opaque bot-defined payload.
         data: Vec<u8>,
+    },
+    /// A bot message form was submitted; answered like an action.
+    MessageFormSubmitted {
+        /// Server interaction ID.
+        interaction_id: InlineId,
+        /// Chat containing the form.
+        chat_id: InlineId,
+        /// Message containing the form.
+        message_id: InlineId,
+        /// User who submitted the form.
+        actor_user_id: InlineId,
+        /// The form ID.
+        form_id: String,
+        /// Submitted values; secret values are present only in the live delivery.
+        values: Vec<FormValue>,
+    },
+    /// Someone used a work bar control on one of this bot's agent sessions.
+    AgentSessionControlRequested {
+        /// Server interaction ID.
+        interaction_id: InlineId,
+        /// Chat the control was used in.
+        chat_id: InlineId,
+        /// The controlled session.
+        agent_session_id: InlineId,
+        /// User who used the control.
+        actor_user_id: InlineId,
+        /// `AgentSessionControl` value: stop, pause or resume.
+        op: i32,
+    },
+    /// Agent grants or participation changed; reread them before acting.
+    AgentAccessChanged {
+        /// Chat whose participation changed, when it was a participation change.
+        chat_id: Option<InlineId>,
+        /// Grant subject, when it was a grant change.
+        user_id: Option<InlineId>,
     },
     /// A previously invoked message action received a UI response.
     MessageActionAnswered {
@@ -702,6 +764,9 @@ impl ClientEvent {
             | Self::SpaceMemberChanged { .. }
             | Self::UserSettingsChanged { .. }
             | Self::MessageActionInvoked { .. }
+            | Self::MessageFormSubmitted { .. }
+            | Self::AgentSessionControlRequested { .. }
+            | Self::AgentAccessChanged { .. }
             | Self::MessageActionAnswered { .. }
             | Self::MessageUpserted { .. }
             | Self::MessageStored { .. }

@@ -418,6 +418,10 @@ pub(crate) fn rpc_method_is_read_only(method: proto::Method) -> bool {
             | proto::Method::ListBotAgents
             | proto::Method::GetConnectorConfig
             | proto::Method::GetUploadState
+            | proto::Method::GetAgentRuntime
+            | proto::Method::GetAgentSessionStates
+            | proto::Method::ListAgentGrants
+            | proto::Method::GetAgentParticipations
     )
 }
 
@@ -2019,6 +2023,97 @@ rpc_requests!(
         GetBotConfigurationCatalog,
         GetBotConfigurationCatalogResult,
         GetBotConfigurationCatalog
+    ),
+    (
+        ReportAgentRuntimeInput,
+        ReportAgentRuntime,
+        ReportAgentRuntime,
+        ReportAgentRuntimeResult,
+        ReportAgentRuntime
+    ),
+    (
+        GetAgentRuntimeInput,
+        GetAgentRuntime,
+        GetAgentRuntime,
+        GetAgentRuntimeResult,
+        GetAgentRuntime
+    ),
+    (
+        UpdateAgentSessionStateInput,
+        UpdateAgentSessionState,
+        UpdateAgentSessionState,
+        UpdateAgentSessionStateResult,
+        UpdateAgentSessionState
+    ),
+    (
+        GetAgentSessionStatesInput,
+        GetAgentSessionStates,
+        GetAgentSessionStates,
+        GetAgentSessionStatesResult,
+        GetAgentSessionStates
+    ),
+    (
+        ListAgentGrantsInput,
+        ListAgentGrants,
+        ListAgentGrants,
+        ListAgentGrantsResult,
+        ListAgentGrants
+    ),
+    (
+        SetAgentGrantInput,
+        SetAgentGrant,
+        SetAgentGrant,
+        SetAgentGrantResult,
+        SetAgentGrant
+    ),
+    (
+        DeleteAgentGrantInput,
+        DeleteAgentGrant,
+        DeleteAgentGrant,
+        DeleteAgentGrantResult,
+        DeleteAgentGrant
+    ),
+    (
+        ImportAgentGrantsInput,
+        ImportAgentGrants,
+        ImportAgentGrants,
+        ImportAgentGrantsResult,
+        ImportAgentGrants
+    ),
+    (
+        GetAgentParticipationsInput,
+        GetAgentParticipations,
+        GetAgentParticipations,
+        GetAgentParticipationsResult,
+        GetAgentParticipations
+    ),
+    (
+        SetAgentParticipationInput,
+        SetAgentParticipation,
+        SetAgentParticipation,
+        SetAgentParticipationResult,
+        SetAgentParticipation
+    ),
+    (
+        UpdateAgentSettingsInput,
+        UpdateAgentSettings,
+        UpdateAgentSettings,
+        UpdateAgentSettingsResult,
+        UpdateAgentSettings
+    ),
+    (
+        ControlAgentSessionInput,
+        ControlAgentSession,
+        ControlAgentSession,
+        ControlAgentSessionResult,
+        ControlAgentSession
+    ),
+    (
+        MoveAgentSessionInput,
+        MoveAgentSession,
+        MoveAgentSession,
+        MoveAgentSessionResult,
+        MoveAgentSession
     ),
 );
 
