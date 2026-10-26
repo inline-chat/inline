@@ -3,6 +3,7 @@ members = [
   "cli",
   "crates/agent-bridge",
   "crates/agent-driver-acp",
+  "crates/agent-driver-claude",
   "crates/agent-driver-codex",
   "crates/client",
   "crates/protocol",
