@@ -117,7 +117,7 @@ struct HarnessState {
     health: RuntimeHealth,
     manifest: Option<CapabilityManifest>,
     catalogs: HashMap<PathBuf, CachedCatalog>,
-    permission_modes: Vec<String>,
+    help: Option<String>,
     sessions: HashMap<String, Weak<SessionInner>>,
 }
 
@@ -137,7 +137,7 @@ impl ClaudeHarness {
                 health: RuntimeHealth::Unknown,
                 manifest: None,
                 catalogs: HashMap::new(),
-                permission_modes: Vec::new(),
+                help: None,
                 sessions: HashMap::new(),
             }),
         }
@@ -172,7 +172,7 @@ impl ClaudeHarness {
         {
             // A new CLI: catalogs and the manifest are re-derived.
             state.catalogs.clear();
-            state.permission_modes.clear();
+            state.help = None;
         }
         state.version = Some(version);
         state.version_text = Some(text);
@@ -190,20 +190,33 @@ impl ClaudeHarness {
         Ok(version)
     }
 
-    fn permission_modes(&self) -> Vec<String> {
-        if let Some(modes) = Some(self.state().permission_modes.clone()).filter(|modes| !modes.is_empty()) {
-            return modes;
+    /// `claude --help`, cached per CLI version: flags and permission modes.
+    fn help(&self) -> String {
+        if let Some(help) = self.state().help.clone() {
+            return help;
         }
-        let output = std::process::Command::new(&self.config.executable)
+        let help = std::process::Command::new(&self.config.executable)
             .arg("--help")
             .stdin(std::process::Stdio::null())
-            .output();
-        let modes = output
-            .ok()
-            .map(|output| parse_permission_modes(&String::from_utf8_lossy(&output.stdout)))
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
             .unwrap_or_default();
-        self.state().permission_modes = modes.clone();
-        modes
+        self.state().help = Some(help.clone());
+        help
+    }
+
+    fn permission_modes(&self) -> Vec<String> {
+        parse_permission_modes(&self.help())
+    }
+
+    /// Launch options with the flags this CLI lacks dropped.
+    fn launch(&self, cwd: PathBuf, session: SessionStart) -> LaunchOptions {
+        let mut options = self.config.launch(cwd, session);
+        let dropped = options.retain_supported(&self.help());
+        if !dropped.is_empty() {
+            log::info!("claude does not support {}; launching without", dropped.join(", "));
+        }
+        options
     }
 
     async fn live_sessions(&self, cwd: &std::path::Path) -> Vec<LiveSession> {
@@ -355,7 +368,7 @@ impl HarnessDriver for ClaudeHarness {
                 .await
                 .map_err(|reason| DriverError::Unavailable(format!("{reason:?}")))?;
             // A short-lived process answers initialize with the folder's catalog.
-            let options = self.config.launch(folder.clone(), SessionStart::Fresh);
+            let options = self.launch(folder.clone(), SessionStart::Fresh);
             let (client, _events, init) = ClaudeClient::connect(
                 &options,
                 ClientConfig::default(),
@@ -466,7 +479,16 @@ impl HarnessDriver for ClaudeHarness {
                     None,
                 ),
             };
-            let mut options = self.config.launch(spec.folder.clone(), start);
+            if let SessionStart::Fork {
+                at_message: Some(_), ..
+            } = &start
+                && !self.help().contains("--resume-session-at")
+            {
+                return Err(OpenError::Unavailable(Availability::unavailable(
+                    "forking at a message needs a newer Claude Code (--resume-session-at)",
+                )));
+            }
+            let mut options = self.launch(spec.folder.clone(), start);
             if let Some(model) = &spec.settings.model {
                 options.model = Some(model.clone());
             }
@@ -476,6 +498,7 @@ impl HarnessDriver for ClaudeHarness {
             if let Some(mode) = &spec.settings.permission_mode {
                 options.permission_mode = mode.clone();
             }
+            options.retain_supported(&self.help());
             let session_id = options
                 .target_session_id()
                 .map(str::to_string)
@@ -758,8 +781,10 @@ impl ClaudeSession {
 
     async fn write(&self, message: &UserMessage) -> Result<(), SendError> {
         self.inner.client.send(message).await.map_err(|error| match error {
-            // A broken pipe mid-write: the CLI may or may not have read it.
-            ControlError::Closed(reason) => SendError::Unknown(reason),
+            // Nothing was written.
+            ControlError::Closed(reason) => SendError::Driver(DriverError::ProcessExited(reason)),
+            // A failed or stalled write: the CLI may or may not have read it.
+            ControlError::Unknown(reason) => SendError::Unknown(reason),
             other => SendError::Driver(DriverError::Protocol(other.to_string())),
         })
     }
@@ -803,6 +828,26 @@ fn pump_event(inner: &SessionInner, event: ClientEvent) {
             if parked {
                 let events = inner.mapper().cancelled(&request_id);
                 inner.emit_all(events);
+            }
+        }
+        ClientEvent::Gap { lost, partial } => {
+            inner.emit(Event::Notice(inline_agent_bridge::harness::Notice {
+                level: if lost > 0 {
+                    inline_agent_bridge::harness::NoticeLevel::Warning
+                } else {
+                    inline_agent_bridge::harness::NoticeLevel::Info
+                },
+                code: "native_gap".into(),
+                message: Some(format!(
+                    "{lost} Claude frames were dropped while the bridge fell behind; the session history is the source of truth"
+                )),
+                native: json!({"lost": lost, "partial": partial}),
+            }));
+            if lost > 0 {
+                // Turn and interaction state may be stale until the next boundary.
+                inner.emit(Event::State {
+                    state: RunState::Unknown,
+                });
             }
         }
         ClientEvent::Malformed { line, error } => {
@@ -875,9 +920,13 @@ impl Session for ClaudeSession {
                 _ => {}
             }
             let message = user_message(&self.inner.session_id, &input);
-            self.inner
-                .mapper()
-                .sent(&input.id, matches!(input.delivery, Delivery::Turn));
+            match input.delivery {
+                Delivery::Passive => self.inner.mapper().sent_passive(&input.id),
+                _ => self
+                    .inner
+                    .mapper()
+                    .sent(&input.id, matches!(input.delivery, Delivery::Turn)),
+            }
             self.write(&message).await?;
             let disposition = match &input.delivery {
                 Delivery::Turn => InputDisposition::Started {
@@ -1062,6 +1111,7 @@ fn op_error(error: ControlError) -> OpError {
         ControlError::Refused { message, .. } => OpError::Rejected(message),
         ControlError::Timeout { subtype } => OpError::Unknown(format!("{subtype} timed out")),
         ControlError::Closed(reason) => OpError::Driver(DriverError::ProcessExited(reason)),
+        ControlError::Unknown(reason) => OpError::Unknown(reason),
         ControlError::Malformed { message, .. } => OpError::Driver(DriverError::Protocol(message)),
     }
 }

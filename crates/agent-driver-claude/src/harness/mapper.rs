@@ -80,6 +80,8 @@ pub struct ClaudeMapper {
     awaiting_turn: VecDeque<InputId>,
     /// Inputs this mapper saw sent (uuids Inline owns).
     sent: HashSet<String>,
+    /// Passive inputs: their lifecycle never opens a turn.
+    passive: HashSet<String>,
     facts: HashSet<(String, &'static str)>,
     effective: EffectiveSettings,
     tools: HashMap<String, ToolItem>,
@@ -159,9 +161,16 @@ impl ClaudeMapper {
     /// Records an input written to stdin.
     pub fn sent(&mut self, input: &InputId, starts_turn: bool) {
         self.sent.insert(input.as_str().to_string());
+        self.passive.remove(input.as_str());
         if starts_turn {
             self.awaiting_turn.push_back(input.clone());
         }
+    }
+
+    /// Records passive context written to stdin (`shouldQuery: false`).
+    pub fn sent_passive(&mut self, input: &InputId) {
+        self.sent.insert(input.as_str().to_string());
+        self.passive.insert(input.as_str().to_string());
     }
 
     /// One stdout message.
@@ -294,6 +303,7 @@ impl ClaudeMapper {
         match state {
             "started" => {
                 if self.turn.is_none()
+                    && !self.passive.contains(uuid)
                     && let Ok(turn) = TurnId::new(uuid)
                 {
                     return self.open_turn(turn, input.into_iter().collect());
@@ -303,6 +313,17 @@ impl ClaudeMapper {
                 {
                     self.turn_inputs.push(input);
                 }
+                Vec::new()
+            }
+            // An input the running turn already took is reported cancelled
+            // when an interrupt or a steer-now aborts that turn; it was
+            // consumed, not dropped (labs, 2.1.292 and 2.1.310).
+            "cancelled"
+                if input.as_ref().is_some_and(|input| {
+                    self.turn_inputs.contains(input)
+                        || self.facts.contains(&(input.as_str().to_string(), "consumed"))
+                }) =>
+            {
                 Vec::new()
             }
             "cancelled" => input.map_or_else(Vec::new, |input| self.fact(input, InputFact::Cancelled)),
@@ -718,6 +739,15 @@ impl ClaudeMapper {
                 duration_ms: result.duration_ms,
             },
         });
+        if outcome == TurnOutcome::AuthenticationRequired {
+            events.push(Event::State {
+                state: RunState::Waiting {
+                    on: WaitingOn::Setup {
+                        reason: inline_agent_bridge::harness::SetupReason::SignIn,
+                    },
+                },
+            });
+        }
         if let Some(reason) = result.startup_failure_reason.as_deref() {
             events.push(Event::State {
                 state: RunState::Waiting {
@@ -1200,12 +1230,21 @@ fn turn_outcome(result: &ResultMessage) -> TurnOutcome {
         _ if result.stop_reason.as_deref() == Some("max_tokens") && !result.is_error => {
             TurnOutcome::TokenLimit
         }
-        _ if result.is_error && result.error_text().contains("/login") => {
-            TurnOutcome::AuthenticationRequired
-        }
+        _ if result.is_error && needs_sign_in(result) => TurnOutcome::AuthenticationRequired,
         _ if result.is_error => TurnOutcome::Failed,
         _ => TurnOutcome::Completed,
     }
+}
+
+/// Claude's own wording for an expired or missing sign-in.
+fn needs_sign_in(result: &ResultMessage) -> bool {
+    let text = result.error_text().to_ascii_lowercase();
+    result.api_error_status.as_ref().and_then(Value::as_u64) == Some(401)
+        || text.contains("/login")
+        || text.contains("authentication_error")
+        || text.contains("invalid api key")
+        || text.contains("oauth token has expired")
+        || text.contains("not logged in")
 }
 
 fn child_kind(task: &TaskEvent, raw: &Value) -> ChildKind {
@@ -1429,6 +1468,39 @@ mod tests {
         };
         assert_eq!(id(&first), "m1:0");
         assert_eq!(id(&second), "m1:1");
+    }
+
+    #[test]
+    fn an_expired_sign_in_is_a_setup_state() {
+        let mut mapper = ClaudeMapper::new(None);
+        let events = mapper.message(&message(json!({"type": "result", "subtype": "success",
+            "is_error": true, "result": "Invalid API key · Please run /login", "user_message_uuids": ["0d6a7c1e-1111-4a00-8000-000000000001"]})));
+        assert!(events.iter().any(|event| matches!(event, Event::State { state: RunState::Waiting { on: WaitingOn::Setup { .. } } })));
+        assert!(events.iter().any(|event| matches!(event, Event::Turn { phase: TurnPhase::Completed { outcome: TurnOutcome::AuthenticationRequired, .. }, .. })));
+    }
+
+    #[test]
+    fn an_aborted_turns_own_input_is_consumed_not_cancelled() {
+        let mut mapper = ClaudeMapper::new(None);
+        let t1 = "0d6a7c1e-1111-4a00-8000-000000000001";
+        mapper.sent(&InputId::new(t1).unwrap(), true);
+        mapper.message(&message(json!({"type": "command_lifecycle", "command_uuid": t1, "state": "started"})));
+        let events = mapper.message(&message(json!({"type": "command_lifecycle", "command_uuid": t1, "state": "cancelled"})));
+        assert!(events.is_empty(), "{events:?}");
+        let events = mapper.message(&message(json!({"type": "result", "subtype": "success", "is_error": false,
+            "terminal_reason": "aborted_tools", "user_message_uuids": [t1]})));
+        assert!(matches!(events.last(), Some(Event::Turn { phase: TurnPhase::Completed { outcome: TurnOutcome::Interrupted, .. }, .. })));
+    }
+
+    #[test]
+    fn passive_input_lifecycle_opens_no_turn() {
+        let mut mapper = ClaudeMapper::new(None);
+        let p1 = "0d6a7c1e-1111-4a00-8000-000000000007";
+        mapper.sent_passive(&InputId::new(p1).unwrap());
+        let mut events = mapper.message(&message(json!({"type": "command_lifecycle", "command_uuid": p1, "state": "started"})));
+        events.extend(mapper.message(&message(json!({"type": "result", "subtype": "success", "is_error": false,
+            "num_turns": 0, "user_message_uuids": [p1]}))));
+        assert!(events.iter().all(|event| !matches!(event, Event::Turn { .. })), "{events:?}");
     }
 
     #[test]

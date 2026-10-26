@@ -158,6 +158,41 @@ impl LaunchOptions {
         }
     }
 
+    /// Drops optional flags the installed CLI does not list in `--help`
+    /// (older releases reject unknown options) and returns their names.
+    pub fn retain_supported(&mut self, help: &str) -> Vec<&'static str> {
+        let mut dropped = Vec::new();
+        let has = |flag: &str| help.contains(flag);
+        if self.effort.is_some() && !has("--effort") {
+            self.effort = None;
+            dropped.push("--effort");
+        }
+        if self.brief && !has("--brief") {
+            self.brief = false;
+            dropped.push("--brief");
+        }
+        if self.bare && !has("--bare") {
+            self.bare = false;
+            dropped.push("--bare");
+        }
+        if self.name.is_some() && !has("--name") {
+            self.name = None;
+            dropped.push("--name");
+        }
+        if self.fallback_model.is_some() && !has("--fallback-model") {
+            self.fallback_model = None;
+            dropped.push("--fallback-model");
+        }
+        if let SessionStart::Fork { at_message, .. } = &mut self.session
+            && at_message.is_some()
+            && !has("--resume-session-at")
+        {
+            *at_message = None;
+            dropped.push("--resume-session-at");
+        }
+        dropped
+    }
+
     /// The CLI arguments, without the executable.
     pub fn cli_arguments(&self) -> Vec<String> {
         let mut args: Vec<String> = [

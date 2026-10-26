@@ -5,8 +5,18 @@
 //! [`ControlHandler`] (and in-process MCP servers), honours
 //! `control_cancel_request`, and forwards every other frame, unchanged, as a
 //! [`ClientEvent`].
+//!
+//! Lifetime: a supervisor task alone owns the child. When the last public
+//! handle drops (including a `connect` cancelled mid-initialize), stdin
+//! closes and the supervisor escalates to SIGTERM and SIGKILL after the
+//! grace period, then reaps the process. The reader holds no process handle.
+//!
+//! Events go through a bounded queue. A consumer that stops reading never
+//! stalls control responses: frames overflow into a bounded backlog, partial
+//! message chunks are dropped first, and anything else lost is reported as a
+//! [`ClientEvent::Gap`] the consumer repairs from the session store.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::process::ExitStatus;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,7 +24,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::process::Child;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 
 use crate::control::{
     IncomingRequest, InitializeRequest, InitializeResponse, InterruptReceipt, request,
@@ -106,6 +116,12 @@ pub struct ClientConfig {
     pub initialize_timeout: Duration,
     /// After stdin closes, how long the CLI gets to exit before each signal.
     pub shutdown_grace: Duration,
+    /// Events the consumer may leave unread before frames overflow.
+    pub event_capacity: usize,
+    /// Overflowed frames kept before they are dropped behind a gap.
+    pub event_backlog: usize,
+    /// A stdin write that takes longer has an unknown outcome.
+    pub write_timeout: Duration,
 }
 
 impl Default for ClientConfig {
@@ -116,6 +132,9 @@ impl Default for ClientConfig {
             request_timeout: Duration::from_secs(60),
             initialize_timeout: Duration::from_secs(60),
             shutdown_grace: Duration::from_secs(5),
+            event_capacity: 1024,
+            event_backlog: 16 * 1024,
+            write_timeout: Duration::from_secs(30),
         }
     }
 }
@@ -128,6 +147,10 @@ pub enum ClientEvent {
     Malformed { line: String, error: String },
     /// The CLI withdrew a request the handler was answering.
     RequestCancelled { request_id: String },
+    /// The consumer fell behind: `lost` frames were dropped (repair from the
+    /// session store) and `partial` streaming chunks were skipped (their
+    /// complete messages still arrive).
+    Gap { lost: u64, partial: u64 },
     /// The process is gone; nothing follows.
     Exited(ExitReport),
 }
@@ -182,8 +205,14 @@ pub enum ControlError {
     Timeout { subtype: String },
     #[error("Claude Code refused {subtype}: {message}")]
     Refused { subtype: String, message: String },
+    /// Nothing was written: the request never reached the CLI.
     #[error("Claude Code is not running: {0}")]
     Closed(String),
+    /// The request may or may not have reached the CLI (a failed or stalled
+    /// write, or the process ended before answering). Never retried
+    /// automatically.
+    #[error("delivery to Claude Code is unknown: {0}")]
+    Unknown(String),
     #[error("control response for {subtype} was malformed: {message}")]
     Malformed { subtype: String, message: String },
 }
@@ -220,32 +249,86 @@ enum Settled {
 
 type Pending = oneshot::Sender<Settled>;
 
+/// State shared by the public handles, the reader and request handlers.
+/// It holds no process handle: only the supervisor owns the child.
 struct Inner {
     writer: tokio::sync::Mutex<Option<BoxWriter>>,
     pending: Mutex<HashMap<String, Pending>>,
     inflight: Mutex<HashMap<String, watch::Sender<bool>>>,
     counter: AtomicU64,
     closed: AtomicBool,
-    child: tokio::sync::Mutex<Option<Child>>,
     pid: Option<u32>,
     stderr: StderrTail,
     session_state: watch::Sender<Option<String>>,
     exit: watch::Sender<Option<ExitReport>>,
-    events: mpsc::UnboundedSender<ClientEvent>,
+    /// `Some(status)` once the supervisor reaped the child (`Some(None)`
+    /// when there was no child or its status could not be read).
+    reaped: watch::Sender<Option<Option<ExitStatus>>>,
+    /// Asks the supervisor to shut the process down.
+    shutdown: Notify,
     config: ClientConfig,
     servers: HashMap<String, Arc<dyn SdkMcpServer>>,
 }
 
-/// A handle to one running CLI process. Cheap to clone.
-#[derive(Clone)]
-pub struct ClaudeClient {
+impl Inner {
+    async fn write_json(&self, value: &Value) -> Result<(), ControlError> {
+        let line = value.to_string();
+        let mut writer = self.writer.lock().await;
+        let Some(stream) = writer.as_mut() else {
+            return Err(ControlError::Closed("stdin is closed".into()));
+        };
+        match tokio::time::timeout(self.config.write_timeout, transport::write_line(stream, &line))
+            .await
+        {
+            Ok(Ok(())) => Ok(()),
+            // Part of the line may have reached the CLI.
+            Ok(Err(error)) => {
+                *writer = None;
+                Err(ControlError::Unknown(error.to_string()))
+            }
+            Err(_) => {
+                *writer = None;
+                Err(ControlError::Unknown("stdin write stalled".into()))
+            }
+        }
+    }
+
+    fn begin_shutdown(&self) {
+        self.closed.store(true, Ordering::Release);
+        self.shutdown.notify_one();
+    }
+}
+
+/// Dropped with the last public handle: closes stdin and has the supervisor
+/// end the process.
+struct Owner {
     inner: Arc<Inner>,
 }
 
+impl Drop for Owner {
+    fn drop(&mut self) {
+        if let Ok(mut writer) = self.inner.writer.try_lock() {
+            writer.take();
+        }
+        self.inner.begin_shutdown();
+    }
+}
+
+/// A handle to one running CLI process. Cheap to clone; the process lives
+/// as long as any clone does.
+#[derive(Clone)]
+pub struct ClaudeClient {
+    owner: Arc<Owner>,
+}
+
 /// Events from one client, in order.
-pub type EventReceiver = mpsc::UnboundedReceiver<ClientEvent>;
+pub type EventReceiver = mpsc::Receiver<ClientEvent>;
 
 impl ClaudeClient {
+    fn inner(&self) -> &Arc<Inner> {
+        &self.owner.inner
+    }
+
     /// Spawns the CLI and starts reading. Call [`Self::initialize`] next.
     pub fn spawn(
         options: &LaunchOptions,
@@ -264,7 +347,8 @@ impl ClaudeClient {
     }
 
     /// Spawns, initializes and returns the catalogs. A startup failure the
-    /// CLI reports is carried in the error.
+    /// CLI reports is carried in the error. Cancelling this future ends the
+    /// process.
     pub async fn connect(
         options: &LaunchOptions,
         config: ClientConfig,
@@ -274,8 +358,7 @@ impl ClaudeClient {
         match client.initialize(initialize).await {
             Ok(response) => Ok((client, events, response)),
             Err(error) => {
-                let exit = client.wait_exit(Duration::from_secs(2)).await.map(Box::new);
-                client.close().await;
+                let exit = client.close().await.map(Box::new);
                 Err(ConnectError::Initialize { error, exit })
             }
         }
@@ -298,7 +381,7 @@ impl ClaudeClient {
         stderr: StderrTail,
         config: ClientConfig,
     ) -> (Self, EventReceiver) {
-        let (events, receiver) = mpsc::unbounded_channel();
+        let (events, receiver) = mpsc::channel(config.event_capacity.max(1));
         let servers = config.mcp_servers.iter().cloned().collect();
         let inner = Arc::new(Inner {
             writer: tokio::sync::Mutex::new(Some(writer)),
@@ -306,78 +389,86 @@ impl ClaudeClient {
             inflight: Mutex::default(),
             counter: AtomicU64::new(0),
             closed: AtomicBool::new(false),
-            child: tokio::sync::Mutex::new(child),
             pid,
             stderr,
             session_state: watch::channel(None).0,
             exit: watch::channel(None).0,
-            events,
+            reaped: watch::channel(None).0,
+            shutdown: Notify::new(),
             config,
             servers,
         });
-        tokio::spawn(read_loop(inner.clone(), reader));
-        (Self { inner }, receiver)
+        match child {
+            Some(child) => {
+                tokio::spawn(supervise(inner.clone(), child));
+            }
+            None => {
+                inner.reaped.send_replace(Some(None));
+            }
+        }
+        let sink = EventSink::new(events, &inner.config);
+        tokio::spawn(read_loop(inner.clone(), reader, sink));
+        (
+            Self {
+                owner: Arc::new(Owner { inner }),
+            },
+            receiver,
+        )
     }
 
     pub fn pid(&self) -> Option<u32> {
-        self.inner.pid
+        self.inner().pid
     }
 
     /// The latest `session_state_changed` state: `idle`, `running` or
     /// `requires_action`; `None` until the CLI reports one.
     pub fn session_state(&self) -> watch::Receiver<Option<String>> {
-        self.inner.session_state.subscribe()
+        self.inner().session_state.subscribe()
     }
 
     /// `Some` once the process is gone.
     pub fn exit(&self) -> watch::Receiver<Option<ExitReport>> {
-        self.inner.exit.subscribe()
+        self.inner().exit.subscribe()
     }
 
     pub fn is_closed(&self) -> bool {
-        self.inner.closed.load(Ordering::Acquire) || self.inner.exit.borrow().is_some()
+        self.inner().closed.load(Ordering::Acquire) || self.inner().exit.borrow().is_some()
     }
 
     pub fn stderr_tail(&self) -> String {
-        self.inner.stderr.text()
+        self.inner().stderr.text()
     }
 
-    /// Writes one user message.
+    /// Writes one user message. `Closed` means it was not written;
+    /// `Unknown` means it may have reached the CLI.
     pub async fn send(&self, message: &UserMessage) -> Result<(), ControlError> {
         self.write_json(&message.to_value()).await
     }
 
     /// Writes any stdin frame verbatim.
     pub async fn write_json(&self, value: &Value) -> Result<(), ControlError> {
-        let line = value.to_string();
-        let mut writer = self.inner.writer.lock().await;
-        let Some(stream) = writer.as_mut() else {
-            return Err(ControlError::Closed("stdin is closed".into()));
-        };
-        if let Err(error) = transport::write_line(stream, &line).await {
-            *writer = None;
-            return Err(ControlError::Closed(error.to_string()));
-        }
-        Ok(())
+        self.inner().write_json(value).await
     }
 
-    /// Sends a control request and waits for its response payload.
+    /// Sends a control request and waits for its response payload. Once the
+    /// request is written, losing the process makes the outcome unknown.
     pub async fn request(&self, body: Value, timeout: Duration) -> Result<Value, ControlError> {
+        let inner = self.inner();
         let subtype = body
             .get("subtype")
             .and_then(Value::as_str)
             .unwrap_or("unknown")
             .to_string();
-        if let Some(exit) = self.inner.exit.borrow().as_ref() {
+        if let Some(exit) = inner.exit.borrow().as_ref() {
             return Err(ControlError::Closed(exit.describe()));
         }
-        let counter = self.inner.counter.fetch_add(1, Ordering::Relaxed) + 1;
+        let counter = inner.counter.fetch_add(1, Ordering::Relaxed) + 1;
         let request_id = format!("req_{counter}_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
         let (sender, receiver) = oneshot::channel();
-        lock(&self.inner.pending).insert(request_id.clone(), sender);
+        lock(&inner.pending).insert(request_id.clone(), sender);
         let envelope = json!({"type": "control_request", "request_id": request_id, "request": body});
-        if let Err(error) = self.write_json(&envelope).await {
-            lock(&self.inner.pending).remove(&request_id);
+        if let Err(error) = inner.write_json(&envelope).await {
+            lock(&inner.pending).remove(&request_id);
             return Err(error);
         }
         match tokio::time::timeout(timeout, receiver).await {
@@ -385,17 +476,11 @@ impl ClaudeClient {
             Ok(Ok(Settled::Answered(Err(message)))) => {
                 Err(ControlError::Refused { subtype, message })
             }
-            Ok(Ok(Settled::Closed(reason))) => Err(ControlError::Closed(reason)),
-            Ok(Err(_)) => Err(ControlError::Closed(
-                self.inner
-                    .exit
-                    .borrow()
-                    .as_ref()
-                    .map_or_else(|| "the reader stopped".to_string(), ExitReport::describe),
-            )),
+            Ok(Ok(Settled::Closed(reason))) => Err(ControlError::Unknown(reason)),
+            Ok(Err(_)) => Err(ControlError::Unknown("the reader stopped".into())),
             Err(_) => {
-                lock(&self.inner.pending).remove(&request_id);
-                let _ = self
+                lock(&inner.pending).remove(&request_id);
+                let _ = inner
                     .write_json(&json!({"type": "control_cancel_request", "request_id": request_id}))
                     .await;
                 Err(ControlError::Timeout { subtype })
@@ -404,7 +489,7 @@ impl ClaudeClient {
     }
 
     fn timeout(&self) -> Duration {
-        self.inner.config.request_timeout
+        self.inner().config.request_timeout
     }
 
     pub async fn initialize(
@@ -412,13 +497,13 @@ impl ClaudeClient {
         initialize: &InitializeRequest,
     ) -> Result<InitializeResponse, ControlError> {
         let mut body = initialize.to_value();
-        if !self.inner.servers.is_empty() {
-            let mut names: Vec<&String> = self.inner.servers.keys().collect();
+        if !self.inner().servers.is_empty() {
+            let mut names: Vec<&String> = self.inner().servers.keys().collect();
             names.sort();
             body["sdkMcpServers"] = json!(names);
         }
         let response = self
-            .request(body, self.inner.config.initialize_timeout)
+            .request(body, self.inner().config.initialize_timeout)
             .await?;
         serde_json::from_value(response).map_err(|error| ControlError::Malformed {
             subtype: "initialize".into(),
@@ -503,26 +588,21 @@ impl ClaudeClient {
 
     /// Closes stdin. The CLI finishes what it owes and exits.
     pub async fn end_input(&self) {
-        self.inner.writer.lock().await.take();
+        self.inner().writer.lock().await.take();
     }
 
-    /// Closes stdin, then waits for exit, escalating to SIGTERM and SIGKILL
-    /// after the grace period.
+    /// Closes stdin, then has the supervisor wait for exit, escalating to
+    /// SIGTERM and SIGKILL after the grace period, and returns the report.
     pub async fn close(&self) -> Option<ExitReport> {
-        self.inner.closed.store(true, Ordering::Release);
         self.end_input().await;
-        let grace = self.inner.config.shutdown_grace;
-        if let Some(child) = self.inner.child.lock().await.as_mut()
-            && let Err(error) = transport::shut_down(child, grace).await
-        {
-            log::warn!("Claude Code shutdown failed: {error}");
-        }
-        self.wait_exit(grace).await
+        self.inner().begin_shutdown();
+        let grace = self.inner().config.shutdown_grace;
+        self.wait_exit(grace * 3 + Duration::from_secs(2)).await
     }
 
     /// Waits up to `timeout` for the exit report.
     pub async fn wait_exit(&self, timeout: Duration) -> Option<ExitReport> {
-        let mut exit = self.inner.exit.subscribe();
+        let mut exit = self.inner().exit.subscribe();
         let wait = async {
             loop {
                 if let Some(report) = exit.borrow_and_update().clone() {
@@ -541,7 +621,116 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
-async fn read_loop(inner: Arc<Inner>, mut reader: BoxReader) {
+/// The only owner of the child: reaps it when it exits on its own, or shuts
+/// it down (stdin closed, then SIGTERM and SIGKILL to its group) when asked.
+async fn supervise(inner: Arc<Inner>, mut child: Child) {
+    let status = tokio::select! {
+        status = child.wait() => status.ok(),
+        () = inner.shutdown.notified() => {
+            inner.writer.lock().await.take();
+            transport::shut_down(&mut child, inner.config.shutdown_grace).await.ok()
+        }
+    };
+    inner.reaped.send_replace(Some(status));
+}
+
+/// Bounded delivery to the consumer that never blocks the reader: the
+/// reader appends to a capped queue and a forwarder task feeds the channel
+/// as the consumer reads.
+struct EventSink {
+    queue: Arc<EventQueue>,
+}
+
+struct EventQueue {
+    state: Mutex<QueueState>,
+    ready: Notify,
+    cap: usize,
+}
+
+#[derive(Default)]
+struct QueueState {
+    items: VecDeque<ClientEvent>,
+    lost: u64,
+    partial: u64,
+    closed: bool,
+}
+
+fn is_partial(event: &ClientEvent) -> bool {
+    matches!(event, ClientEvent::Message(message) if matches!(message.kind, MessageKind::StreamEvent(_)))
+}
+
+impl EventSink {
+    fn new(sender: mpsc::Sender<ClientEvent>, config: &ClientConfig) -> Self {
+        let queue = Arc::new(EventQueue {
+            state: Mutex::new(QueueState::default()),
+            ready: Notify::new(),
+            cap: config.event_backlog.max(1),
+        });
+        tokio::spawn(forward(queue.clone(), sender));
+        Self { queue }
+    }
+
+    fn push(&mut self, event: ClientEvent) {
+        let mut state = lock(&self.queue.state);
+        if state.items.len() >= self.queue.cap {
+            if is_partial(&event) {
+                // The complete assistant message carries the same content.
+                state.partial += 1;
+                return;
+            }
+            if let Some(index) = state.items.iter().position(is_partial) {
+                state.items.remove(index);
+                state.partial += 1;
+            } else {
+                state.lost += state.items.len() as u64;
+                state.items.clear();
+            }
+        }
+        state.items.push_back(event);
+        drop(state);
+        self.queue.ready.notify_one();
+    }
+
+    /// Queues the last event and lets the forwarder drain and end.
+    async fn finish(mut self, last: ClientEvent) {
+        self.push(last);
+        lock(&self.queue.state).closed = true;
+        self.queue.ready.notify_one();
+    }
+}
+
+async fn forward(queue: Arc<EventQueue>, sender: mpsc::Sender<ClientEvent>) {
+    loop {
+        let next = {
+            let mut state = lock(&queue.state);
+            if state.lost > 0 || state.partial > 0 {
+                let gap = ClientEvent::Gap {
+                    lost: state.lost,
+                    partial: state.partial,
+                };
+                state.lost = 0;
+                state.partial = 0;
+                Some(gap)
+            } else if let Some(event) = state.items.pop_front() {
+                Some(event)
+            } else if state.closed {
+                return;
+            } else {
+                None
+            }
+        };
+        match next {
+            Some(event) => {
+                if sender.send(event).await.is_err() {
+                    return;
+                }
+            }
+            None => queue.ready.notified().await,
+        }
+    }
+}
+
+async fn read_loop(inner: Arc<Inner>, mut reader: BoxReader, mut sink: EventSink) {
     let mut line = Vec::new();
     let mut last_error_result: Option<ResultMessage> = None;
     let mut read_error = None;
@@ -558,7 +747,7 @@ async fn read_loop(inner: Arc<Inner>, mut reader: BoxReader) {
             Ok(Some(frame)) => frame,
             Ok(None) => continue,
             Err(error) => {
-                let _ = inner.events.send(ClientEvent::Malformed {
+                sink.push(ClientEvent::Malformed {
                     line: String::from_utf8_lossy(&line).trim_end().to_string(),
                     error: error.to_string(),
                 });
@@ -578,9 +767,7 @@ async fn read_loop(inner: Arc<Inner>, mut reader: BoxReader) {
             Frame::ControlCancel { request_id } => {
                 if let Some(cancel) = lock(&inner.inflight).remove(&request_id) {
                     let _ = cancel.send(true);
-                    let _ = inner
-                        .events
-                        .send(ClientEvent::RequestCancelled { request_id });
+                    sink.push(ClientEvent::RequestCancelled { request_id });
                 }
             }
             Frame::KeepAlive => {}
@@ -594,23 +781,29 @@ async fn read_loop(inner: Arc<Inner>, mut reader: BoxReader) {
                     }
                     _ => {}
                 }
-                let _ = inner.events.send(ClientEvent::Message(message));
+                sink.push(ClientEvent::Message(message));
             }
         }
     }
 
-    // stdout ended: the process is exiting.
-    let grace = inner.config.shutdown_grace;
-    let status = {
-        let mut child = inner.child.lock().await;
-        match child.as_mut() {
-            Some(child) => match tokio::time::timeout(grace, child.wait()).await {
-                Ok(Ok(status)) => Some(status),
-                _ => child.try_wait().ok().flatten(),
-            },
-            None => None,
+    // stdout ended: the session is over even if the process lingers.
+    inner.writer.lock().await.take();
+    inner.begin_shutdown();
+    let mut reaped = inner.reaped.subscribe();
+    let wait = inner.config.shutdown_grace * 3 + Duration::from_secs(2);
+    let status = tokio::time::timeout(wait, async {
+        loop {
+            if let Some(status) = *reaped.borrow_and_update() {
+                return status;
+            }
+            if reaped.changed().await.is_err() {
+                return None;
+            }
         }
-    };
+    })
+    .await
+    .ok()
+    .flatten();
     let report = ExitReport {
         status,
         stderr_tail: inner.stderr.text(),
@@ -623,9 +816,8 @@ async fn read_loop(inner: Arc<Inner>, mut reader: BoxReader) {
     for (_, cancel) in lock(&inner.inflight).drain() {
         let _ = cancel.send(true);
     }
-    inner.writer.lock().await.take();
     inner.exit.send_replace(Some(report.clone()));
-    let _ = inner.events.send(ClientEvent::Exited(report));
+    sink.finish(ClientEvent::Exited(report)).await;
 }
 
 fn spawn_request_handler(inner: Arc<Inner>, request_id: String, request: Value) {
@@ -672,8 +864,7 @@ fn spawn_request_handler(inner: Arc<Inner>, request_id: String, request: Value) 
                 "response": {"subtype": "error", "request_id": request_id, "error": error}
             }),
         };
-        let client = ClaudeClient { inner };
-        if let Err(error) = client.write_json(&response).await {
+        if let Err(error) = inner.write_json(&response).await {
             log::debug!("control response not delivered: {error}");
         }
     });
@@ -890,6 +1081,177 @@ mod tests {
         }
         assert_eq!(kinds, ["system", "result"]);
         assert_eq!(client.session_state().borrow().as_deref(), Some("running"));
-        assert!(matches!(pending.await.unwrap(), Err(ControlError::Closed(_))));
+        // Written, then the process went away: the outcome is unknown.
+        assert!(matches!(pending.await.unwrap(), Err(ControlError::Unknown(_))));
+    }
+
+    fn fast() -> ClientConfig {
+        ClientConfig {
+            shutdown_grace: Duration::from_millis(200),
+            ..ClientConfig::default()
+        }
+    }
+
+    /// A stand-in CLI: a shell script that ignores Claude's arguments.
+    fn fake_cli(dir: &std::path::Path, body: &str) -> LaunchOptions {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("fake-claude");
+        std::fs::write(&path, format!("#!/bin/sh\necho $$ > \"$PID_FILE\"\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut options = LaunchOptions::new(&path, dir);
+        options.env.push(("PID_FILE".into(), dir.join("pid").into_os_string()));
+        options
+    }
+
+    async fn pid_of(dir: &std::path::Path) -> u32 {
+        for _ in 0..100 {
+            if let Ok(text) = std::fs::read_to_string(dir.join("pid"))
+                && let Ok(pid) = text.trim().parse()
+            {
+                return pid;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("fake CLI never started");
+    }
+
+    fn alive(pid: u32) -> bool {
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+
+    async fn gone(pid: u32) -> bool {
+        for _ in 0..100 {
+            if !alive(pid) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn dropping_the_last_handle_ends_even_a_stubborn_process() {
+        let dir = tempfile::tempdir().unwrap();
+        // Ignores stdin EOF and SIGTERM: only SIGKILL ends it.
+        let options = fake_cli(dir.path(), "trap '' TERM\nexec sleep 30");
+        let (client, events) = ClaudeClient::spawn(&options, fast()).unwrap();
+        let pid = pid_of(dir.path()).await;
+        assert!(alive(pid));
+        let second = client.clone();
+        drop(client);
+        assert!(alive(pid), "a remaining handle keeps the process");
+        drop(second);
+        drop(events);
+        assert!(gone(pid).await, "process {pid} outlived its last handle");
+    }
+
+    #[tokio::test]
+    async fn cancelling_initialize_leaves_no_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let options = fake_cli(dir.path(), "exec sleep 30");
+        let attempt = tokio::time::timeout(
+            Duration::from_millis(300),
+            ClaudeClient::connect(&options, fast(), &InitializeRequest::default()),
+        )
+        .await;
+        assert!(attempt.is_err(), "initialize never answers");
+        let pid = pid_of(dir.path()).await;
+        assert!(gone(pid).await, "process {pid} survived a cancelled connect");
+    }
+
+    #[tokio::test]
+    async fn losing_stdout_ends_the_session_and_the_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let options = fake_cli(dir.path(), "exec >&-\nexec sleep 30");
+        let (client, mut events) = ClaudeClient::spawn(&options, fast()).unwrap();
+        let pid = pid_of(dir.path()).await;
+        let exited = tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(event) = events.recv().await {
+                if let ClientEvent::Exited(report) = event {
+                    return Some(report);
+                }
+            }
+            None
+        })
+        .await
+        .expect("exit reported")
+        .expect("exit event");
+        assert!(exited.status.is_some(), "the supervisor reaped it");
+        assert!(gone(pid).await);
+        assert!(client.is_closed());
+        assert!(matches!(
+            client.get_context_usage().await,
+            Err(ControlError::Closed(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_stalled_consumer_never_blocks_control_responses() {
+        let config = ClientConfig {
+            event_capacity: 4,
+            event_backlog: 8,
+            ..ClientConfig::default()
+        };
+        let (client, mut events, mut cli) = harness(config);
+        for index in 0..40 {
+            cli.write(json!({"type": "stream_event", "uuid": format!("s{index}"), "session_id": "s",
+                "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "x"}}}))
+                .await;
+            cli.write(json!({"type": "assistant", "uuid": format!("a{index}"),
+                "message": {"id": format!("m{index}"), "content": []}}))
+                .await;
+        }
+        let request = tokio::spawn({
+            let client = client.clone();
+            async move { client.mcp_status().await }
+        });
+        let sent = cli.read().await;
+        cli.write(json!({"type": "control_response", "response": {"subtype": "success",
+            "request_id": sent["request_id"], "response": {"mcpServers": []}}}))
+            .await;
+        let answer = tokio::time::timeout(Duration::from_secs(5), request)
+            .await
+            .expect("control response arrived while the consumer stalled")
+            .unwrap();
+        assert!(answer.is_ok());
+
+        // The consumer catches up: bounded delivery plus an explicit gap.
+        let mut messages = 0;
+        let mut gaps = Vec::new();
+        cli.write(json!({"type": "keep_alive"})).await;
+        while let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(300), events.recv()).await
+        {
+            match event {
+                ClientEvent::Message(_) => messages += 1,
+                ClientEvent::Gap { lost, partial } => gaps.push((lost, partial)),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        assert!(messages <= 4 + 8 + 1, "{messages} messages retained");
+        let lost: u64 = gaps.iter().map(|gap| gap.0).sum();
+        let partial: u64 = gaps.iter().map(|gap| gap.1).sum();
+        assert!(partial > 0, "partial chunks are dropped first: {gaps:?}");
+        assert_eq!(messages as u64 + lost + partial, 80, "every frame is delivered or counted");
+    }
+
+    #[tokio::test]
+    async fn delivery_is_closed_before_writing_and_unknown_after() {
+        let (client, _events, mut cli) = harness(ClientConfig::default());
+        let pending = tokio::spawn({
+            let client = client.clone();
+            async move { client.interrupt(false).await }
+        });
+        let _ = cli.read().await;
+        drop(cli);
+        assert!(matches!(pending.await.unwrap(), Err(ControlError::Unknown(_))));
+
+        let (client, _events, _cli) = harness(ClientConfig::default());
+        client.end_input().await;
+        assert!(matches!(client.interrupt(false).await, Err(ControlError::Closed(_))));
+        assert!(matches!(
+            client.send(&UserMessage::text("hi")).await,
+            Err(ControlError::Closed(_))
+        ));
     }
 }

@@ -58,6 +58,7 @@ impl Recorder {
             ClientEvent::Malformed { line, error } => {
                 json!({"lab": "malformed", "line": line, "error": error})
             }
+            ClientEvent::Gap { lost, partial } => json!({"lab": "gap", "lost": lost, "partial": partial}),
             ClientEvent::RequestCancelled { request_id } => {
                 json!({"lab": "request_cancelled", "request_id": request_id})
             }
@@ -222,7 +223,10 @@ impl Lab {
     pub fn options(&self, session: SessionStart) -> LaunchOptions {
         let mut options = LaunchOptions::new(&self.bin, self.work_dir.path());
         options.session = session;
-        options.bare = true;
+        // `--bare` trims the tool set to Bash, Edit and Read; the isolated
+        // config dir and dummy key already keep labs off the real account.
+        options.bare = std::env::var_os("CLAUDE_LAB_BARE").is_some();
+        options.retain_supported(&self.help);
         options.model = Some("claude-sonnet-4-5".into());
         options.env = vec![
             ("ANTHROPIC_BASE_URL".into(), self.api.base_url.clone().into()),
