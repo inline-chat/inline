@@ -17,7 +17,8 @@ use inline_agent_bridge::harness::{
     CompatTier, Delivery, DeliveryKind, Envelope, Event, EventHub, EventStream, ExecutableInfo,
     ExecutableSource, ForkPoint, HarnessDriver, HarnessFuture, HeldBy, HeldSurface, Input,
     InputDisposition, InputReceipt, InteractionId, LiveWork, ModeId, Op, OpError, OpKind,
-    OpOutcome, OpenError, OpenMode, OpenSpec, QueueEntryId, Released, RunState, RunStateTracker,
+    OpOutcome, OpenError, OpenMode, OpenSpec, OutputMode, QueueEntryId, ReleaseOutcome, Released,
+    RunState, RunStateTracker,
     RuntimeHealth, RuntimeInfo, SendError, Session, SessionKey, SessionPage, SessionQuery,
     SessionSummary, SettingsScope, SetupReason, DEFAULT_HUB_CAPACITY,
 };
@@ -58,8 +59,6 @@ pub struct ClaudeHarnessConfig {
     pub permission_mode: String,
     pub model: Option<String>,
     pub effort: Option<String>,
-    /// Friendly mode: Claude Code's brief mode (`SendUserMessage`).
-    pub brief: bool,
     pub env: Vec<(OsString, OsString)>,
     pub process_host: Option<ProcessHost>,
     /// Inline tools served in-process over `mcp_message`.
@@ -77,7 +76,6 @@ impl ClaudeHarnessConfig {
             permission_mode: "bypassPermissions".into(),
             model: None,
             effort: None,
-            brief: false,
             env: Vec::new(),
             process_host: None,
             mcp_servers: Vec::new(),
@@ -91,7 +89,6 @@ impl ClaudeHarnessConfig {
         options.permission_mode = self.permission_mode.clone();
         options.model = self.model.clone();
         options.effort = self.effort.clone();
-        options.brief = self.brief;
         options.bare = self.bare;
         options.env = self.env.clone();
         options.process_host = self.process_host.clone();
@@ -497,6 +494,14 @@ impl HarnessDriver for ClaudeHarness {
             }
             if let Some(mode) = &spec.settings.permission_mode {
                 options.permission_mode = mode.clone();
+            }
+            // Friendly mode is Claude Code's brief mode, fixed at launch; a
+            // mode change applies at the next open.
+            options.brief = spec.output_mode == OutputMode::Friendly;
+            if options.brief && !self.help().contains("--brief") {
+                return Err(OpenError::Unavailable(Availability::unavailable(
+                    "Friendly mode needs a newer Claude Code (--brief)",
+                )));
             }
             options.retain_supported(&self.help());
             let session_id = options
@@ -1094,10 +1099,24 @@ impl Session for ClaudeSession {
                     stopped_children.push(child.clone());
                 }
             }
-            self.inner.client.close().await;
+            self.inner.emit(Event::State {
+                state: RunState::Releasing,
+            });
+            // Closing stdin, then the supervisor's escalation; the session is
+            // free for another client only once the process has exited.
+            let exited = self.inner.client.close().await.is_some();
+            let outcome = if exited {
+                self.inner.emit(Event::State {
+                    state: RunState::Released,
+                });
+                ReleaseOutcome::NativeReleased
+            } else {
+                ReleaseOutcome::Unsubscribed
+            };
             let cancelled_interactions: Vec<InteractionId> = live.interactions.clone();
             Ok(Released {
                 key: self.inner.key.clone(),
+                outcome,
                 cancelled_interactions,
                 pending_inputs,
                 stopped_children,

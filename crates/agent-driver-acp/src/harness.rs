@@ -19,7 +19,7 @@ use inline_agent_bridge::harness::{
     InputId, InputReceipt, Interaction, InteractionId, InteractionKind, InteractionResponse, Item,
     ItemBody, ItemDelta, ItemId, ItemKind, ItemStatus, ItemUpdate, LiveWork, MessageRole, Notice,
     NoticeLevel, Op, OpError, OpKind, OpOutcome, OpenError, OpenMode, OpenSpec, QuestionForm,
-    Released, RunState, RunStateTracker, RuntimeHealth, RuntimeInfo, SendError, Session,
+    ReleaseOutcome, Released, RunState, RunStateTracker, RuntimeHealth, RuntimeInfo, SendError, Session,
     SessionKey, SessionPage, SessionQuery, SettingsScope, TurnPhase, UserId, DEFAULT_HUB_CAPACITY,
 };
 use inline_agent_bridge::{
@@ -488,8 +488,11 @@ impl Session for AcpSession {
             if let Some(turn) = turn {
                 let _ = self.inner.driver.cancel_turn(&self.inner.session, &turn).await;
             }
+            // The ACP agent process keeps the session loaded; nothing here
+            // proves native ownership was given up.
             Ok(Released {
                 key: self.inner.key.clone(),
+                outcome: ReleaseOutcome::Unsubscribed,
                 cancelled_interactions: cancelled,
                 pending_inputs: Vec::new(),
                 stopped_children: Vec::new(),
