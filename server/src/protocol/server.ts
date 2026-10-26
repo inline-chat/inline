@@ -28,6 +28,7 @@ import { ChatPermissions } from "@inline-chat/protocol/core";
 import { SpaceSettings } from "@inline-chat/protocol/core";
 import { User } from "@inline-chat/protocol/core";
 import { Member } from "@inline-chat/protocol/core";
+import { AgentOutputMode } from "@inline-chat/protocol/core";
 import { AgentParticipationMode } from "@inline-chat/protocol/core";
 import { AgentSessionState } from "@inline-chat/protocol/core";
 import { AgentSessionRelation } from "@inline-chat/protocol/core";
@@ -36,6 +37,7 @@ import { Reaction } from "@inline-chat/protocol/core";
 import { AgentThreadContext } from "@inline-chat/protocol/core";
 import { ChatParticipantGroup } from "@inline-chat/protocol/core";
 import { ChatParticipant } from "@inline-chat/protocol/core";
+import { UpdateAgentSessionControl } from "@inline-chat/protocol/core";
 import { UpdateAgentRuntime } from "@inline-chat/protocol/core";
 import { UpdateAgentGrant } from "@inline-chat/protocol/core";
 import { UpdateSpaceProfile } from "@inline-chat/protocol/core";
@@ -409,6 +411,12 @@ export interface ServerUpdate {
          */
         userAgentRuntime: UpdateAgentRuntime;
     } | {
+        oneofKind: "userAgentSessionControl";
+        /**
+         * @generated from protobuf field: UpdateAgentSessionControl user_agent_session_control = 54;
+         */
+        userAgentSessionControl: UpdateAgentSessionControl;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -765,6 +773,10 @@ export interface ServerChatUpdateAgentParticipation {
      * @generated from protobuf field: int64 date = 6;
      */
     date: bigint;
+    /**
+     * @generated from protobuf field: optional AgentOutputMode output_mode = 7;
+     */
+    outputMode?: AgentOutputMode;
 }
 /**
  * @generated from protobuf message server.ServerChatUpdateDeleteReaction
@@ -1505,7 +1517,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 50, name: "agent_session_state", kind: "message", oneof: "update", T: () => ServerChatUpdateAgentSessionState },
             { no: 51, name: "agent_participation", kind: "message", oneof: "update", T: () => ServerChatUpdateAgentParticipation },
             { no: 52, name: "user_agent_grant", kind: "message", oneof: "update", T: () => UpdateAgentGrant },
-            { no: 53, name: "user_agent_runtime", kind: "message", oneof: "update", T: () => UpdateAgentRuntime }
+            { no: 53, name: "user_agent_runtime", kind: "message", oneof: "update", T: () => UpdateAgentRuntime },
+            { no: 54, name: "user_agent_session_control", kind: "message", oneof: "update", T: () => UpdateAgentSessionControl }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1828,6 +1841,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userAgentRuntime: UpdateAgentRuntime.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userAgentRuntime)
                     };
                     break;
+                case /* UpdateAgentSessionControl user_agent_session_control */ 54:
+                    message.update = {
+                        oneofKind: "userAgentSessionControl",
+                        userAgentSessionControl: UpdateAgentSessionControl.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userAgentSessionControl)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1996,6 +2015,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* UpdateAgentRuntime user_agent_runtime = 53; */
         if (message.update.oneofKind === "userAgentRuntime")
             UpdateAgentRuntime.internalBinaryWrite(message.update.userAgentRuntime, writer.tag(53, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateAgentSessionControl user_agent_session_control = 54; */
+        if (message.update.oneofKind === "userAgentSessionControl")
+            UpdateAgentSessionControl.internalBinaryWrite(message.update.userAgentSessionControl, writer.tag(54, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3072,7 +3094,8 @@ class ServerChatUpdateAgentParticipation$Type extends MessageType<ServerChatUpda
             { no: 3, name: "joined_by", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "default_session_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 5, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 6, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 6, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
         ]);
     }
     create(value?: PartialMessage<ServerChatUpdateAgentParticipation>): ServerChatUpdateAgentParticipation {
@@ -3108,6 +3131,9 @@ class ServerChatUpdateAgentParticipation$Type extends MessageType<ServerChatUpda
                 case /* int64 date */ 6:
                     message.date = reader.int64().toBigInt();
                     break;
+                case /* optional AgentOutputMode output_mode */ 7:
+                    message.outputMode = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3138,6 +3164,9 @@ class ServerChatUpdateAgentParticipation$Type extends MessageType<ServerChatUpda
         /* int64 date = 6; */
         if (message.date !== 0n)
             writer.tag(6, WireType.Varint).int64(message.date);
+        /* optional AgentOutputMode output_mode = 7; */
+        if (message.outputMode !== undefined)
+            writer.tag(7, WireType.Varint).int32(message.outputMode);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

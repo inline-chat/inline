@@ -82,6 +82,7 @@ message ServerUpdate {
     ServerChatUpdateAgentParticipation agent_participation = 51;
     UpdateAgentGrant user_agent_grant = 52;
     UpdateAgentRuntime user_agent_runtime = 53;
+    UpdateAgentSessionControl user_agent_session_control = 54;
   }
 }
 
@@ -223,6 +224,7 @@ message ServerChatUpdateAgentParticipation {
   optional int64 default_session_id = 4;
   int64 revision = 5;
   int64 date = 6;
+  optional AgentOutputMode output_mode = 7;
 }
 
 message ServerChatUpdateDeleteReaction {
