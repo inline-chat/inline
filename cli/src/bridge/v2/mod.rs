@@ -2,6 +2,9 @@
 //!
 //! v1 stays untouched until a provider passes its stage acceptance.
 
+pub(crate) mod api;
 pub(crate) mod doc;
 pub(crate) mod files;
+pub(crate) mod intake;
 pub(crate) mod render;
+pub(crate) mod runtime;

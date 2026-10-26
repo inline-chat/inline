@@ -4,6 +4,7 @@
 //! complete fallback for clients that predate the blocks, so the builder writes
 //! readable plain text and records each block's range as it goes.
 
+use inline_agent_bridge::harness::{FieldInput, QuestionForm};
 use inline_protocol::proto;
 
 /// One message: fallback text plus structured blocks.
@@ -151,6 +152,94 @@ impl DocBuilder {
                 ..Default::default()
             }));
         }
+    }
+
+    /// A question form. Field prompts and option labels are written as text
+    /// too, so older apps can answer by replying. Options are `o<index>`.
+    pub(crate) fn form(
+        &mut self,
+        form_id: &str,
+        form: &QuestionForm,
+        required_grant: proto::AgentGrantRequirement,
+    ) {
+        let title = form.title.as_deref().map(|title| self.span(title));
+        let fields = form
+            .fields
+            .iter()
+            .map(|field| {
+                let label = self.span(&field.prompt);
+                let kind = match &field.input {
+                    FieldInput::Select {
+                        options,
+                        multiple,
+                        allow_other,
+                    } => proto::block_form_field::Kind::Select(proto::BlockFormSelect {
+                        options: options
+                            .iter()
+                            .enumerate()
+                            .map(|(index, option)| {
+                                self.push_raw("• ");
+                                let label = self.span(&option.label);
+                                proto::BlockFormOption {
+                                    option_id: format!("o{index}"),
+                                    label: Some(label),
+                                    description: None,
+                                }
+                            })
+                            .collect(),
+                        multiple: *multiple,
+                        default_option_ids: Vec::new(),
+                        allow_other: *allow_other,
+                    }),
+                    FieldInput::Text { multiline, default } => {
+                        proto::block_form_field::Kind::Text(proto::BlockFormText {
+                            kind: if *multiline {
+                                proto::block_form_text::Kind::Multiline
+                            } else {
+                                proto::block_form_text::Kind::SingleLine
+                            } as i32,
+                            default_value: default.clone(),
+                            ..Default::default()
+                        })
+                    }
+                    FieldInput::Secret => {
+                        proto::block_form_field::Kind::Text(proto::BlockFormText {
+                            kind: proto::block_form_text::Kind::Secret as i32,
+                            ..Default::default()
+                        })
+                    }
+                    FieldInput::Toggle { default } => {
+                        proto::block_form_field::Kind::Toggle(proto::BlockFormToggle {
+                            default_value: default.unwrap_or(false),
+                        })
+                    }
+                    FieldInput::Number { default, min, max } => {
+                        proto::block_form_field::Kind::Number(proto::BlockFormNumber {
+                            default_value: default.as_ref().and_then(|value| value.as_f64()),
+                            min: min.as_ref().and_then(|value| value.as_f64()),
+                            max: max.as_ref().and_then(|value| value.as_f64()),
+                            ..Default::default()
+                        })
+                    }
+                };
+                proto::BlockFormField {
+                    field_id: field.id.to_string(),
+                    label: Some(label),
+                    description: None,
+                    required: field.required,
+                    kind: Some(kind),
+                }
+            })
+            .collect();
+        self.push_block(proto::block::Kind::Form(proto::BlockForm {
+            form_id: form_id.to_owned(),
+            title,
+            fields,
+            submit_label: None,
+            required_grant: required_grant as i32,
+            closed: false,
+            is_rtl: None,
+        }));
     }
 
     pub(crate) fn steps(&mut self, steps: &[(String, Status)]) {

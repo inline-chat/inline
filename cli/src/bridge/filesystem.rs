@@ -129,7 +129,7 @@ fn list_directory(path: &str, after: &str) -> Result<BotFilesystemListing, &'sta
 
 /// `LIST_WORK_FILES`: relative entries from the work's folder, already free of
 /// absolute paths, `~` and `..` (the server rejects any that are not).
-fn work_files_listing(
+pub(super) fn work_files_listing(
     folder: &Path,
     path: &str,
     query: Option<&str>,

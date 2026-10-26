@@ -19,6 +19,7 @@ flate2 = "1.0.30"
 inline-agent-bridge = { path = "../crates/agent-bridge" }
 inline-agent-driver-acp = { path = "../crates/agent-driver-acp" }
 inline-agent-driver-codex = { path = "../crates/agent-driver-codex" }
+inline-agent-driver-claude = { path = "../crates/agent-driver-claude" }
 inline-client = { path = "../crates/client" }
 inline-protocol = { path = "../crates/protocol" }
 inline-sdk = { path = "../crates/sdk" }

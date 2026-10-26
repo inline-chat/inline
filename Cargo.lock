@@ -1439,6 +1439,7 @@ dependencies = [
  "futures-util",
  "inline-agent-bridge",
  "inline-agent-driver-acp",
+ "inline-agent-driver-claude",
  "inline-agent-driver-codex",
  "inline-client",
  "inline-protocol",

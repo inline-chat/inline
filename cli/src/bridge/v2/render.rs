@@ -901,24 +901,20 @@ fn approval_card(agent: &str, subject: &ApprovalSubject) -> Doc {
     builder.finish()
 }
 
+/// Form ID of a question card; one form per card message.
+pub(crate) const QUESTION_FORM_ID: &str = "q";
+
 fn question_card(agent: &str, form: &QuestionForm) -> Doc {
     let mut builder = DocBuilder::new();
-    builder.paragraph(
-        form.title
-            .as_deref()
-            .unwrap_or(&format!("{agent} has a question")),
-    );
-    for field in &form.fields {
-        builder.paragraph(&field.prompt);
-        if let inline_agent_bridge::harness::FieldInput::Select { options, .. } = &field.input {
-            for option in options {
-                builder.paragraph(&match &option.description {
-                    Some(description) => format!("• {}: {description}", option.label),
-                    None => format!("• {}", option.label),
-                });
-            }
-        }
+    if form.title.is_none() {
+        builder.paragraph(&format!("{agent} has a question"));
     }
+    // Anyone with access to the agent can answer its questions.
+    builder.form(
+        QUESTION_FORM_ID,
+        form,
+        inline_protocol::proto::AgentGrantRequirement::Access,
+    );
     builder.finish()
 }
 
