@@ -57,6 +57,15 @@ answers. Review these before upgrading:
   suggestions names its bot. A command several bots offer, typed without a
   name, goes to the bot you replied to or the one bot following the thread;
   otherwise no bot runs it.
+- **A thread's first message and its follow-ups share one conversation.** The
+  first message used to start a separate session from the replies inside the
+  thread.
+- **The agent can manage chats.** It can add people or agents, rename a chat
+  and delete one it created. A private chat it creates for you includes you.
+- **Status tells you whether messages are arriving.** `hermes inline status`
+  and `inline-hermes doctor` now report "Receiving Inline messages" separately
+  from "ready" (installed and configured), with the next step when the gateway
+  isn't running or Inline isn't connected.
 - **The bot shows Working instead of typing** while it works. Older Inline apps
   show typing.
 - **State moves into each profile.** The SDK state file is now
