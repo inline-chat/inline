@@ -2186,6 +2186,9 @@ class GlassComposeAppKit: NSView {
 
   private func setupAgentChainObservers() {
     guard let agentChain else { return }
+    agentChain.onInsertText = { [weak self] text in
+      self?.insertAgentReference(text)
+    }
     agentChain.start()
     Publishers.CombineLatest(agentChain.$isAvailable, agentChain.$isChainOpen)
       .map { $0 && $1 }
@@ -2212,6 +2215,15 @@ class GlassComposeAppKit: NSView {
       updateHeight(animate: false)
       agentChainHost.isHidden = true
     }
+  }
+
+  /// Inserts a plain-text reference (a file path) at the cursor, with plain
+  /// typing attributes so no mention or link styling carries over.
+  private func insertAgentReference(_ text: String) {
+    let textView = textEditor.textView
+    window?.makeFirstResponder(textView)
+    textView.typingAttributes = textEditor.defaultTypingAttributes
+    textView.insertText(text, replacementRange: textView.selectedRange())
   }
 
   private func refreshAgentDraftTarget() {
