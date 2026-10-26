@@ -494,8 +494,10 @@ extension UIMessageView {
 
     // Propose the standalone width without preventing the parent stack from
     // stretching the voice surface to match a wider text or preview child.
+    // Above the hosting view's hugging: at a tie the row first lays out at 240,
+    // then collapses to the minimum once SwiftUI reports its own narrow ideal width.
     let preferredWidth = controller.view.widthAnchor.constraint(equalToConstant: 240)
-    preferredWidth.priority = .defaultLow
+    preferredWidth.priority = .defaultHigh
 
     NSLayoutConstraint.activate([
       controller.view.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
