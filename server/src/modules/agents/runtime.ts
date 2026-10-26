@@ -13,7 +13,9 @@ import {
   type UpdateAgentSettingsResult,
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
+import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UsersModel } from "@in/server/db/models/users"
+import type { Transaction } from "@in/server/db/types"
 import { agentParticipations, agentRuntimes, agentSessions, chats, type DbAgentRuntime } from "@in/server/db/schema"
 import { chatRecipientUserIds } from "@in/server/modules/agents/chatUpdates"
 import { Log } from "@in/server/utils/log"
@@ -94,6 +96,9 @@ export async function updateAgentSettings(
   if (input.defaultOutputMode !== undefined && !validOutputMode(input.defaultOutputMode)) throw RealtimeRpcError.BadRequest()
 
   const ownerUserId = bot.botCreatorId
+  // Members of the agent's chats resolve its effective output mode from the
+  // default, so they get the change too (status-only view).
+  const audience = await runtimeAudience(botUserId, ownerUserId)
   const { row, live } = await db.transaction(async (tx) => {
     const [saved] = await tx
       .update(agentRuntimes)
@@ -105,25 +110,9 @@ export async function updateAgentSettings(
       .returning()
     // Settings live on the runtime, which exists once the bridge has reported.
     if (!saved) throw RealtimeRpcError.BadRequest()
-    const runtime = encodeAgentRuntime(saved, "owner")
-    const live = []
-    for (const userId of new Set([ownerUserId, botUserId])) {
-      const durable = await UserBucketUpdates.enqueue(
-        { userId, update: { oneofKind: "userAgentRuntime", userAgentRuntime: { runtime } } },
-        { tx },
-      )
-      live.push({ userId, durable })
-    }
-    return { row: saved, live }
+    return { row: saved, live: await enqueueRuntimeChange(tx, saved, ownerUserId, audience, { includeBot: true }) }
   })
-  const runtime = encodeAgentRuntime(row, "owner")
-  for (const { userId, durable } of live) {
-    RealtimeUpdates.pushToUser(userId, [{
-      seq: durable.seq,
-      date: encodeDateStrict(durable.date),
-      update: { oneofKind: "agentRuntime", agentRuntime: { runtime } },
-    }])
-  }
+  pushRuntimeChange(live)
   return { runtime: encodeAgentRuntime(row, currentUserId === ownerUserId ? "owner" : "other") }
 }
 
@@ -164,7 +153,7 @@ export async function reportAgentRuntime(
   }
 
   const ownerUserId = bot.botCreatorId
-  const { row, changed } = await db.transaction(async (tx) => {
+  const { row, live } = await db.transaction(async (tx) => {
     const [previous] = await tx.select().from(agentRuntimes).where(eq(agentRuntimes.botUserId, bot.id)).for("update").limit(1)
     const [saved] = previous
       ? await tx.update(agentRuntimes).set(values).where(eq(agentRuntimes.botUserId, bot.id)).returning()
@@ -177,13 +166,18 @@ export async function reportAgentRuntime(
       previous.provider !== saved.provider ||
       previous.machineLabel !== saved.machineLabel ||
       previous.executableVersion !== saved.executableVersion
-    return { row: saved, changed }
+    // The durable updates commit with the change, so a crash cannot drop them
+    // while later heartbeats see nothing changed.
+    const live = changed
+      ? await enqueueRuntimeChange(tx, saved, ownerUserId, await runtimeAudience(bot.id, ownerUserId))
+      : []
+    return { row: saved, live }
   })
 
   // Any process that serves heartbeats also watches for lapsed ones.
   startAgentRuntimeSweeper()
   const runtime = encodeAgentRuntime(row, "owner", now.getTime())
-  if (changed) await publishRuntimeChange(row, ownerUserId)
+  pushRuntimeChange(live)
   return {
     runtime,
     grantsRevision: await grantsRevision(bot.id),
@@ -236,18 +230,41 @@ async function runtimeAudience(botUserId: number, ownerUserId: number): Promise<
   return [...users]
 }
 
+type RuntimeDelivery = { userId: number; runtime: AgentRuntime; durable: UpdateSeqAndDate }
+
 /**
  * Durable user-bucket updates so reconnecting apps render the right status on
- * the first frame: the owner's view to the owner, the status-only view to
- * members of the agent's chats.
+ * the first frame: the owner's view to the owner (and the bot, for settings),
+ * the status-only view to members of the agent's chats. Enqueued in the
+ * transaction that changes the runtime.
  */
-export async function publishRuntimeChange(row: DbAgentRuntime, ownerUserId: number): Promise<void> {
-  const deliveries = [
-    { userId: ownerUserId, runtime: encodeAgentRuntime(row, "owner") },
-    ...(await runtimeAudience(row.botUserId, ownerUserId)).map((userId) => ({ userId, runtime: encodeAgentRuntime(row, "other") })),
+async function enqueueRuntimeChange(
+  tx: Transaction,
+  row: DbAgentRuntime,
+  ownerUserId: number,
+  audience: number[],
+  options: { includeBot?: boolean } = {},
+): Promise<RuntimeDelivery[]> {
+  const ownerView = encodeAgentRuntime(row, "owner")
+  const otherView = encodeAgentRuntime(row, "other")
+  const recipients = [
+    { userId: ownerUserId, runtime: ownerView },
+    ...(options.includeBot && row.botUserId !== ownerUserId ? [{ userId: row.botUserId, runtime: ownerView }] : []),
+    ...audience.map((userId) => ({ userId, runtime: otherView })),
   ]
-  for (const { userId, runtime } of deliveries) {
-    const durable = await UserBucketUpdates.enqueue({ userId, update: { oneofKind: "userAgentRuntime", userAgentRuntime: { runtime } } })
+  const deliveries: RuntimeDelivery[] = []
+  for (const { userId, runtime } of recipients) {
+    const durable = await UserBucketUpdates.enqueue(
+      { userId, update: { oneofKind: "userAgentRuntime", userAgentRuntime: { runtime } } },
+      { tx },
+    )
+    deliveries.push({ userId, runtime, durable })
+  }
+  return deliveries
+}
+
+function pushRuntimeChange(deliveries: RuntimeDelivery[]): void {
+  for (const { userId, runtime, durable } of deliveries) {
     RealtimeUpdates.pushToUser(userId, [{
       seq: durable.seq,
       date: encodeDateStrict(durable.date),
@@ -258,25 +275,43 @@ export async function publishRuntimeChange(row: DbAgentRuntime, ownerUserId: num
 
 /**
  * Marks runtimes whose heartbeats lapsed as offline and publishes the change.
- * The conditional update claims each lapse once across server processes.
+ * Each lapse is claimed with its durable updates in one transaction, so it is
+ * claimed once across server processes and never left unpublished.
  */
 export async function sweepLapsedAgentRuntimes(now = Date.now()): Promise<number> {
   const cutoff = new Date(now - AGENT_RUNTIME_HEARTBEAT_SECONDS * MISSED_HEARTBEATS_OFFLINE * 1_000)
-  const lapsed = await db
-    .update(agentRuntimes)
-    .set({ status: AgentRuntimeStatus.OFFLINE, updatedAt: new Date(now) })
+  const candidates = await db
+    .select({ botUserId: agentRuntimes.botUserId })
+    .from(agentRuntimes)
     .where(and(ne(agentRuntimes.status, AgentRuntimeStatus.OFFLINE), lt(agentRuntimes.lastSeenAt, cutoff)))
-    .returning()
-  for (const row of lapsed) {
-    const bot = await UsersModel.getUserById(row.botUserId)
+  let swept = 0
+  for (const { botUserId } of candidates) {
+    const bot = await UsersModel.getUserById(botUserId)
     if (bot?.botCreatorId == null) continue
+    const ownerUserId = bot.botCreatorId
     try {
-      await publishRuntimeChange(row, bot.botCreatorId)
+      const audience = await runtimeAudience(botUserId, ownerUserId)
+      const live = await db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(agentRuntimes)
+          .set({ status: AgentRuntimeStatus.OFFLINE, updatedAt: new Date(now) })
+          .where(and(
+            eq(agentRuntimes.botUserId, botUserId),
+            ne(agentRuntimes.status, AgentRuntimeStatus.OFFLINE),
+            lt(agentRuntimes.lastSeenAt, cutoff),
+          ))
+          .returning()
+        // Another process claimed it, or a heartbeat arrived meanwhile.
+        if (!row) return []
+        return enqueueRuntimeChange(tx, row, ownerUserId, audience)
+      })
+      if (live.length > 0) swept += 1
+      pushRuntimeChange(live)
     } catch (error) {
-      log.warn("Failed to publish a lapsed agent runtime", { botUserId: row.botUserId, error })
+      log.warn("Failed to mark a lapsed agent runtime offline", { botUserId, error })
     }
   }
-  return lapsed.length
+  return swept
 }
 
 let sweepTimer: ReturnType<typeof setInterval> | undefined

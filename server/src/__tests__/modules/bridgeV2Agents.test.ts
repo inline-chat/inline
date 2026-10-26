@@ -255,6 +255,20 @@ describe("bridge v2 agent server", () => {
     expect(row?.revokedAt).toBeNull()
   })
 
+  test("a default output mode change reaches the agent's chat members", async () => {
+    await setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: AgentParticipationMode.ACTIVE }, botId)
+    await reportAgentRuntime({ provider: AgentSessionProvider.CODEX, status: 1, executablePath: "/opt/codex" }, botId)
+    await updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: AgentOutputMode.FRIENDLY }, ownerId)
+    const [row] = await db.select().from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, teammateId)))
+      .orderBy(desc(updates.seq)).limit(1)
+    const payload = row ? UpdatesModel.decrypt(row).payload.update : undefined
+    const runtime = payload?.oneofKind === "userAgentRuntime" ? payload.userAgentRuntime.runtime : undefined
+    expect(runtime?.defaultOutputMode).toBe(AgentOutputMode.FRIENDLY)
+    // Members get the status-only view.
+    expect(runtime?.executablePath).toBeUndefined()
+  })
+
   test("a lapsed heartbeat is published once to the owner and the agent's chat members", async () => {
     await setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: AgentParticipationMode.ACTIVE }, botId)
     await reportAgentRuntime({ provider: AgentSessionProvider.CODEX, status: 1, executablePath: "/opt/codex" }, botId)
