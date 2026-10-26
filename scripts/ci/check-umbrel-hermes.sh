@@ -18,7 +18,7 @@ done
 docker exec --user hermes "$container" test -w /opt/data/home
 docker exec --user hermes "$container" mkdir -p /tmp/inline-smoke/scripts/ci /tmp/inline-smoke/plugins/hermes-agent/plugin/inline/sidecar /opt/data/.local/bin
 # Copy only the explicit public test inputs, never the workspace or environment.
-for file in __init__.py adapter.py cli.py tools.py message_actions.py telemetry.py plugin.yaml README.md LICENSE sidecar/index.mjs; do
+for file in __init__.py adapter.py cli.py tools.py profile.py message_actions.py telemetry.py plugin.yaml README.md LICENSE sidecar/index.mjs; do
   docker cp "plugins/hermes-agent/plugin/inline/$file" "$container:/tmp/inline-smoke/plugins/hermes-agent/plugin/inline/$file"
 done
 for file in check-hermes-source.mjs check-hermes-host.py check-hermes-admission.mjs; do

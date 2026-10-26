@@ -48,7 +48,7 @@ console.log(run(hermesBin, ["plugins", "install", identifier, "--ref", revision,
 const installed = path.join(home, "plugins", "inline-platform")
 assert.ok((await stat(installed)).isDirectory())
 assert.ok(!(await readdir(path.join(home, "plugins"))).includes("inline"), "native install created legacy inline directory")
-for (const file of ["__init__.py", "adapter.py", "cli.py", "tools.py", "plugin.yaml", "README.md", "LICENSE", "sidecar/index.mjs"]) {
+for (const file of ["__init__.py", "adapter.py", "cli.py", "tools.py", "profile.py", "plugin.yaml", "README.md", "LICENSE", "sidecar/index.mjs"]) {
   assert.deepEqual(await readFile(path.join(installed, file)), await readFile(path.join(source, file)), `native install changed ${file}`)
 }
 const metadata = JSON.parse(await readFile(path.join(home, "plugins", ".install-metadata.json"), "utf8"))
