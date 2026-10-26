@@ -19,9 +19,12 @@ mod input;
 mod intake;
 mod participation;
 mod permissions;
+#[cfg(test)]
+mod scenarios;
 mod speak_gate;
 mod subthread;
 mod sync;
+mod tools;
 
 pub use caps::{
     BudgetOutcome, DEFAULT_DAILY_SPEAK_GATE_BUDGET, DEFAULT_LOOP_CAP_HOPS, DailySpeakGateBudget,
@@ -63,4 +66,7 @@ pub use subthread::{Publication, PublicationEffect, PublicationEvent, Publicatio
 pub use sync::{
     ArchiveEffect, NativeArchive, NativeTitleSource, TitleEffect, TitleEvent, TitleSync,
     TitleSyncPolicy, WorkOrigin, archive_effect,
+};
+pub use tools::{
+    TOOL_CATALOG, ToolBinding, ToolBindings, ToolDescriptor, ToolRejection, ToolTarget, tool,
 };
