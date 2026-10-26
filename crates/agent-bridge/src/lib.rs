@@ -9,6 +9,7 @@
 
 mod command;
 mod driver;
+pub mod group;
 mod model;
 mod policy;
 mod presentation;
