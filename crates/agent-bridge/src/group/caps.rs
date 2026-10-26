@@ -314,7 +314,7 @@ mod tests {
             budget.status(DayKey(0)),
             (0, DEFAULT_DAILY_SPEAK_GATE_BUDGET)
         );
-        assert!(DEFAULT_DAILY_SPEAK_GATE_BUDGET >= 100);
+        const { assert!(DEFAULT_DAILY_SPEAK_GATE_BUDGET >= 100) };
     }
 
     #[test]

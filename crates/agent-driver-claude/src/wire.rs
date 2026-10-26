@@ -12,6 +12,7 @@ use serde_json::Value;
 
 /// One parsed stdout line.
 #[derive(Clone, Debug, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum Frame {
     /// A request the CLI sends to the host (`can_use_tool`, `mcp_message`, …).
     ControlRequest { request_id: String, request: Value },

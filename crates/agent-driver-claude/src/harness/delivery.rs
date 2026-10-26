@@ -70,13 +70,13 @@ pub fn origin(origin: &ContractOrigin) -> Origin {
 
 fn content_blocks(input: &Input) -> Vec<Value> {
     let mut blocks = Vec::new();
-    if let Some(context) = &input.content.context {
-        if !context.conversation.trim().is_empty() {
-            blocks.push(UserContent::text_block(&format!(
-                "<inline-context untrusted=\"true\">\n{}\n</inline-context>",
-                context.conversation
-            )));
-        }
+    if let Some(context) = &input.content.context
+        && !context.conversation.trim().is_empty()
+    {
+        blocks.push(UserContent::text_block(&format!(
+            "<inline-context untrusted=\"true\">\n{}\n</inline-context>",
+            context.conversation
+        )));
     }
     let mut described = Vec::new();
     for attachment in &input.content.attachments {

@@ -138,6 +138,7 @@ pub struct InterruptReceipt {
 
 /// A request the CLI sent to the host.
 #[derive(Clone, Debug, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum IncomingRequest {
     /// A tool needs permission; also how AskUserQuestion reaches the host.
     CanUseTool(PermissionRequest),

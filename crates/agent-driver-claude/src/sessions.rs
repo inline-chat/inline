@@ -230,7 +230,7 @@ impl SessionStore {
         let chain = build_conversation_chain(&entries);
         let messages = chain
             .into_iter()
-            .filter(|entry| is_visible(entry))
+            .filter(is_visible)
             .map(to_session_message)
             .skip(offset);
         Ok(match limit {

@@ -1026,39 +1026,36 @@ fn map_event(inner: &AcpSessionInner, event: AgentEvent, native: Value) -> Vec<E
             error,
             timing,
         } => {
-            let inputs = {
-                let mut state = inner.state();
-                if state.turn.as_ref() == Some(&turn_id) {
-                    state.turn = None;
-                }
-                let questions: Vec<String> = state.questions.keys().cloned().collect();
-                let approvals: Vec<String> = state.approvals.keys().cloned().collect();
-                state.questions.clear();
-                state.approvals.clear();
-                state.activities.clear();
-                let inputs = std::mem::take(&mut state.turn_inputs);
-                drop(state);
-                let mut events: Vec<Event> = questions
-                    .into_iter()
-                    .chain(approvals)
-                    .filter_map(|id| InteractionId::new(id).ok())
-                    .map(|id| Event::InteractionClosed {
-                        id,
-                        by: ClosedBy::Cancelled,
-                    })
-                    .collect();
-                events.push(Event::Turn {
-                    turn: turn_id,
-                    phase: TurnPhase::Completed {
-                        outcome,
-                        inputs_consumed: inputs,
-                        error,
-                        duration_ms: timing.provider_duration_ms,
-                    },
-                });
-                events
-            };
-            inputs
+            let mut state = inner.state();
+            if state.turn.as_ref() == Some(&turn_id) {
+                state.turn = None;
+            }
+            let questions: Vec<String> = state.questions.keys().cloned().collect();
+            let approvals: Vec<String> = state.approvals.keys().cloned().collect();
+            state.questions.clear();
+            state.approvals.clear();
+            state.activities.clear();
+            let inputs = std::mem::take(&mut state.turn_inputs);
+            drop(state);
+            let mut events: Vec<Event> = questions
+                .into_iter()
+                .chain(approvals)
+                .filter_map(|id| InteractionId::new(id).ok())
+                .map(|id| Event::InteractionClosed {
+                    id,
+                    by: ClosedBy::Cancelled,
+                })
+                .collect();
+            events.push(Event::Turn {
+                turn: turn_id,
+                phase: TurnPhase::Completed {
+                    outcome,
+                    inputs_consumed: inputs,
+                    error,
+                    duration_ms: timing.provider_duration_ms,
+                },
+            });
+            events
         }
     }
 }
