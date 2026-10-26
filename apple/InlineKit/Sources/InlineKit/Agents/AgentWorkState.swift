@@ -213,6 +213,9 @@ public final class AgentWorkStateStore: ObservableObject {
 
   public init(database: AppDatabase? = nil) {
     self.database = database
+    // Hydrate before any view reads, so first-frame reads never publish
+    // from inside a view update.
+    hydrateIfNeeded()
   }
 
   // MARK: Reads
