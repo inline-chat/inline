@@ -36,6 +36,33 @@ class EmbedMessageView: UIView {
     + UIFont.systemFont(ofSize: 14, weight: .medium).lineHeight
     + UIFont.systemFont(ofSize: 14).lineHeight)
 
+  /// The width a reply quote needs to show its sender and preview line without truncating.
+  static func preferredReplyWidth(for embedded: EmbeddedMessage?, traits: UITraitCollection) -> CGFloat {
+    guard let embedded else { return 120 }
+    let message = embedded.message
+    let senderName = embedded.from?.shortDisplayName ?? "User"
+    let preview = messageContent(
+      for: message,
+      displayText: embedded.displayText,
+      documentFileName: embedded.document?.fileName,
+      documentMimeType: embedded.document?.mimeType,
+      senderName: senderName,
+      kind: .replyInMessage
+    )
+    let header = ChatTypography.font(14, weight: .medium, compatibleWith: traits)
+    let body = ChatTypography.font(14, compatibleWith: traits)
+    let headerWidth = (senderName as NSString).size(withAttributes: [.font: header]).width
+    let isMedia = message.isSticker == true || message.hasPhoto || message.hasVideo
+      || message.documentId != nil || message.hasVoice
+    let iconWidth: CGFloat = isMedia ? Constants.iconPointSizeMessage + 2 + 4 : 0
+    let bodyWidth = iconWidth + (preview as NSString).size(withAttributes: [.font: body]).width
+    let thumbnail = embedded.photoInfo != nil || embedded.videoInfo?.thumbnail != nil
+      ? Constants.thumbnailSize + Constants.contentSpacing
+      : 0
+    return ceil(Constants.rectangleWidth + Constants.contentSpacing + thumbnail
+      + max(headerWidth, bodyWidth) + Constants.horizontalPadding)
+  }
+
   static func height(compatibleWith traits: UITraitCollection) -> CGFloat {
     let header = ChatTypography.font(14, weight: .medium, compatibleWith: traits)
     let body = ChatTypography.font(14, compatibleWith: traits)
@@ -208,7 +235,7 @@ class EmbedMessageView: UIView {
     headerLabel.text = headerText(for: kind, senderName: senderName)
     let fallbackText = messageText
     messageLabel.text = kind == .forwardingInCompose
-      ? forwardDescription(for: senderName, messageText: fallbackText)
+      ? Self.forwardDescription(for: senderName, messageText: fallbackText)
       : fallbackText
 
     let config = UIImage.SymbolConfiguration(pointSize: iconPointSize, weight: .medium)
@@ -401,7 +428,7 @@ private extension EmbedMessageView {
     )
 
     headerLabel.text = headerText(for: kind, senderName: senderName)
-    messageLabel.text = messageContent(
+    messageLabel.text = Self.messageContent(
       for: message,
       displayText: displayText,
       documentFileName: document?.fileName,
@@ -434,7 +461,7 @@ private extension EmbedMessageView {
     }
   }
 
-  func messageContent(
+  static func messageContent(
     for message: Message,
     displayText: String?,
     documentFileName: String?,
@@ -489,7 +516,7 @@ private extension EmbedMessageView {
     return baseContent
   }
 
-  func forwardDescription(for senderName: String, messageText: String) -> String {
+  static func forwardDescription(for senderName: String, messageText: String) -> String {
     "\(senderName): \(messageText)"
   }
 

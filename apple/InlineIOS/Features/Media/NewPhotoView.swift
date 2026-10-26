@@ -15,9 +15,12 @@ final class NewPhotoView: UIView {
 
   private var fullMessage: FullMessage
 
-  private let maxWidth: CGFloat = 280
-  private let maxHeight: CGFloat = 400
-  private let minWidth: CGFloat = 180
+  static let maximumWidth: CGFloat = 280
+  static let maximumHeight: CGFloat = 400
+  static let minimumWidth: CGFloat = 180
+  private let maxWidth = NewPhotoView.maximumWidth
+  private let maxHeight = NewPhotoView.maximumHeight
+  private let minWidth = NewPhotoView.minimumWidth
   private let cornerRadius = MessageBubbleGeometry.cornerRadius
   private let maskLayer = CAShapeLayer()
 
@@ -71,6 +74,14 @@ final class NewPhotoView: UIView {
   }()
 
   private var imageConstraints: [NSLayoutConstraint] = []
+  /// The size the next message view planned for this photo. Its planner shrinks media to fit
+  /// narrow rows, so the view takes this size instead of its own when set.
+  var plannedSize: CGSize? {
+    didSet {
+      if plannedSize != oldValue { setupImageConstraints() }
+    }
+  }
+
   var onTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
 
   // MARK: - Initialization
@@ -90,11 +101,31 @@ final class NewPhotoView: UIView {
   // MARK: - Setup
 
   private func shouldCropNarrowImage(width: Int, height: Int) -> Bool {
+    Self.cropsNarrowImage(width: width, height: height, hasCaption: hasText)
+  }
+
+  private static func cropsNarrowImage(width: Int, height: Int, hasCaption: Bool) -> Bool {
     let aspectRatio = CGFloat(width) / CGFloat(height)
-    return aspectRatio < 0.75 && hasText // Narrow image with caption
+    return aspectRatio < 0.75 && hasCaption // Narrow image with caption
   }
 
   private func calculateImageDimensions(width: Int, height: Int) -> ImageDimensions {
+    let size = Self.displaySize(width: width, height: height, hasCaption: hasText)
+    return ImageDimensions(
+      width: isSticker ? size.width / 2 : size.width,
+      height: isSticker ? size.height / 2 : size.height
+    )
+  }
+
+  /// The size this view gives a `width`×`height` photo in a bubble; the next message view plans
+  /// with it. Photos without a known size use `minimumWidth` square.
+  static func displaySize(width: Int?, height: Int?, hasCaption: Bool) -> CGSize {
+    guard let width, let height, width > 0, height > 0 else {
+      return CGSize(width: minimumWidth, height: minimumWidth)
+    }
+    let maxWidth = maximumWidth
+    let maxHeight = maximumHeight
+    let minWidth = minimumWidth
     let aspectRatio = CGFloat(width) / CGFloat(height)
     let preferredWidth: CGFloat = 280 // Width for narrow images with captions
 
@@ -102,7 +133,7 @@ final class NewPhotoView: UIView {
     var calculatedHeight: CGFloat
 
     // For very narrow images with captions, use fixed dimensions to enable cropping
-    if shouldCropNarrowImage(width: width, height: height) {
+    if cropsNarrowImage(width: width, height: height, hasCaption: hasCaption) {
       calculatedWidth = preferredWidth
       calculatedHeight = maxHeight
     } else {
@@ -131,10 +162,7 @@ final class NewPhotoView: UIView {
       }
     }
 
-    return ImageDimensions(
-      width: isSticker ? calculatedWidth / 2 : calculatedWidth,
-      height: isSticker ? calculatedHeight / 2 : calculatedHeight
-    )
+    return CGSize(width: calculatedWidth, height: calculatedHeight)
   }
 
   private func setupImageConstraints() {
@@ -149,8 +177,8 @@ final class NewPhotoView: UIView {
     else {
       let size = minWidth
       imageConstraints = [
-        widthAnchor.constraint(equalToConstant: size),
-        heightAnchor.constraint(equalToConstant: size),
+        widthAnchor.constraint(equalToConstant: plannedSize?.width ?? size),
+        heightAnchor.constraint(equalToConstant: plannedSize?.height ?? size),
 
         imageView.topAnchor.constraint(equalTo: topAnchor),
         imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -168,7 +196,8 @@ final class NewPhotoView: UIView {
       imageView.contentMode = .scaleAspectFit
     }
 
-    let dimensions = calculateImageDimensions(width: width, height: height)
+    let dimensions = plannedSize.map { ImageDimensions(width: $0.width, height: $0.height) }
+      ?? calculateImageDimensions(width: width, height: height)
 
     if !isSticker {
       let widthConstraint = widthAnchor.constraint(equalToConstant: dimensions.width)

@@ -283,38 +283,40 @@ class MessageReactionView: UIControl, UIGestureRecognizerDelegate {
       previewProvider: nil
     ) { [weak self] _ in
       guard let self else { return UIMenu(children: []) }
-      let currentUserId = Auth.shared.getCurrentUserId()
-      let sortedReactionUsers = reactionUsers.sorted { $0.reactedAt > $1.reactedAt }
+      return Self.reactorsMenu(for: reactionUsers)
+    }
+  }
 
-      // Create menu items for each user who reacted
-      let userActions = sortedReactionUsers.map { user in
-        let avatarImage: UIImage = if let userInfo = user.userInfo {
-          self.createAvatarImage(for: userInfo)
-        } else {
-          UIImage(systemName: "person.circle") ?? self.createDefaultAvatar()
-        }
-
-        let userName = if let currentUserId, user.userId == currentUserId {
-          "You"
-        } else {
-          user.displayName
-        }
-
-        return UIAction(
-          title: userName,
-          subtitle: self.timestampString(for: user.reactedAt),
-          image: avatarImage
-        ) { _ in
-          NotificationCenter.default.post(
-            name: Notification.Name("NavigateToUser"),
-            object: nil,
-            userInfo: ["userId": user.userId]
-          )
-        }
+  /// Who reacted, newest first; choosing someone opens their profile.
+  static func reactorsMenu(for users: [ReactionUser]) -> UIMenu {
+    let currentUserId = Auth.shared.getCurrentUserId()
+    let userActions = users.sorted { $0.reactedAt > $1.reactedAt }.map { user in
+      let avatarImage: UIImage = if let userInfo = user.userInfo {
+        createAvatarImage(for: userInfo)
+      } else {
+        UIImage(systemName: "person.circle") ?? createDefaultAvatar()
       }
 
-      return UIMenu(children: userActions)
+      let userName = if let currentUserId, user.userId == currentUserId {
+        "You"
+      } else {
+        user.displayName
+      }
+
+      return UIAction(
+        title: userName,
+        subtitle: timestampString(for: user.reactedAt),
+        image: avatarImage
+      ) { _ in
+        NotificationCenter.default.post(
+          name: Notification.Name("NavigateToUser"),
+          object: nil,
+          userInfo: ["userId": user.userId]
+        )
+      }
     }
+
+    return UIMenu(children: userActions)
   }
 
   override func contextMenuInteraction(
@@ -525,7 +527,7 @@ class MessageReactionView: UIControl, UIGestureRecognizerDelegate {
     configureContainerAppearance()
   }
 
-  private func createAvatarImage(for userInfo: UserInfo) -> UIImage {
+  private static func createAvatarImage(for userInfo: UserInfo) -> UIImage {
     // Try to get an already loaded image first
     if let photo = userInfo.profilePhoto?.first {
       if let localUrl = photo.getLocalURL() {
@@ -553,7 +555,7 @@ class MessageReactionView: UIControl, UIGestureRecognizerDelegate {
     return createInitialsAvatar(for: userInfo, size: Constants.menuAvatarSize)
   }
 
-  private func createInitialsAvatar(for userInfo: UserInfo, size: CGFloat) -> UIImage {
+  private static func createInitialsAvatar(for userInfo: UserInfo, size: CGFloat) -> UIImage {
     let user = userInfo.user
     let nameForInitials = AvatarColorUtility.formatNameForHashing(
       firstName: user.firstName,
@@ -612,7 +614,7 @@ class MessageReactionView: UIControl, UIGestureRecognizerDelegate {
     return image.withRenderingMode(.alwaysOriginal)
   }
 
-  private func resizeImage(_ image: UIImage, to size: CGSize) -> UIImage {
+  private static func resizeImage(_ image: UIImage, to size: CGSize) -> UIImage {
     let renderer = UIGraphicsImageRenderer(size: size)
     let resizedImage = renderer.image { _ in
       let rect = CGRect(origin: .zero, size: size)
@@ -627,13 +629,13 @@ class MessageReactionView: UIControl, UIGestureRecognizerDelegate {
     return resizedImage.withRenderingMode(.alwaysOriginal)
   }
 
-  private func createDefaultAvatar() -> UIImage {
+  private static func createDefaultAvatar() -> UIImage {
     // Implement the logic to create a default avatar image
     // This is a placeholder and should be replaced with the actual implementation
     UIImage(systemName: "person.circle") ?? UIImage()
   }
 
-  private func timestampString(for date: Date) -> String {
+  private static func timestampString(for date: Date) -> String {
     "\(Self.menuDateFormatter.string(from: date)), \(Self.menuTimeFormatter.string(from: date))"
   }
 

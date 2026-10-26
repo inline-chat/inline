@@ -117,12 +117,20 @@ final class NewVideoView: UIView {
   }
 
   private var fullMessage: FullMessage
-  private let maxWidth: CGFloat = 280
-  private let maxHeight: CGFloat = 400
-  private let minWidth: CGFloat = 180
+  private let maxWidth = NewPhotoView.maximumWidth
+  private let maxHeight = NewPhotoView.maximumHeight
+  private let minWidth = NewPhotoView.minimumWidth
   private let cornerRadius: CGFloat = 16.0
   private let maskLayer = CAShapeLayer()
   private var imageConstraints: [NSLayoutConstraint] = []
+  /// The size the next message view planned for this video. Its planner shrinks media to fit
+  /// narrow rows, so the view takes this size instead of its own when set.
+  var plannedSize: CGSize? {
+    didSet {
+      if plannedSize != oldValue { setupVideoConstraints() }
+    }
+  }
+
   private var downloadProgressCancellable: AnyCancellable?
   private var uploadProgressCancellable: AnyCancellable?
   private var uploadProgressBindingTask: Task<Void, Never>?
@@ -305,6 +313,19 @@ final class NewVideoView: UIView {
   // MARK: - Setup
 
   private func calculateImageDimensions(width: Int, height: Int) -> ImageDimensions {
+    let size = Self.displaySize(width: width, height: height)
+    return ImageDimensions(width: size.width, height: size.height)
+  }
+
+  /// The size this view gives a `width`×`height` video in a bubble; the next message view plans
+  /// with it. Videos without a known size use the minimum width square.
+  static func displaySize(width: Int?, height: Int?) -> CGSize {
+    let maxWidth = NewPhotoView.maximumWidth
+    let maxHeight = NewPhotoView.maximumHeight
+    let minWidth = NewPhotoView.minimumWidth
+    guard let width, let height, width > 0, height > 0 else {
+      return CGSize(width: minWidth, height: minWidth)
+    }
     let aspectRatio = CGFloat(width) / CGFloat(height)
 
     var calculatedWidth: CGFloat
@@ -333,7 +354,7 @@ final class NewVideoView: UIView {
       calculatedHeight = calculatedWidth / aspectRatio
     }
 
-    return ImageDimensions(width: calculatedWidth, height: calculatedHeight)
+    return CGSize(width: calculatedWidth, height: calculatedHeight)
   }
 
   private func setupVideoConstraints() {
@@ -349,8 +370,8 @@ final class NewVideoView: UIView {
     else {
       let size = minWidth
       imageConstraints = [
-        widthAnchor.constraint(equalToConstant: size),
-        heightAnchor.constraint(equalToConstant: size),
+        widthAnchor.constraint(equalToConstant: plannedSize?.width ?? size),
+        heightAnchor.constraint(equalToConstant: plannedSize?.height ?? size),
 
         thumbnailView.topAnchor.constraint(equalTo: topAnchor),
         thumbnailView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -361,7 +382,8 @@ final class NewVideoView: UIView {
       return
     }
 
-    let dimensions = calculateImageDimensions(width: width, height: height)
+    let dimensions = plannedSize.map { ImageDimensions(width: $0.width, height: $0.height) }
+      ?? calculateImageDimensions(width: width, height: height)
     let widthConstraint = widthAnchor.constraint(equalToConstant: dimensions.width)
     let heightConstraint = heightAnchor.constraint(equalToConstant: dimensions.height)
 

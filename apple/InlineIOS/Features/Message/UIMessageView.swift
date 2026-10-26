@@ -109,66 +109,16 @@ class UIMessageView: UIView {
     return theme.primary.uiColor
   }
 
-  private var forwardHeaderTitle: String {
-    if message.forwardFromPeerThreadId != nil {
-      let title = fullMessage.forwardFromChatInfo?.title
-      return (title?.isEmpty == false) ? title! : "Chat"
-    }
-
-    if message.forwardFromPeerUserId != nil {
-      if let forwardUserInfo = fullMessage.forwardFromUserInfo {
-        return forwardUserInfo.user.shortDisplayName
-      }
-
-      if let peerUserInfo = fullMessage.forwardFromPeerUserInfo {
-        return peerUserInfo.user.shortDisplayName
-      }
-    }
-
-    return "User"
-  }
-
   private var forwardHeaderIsPrivate: Bool {
-    if message.forwardFromPeerThreadId != nil {
-      return fullMessage.forwardFromChatInfo == nil
-    }
-
-    if message.forwardFromPeerUserId != nil {
-      if fullMessage.forwardFromUserInfo != nil {
-        return false
-      }
-
-      if fullMessage.forwardFromPeerUserInfo != nil {
-        return false
-      }
-      return true
-    }
-
-    return true
+    fullMessage.forwardHeaderIsPrivate
   }
 
   var forwardHeaderText: String {
-    if forwardHeaderIsPrivate {
-      return "Forwarded from a private chat"
-    }
-    return "Forwarded from: \(forwardHeaderTitle)"
-  }
-
-  private var isForwardFromSelfDm: Bool {
-    guard let forwardFromUserId = message.forwardFromUserId else { return false }
-    let currentUserId = Auth.shared.getCurrentUserId() ?? 0
-    guard forwardFromUserId == currentUserId else { return false }
-    if message.forwardFromPeerUserId != nil {
-      return true
-    }
-    if let forwardChat = fullMessage.forwardFromChatInfo, forwardChat.type == .privateChat {
-      return true
-    }
-    return false
+    fullMessage.forwardHeaderText
   }
 
   var shouldShowForwardHeader: Bool {
-    message.forwardFromUserId != nil && !isForwardFromSelfDm
+    fullMessage.showsForwardHeader
   }
 
   var message: Message {
@@ -829,67 +779,11 @@ class UIMessageView: UIView {
   }
 
   private func makeURLPreviewExclusionAction(for attachment: FullAttachment) -> URLPreviewView.NeverShowPreviewAction? {
-    guard let url = attachment.urlPreview?.openURL else { return nil }
-    guard let context = SpaceUrlPreviewExclusionAccess.context(peer: message.peerId, url: url) else { return nil }
-
-    return URLPreviewView.NeverShowPreviewAction(host: context.pattern.host) { [weak self] in
-      self?.addURLPreviewExclusion(context)
-    }
-  }
-
-  private func addURLPreviewExclusion(_ context: SpaceUrlPreviewExclusionContext) {
-    let peerId = message.peerId
-    let messageId = message.messageId
-
-    Task {
-      do {
-        _ = try await Api.realtime.send(.addSpaceUrlPreviewExclusion(
-          spaceId: context.spaceId,
-          host: context.pattern.host,
-          pathPrefix: nil,
-          peerId: peerId,
-          messageId: messageId
-        ))
-      } catch {
-        Log.shared.error("Failed to exclude URL preview host", error: error)
-        await MainActor.run {
-          ToastManager.shared.showToast(
-            "Update failed",
-            type: .error,
-            systemImage: "exclamationmark.triangle"
-          )
-        }
-      }
-    }
+    MessageViewActions.neverShowPreviewAction(for: attachment, in: message)
   }
 
   private func removeURLPreviewAttachment(_ attachment: FullAttachment) {
-    guard let attachmentId = attachment.attachment.attachmentId else {
-      Log.shared.error("Missing URL preview attachment id for deletion")
-      return
-    }
-
-    let peerId = message.peerId
-    let messageId = message.messageId
-
-    Task {
-      do {
-        _ = try await Api.realtime.send(.deleteMessageAttachment(
-          peerId: peerId,
-          messageId: messageId,
-          attachmentId: attachmentId
-        ))
-      } catch {
-        Log.shared.error("Failed to remove URL preview attachment", error: error)
-        await MainActor.run {
-          ToastManager.shared.showToast(
-            "Remove failed",
-            type: .error,
-            systemImage: "exclamationmark.triangle"
-          )
-        }
-      }
-    }
+    MessageViewActions.removeURLPreview(attachment, from: message)
   }
 
   private func addURLPreviewView(for attachment: FullAttachment, to stack: UIStackView) {
@@ -1422,56 +1316,7 @@ class UIMessageView: UIView {
   }
 
   @objc  func handleForwardHeaderTap() {
-    guard let forwardedMessageId = message.forwardFromMessageId else { return }
-
-    var forwardPeer: Peer?
-    if let peerUserId = message.forwardFromPeerUserId {
-      let currentUserId = Auth.shared.getCurrentUserId()
-      if let senderId = message.forwardFromUserId, senderId != currentUserId {
-        forwardPeer = .user(id: senderId)
-      } else {
-        forwardPeer = .user(id: peerUserId)
-      }
-    } else if let threadId = message.forwardFromPeerThreadId {
-      forwardPeer = .thread(id: threadId)
-    }
-
-    if forwardHeaderIsPrivate,
-       let forwardPeer,
-       let userId = forwardPeer.asUserId(),
-       forwardPeer != message.peerId
-    {
-      NotificationCenter.default.post(
-        name: Notification.Name("NavigateToForwardDestination"),
-        object: nil,
-        userInfo: ["peerUserId": userId]
-      )
-      return
-    }
-
-    if forwardPeer == nil || forwardPeer == message.peerId {
-      NotificationCenter.default.post(
-        name: Notification.Name("ScrollToRepliedMessage"),
-        object: nil,
-        userInfo: ["repliedToMessageId": forwardedMessageId, "chatId": message.chatId]
-      )
-      return
-    }
-
-    if let forwardPeer {
-      var userInfo: [AnyHashable: Any] = ["messageId": forwardedMessageId]
-      if let userId = forwardPeer.asUserId() {
-        userInfo["peerUserId"] = userId
-      }
-      if let threadId = forwardPeer.asThreadId() {
-        userInfo["peerThreadId"] = threadId
-      }
-      NotificationCenter.default.post(
-        name: Notification.Name("NavigateToForwardedMessage"),
-        object: nil,
-        userInfo: userInfo
-      )
-    }
+    MessageViewActions.openForwardSource(of: fullMessage)
   }
 
   @objc func handleEmbedViewTap() {

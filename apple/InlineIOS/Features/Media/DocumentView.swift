@@ -151,6 +151,19 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
   // MARK: - Setup & helpers
 
+  /// Height of this view as its stacks lay it out: the 38 pt icon below a 2 pt top inset.
+  static let preferredHeight: CGFloat = 40
+
+  /// Width of this view for a file, as its stacks lay it out; the next message view plans with
+  /// it. The size label reserves one and a half times its text, as `setupContent` does.
+  static func preferredWidth(fileName: String?, size: Int?) -> CGFloat {
+    let name = (fileName ?? "Unknown File") as NSString
+    let sizeText = FileHelpers.formatFileSize(UInt64(size ?? 0)) as NSString
+    let nameWidth = name.size(withAttributes: [.font: UIFont.systemFont(ofSize: 15)]).width
+    let sizeWidth = sizeText.size(withAttributes: [.font: UIFont.systemFont(ofSize: 13)]).width * 1.5
+    return ceil(38 + 8 + max(nameWidth, sizeWidth) + 4)
+  }
+
   override var intrinsicContentSize: CGSize {
     let targetSize = CGSize(
       width: UIView.layoutFittingCompressedSize.width,

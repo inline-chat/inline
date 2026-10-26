@@ -2,6 +2,13 @@ import InlineKit
 import UIKit
 
 final class ReplyThreadSummaryView: UIControl {
+  static var minimumWidth: CGFloat { Constants.minWidth }
+
+  /// Height for a summary with or without a title, as `updateTitle` sets it.
+  static func preferredHeight(title: String?) -> CGFloat {
+    title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? Constants.titledHeight : Constants.height
+  }
+
   private enum Constants {
     static let height: CGFloat = 36
     static let titledHeight: CGFloat = 52

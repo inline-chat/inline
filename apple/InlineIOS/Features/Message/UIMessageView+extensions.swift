@@ -287,7 +287,7 @@ final class MessageBubbleView: UIView {
 
 /// A nine-slice alpha mask keeps corners and the tail fixed while UIKit interpolates
 /// the fill's bounds. No path construction or bitmap rendering occurs during a resize.
-private final class MessageBubbleFillView: UIView {
+final class MessageBubbleFillView: UIView {
   override class var layerClass: AnyClass { CAGradientLayer.self }
 
   var gradient: CAGradientLayer { layer as! CAGradientLayer }
@@ -343,7 +343,7 @@ private final class MessageBubbleFillView: UIView {
   }
 }
 
-private extension UIColor {
+extension UIColor {
   func mixedWithWhite(alpha: CGFloat) -> UIColor {
     let fraction = min(max(alpha, 0), 1)
     guard fraction > 0 else { return self }
