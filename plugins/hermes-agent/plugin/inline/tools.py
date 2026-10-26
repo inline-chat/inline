@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections import OrderedDict
 import os
 import re
 import urllib.error
@@ -77,6 +78,35 @@ INLINE_PLATFORM_GUIDANCE = (
     "Use <footer>Attribution or brief metadata</footer> for a short footer."
 )
 
+# Where each turn's triggering message physically lives, and who sent it. Hermes tells tools
+# the session's chat and message id, but a thread's opener is keyed on the thread while its
+# message lives in the parent chat, so "this message" must be paired with its own chat.
+_turn_messages: "OrderedDict[tuple[str, str, str, str], Dict[str, Any]]" = OrderedDict()
+_TURN_MESSAGES_MAX = 1000
+
+
+def remember_turn_message(*, session_chat_id: str, thread_id: str, message_id: str, chat_id: str, sender_id: str, sender_is_bot: bool) -> None:
+    key = (str(hermes_home()), str(session_chat_id or ""), str(thread_id or ""), str(message_id or ""))
+    _turn_messages[key] = {"chatId": str(chat_id), "senderId": str(sender_id or ""), "senderIsBot": bool(sender_is_bot)}
+    _turn_messages.move_to_end(key)
+    while len(_turn_messages) > _TURN_MESSAGES_MAX:
+        _turn_messages.popitem(last=False)
+
+
+def _current_turn() -> Dict[str, Any]:
+    """This turn's message: its id, the chat it lives in, and its sender when known."""
+    message_id = _session_message_id()
+    session_chat = _session_chat_id(prefer_thread=False)
+    thread_id = _inline_id(_session_env("HERMES_SESSION_THREAD_ID", ""))
+    known = _turn_messages.get((str(hermes_home()), session_chat, thread_id, message_id)) or {}
+    return {
+        "messageId": message_id,
+        "chatId": known.get("chatId") or session_chat,
+        "senderId": known.get("senderId") or "",
+        "senderIsBot": known.get("senderIsBot"),
+    }
+
+
 # Live sidecars by profile home: one gateway process can serve several profiles,
 # and a tool call must reach the sidecar of the bot it runs for.
 _sidecars: Dict[str, Dict[str, Any]] = {}
@@ -97,7 +127,10 @@ _ACTION_MANIFEST = [
     ("unpin_message", "(chat_id?|user_id?, message_id?)", "Unpin an Inline message for the conversation."),
     ("list_pins", "(chat_id?)", "List pinned Inline message IDs for a chat or reply thread."),
     ("create_thread", "(parent_chat_id?, parent_message_id?, title?)", "Create an Inline reply thread."),
-    ("create_chat", "(title, space_id?, participant_user_ids?, is_public?)", "Create a top-level Inline thread/chat."),
+    ("create_chat", "(title, space_id?, participant_user_ids?, is_public?, include_requester?)", "Create a top-level Inline thread/chat. A private chat includes the person who asked unless include_requester is false."),
+    ("add_participants", "(chat_id?, user_ids)", "Add people or agents to a chat or thread you manage."),
+    ("update_chat", "(chat_id?, title?, emoji?)", "Rename a chat or thread, or change its emoji."),
+    ("delete_chat", "(chat_id)", "Delete a chat or thread you created. This can't be undone."),
     ("create_agent", "(name, skill_key?, instructions?)", "Create a named Inline Agent backed by this bot."),
     ("get_agent", "(agent_id)", "Inspect one Agent backed by this bot."),
     ("list_agents", "()", "List Agents backed by this bot."),
@@ -232,7 +265,7 @@ INLINE_TOOL_SCHEMA = {
                 "type": "string",
                 "description": "Parent message ID for create_thread. Defaults to the triggering message when available.",
             },
-            "title": {"type": "string", "description": "Thread title. Required for create_chat and optional for create_thread."},
+            "title": {"type": "string", "description": "Thread title. Required for create_chat, optional for create_thread, and the new name for update_chat."},
             "name": {"type": "string", "description": "Agent name for create_agent."},
             "agent_id": {"type": "string", "description": "Globally unique Inline Agent ID for get_agent, update_agent, or delete_agent."},
             "handle": {"type": "string", "description": "Optional Agent handle."},
@@ -282,6 +315,8 @@ INLINE_TOOL_SCHEMA = {
             "offset_id": {"type": "string", "description": "Offset message ID for search_messages pagination."},
             "kind": {"type": "string", "enum": _PRESENCE_KINDS, "description": "Bot avatar presence/status kind."},
             "comment": {"type": "string", "description": "Optional bot avatar presence/status message."},
+            "user_ids": {"type": "array", "items": {"type": "string"}, "description": "add_participants: Inline user IDs of the people or agents to add."},
+            "include_requester": {"type": "boolean", "description": "create_chat: include the person who asked (default true for private chats). Set false only for a deliberately bot-only chat."},
             "mode": {"type": "string", "enum": ["following", "unfollowed"], "description": "set_follow_mode: following joins the thread's conversation; unfollowed limits you to mentions and replies."},
         },
         "required": ["action"],
@@ -381,9 +416,10 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
         }
 
     if action in {"add_reaction", "remove_reaction"}:
+        target, message_id = _message_target(args)
         body = {
-            "target": _target(args),
-            "messageId": _message_id_or_current(args),
+            "target": target,
+            "messageId": message_id,
             "emoji": _required_str(args, "emoji", max_chars=64),
         }
         if action == "remove_reaction":
@@ -391,16 +427,12 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
         return "/reaction", body
 
     if action == "get_reactions":
-        return "/reactions", {
-            "target": _target(args),
-            "messageId": _message_id_or_current(args),
-        }
+        target, message_id = _message_target(args)
+        return "/reactions", {"target": target, "messageId": message_id}
 
     if action in {"pin_message", "unpin_message"}:
-        body = {
-            "target": _target(args),
-            "messageId": _message_id_or_current(args),
-        }
+        target, message_id = _message_target(args)
+        body = {"target": target, "messageId": message_id}
         if action == "unpin_message":
             body["unpin"] = True
         return "/pin", body
@@ -409,11 +441,15 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
         return "/pins", {"target": _target(args)}
 
     if action == "create_thread":
-        parent_chat_id = _inline_id(args.get("parent_chat_id")) or _session_chat_id(prefer_thread=False)
+        turn = _current_turn()
+        parent_chat_id = _inline_id(args.get("parent_chat_id")) or turn["chatId"]
         if not parent_chat_id:
             raise InlineToolError("create_thread requires parent_chat_id or current Inline chat context", "bad_format")
         body = {"parentChatId": parent_chat_id}
-        parent_message_id = _inline_id(args.get("parent_message_id")) or _session_message_id()
+        # Message ids are per chat: anchor on this turn's message only inside its own chat.
+        parent_message_id = _inline_id(args.get("parent_message_id")) or (
+            turn["messageId"] if parent_chat_id == turn["chatId"] else ""
+        )
         if parent_message_id:
             body["parentMessageId"] = parent_message_id
         for key in ("title", "description", "emoji"):
@@ -436,12 +472,40 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
                 raise InlineToolError("public create_chat requires space_id", "bad_format")
             if participant_user_ids:
                 raise InlineToolError("public create_chat cannot include participant_user_ids", "bad_format")
+        if not body["isPublic"] and _bool(args.get("include_requester"), True):
+            # The person who asked can open the chat the agent made for them (Jack, J13).
+            turn = _current_turn()
+            requester = _inline_id(turn["senderId"])
+            if requester and turn["senderIsBot"] is False and requester not in participant_user_ids:
+                participant_user_ids = [requester, *participant_user_ids]
         body["participantUserIds"] = participant_user_ids
         for key, limit in (("description", 1000), ("emoji", 16)):
             value = _str(args.get(key))
             if value:
                 body[key] = _truncate(value, limit)
         return "/create-chat", body
+
+    if action == "add_participants":
+        user_ids = _id_list(args.get("user_ids"), max_items=50)
+        if not user_ids:
+            raise InlineToolError("add_participants requires user_ids", "bad_format")
+        return "/add-participants", {"chatId": _chat_id_or_current(args), "userIds": user_ids}
+
+    if action == "update_chat":
+        body = {"chatId": _chat_id_or_current(args)}
+        title = _str(args.get("title"))
+        emoji = _str(args.get("emoji"))
+        if title:
+            body["title"] = _truncate(title, 200)
+        if emoji:
+            body["emoji"] = _truncate(emoji, 16)
+        if len(body) == 1:
+            raise InlineToolError("update_chat requires title or emoji", "bad_format")
+        return "/update-chat", body
+
+    if action == "delete_chat":
+        # Deleting is never implied by the current chat: name it.
+        return "/delete-chat", {"chatId": _required_id(args, "chat_id")}
 
     if action == "create_agent":
         body = {"name": _required_str(args, "name", max_chars=256)}
@@ -637,11 +701,27 @@ def _message_ids(args: Dict[str, Any]) -> list[str]:
     return ids
 
 
-def _message_id_or_current(args: Dict[str, Any]) -> str:
-    message_id = _inline_id(args.get("message_id")) or _session_message_id()
-    if not message_id:
+def _message_target(args: Dict[str, Any]) -> tuple[Dict[str, str], str]:
+    """Target and message id; "this message" always goes with the chat it lives in."""
+    explicit = _inline_id(args.get("message_id"))
+    if explicit:
+        return _target(args), explicit
+    turn = _current_turn()
+    if not turn["messageId"]:
         raise InlineToolError("message_id is required outside an Inline message context", "bad_format")
-    return message_id
+    own_chat = {"chatId": turn["chatId"]} if turn["chatId"] else None
+    if (_inline_id(args.get("chat_id")) or _inline_id(args.get("user_id"))) and _target(args) != own_chat:
+        raise InlineToolError("message_id is required when targeting a different chat", "bad_format")
+    if own_chat is None:
+        raise InlineToolError("message_id is required outside an Inline message context", "bad_format")
+    return own_chat, turn["messageId"]
+
+
+def _chat_id_or_current(args: Dict[str, Any]) -> str:
+    chat_id = _inline_id(args.get("chat_id")) or _session_chat_id(prefer_thread=True)
+    if not chat_id:
+        raise InlineToolError("chat_id is required outside an Inline chat", "bad_format")
+    return chat_id
 
 
 def _message_actions(args: Dict[str, Any]) -> Optional[Dict[str, Any]]:

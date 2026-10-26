@@ -49968,6 +49968,15 @@ async function handleRequest(req, res) {
     case "/create-subthread":
       await endpointCreateSubthread(res, body);
       return;
+    case "/add-participants":
+      await endpointAddParticipants(res, body);
+      return;
+    case "/update-chat":
+      await endpointUpdateChat(res, body);
+      return;
+    case "/delete-chat":
+      await endpointDeleteChat(res, body);
+      return;
     case "/create-chat":
       await endpointCreateChat(res, body);
       return;
@@ -50356,6 +50365,45 @@ async function endpointCreateSubthread(res, body) {
       chatId: subthread?.id?.toString() ?? null
     }
   });
+}
+async function endpointAddParticipants(res, body) {
+  const record2 = asRecord(body);
+  const chatId = readRequiredInlineId(record2, "chatId");
+  const userIds = readInlineIdArray(record2, "userIds", 50, true);
+  const added = [];
+  for (const userId of userIds) {
+    await client.invokeUncheckedRaw(Method.ADD_CHAT_PARTICIPANT, {
+      oneofKind: "addChatParticipant",
+      addChatParticipant: { chatId, userId }
+    });
+    added.push(userId.toString());
+  }
+  writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), addedUserIds: added } });
+}
+async function endpointUpdateChat(res, body) {
+  const record2 = asRecord(body);
+  const chatId = readRequiredInlineId(record2, "chatId");
+  const title = readOptionalString(record2, "title");
+  const emoji = readOptionalString(record2, "emoji");
+  if (title === undefined && emoji === undefined) {
+    throw new SidecarError("update-chat requires title or emoji", "bad_format");
+  }
+  const result = await client.invokeUncheckedRaw(Method.UPDATE_CHAT_INFO, {
+    oneofKind: "updateChatInfo",
+    updateChatInfo: { chatId, ...title !== undefined ? { title } : {}, ...emoji !== undefined ? { emoji } : {} }
+  });
+  const typed = result;
+  const chat = typed.oneofKind === "updateChatInfo" ? typed.updateChatInfo?.chat : undefined;
+  writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), chat: safeJson(chat ?? null) } });
+}
+async function endpointDeleteChat(res, body) {
+  const record2 = asRecord(body);
+  const chatId = readRequiredInlineId(record2, "chatId");
+  await client.invokeUncheckedRaw(Method.DELETE_CHAT, {
+    oneofKind: "deleteChat",
+    deleteChat: { peerId: inputPeerFromTarget({ chatId }) }
+  });
+  writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), deleted: true } });
 }
 async function endpointCreateChat(res, body) {
   const record2 = asRecord(body);

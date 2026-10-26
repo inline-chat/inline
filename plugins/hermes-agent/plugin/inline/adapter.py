@@ -2785,8 +2785,17 @@ class InlineAdapter(BasePlatformAdapter):
                 "callback_data_base64": str(agent_action.get("dataBase64") or ""),
             }
 
+        session_chat_id = _session_chat_id(chat_id, chat_type, thread_id, parent_chat_id)
+        try:
+            from . import tools as _inline_tools
+            _inline_tools.remember_turn_message(
+                session_chat_id=session_chat_id, thread_id=str(thread_id or ""), message_id=msg_id,
+                chat_id=chat_id, sender_id=from_id, sender_is_bot=sender_profile.get("bot") is True,
+            )
+        except Exception:
+            logger.debug("[inline] failed to record the turn's message for tools", exc_info=True)
         source = self.build_source(
-            chat_id=_session_chat_id(chat_id, chat_type, thread_id, parent_chat_id),
+            chat_id=session_chat_id,
             chat_name=chat_name,
             chat_type=chat_type,
             user_id=from_id,

@@ -327,6 +327,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     case "/create-subthread":
       await endpointCreateSubthread(res, body)
       return
+    case "/add-participants":
+      await endpointAddParticipants(res, body)
+      return
+    case "/update-chat":
+      await endpointUpdateChat(res, body)
+      return
+    case "/delete-chat":
+      await endpointDeleteChat(res, body)
+      return
     case "/create-chat":
       await endpointCreateChat(res, body)
       return
@@ -772,6 +781,50 @@ async function endpointCreateSubthread(res: ServerResponse, body: unknown) {
       chatId: subthread?.id?.toString() ?? null,
     },
   })
+}
+
+// Chat management goes through the same server operations as the apps, so the server's own
+// permission checks decide what a bot may change.
+async function endpointAddParticipants(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const chatId = readRequiredInlineId(record, "chatId")
+  const userIds = readInlineIdArray(record, "userIds", 50, true)
+  const added: string[] = []
+  for (const userId of userIds) {
+    await client.invokeUncheckedRaw(Method.ADD_CHAT_PARTICIPANT, {
+      oneofKind: "addChatParticipant",
+      addChatParticipant: { chatId, userId },
+    })
+    added.push(userId.toString())
+  }
+  writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), addedUserIds: added } })
+}
+
+async function endpointUpdateChat(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const chatId = readRequiredInlineId(record, "chatId")
+  const title = readOptionalString(record, "title")
+  const emoji = readOptionalString(record, "emoji")
+  if (title === undefined && emoji === undefined) {
+    throw new SidecarError("update-chat requires title or emoji", "bad_format")
+  }
+  const result = await client.invokeUncheckedRaw(Method.UPDATE_CHAT_INFO, {
+    oneofKind: "updateChatInfo",
+    updateChatInfo: { chatId, ...(title !== undefined ? { title } : {}), ...(emoji !== undefined ? { emoji } : {}) },
+  })
+  const typed = result as { oneofKind?: string; updateChatInfo?: { chat?: Record<string, unknown> } }
+  const chat = typed.oneofKind === "updateChatInfo" ? typed.updateChatInfo?.chat : undefined
+  writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), chat: safeJson(chat ?? null) } })
+}
+
+async function endpointDeleteChat(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const chatId = readRequiredInlineId(record, "chatId")
+  await client.invokeUncheckedRaw(Method.DELETE_CHAT, {
+    oneofKind: "deleteChat",
+    deleteChat: { peerId: inputPeerFromTarget({ chatId }) },
+  })
+  writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), deleted: true } })
 }
 
 async function endpointCreateChat(res: ServerResponse, body: unknown) {

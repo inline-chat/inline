@@ -419,13 +419,12 @@ Restart the gateway after refreshing the plugin. Version 0.0.19 removes the
 in-chat updater so the same plugin can comply with the catalog's exact-commit
 trust policy. Hermes's own `/update` command is unchanged.
 
-Run `/follow` in an Inline DM, group, or reply thread to explicitly opt into
-eligible unmentioned activity waking Hermes. Run `/unfollow` to explicitly opt
-out; server auto-follow heuristics will not turn following back on, while
-mentions and replies retain their normal relevance behavior. If an otherwise
-implicit follow/reply wake begins with a concrete mention of another person,
-Hermes treats that explicit address as higher priority and does not respond
-unless the bot is also explicitly mentioned.
+Run `/follow` in an Inline group or reply thread to opt into eligible
+unmentioned activity waking Hermes, and `/unfollow` to opt out; mentions and
+replies still reach it. The agent can do the same itself with the `inline`
+tool's `set_follow_mode` action. A message that starts by mentioning someone
+else isn't for Hermes, even if it mentions Hermes later, and a reply to another
+person or bot doesn't wake it unless it mentions Hermes.
 
 The model-callable `inline` tool keeps reply and top-level creation separate:
 `create_thread` creates a reply subthread under the current or explicit parent
@@ -436,6 +435,14 @@ for space-wide visibility. It returns the new chat ID so Hermes can link it in
 the normal reply. Omitted or empty private participants create a conversation
 accessible only to the connected account. Include intended human participants
 explicitly; owning the bot does not grant membership in its private conversations.
+When a person asks for a private chat, `create_chat` adds them automatically;
+pass `include_requester: false` for a deliberately bot-only chat. A thread that
+`create_thread` starts from the current message hangs off that message only in
+its own chat; another parent needs an explicit `parent_message_id`.
+
+`add_participants`, `update_chat` (title or emoji) and `delete_chat` manage
+chats through the same server operations as the apps, so the server decides
+what the bot may change. `delete_chat` always needs an explicit `chat_id`.
 
 The plugin id is `inline`, which is intentionally the same id an eventual
 bundled Hermes adapter should use.

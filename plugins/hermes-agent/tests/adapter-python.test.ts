@@ -1051,6 +1051,43 @@ try:
 
     error_result = json.loads(ctx.tool["handler"]({"action": "missing"}))
     assert "unknown action" in error_result["error"]
+
+    # A thread's opener is keyed on the thread (99) but lives in the parent chat (10):
+    # "this message" goes with its own chat.
+    os.environ["HERMES_SESSION_CHAT_ID"] = "99"
+    os.environ["HERMES_SESSION_THREAD_ID"] = "99"
+    os.environ["HERMES_SESSION_MESSAGE_ID"] = "7"
+    inline_tools.remember_turn_message(session_chat_id="99", thread_id="99", message_id="7", chat_id="10", sender_id="501", sender_is_bot=False)
+    json.loads(ctx.tool["handler"]({"action": "add_reaction", "emoji": "👍"}))
+    assert tool_calls[-1] == ("/reaction", {"target": {"chatId": "10"}, "messageId": "7", "emoji": "👍"})
+    json.loads(ctx.tool["handler"]({"action": "pin_message"}))
+    assert tool_calls[-1] == ("/pin", {"target": {"chatId": "10"}, "messageId": "7"})
+    wrong_chat = json.loads(ctx.tool["handler"]({"action": "pin_message", "chat_id": "55"}))
+    assert "message_id is required" in wrong_chat["error"]
+    # Message ids are per chat: anchor on this message only in its own chat (annotation 22).
+    json.loads(ctx.tool["handler"]({"action": "create_thread", "title": "Follow-up"}))
+    assert tool_calls[-1] == ("/create-subthread", {"parentChatId": "10", "parentMessageId": "7", "title": "Follow-up"})
+    json.loads(ctx.tool["handler"]({"action": "create_thread", "parent_chat_id": "55", "title": "Elsewhere"}))
+    assert tool_calls[-1] == ("/create-subthread", {"parentChatId": "55", "title": "Elsewhere"})
+    # A private chat made for someone includes them (J13); a bot-only chat can opt out.
+    json.loads(ctx.tool["handler"]({"action": "create_chat", "title": "Research", "participant_user_ids": ["700"]}))
+    assert tool_calls[-1][1]["participantUserIds"] == ["501", "700"]
+    json.loads(ctx.tool["handler"]({"action": "create_chat", "title": "Bots", "participant_user_ids": ["700"], "include_requester": False}))
+    assert tool_calls[-1][1]["participantUserIds"] == ["700"]
+    inline_tools.remember_turn_message(session_chat_id="99", thread_id="99", message_id="7", chat_id="10", sender_id="800", sender_is_bot=True)
+    json.loads(ctx.tool["handler"]({"action": "create_chat", "title": "From a bot", "participant_user_ids": ["700"]}))
+    assert tool_calls[-1][1]["participantUserIds"] == ["700"]
+    # Chat management uses the server's own permission checks.
+    json.loads(ctx.tool["handler"]({"action": "add_participants", "user_ids": ["501", "502"]}))
+    assert tool_calls[-1] == ("/add-participants", {"chatId": "99", "userIds": ["501", "502"]})
+    json.loads(ctx.tool["handler"]({"action": "update_chat", "chat_id": "99", "title": "Launch plan"}))
+    assert tool_calls[-1] == ("/update-chat", {"chatId": "99", "title": "Launch plan"})
+    no_change = json.loads(ctx.tool["handler"]({"action": "update_chat", "chat_id": "99"}))
+    assert "requires title or emoji" in no_change["error"]
+    implied_delete = json.loads(ctx.tool["handler"]({"action": "delete_chat"}))
+    assert "chat_id" in implied_delete["error"]
+    json.loads(ctx.tool["handler"]({"action": "delete_chat", "chat_id": "99"}))
+    assert tool_calls[-1] == ("/delete-chat", {"chatId": "99"})
 finally:
     inline_tools._sidecar_call = real_inline_sidecar
     for key, value in saved_session_env.items():
