@@ -66,9 +66,17 @@ type ActivationInfo = {
   credentialState: "not_configured" | "configured_unverified" | "verified" | "invalid" | "unknown"
   credentialBotUserId?: string
   credentialBotUsername?: string
+  /** Whether Inline messages reach the agent now, as Hermes reports it; absent on older adapters. */
+  receiving?: ReceivingInfo
   tokenPresent: boolean
   tokenConfigured: boolean
   installOwnershipAligned: boolean
+}
+
+type ReceivingInfo = {
+  ok: boolean
+  reason: string
+  next: string | null
 }
 
 type TokenInfo = {
@@ -289,6 +297,17 @@ async function inspectInstall(params: {
     const message = "Hermes found the Inline credential, but the requested verification was inconclusive"
     if (params.opts.command === "doctor") issues.push(message)
     else warnings.push(message)
+  }
+  // Installed and configured isn't the same as receiving messages: say so when the gateway
+  // isn't running or Inline isn't connected.
+  if (
+    params.opts.command === "doctor"
+    && activation.receiving
+    && !activation.receiving.ok
+    && activation.credentialState !== "not_configured"
+    && activation.credentialState !== "invalid"
+  ) {
+    issues.push(`Inline messages aren't reaching this agent (${activation.receiving.reason}). ${activation.receiving.next ?? ""}`.trim())
   }
   if (targetExists && !activation.installOwnershipAligned) {
     warnings.push("Installed plugin ownership differs from the Hermes home owner; manual updates may fail until inline-hermes install --force repairs it")
@@ -711,6 +730,7 @@ async function inspectActivation(hermesHome: string, target: string, probeCreden
     credentialState,
     ...(machineCredential.botUserId ? { credentialBotUserId: machineCredential.botUserId } : {}),
     ...(machineCredential.botUsername ? { credentialBotUsername: machineCredential.botUsername } : {}),
+    ...(machineCredential.receiving ? { receiving: machineCredential.receiving } : {}),
     tokenPresent,
     tokenConfigured: machineCredential.configured === false
       ? fallbackConfigured
@@ -769,11 +789,19 @@ async function chownTree(target: string, uid: number, gid: number): Promise<void
 
 type HermesCredentialInspection = {
   compatible?: boolean
+  receiving?: ReceivingInfo
   checked: boolean
   configured: boolean | null
   state: ActivationInfo["credentialState"]
   botUserId?: string
   botUsername?: string
+}
+
+function parseReceiving(value: unknown): ReceivingInfo | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  if (typeof record.ok !== "boolean" || typeof record.reason !== "string") return undefined
+  return { ok: record.ok, reason: record.reason, next: typeof record.next === "string" ? record.next : null }
 }
 
 function inspectHermesCredential(hermesHome: string, probe: boolean, target: string): HermesCredentialInspection {
@@ -810,11 +838,12 @@ function inspectHermesCredential(hermesHome: string, probe: boolean, target: str
   const compatibility = record.compatibility as Record<string, unknown> | undefined
   const compatible = result.status === 0 && compatibility?.ok === true
     && compatibility.pluginPath === safeRealpathSync(target)
+  const receiving = parseReceiving(record.receiving)
   if (!record.configured) {
-    return { compatible, checked: true, configured: false, state: "not_configured" }
+    return { compatible, ...(receiving ? { receiving } : {}), checked: true, configured: false, state: "not_configured" }
   }
   if (!probe) {
-    return { compatible, checked: true, configured: true, state: "configured_unverified" }
+    return { compatible, ...(receiving ? { receiving } : {}), checked: true, configured: true, state: "configured_unverified" }
   }
   const probeResult = record.probe && typeof record.probe === "object" && !Array.isArray(record.probe)
     ? record.probe as Record<string, unknown>
@@ -829,6 +858,7 @@ function inspectHermesCredential(hermesHome: string, probe: boolean, target: str
       : undefined
     return {
       compatible,
+      ...(receiving ? { receiving } : {}),
       checked: true,
       configured: true,
       state: "verified",
@@ -839,7 +869,7 @@ function inspectHermesCredential(hermesHome: string, probe: boolean, target: str
   if (probeResult?.errorKind === "invalid_credential") {
     return { compatible, checked: true, configured: true, state: "invalid" }
   }
-  return { compatible, checked: true, configured: true, state: "unknown" }
+  return { compatible, ...(receiving ? { receiving } : {}), checked: true, configured: true, state: "unknown" }
 }
 
 function safeRealpathSync(target: string): string | null {

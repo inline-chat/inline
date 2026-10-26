@@ -457,6 +457,10 @@ def _status(args) -> int:
     compatibility = _compatibility_status() if getattr(args, "check_compatibility", False) else None
     compatible = compatibility is None or compatibility["ok"]
     ready = compatible and runtime_usable and configured and (not probe_requested or bool(probe and probe.get("ok")))
+    gateway = _gateway_status()
+    receiving = _receiving_status(
+        configured=configured, runtime_usable=runtime_usable, compatible=compatible, probe=probe, gateway=gateway,
+    )
     result = {
         "ok": ready,
         "ready": ready,
@@ -469,7 +473,8 @@ def _status(args) -> int:
         "sidecar": sidecar,
         "node": node,
         "probeRequested": probe_requested,
-        "gateway": _gateway_status(),
+        "gateway": gateway,
+        "receiving": receiving,
         **({"compatibility": compatibility} if compatibility is not None else {}),
         **({"probe": probe} if probe is not None else {}),
     }
@@ -482,6 +487,10 @@ def _status(args) -> int:
         print(f"Inline sidecar usable: {'yes' if sidecar['ok'] else 'no'}")
         print(f"Node available: {_node_status_text(node)}")
         print(f"Inline runtime ready: {'yes' if ready else 'no'}")
+        # "Ready" means installed and configured; this says whether messages arrive now.
+        print(f"Receiving Inline messages: {'yes' if receiving['ok'] else 'no'}")
+        if not receiving["ok"] and configured and receiving["next"]:
+            print(f"Next: {receiving['next']}")
         if not configured:
             print("Next: run `hermes inline setup` for guided bot setup.")
         elif probe_requested:
@@ -538,10 +547,19 @@ def _gateway_status() -> dict:
         from gateway.status import read_runtime_status, get_runtime_status_running_pid
         from hermes_constants import get_hermes_home
 
-        runtime = read_runtime_status()
-        # Also validate this helper contract for an absent runtime: older hosts
-        # lack expected_home and must not claim support until after installation.
-        pid = get_runtime_status_running_pid(runtime if isinstance(runtime, dict) else {}, expected_home=get_hermes_home())
+        home = get_hermes_home()
+        platform_keys = ["inline"]
+        served = _multiplexed_gateway_for(home)
+        if served is not None:
+            # Hermes 0.22+: one gateway serves every profile from the launch profile's
+            # status file, keyed <profile>:inline.
+            pid, runtime, profile_key = served
+            platform_keys = [profile_key, "inline"]
+        else:
+            runtime = read_runtime_status()
+            # Also validate this helper contract for an absent runtime: older hosts
+            # lack expected_home and must not claim support until after installation.
+            pid = get_runtime_status_running_pid(runtime if isinstance(runtime, dict) else {}, expected_home=home)
         if not isinstance(runtime, dict):
             return {"supported": True, "ready": False, "reason": "missing_status"}
         # Return only an opaque generation, never process IDs or raw state.
@@ -552,7 +570,10 @@ def _gateway_status() -> dict:
         generation = hashlib.sha256(f"inline-gateway:{pid}:{start_time}".encode()).hexdigest() if valid_identity else None
         state = runtime.get("gateway_state")
         platforms = runtime.get("platforms")
-        inline = platforms.get("inline") if isinstance(platforms, dict) else None
+        inline = next(
+            (platforms[key] for key in platform_keys if isinstance(platforms, dict) and isinstance(platforms.get(key), dict)),
+            None,
+        )
         platform_state = inline.get("state") if isinstance(inline, dict) else None
         state = state if state in ("starting", "running", "draining", "stopping", "stopped", "startup_failed") else "unknown"
         platform_state = platform_state if platform_state in ("connected", "connecting", "retrying", "fatal", "disconnected") else "unknown"
@@ -574,6 +595,51 @@ def _gateway_status() -> dict:
         # Older Hermes versions may not expose the helpers. Never return raw
         # runtime files or exceptions: they can contain provider/credential data.
         return unavailable
+
+
+def _multiplexed_gateway_for(home) -> "tuple[int, dict, str] | None":
+    """The live multiplexed gateway serving this profile, as (pid, status, platform key)."""
+    try:
+        from gateway.status import multiplexer_liveness_for_profile, profile_name_for_home
+    except ImportError:
+        return None
+    try:
+        served = multiplexer_liveness_for_profile(Path(home))
+        name = profile_name_for_home(Path(home))
+    except Exception:
+        return None
+    if not served or not name:
+        return None
+    pid, runtime = served
+    return pid, runtime, f"{name}:inline"
+
+
+def _receiving_status(*, configured: bool, runtime_usable: bool, compatible: bool, probe: "dict | None", gateway: dict) -> dict:
+    """Whether Inline messages can reach this agent right now, with the first thing to fix.
+
+    Separate from ``ready``, which keeps meaning "installed and configured" for setup.
+    """
+    if not compatible:
+        return {"ok": False, "reason": "incompatible_host", "next": "Update Hermes or the Inline adapter to a supported pair."}
+    if not configured:
+        return {"ok": False, "reason": "not_configured", "next": "Run `hermes inline setup`."}
+    if not runtime_usable:
+        return {"ok": False, "reason": "runtime_unusable", "next": "Run `inline-hermes doctor --json` for the Node or sidecar problem."}
+    if probe is not None and not probe.get("ok"):
+        return {"ok": False, "reason": "credential_rejected", "next": "Check the Inline bot token."}
+    if not gateway.get("supported"):
+        return {"ok": False, "reason": "gateway_unknown", "next": "This Hermes can't report gateway state; check `hermes gateway status`."}
+    if not gateway.get("ready"):
+        reason = str(gateway.get("reason") or "gateway_not_ready")
+        hint = {
+            "missing_status": "Start the gateway: `hermes gateway start`.",
+            "stale_pid": "Start the gateway: `hermes gateway start`.",
+            "gateway_not_running": "Start the gateway: `hermes gateway start`.",
+            "platform_status_stale": "Restart the gateway: `hermes gateway restart`.",
+            "platform_not_connected": "The gateway runs but Inline isn't connected; check `hermes gateway status` and its logs.",
+        }.get(reason, "Check `hermes gateway status`.")
+        return {"ok": False, "reason": reason, "next": hint}
+    return {"ok": True, "reason": "connected", "next": None}
 
 
 def _plugin_version() -> str:

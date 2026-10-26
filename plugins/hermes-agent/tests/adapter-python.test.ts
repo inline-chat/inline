@@ -1141,6 +1141,26 @@ try:
         gateway_runtime["platforms"]["inline"]["state"] = state
         assert inline_cli._gateway_status()["ready"] is False
     gateway_runtime["platforms"]["inline"]["state"] = "connected"
+    # Hermes 0.22 multiplexed gateway: the host status file keys this profile <name>:inline.
+    host_runtime = {"pid": 321, "start_time": 654, "gateway_state": "running", "platforms": {
+        "default:inline": {"state": "connected", "writer_pid": 321, "writer_start_time": 654},
+        "scout:inline": {"state": "disconnected", "writer_pid": 321, "writer_start_time": 654},
+    }}
+    gateway_status.multiplexer_liveness_for_profile = lambda home: (321, host_runtime)
+    gateway_status.profile_name_for_home = lambda home: "scout"
+    multiplexed = inline_cli._gateway_status()
+    assert multiplexed["ready"] is False and multiplexed["reason"] == "platform_not_connected"
+    host_runtime["platforms"]["scout:inline"]["state"] = "connected"
+    assert inline_cli._gateway_status()["ready"] is True
+    del gateway_status.multiplexer_liveness_for_profile
+    del gateway_status.profile_name_for_home
+    # "Ready" stays the setup check; the receiving verdict needs the gateway too.
+    stopped = {"supported": True, "ready": False, "reason": "gateway_not_running"}
+    verdict = inline_cli._receiving_status(configured=True, runtime_usable=True, compatible=True, probe={"ok": True}, gateway=stopped)
+    assert verdict == {"ok": False, "reason": "gateway_not_running", "next": "Start the gateway: \x60hermes gateway start\x60."}
+    connected = {"supported": True, "ready": True, "reason": "ready"}
+    assert inline_cli._receiving_status(configured=True, runtime_usable=True, compatible=True, probe=None, gateway=connected)["ok"] is True
+    assert inline_cli._receiving_status(configured=True, runtime_usable=True, compatible=True, probe={"ok": False}, gateway=connected)["reason"] == "credential_rejected"
     gateway_status.get_runtime_status_running_pid = lambda runtime, expected_home=None: None
     assert inline_cli._gateway_status()["reason"] == "stale_pid"
     gateway_status.read_runtime_status = lambda: None
