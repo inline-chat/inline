@@ -74,6 +74,9 @@ mod reply_threads;
 mod service;
 mod stream_ui;
 mod supervisor;
+// Bridge v2 runtime pieces; wired in behind the per-provider flag.
+#[allow(dead_code)]
+mod v2;
 use allowlist_ui::*;
 use approval_ui::*;
 use copy::{BridgeNotice, failure_message, session_open_notice};
