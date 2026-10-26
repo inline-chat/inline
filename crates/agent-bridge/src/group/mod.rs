@@ -20,6 +20,7 @@ mod intake;
 mod participation;
 mod permissions;
 mod speak_gate;
+mod subthread;
 mod sync;
 
 pub use caps::{
@@ -58,6 +59,7 @@ pub use speak_gate::{
     GateAdmission, GateAvailability, SpeakGate, SpeakGateError, SpeakGateFuture, SpeakGateRequest,
     SpeakVerdict, UnavailableSpeakGate, effective_mode, gate_admission,
 };
+pub use subthread::{Publication, PublicationEffect, PublicationEvent, PublicationState};
 pub use sync::{
     ArchiveEffect, NativeArchive, NativeTitleSource, TitleEffect, TitleEvent, TitleSync,
     TitleSyncPolicy, WorkOrigin, archive_effect,
