@@ -13,7 +13,8 @@
       "inline_nudge",
       "inline_forward",
       "inline_bot_presence",
-      "inline_parent_context"
+      "inline_parent_context",
+      "inline_follow"
     ]
   },
   "configSchema": {
