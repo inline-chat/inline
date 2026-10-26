@@ -66,10 +66,6 @@ public enum AgentWorkFiles {
   /// The bridge answers from the work's own folder; every path in and out is
   /// relative to it. Results are never cached or stored.
   struct BridgeListing: AgentWorkFilesListing {
-    /// The server requires a host ID on every filesystem request; a work's
-    /// listing resolves its machine from the session instead.
-    static let workHostPlaceholder = "work"
-
     @MainActor
     func list(
       peer: Peer,
@@ -85,8 +81,9 @@ public enum AgentWorkFiles {
         method: .requestBotFilesystem,
         input: .requestBotFilesystem(.with {
           $0.peerID = peer.toInputPeer()
-          $0.botUserID = botUserID
-          $0.hostInstallationID = Self.workHostPlaceholder
+          // The server resolves the bot and its machine from the session.
+          $0.botUserID = 0
+          $0.hostInstallationID = ""
           $0.operation = .listWorkFiles
           $0.agentSessionID = agentSessionID
           $0.path = relativePath
