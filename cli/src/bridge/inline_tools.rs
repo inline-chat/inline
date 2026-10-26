@@ -797,6 +797,7 @@ impl InlineToolHost {
                 source_chat_id: request.target.map(|_| request.source_chat_id),
                 temporary_send_date: Some(now_seconds()),
                 has_link: None,
+                ..Default::default()
             })
             .await
             .map(|_| ())

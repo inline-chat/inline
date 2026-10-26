@@ -427,6 +427,7 @@ impl SdkBackend {
             actions: actions.map(message_actions_to_proto),
             initial_agent_context: None,
             source_chat_id: None,
+            ..Default::default()
         };
         let send_result = match self.call_realtime(&session, input).await {
             Ok(result) => result,
@@ -1924,6 +1925,7 @@ impl ClientBackend for SdkBackend {
                 actions: None,
                 initial_agent_context: None,
                 source_chat_id: None,
+                ..Default::default()
             };
             let send_result = match backend.call_realtime(&session, input).await {
                 Ok(result) => result,
@@ -4011,7 +4013,7 @@ impl SdkBackend {
                         Some(proto::message_action_response_ui::Kind::Toast(toast)) => {
                             trimmed_option(Some(toast.text))
                         }
-                        None => None,
+                        Some(proto::message_action_response_ui::Kind::Alert(_)) | None => None,
                     });
                     events.push(ClientEvent::MessageActionAnswered {
                         interaction_id: InlineId::new(update.interaction_id),
@@ -4173,6 +4175,11 @@ fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::UserRemovedFromChat(_) => "user_removed_from_chat",
         Update::Acknowledgement(_) => "acknowledgement",
         Update::DialogTranslation(_) => "dialog_translation",
+        Update::AgentSessionState(_) => "agent_session_state",
+        Update::AgentParticipation(_) => "agent_participation",
+        Update::AgentGrant(_) => "agent_grant",
+        Update::AgentRuntime(_) => "agent_runtime",
+        Update::AgentSessionControl(_) => "agent_session_control",
     }
 }
 
@@ -5165,6 +5172,7 @@ fn message_actions_to_proto(actions: MessageActions) -> proto::MessageActions {
                                 )
                             }
                         }),
+                        ..Default::default()
                     })
                     .collect(),
             })
@@ -5991,6 +5999,8 @@ fn message_action_from_proto(action: &proto::MessageAction) -> crate::MessageAct
     let kind = match action.action {
         Some(proto::message_action::Action::Callback(_)) => "callback",
         Some(proto::message_action::Action::CopyText(_)) => "copy_text",
+        Some(proto::message_action::Action::OpenUrl(_)) => "open_url",
+        Some(proto::message_action::Action::OpenLink(_)) => "open_link",
         None => "unknown",
     };
     crate::MessageActionRecord {
@@ -6269,6 +6279,7 @@ fn edit_message_input(
         entities: None,
         parse_markdown: Some(request.parse_markdown),
         actions: actions.map(message_actions_to_proto),
+        ..Default::default()
     }
 }
 
@@ -6489,6 +6500,7 @@ mod tests {
                                 data: b"private-callback".to_vec(),
                             },
                         )),
+                        ..Default::default()
                     }],
                 }],
             }),
