@@ -215,7 +215,7 @@ final class NextMessageViewPlaygroundController: UIViewController {
           isLastInGroup: false, showsName: true, avatar: .reserved),
       Row(message: message(5, "The bubble below lines up with this one.", from: ava),
           isFirstInGroup: false, avatar: .visible),
-      Row(message: message(6, "سلام! این پیام فارسی است و باید از راست به چپ نمایش داده شود، حتی وقتی چند خط می‌شود.", from: sam)),
+      Row(message: message(6, "سلام! این پیام فارسی است و باید از راست به چپ نمایش داده شود، حتی وقتی چند خط می\u{200C}شود.", from: sam)),
       Row(message: message(7, "😀", from: me, out: true)),
       Row(message: styled(8)),
       Row(message: message(9, "This one failed to send.", from: me, out: true, status: .failed)),
