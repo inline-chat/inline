@@ -68,8 +68,15 @@ final class AgentThreadToolbarModel: ObservableObject {
       scheduling: .immediate,
       onError: { _ in },
       onChange: { [weak self] snapshot in
-        Task { @MainActor [weak self] in
-          self?.apply(snapshot)
+        // `.immediate` delivers the initial value synchronously on the main
+        // queue; applying it in place lets the toolbar and Compose render the
+        // thread's Agent on their first frame instead of after a hop.
+        if Thread.isMainThread {
+          MainActor.assumeIsolated { self?.apply(snapshot) }
+        } else {
+          Task { @MainActor [weak self] in
+            self?.apply(snapshot)
+          }
         }
       }
     )
@@ -230,7 +237,9 @@ final class AgentThreadToolbarModel: ObservableObject {
 
     guard loadedIdentity != identity else { return }
     loadedIdentity = identity
-    catalog = nil
+    // The durable catalog row is tiny; reading it here keeps titles on the
+    // first frame. The load below still refreshes it from the harness.
+    catalog = AgentConfigurationCatalogStore.shared.cachedSnapshot(botUserID: identity.botUserID)
     canEditProject = false
     canEdit = false
     editabilityResolved = false
