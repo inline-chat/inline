@@ -133,6 +133,18 @@ final class ComposeAgentChainModel: ObservableObject {
     isChainOpen.toggle()
   }
 
+  /// Inserts text at the composer's cursor. Set by Compose.
+  var onInsertText: ((String) -> Void)?
+
+  /// The work in this chat that file references resolve against.
+  var workSessionID: Int64? {
+    target.flatMap { AgentWorkStateStore.shared.state(peer: peer, botUserID: $0.botUserID)?.sessionID }
+  }
+
+  func insertFileReference(_ entry: AgentWorkFileEntry) {
+    onInsertText?(AgentWorkFiles.referenceText(for: entry) + " ")
+  }
+
   var showsChain: Bool {
     isAvailable && isChainOpen
   }
@@ -570,6 +582,7 @@ struct ComposeAgentPill: View {
 struct ComposeAgentChainBar: View {
   @ObservedObject var model: ComposeAgentChainModel
   @State private var isShowingUsage = false
+  @State private var isShowingFiles = false
 
   var body: some View {
     if model.showsChain {
@@ -615,6 +628,29 @@ struct ComposeAgentChainBar: View {
         }
 
         Spacer(minLength: 0)
+
+        Button {
+          isShowingFiles.toggle()
+        } label: {
+          Image(systemName: "doc.badge.plus")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.secondary)
+            .frame(width: 24, height: 24)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Insert file reference")
+        .inlineTooltip(
+          verbatim: "Files",
+          description: "Insert a path from this work's folder.",
+          placement: .above
+        )
+        .popover(isPresented: $isShowingFiles, arrowEdge: .bottom) {
+          ComposeAgentFilePicker(sessionID: model.workSessionID) { entry in
+            model.insertFileReference(entry)
+            isShowingFiles = false
+          }
+        }
 
         Button {
           model.prepareUsage()
@@ -688,6 +724,142 @@ private struct ComposeAgentUsagePopover: View {
           .font(.callout)
           .foregroundStyle(.secondary)
       }
+    }
+  }
+}
+
+/// Searchable picker over the work's folder. It inserts a plain path token,
+/// never a mention entity; nothing it lists is cached.
+@available(macOS 26.0, *)
+private struct ComposeAgentFilePicker: View {
+  let sessionID: Int64?
+  let select: (AgentWorkFileEntry) -> Void
+
+  @State private var query = ""
+  @State private var path = ""
+  @State private var entries: [AgentWorkFileEntry] = []
+  @State private var nextAfter: String?
+  @State private var phase: Phase = .loading
+
+  private enum Phase: Equatable {
+    case loading, loaded, unavailable, noWork, problem(String)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      TextField("Search files", text: $query)
+        .textFieldStyle(.roundedBorder)
+      if !path.isEmpty, query.isEmpty {
+        Button {
+          path = parent(of: path)
+        } label: {
+          Label(path, systemImage: "chevron.left")
+            .lineLimit(1)
+            .truncationMode(.head)
+        }
+        .buttonStyle(.plain)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+      content
+    }
+    .padding(12)
+    .frame(width: 320, height: 300, alignment: .top)
+    .task(id: "\(sessionID ?? 0)|\(path)|\(query)") {
+      await load(after: nil)
+    }
+  }
+
+  @ViewBuilder
+  private var content: some View {
+    switch phase {
+    case .loading where entries.isEmpty:
+      ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+    case .noWork:
+      message("Files appear once the agent has started work in this thread.")
+    case .unavailable:
+      message("This agent can't list its folder yet. Update the Inline CLI on its machine.")
+    case let .problem(text):
+      message(text)
+    default:
+      if entries.isEmpty {
+        message(query.isEmpty ? "This folder is empty." : "No matching files.")
+      } else {
+        List {
+          ForEach(entries) { entry in
+            Button {
+              if entry.isDirectory, query.isEmpty {
+                path = entry.relativePath
+              } else {
+                select(entry)
+              }
+            } label: {
+              Label(query.isEmpty ? entry.name : entry.relativePath, systemImage: entry.isDirectory ? "folder" : "doc")
+                .lineLimit(1)
+                .truncationMode(.middle)
+            }
+            .buttonStyle(.plain)
+          }
+          if let nextAfter {
+            Button("Show more") { Task { await load(after: nextAfter) } }
+              .buttonStyle(.plain)
+              .foregroundStyle(.secondary)
+          }
+        }
+        .listStyle(.plain)
+      }
+    }
+  }
+
+  private func message(_ text: LocalizedStringKey) -> some View {
+    Text(text)
+      .font(.callout)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .multilineTextAlignment(.center)
+  }
+
+  private func message(_ text: String) -> some View {
+    message(LocalizedStringKey(text))
+  }
+
+  private func parent(of path: String) -> String {
+    var components = path.split(separator: "/")
+    _ = components.popLast()
+    return components.joined(separator: "/")
+  }
+
+  @MainActor
+  private func load(after: String?) async {
+    guard let sessionID else {
+      phase = .noWork
+      return
+    }
+    if after == nil {
+      // Debounce typing; a newer task cancels this one.
+      if !query.isEmpty { try? await Task.sleep(for: .milliseconds(180)) }
+      guard !Task.isCancelled else { return }
+      phase = .loading
+    }
+    do {
+      let page = try await AgentWorkFiles.listing.list(
+        agentSessionID: sessionID,
+        relativePath: path,
+        query: query.isEmpty ? nil : query,
+        after: after,
+        limit: 100
+      )
+      guard !Task.isCancelled else { return }
+      entries = after == nil ? page.entries : entries + page.entries
+      nextAfter = page.nextAfter
+      phase = .loaded
+    } catch AgentWorkFilesError.unavailable {
+      phase = .unavailable
+    } catch let AgentWorkFilesError.problem(text) {
+      phase = .problem(text)
+    } catch {
+      guard !Task.isCancelled else { return }
+      phase = .problem(String(localized: "Couldn't list files. Try again."))
     }
   }
 }
