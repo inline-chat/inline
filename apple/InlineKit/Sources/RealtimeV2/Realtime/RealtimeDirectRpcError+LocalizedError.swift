@@ -95,6 +95,8 @@ public enum RealtimeErrorPresentation {
       String(localized: "Imported agent session history cannot be edited or deleted yet.")
     case .mediaNotOwned:
       String(localized: "This media can’t be sent here. Forward the original message instead.")
+    case .agentGrantRequired:
+      String(localized: "You don’t have access to do that for this agent.")
     case .unknown, .UNRECOGNIZED:
       statusFallback(statusCode)
     }

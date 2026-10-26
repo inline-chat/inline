@@ -96,6 +96,10 @@ private enum LocalDataResetPerformer {
       await Drafts2.shared.resetForAccountChange()
       await Transactions.shared.clearAllAndWait()
       await AgentConfigurationCatalogStore.shared.clear()
+      await MainActor.run {
+        AgentWorkStateStore.shared.removeAll()
+        AgentGrantStore.shared.removeAll()
+      }
       ObjectCache.shared.clear()
 
       do {

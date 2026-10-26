@@ -711,7 +711,14 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
             blocks: quote.children,
             materializedPhotoIDs: &materializedPhotoIDs
           )
-        case .paragraph, .heading, .code, .separator, .footer, .table, .math, nil:
+        case let .callout(callout):
+          try materializeBlockPhotos(
+            db,
+            blocks: callout.children,
+            materializedPhotoIDs: &materializedPhotoIDs
+          )
+        case .paragraph, .heading, .code, .separator, .footer, .table, .math,
+             .diff, .fields, .steps, .meter, .form, nil:
           break
       }
     }

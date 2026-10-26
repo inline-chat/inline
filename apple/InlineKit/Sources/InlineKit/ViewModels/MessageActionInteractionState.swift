@@ -24,11 +24,14 @@ public final class MessageActionInteractionState {
     public let key: LoadingKey
     public let interactionId: Int64
     public let toastText: String?
+    /// A bot's `alert` response, shown as a dialog.
+    public let alert: MessageActionAlertContent?
 
-    public init(key: LoadingKey, interactionId: Int64, toastText: String?) {
+    public init(key: LoadingKey, interactionId: Int64, toastText: String?, alert: MessageActionAlertContent? = nil) {
       self.key = key
       self.interactionId = interactionId
       self.toastText = toastText
+      self.alert = alert
     }
   }
 
@@ -39,6 +42,7 @@ public final class MessageActionInteractionState {
 
   private struct PendingFinish: Sendable {
     let toastText: String?
+    let alert: MessageActionAlertContent?
   }
 
   private var loading: Set<LoadingKey> = []
@@ -79,22 +83,22 @@ public final class MessageActionInteractionState {
     loadingPublisher.send(loading)
 
     if let pendingFinish = pendingFinishByInteraction.removeValue(forKey: interactionId) {
-      complete(interactionId: interactionId, key: key, toastText: pendingFinish.toastText)
+      complete(interactionId: interactionId, key: key, toastText: pendingFinish.toastText, alert: pendingFinish.alert)
     }
   }
 
-  public func finish(interactionId: Int64, toastText: String? = nil) {
+  public func finish(interactionId: Int64, toastText: String? = nil, alert: MessageActionAlertContent? = nil) {
     guard interactionId > 0 else {
       return
     }
 
     guard let key = keyByInteraction[interactionId] else {
-      pendingFinishByInteraction[interactionId] = PendingFinish(toastText: toastText)
+      pendingFinishByInteraction[interactionId] = PendingFinish(toastText: toastText, alert: alert)
       log.trace("Buffered finish for interaction \(interactionId) before mapping was attached")
       return
     }
 
-    complete(interactionId: interactionId, key: key, toastText: toastText)
+    complete(interactionId: interactionId, key: key, toastText: toastText, alert: alert)
   }
 
   public func fail(key: LoadingKey) {
@@ -120,7 +124,12 @@ public final class MessageActionInteractionState {
     )
   }
 
-  private func complete(interactionId: Int64, key: LoadingKey, toastText: String?) {
+  private func complete(
+    interactionId: Int64,
+    key: LoadingKey,
+    toastText: String?,
+    alert: MessageActionAlertContent? = nil
+  ) {
     keyByInteraction.removeValue(forKey: interactionId)
     interactionByKey.removeValue(forKey: key)
     loading.remove(key)
@@ -130,7 +139,8 @@ public final class MessageActionInteractionState {
       AnswerEvent(
         key: key,
         interactionId: interactionId,
-        toastText: toastText
+        toastText: toastText,
+        alert: alert
       )
     )
   }

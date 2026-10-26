@@ -37,6 +37,12 @@ public enum BlockContentNodeKind: Hashable, Sendable {
   case footer
   case quote
   case table
+  case diff
+  case fields
+  case steps
+  case callout
+  case meter
+  case form
 }
 
 public struct BlockContentReconciliation: Equatable, Sendable {
@@ -210,6 +216,18 @@ public enum BlockContentReconciler {
         let identity: Identity? = !cells.isEmpty && header.count == cells.count
           ? .table(header: header, alignments: table.alignments.map(\.rawValue), isRTL: table.isRtl) : nil
         return [Node(path: path, kind: .table, identity: identity)]
+      case .diff:
+        return [Node(path: path, kind: .diff)]
+      case .fields:
+        return [Node(path: path, kind: .fields)]
+      case .steps:
+        return [Node(path: path, kind: .steps)]
+      case let .callout(callout):
+        return [Node(path: path, kind: .callout)] + flatten(callout.children, source: source, parent: path)
+      case .meter:
+        return [Node(path: path, kind: .meter)]
+      case .form:
+        return [Node(path: path, kind: .form)]
       }
     }
   }

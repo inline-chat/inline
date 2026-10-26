@@ -1,4 +1,5 @@
 import Foundation
+import InlineProtocol
 import Testing
 @testable import InlineKit
 
@@ -105,15 +106,46 @@ struct AgentComposeTargetTests {
     ) == nil)
   }
 
-  @Test("work state ignores older revisions and defaults to Detailed")
+  @Test("work state ignores older revisions; output mode falls back to the agent default")
   @MainActor
   func workStateRevisions() {
     let store = AgentWorkStateStore()
-    let key = AgentWorkState.Key(chatID: 1, botUserID: Self.bot)
-    #expect(store.outputMode(chatID: 1, botUserID: Self.bot) == .detailed)
-    store.apply(.init(key: key, runState: .working, outputMode: .friendly, revision: 5))
-    store.apply(.init(key: key, runState: .idle, outputMode: .detailed, revision: 4))
-    #expect(store.state(chatID: 1, botUserID: Self.bot)?.runState == .working)
-    #expect(store.outputMode(chatID: 1, botUserID: Self.bot) == .friendly)
+    let peer = Peer.thread(id: 1)
+    let key = AgentWorkState.Key(peer: peer, botUserID: Self.bot)
+    #expect(store.outputMode(peer: peer, botUserID: Self.bot) == .detailed)
+    store.apply(AgentWorkState(key: key, sessionID: 3, runState: .working, revision: 5))
+    store.apply(AgentWorkState(key: key, sessionID: 3, runState: .idle, revision: 4))
+    #expect(store.state(peer: peer, botUserID: Self.bot)?.runState == .working)
+    store.setDefaultOutputMode(.friendly, botUserID: Self.bot)
+    #expect(store.outputMode(peer: peer, botUserID: Self.bot) == .friendly)
+    store.setOutputModeOverride(.detailed, peer: peer, botUserID: Self.bot)
+    #expect(store.outputMode(peer: peer, botUserID: Self.bot) == .detailed)
+  }
+
+  @Test("grant requirements: owner always qualifies, access needs any grant")
+  func grantRequirements() {
+    let owner = AgentGrantAccess(botUserID: Self.bot, ownerUserID: 1, viewerUserID: 1, operations: [], revision: 1)
+    let teammate = AgentGrantAccess(
+      botUserID: Self.bot, ownerUserID: 1, viewerUserID: 2, operations: [.invoke], revision: 1
+    )
+    let stranger = AgentGrantAccess(botUserID: Self.bot, ownerUserID: 1, viewerUserID: 3, operations: [], revision: 1)
+    #expect(owner.satisfies(.approve))
+    #expect(teammate.satisfies(.access))
+    #expect(!teammate.satisfies(.approve))
+    #expect(!stranger.satisfies(.access))
+    #expect(MessageActionPresentation.disabledReason(
+      requirement: .approve, access: teammate, ownerName: "Bob", botName: "Codex"
+    ) == "Only Bob can approve")
+    #expect(MessageActionPresentation.disabledReason(
+      requirement: .approve, access: nil, ownerName: "Bob", botName: "Codex"
+    ) == nil)
+  }
+
+  @Test("open URL actions never open local files or scripts")
+  func safeURLs() {
+    #expect(MessageActionPresentation.safeURL("https://inline.chat") != nil)
+    #expect(MessageActionPresentation.safeURL("codex://threads/abc") != nil)
+    #expect(MessageActionPresentation.safeURL("file:///etc/passwd") == nil)
+    #expect(MessageActionPresentation.safeURL("javascript:alert(1)") == nil)
   }
 }
