@@ -303,8 +303,8 @@ Access control follows Hermes' native platform model:
 | `INLINE_DM_POLICY=open|allowlist|disabled` | Controls direct-message intake. `allowlist` requires `INLINE_ALLOWED_USERS` or config `allow_from`. |
 | `INLINE_GROUP_POLICY=open|allowlist|disabled` | Controls group intake. `allowlist` requires `INLINE_GROUP_ALLOW_FROM`. |
 | `INLINE_GROUP_ALLOW_FROM` | Comma-separated Inline user ids allowed to invoke the bot from group chats. |
-| `INLINE_REQUIRE_MENTION` | Requires a mention or wake word in groups by default. Replies to the bot and dialogs already marked `FOLLOWING` are accepted without the wake word. |
-| `INLINE_STRICT_MENTION` | Requires a mention or wake word on every group turn, including replies to the bot and followed threads. Defaults to `false`. |
+| `INLINE_REQUIRE_MENTION` | Requires an @mention in groups by default. Replies to the bot and dialogs already marked `FOLLOWING` are accepted without one. Hermes never wakes on words such as its name; only structured Inline mentions, replies, followed dialogs and commands count. |
+| `INLINE_STRICT_MENTION` | Requires an @mention on every group turn, including replies to the bot and followed threads. Defaults to `false`. |
 | `INLINE_ALLOWED_CHATS` | Comma-separated group/thread chat ids where the bot may respond. Parent chat ids also match their Inline reply threads. DMs are not filtered. Empty means no chat restriction. |
 | `INLINE_FREE_RESPONSE_CHATS` | Comma-separated group/thread chat ids where no mention is required. Parent chat ids also match their Inline reply threads. Useful for dedicated agent rooms. |
 | `INLINE_REPLY_THREADS` | Controls top-level reply-thread creation. `auto` creates a child reply thread only for an explicit thread request; `on` always creates; `off` stays flat. Existing child-thread conversations always remain in their thread. Defaults to `auto`. |
@@ -317,7 +317,6 @@ Access control follows Hermes' native platform model:
 | `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On/Off buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
 | `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. Reactions on bot messages are always delivered. |
 | `INLINE_REACTIONS` | Shows 👀 while Hermes handles an inbound message, then ✅ on success or ❌ on failure. Cancellation clears the working marker. Defaults to `false`. |
-| `INLINE_MENTION_PATTERNS` | JSON list, comma-separated, or newline-separated regex patterns for group wake words. |
 | `INLINE_PARSE_MARKDOWN` | Controls whether supported outbound Inline Markdown is parsed. Defaults to `true`; `false` preserves the supplied syntax literally. |
 | `INLINE_SYNC_COMMANDS` | Syncs Hermes slash commands into Inline's native `/` bot command menu on gateway connect. Defaults to `true`. |
 | `INLINE_COMMAND_LIMIT` | Caps native Inline bot command sync. Must be `1` through `100`; defaults to `100`. |
@@ -358,7 +357,7 @@ Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 `strict_mention`, `allowed_chats`, `free_response_chats`, `reply_threads`,
 `context_backfill`, `thread_context_limit`, `reply_context_limit`,
 `observed_context_limit`, `observe_unmentioned_messages`, `settings_path`, and
-`mention_patterns`, and `reactions` under the Inline platform config. Operational settings such
+`reactions` under the Inline platform config. Operational settings such
 as `base_url`, `parse_markdown`, `media_max_mb`, `upload_max_mb`,
 `state_path`, `sidecar_port`, `connect_timeout_ms`, `sync_commands`, and
 `command_limit` can also be set there.

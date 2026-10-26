@@ -66,11 +66,11 @@ optional_env:
     prompt: "Allowed group sender ids"
     password: false
   - name: INLINE_REQUIRE_MENTION
-    description: "Require a mention/wake word in group chats. Replies to the bot and dialogs already marked FOLLOWING can continue without one unless strict mention is enabled (default true)."
+    description: "Require an @mention in group chats. Replies to the bot and dialogs already marked FOLLOWING can continue without one unless strict mention is enabled (default true)."
     prompt: "Require group mention? (true/false)"
     password: false
   - name: INLINE_STRICT_MENTION
-    description: "Require an explicit mention/wake word on every group-chat turn, including replies to the bot and followed threads (true/false, default false)"
+    description: "Require an explicit @mention on every group-chat turn, including replies to the bot and followed threads (true/false, default false)"
     prompt: "Require every group turn to mention Hermes? (true/false)"
     password: false
   - name: INLINE_ALLOWED_CHATS
@@ -116,10 +116,6 @@ optional_env:
   - name: INLINE_REACTIONS
     description: "Show processing reactions on handled inbound messages: eyes while working, then success or failure (true/false, default false)"
     prompt: "Show processing reactions? (true/false)"
-    password: false
-  - name: INLINE_MENTION_PATTERNS
-    description: "Mention wake-word regexes, JSON list or comma/newline-separated"
-    prompt: "Mention patterns"
     password: false
   - name: INLINE_HOME_CHANNEL
     description: "Default target for cron/standalone sends, for example chat:123"

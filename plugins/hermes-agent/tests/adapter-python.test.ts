@@ -1762,12 +1762,9 @@ assert not disabled._allowed("dm", "u1")
 wildcard = InlineAdapter(PlatformConfig(extra={**base_extra, "dm_policy": "allowlist", "allow_from": "*"}))
 assert wildcard._allowed("dm", "anyone")
 
-patterns = InlineAdapter._compile_mention_patterns("hermes, inline\nagent")
-assert [pattern.pattern for pattern in patterns] == ["hermes", "inline", "agent"]
-
-wake = InlineAdapter(PlatformConfig(extra={**base_extra, "mention_patterns": r'["hermes\\b[:,]?"]'}))
-assert wake._matches_mention("Hermes: status")
-assert wake._clean_mention("Hermes: status") == "status"
+word_only = InlineAdapter(PlatformConfig(extra={**base_extra, "mention_patterns": r'["hermes\\b[:,]?"]'}))
+assert not hasattr(word_only, "_matches_mention")
+assert not hasattr(word_only, "_mention_patterns")
 
 merged = _apply_yaml_config({"allowed_users": ["wrong-global"]}, {"allowed_users": ["u5"], "dm_policy": "allowlist", "extra": {"token": "fake"}})
 assert merged["allowed_users"] == ["u5"]
@@ -2573,6 +2570,7 @@ async def assert_observed_context_buffer():
             "peerId": {"peer": {"oneofKind": "chat"}},
         },
     })
+    # Words such as the agent's name never wake it; only structured Inline addressing does.
     await adapter._dispatch_message({
         "seq": 19,
         "chatId": "10",
@@ -2584,11 +2582,31 @@ async def assert_observed_context_buffer():
             "peerId": {"peer": {"oneofKind": "chat"}},
         },
     })
+    assert events == []
+    await adapter._dispatch_message({
+        "seq": 20,
+        "chatId": "10",
+        "message": {
+            "id": "62",
+            "chatId": "10",
+            "fromId": "u1",
+            "message": "@InlineBot what changed?",
+            "mentioned": True,
+            "entities": {"entities": [{
+                "type": 1,
+                "offset": 0,
+                "length": 10,
+                "entity": {"oneofKind": "mention", "mention": {"userId": "999"}},
+            }]},
+            "peerId": {"peer": {"oneofKind": "chat"}},
+        },
+    })
 
     assert len(events) == 1
-    assert events[0].text == "what changed?"
+    assert events[0].text == "@InlineBot what changed?"
     assert "[Inline observed context]" in events[0].channel_context
     assert "message:60 from an unknown sender: QA found one blocker" in events[0].channel_context
+    assert "Hermes: what changed?" in events[0].channel_context
     assert "Inline observed context contains recent group messages" in events[0].channel_prompt
     assert adapter._observed_context == {}
 
@@ -3196,7 +3214,9 @@ async def assert_group_room_controls():
     strict._me_id = "bot"
     own_reply = {"id": "parent", "fromId": "bot", "message": "answer"}
     assert await run(strict, {**base_msg, "replyToMsgId": "parent"}, reply=own_reply) == []
-    assert len(await run(strict, {**base_msg, "id": "room-msg-2", "message": "Hermes: hello", "replyToMsgId": "parent"}, reply=own_reply)) == 1
+    # A word such as the agent's name is not an explicit address, even in strict mode.
+    assert await run(strict, {**base_msg, "id": "room-msg-2", "message": "Hermes: hello", "replyToMsgId": "parent"}, reply=own_reply) == []
+    assert len(await run(strict, {**base_msg, "id": "room-msg-3", "message": "@InlineBot hello", "mentioned": True, "replyToMsgId": "parent"}, reply=own_reply)) == 1
 
 asyncio.run(assert_group_room_controls())
 

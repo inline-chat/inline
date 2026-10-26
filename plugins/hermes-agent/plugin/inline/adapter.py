@@ -174,11 +174,6 @@ _INLINE_ENTITY_TYPE_NAMES = {
     14: "group_mention",
 }
 
-_DEFAULT_MENTION_PATTERNS = [
-    r"(?<![\w@])@?hermes\s+agent\b[,:\-]?",
-    r"(?<![\w@])@?hermes\b[,:\-]?",
-    r"(?<![\w@])@?inline\s+agent\b[,:\-]?",
-]
 _ENV_REF_PATTERN = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 _SIDECAR_RETRYABLE_KINDS = {"transient"}
 _INLINE_DISPLAY_DEFAULTS = {
@@ -770,7 +765,6 @@ def _apply_yaml_config(yaml_cfg: dict, platform_cfg: dict) -> Optional[dict]:
         "parse_markdown",
         "require_mention",
         "strict_mention",
-        "mention_patterns",
         "allowed_chats",
         "free_response_chats",
         "group_policy",
@@ -937,9 +931,6 @@ class InlineAdapter(BasePlatformAdapter):
         self._strict_mention = _truthy(
             extra.get("strict_mention") if "strict_mention" in extra else os.getenv("INLINE_STRICT_MENTION"),
             False,
-        )
-        self._mention_patterns = self._compile_mention_patterns(
-            extra["mention_patterns"] if "mention_patterns" in extra else os.getenv("INLINE_MENTION_PATTERNS")
         )
         self._allowed_chats = self._parse_chat_set(
             extra.get("allowed_chats")
@@ -1652,49 +1643,6 @@ class InlineAdapter(BasePlatformAdapter):
             if candidate == "*" or candidate == normalized:
                 return True
         return False
-
-    @staticmethod
-    def _compile_mention_patterns(raw: Any) -> "list[re.Pattern]":
-        if raw is None:
-            patterns = list(_DEFAULT_MENTION_PATTERNS)
-        elif isinstance(raw, str):
-            text = raw.strip()
-            try:
-                loaded = json.loads(text) if text else []
-            except Exception:
-                loaded = None
-            patterns = loaded if isinstance(loaded, list) else [
-                part.strip()
-                for line in text.splitlines()
-                for part in line.split(",")
-            ]
-        elif isinstance(raw, list):
-            patterns = raw
-        else:
-            patterns = [raw]
-        compiled = []
-        for pattern in patterns:
-            text = str(pattern).strip()
-            if not text:
-                continue
-            try:
-                compiled.append(re.compile(text, re.IGNORECASE))
-            except re.error as exc:
-                logger.warning("[inline] invalid mention pattern %r: %s", text, exc)
-        return compiled
-
-    def _matches_mention(self, text: str) -> bool:
-        return bool(text and any(pattern.search(text) for pattern in self._mention_patterns))
-
-    def _clean_mention(self, text: str) -> str:
-        if not text:
-            return text
-        stripped = text.lstrip()
-        for pattern in self._mention_patterns:
-            match = pattern.match(stripped)
-            if match:
-                return stripped[match.end():].lstrip(" ,:-") or text
-        return text
 
     @staticmethod
     def _thread_command_action(text: str) -> Optional[str]:
@@ -2610,7 +2558,7 @@ class InlineAdapter(BasePlatformAdapter):
             and not self._free_response_chat(chat_id, thread_id, parent_chat_id)
         )
         if mention_gate_active:
-            mentioned = command_addressed_to_me or bool(msg.get("mentioned")) or self._matches_mention(text)
+            mentioned = command_addressed_to_me or bool(msg.get("mentioned"))
             reply_wakes_thread = reply_to_is_own and not self._strict_mention
             # Freshness only controls whether the server auto-follows a thread.
             # Once this dialog is FOLLOWING, it remains relevant until unfollowed.
@@ -2631,8 +2579,6 @@ class InlineAdapter(BasePlatformAdapter):
             ):
                 self._remember_observed_context(chat_id, msg, text)
                 return
-            if mentioned:
-                text = self._clean_mention(text)
         if edit:
             text = f"message:edited:{text}" if text else "message:edited"
         if (
