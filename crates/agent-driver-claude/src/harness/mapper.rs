@@ -164,6 +164,13 @@ impl ClaudeMapper {
         }
     }
 
+    /// Undoes [`Self::sent`] for an input that never reached stdin.
+    pub fn forget_sent(&mut self, input: &InputId) {
+        self.sent.remove(input.as_str());
+        self.passive.remove(input.as_str());
+        self.awaiting_turn.retain(|waiting| waiting != input);
+    }
+
     /// Records passive context written to stdin (`shouldQuery: false`).
     pub fn sent_passive(&mut self, input: &InputId) {
         self.sent.insert(input.as_str().to_string());

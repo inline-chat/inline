@@ -696,6 +696,13 @@ struct SessionInner {
     capabilities: Mutex<Vec<String>>,
     store: Option<SessionStore>,
     cwd: PathBuf,
+    /// Inputs written and waiting for their first `command_lifecycle` frame.
+    acks: Mutex<HashMap<String, oneshot::Sender<String>>>,
+    /// Whether this CLI has sent any lifecycle frame (older ones do not).
+    lifecycle_seen: std::sync::atomic::AtomicBool,
+    /// Set once a wait ended without any lifecycle frame: this CLI predates
+    /// them, so later sends do not wait.
+    lifecycle_absent: std::sync::atomic::AtomicBool,
 }
 
 impl SessionInner {
@@ -825,6 +832,9 @@ impl ClaudeSession {
             capabilities: Mutex::new(Vec::new()),
             store: SessionStore::resolve(&options.env),
             cwd,
+            acks: Mutex::new(HashMap::new()),
+            lifecycle_seen: std::sync::atomic::AtomicBool::new(false),
+            lifecycle_absent: std::sync::atomic::AtomicBool::new(false),
         });
         *slot.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(Arc::downgrade(&inner));
         let pump = Arc::downgrade(&inner);
@@ -869,6 +879,9 @@ impl ClaudeSession {
     }
 }
 
+/// How long a written input waits for its lifecycle frame.
+const LIFECYCLE_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 fn pump_event(inner: &SessionInner, event: ClientEvent) {
     match event {
         ClientEvent::Message(message) => {
@@ -879,6 +892,22 @@ fn pump_event(inner: &SessionInner, event: ClientEvent) {
                     .capabilities
                     .lock()
                     .unwrap_or_else(|poison| poison.into_inner()) = init.capabilities.clone();
+            }
+            if let crate::wire::MessageKind::CommandLifecycle(lifecycle) = &message.kind {
+                inner
+                    .lifecycle_seen
+                    .store(true, std::sync::atomic::Ordering::Release);
+                inner
+                    .lifecycle_absent
+                    .store(false, std::sync::atomic::Ordering::Release);
+                if let Some(waiter) = inner
+                    .acks
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .remove(&lifecycle.command_uuid)
+                {
+                    let _ = waiter.send(lifecycle.state.clone());
+                }
             }
             let events = inner.mapper().message(&message);
             inner.emit_all(events);
@@ -993,7 +1022,62 @@ impl Session for ClaudeSession {
                     .mapper()
                     .sent(&input.id, matches!(input.delivery, Delivery::Turn)),
             }
-            self.write(&message).await?;
+            let (ack, acked) = oneshot::channel();
+            self.inner
+                .acks
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .insert(input.id.as_str().to_string(), ack);
+            if let Err(error) = self.write(&message).await {
+                self.inner
+                    .acks
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner())
+                    .remove(input.id.as_str());
+                // Nothing reached stdin: the input was never sent.
+                if matches!(error, SendError::Driver(_)) {
+                    self.inner.mapper().forget_sent(&input.id);
+                }
+                return Err(error);
+            }
+            // A written line is not an accepted input: wait for Claude's own
+            // lifecycle frame for this UUID.
+            let wait = if self
+                .inner
+                .lifecycle_absent
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                std::time::Duration::ZERO
+            } else {
+                LIFECYCLE_ACK_TIMEOUT
+            };
+            let lifecycle = match tokio::time::timeout(wait, acked).await {
+                Ok(Ok(state)) => Some(state),
+                _ => {
+                    self.inner
+                        .acks
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner())
+                        .remove(input.id.as_str());
+                    if self
+                        .inner
+                        .lifecycle_seen
+                        .load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        return Err(SendError::Unknown(
+                            "Claude did not acknowledge the input".into(),
+                        ));
+                    }
+                    // A CLI without lifecycle frames: only the write is known.
+                    self.inner
+                        .lifecycle_absent
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    None
+                }
+            };
+            if let Some(state @ ("refused" | "discarded")) = lifecycle.as_deref() {
+                return Err(SendError::Rejected(format!("Claude {state} the input")));
+            }
             let disposition = match &input.delivery {
                 Delivery::Turn => InputDisposition::Started {
                     turn: TurnId::new(input.id.as_str())
@@ -1011,10 +1095,12 @@ impl Session for ClaudeSession {
                 }
                 Delivery::Passive => InputDisposition::Absorbed,
             };
+            let mut native = message.to_value();
+            native["inline_ack"] = json!(lifecycle.as_deref().unwrap_or("written"));
             Ok(InputReceipt {
                 input: input.id,
                 disposition,
-                native: message.to_value(),
+                native,
             })
         })
     }
