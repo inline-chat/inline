@@ -2222,7 +2222,7 @@ class GlassComposeAppKit: NSView {
   private func insertAgentReference(_ text: String) {
     let textView = textEditor.textView
     window?.makeFirstResponder(textView)
-    textView.typingAttributes = textEditor.defaultTypingAttributes
+    textView.typingAttributes = textView.defaultTypingAttributes
     textView.insertText(text, replacementRange: textView.selectedRange())
   }
 
