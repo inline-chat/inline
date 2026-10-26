@@ -3018,6 +3018,35 @@ async def assert_bot_lock():
 
 asyncio.run(assert_bot_lock())
 
+# An answered approval card loses its buttons even after one transient edit failure (annotation 28).
+async def assert_action_card_clearing():
+    adapter = InlineAdapter(PlatformConfig(extra={**base_extra}))
+    inline_adapter_module._ACTION_EDIT_RETRY_DELAY_SECONDS = 0
+    edits, sends = [], []
+    outcomes = [SendResult(success=False, error="timeout", retryable=True), SendResult(success=True, message_id="44")]
+
+    async def fake_send_sidecar(path, body):
+        edits.append((path, body))
+        return outcomes.pop(0)
+
+    async def fake_send(chat_id, content, **kwargs):
+        sends.append((chat_id, content))
+        return SendResult(success=True, message_id="45")
+
+    adapter._send_sidecar = fake_send_sidecar
+    adapter.send = fake_send
+    event = {"chatId": "10", "messageId": "44"}
+    result = await adapter._edit_action_message(event, "Approved", actions={"rows": []})
+    assert result.success is True and len(edits) == 2 and sends == []
+    assert edits[-1][1]["actions"] == {"rows": []}
+    # A permanent failure posts the outcome instead, without retrying.
+    edits.clear()
+    outcomes[:] = [SendResult(success=False, error="message not found", retryable=False)]
+    await adapter._edit_action_message(event, "Approved", actions={"rows": []})
+    assert len(edits) == 1 and sends == [("10", "Approved")]
+
+asyncio.run(assert_action_card_clearing())
+
 # J19: agents follow and unfollow threads themselves, with a readback of the real state.
 def assert_follow_tool():
     calls = []

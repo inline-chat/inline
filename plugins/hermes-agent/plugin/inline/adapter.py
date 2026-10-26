@@ -61,6 +61,7 @@ from .telemetry import capture_plugin_error
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SIDECAR_PORT = 8794
+_ACTION_EDIT_RETRY_DELAY_SECONDS = 0.5
 _DEFAULT_SIDECAR_BIND = "127.0.0.1"
 _MAX_MESSAGE_LENGTH = 4000
 _MODEL_PAGE_SIZE = 8
@@ -4709,9 +4710,13 @@ class InlineAdapter(BasePlatformAdapter):
         if actions is not None:
             body["actions"] = actions
         result = await self._send_sidecar("/edit", body)
+        if not result.success and getattr(result, "retryable", False):
+            # A transient failure would leave the answered card's buttons in place.
+            await asyncio.sleep(_ACTION_EDIT_RETRY_DELAY_SECONDS)
+            result = await self._send_sidecar("/edit", body)
         if result.success:
             return result
-        logger.debug("[inline] edit action message failed; sending fallback: %s", result.error)
+        logger.warning("[inline] could not update the answered action card; posting the outcome instead: %s", result.error)
         return await self.send(chat_id, text)
 
     async def _answer_action(self, interaction_id: str, toast: str) -> None:
