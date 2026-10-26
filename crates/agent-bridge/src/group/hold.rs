@@ -1,17 +1,27 @@
 //! Hold, release and acquire for one native session (spec §4.6).
 //!
 //! - **Hold** while the session works. When it is idle with no live work,
-//!   Codex is unsubscribed at once and the app-server unloads the thread after
-//!   the user's own `thread_unload_delay_secs`; Claude has no idle unload, so
-//!   stdin is closed after an Inline idle window (1800 s by default).
-//! - **The idle timer never releases live work:** an active turn, background
-//!   tasks, children, a pending interaction, queued input or a wakeup.
+//!   Codex is unsubscribed and the app-server unloads the thread after the
+//!   user's own `thread_unload_delay_secs`; Claude has no idle unload, so stdin
+//!   is closed after an Inline idle window (1800 s by default).
+//! - **The idle timer never releases live work** ([`LiveWork::is_idle`]).
 //! - **Explicit release wins.** `/release`, "Continue in terminal" and "Open
-//!   in app" release now. With live work, the machine lists it for
-//!   confirmation, then stops or hands over each item with a receipt.
+//!   in app" stop Inline's admission at once; new input stays pending in
+//!   Inline. With live work, the machine lists it for confirmation, then runs
+//!   one step at a time, each waiting on its receipt. Queued input is
+//!   confirmed kept or removed before the interrupt that could drain it.
+//! - **Release is confirmed, not assumed.** A failed or unknown step fences
+//!   the release and is reported; the owner retries or cancels. Nothing is
+//!   released anyway. The session counts as released only when the harness
+//!   confirms: Codex `thread/closed`, or the Claude process exiting. There is
+//!   no timer for that and no shorter global timeout, and the shared Codex
+//!   app-server is never killed.
 //! - **Acquire** on direct input or `/resume`. A session held by another
 //!   client keeps the input pending and shows "continue there, or Fork here";
 //!   pending input runs once the session frees, if its sender still wants it.
+//!
+//! Pending inputs carry the operation they need. The runtime rechecks it
+//! against the sender's current grants before delivering or offering them.
 //!
 //! The machine is pure: the runtime feeds [`HoldEvent`]s with the current
 //! time and executes the returned [`HoldEffect`]s.
@@ -20,18 +30,21 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ProviderSurface;
+use super::permissions::Operation;
+use crate::TurnId;
+use crate::harness::{ChildRef, HeldBy, InputId, InteractionId, LiveWork, QueuedInput, UserId};
 
 /// Claude's idle window: Inline-chosen to match Codex's default unload delay,
 /// tunable.
 pub const CLAUDE_IDLE_WINDOW: Duration = Duration::from_secs(1_800);
-/// Codex's own default for `thread_unload_delay_secs` when the user's
-/// `config.toml` does not set it.
+/// Codex's own default for `thread_unload_delay_secs`, shown while waiting for
+/// `thread/closed` when the user's config does not set it.
 pub const CODEX_DEFAULT_UNLOAD_DELAY: Duration = Duration::from_secs(1_800);
-/// How long Claude may take to exit after stdin closes before it is killed.
+/// How long the Claude process this bridge owns may take to exit after stdin
+/// closes before it is killed.
 pub const CLAUDE_EXIT_GRACE: Duration = Duration::from_secs(10);
-/// How long release waits for each stop or hand-over before recording it as
-/// failed and releasing anyway.
+/// How long a release step may go without a receipt before its outcome is
+/// recorded as unknown, which fences the release.
 pub const RELEASE_STEP_TIMEOUT: Duration = Duration::from_secs(15);
 /// How often a session held elsewhere is probed while input waits for it.
 pub const HELD_ELSEWHERE_PROBE_INTERVAL: Duration = Duration::from_secs(60);
@@ -40,12 +53,12 @@ fn millis(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
-/// How an idle, held session is let go.
+/// How a held session is let go.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum IdleRelease {
     /// Codex: unsubscribe when idle; the app-server unloads the thread after
-    /// the user's own unload delay, which frees its writer lock.
+    /// the user's own delay and reports `thread/closed`.
     Unsubscribe { native_unload_delay_ms: u64 },
     /// Claude: close stdin after the idle window, then kill after the grace.
     CloseStdin {
@@ -80,120 +93,88 @@ impl IdleRelease {
     }
 }
 
-/// One live piece of work, with a label for the confirmation and receipt.
+/// One stop or hand-over during an explicit release.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LiveItem {
-    pub id: String,
-    pub label: String,
-}
-
-impl LiveItem {
-    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            label: label.into(),
-        }
-    }
-}
-
-/// Work that keeps a session held, as the driver last reported it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LiveWork {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub active_turn: Option<LiveItem>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub background_tasks: Vec<LiveItem>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub children: Vec<LiveItem>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub interactions: Vec<LiveItem>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub queued_inputs: Vec<LiveItem>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub wakeups: Vec<LiveItem>,
-}
-
-impl LiveWork {
-    pub fn is_empty(&self) -> bool {
-        self.active_turn.is_none()
-            && self.background_tasks.is_empty()
-            && self.children.is_empty()
-            && self.interactions.is_empty()
-            && self.queued_inputs.is_empty()
-            && self.wakeups.is_empty()
-    }
-
-    /// Release steps, ordered so nothing restarts while stopping: queued input
-    /// leaves the native queue first (Claude runs its queue after an
-    /// interrupt), then interactions close, then the turn, children and
-    /// background tasks stop.
-    pub fn release_steps(&self, wakeups: WakeupDisposition) -> Vec<ReleaseStep> {
-        let step = |action, item: &LiveItem| ReleaseStep {
-            action,
-            item: item.clone(),
-        };
-        let wakeup_action = match wakeups {
-            WakeupDisposition::LeaveForNextHolder => ReleaseAction::LeaveWakeup,
-            WakeupDisposition::Cancel => ReleaseAction::CancelWakeup,
-        };
-        self.queued_inputs
-            .iter()
-            .map(|item| step(ReleaseAction::KeepQueuedPending, item))
-            .chain(
-                self.interactions
-                    .iter()
-                    .map(|item| step(ReleaseAction::CancelInteraction, item)),
-            )
-            .chain(
-                self.active_turn
-                    .iter()
-                    .map(|item| step(ReleaseAction::InterruptTurn, item)),
-            )
-            .chain(
-                self.children
-                    .iter()
-                    .map(|item| step(ReleaseAction::StopChild, item)),
-            )
-            .chain(
-                self.background_tasks
-                    .iter()
-                    .map(|item| step(ReleaseAction::StopBackgroundTask, item)),
-            )
-            .chain(self.wakeups.iter().map(|item| step(wakeup_action, item)))
-            .collect()
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ReleaseAction {
-    /// Codex `turn/interrupt`, Claude `interrupt`.
-    InterruptTurn,
-    /// Through the parent, as the harness does (Codex sub-agents, Claude
-    /// subagents).
-    StopChild,
-    /// Claude `stop_task`, Codex `thread/backgroundTerminals/terminate`.
-    StopBackgroundTask,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ReleaseStep {
+    /// Take the entry out of the native queue and keep it pending in Inline.
+    KeepQueuedPending {
+        queued: QueuedInput,
+    },
     /// Cancel the pending approval or question.
-    CancelInteraction,
-    /// Take queued input out of the native queue and keep it pending in Inline.
-    KeepQueuedPending,
-    CancelWakeup,
+    CancelInteraction {
+        interaction: InteractionId,
+    },
+    /// Codex `turn/interrupt`, Claude `interrupt`.
+    InterruptTurn {
+        turn: TurnId,
+    },
+    /// Through the parent: Claude `stop_task`, Codex
+    /// `thread/backgroundTerminals/terminate` or sub-agent stop.
+    StopChild {
+        child: ChildRef,
+    },
+    CancelWakeup {
+        wakeup: String,
+    },
     /// Leave a scheduled wakeup to whoever takes the session; no native call.
-    LeaveWakeup,
+    LeaveWakeup {
+        wakeup: String,
+    },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReleaseStep {
-    pub action: ReleaseAction,
-    pub item: LiveItem,
+/// Release steps for `live`, in the order that keeps anything from
+/// restarting: queued input leaves the native queue first (Claude runs its
+/// queue after an interrupt), then interactions close, then the turn and
+/// children stop, then wakeups.
+pub fn release_steps(live: &LiveWork, wakeups: WakeupDisposition) -> Vec<ReleaseStep> {
+    let queued = live
+        .queued
+        .iter()
+        .map(|queued| ReleaseStep::KeepQueuedPending {
+            queued: queued.clone(),
+        });
+    let interactions = live
+        .interactions
+        .iter()
+        .map(|interaction| ReleaseStep::CancelInteraction {
+            interaction: interaction.clone(),
+        });
+    let turn = live
+        .turn
+        .iter()
+        .map(|turn| ReleaseStep::InterruptTurn { turn: turn.clone() });
+    let children = live.children.iter().map(|child| ReleaseStep::StopChild {
+        child: child.clone(),
+    });
+    let wakeup_steps = live.wakeups.iter().map(|wakeup| match wakeups {
+        WakeupDisposition::LeaveForNextHolder => ReleaseStep::LeaveWakeup {
+            wakeup: wakeup.clone(),
+        },
+        WakeupDisposition::Cancel => ReleaseStep::CancelWakeup {
+            wakeup: wakeup.clone(),
+        },
+    });
+    queued
+        .chain(interactions)
+        .chain(turn)
+        .chain(children)
+        .chain(wakeup_steps)
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ReleaseStepOutcome {
     Done,
-    Failed { reason: String },
+    Failed {
+        reason: String,
+    },
+    /// The harness may or may not have done it (a timeout or a lost reply).
+    /// Treated like a failure: fenced until reconciled.
+    Unknown {
+        reason: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -234,14 +215,14 @@ pub enum WakeupDisposition {
 pub struct ReleaseRequest {
     pub cause: ReleaseCause,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub requested_by: Option<i64>,
+    pub requested_by: Option<UserId>,
     pub wakeups: WakeupDisposition,
 }
 
 impl ReleaseRequest {
     /// Handoffs leave wakeups to the next client by default; `/release`
     /// cancels them. The confirmation can change it.
-    pub fn new(cause: ReleaseCause, requested_by: Option<i64>) -> Self {
+    pub fn new(cause: ReleaseCause, requested_by: Option<UserId>) -> Self {
         Self {
             cause,
             requested_by,
@@ -254,29 +235,24 @@ impl ReleaseRequest {
     }
 }
 
-/// The other client holding a session.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HeldBy {
-    pub surface: ProviderSurface,
-    /// Native detail, such as Codex's conflict message or a Claude agents
-    /// listing entry.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub detail: Option<String>,
-}
-
-/// Direct input waiting for the session, with its sender so the sender can be
-/// asked whether it should still run.
+/// Direct input waiting for the session, with its sender and the operation
+/// it needs, so both can be rechecked before it runs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingInput {
-    pub id: String,
-    pub sender_user_id: i64,
+    pub id: InputId,
+    pub sender: UserId,
+    pub required: Operation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ReleasePhase {
-    Steps { deadline_ms: u64 },
-    Closing { deadline_ms: u64 },
+pub enum DetachPhase {
+    /// Codex: unsubscribed, waiting for `thread/closed`.
+    AwaitingNativeClose,
+    /// Claude: stdin closed, waiting for the process to exit.
+    Closing {
+        deadline_ms: u64,
+    },
     Killing,
 }
 
@@ -284,16 +260,14 @@ pub enum ReleasePhase {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HoldState {
     Released,
-    /// Codex after unsubscribe: the app-server keeps the thread loaded until
-    /// its unload delay ends. Re-acquiring is a resubscribe.
-    Unloading {
-        unload_at_ms: u64,
-    },
     Acquiring {
         /// Delivered once acquired.
         pending: Vec<PendingInput>,
         /// Offered back to their senders once acquired.
         offer: Vec<PendingInput>,
+        /// An explicit release requested while acquiring.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        release: Option<ReleaseRequest>,
     },
     Held {
         last_activity_ms: u64,
@@ -307,10 +281,30 @@ pub enum HoldState {
     },
     Releasing {
         request: ReleaseRequest,
+        current: ReleaseStep,
+        deadline_ms: u64,
         remaining: Vec<ReleaseStep>,
         receipts: Vec<ReleaseReceipt>,
-        phase: ReleasePhase,
         pending: Vec<PendingInput>,
+        live: LiveWork,
+        last_activity_ms: u64,
+    },
+    /// A step failed or its outcome is unknown. Admission stays stopped until
+    /// the owner retries or cancels the release.
+    ReleaseFenced {
+        request: ReleaseRequest,
+        failed: ReleaseReceipt,
+        remaining: Vec<ReleaseStep>,
+        receipts: Vec<ReleaseReceipt>,
+        pending: Vec<PendingInput>,
+        live: LiveWork,
+        last_activity_ms: u64,
+    },
+    Detaching {
+        request: ReleaseRequest,
+        receipts: Vec<ReleaseReceipt>,
+        pending: Vec<PendingInput>,
+        phase: DetachPhase,
     },
     HeldElsewhere {
         by: HeldBy,
@@ -333,7 +327,7 @@ pub enum HoldEvent {
     AcquireConflict {
         by: HeldBy,
     },
-    /// The driver's current live work, after any native event.
+    /// The session's current [`LiveWork`] (`Session::live_work`).
     Activity {
         live: LiveWork,
     },
@@ -343,15 +337,17 @@ pub enum HoldEvent {
     },
     ReleaseConfirmed,
     ReleaseCancelled,
+    /// Run the fenced step again.
+    ReleaseRetry,
     StepFinished {
-        action: ReleaseAction,
-        id: String,
+        step: ReleaseStep,
         outcome: ReleaseStepOutcome,
     },
-    /// The connection ended: Claude exited or the Codex subscription is gone.
+    /// The connection ended: the Claude process exited, or the Codex
+    /// app-server went away.
     Detached,
-    /// Codex reported the thread unloaded.
-    NativeUnloaded,
+    /// Codex `thread/closed`: the thread unloaded and its writer lock is free.
+    NativeClosed,
     /// A probe found the session free.
     ElsewhereFreed,
     ForkHere,
@@ -362,11 +358,12 @@ pub enum HoldEvent {
 pub enum HoldEffect {
     /// Codex: `thread/resume` and subscribe. Claude: spawn with `--resume`.
     Acquire,
+    /// Deliver after rechecking each input's `required` operation.
     Deliver {
         inputs: Vec<PendingInput>,
     },
     /// The session freed or was acquired by `/resume`: ask each sender
-    /// whether their pending input should still run.
+    /// (still permitted) whether their pending input should run.
     OfferPending {
         inputs: Vec<PendingInput>,
     },
@@ -375,21 +372,34 @@ pub enum HoldEffect {
         by: HeldBy,
     },
     ProbeHolder,
+    /// Admission stopped: show "releasing".
+    ReleaseStarted {
+        cause: ReleaseCause,
+    },
+    /// The release was cancelled; admission resumes.
+    ReleaseAbandoned,
     /// List live work and ask to confirm the release.
     ConfirmRelease {
         request: ReleaseRequest,
         live: LiveWork,
     },
     Step(ReleaseStep),
+    /// Report the failed or unknown step and offer retry or cancel.
+    ReleaseFenced {
+        failed: ReleaseReceipt,
+        receipts: Vec<ReleaseReceipt>,
+    },
     /// Codex.
     Unsubscribe,
     /// Claude: close stdin, then kill after `kill_after_ms`.
     CloseStdin {
         kill_after_ms: u64,
     },
+    /// Claude only: the process this bridge owns did not exit.
     Kill,
-    /// The session is released. Explicit causes post the receipts and the
-    /// handoff instruction.
+    /// The harness confirmed the session is free. Explicit causes post the
+    /// receipts and the handoff instruction. Receipts with an unknown outcome
+    /// stay fenced in the delivery ledger.
     Released {
         cause: ReleaseCause,
         receipts: Vec<ReleaseReceipt>,
@@ -424,13 +434,9 @@ impl HoldMachine {
         &self.state
     }
 
-    pub fn is_held(&self) -> bool {
-        matches!(
-            self.state,
-            HoldState::Held { .. }
-                | HoldState::ConfirmingRelease { .. }
-                | HoldState::Releasing { .. }
-        )
+    /// Whether Inline admits input into the session right now.
+    pub fn admits(&self) -> bool {
+        matches!(self.state, HoldState::Held { .. })
     }
 
     pub fn held_elsewhere(&self) -> Option<&HeldBy> {
@@ -457,38 +463,55 @@ impl HoldMachine {
         use HoldEvent as E;
         use HoldState as S;
         match (state, event) {
-            // Released or unloading: acquire on demand.
-            (S::Released | S::Unloading { .. }, E::AcquireRequested { input }) => {
+            // Released.
+            (S::Released, E::AcquireRequested { input }) => {
                 effects.push(HoldEffect::Acquire);
                 S::Acquiring {
                     pending: input.into_iter().collect(),
                     offer: Vec::new(),
+                    release: None,
                 }
             }
-            (state @ (S::Released | S::Unloading { .. }), E::ReleaseRequested { request }) => {
+            (S::Released, E::ReleaseRequested { request }) => {
                 effects.push(HoldEffect::Released {
                     cause: request.cause,
                     receipts: Vec::new(),
                 });
-                state
+                S::Released
             }
             // A late acquisition nobody wants any more is let go again.
-            (S::Released | S::Unloading { .. }, E::Acquired) => self.detach(
+            (S::Released, E::Acquired) => self.detach(
                 ReleaseRequest::new(ReleaseCause::Idle, None),
                 Vec::new(),
                 Vec::new(),
                 now,
                 effects,
             ),
-            (S::Unloading { unload_at_ms }, E::Tick) if now >= unload_at_ms => S::Released,
-            (S::Unloading { .. }, E::NativeUnloaded) => S::Released,
 
             // Acquiring.
-            (S::Acquiring { mut pending, offer }, E::AcquireRequested { input }) => {
+            (
+                S::Acquiring {
+                    mut pending,
+                    offer,
+                    release,
+                },
+                E::AcquireRequested { input },
+            ) => {
                 pending.extend(input);
-                S::Acquiring { pending, offer }
+                S::Acquiring {
+                    pending,
+                    offer,
+                    release,
+                }
             }
-            (S::Acquiring { pending, offer }, E::Acquired) => {
+            (
+                S::Acquiring {
+                    pending,
+                    offer,
+                    release: None,
+                },
+                E::Acquired,
+            ) => {
                 push_inputs(effects, HoldEffect::Deliver { inputs: pending });
                 push_inputs(effects, HoldEffect::OfferPending { inputs: offer });
                 S::Held {
@@ -496,8 +519,35 @@ impl HoldMachine {
                     live: LiveWork::default(),
                 }
             }
-            (S::Acquiring { mut pending, offer }, E::AcquireConflict { by }) => {
+            (
+                S::Acquiring {
+                    mut pending,
+                    offer,
+                    release: Some(request),
+                },
+                E::Acquired,
+            ) => {
                 pending.extend(offer);
+                self.detach(request, Vec::new(), pending, now, effects)
+            }
+            (
+                S::Acquiring {
+                    mut pending,
+                    offer,
+                    release,
+                },
+                E::AcquireConflict { by },
+            ) => {
+                pending.extend(offer);
+                if let Some(request) = release {
+                    // Another client already holds it; nothing of ours to let go.
+                    effects.push(HoldEffect::Released {
+                        cause: request.cause,
+                        receipts: Vec::new(),
+                    });
+                    push_inputs(effects, HoldEffect::PendingNotDelivered { inputs: pending });
+                    return S::Released;
+                }
                 effects.push(HoldEffect::ShowHeldElsewhere { by: by.clone() });
                 S::HeldElsewhere {
                     by,
@@ -505,17 +555,38 @@ impl HoldMachine {
                     next_probe_ms: now + millis(HELD_ELSEWHERE_PROBE_INTERVAL),
                 }
             }
-            (S::Acquiring { mut pending, offer }, E::ReleaseRequested { request }) => {
-                pending.extend(offer);
-                push_inputs(effects, HoldEffect::PendingNotDelivered { inputs: pending });
-                effects.push(HoldEffect::Released {
+            (
+                S::Acquiring {
+                    pending,
+                    offer,
+                    release: None,
+                },
+                E::ReleaseRequested { request },
+            ) if request.cause.is_explicit() => {
+                effects.push(HoldEffect::ReleaseStarted {
                     cause: request.cause,
-                    receipts: Vec::new(),
                 });
-                S::Released
+                S::Acquiring {
+                    pending,
+                    offer,
+                    release: Some(request),
+                }
             }
-            (S::Acquiring { mut pending, offer }, E::Detached) => {
+            (
+                S::Acquiring {
+                    mut pending,
+                    offer,
+                    release,
+                },
+                E::Detached,
+            ) => {
                 pending.extend(offer);
+                if let Some(request) = release {
+                    effects.push(HoldEffect::Released {
+                        cause: request.cause,
+                        receipts: Vec::new(),
+                    });
+                }
                 push_inputs(effects, HoldEffect::PendingNotDelivered { inputs: pending });
                 S::Released
             }
@@ -544,7 +615,7 @@ impl HoldMachine {
                 },
                 E::Tick,
             ) => {
-                if live.is_empty()
+                if live.is_idle()
                     && now.saturating_sub(last_activity_ms) >= self.policy.idle_after_ms()
                 {
                     self.detach(
@@ -567,20 +638,22 @@ impl HoldMachine {
                     live,
                 },
                 E::ReleaseRequested { request },
-            ) => {
-                if live.is_empty() {
-                    self.detach(request, Vec::new(), Vec::new(), now, effects)
-                } else {
-                    effects.push(HoldEffect::ConfirmRelease {
-                        request,
-                        live: live.clone(),
-                    });
-                    S::ConfirmingRelease {
-                        request,
-                        live,
-                        last_activity_ms,
-                        pending: Vec::new(),
-                    }
+            ) if request.cause.is_explicit() => {
+                effects.push(HoldEffect::ReleaseStarted {
+                    cause: request.cause,
+                });
+                if live.is_idle() {
+                    return self.detach(request, Vec::new(), Vec::new(), now, effects);
+                }
+                effects.push(HoldEffect::ConfirmRelease {
+                    request,
+                    live: live.clone(),
+                });
+                S::ConfirmingRelease {
+                    request,
+                    live,
+                    last_activity_ms,
+                    pending: Vec::new(),
                 }
             }
             (S::Held { .. }, E::Detached) => {
@@ -588,8 +661,8 @@ impl HoldMachine {
                 S::Released
             }
 
-            // Confirming an explicit release: nothing but the answer (or the
-            // live work ending by itself) moves it on; input waits in Inline.
+            // Confirming: admission is stopped; only the answer, or the live
+            // work ending by itself, moves on.
             (
                 S::ConfirmingRelease {
                     request,
@@ -616,21 +689,20 @@ impl HoldMachine {
                 },
                 E::Activity { live },
             ) => {
-                if live.is_empty() {
-                    self.detach(request, Vec::new(), pending, now, effects)
-                } else {
-                    if live != old {
-                        effects.push(HoldEffect::ConfirmRelease {
-                            request,
-                            live: live.clone(),
-                        });
-                    }
-                    S::ConfirmingRelease {
+                if live.is_idle() {
+                    return self.detach(request, Vec::new(), pending, now, effects);
+                }
+                if live != old {
+                    effects.push(HoldEffect::ConfirmRelease {
                         request,
-                        live,
-                        last_activity_ms: now,
-                        pending,
-                    }
+                        live: live.clone(),
+                    });
+                }
+                S::ConfirmingRelease {
+                    request,
+                    live,
+                    last_activity_ms: now,
+                    pending,
                 }
             }
             (
@@ -641,7 +713,7 @@ impl HoldMachine {
                     ..
                 },
                 E::ReleaseRequested { request },
-            ) => {
+            ) if request.cause.is_explicit() => {
                 effects.push(HoldEffect::ConfirmRelease {
                     request,
                     live: live.clone(),
@@ -657,17 +729,23 @@ impl HoldMachine {
                 S::ConfirmingRelease {
                     request,
                     live,
+                    last_activity_ms,
                     pending,
-                    ..
                 },
                 E::ReleaseConfirmed,
-            ) => self.run_steps(
-                request,
-                live.release_steps(request.wakeups),
-                pending,
-                now,
-                effects,
-            ),
+            ) => {
+                let steps = release_steps(&live, request.wakeups);
+                self.next_step(
+                    request,
+                    steps,
+                    Vec::new(),
+                    pending,
+                    live,
+                    last_activity_ms,
+                    now,
+                    effects,
+                )
+            }
             (
                 S::ConfirmingRelease {
                     live,
@@ -676,125 +754,322 @@ impl HoldMachine {
                     ..
                 },
                 E::ReleaseCancelled,
-            ) => {
-                push_inputs(effects, HoldEffect::Deliver { inputs: pending });
-                S::Held {
-                    last_activity_ms,
-                    live,
-                }
-            }
+            ) => resume_admission(live, last_activity_ms, pending, effects),
             (S::ConfirmingRelease { pending, .. }, E::Detached) => {
                 effects.push(HoldEffect::Lost);
                 push_inputs(effects, HoldEffect::PendingNotDelivered { inputs: pending });
                 S::Released
             }
 
-            // Releasing.
+            // Releasing: one step at a time.
             (
                 S::Releasing {
                     request,
+                    current,
+                    deadline_ms,
                     remaining,
-                    receipts,
-                    phase,
-                    mut pending,
-                },
-                E::AcquireRequested { input },
-            ) => {
-                pending.extend(input);
-                S::Releasing {
-                    request,
-                    remaining,
-                    receipts,
-                    phase,
-                    pending,
-                }
-            }
-            (
-                S::Releasing {
-                    request,
-                    mut remaining,
                     mut receipts,
-                    phase: phase @ ReleasePhase::Steps { .. },
                     pending,
+                    live,
+                    last_activity_ms,
                 },
-                E::StepFinished {
-                    action,
-                    id,
-                    outcome,
-                },
+                E::StepFinished { step, outcome },
             ) => {
-                if let Some(index) = remaining
-                    .iter()
-                    .position(|step| step.action == action && step.item.id == id)
-                {
-                    receipts.push(ReleaseReceipt {
-                        step: remaining.remove(index),
-                        outcome,
-                    });
-                }
-                if remaining.is_empty() {
-                    self.detach(request, receipts, pending, now, effects)
-                } else {
-                    S::Releasing {
+                if step != current {
+                    return S::Releasing {
                         request,
+                        current,
+                        deadline_ms,
                         remaining,
                         receipts,
-                        phase,
                         pending,
-                    }
+                        live,
+                        last_activity_ms,
+                    };
                 }
-            }
-            (
-                S::Releasing {
-                    request,
-                    remaining,
-                    mut receipts,
-                    phase: ReleasePhase::Steps { deadline_ms },
-                    pending,
-                },
-                E::Tick,
-            ) if now >= deadline_ms => {
-                fail_remaining(&mut receipts, remaining, "timed out; released anyway");
-                self.detach(request, receipts, pending, now, effects)
-            }
-            (
-                S::Releasing {
+                let receipt = ReleaseReceipt { step, outcome };
+                if receipt.outcome != ReleaseStepOutcome::Done {
+                    return fence(
+                        request,
+                        receipt,
+                        remaining,
+                        receipts,
+                        pending,
+                        live,
+                        last_activity_ms,
+                        effects,
+                    );
+                }
+                receipts.push(receipt);
+                self.next_step(
                     request,
                     remaining,
                     receipts,
-                    phase: ReleasePhase::Closing { deadline_ms },
                     pending,
-                },
-                E::Tick,
-            ) if now >= deadline_ms => {
-                effects.push(HoldEffect::Kill);
-                S::Releasing {
-                    request,
-                    remaining,
-                    receipts,
-                    phase: ReleasePhase::Killing,
-                    pending,
-                }
+                    live,
+                    last_activity_ms,
+                    now,
+                    effects,
+                )
             }
             (
                 S::Releasing {
                     request,
+                    current,
+                    deadline_ms,
                     remaining,
-                    mut receipts,
+                    receipts,
+                    pending,
+                    live,
+                    last_activity_ms,
+                },
+                E::Tick,
+            ) if now >= deadline_ms => fence(
+                request,
+                ReleaseReceipt {
+                    step: current,
+                    outcome: ReleaseStepOutcome::Unknown {
+                        reason: "no receipt from the harness".to_string(),
+                    },
+                },
+                remaining,
+                receipts,
+                pending,
+                live,
+                last_activity_ms,
+                effects,
+            ),
+            (
+                S::Releasing {
+                    request,
+                    current,
+                    remaining,
+                    receipts,
                     pending,
                     ..
                 },
                 E::Detached,
-            ) => {
-                fail_remaining(
-                    &mut receipts,
+            ) => exited_mid_release(
+                request,
+                std::iter::once(current).chain(remaining).collect(),
+                receipts,
+                pending,
+                effects,
+            ),
+
+            // Fenced.
+            (
+                S::ReleaseFenced {
+                    request,
+                    failed,
                     remaining,
-                    "the session exited before this was confirmed",
-                );
+                    receipts,
+                    pending,
+                    live,
+                    last_activity_ms,
+                },
+                E::ReleaseRetry,
+            ) => {
+                effects.push(HoldEffect::Step(failed.step.clone()));
+                S::Releasing {
+                    request,
+                    current: failed.step,
+                    deadline_ms: now + millis(RELEASE_STEP_TIMEOUT),
+                    remaining,
+                    receipts,
+                    pending,
+                    live,
+                    last_activity_ms,
+                }
+            }
+            // A late receipt resolves the unknown step.
+            (
+                S::ReleaseFenced {
+                    request,
+                    failed,
+                    remaining,
+                    mut receipts,
+                    pending,
+                    live,
+                    last_activity_ms,
+                },
+                E::StepFinished {
+                    step,
+                    outcome: ReleaseStepOutcome::Done,
+                },
+            ) if step == failed.step => {
+                receipts.push(ReleaseReceipt {
+                    step,
+                    outcome: ReleaseStepOutcome::Done,
+                });
+                self.next_step(
+                    request,
+                    remaining,
+                    receipts,
+                    pending,
+                    live,
+                    last_activity_ms,
+                    now,
+                    effects,
+                )
+            }
+            (
+                S::ReleaseFenced {
+                    live,
+                    last_activity_ms,
+                    pending,
+                    ..
+                },
+                E::ReleaseCancelled,
+            ) => resume_admission(live, last_activity_ms, pending, effects),
+            (
+                S::ReleaseFenced {
+                    request,
+                    failed,
+                    remaining,
+                    receipts,
+                    pending,
+                    ..
+                },
+                E::Detached,
+            ) => exited_mid_release(
+                request,
+                std::iter::once(failed.step).chain(remaining).collect(),
+                receipts,
+                pending,
+                effects,
+            ),
+
+            // Input and live-work updates while releasing or fenced.
+            (
+                S::Releasing {
+                    request,
+                    current,
+                    deadline_ms,
+                    remaining,
+                    receipts,
+                    mut pending,
+                    mut live,
+                    last_activity_ms,
+                },
+                event @ (E::AcquireRequested { .. } | E::Activity { .. }),
+            ) => {
+                absorb(event, &mut pending, &mut live);
+                S::Releasing {
+                    request,
+                    current,
+                    deadline_ms,
+                    remaining,
+                    receipts,
+                    pending,
+                    live,
+                    last_activity_ms,
+                }
+            }
+            (
+                S::ReleaseFenced {
+                    request,
+                    failed,
+                    remaining,
+                    receipts,
+                    mut pending,
+                    mut live,
+                    last_activity_ms,
+                },
+                event @ (E::AcquireRequested { .. } | E::Activity { .. }),
+            ) => {
+                absorb(event, &mut pending, &mut live);
+                S::ReleaseFenced {
+                    request,
+                    failed,
+                    remaining,
+                    receipts,
+                    pending,
+                    live,
+                    last_activity_ms,
+                }
+            }
+
+            // Detaching: wait for the harness, never a timer.
+            (
+                S::Detaching {
+                    request,
+                    receipts,
+                    mut pending,
+                    phase,
+                },
+                E::AcquireRequested { input },
+            ) => {
+                if !request.cause.is_explicit() && phase == DetachPhase::AwaitingNativeClose {
+                    // Idle Codex unsubscribe: the app-server still has the
+                    // thread loaded, so resubscribing takes it back.
+                    pending.extend(input);
+                    effects.push(HoldEffect::Acquire);
+                    return S::Acquiring {
+                        pending,
+                        offer: Vec::new(),
+                        release: None,
+                    };
+                }
+                pending.extend(input);
+                S::Detaching {
+                    request,
+                    receipts,
+                    pending,
+                    phase,
+                }
+            }
+            (
+                S::Detaching {
+                    request,
+                    receipts,
+                    pending,
+                    phase: DetachPhase::Closing { deadline_ms },
+                },
+                E::Tick,
+            ) if now >= deadline_ms => {
+                effects.push(HoldEffect::Kill);
+                S::Detaching {
+                    request,
+                    receipts,
+                    pending,
+                    phase: DetachPhase::Killing,
+                }
+            }
+            (
+                S::Detaching {
+                    request,
+                    receipts,
+                    pending,
+                    phase,
+                },
+                event @ (E::NativeClosed | E::Detached),
+            ) => {
+                let confirmed = match phase {
+                    DetachPhase::AwaitingNativeClose => true,
+                    DetachPhase::Closing { .. } | DetachPhase::Killing => event == E::Detached,
+                };
+                if !confirmed {
+                    return S::Detaching {
+                        request,
+                        receipts,
+                        pending,
+                        phase,
+                    };
+                }
                 effects.push(HoldEffect::Released {
                     cause: request.cause,
                     receipts,
                 });
+                if !request.cause.is_explicit() && !pending.is_empty() {
+                    // Input arrived while an idle Claude process was exiting.
+                    effects.push(HoldEffect::Acquire);
+                    return S::Acquiring {
+                        pending,
+                        offer: Vec::new(),
+                        release: None,
+                    };
+                }
                 push_inputs(effects, HoldEffect::PendingNotDelivered { inputs: pending });
                 S::Released
             }
@@ -821,6 +1096,7 @@ impl HoldMachine {
                 S::Acquiring {
                     pending: Vec::new(),
                     offer: pending,
+                    release: None,
                 }
             }
             (
@@ -883,42 +1159,46 @@ impl HoldMachine {
         }
     }
 
-    fn run_steps(
+    /// Emits the next step that needs the harness, or detaches when none is
+    /// left. Leaving a wakeup needs no native call and is receipted at once.
+    #[allow(clippy::too_many_arguments)]
+    fn next_step(
         &self,
         request: ReleaseRequest,
         steps: Vec<ReleaseStep>,
+        mut receipts: Vec<ReleaseReceipt>,
         pending: Vec<PendingInput>,
+        live: LiveWork,
+        last_activity_ms: u64,
         now: u64,
         effects: &mut Vec<HoldEffect>,
     ) -> HoldState {
-        let mut receipts = Vec::new();
-        let mut remaining = Vec::new();
-        for step in steps {
-            if step.action == ReleaseAction::LeaveWakeup {
+        let mut steps = steps.into_iter();
+        for step in steps.by_ref() {
+            if matches!(step, ReleaseStep::LeaveWakeup { .. }) {
                 receipts.push(ReleaseReceipt {
                     step,
                     outcome: ReleaseStepOutcome::Done,
                 });
-            } else {
-                effects.push(HoldEffect::Step(step.clone()));
-                remaining.push(step);
+                continue;
             }
-        }
-        if remaining.is_empty() {
-            return self.detach(request, receipts, pending, now, effects);
-        }
-        HoldState::Releasing {
-            request,
-            remaining,
-            receipts,
-            phase: ReleasePhase::Steps {
+            effects.push(HoldEffect::Step(step.clone()));
+            return HoldState::Releasing {
+                request,
+                current: step,
                 deadline_ms: now + millis(RELEASE_STEP_TIMEOUT),
-            },
-            pending,
+                remaining: steps.collect(),
+                receipts,
+                pending,
+                live,
+                last_activity_ms,
+            };
         }
+        self.detach(request, receipts, pending, now, effects)
     }
 
-    /// Lets the native session go once nothing live is left.
+    /// Asks the harness to let the session go; [`HoldEffect::Released`]
+    /// follows only its confirmation.
     fn detach(
         &self,
         request: ReleaseRequest,
@@ -927,35 +1207,98 @@ impl HoldMachine {
         now: u64,
         effects: &mut Vec<HoldEffect>,
     ) -> HoldState {
-        match self.policy {
-            IdleRelease::Unsubscribe {
-                native_unload_delay_ms,
-            } => {
+        let phase = match self.policy {
+            IdleRelease::Unsubscribe { .. } => {
                 effects.push(HoldEffect::Unsubscribe);
-                effects.push(HoldEffect::Released {
-                    cause: request.cause,
-                    receipts,
-                });
-                push_inputs(effects, HoldEffect::PendingNotDelivered { inputs: pending });
-                HoldState::Unloading {
-                    unload_at_ms: now.saturating_add(native_unload_delay_ms),
-                }
+                DetachPhase::AwaitingNativeClose
             }
             IdleRelease::CloseStdin { exit_grace_ms, .. } => {
                 effects.push(HoldEffect::CloseStdin {
                     kill_after_ms: exit_grace_ms,
                 });
-                HoldState::Releasing {
-                    request,
-                    remaining: Vec::new(),
-                    receipts,
-                    phase: ReleasePhase::Closing {
-                        deadline_ms: now.saturating_add(exit_grace_ms),
-                    },
-                    pending,
+                DetachPhase::Closing {
+                    deadline_ms: now.saturating_add(exit_grace_ms),
                 }
             }
+        };
+        HoldState::Detaching {
+            request,
+            receipts,
+            pending,
+            phase,
         }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn fence(
+    request: ReleaseRequest,
+    failed: ReleaseReceipt,
+    remaining: Vec<ReleaseStep>,
+    receipts: Vec<ReleaseReceipt>,
+    pending: Vec<PendingInput>,
+    live: LiveWork,
+    last_activity_ms: u64,
+    effects: &mut Vec<HoldEffect>,
+) -> HoldState {
+    effects.push(HoldEffect::ReleaseFenced {
+        failed: failed.clone(),
+        receipts: receipts.clone(),
+    });
+    HoldState::ReleaseFenced {
+        request,
+        failed,
+        remaining,
+        receipts,
+        pending,
+        live,
+        last_activity_ms,
+    }
+}
+
+fn resume_admission(
+    live: LiveWork,
+    last_activity_ms: u64,
+    pending: Vec<PendingInput>,
+    effects: &mut Vec<HoldEffect>,
+) -> HoldState {
+    effects.push(HoldEffect::ReleaseAbandoned);
+    push_inputs(effects, HoldEffect::Deliver { inputs: pending });
+    HoldState::Held {
+        last_activity_ms,
+        live,
+    }
+}
+
+/// The process exited mid-release: the session is free, but the unfinished
+/// steps were never confirmed and stay unknown.
+fn exited_mid_release(
+    request: ReleaseRequest,
+    unconfirmed: Vec<ReleaseStep>,
+    mut receipts: Vec<ReleaseReceipt>,
+    pending: Vec<PendingInput>,
+    effects: &mut Vec<HoldEffect>,
+) -> HoldState {
+    receipts.extend(unconfirmed.into_iter().map(|step| ReleaseReceipt {
+        step,
+        outcome: ReleaseStepOutcome::Unknown {
+            reason: "the session exited before this was confirmed".to_string(),
+        },
+    }));
+    effects.push(HoldEffect::Lost);
+    effects.push(HoldEffect::Released {
+        cause: request.cause,
+        receipts,
+    });
+    push_inputs(effects, HoldEffect::PendingNotDelivered { inputs: pending });
+    HoldState::Released
+}
+
+fn absorb(event: HoldEvent, pending: &mut Vec<PendingInput>, live: &mut LiveWork) {
+    match event {
+        HoldEvent::AcquireRequested { input } => pending.extend(input),
+        HoldEvent::Activity { live: next } => *live = next,
+        _ => {}
     }
 }
 
@@ -971,18 +1314,10 @@ fn push_inputs(effects: &mut Vec<HoldEffect>, effect: HoldEffect) {
     }
 }
 
-fn fail_remaining(receipts: &mut Vec<ReleaseReceipt>, remaining: Vec<ReleaseStep>, reason: &str) {
-    receipts.extend(remaining.into_iter().map(|step| ReleaseReceipt {
-        step,
-        outcome: ReleaseStepOutcome::Failed {
-            reason: reason.to_string(),
-        },
-    }));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::harness::{ChildId, ChildKind, HeldSurface, QueueEntryId};
 
     const MIN: u64 = 60_000;
 
@@ -996,8 +1331,9 @@ mod tests {
 
     fn input(id: &str) -> PendingInput {
         PendingInput {
-            id: id.into(),
-            sender_user_id: 8,
+            id: InputId::new(id).unwrap(),
+            sender: UserId(8),
+            required: Operation::Steer,
         }
     }
 
@@ -1014,23 +1350,54 @@ mod tests {
                 inputs: vec![input("first")]
             }]
         );
-        assert!(machine.is_held());
+        assert!(machine.admits());
+    }
+
+    fn queued() -> QueuedInput {
+        QueuedInput {
+            entry: QueueEntryId::new("q-1").unwrap(),
+            input: Some(InputId::new("in-q").unwrap()),
+            preview: "and the docs".into(),
+        }
+    }
+
+    fn child(id: &str, kind: ChildKind) -> ChildRef {
+        ChildRef {
+            id: ChildId::new(id).unwrap(),
+            kind,
+        }
     }
 
     fn busy() -> LiveWork {
         LiveWork {
-            active_turn: Some(LiveItem::new("turn-1", "Current turn")),
-            background_tasks: vec![LiveItem::new("task-1", "npm test")],
-            children: vec![LiveItem::new("child-1", "Explorer")],
-            interactions: vec![LiveItem::new("approval-1", "Run rm -rf build?")],
-            queued_inputs: vec![LiveItem::new("queued-1", "and the docs")],
-            wakeups: vec![LiveItem::new("wake-1", "Check CI in 10 min")],
+            turn: Some(TurnId::new("turn-1").unwrap()),
+            children: vec![
+                child("explorer", ChildKind::Subagent),
+                child("npm-test", ChildKind::BackgroundTask),
+            ],
+            interactions: vec![InteractionId::new("approval-1").unwrap()],
+            queued: vec![queued()],
+            wakeups: vec!["Check CI in 10 min".into()],
         }
     }
 
     fn release(cause: ReleaseCause) -> HoldEvent {
         HoldEvent::ReleaseRequested {
-            request: ReleaseRequest::new(cause, Some(7)),
+            request: ReleaseRequest::new(cause, Some(UserId(7))),
+        }
+    }
+
+    fn step_of(effects: &[HoldEffect]) -> ReleaseStep {
+        match effects {
+            [HoldEffect::Step(step)] => step.clone(),
+            other => panic!("expected one step, got {other:?}"),
+        }
+    }
+
+    fn done(step: ReleaseStep) -> HoldEvent {
+        HoldEvent::StepFinished {
+            step,
+            outcome: ReleaseStepOutcome::Done,
         }
     }
 
@@ -1058,7 +1425,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_unsubscribes_as_soon_as_idle_and_unloads_natively() {
+    fn codex_idle_unsubscribe_waits_for_thread_closed_without_a_timer() {
         let mut machine = codex();
         held(&mut machine, 0);
         machine.handle(HoldEvent::Activity { live: busy() }, 1_000);
@@ -1071,32 +1438,76 @@ mod tests {
         );
         assert_eq!(
             machine.handle(HoldEvent::Tick, 11 * MIN + 5_000),
-            [
-                HoldEffect::Unsubscribe,
-                HoldEffect::Released {
-                    cause: ReleaseCause::Idle,
-                    receipts: Vec::new()
-                }
-            ]
+            [HoldEffect::Unsubscribe]
         );
-        assert_eq!(
-            machine.state(),
-            &HoldState::Unloading {
-                unload_at_ms: 11 * MIN + 5_000 + 30 * MIN
-            }
-        );
-        // Re-acquiring while still loaded is a resubscribe.
+        // Unsubscribed is not released: no amount of time changes that.
+        assert!(machine.handle(HoldEvent::Tick, 24 * 60 * MIN).is_empty());
+        assert!(matches!(machine.state(), HoldState::Detaching { .. }));
+
+        // Before thread/closed, direct input resubscribes.
         let mut resubscribed = machine.clone();
         assert_eq!(
-            resubscribed.handle(HoldEvent::AcquireRequested { input: None }, 12 * MIN),
+            resubscribed.handle(
+                HoldEvent::AcquireRequested {
+                    input: Some(input("again"))
+                },
+                12 * MIN
+            ),
             [HoldEffect::Acquire]
         );
-        machine.handle(HoldEvent::Tick, 41 * MIN + 5_000);
+
+        assert_eq!(
+            machine.handle(HoldEvent::NativeClosed, 41 * MIN),
+            [HoldEffect::Released {
+                cause: ReleaseCause::Idle,
+                receipts: Vec::new()
+            }]
+        );
         assert_eq!(machine.state(), &HoldState::Released);
     }
 
     #[test]
-    fn claude_closes_stdin_after_the_idle_window_then_kills() {
+    fn explicit_codex_release_stops_admission_and_shows_releasing_until_closed() {
+        let mut machine = codex();
+        held(&mut machine, 0);
+        assert_eq!(
+            machine.handle(release(ReleaseCause::ContinueInTerminal), 1_000),
+            [
+                HoldEffect::ReleaseStarted {
+                    cause: ReleaseCause::ContinueInTerminal
+                },
+                HoldEffect::Unsubscribe
+            ]
+        );
+        assert!(!machine.admits());
+        // Input waits in Inline; it never resubscribes an explicit release.
+        assert!(
+            machine
+                .handle(
+                    HoldEvent::AcquireRequested {
+                        input: Some(input("late"))
+                    },
+                    2_000
+                )
+                .is_empty()
+        );
+        assert!(machine.handle(HoldEvent::Tick, 60 * MIN).is_empty());
+        assert_eq!(
+            machine.handle(HoldEvent::NativeClosed, 61 * MIN),
+            [
+                HoldEffect::Released {
+                    cause: ReleaseCause::ContinueInTerminal,
+                    receipts: Vec::new()
+                },
+                HoldEffect::PendingNotDelivered {
+                    inputs: vec![input("late")]
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn claude_closes_stdin_after_the_idle_window_and_waits_for_exit() {
         let mut machine = claude();
         held(&mut machine, 0);
         assert!(machine.handle(HoldEvent::Tick, 29 * MIN).is_empty());
@@ -1107,6 +1518,12 @@ mod tests {
             }]
         );
         assert!(machine.handle(HoldEvent::Tick, 30 * MIN + 5_000).is_empty());
+        // thread/closed means nothing to a Claude process.
+        assert!(
+            machine
+                .handle(HoldEvent::NativeClosed, 30 * MIN + 6_000)
+                .is_empty()
+        );
         assert_eq!(
             machine.handle(HoldEvent::Tick, 30 * MIN + 10_000),
             [HoldEffect::Kill]
@@ -1127,30 +1544,63 @@ mod tests {
     }
 
     #[test]
+    fn input_during_an_idle_claude_exit_respawns_after_it() {
+        let mut machine = claude();
+        held(&mut machine, 0);
+        machine.handle(HoldEvent::Tick, 30 * MIN);
+        assert!(
+            machine
+                .handle(
+                    HoldEvent::AcquireRequested {
+                        input: Some(input("next"))
+                    },
+                    30 * MIN + 1
+                )
+                .is_empty()
+        );
+        assert_eq!(
+            machine.handle(HoldEvent::Detached, 30 * MIN + 2),
+            [
+                HoldEffect::Released {
+                    cause: ReleaseCause::Idle,
+                    receipts: Vec::new()
+                },
+                HoldEffect::Acquire
+            ]
+        );
+        assert_eq!(
+            machine.handle(HoldEvent::Acquired, 30 * MIN + 3),
+            [HoldEffect::Deliver {
+                inputs: vec![input("next")]
+            }]
+        );
+    }
+
+    #[test]
     fn the_idle_timer_never_releases_live_work() {
         for live in [
             LiveWork {
-                active_turn: Some(LiveItem::new("t", "turn")),
+                turn: Some(TurnId::new("t").unwrap()),
                 ..LiveWork::default()
             },
             LiveWork {
-                background_tasks: vec![LiveItem::new("b", "task")],
+                children: vec![child("b", ChildKind::BackgroundTask)],
                 ..LiveWork::default()
             },
             LiveWork {
-                children: vec![LiveItem::new("c", "child")],
+                children: vec![child("c", ChildKind::Subagent)],
                 ..LiveWork::default()
             },
             LiveWork {
-                interactions: vec![LiveItem::new("i", "question")],
+                interactions: vec![InteractionId::new("i").unwrap()],
                 ..LiveWork::default()
             },
             LiveWork {
-                queued_inputs: vec![LiveItem::new("q", "queued")],
+                queued: vec![queued()],
                 ..LiveWork::default()
             },
             LiveWork {
-                wakeups: vec![LiveItem::new("w", "wakeup")],
+                wakeups: vec!["w".into()],
                 ..LiveWork::default()
             },
         ] {
@@ -1158,57 +1608,29 @@ mod tests {
                 held(&mut machine, 0);
                 machine.handle(HoldEvent::Activity { live: live.clone() }, 0);
                 assert!(machine.handle(HoldEvent::Tick, 24 * 60 * MIN).is_empty());
-                assert!(machine.is_held());
+                assert!(machine.admits());
             }
         }
     }
 
     #[test]
-    fn explicit_release_of_an_idle_session_is_immediate() {
-        let mut machine = codex();
-        held(&mut machine, 0);
-        assert_eq!(
-            machine.handle(release(ReleaseCause::ContinueInTerminal), 1_000),
-            [
-                HoldEffect::Unsubscribe,
-                HoldEffect::Released {
-                    cause: ReleaseCause::ContinueInTerminal,
-                    receipts: Vec::new()
-                }
-            ]
-        );
-
-        let mut machine = claude();
-        held(&mut machine, 0);
-        assert_eq!(
-            machine.handle(release(ReleaseCause::Command), 1_000),
-            [HoldEffect::CloseStdin {
-                kill_after_ms: 10_000
-            }]
-        );
-        assert_eq!(
-            machine.handle(HoldEvent::Detached, 2_000),
-            [HoldEffect::Released {
-                cause: ReleaseCause::Command,
-                receipts: Vec::new()
-            }]
-        );
-    }
-
-    #[test]
-    fn explicit_release_lists_live_work_then_stops_each_with_a_receipt() {
+    fn release_steps_run_in_order_each_after_its_receipt() {
         let mut machine = claude();
         held(&mut machine, 0);
         machine.handle(HoldEvent::Activity { live: busy() }, 0);
-        let request = ReleaseRequest::new(ReleaseCause::ContinueInTerminal, Some(7));
+        let request = ReleaseRequest::new(ReleaseCause::ContinueInTerminal, Some(UserId(7)));
         assert_eq!(
             machine.handle(HoldEvent::ReleaseRequested { request }, 1_000),
-            [HoldEffect::ConfirmRelease {
-                request,
-                live: busy()
-            }]
+            [
+                HoldEffect::ReleaseStarted {
+                    cause: ReleaseCause::ContinueInTerminal
+                },
+                HoldEffect::ConfirmRelease {
+                    request,
+                    live: busy()
+                }
+            ]
         );
-        // Input while confirming waits in Inline; the idle timer does nothing.
         assert!(
             machine
                 .handle(
@@ -1219,61 +1641,29 @@ mod tests {
                 )
                 .is_empty()
         );
-        assert!(machine.handle(HoldEvent::Tick, 60 * MIN).is_empty());
 
-        let effects = machine.handle(HoldEvent::ReleaseConfirmed, 60 * MIN);
-        let actions = effects
-            .iter()
-            .map(|effect| match effect {
-                HoldEffect::Step(step) => step.action,
-                other => panic!("unexpected {other:?}"),
-            })
-            .collect::<Vec<_>>();
+        // Only the queue step goes out first; the interrupt that could drain
+        // the queue waits for its receipt.
+        let first = step_of(&machine.handle(HoldEvent::ReleaseConfirmed, 3_000));
+        assert_eq!(first, ReleaseStep::KeepQueuedPending { queued: queued() });
+        let second = step_of(&machine.handle(done(first), 4_000));
+        assert!(matches!(second, ReleaseStep::CancelInteraction { .. }));
+        let third = step_of(&machine.handle(done(second), 5_000));
+        assert!(matches!(third, ReleaseStep::InterruptTurn { .. }));
+        let fourth = step_of(&machine.handle(done(third), 6_000));
+        let fifth = step_of(&machine.handle(done(fourth.clone()), 7_000));
+        assert!(matches!(
+            (&fourth, &fifth),
+            (ReleaseStep::StopChild { .. }, ReleaseStep::StopChild { .. })
+        ));
+        // The handoff leaves the wakeup to the next holder without a call.
         assert_eq!(
-            actions,
-            [
-                ReleaseAction::KeepQueuedPending,
-                ReleaseAction::CancelInteraction,
-                ReleaseAction::InterruptTurn,
-                ReleaseAction::StopChild,
-                ReleaseAction::StopBackgroundTask,
-            ]
-        );
-        for (action, id) in [
-            (ReleaseAction::KeepQueuedPending, "queued-1"),
-            (ReleaseAction::CancelInteraction, "approval-1"),
-            (ReleaseAction::InterruptTurn, "turn-1"),
-            (ReleaseAction::StopChild, "child-1"),
-        ] {
-            assert!(
-                machine
-                    .handle(
-                        HoldEvent::StepFinished {
-                            action,
-                            id: id.into(),
-                            outcome: ReleaseStepOutcome::Done
-                        },
-                        60 * MIN + 1_000
-                    )
-                    .is_empty()
-            );
-        }
-        assert_eq!(
-            machine.handle(
-                HoldEvent::StepFinished {
-                    action: ReleaseAction::StopBackgroundTask,
-                    id: "task-1".into(),
-                    outcome: ReleaseStepOutcome::Failed {
-                        reason: "stop_task failed".into()
-                    }
-                },
-                60 * MIN + 2_000
-            ),
+            machine.handle(done(fifth), 8_000),
             [HoldEffect::CloseStdin {
                 kill_after_ms: 10_000
             }]
         );
-        let effects = machine.handle(HoldEvent::Detached, 60 * MIN + 3_000);
+        let effects = machine.handle(HoldEvent::Detached, 9_000);
         let [
             HoldEffect::Released { cause, receipts },
             HoldEffect::PendingNotDelivered { inputs },
@@ -1284,51 +1674,126 @@ mod tests {
         assert_eq!(*cause, ReleaseCause::ContinueInTerminal);
         assert_eq!(inputs, &[input("late")]);
         assert_eq!(receipts.len(), 6);
-        // Handoff leaves the wakeup to the next holder, with a receipt.
-        assert_eq!(receipts[0].step.action, ReleaseAction::LeaveWakeup);
         assert!(
             receipts
                 .iter()
-                .any(|receipt| matches!(receipt.outcome, ReleaseStepOutcome::Failed { .. }))
+                .all(|receipt| receipt.outcome == ReleaseStepOutcome::Done)
         );
+        assert!(matches!(
+            receipts.last().unwrap().step,
+            ReleaseStep::LeaveWakeup { .. }
+        ));
     }
 
     #[test]
-    fn release_command_cancels_wakeups_and_steps_time_out() {
+    fn a_failed_queue_step_fences_the_release_and_never_interrupts() {
+        let mut machine = codex();
+        held(&mut machine, 0);
+        machine.handle(HoldEvent::Activity { live: busy() }, 0);
+        machine.handle(release(ReleaseCause::Command), 0);
+        let first = step_of(&machine.handle(HoldEvent::ReleaseConfirmed, 0));
+        let failed = ReleaseReceipt {
+            step: first.clone(),
+            outcome: ReleaseStepOutcome::Failed {
+                reason: "thread/queue/delete failed".into(),
+            },
+        };
+        assert_eq!(
+            machine.handle(
+                HoldEvent::StepFinished {
+                    step: first.clone(),
+                    outcome: failed.outcome.clone()
+                },
+                1_000
+            ),
+            [HoldEffect::ReleaseFenced {
+                failed,
+                receipts: Vec::new()
+            }]
+        );
+        assert!(!machine.admits());
+        // Fenced means fenced: no interrupt, no unsubscribe, however long.
+        assert!(machine.handle(HoldEvent::Tick, 24 * 60 * MIN).is_empty());
+        // Retrying re-runs exactly the failed step.
+        assert_eq!(
+            step_of(&machine.handle(HoldEvent::ReleaseRetry, 24 * 60 * MIN)),
+            first
+        );
+        let next = step_of(&machine.handle(done(first), 24 * 60 * MIN + 1));
+        assert!(matches!(next, ReleaseStep::CancelInteraction { .. }));
+    }
+
+    #[test]
+    fn a_step_without_a_receipt_becomes_unknown_and_fenced() {
         let mut machine = codex();
         held(&mut machine, 0);
         machine.handle(
             HoldEvent::Activity {
                 live: LiveWork {
-                    wakeups: vec![LiveItem::new("wake-1", "later")],
-                    background_tasks: vec![LiveItem::new("term-1", "dev server")],
+                    children: vec![child("dev-server", ChildKind::BackgroundTask)],
+                    wakeups: vec!["later".into()],
                     ..LiveWork::default()
                 },
             },
             0,
         );
         machine.handle(release(ReleaseCause::Command), 0);
-        let effects = machine.handle(HoldEvent::ReleaseConfirmed, 0);
-        assert!(effects.contains(&HoldEffect::Step(ReleaseStep {
-            action: ReleaseAction::CancelWakeup,
-            item: LiveItem::new("wake-1", "later")
-        })));
+        let stop = step_of(&machine.handle(HoldEvent::ReleaseConfirmed, 0));
         assert!(machine.handle(HoldEvent::Tick, 14_000).is_empty());
         let effects = machine.handle(HoldEvent::Tick, 15_000);
-        assert_eq!(effects[0], HoldEffect::Unsubscribe);
-        let HoldEffect::Released { receipts, .. } = &effects[1] else {
-            panic!("unexpected {effects:?}");
-        };
-        assert!(
-            receipts
-                .iter()
-                .all(|receipt| matches!(receipt.outcome, ReleaseStepOutcome::Failed { .. }))
+        assert!(matches!(
+            effects.as_slice(),
+            [HoldEffect::ReleaseFenced {
+                failed: ReleaseReceipt {
+                    outcome: ReleaseStepOutcome::Unknown { .. },
+                    ..
+                },
+                ..
+            }]
+        ));
+        // A late success resolves it, and `/release` cancels the wakeup.
+        let cancel_wakeup = step_of(&machine.handle(done(stop), 20_000));
+        assert_eq!(
+            cancel_wakeup,
+            ReleaseStep::CancelWakeup {
+                wakeup: "later".into()
+            }
         );
-        assert!(matches!(machine.state(), HoldState::Unloading { .. }));
+        assert_eq!(
+            machine.handle(done(cancel_wakeup), 21_000),
+            [HoldEffect::Unsubscribe]
+        );
+        assert!(matches!(machine.state(), HoldState::Detaching { .. }));
     }
 
     #[test]
-    fn confirmation_can_be_cancelled_or_resolved_by_work_ending() {
+    fn stale_receipts_do_not_advance_the_release() {
+        let mut machine = claude();
+        held(&mut machine, 0);
+        machine.handle(HoldEvent::Activity { live: busy() }, 0);
+        machine.handle(release(ReleaseCause::Command), 0);
+        machine.handle(HoldEvent::ReleaseConfirmed, 0);
+        assert!(
+            machine
+                .handle(
+                    done(ReleaseStep::InterruptTurn {
+                        turn: TurnId::new("turn-1").unwrap()
+                    }),
+                    1
+                )
+                .is_empty()
+        );
+        assert!(matches!(
+            machine.state(),
+            HoldState::Releasing {
+                current: ReleaseStep::KeepQueuedPending { .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn cancelling_a_confirmation_or_a_fenced_release_resumes_admission() {
         let mut machine = codex();
         held(&mut machine, 0);
         machine.handle(HoldEvent::Activity { live: busy() }, 0);
@@ -1341,28 +1806,67 @@ mod tests {
         );
         assert_eq!(
             machine.handle(HoldEvent::ReleaseCancelled, 2),
-            [HoldEffect::Deliver {
-                inputs: vec![input("meanwhile")]
-            }]
+            [
+                HoldEffect::ReleaseAbandoned,
+                HoldEffect::Deliver {
+                    inputs: vec![input("meanwhile")]
+                }
+            ]
         );
-        assert!(matches!(machine.state(), HoldState::Held { .. }));
+        assert!(machine.admits());
 
-        machine.handle(release(ReleaseCause::OpenInApp), 3);
+        machine.handle(release(ReleaseCause::Command), 3);
+        let first = step_of(&machine.handle(HoldEvent::ReleaseConfirmed, 3));
+        machine.handle(
+            HoldEvent::StepFinished {
+                step: first,
+                outcome: ReleaseStepOutcome::Failed { reason: "x".into() },
+            },
+            4,
+        );
+        assert_eq!(
+            machine.handle(HoldEvent::ReleaseCancelled, 5),
+            [HoldEffect::ReleaseAbandoned]
+        );
+        assert!(machine.admits());
+    }
+
+    #[test]
+    fn work_ending_during_confirmation_detaches_without_steps() {
+        let mut machine = codex();
+        held(&mut machine, 0);
+        machine.handle(HoldEvent::Activity { live: busy() }, 0);
+        machine.handle(release(ReleaseCause::OpenInApp), 1);
         assert_eq!(
             machine.handle(
                 HoldEvent::Activity {
                     live: LiveWork::default()
                 },
-                4
+                2
             ),
-            [
-                HoldEffect::Unsubscribe,
-                HoldEffect::Released {
-                    cause: ReleaseCause::OpenInApp,
-                    receipts: Vec::new()
-                }
-            ]
+            [HoldEffect::Unsubscribe]
         );
+    }
+
+    #[test]
+    fn exit_mid_release_reports_unconfirmed_steps_as_unknown() {
+        let mut machine = claude();
+        held(&mut machine, 0);
+        machine.handle(HoldEvent::Activity { live: busy() }, 0);
+        machine.handle(release(ReleaseCause::Command), 0);
+        let first = step_of(&machine.handle(HoldEvent::ReleaseConfirmed, 0));
+        machine.handle(done(first), 1);
+        let effects = machine.handle(HoldEvent::Detached, 2);
+        let [HoldEffect::Lost, HoldEffect::Released { receipts, .. }] = effects.as_slice() else {
+            panic!("unexpected {effects:?}");
+        };
+        assert_eq!(receipts[0].outcome, ReleaseStepOutcome::Done);
+        assert!(
+            receipts[1..]
+                .iter()
+                .all(|receipt| matches!(receipt.outcome, ReleaseStepOutcome::Unknown { .. }))
+        );
+        assert_eq!(machine.state(), &HoldState::Released);
     }
 
     #[test]
@@ -1375,7 +1879,7 @@ mod tests {
             0,
         );
         let by = HeldBy {
-            surface: ProviderSurface::Cli,
+            surface: HeldSurface::Terminal,
             detail: Some("already has a live local writer".into()),
         };
         assert_eq!(
@@ -1415,7 +1919,7 @@ mod tests {
         machine.handle(
             HoldEvent::AcquireConflict {
                 by: HeldBy {
-                    surface: ProviderSurface::Desktop,
+                    surface: HeldSurface::DesktopApp,
                     detail: None,
                 },
             },
@@ -1436,7 +1940,7 @@ mod tests {
         machine.handle(
             HoldEvent::AcquireConflict {
                 by: HeldBy {
-                    surface: ProviderSurface::Desktop,
+                    surface: HeldSurface::DesktopApp,
                     detail: None,
                 },
             },
@@ -1466,7 +1970,7 @@ mod tests {
         machine.handle(
             HoldEvent::AcquireConflict {
                 by: HeldBy {
-                    surface: ProviderSurface::Cli,
+                    surface: HeldSurface::Terminal,
                     detail: None,
                 },
             },
@@ -1482,7 +1986,7 @@ mod tests {
     }
 
     #[test]
-    fn release_during_acquire_wins_and_a_late_acquire_is_let_go() {
+    fn release_during_acquire_detaches_once_acquired_and_confirms_natively() {
         let mut machine = codex();
         machine.handle(
             HoldEvent::AcquireRequested {
@@ -1492,23 +1996,23 @@ mod tests {
         );
         assert_eq!(
             machine.handle(release(ReleaseCause::Command), 1),
-            [
-                HoldEffect::PendingNotDelivered {
-                    inputs: vec![input("a")]
-                },
-                HoldEffect::Released {
-                    cause: ReleaseCause::Command,
-                    receipts: Vec::new()
-                }
-            ]
+            [HoldEffect::ReleaseStarted {
+                cause: ReleaseCause::Command
+            }]
         );
         assert_eq!(
             machine.handle(HoldEvent::Acquired, 2),
+            [HoldEffect::Unsubscribe]
+        );
+        assert_eq!(
+            machine.handle(HoldEvent::NativeClosed, 3),
             [
-                HoldEffect::Unsubscribe,
                 HoldEffect::Released {
-                    cause: ReleaseCause::Idle,
+                    cause: ReleaseCause::Command,
                     receipts: Vec::new()
+                },
+                HoldEffect::PendingNotDelivered {
+                    inputs: vec![input("a")]
                 }
             ]
         );
@@ -1557,6 +2061,7 @@ mod tests {
         held(&mut machine, 0);
         machine.handle(HoldEvent::Activity { live: busy() }, 0);
         machine.handle(release(ReleaseCause::Command), 0);
+        machine.handle(HoldEvent::ReleaseConfirmed, 0);
         let json = serde_json::to_string(&machine).unwrap();
         let back: HoldMachine = serde_json::from_str(&json).unwrap();
         assert_eq!(back, machine);

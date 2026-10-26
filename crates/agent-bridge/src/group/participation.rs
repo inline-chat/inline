@@ -1,13 +1,14 @@
 //! Participation modes per (thread, agent) (spec §5.1 rule 2).
 //!
-//! A mention or invite from someone with access joins the agent in active
-//! mode. Participation lasts until muted or removed. The owner and grantees
-//! change the mode; the server's record (with its revision) is authoritative.
+//! A mention or invite from someone who may start work (INVOKE) joins the
+//! agent in active mode. Participation lasts until muted or removed. Changing
+//! the mode or removing the agent needs CONFIGURE (spec §7). The server's
+//! record (with its revision) is authoritative.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::intake::Access;
+use super::permissions::{Grants, Operation};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -57,20 +58,20 @@ pub enum ParticipationChange {
 
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum ParticipationError {
-    #[error("only the owner and people with access can change an agent's participation")]
-    NotGranted,
+    #[error("this change needs the {0:?} permission")]
+    NotGranted(Operation),
     #[error("the agent does not participate in this thread")]
     NotParticipating,
     #[error("the participation update is older than the current record")]
     Stale,
 }
 
-/// Applies one change. `actor_access` is the access of whoever made a local
-/// change; remote records are already authorized by the server.
+/// Applies one change. `actor` holds the current grants of whoever made a
+/// local change; remote records are already authorized by the server.
 pub fn apply_participation_change(
     current: Option<&Participation>,
     change: ParticipationChange,
-    actor_access: Access,
+    actor: Grants,
 ) -> Result<Option<Participation>, ParticipationError> {
     let next_revision = current.map_or(1, |current| current.revision + 1);
     match change {
@@ -80,7 +81,14 @@ pub fn apply_participation_change(
             }
             Ok(record.map(|record| Participation { revision, ..record }))
         }
-        _ if !actor_access.may_invoke() => Err(ParticipationError::NotGranted),
+        ParticipationChange::Join { .. } if !actor.permits(Operation::StartWork) => {
+            Err(ParticipationError::NotGranted(Operation::StartWork))
+        }
+        ParticipationChange::SetMode { .. } | ParticipationChange::Remove { .. }
+            if !actor.permits(Operation::Configure) =>
+        {
+            Err(ParticipationError::NotGranted(Operation::Configure))
+        }
         ParticipationChange::Join { chat_id, by } => Ok(Some(match current {
             Some(current) => *current,
             None => Participation {
@@ -119,7 +127,7 @@ mod tests {
         apply_participation_change(
             None,
             ParticipationChange::Join { chat_id: 3, by: 8 },
-            Access::Grantee,
+            Grants::MIGRATED_ALLOWLIST,
         )
         .unwrap()
         .unwrap()
@@ -139,9 +147,9 @@ mod tests {
             apply_participation_change(
                 None,
                 ParticipationChange::Join { chat_id: 3, by: 9 },
-                Access::None,
+                Grants::NONE,
             ),
-            Err(ParticipationError::NotGranted)
+            Err(ParticipationError::NotGranted(Operation::StartWork))
         );
     }
 
@@ -154,7 +162,7 @@ mod tests {
                 mode: ParticipationMode::Muted,
                 by: 7,
             },
-            Access::Owner,
+            Grants::OWNER,
         )
         .unwrap()
         .unwrap();
@@ -162,7 +170,7 @@ mod tests {
         let after_mention = apply_participation_change(
             Some(&muted),
             ParticipationChange::Join { chat_id: 3, by: 8 },
-            Access::Grantee,
+            Grants::MIGRATED_ALLOWLIST,
         )
         .unwrap()
         .unwrap();
@@ -170,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn mode_changes_and_removal_need_access() {
+    fn mode_changes_and_removal_need_configure() {
         let record = joined();
         for change in [
             ParticipationChange::SetMode {
@@ -181,21 +189,49 @@ mod tests {
             ParticipationChange::Remove { by: 9 },
         ] {
             assert_eq!(
-                apply_participation_change(Some(&record), change, Access::None),
-                Err(ParticipationError::NotGranted)
+                apply_participation_change(Some(&record), change, Grants::MIGRATED_ALLOWLIST),
+                Err(ParticipationError::NotGranted(Operation::Configure))
             );
         }
         assert_eq!(
             apply_participation_change(
                 Some(&record),
                 ParticipationChange::Remove { by: 7 },
-                Access::Owner
+                Grants::OWNER
             ),
             Ok(None)
         );
         assert_eq!(
-            apply_participation_change(None, ParticipationChange::Remove { by: 7 }, Access::Owner),
+            apply_participation_change(None, ParticipationChange::Remove { by: 7 }, Grants::OWNER),
             Err(ParticipationError::NotParticipating)
+        );
+    }
+
+    #[test]
+    fn a_configure_delegate_can_change_the_mode_without_invoke() {
+        let configure = Grants {
+            configure: true,
+            ..Grants::NONE
+        };
+        let muted = apply_participation_change(
+            Some(&joined()),
+            ParticipationChange::SetMode {
+                chat_id: 3,
+                mode: ParticipationMode::Muted,
+                by: 12,
+            },
+            configure,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(muted.mode, ParticipationMode::Muted);
+        assert_eq!(
+            apply_participation_change(
+                None,
+                ParticipationChange::Join { chat_id: 3, by: 12 },
+                configure
+            ),
+            Err(ParticipationError::NotGranted(Operation::StartWork))
         );
     }
 
@@ -210,7 +246,7 @@ mod tests {
                     mode: ParticipationMode::Active,
                     by: 7,
                 },
-                Access::Owner,
+                Grants::OWNER,
             ),
             Ok(Some(record))
         );
@@ -230,7 +266,7 @@ mod tests {
                     record: Some(newer),
                     revision: 5,
                 },
-                Access::None,
+                Grants::NONE,
             ),
             Ok(Some(Participation {
                 revision: 5,
@@ -247,7 +283,7 @@ mod tests {
                     record: None,
                     revision: 5,
                 },
-                Access::None,
+                Grants::NONE,
             ),
             Err(ParticipationError::Stale)
         );
@@ -258,7 +294,7 @@ mod tests {
                     record: None,
                     revision: 6,
                 },
-                Access::None,
+                Grants::NONE,
             ),
             Ok(None)
         );

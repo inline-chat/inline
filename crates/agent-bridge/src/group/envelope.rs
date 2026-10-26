@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::harness::{ChatId, Origin, UserId, WorkRef};
+
 /// Channel server name stamped on Claude `origin` for teammate input.
 pub const INLINE_CHANNEL_SERVER: &str = "inline";
 
@@ -29,10 +31,10 @@ pub enum AuthorKind {
         /// The agent's owner when the transport knows it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         owner_user_id: Option<i64>,
-        /// Opaque reference to the sending agent's work, when known (for
-        /// Claude `peer.fromSession`).
+        /// The sending agent's work, when the transport knows it (for Claude
+        /// `peer.fromSession`). Defaults to the message's chat.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        work: Option<String>,
+        work: Option<WorkRef>,
     },
 }
 
@@ -165,91 +167,24 @@ impl GroupMessage {
     }
 }
 
-/// Who an input speaks for. Only the owner's own voice carries the owner's
-/// consent; teammates and agents never consent on the owner's behalf.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum Provenance {
-    Owner {
-        user_id: i64,
-    },
-    Teammate {
-        user_id: i64,
-        name: String,
-    },
-    Agent {
-        bot_user_id: i64,
-        name: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        work: Option<String>,
-    },
-    /// Thread traffic delivered as passive context, not addressed input.
-    Ambient {
-        chat_id: i64,
-    },
-}
-
-impl Provenance {
-    /// Provenance of a message author relative to the agent's owner.
-    pub fn of_author(author: &Author, owner_user_id: i64) -> Self {
-        match &author.kind {
-            AuthorKind::Agent { work, .. } => Self::Agent {
-                bot_user_id: author.user_id,
-                name: author.display_name.clone(),
-                work: work.clone(),
-            },
-            AuthorKind::Human if author.user_id == owner_user_id => Self::Owner {
-                user_id: author.user_id,
-            },
-            AuthorKind::Human => Self::Teammate {
-                user_id: author.user_id,
-                name: author.display_name.clone(),
-            },
-        }
-    }
-
-    /// Whether this input may stand for the owner's consent (for example a
-    /// harness trust gate that only accepts human input).
-    pub const fn speaks_for_owner(&self) -> bool {
-        matches!(self, Self::Owner { .. })
-    }
-
-    /// Claude's native `origin` for this input.
-    pub fn claude_origin(&self) -> ClaudeOrigin {
-        match self {
-            Self::Owner { .. } => ClaudeOrigin::Human,
-            Self::Teammate { .. } | Self::Ambient { .. } => ClaudeOrigin::Channel {
-                server: INLINE_CHANNEL_SERVER.to_string(),
-            },
-            Self::Agent {
-                bot_user_id,
-                name,
-                work,
-            } => ClaudeOrigin::Peer {
-                from: format!("inline:user/{bot_user_id}"),
-                name: Some(name.clone()).filter(|name| !name.trim().is_empty()),
-                from_session: work.clone(),
-            },
-        }
-    }
-
-    /// Claude user-message fields: direct input queries, ambient context does
-    /// not (`shouldQuery: false`).
-    pub fn claude_input(&self) -> ClaudeInputFields {
-        ClaudeInputFields {
-            origin: self.claude_origin(),
-            should_query: !matches!(self, Self::Ambient { .. }),
-        }
-    }
-
-    /// Where Codex receives this input. Direct input is user input with its
-    /// sender metadata as untrusted context; ambient traffic is untrusted
-    /// `additionalContext` only.
-    pub const fn codex_placement(&self) -> CodexPlacement {
-        match self {
-            Self::Ambient { .. } => CodexPlacement::UntrustedContextOnly,
-            _ => CodexPlacement::UserInputWithUntrustedSender,
-        }
+/// The contract [`Origin`] of a message author, relative to the agent's owner.
+/// A bot account is always an agent, never the owner's voice.
+pub fn origin_of(message: &GroupMessage, owner_user_id: i64) -> Origin {
+    let author = &message.author;
+    match &author.kind {
+        AuthorKind::Agent { work, .. } => Origin::Agent {
+            bot: UserId(author.user_id),
+            work: work.clone().unwrap_or(WorkRef {
+                chat: ChatId(message.chat_id),
+                session: None,
+            }),
+        },
+        AuthorKind::Human if author.user_id == owner_user_id => Origin::Owner {
+            user: UserId(author.user_id),
+        },
+        AuthorKind::Human => Origin::Teammate {
+            user: UserId(author.user_id),
+        },
     }
 }
 
@@ -283,6 +218,34 @@ pub struct ClaudeInputFields {
     pub should_query: bool,
 }
 
+/// Claude's native fields for an input with this origin. `agent_name` is the
+/// sending agent's display name (untrusted, informational). Ambient context
+/// never queries (`shouldQuery: false`).
+pub fn claude_input(origin: &Origin, agent_name: Option<&str>) -> ClaudeInputFields {
+    let channel = || ClaudeOrigin::Channel {
+        server: INLINE_CHANNEL_SERVER.to_string(),
+    };
+    let claude_origin = match origin {
+        Origin::Owner { .. } => ClaudeOrigin::Human,
+        Origin::Teammate { .. } | Origin::Ambient { .. } | Origin::Scheduled => channel(),
+        Origin::Agent { bot, work } => ClaudeOrigin::Peer {
+            from: format!("inline:user/{}", bot.0),
+            name: agent_name
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string),
+            from_session: Some(match &work.session {
+                Some(session) => session.as_str().to_string(),
+                None => format!("inline:chat/{}", work.chat.0),
+            }),
+        },
+    };
+    ClaudeInputFields {
+        origin: claude_origin,
+        should_query: !matches!(origin, Origin::Ambient { .. }),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CodexPlacement {
@@ -293,33 +256,50 @@ pub enum CodexPlacement {
     UntrustedContextOnly,
 }
 
+/// Where Codex receives an input with this origin.
+pub const fn codex_placement(origin: &Origin) -> CodexPlacement {
+    match origin {
+        Origin::Ambient { .. } => CodexPlacement::UntrustedContextOnly,
+        _ => CodexPlacement::UserInputWithUntrustedSender,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
 
-    fn author(user_id: i64, kind: AuthorKind) -> Author {
-        Author {
-            user_id,
-            display_name: format!("user {user_id}"),
-            kind,
+    fn message(user_id: i64, kind: AuthorKind) -> GroupMessage {
+        GroupMessage {
+            chat_id: 3,
+            message_id: 2,
+            author: Author {
+                user_id,
+                display_name: format!("user {user_id}"),
+                kind,
+            },
+            conversation: Conversation::Group,
+            via: SentVia::Composer,
+            text: "hi".into(),
+            entities: Vec::new(),
+            reply_to: None,
+            sent_at: 0,
         }
     }
 
     #[test]
-    fn provenance_follows_owner_teammate_and_agent() {
+    fn origin_follows_owner_teammate_and_agent() {
         assert_eq!(
-            Provenance::of_author(&author(7, AuthorKind::Human), 7),
-            Provenance::Owner { user_id: 7 }
+            origin_of(&message(7, AuthorKind::Human), 7),
+            Origin::Owner { user: UserId(7) }
         );
-        assert!(matches!(
-            Provenance::of_author(&author(8, AuthorKind::Human), 7),
-            Provenance::Teammate { user_id: 8, .. }
-        ));
-        // A bot account is an agent even when its id equals the owner's
-        // number space; ownership never upgrades it to the owner's voice.
-        let agent = Provenance::of_author(
-            &author(
+        assert_eq!(
+            origin_of(&message(8, AuthorKind::Human), 7),
+            Origin::Teammate { user: UserId(8) }
+        );
+        // A bot with the owner's number is still an agent, never the owner.
+        let agent = origin_of(
+            &message(
                 7,
                 AuthorKind::Agent {
                     owner_user_id: Some(7),
@@ -328,129 +308,106 @@ mod tests {
             ),
             7,
         );
-        assert!(matches!(agent, Provenance::Agent { bot_user_id: 7, .. }));
-        assert!(!agent.speaks_for_owner());
-    }
-
-    #[test]
-    fn only_the_owner_speaks_for_the_owner() {
-        assert!(Provenance::Owner { user_id: 7 }.speaks_for_owner());
-        assert!(
-            !Provenance::Teammate {
-                user_id: 8,
-                name: "Sara".into()
+        assert_eq!(
+            agent,
+            Origin::Agent {
+                bot: UserId(7),
+                work: WorkRef {
+                    chat: ChatId(3),
+                    session: None
+                }
             }
-            .speaks_for_owner()
         );
-        assert!(!Provenance::Ambient { chat_id: 1 }.speaks_for_owner());
+        assert!(!agent.can_consent_for_owner());
     }
 
     #[test]
     fn claude_origin_matches_the_native_wire_shape() {
+        let fields =
+            |origin: Origin, name| serde_json::to_value(claude_input(&origin, name)).unwrap();
         assert_eq!(
-            serde_json::to_value(Provenance::Owner { user_id: 7 }.claude_input()).unwrap(),
+            fields(Origin::Owner { user: UserId(7) }, None),
             json!({"origin": {"kind": "human"}, "shouldQuery": true})
         );
         assert_eq!(
-            serde_json::to_value(
-                Provenance::Teammate {
-                    user_id: 8,
-                    name: "Sara".into()
-                }
-                .claude_input()
-            )
-            .unwrap(),
+            fields(Origin::Teammate { user: UserId(8) }, None),
             json!({"origin": {"kind": "channel", "server": "inline"}, "shouldQuery": true})
         );
         assert_eq!(
-            serde_json::to_value(
-                Provenance::Agent {
-                    bot_user_id: 41,
-                    name: "Mo's Codex · MacBook".into(),
-                    work: Some("inline:work/9".into()),
-                }
-                .claude_input()
-            )
-            .unwrap(),
+            fields(
+                Origin::Agent {
+                    bot: UserId(41),
+                    work: WorkRef {
+                        chat: ChatId(9),
+                        session: Some(crate::ProviderSessionId::new("thr_1").unwrap())
+                    }
+                },
+                Some("Mo's Codex · MacBook")
+            ),
             json!({
                 "origin": {
                     "kind": "peer",
                     "from": "inline:user/41",
                     "name": "Mo's Codex · MacBook",
-                    "fromSession": "inline:work/9"
+                    "fromSession": "thr_1"
                 },
                 "shouldQuery": true
             })
         );
         assert_eq!(
-            serde_json::to_value(Provenance::Ambient { chat_id: 3 }.claude_input()).unwrap(),
-            json!({"origin": {"kind": "channel", "server": "inline"}, "shouldQuery": false})
+            fields(
+                Origin::Agent {
+                    bot: UserId(41),
+                    work: WorkRef {
+                        chat: ChatId(9),
+                        session: None
+                    }
+                },
+                Some("  ")
+            ),
+            json!({
+                "origin": {"kind": "peer", "from": "inline:user/41", "fromSession": "inline:chat/9"},
+                "shouldQuery": true
+            })
         );
-    }
-
-    #[test]
-    fn peer_origin_omits_blank_names_and_unknown_sessions() {
-        let origin = Provenance::Agent {
-            bot_user_id: 41,
-            name: "  ".into(),
-            work: None,
-        }
-        .claude_origin();
         assert_eq!(
-            serde_json::to_value(origin).unwrap(),
-            json!({"kind": "peer", "from": "inline:user/41"})
+            fields(Origin::Ambient { chat: ChatId(3) }, None),
+            json!({"origin": {"kind": "channel", "server": "inline"}, "shouldQuery": false})
         );
     }
 
     #[test]
     fn codex_keeps_ambient_traffic_out_of_user_input() {
         assert_eq!(
-            Provenance::Owner { user_id: 7 }.codex_placement(),
+            codex_placement(&Origin::Owner { user: UserId(7) }),
             CodexPlacement::UserInputWithUntrustedSender
         );
         assert_eq!(
-            Provenance::Agent {
-                bot_user_id: 41,
-                name: "Codex".into(),
-                work: None
-            }
-            .codex_placement(),
-            CodexPlacement::UserInputWithUntrustedSender
-        );
-        assert_eq!(
-            Provenance::Ambient { chat_id: 3 }.codex_placement(),
+            codex_placement(&Origin::Ambient { chat: ChatId(3) }),
             CodexPlacement::UntrustedContextOnly
         );
     }
 
     #[test]
     fn message_round_trips_through_serde() {
-        let message = GroupMessage {
-            chat_id: 1,
-            message_id: 2,
-            author: author(8, AuthorKind::Human),
-            conversation: Conversation::Group,
-            via: SentVia::Composer,
-            text: "@claude look".into(),
-            entities: vec![
-                MessageEntity::Mention {
-                    offset: 0,
-                    length: 7,
-                    target: Mention::User { user_id: 99 },
-                },
-                MessageEntity::Link {
-                    chat_id: 5,
-                    message_id: None,
-                },
-            ],
-            reply_to: Some(ReplyRef {
-                message_id: 1,
-                author_user_id: 99,
-            }),
-            sent_at: 10,
-        };
-        let value = serde_json::to_value(&message).unwrap();
-        let back: GroupMessage = serde_json::from_value(value).unwrap();
+        let mut message = message(8, AuthorKind::Human);
+        message.entities = vec![
+            MessageEntity::Mention {
+                offset: 0,
+                length: 7,
+                target: Mention::User { user_id: 99 },
+            },
+            MessageEntity::Link {
+                chat_id: 5,
+                message_id: None,
+            },
+        ];
+        message.reply_to = Some(ReplyRef {
+            message_id: 1,
+            author_user_id: 99,
+        });
+        let back: GroupMessage =
+            serde_json::from_value(serde_json::to_value(&message).unwrap()).unwrap();
         assert_eq!(back, message);
         assert!(back.mentions_user(99));
         assert_eq!(back.links().collect::<Vec<_>>(), [(5, None)]);
