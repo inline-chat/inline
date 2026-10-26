@@ -680,7 +680,7 @@ describe("editMessage function", () => {
           rows: [
             {
               actions: [
-                {
+                { style: 0, requiredGrant: 0,
                   actionId: "approve",
                   text: "Approve",
                   action: {

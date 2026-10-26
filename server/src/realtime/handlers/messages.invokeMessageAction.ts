@@ -16,6 +16,7 @@ export const invokeMessageAction = async (
       peerId: input.peerId,
       messageId: input.messageId,
       actionId: input.actionId,
+      form: input.form,
     },
     {
       currentSessionId: handlerContext.sessionId,

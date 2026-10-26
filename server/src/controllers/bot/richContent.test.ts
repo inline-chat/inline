@@ -204,7 +204,7 @@ describe("Bot rich content projection", () => {
         {
           kind: {
             oneofKind: "disclosure",
-            disclosure: {
+            disclosure: { status: 0,
               summary: { offset: 9n, length: 7n },
               kind: BlockDisclosure_Kind.PROGRESS,
               activityKind: BlockDisclosure_ActivityKind.UNSPECIFIED,

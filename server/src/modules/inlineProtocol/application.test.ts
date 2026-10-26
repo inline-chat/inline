@@ -688,7 +688,7 @@ describe("Inline Protocol application ordering", () => {
     const connect = RpcCall.create({
       input: {
         oneofKind: "connectAgentSession",
-        connectAgentSession: {
+        connectAgentSession: { relation: 0, allowMultiple: false,
           peerId,
           botUserId: 2n,
           provider: 1,

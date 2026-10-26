@@ -563,13 +563,25 @@ export const BotMedia = Schema.Union([
   description: "One media item attached to a message.",
 })
 
-export const BotMessageAction = Schema.Union([
+const botMessageActionOptions = {
+  style: Schema.optionalKey(Schema.Literals(["primary", "destructive"])),
+  confirm: Schema.optionalKey(Schema.Struct({
+    title: Schema.String,
+    text: Schema.optionalKey(Schema.String),
+    confirm_text: Schema.optionalKey(Schema.String),
+  })),
+  required_grant: Schema.optionalKey(Schema.Literals(["access", "invoke", "steer", "approve", "view", "configure", "owner"])),
+}
+
+// Annotated like BotRichBlock so route group types stay within the compiler's serialization limit.
+export const BotMessageAction: Schema.Codec<NeutralBotMessageAction> = Schema.Union([
   Schema.Struct({
     action_id: Schema.String,
     text: Schema.String,
     type: Schema.Literal("callback"),
     callback_data: Schema.String,
     callback_data_base64: Schema.optionalKey(Schema.Never),
+    ...botMessageActionOptions,
   }),
   Schema.Struct({
     action_id: Schema.String,
@@ -577,6 +589,7 @@ export const BotMessageAction = Schema.Union([
     type: Schema.Literal("callback"),
     callback_data: Schema.optionalKey(Schema.Never),
     callback_data_base64: Schema.String,
+    ...botMessageActionOptions,
   }),
   Schema.Struct({
     action_id: Schema.String,
@@ -584,6 +597,7 @@ export const BotMessageAction = Schema.Union([
     type: Schema.Literal("callback"),
     callback_data: Schema.optionalKey(Schema.Never),
     callback_data_base64: Schema.optionalKey(Schema.Never),
+    ...botMessageActionOptions,
   }),
   Schema.Struct({
     action_id: Schema.String,
@@ -592,6 +606,23 @@ export const BotMessageAction = Schema.Union([
     copy_text: Schema.String,
     callback_data: Schema.optionalKey(Schema.Never),
     callback_data_base64: Schema.optionalKey(Schema.Never),
+    ...botMessageActionOptions,
+  }),
+  Schema.Struct({
+    action_id: Schema.String,
+    text: Schema.String,
+    type: Schema.Literal("open_url"),
+    url: Schema.String,
+    ...botMessageActionOptions,
+  }),
+  Schema.Struct({
+    action_id: Schema.String,
+    text: Schema.String,
+    type: Schema.Literal("open_link"),
+    chat_id: Schema.optionalKey(Schema.Number),
+    user_id: Schema.optionalKey(Schema.Number),
+    message_id: Schema.optionalKey(Schema.Number),
+    ...botMessageActionOptions,
   }),
 ]).annotate({
   identifier: "BotMessageAction",

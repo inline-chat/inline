@@ -243,7 +243,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
     } else if (serverUpdate.oneofKind === "newChat") {
       needsChat = true
       needsNewChatUser = true
-    } else if (serverUpdate.oneofKind === "chatMoved") {
+    } else if (serverUpdate.oneofKind === "chatMoved" || serverUpdate.oneofKind === "agentSessionState") {
       needsChat = true
     }
   }
@@ -767,6 +767,45 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
         })
         break
 
+      case "agentSessionState": {
+        const state = serverUpdate.update.agentSessionState
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "agentSessionState",
+            agentSessionState: {
+              agentSession: {
+                id: state.agentSessionId,
+                peerId,
+                botUserId: state.botUserId,
+                provider: state.provider,
+                statusMessageId: state.statusMessageId,
+                parentChatId: chatRecord?.parentChatId ? BigInt(chatRecord.parentChatId) : undefined,
+                parentSessionId: state.parentSessionId,
+                relation: state.relation,
+                state: state.state,
+                workspaceLabel: state.workspaceLabel,
+              },
+            },
+          },
+        })
+        break
+      }
+
+      case "agentParticipation": {
+        const participation = serverUpdate.update.agentParticipation
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "agentParticipation",
+            agentParticipation: { participation: { peerId, ...participation } },
+          },
+        })
+        break
+      }
+
       case "spaceRemoveMember":
       case "spaceMemberUpdate":
       case "spaceMemberAdd":
@@ -795,6 +834,9 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "userChatPermissions":
       case "userSettings":
       case "userDialogFolder":
+      case "userAgentGrant":
+      case "userAgentRuntime":
+      case "userAgentSessionControl":
       case "reaction":
       case "reactionDeleted":
         inflatedUpdates.push(chatSkipPts(update, chatId))
@@ -1796,6 +1838,11 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "userChatPermissions":
     case "userSettings":
     case "userDialogFolder":
+    case "agentSessionState":
+    case "agentParticipation":
+    case "userAgentGrant":
+    case "userAgentRuntime":
+    case "userAgentSessionControl":
       return null
     case undefined:
       log.warn("Skipping unknown durable space update", { spaceId: update.entityId, seq: update.seq })
@@ -2106,6 +2153,7 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
             actorUserId: payload.userMessageActionInvoked.actorUserId,
             actionId: payload.userMessageActionInvoked.actionId,
             data: payload.userMessageActionInvoked.data,
+            form: payload.userMessageActionInvoked.form,
           },
         },
       }
@@ -2147,7 +2195,22 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
     case "messageAttachment":
     case "participantGroupAdd":
     case "participantGroupDelete":
+    case "agentSessionState":
+    case "agentParticipation":
       return null
+    case "userAgentGrant":
+      return { seq, date, update: { oneofKind: "agentGrant", agentGrant: payload.userAgentGrant } }
+    case "userAgentRuntime":
+      return { seq, date, update: { oneofKind: "agentRuntime", agentRuntime: payload.userAgentRuntime } }
+    case "userAgentSessionControl":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "agentSessionControl",
+          agentSessionControl: { ...payload.userAgentSessionControl, interactionId: BigInt(seq) },
+        },
+      }
     case undefined:
       log.warn("Skipping unknown durable user update", { userId, seq: decrypted.seq })
       return null

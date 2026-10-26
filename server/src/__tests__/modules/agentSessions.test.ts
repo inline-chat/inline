@@ -56,7 +56,7 @@ describe("agent session continuity", () => {
   })
 
   async function connect() {
-    return connectAgentSession({
+    return connectAgentSession({ relation: 0, allowMultiple: false,
       peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
       botUserId: BigInt(botId),
       provider: AgentSessionProvider.CODEX,
@@ -463,7 +463,7 @@ describe("agent session continuity", () => {
     const secondBot = await testUtils.createUser(`agent-bot-two-${crypto.randomUUID()}@example.com`)
     await db.update(users).set({ bot: true, botCreatorId: ownerId }).where(eq(users.id, secondBot.id))
     await testUtils.addParticipant(chatId, secondBot.id)
-    await expect(connectAgentSession({
+    await expect(connectAgentSession({ relation: 0, allowMultiple: false,
       peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
       botUserId: BigInt(secondBot.id),
       provider: AgentSessionProvider.CLAUDE,
@@ -694,7 +694,7 @@ describe("agent session continuity", () => {
       testUtils.addParticipant(secondChat.id, botId),
     ])
 
-    const second = await connectAgentSession({
+    const second = await connectAgentSession({ relation: 0, allowMultiple: false,
       peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(secondChat.id) } } },
       botUserId: BigInt(botId),
       provider: AgentSessionProvider.CODEX,
@@ -710,7 +710,7 @@ describe("agent session continuity", () => {
       expect(canonicalPeer.type.chat.chatId).toBe(BigInt(chatId))
     }
 
-    const lookup = await connectAgentSession({
+    const lookup = await connectAgentSession({ relation: 0, allowMultiple: false,
       botUserId: BigInt(botId),
       provider: AgentSessionProvider.CODEX,
       instanceRef: "codex-installation",
@@ -727,7 +727,7 @@ describe("agent session continuity", () => {
 
     const connected = await connect()
     expect(connected.agentSession?.parentChatId).toBe(BigInt(parent.id))
-    const lookup = await connectAgentSession({
+    const lookup = await connectAgentSession({ relation: 0, allowMultiple: false,
       botUserId: BigInt(botId),
       provider: AgentSessionProvider.CODEX,
       instanceRef: "codex-installation",
@@ -740,7 +740,7 @@ describe("agent session continuity", () => {
   test("keeps the first project identity immutable across reconnects and lookups", async () => {
     await connect()
 
-    const mismatched = {
+    const mismatched = { relation: 0, allowMultiple: false,
       botUserId: BigInt(botId),
       provider: AgentSessionProvider.CODEX,
       instanceRef: "codex-installation",
@@ -764,7 +764,7 @@ describe("agent session continuity", () => {
 
   test("keeps provider default project immutable after session creation", async () => {
     const peerId = { type: { oneofKind: "chat" as const, chat: { chatId: BigInt(chatId) } } }
-    const base = {
+    const base = { relation: 0, allowMultiple: false,
       peerId,
       botUserId: BigInt(botId),
       provider: AgentSessionProvider.CODEX,
@@ -786,7 +786,7 @@ describe("agent session continuity", () => {
     await db.update(users).set({ bot: true, botCreatorId: ownerId }).where(eq(users.id, secondBot.id))
     await testUtils.addParticipant(chatId, secondBot.id)
 
-    await expect(connectAgentSession({
+    await expect(connectAgentSession({ relation: 0, allowMultiple: false,
       peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
       botUserId: BigInt(secondBot.id),
       provider: AgentSessionProvider.CLAUDE,
@@ -801,7 +801,7 @@ describe("agent session continuity", () => {
     await db.update(users).set({ bot: true, botCreatorId: ownerId }).where(eq(users.id, secondBot.id))
     await testUtils.addParticipant(chatId, secondBot.id)
 
-    const connected = await connectAgentSession({
+    const connected = await connectAgentSession({ relation: 0, allowMultiple: false,
       peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
       botUserId: BigInt(secondBot.id),
       provider: AgentSessionProvider.CLAUDE,
@@ -821,7 +821,7 @@ describe("agent session continuity", () => {
     }).where(eq(chats.id, chatId))
 
     await expect(connect()).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
-    const connected = await connectAgentSession({
+    const connected = await connectAgentSession({ relation: 0, allowMultiple: false,
       peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
       botUserId: BigInt(botId),
       provider: AgentSessionProvider.CODEX,
@@ -849,7 +849,7 @@ describe("agent session continuity", () => {
   })
 
   test("canonical lookup misses without creating or reserving a session", async () => {
-    const lookup = await connectAgentSession({
+    const lookup = await connectAgentSession({ relation: 0, allowMultiple: false,
       botUserId: BigInt(botId),
       provider: AgentSessionProvider.CODEX,
       instanceRef: "codex-installation",
@@ -876,7 +876,7 @@ describe("agent session continuity", () => {
       ownerId,
     )
     if (!normalThread) throw new Error("normal thread not created")
-    const normal = await connectAgentSession({
+    const normal = await connectAgentSession({ relation: 0, allowMultiple: false,
       peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(normalThread.id) } } },
       botUserId: BigInt(botId),
       provider: AgentSessionProvider.CODEX,
@@ -885,7 +885,7 @@ describe("agent session continuity", () => {
     }, ownerId)
     expect(normal.state).toBe(ConnectAgentSessionState.CREATED)
     await db.update(spaces).set({ isPublic: true }).where(eq(spaces.id, normalSpace.id))
-    await expect(connectAgentSession({
+    await expect(connectAgentSession({ relation: 0, allowMultiple: false,
       botUserId: BigInt(botId),
       provider: AgentSessionProvider.CODEX,
       instanceRef: "codex-installation",
@@ -907,7 +907,7 @@ describe("agent session continuity", () => {
       ownerId,
     )
     if (!internetThread) throw new Error("internet thread not created")
-    await expect(connectAgentSession({
+    await expect(connectAgentSession({ relation: 0, allowMultiple: false,
       peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(internetThread.id) } } },
       botUserId: BigInt(botId),
       provider: AgentSessionProvider.CODEX,

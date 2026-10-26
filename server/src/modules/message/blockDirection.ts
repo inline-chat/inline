@@ -94,6 +94,7 @@ function annotateBlock(
     case "disclosure": {
       let aggregate = directionForText(text, block.kind.disclosure.summary)
       clearTextDirection(block.kind.disclosure.summary)
+      clearTextDirection(block.kind.disclosure.meta)
       for (const child of block.kind.disclosure.children) {
         const childDirection = annotateBlock(text, child, emitLeafDirection)
         aggregate ??= childDirection
@@ -130,6 +131,43 @@ function annotateBlock(
       return undefined
     case "separator":
       return undefined
+    case "diff":
+      // Paths and diffs render LTR, like code.
+      clearTextDirection(block.kind.diff.path)
+      clearTextDirection(block.kind.diff.text)
+      clearTextDirection(block.kind.diff.previousPath)
+      return undefined
+    case "meter":
+      clearTextDirection(block.kind.meter.label)
+      clearTextDirection(block.kind.meter.meta)
+      return undefined
+    case "fields":
+      return aggregateTexts(text, block.kind.fields, block.kind.fields.fields.flatMap((field) => [field.label, field.value]))
+    case "steps":
+      return aggregateTexts(text, block.kind.steps, block.kind.steps.steps.flatMap((step) => [step.text, step.detail]))
+    case "callout": {
+      let aggregate = directionForText(text, block.kind.callout.title)
+      clearTextDirection(block.kind.callout.title)
+      for (const child of block.kind.callout.children) {
+        const childDirection = annotateBlock(text, child, emitLeafDirection)
+        aggregate ??= childDirection
+      }
+      setDirection(block.kind.callout, aggregate)
+      return aggregate
+    }
+    case "form": {
+      const form = block.kind.form
+      return aggregateTexts(text, form, [
+        form.title,
+        ...form.fields.flatMap((field) => [
+          field.label,
+          field.description,
+          ...(field.kind.oneofKind === "select"
+            ? field.kind.select.options.flatMap((option) => [option.label, option.description])
+            : []),
+        ]),
+      ])
+    }
     default:
       return undefined
   }
@@ -154,6 +192,21 @@ function directionForText(text: string, range: BlockText | undefined): boolean |
   return detectFirstStrongIsRtl(
     text.slice(Number(range.offset), Number(range.offset + range.length)),
   )
+}
+
+/** One direction for a container from its first strong text; leaves carry none. */
+function aggregateTexts(
+  text: string,
+  target: { isRtl?: boolean },
+  ranges: readonly (BlockText | undefined)[],
+): boolean | undefined {
+  let aggregate: boolean | undefined
+  for (const range of ranges) {
+    aggregate ??= directionForText(text, range)
+    clearTextDirection(range)
+  }
+  setDirection(target, aggregate)
+  return aggregate
 }
 
 function clearTextDirection(range: BlockText | undefined): void {
