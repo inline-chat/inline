@@ -215,17 +215,27 @@ async def exercise_authorization():
             }})
 
         with patch.object(adapter, "handle_message", receive), patch.object(adapter, "_send_thread_status", status), patch.object(adapter, "_create_reply_thread", create_thread):
-            await dispatch("43", "/threads off", 1001)
+            await dispatch("43", "/threads auto", 1001)
             assert "101" not in adapter._reply_thread_overrides
-            assert delivered[-1].text == "/threads off", "unknown DM lost host pairing ingress"
+            assert delivered[-1].text == "/threads auto", "unknown DM lost host pairing ingress"
             assert delivered[-1].source.user_id == "43"
-            await dispatch("42", "/threads off", 1002)
-            assert adapter._reply_thread_overrides["101"] == "off"
+            await dispatch("42", "/threads auto", 1002)
+            assert adapter._reply_thread_overrides["101"] == "auto"
             adapter._set_reply_threads_for_chat("101", "on")
             await dispatch("43", "ordinary unknown message", 1003)
             assert not mutations, "unknown sender created a reply thread before host authorization"
             await dispatch("42", "ordinary paired message", 1004)
-            assert len(mutations) == 1, "paired sender lost automatic threads"
+            assert len(mutations) == 1, "paired sender lost reply threads in their DM"
+
+        # Who may change reply threads follows Hermes' own admin lists.
+        if importlib.util.find_spec("gateway.slash_access"):
+            adapter.config.extra["group_allow_admin_from"] = ["42"]
+            assert adapter._may_change_reply_threads("42", "group")
+            assert not adapter._may_change_reply_threads("43", "group")
+            adapter.config.extra["group_user_allowed_commands"] = ["threads"]
+            assert adapter._may_change_reply_threads("43", "group")
+            for key in ("group_allow_admin_from", "group_user_allowed_commands"):
+                adapter.config.extra.pop(key, None)
 
         assert runner.pairing_store.revoke("inline", "42")
         assert authorized() is False, "revocation was hidden by cached adapter authorization"

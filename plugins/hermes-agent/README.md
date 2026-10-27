@@ -27,7 +27,7 @@ Supported:
 - Realtime inbound messages, catch-up, replies to bot messages, and action callbacks.
 - Inbound SDK receipts remain pending until Python handles the event. Temporary routing-metadata and authorization failures retry before deduplication or effects, preserving per-chat order while other chats can progress. Lost acknowledgement responses retry only the acknowledgement. Agent-button preflight retries are bounded, then show a retry prompt so an unavailable button cannot indefinitely block the shared action cursor. Shutdown leaves unresolved receipts available for catch-up; this is an at-least-once handoff, not a durable exactly-once guarantee for model turns or external effects.
 - Outbound text, Markdown parsing, opt-in edit-message streaming, long-message splitting, edits, deletes, typing, and presence.
-- Inline reply-thread routing, explicit-request auto mode, `/threads` controls, explicit `/follow` and `/unfollow` dialog relevance controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
+- Inline reply threads per chat (Auto or On, in DMs and groups, set with `/threads`, the agent settings, or by asking the agent), one thread per conversation, explicit `/follow` and `/unfollow` dialog relevance controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
 - Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, button-message sends, editing/deleting bot-owned messages, reactions, pin/unpin/list pins, reply-thread creation, top-level thread/chat creation outside the current conversation, and avatar presence/status.
 - Cached, privacy-safe sender names/usernames plus chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with first-name/username Markdown mention guidance and current chat/thread links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
@@ -308,14 +308,14 @@ Access control follows Hermes' native platform model:
 | `INLINE_ALLOWED_CHATS` | Comma-separated group/thread chat ids where the bot may respond. Parent chat ids also match their Inline reply threads. DMs are not filtered. Empty means no chat restriction. |
 | `INLINE_FREE_RESPONSE_CHATS` | Comma-separated group/thread chat ids where no mention is required. Parent chat ids also match their Inline reply threads. Useful for dedicated agent rooms. |
 | `INLINE_REPLY_TO_MODE` | When answers quote the message they answer. `bots` (default) quotes only requests from other bots, so the answer reaches them; `first` quotes the first chunk of every answer; `off` never quotes. Action cards and child-thread destinations keep their anchors. |
-| `INLINE_REPLY_THREADS` | Controls top-level reply-thread creation. `auto` creates a child reply thread only for an explicit thread request; `on` always creates; `off` stays flat. Existing child-thread conversations always remain in their thread. Defaults to `auto`. |
+| `INLINE_REPLY_THREADS` | Retired in 1.0; the default is always Auto: answers stay in the chat, and a thread starts only when someone asks for one. Turn On per chat (DM or group) with `/threads on`, the agent settings, or by asking the agent. `on` here is read as Auto with a warning, so a new tab's first message never gets a thread; `off` reads as Auto. Existing threads always keep their conversation. |
 | `INLINE_CONTEXT_BACKFILL` | Automatic context mode. `selective` is the default, `off` disables automatic history windows, and `always` restores recent-history backfill on every turn. |
 | `INLINE_THREAD_CONTEXT_LIMIT` | Max current chat/thread messages for selective thread or mention-gap context. Must be `0` through `100`; defaults to `30`. |
 | `INLINE_REPLY_CONTEXT_LIMIT` | Max messages in the anchored window around a replied-to Inline message. Must be `0` through `50`; defaults to `10`. |
 | `INLINE_OBSERVED_CONTEXT_LIMIT` | Max unmentioned group messages kept in the observed-context buffer. Must be `0` through `100`; defaults to `20`. |
 | `INLINE_OBSERVE_UNMENTIONED_MESSAGES` | Buffers unmentioned group messages that pass chat/user policy but do not wake the bot. Defaults to `true`; set to `false` to disable. |
 | `INLINE_CONTEXT_HISTORY_LIMIT` | Legacy compatibility shortcut. `0` maps to `INLINE_CONTEXT_BACKFILL=off`; `1` through `20` maps to `always` with that thread-context limit. Prefer the explicit settings above. |
-| `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On/Off buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
+| `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
 | `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. Reactions on bot messages are always delivered. |
 | `INLINE_REACTIONS` | Shows 👀 while Hermes handles an inbound message, then ✅ on success or ❌ on failure. Cancellation clears the working marker. Defaults to `false`. |
 | `INLINE_PARSE_MARKDOWN` | Controls whether supported outbound Inline Markdown is parsed. Defaults to `true`; `false` preserves the supplied syntax literally. |
@@ -335,7 +335,7 @@ Access control follows Hermes' native platform model:
 | `platforms.inline.typing_indicator` | Hermes-native toggle for Inline typing/presence while a turn is running. Defaults to `true`; set to `false` to keep busy threads visually quiet. |
 | `platforms.inline.gateway_restart_notification` | Hermes-native toggle for gateway online/restarted notices. Defaults to `true`. |
 
-Policy is evaluated in three ordered stages: **access**, then **wake**, then **delivery**. Access checks the chat and sender policy and is a hard gate; a mention, reply, callback, or command never grants access to a blocked chat or actor. Wake decides whether an allowed group turn invokes Hermes: free-response chats wake normally, while mention-gated chats require an explicit mention unless a configured reply-to-bot or followed-thread exception applies. Delivery keeps existing child-thread conversations in place; top-level `auto` creates a child only for explicit thread intent, `on` always creates one, and `off` stays flat.
+Policy is evaluated in three ordered stages: **access**, then **wake**, then **delivery**. Access checks the chat and sender policy and is a hard gate; a mention, reply, callback, or command never grants access to a blocked chat or actor. Wake decides whether an allowed group turn invokes Hermes: free-response chats wake normally, while mention-gated chats require an explicit mention unless a configured reply-to-bot or followed-thread exception applies. Delivery keeps existing child-thread conversations in place; in a chat set to On a top-level message gets its answer in a reply thread, and in Auto it stays in the chat unless someone asks for a thread. A thread under the bot's DM stays that DM for its person: DM access, no mention needed, and one session (`dm:<dm>:<thread>`, like a Slack DM thread). Anyone else in that thread keeps group rules.
 
 `open` controls intake; it does not grant permission to use the bot. After
 Inline's sender and group/thread restrictions pass, the adapter asks Hermes'
@@ -349,7 +349,11 @@ policy, or excluded group. DMs remain exempt from `allowed_chats`.
 Child-thread authorization preserves both the child and parent chat IDs so
 Hermes can select the correct profile. If required group metadata is unavailable,
 the adapter denies the operation instead of guessing a profile. Controls that
-change the parent's reply-thread mode also require access to that parent;
+change the parent's reply-thread mode also require access to that parent, and
+follow Hermes' own slash-command access: when `allow_admin_from` or
+`group_allow_admin_from` is set, only admins and people allowed to run
+`threads` (`user_allowed_commands`) can change it, from `/threads`, the settings
+card, or by asking the agent;
 thread-local model and following settings remain available to an authorized
 child-thread user.
 

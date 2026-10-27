@@ -82,8 +82,8 @@ optional_env:
     prompt: "Free-response Inline chat ids"
     password: false
   - name: INLINE_REPLY_THREADS
-    description: "Reply-thread mode: auto, on, or off. Auto creates child reply threads only for explicit thread requests (default auto)."
-    prompt: "Reply-thread mode (auto/on/off)"
+    description: "Retired: replies stay in the chat unless someone asks for a thread. Turn reply threads on per chat with /threads on."
+    prompt: "Reply-thread mode (retired; leave empty)"
     password: false
   - name: INLINE_CONTEXT_BACKFILL
     description: "Automatic context mode: selective, off, or always (default selective)"

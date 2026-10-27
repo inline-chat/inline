@@ -76,6 +76,17 @@ answers. Review these before upgrading:
   start from the upgrade, so messages sent while the gateway restarts may not
   be picked up.
 - **The sidecar takes a free local port** unless `INLINE_SIDECAR_PORT` is set.
+- **Reply threads are Auto or On, per chat.** Auto (the default) answers in the
+  chat and starts a thread only when someone asks for one; words alone never
+  start one. On answers each message in a reply thread, in a DM or a group, and
+  is set per chat with `/threads on`, the agent settings, or by asking the
+  agent. Off is gone, and `INLINE_REPLY_THREADS=on` as a bot-wide default now
+  reads as Auto, so a new tab's first message never gets a thread. When the
+  agent opens a thread for your message, its answer goes there, and asking
+  again returns the same thread.
+- **A thread under the bot's DM stays your DM.** You don't need to mention the
+  bot there, and the thread's first answer and your replies share one
+  conversation. Anyone else added to it is treated like any thread member.
 
 ## Agent setup prompt
 

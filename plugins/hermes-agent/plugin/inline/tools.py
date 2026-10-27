@@ -85,9 +85,15 @@ _turn_messages: "OrderedDict[tuple[str, str, str, str], Dict[str, Any]]" = Order
 _TURN_MESSAGES_MAX = 1000
 
 
-def remember_turn_message(*, session_chat_id: str, thread_id: str, message_id: str, chat_id: str, sender_id: str, sender_is_bot: bool) -> None:
+def remember_turn_message(
+    *, session_chat_id: str, thread_id: str, message_id: str, chat_id: str, sender_id: str, sender_is_bot: bool,
+    chat_type: str = "", in_reply_thread: bool = False,
+) -> None:
     key = (str(hermes_home()), str(session_chat_id or ""), str(thread_id or ""), str(message_id or ""))
-    _turn_messages[key] = {"chatId": str(chat_id), "senderId": str(sender_id or ""), "senderIsBot": bool(sender_is_bot)}
+    _turn_messages[key] = {
+        "chatId": str(chat_id), "senderId": str(sender_id or ""), "senderIsBot": bool(sender_is_bot),
+        "chatType": str(chat_type or ""), "inReplyThread": bool(in_reply_thread),
+    }
     _turn_messages.move_to_end(key)
     while len(_turn_messages) > _TURN_MESSAGES_MAX:
         _turn_messages.popitem(last=False)
@@ -99,17 +105,25 @@ def _current_turn() -> Dict[str, Any]:
     session_chat = _session_chat_id(prefer_thread=False)
     thread_id = _inline_id(_session_env("HERMES_SESSION_THREAD_ID", ""))
     known = _turn_messages.get((str(hermes_home()), session_chat, thread_id, message_id)) or {}
+    # The turn already runs in a thread when reply threads moved it there (its message lives
+    # in the parent chat) or when its message was sent inside the thread.
+    in_thread = bool(thread_id) and (bool(known.get("inReplyThread")) or (known.get("chatId") or session_chat) != thread_id)
     return {
         "messageId": message_id,
         "chatId": known.get("chatId") or session_chat,
         "senderId": known.get("senderId") or "",
         "senderIsBot": known.get("senderIsBot"),
+        "chatType": known.get("chatType") or "",
+        "inReplyThread": bool(known.get("inReplyThread")),
+        "threadId": thread_id if in_thread else "",
     }
 
 
 # Live sidecars by profile home: one gateway process can serve several profiles,
 # and a tool call must reach the sidecar of the bot it runs for.
 _sidecars: Dict[str, Dict[str, Any]] = {}
+# The adapter that owns each profile's Inline settings (reply threads), for the same reason.
+_settings_owners: Dict[str, Any] = {}
 
 _ACTION_MANIFEST = [
     ("send_message", "(chat_id?|user_id?, text, buttons?)", "Send a message, including optional agent-owned buttons."),
@@ -126,7 +140,8 @@ _ACTION_MANIFEST = [
     ("pin_message", "(chat_id?|user_id?, message_id?)", "Pin an Inline message for the conversation."),
     ("unpin_message", "(chat_id?|user_id?, message_id?)", "Unpin an Inline message for the conversation."),
     ("list_pins", "(chat_id?)", "List pinned Inline message IDs for a chat or reply thread."),
-    ("create_thread", "(parent_chat_id?, parent_message_id?, title?)", "Create an Inline reply thread."),
+    ("create_thread", "(parent_chat_id?, parent_message_id?, title?)", "Create an Inline reply thread on a message. For the message you're answering, your answer goes into the thread; if this conversation already has its thread, you get that one back."),
+    ("set_reply_threads", "(mode)", "Change where your answers go in this chat when someone asks you to: auto answers in the chat and starts a thread only when asked; on answers each message in a reply thread; default clears this chat's setting."),
     ("create_chat", "(title, space_id?, participant_user_ids?, is_public?, include_requester?)", "Create a top-level Inline thread/chat. A private chat includes the person who asked unless include_requester is false."),
     ("add_participants", "(chat_id?, user_ids)", "Add people or agents to a chat or thread you manage."),
     ("update_chat", "(chat_id?, title?, emoji?)", "Rename a chat or thread, or change its emoji."),
@@ -160,6 +175,18 @@ def _current_sidecar() -> Dict[str, Any]:
     if _sidecars:
         raise InlineToolError("Inline is not connected for this profile", "forbidden")
     return {}
+
+
+def configure_settings(owner: Any) -> None:
+    """Register the adapter that keeps this profile's Inline settings."""
+    _settings_owners[str(hermes_home())] = owner
+
+
+def _current_settings_owner() -> Any:
+    current = _settings_owners.get(str(hermes_home()))
+    if current is not None or multiplex_active():
+        return current
+    return next(iter(_settings_owners.values())) if len(_settings_owners) == 1 else None
 
 
 def check_inline_tool_requirements() -> bool:
@@ -238,7 +265,8 @@ INLINE_TOOL_SCHEMA = {
         "When chat_id is omitted, the tool uses the current Inline reply thread if present, otherwise the current chat. "
         "Return normal assistant replies as text. Use send_message only for a button card or a different destination. "
         "Agent-owned button presses return as ordinary turns, and the normal response replaces the source card while clearing omitted buttons. "
-        "Use create_thread with the current triggering message as parent_message_id to move large top-level discussions into a reply thread. "
+        "Use create_thread on the current triggering message when someone asks to continue in a thread; your answer then goes into it, so don't also post it in the chat. "
+        "Use set_reply_threads when someone asks you to always or never answer in threads here. "
         "Use create_chat to create a new top-level destination outside the current conversation; it defaults to private, and public creation must explicitly set is_public with a space_id. "
         "Use search_messages for exact catch-up across older chat history. "
         "Use pin_message/unpin_message only when the user explicitly asks because pins are durable shared-chat state. "
@@ -317,7 +345,7 @@ INLINE_TOOL_SCHEMA = {
             "comment": {"type": "string", "description": "Optional bot avatar presence/status message."},
             "user_ids": {"type": "array", "items": {"type": "string"}, "description": "add_participants: Inline user IDs of the people or agents to add."},
             "include_requester": {"type": "boolean", "description": "create_chat: include the person who asked (default true for private chats). Set false only for a deliberately bot-only chat."},
-            "mode": {"type": "string", "enum": ["following", "unfollowed"], "description": "set_follow_mode: following joins the thread's conversation; unfollowed limits you to mentions and replies."},
+            "mode": {"type": "string", "enum": ["following", "unfollowed", "auto", "on", "default"], "description": "set_follow_mode: following joins the thread's conversation; unfollowed limits you to mentions and replies. set_reply_threads: auto, on, or default to clear this chat's setting."},
         },
         "required": ["action"],
     },
@@ -347,6 +375,10 @@ def _handle_inline_tool(args: Dict[str, Any], **_: Any) -> str:
     try:
         if action == "set_follow_mode":
             return tool_result({"success": True, "action": action, "result": _set_follow_mode(args)})
+        if action == "set_reply_threads":
+            return tool_result({"success": True, "action": action, "result": _set_reply_threads(args)})
+        if action == "create_thread":
+            return tool_result({"success": True, "action": action, "result": _create_thread(args)})
         path, body = _request_for_action(action, args)
         response = _sidecar_call(path, body)
         result = _compact_result(action, response.get("result") or {})
@@ -571,6 +603,50 @@ def _set_follow_mode(args: Dict[str, Any]) -> Dict[str, Any]:
     if write_error:
         raise write_error
     raise InlineToolError(f"Follow state is {actual or 'default'} after the change", "unknown")
+
+
+def _set_reply_threads(args: Dict[str, Any]) -> Dict[str, Any]:
+    mode = _str(args.get("mode")).lower()
+    if mode not in {"auto", "on", "default"}:
+        raise InlineToolError("set_reply_threads requires mode auto, on or default", "bad_format")
+    owner = _current_settings_owner()
+    if owner is None:
+        raise InlineToolError("Inline settings aren't available for this profile", "unsupported")
+    turn = _current_turn()
+    if not turn.get("senderId"):
+        raise InlineToolError("Only the person who asked can change reply threads, and this turn has no sender", "forbidden")
+    try:
+        return owner.set_reply_threads_from_tool(
+            chat_id=turn["chatId"],
+            chat_type=turn.get("chatType") or "group",
+            in_reply_thread=bool(turn.get("inReplyThread")),
+            actor_id=turn["senderId"],
+            actor_is_bot=bool(turn.get("senderIsBot")),
+            mode=mode,
+        )
+    except PermissionError as exc:
+        raise InlineToolError(str(exc), "forbidden") from exc
+
+
+def _create_thread(args: Dict[str, Any]) -> Dict[str, Any]:
+    """One conversation, one thread. A thread for the message being answered is this turn's
+    thread: if the turn already runs in one (reply threads on, or a message inside a thread),
+    that thread comes back instead of a second one, and a new one receives the turn's answer."""
+    path, body = _request_for_action("create_thread", args)
+    turn = _current_turn()
+    owner = _current_settings_owner()
+    for_this_turn = bool(turn["messageId"]) and body["parentChatId"] == turn["chatId"] and (
+        body.get("parentMessageId") in {None, turn["messageId"]}
+    )
+    if for_this_turn:
+        existing = turn.get("threadId") or (owner.turn_thread(turn["chatId"], turn["messageId"]) if owner else "")
+        if existing:
+            return {"chatId": existing, "existing": True, "message": "This conversation already has its thread; your answer goes there."}
+    result = _compact_result("create_thread", _sidecar_call(path, body).get("result") or {})
+    thread_id = _inline_id(result.get("chatId"))
+    if for_this_turn and owner is not None and thread_id:
+        owner.note_turn_thread(turn["chatId"], turn["messageId"], thread_id)
+    return result
 
 
 _FOLLOW_CONFIRMATIONS = {
