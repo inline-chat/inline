@@ -88,7 +88,7 @@ import {
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
 import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
 import { resolveGroupMentions } from "@in/server/modules/message/resolveGroupMentions"
-import { getAddressedUserIds, isBotCommandMessage, resolveThreadAutoFollowUserIds } from "@in/server/modules/threadAutoFollow"
+import { getAddressedUserIds, resolveThreadAutoFollowUserIds } from "@in/server/modules/threadAutoFollow"
 import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 import { ModelError } from "@in/server/db/models/_errors"
@@ -588,7 +588,6 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     newMessageId: newMessage.messageId,
     addressedUserIds: getAddressedUserIds(text, entities),
     senderIsBot: context.isBot,
-    isCommand: isBotCommandMessage(entities),
   })
 
   const sidebarOpenUserIds = await getSidebarOpenUserIds({
@@ -921,7 +920,6 @@ const autoFollowThreadMessage = async ({
   newMessageId,
   addressedUserIds,
   senderIsBot,
-  isCommand,
 }: {
   chat: DbChat
   currentUserId: number
@@ -929,7 +927,6 @@ const autoFollowThreadMessage = async ({
   newMessageId: number
   addressedUserIds: ReadonlySet<number>
   senderIsBot: boolean | undefined
-  isCommand: boolean
 }) => {
   const eligibleUserIds = new Set(updateGroup.userIds)
   const candidateUserIds = await resolveThreadAutoFollowUserIds({
@@ -939,7 +936,6 @@ const autoFollowThreadMessage = async ({
     newMessageId,
     addressedUserIds,
     senderIsBot,
-    isCommand,
   })
   if (candidateUserIds.length === 0) {
     return

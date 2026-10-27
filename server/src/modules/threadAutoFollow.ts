@@ -1,13 +1,13 @@
-import { and, eq, inArray, isNull, lt, ne } from "drizzle-orm"
+import { and, eq, inArray, isNull, lt } from "drizzle-orm"
 import { MessageEntity_Type, type MessageEntities } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
-import { chats, messages, users, type DbChat } from "@in/server/db/schema"
+import { messages, users, type DbChat } from "@in/server/db/schema"
 import { getChatById, getReplyThreadAnchorSenderId, isReplyThread } from "@in/server/modules/subthreads"
 
 export const FRESH_NORMAL_THREAD_MESSAGE_ID_LIMIT = 15
 
 type ThreadFollowChat = Pick<DbChat, "type">
-type ThreadAutoFollowChat = Pick<DbChat, "id" | "type" | "parentChatId" | "parentMessageId" | "conversationStarted">
+type ThreadAutoFollowChat = Pick<DbChat, "id" | "type" | "parentChatId" | "parentMessageId">
 
 export function canUseThreadFollowMode(chat: ThreadFollowChat): boolean {
   return chat.type === "thread"
@@ -28,7 +28,7 @@ export function shouldAutoFollowThreadMessage(
   return isFreshNormalThreadByNewMessageId(newMessageId)
 }
 
-export function isFreshNormalThreadByNewMessageId(newMessageId: number | null | undefined): boolean {
+export function isFreshNormalThreadByNewMessageId(newMessageId: number | null | undefined): newMessageId is number {
   // Message ids are per-chat, so the newly inserted id is a cheap proxy for thread size.
   // Keep this centralized so we can later swap in a better "fresh thread" signal without changing send flow.
   return (
@@ -40,26 +40,28 @@ export function isFreshNormalThreadByNewMessageId(newMessageId: number | null | 
 }
 
 /**
- * Claims the thread's first conversational message. Exactly one sender wins, even when two
- * first messages race; system messages never call this, and deleting the opener later doesn't
- * reopen the claim.
+ * Whether this message opens the thread: the first message in it that isn't a system message.
+ * Only the fresh-thread window is checked, so later sends never pay for the lookup.
  */
-async function claimThreadOpener(chat: ThreadAutoFollowChat): Promise<boolean> {
-  if (!canUseThreadFollowMode(chat) || chat.conversationStarted) {
+async function isThreadOpener(chat: ThreadAutoFollowChat, newMessageId: number | null | undefined): Promise<boolean> {
+  if (!canUseThreadFollowMode(chat) || !isFreshNormalThreadByNewMessageId(newMessageId)) {
     return false
   }
+  if (newMessageId === 1) {
+    return true
+  }
 
-  const claimed = await db
-    .update(chats)
-    .set({ conversationStarted: true })
-    .where(and(eq(chats.id, chat.id), eq(chats.conversationStarted, false)))
-    .returning({ id: chats.id })
-  return claimed.length > 0
+  const [earlier] = await db
+    .select({ messageId: messages.messageId })
+    .from(messages)
+    .where(and(eq(messages.chatId, chat.id), lt(messages.messageId, newMessageId), isNull(messages.systemMessageEncrypted)))
+    .limit(1)
+  return earlier === undefined
 }
 
 /**
- * Users a message is addressed to for following: the run of mentions it starts with, or every
- * mention when it doesn't start with one. Bot commands run once and never assign a follower.
+ * Users a message is addressed to for following: the run of mentions and bot commands it starts
+ * with, or every one of them when it doesn't start with one.
  */
 export function getAddressedUserIds(text: string | undefined, entities: MessageEntities | undefined): Set<number> {
   const addressed = new Set<number>()
@@ -69,10 +71,16 @@ export function getAddressedUserIds(text: string | undefined, entities: MessageE
 
   const mentions: { offset: number; end: number; userId: number }[] = []
   for (const entity of entities.entities) {
-    if (entity.type !== MessageEntity_Type.MENTION || entity.entity.oneofKind !== "mention") {
+    const target =
+      entity.type === MessageEntity_Type.MENTION && entity.entity.oneofKind === "mention"
+        ? entity.entity.mention.userId
+        : entity.type === MessageEntity_Type.BOT_COMMAND && entity.entity.oneofKind === "botCommand"
+          ? entity.entity.botCommand.botUserId
+          : undefined
+    if (target === undefined) {
       continue
     }
-    const userId = Number(entity.entity.mention.userId)
+    const userId = Number(target)
     if (!Number.isSafeInteger(userId) || userId <= 0) {
       continue
     }
@@ -97,31 +105,6 @@ export function getAddressedUserIds(text: string | undefined, entities: MessageE
     addressed.add(userId)
   }
   return addressed
-}
-
-/** A message carrying a bot command is a one-off control, not the start of a conversation. */
-export function isBotCommandMessage(entities: MessageEntities | undefined): boolean {
-  return entities?.entities.some((entity) => entity.type === MessageEntity_Type.BOT_COMMAND) ?? false
-}
-
-/**
- * Whether someone else wrote in the chat before this message. In a thread no ordinary message has
- * opened yet, that earlier message was a command, so a bot writing now is answering it.
- */
-async function hasEarlierMessageFromOthers(chatId: number, senderId: number, messageId: number): Promise<boolean> {
-  const [row] = await db
-    .select({ messageId: messages.messageId })
-    .from(messages)
-    .where(
-      and(
-        eq(messages.chatId, chatId),
-        lt(messages.messageId, messageId),
-        ne(messages.fromId, senderId),
-        isNull(messages.systemMessageEncrypted),
-      ),
-    )
-    .limit(1)
-  return row !== undefined
 }
 
 async function getBotUserIds(userIds: Iterable<number>): Promise<Set<number>> {
@@ -153,11 +136,10 @@ async function getBotDmPeerId(chat: ThreadAutoFollowChat, currentUserId: number)
 /**
  * Who starts following a thread when a message is sent.
  *
- * People keep the fresh-thread heuristic. Bots only enter through the thread's opening message,
- * its first message that isn't a bot command:
- * the bots it addresses follow. With no address, the bot it is implicitly for follows: a reply
- * thread's bot anchor author, the one bot in a thread only it and the sender can see, or a bot DM's
- * peer; otherwise a bot that wrote the opener follows its own thread.
+ * People keep the fresh-thread heuristic. Bots only enter through the thread's opening message:
+ * the bots it addresses, by mention or command, follow. With no address, the bot it is implicitly
+ * for follows: a reply thread's bot anchor author, the one bot in a thread only it and the sender
+ * can see, or a bot DM's peer; otherwise a bot that wrote the opener follows its own thread.
  */
 export async function resolveThreadAutoFollowUserIds(input: {
   chat: ThreadAutoFollowChat
@@ -167,22 +149,11 @@ export async function resolveThreadAutoFollowUserIds(input: {
   addressedUserIds: ReadonlySet<number>
   /** Known when the entry point authenticated the sender; looked up otherwise. */
   senderIsBot?: boolean | undefined
-  /** Commands leave the opener for the thread's first ordinary message. */
-  isCommand?: boolean | undefined
 }): Promise<number[]> {
   const { chat, currentUserId, eligibleUserIds, newMessageId, addressedUserIds } = input
   const humanRuleApplies = shouldAutoFollowThreadMessage(chat, newMessageId)
-  const mayOpen = !input.isCommand && canUseThreadFollowMode(chat) && !chat.conversationStarted
+  const isOpener = await isThreadOpener(chat, newMessageId)
   let senderIsBot = input.senderIsBot
-  if (mayOpen && senderIsBot === undefined) {
-    senderIsBot = (await getBotUserIds([currentUserId])).has(currentUserId)
-  }
-  // A bot's answer to a command is part of that command, so it doesn't open the thread either;
-  // a bot that writes first, like a thread it starts for its own answer, still does.
-  const answersCommand =
-    mayOpen && senderIsBot === true && typeof newMessageId === "number" &&
-    (await hasEarlierMessageFromOthers(chat.id, currentUserId, newMessageId))
-  const isOpener = mayOpen && !answersCommand && (await claimThreadOpener(chat))
   if (!humanRuleApplies && !isOpener) {
     return []
   }

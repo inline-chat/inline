@@ -235,42 +235,6 @@ describe("bots enter a thread through its opening message", () => {
     expect(await followMode(chat.id, scout.id)).toBe("following")
   })
 
-  test("many system messages before the first message don't hide the opener", async () => {
-    const chat = await createThread([owner, scout])
-    await db.insert(messages).values(
-      Array.from({ length: 16 }, (_, index) => ({
-        chatId: chat.id,
-        messageId: index + 1,
-        fromId: alice.id,
-        systemMessageEncrypted: Buffer.from("pin"),
-        systemMessageIv: Buffer.from("iv"),
-        systemMessageTag: Buffer.from("tag"),
-      })),
-    )
-    await db.update(chats).set({ lastMsgId: 16, messageIdCounter: 16 }).where(eq(chats.id, chat.id))
-    await send(owner.id, chat.id, "@scout find flights", mentions({ userId: scout.id, offset: 0, length: 6 }))
-
-    expect(await followMode(chat.id, scout.id)).toBe("following")
-  })
-
-  test("deleting the opener doesn't make a later mention the opener", async () => {
-    const chat = await createThread([owner, alice, scout])
-    await send(owner.id, chat.id, "kickoff notes")
-    await db.update(chats).set({ lastMsgId: null }).where(eq(chats.id, chat.id))
-    await db.delete(messages).where(eq(messages.chatId, chat.id))
-    await send(owner.id, chat.id, "@scout what's churn?", mentions({ userId: scout.id, offset: 0, length: 6 }))
-
-    expect(await followMode(chat.id, scout.id)).toBeNull()
-  })
-
-  test("chats from before the opener flag existed never assign bots again", async () => {
-    const chat = await createThread([owner, scout])
-    await db.update(chats).set({ conversationStarted: true }).where(eq(chats.id, chat.id))
-    await send(owner.id, chat.id, "@scout find flights", mentions({ userId: scout.id, offset: 0, length: 6 }))
-
-    expect(await followMode(chat.id, scout.id)).toBeNull()
-  })
-
   test("an @username typed without a client entity still addresses the bot", async () => {
     await db.update(users).set({ username: `scout${runId}` }).where(eq(users.id, scout.id))
     const chat = await createThread([owner, alice, scout])
@@ -305,34 +269,25 @@ describe("bots enter a thread through its opening message", () => {
     expect(await followMode(child.id, scout.id)).toBe("following")
   })
 
-  test("a command as the first message runs once and assigns no bot", async () => {
+  test("a command as the first message makes its bot follow", async () => {
     await db.insert(botCommands).values({ botUserId: chief.id, command: "status", description: "Status" }).onConflictDoNothing()
     const chat = await createThread([owner, alice, chief, scout])
     await send(owner.id, chat.id, "/status", command("/status", chief.id))
+    await send(owner.id, chat.id, "now fix the login bug")
 
-    expect(await followMode(chat.id, chief.id)).toBeNull()
+    expect(await followMode(chat.id, chief.id)).toBe("following")
     expect(await followMode(chat.id, owner.id)).toBe("following")
   })
 
-  test("the first ordinary message after a command decides who follows", async () => {
-    await db.insert(botCommands).values({ botUserId: chief.id, command: "status", description: "Status" }).onConflictDoNothing()
-    const chat = await createThread([owner, alice, chief, scout])
-    await send(owner.id, chat.id, "/status", command("/status", chief.id))
-    await send(owner.id, chat.id, "@scout find flights", mentions({ userId: scout.id, offset: 0, length: 6 }))
-
-    expect(await followMode(chat.id, scout.id)).toBe("following")
-    expect(await followMode(chat.id, chief.id)).toBeNull()
-  })
-
-  test("a bot's answer to a command doesn't open the thread either", async () => {
+  test("a bot's answer to an opening command leaves later mentions as one-off", async () => {
     await db.insert(botCommands).values({ botUserId: chief.id, command: "status", description: "Status" }).onConflictDoNothing()
     const chat = await createThread([owner, alice, chief, scout])
     await send(owner.id, chat.id, "/status", command("/status", chief.id))
     await send(chief.id, chat.id, "Ready.", undefined, true)
     await send(owner.id, chat.id, "@scout research this", mentions({ userId: scout.id, offset: 0, length: 6 }))
 
-    expect(await followMode(chat.id, chief.id)).toBeNull()
-    expect(await followMode(chat.id, scout.id)).toBe("following")
+    expect(await followMode(chat.id, chief.id)).toBe("following")
+    expect(await followMode(chat.id, scout.id)).toBeNull()
   })
 
   test("a bot that writes a thread's first message still follows it", async () => {
@@ -342,15 +297,6 @@ describe("bots enter a thread through its opening message", () => {
     expect(await followMode(chat.id, chief.id)).toBe("following")
   })
 
-  test("in a thread with one bot, a command doesn't assign it but the next message does", async () => {
-    await db.insert(botCommands).values({ botUserId: chief.id, command: "status", description: "Status" }).onConflictDoNothing()
-    const chat = await createThread([owner, chief])
-    await send(owner.id, chat.id, "/status", command("/status", chief.id))
-    expect(await followMode(chat.id, chief.id)).toBeNull()
-
-    await send(owner.id, chat.id, "and the open tickets?")
-    expect(await followMode(chat.id, chief.id)).toBe("following")
-  })
 })
 
 describe("getAddressedUserIds", () => {
@@ -367,7 +313,7 @@ describe("getAddressedUserIds", () => {
     expect([...getAddressedUserIds("  @a hi", mentions({ userId: 1, offset: 2, length: 2 }))]).toEqual([1])
   })
 
-  test("a bot command target is not addressed for following", () => {
+  test("a bot command addresses its target bot", () => {
     const entities: MessageEntities = {
       entities: [
         {
@@ -378,6 +324,6 @@ describe("getAddressedUserIds", () => {
         },
       ],
     }
-    expect([...getAddressedUserIds("/help@scout", entities)]).toEqual([])
+    expect([...getAddressedUserIds("/help@scout", entities)]).toEqual([9])
   })
 })

@@ -30,13 +30,6 @@ export const chats = pgTable(
     /** Highest message id ever allocated in this chat; never decreases when history is deleted. */
     messageIdCounter: integer("message_id_counter").notNull().default(0),
 
-    /**
-     * Set by the first conversational message. Its opener decides which bots follow the thread,
-     * so this survives deleted messages and ignores system messages. Chats created before the
-     * column existed count as started.
-     */
-    conversationStarted: boolean("conversation_started").notNull().default(false),
-
     /** optional, if part of a space */
     spaceId: integer("space_id").references(() => spaces.id),
 
