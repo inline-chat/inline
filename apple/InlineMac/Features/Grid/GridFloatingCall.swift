@@ -86,9 +86,9 @@ final class GridFloatingCallController {
     hostingView.sizingOptions = []
     if #available(macOS 26.0, *) {
       let glass = NSGlassEffectView()
-      // Clear glass: no white tint, the content behind stays true to color.
-      glass.style = .clear
-      glass.cornerRadius = 21
+      // Regular glass: clear glass let busy or dark wallpapers wash out the controls.
+      glass.style = .regular
+      glass.cornerRadius = 20
       glass.contentView = hostingView
       panel.contentView = glass
       glassView = glass
@@ -246,7 +246,7 @@ final class GridFloatingCallController {
 
   private func contentSize() -> CGSize {
     if let size = hostingView?.fittingSize, size.width > 0, size.height > 0 { return size }
-    return lastContentSize ?? CGSize(width: 220, height: 42)
+    return lastContentSize ?? CGSize(width: 200, height: 40)
   }
 
   // MARK: - Layout
@@ -435,8 +435,6 @@ struct GridFloatingCallView: View {
   let onOpenGrid: (Int64) -> Void
   let onSizeChange: (CGSize) -> Void
 
-  @State private var isHovered = false
-
   private static var usesWindowGlass: Bool {
     if #available(macOS 26.0, *) { return true }
     return false
@@ -461,18 +459,8 @@ struct GridFloatingCallView: View {
 
   private func pill(room: GridRoom) -> some View {
     let folded = presentation.isFolded
-    return HStack(spacing: 6) {
-      HStack(spacing: 6) {
-        avatars(room.avatars)
-        if isHovered, room.hasTitle, !room.title.isEmpty {
-          Text(room.title)
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .frame(maxWidth: 140, alignment: .leading)
-            .transition(.opacity)
-        }
-      }
+    return HStack(spacing: 4) {
+      avatars(room.avatars)
       .contentShape(Rectangle())
       // Not a Button: a button captures the press and blocks dragging the
       // window. A simultaneous tap still opens Grid while drags move the pill.
@@ -496,26 +484,19 @@ struct GridFloatingCallView: View {
       ) {
         rooms.toggleScreenShare()
       }
-      .modifier(GridFloatingCallFold(isFolded: folded, depth: 2))
+      .modifier(GridFloatingCallFold(isFolded: folded, depth: 1))
 
-      Rectangle()
-        .fill(Color.primary.opacity(0.25))
-        .frame(width: 1, height: 17)
-        .modifier(GridFloatingCallFold(isFolded: folded, depth: 1))
-
-      GridFloatingCallButton(systemName: "door.left.hand.open", tint: .pink, help: "Leave room") {
+      GridFloatingCallButton(systemName: "door.left.hand.open", isDestructive: true, help: "Leave room") {
         rooms.leaveCurrentRoom(spaceID: room.spaceID)
       }
       .modifier(GridFloatingCallFold(isFolded: folded, depth: 0))
     }
     .coordinateSpace(.named(GridFloatingCallFold.space))
     .padding(.leading, 8)
-    .padding(.trailing, 6)
-    .padding(.vertical, 6)
+    .padding(.trailing, 5)
+    .padding(.vertical, 5)
     .contentShape(Capsule())
     .gesture(WindowDragGesture())
-    .onHover { isHovered = $0 }
-    .animation(.smoothSnappy, value: isHovered)
   }
 
   private var isSharingScreen: Bool {
@@ -525,7 +506,7 @@ struct GridFloatingCallView: View {
   private func avatars(_ avatars: [GridAvatar]) -> some View {
     let visible = Array(avatars.prefix(Self.maximumVisibleAvatarCount))
     let hidden = max(avatars.count - visible.count, 0)
-    return HStack(spacing: -8) {
+    return HStack(spacing: -7) {
       ForEach(visible, id: \.user.id) { avatar in
         GridFloatingCallAvatar(
           user: avatar.user,
@@ -537,11 +518,12 @@ struct GridFloatingCallView: View {
       if hidden > 0 {
         Text("+\(hidden)")
           .font(.system(size: 9, weight: .semibold).monospacedDigit())
-          .frame(width: 28, height: 28)
-          .background(Color.primary.opacity(0.07), in: Circle())
+          .foregroundStyle(.secondary)
+          .frame(width: 27, height: 27)
+          .background(Color.primary.opacity(0.08), in: Circle())
       }
     }
-    .padding(.trailing, 2)
+    .padding(.trailing, 4)
     .animation(.smoothSnappy, value: avatars.map(\.user.id))
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(
@@ -559,7 +541,7 @@ private struct GridFloatingCallFold: ViewModifier {
   /// 0 for the outermost items, increasing toward the center.
   let depth: Int
 
-  private static let maxDepth = 2
+  private static let maxDepth = 1
 
   func body(content: Content) -> some View {
     let isFolded = isFolded
@@ -588,11 +570,11 @@ private struct GridFloatingCallAvatar: View {
   let isScreenSharing: Bool
 
   var body: some View {
-    UserAvatar(user: InlineKit.User(from: user), size: 26)
+    UserAvatar(user: InlineKit.User(from: user), size: 24)
       .padding(1.5)
       .overlay(
         Circle()
-          .stroke(isSpeaking ? Color.green : Color.clear, lineWidth: 1.5)
+          .stroke(isSpeaking ? GridFloatingCallButton.green : Color.clear, lineWidth: 1.5)
           // Speaking-level updates arrive frequently; scope the animation to the ring.
           .animation(.easeOut(duration: 0.12), value: isSpeaking)
       )
@@ -601,8 +583,8 @@ private struct GridFloatingCallAvatar: View {
           Image(systemName: "rectangle.on.rectangle")
             .font(.system(size: 6, weight: .bold))
             .foregroundStyle(.white)
-            .frame(width: 13, height: 13)
-            .background(Color.green, in: Circle())
+            .frame(width: 12, height: 12)
+            .background(GridFloatingCallButton.green, in: Circle())
             .offset(x: 2, y: 2)
         }
       }
@@ -615,9 +597,14 @@ private struct GridFloatingCallAvatar: View {
 }
 
 private struct GridFloatingCallButton: View {
+  /// Regular glass lightens colored content, so these sit deeper than they
+  /// read on screen: a clean green and a clear red once the glass is applied.
+  static let green = Color(red: 0.11, green: 0.62, blue: 0.30)
+  private static let red = Color(red: 0.86, green: 0.17, blue: 0.20)
+
   let systemName: String
   var isActive = false
-  var tint: Color = .primary
+  var isDestructive = false
   let help: String
   let action: () -> Void
 
@@ -626,8 +613,8 @@ private struct GridFloatingCallButton: View {
   var body: some View {
     Button(action: action) {
       Image(systemName: systemName)
-        .font(.system(size: 12, weight: .semibold))
-        .foregroundStyle(isActive ? Color.white : tint)
+        .font(.system(size: 13, weight: .medium))
+        .foregroundStyle(foreground)
         .frame(width: 30, height: 30)
         .background(background, in: Circle())
         .contentShape(Circle())
@@ -640,9 +627,19 @@ private struct GridFloatingCallButton: View {
     .accessibilityLabel(help)
   }
 
-  private var background: Color {
-    if isActive { return .green }
-    // Clear glass lightens what's on it, so the hover circle needs more weight.
-    return isHovered ? Color.primary.opacity(0.25) : .clear
+  private var foreground: Color {
+    if isActive { return .white }
+    if isDestructive { return Self.red }
+    return .primary
+  }
+
+  private var background: AnyShapeStyle {
+    if isActive {
+      return AnyShapeStyle(Self.green.gradient.opacity(isHovered ? 0.88 : 1))
+    }
+    if isDestructive {
+      return AnyShapeStyle(Self.red.opacity(isHovered ? 0.26 : 0.18))
+    }
+    return AnyShapeStyle(Color.primary.opacity(isHovered ? 0.1 : 0))
   }
 }
