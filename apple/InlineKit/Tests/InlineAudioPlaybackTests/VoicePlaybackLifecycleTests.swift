@@ -31,7 +31,9 @@ struct VoicePlaybackLifecycleTests {
     try await startPlayback { completion in
       try center.resume(completion: completion)
     }
-    #expect(center.currentTime < 0.2)
+    // Resuming from the end restarts. The real player keeps running while it
+    // starts up, so compare against the halfway mark instead of a tight bound.
+    #expect(center.currentTime < center.duration / 2)
   }
 
   @Test("actual completion clears the selected item")
