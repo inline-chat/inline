@@ -3064,12 +3064,47 @@ async def assert_multi_bot_rules():
     restarted = InlineAdapter(PlatformConfig(extra=trusted_extra))
     async def fetch_bot_request(chat_id, message_id, **kwargs):
         return {"id": message_id, "chatId": chat_id, "fromId": "500", "sender": {"id": "500", "bot": True}}
+    async def top_level_info(chat_id, **kwargs):
+        return {"id": chat_id}
+    restarted._get_chat_info = top_level_info
     restarted._fetch_message = fetch_bot_request
     assert await restarted._reply_to_for_target("m-331", {"chatId": "10"}, request_chat_id="10") == "m-331"
     # An answer moved into a thread never looks the parent's message id up in the thread.
     moved = InlineAdapter(PlatformConfig(extra=trusted_extra))
     moved._fetch_message = fetch_bot_request
     assert await moved._reply_to_for_target("m-331", {"chatId": "77"}, request_chat_id="10") is None
+    # The native caller uses the normalized session chat, not the physical opener's chat.
+    opener, opener_events = make(extra={"require_mention": False})
+    opener._reply_thread_overrides["10"] = "on"
+    async def create_reply_thread(*args):
+        return "77"
+    opener._create_reply_thread = create_reply_thread
+    await opener._dispatch_message(message(334, "prepare the launch"))
+    request = opener_events[0]
+    assert (request.source.chat_id, request.source.thread_id, request.message_id) == ("77", "77", "m-334")
+    restarted_thread = InlineAdapter(PlatformConfig(extra=trusted_extra))
+    lookups, sent = [], []
+    async def thread_info(chat_id, **kwargs):
+        return {"id": chat_id, "parentChatId": "10", "parentMessageId": "m-334"}
+    async def unrelated_child_message(chat_id, message_id, **kwargs):
+        lookups.append((chat_id, message_id))
+        return await fetch_bot_request(chat_id, message_id)
+    async def capture_send(endpoint, body):
+        sent.append(body)
+        result = SendResult(success=True, message_id="reply")
+        result.raw_response = {}
+        return result
+    restarted_thread._get_chat_info = thread_info
+    restarted_thread._fetch_message = unrelated_child_message
+    restarted_thread._send_sidecar = capture_send
+    await restarted_thread.send(request.source.chat_id, "launch ready", reply_to=request.message_id,
+                                metadata={"thread_id": request.source.thread_id})
+    assert lookups == [], "the parent's opener was looked up as an unrelated child message"
+    assert "replyToMsgId" not in sent[-1]
+    # A genuine later request inside the child can still hand its answer back to a bot.
+    await restarted_thread.send("77", "worker result", reply_to="m-335", metadata={"thread_id": "77"})
+    assert lookups == [("77", "m-335")]
+    assert sent[-1]["replyToMsgId"] == "m-335"
     # Ambient bot output never wakes a following bot.
     adapter, events = make()
     await adapter._dispatch_message(message(332, "status: still crawling", sender="500", bot=True))
