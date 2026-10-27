@@ -96,16 +96,13 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
       return
     }
     let (photoURL, syncOps) = hydrateFromEncryptedContentIfNeeded(content: content)
-    // Read/delete state from the user's other devices clears notifications already handled there.
-    if let syncOps, isAccountCurrent(),
-       let recipientUserID = NotificationAccountAdmission.recipientUserID(in: content.userInfo) {
-      await syncOps.removeCovered(recipientUserID: recipientUserID)
-    }
-    guard !Task.isCancelled, delivery.isPending else { return }
+    let recipientUserID = NotificationAccountAdmission.recipientUserID(in: content.userInfo)
     var bestContent: UNNotificationContent = content
-    delivery.updateFallback(bestContent)
+    // Commit the decrypted text before the first suspension. A newer push or expiry can finish
+    // this delivery at any await, and the request's own alert is only the server's placeholder.
+    guard delivery.updateFallback(bestContent) else { return }
 
-    // Artwork and intent donation share a total deadline; neither gates text delivery.
+    // Artwork, intent donation and sync cleanup share a total deadline; none gates text delivery.
     let deadline = Task.detached {
       do { try await Task.sleep(for: .seconds(2)) } catch { return }
       delivery.finish()
@@ -159,10 +156,18 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
       }
     }
 
-    // Both jobs publish their completed fallback independently and share the existing deadline.
+    @MainActor func applySyncOps() async {
+      // Read/delete state from the user's other devices clears notifications already handled there.
+      guard let syncOps, let recipientUserID, !Task.isCancelled, delivery.isPending, isAccountCurrent()
+      else { return }
+      await syncOps.removeCovered(recipientUserID: recipientUserID)
+    }
+
+    // Artwork jobs publish their completed fallback independently; all three share the deadline.
     async let avatar: Void = enrichAvatar()
     async let photo: Void = enrichPhoto()
-    _ = await (avatar, photo)
+    async let cleanup: Void = applySyncOps()
+    _ = await (avatar, photo, cleanup)
     delivery.finish(with: bestContent)
   }
 
