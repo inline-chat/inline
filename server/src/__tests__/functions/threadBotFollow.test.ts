@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm"
 import { setupTestDatabase, teardownTestDatabase, testUtils } from "../setup"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { db } from "@in/server/db"
-import { chats, dialogs, messages, users, type DbUser } from "@in/server/db/schema"
+import { botCommands, chats, dialogs, messages, users, type DbUser } from "@in/server/db/schema"
 import { getAddressedUserIds } from "@in/server/modules/threadAutoFollow"
 import * as threadTitles from "@in/server/modules/threadTitles"
 
@@ -37,6 +37,19 @@ function mentions(...items: { userId: number; offset: number; length: number }[]
       length: BigInt(item.length),
       entity: { oneofKind: "mention" as const, mention: { userId: BigInt(item.userId) } },
     })),
+  }
+}
+
+function command(text: string, botUserId: number): MessageEntities {
+  return {
+    entities: [
+      {
+        type: MessageEntity_Type.BOT_COMMAND,
+        offset: 0n,
+        length: BigInt(text.length),
+        entity: { oneofKind: "botCommand", botCommand: { botUserId: BigInt(botUserId) } },
+      },
+    ],
   }
 }
 
@@ -291,6 +304,35 @@ describe("bots enter a thread through its opening message", () => {
 
     expect(await followMode(child.id, scout.id)).toBe("following")
   })
+
+  test("a command as the first message runs once and assigns no bot", async () => {
+    await db.insert(botCommands).values({ botUserId: chief.id, command: "status", description: "Status" }).onConflictDoNothing()
+    const chat = await createThread([owner, alice, chief, scout])
+    await send(owner.id, chat.id, "/status", command("/status", chief.id))
+
+    expect(await followMode(chat.id, chief.id)).toBeNull()
+    expect(await followMode(chat.id, owner.id)).toBe("following")
+  })
+
+  test("the first ordinary message after a command decides who follows", async () => {
+    await db.insert(botCommands).values({ botUserId: chief.id, command: "status", description: "Status" }).onConflictDoNothing()
+    const chat = await createThread([owner, alice, chief, scout])
+    await send(owner.id, chat.id, "/status", command("/status", chief.id))
+    await send(owner.id, chat.id, "@scout find flights", mentions({ userId: scout.id, offset: 0, length: 6 }))
+
+    expect(await followMode(chat.id, scout.id)).toBe("following")
+    expect(await followMode(chat.id, chief.id)).toBeNull()
+  })
+
+  test("in a thread with one bot, a command doesn't assign it but the next message does", async () => {
+    await db.insert(botCommands).values({ botUserId: chief.id, command: "status", description: "Status" }).onConflictDoNothing()
+    const chat = await createThread([owner, chief])
+    await send(owner.id, chat.id, "/status", command("/status", chief.id))
+    expect(await followMode(chat.id, chief.id)).toBeNull()
+
+    await send(owner.id, chat.id, "and the open tickets?")
+    expect(await followMode(chat.id, chief.id)).toBe("following")
+  })
 })
 
 describe("getAddressedUserIds", () => {
@@ -307,7 +349,7 @@ describe("getAddressedUserIds", () => {
     expect([...getAddressedUserIds("  @a hi", mentions({ userId: 1, offset: 2, length: 2 }))]).toEqual([1])
   })
 
-  test("a bot command target is addressed", () => {
+  test("a bot command target is not addressed for following", () => {
     const entities: MessageEntities = {
       entities: [
         {
@@ -318,6 +360,6 @@ describe("getAddressedUserIds", () => {
         },
       ],
     }
-    expect([...getAddressedUserIds("/help@scout", entities)]).toEqual([9])
+    expect([...getAddressedUserIds("/help@scout", entities)]).toEqual([])
   })
 })

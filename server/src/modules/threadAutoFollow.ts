@@ -58,8 +58,8 @@ async function claimThreadOpener(chat: ThreadAutoFollowChat): Promise<boolean> {
 }
 
 /**
- * Users a message is addressed to: the run of mentions it starts with, or every mention when it
- * doesn't start with one, plus the target of a bot command.
+ * Users a message is addressed to for following: the run of mentions it starts with, or every
+ * mention when it doesn't start with one. Bot commands run once and never assign a follower.
  */
 export function getAddressedUserIds(text: string | undefined, entities: MessageEntities | undefined): Set<number> {
   const addressed = new Set<number>()
@@ -69,13 +69,6 @@ export function getAddressedUserIds(text: string | undefined, entities: MessageE
 
   const mentions: { offset: number; end: number; userId: number }[] = []
   for (const entity of entities.entities) {
-    if (entity.entity.oneofKind === "botCommand") {
-      const botUserId = Number(entity.entity.botCommand.botUserId)
-      if (Number.isSafeInteger(botUserId) && botUserId > 0) {
-        addressed.add(botUserId)
-      }
-      continue
-    }
     if (entity.type !== MessageEntity_Type.MENTION || entity.entity.oneofKind !== "mention") {
       continue
     }
@@ -104,6 +97,11 @@ export function getAddressedUserIds(text: string | undefined, entities: MessageE
     addressed.add(userId)
   }
   return addressed
+}
+
+/** A message carrying a bot command is a one-off control, not the start of a conversation. */
+export function isBotCommandMessage(entities: MessageEntities | undefined): boolean {
+  return entities?.entities.some((entity) => entity.type === MessageEntity_Type.BOT_COMMAND) ?? false
 }
 
 async function getBotUserIds(userIds: Iterable<number>): Promise<Set<number>> {
@@ -135,7 +133,8 @@ async function getBotDmPeerId(chat: ThreadAutoFollowChat, currentUserId: number)
 /**
  * Who starts following a thread when a message is sent.
  *
- * People keep the fresh-thread heuristic. Bots only enter through the thread's opening message:
+ * People keep the fresh-thread heuristic. Bots only enter through the thread's opening message,
+ * its first message that isn't a bot command:
  * the bots it addresses follow. With no address, the bot it is implicitly for follows: a reply
  * thread's bot anchor author, the one bot in a thread only it and the sender can see, or a bot DM's
  * peer; otherwise a bot that wrote the opener follows its own thread.
@@ -148,10 +147,12 @@ export async function resolveThreadAutoFollowUserIds(input: {
   addressedUserIds: ReadonlySet<number>
   /** Known when the entry point authenticated the sender; looked up otherwise. */
   senderIsBot?: boolean | undefined
+  /** Commands leave the opener for the thread's first ordinary message. */
+  isCommand?: boolean | undefined
 }): Promise<number[]> {
   const { chat, currentUserId, eligibleUserIds, newMessageId, addressedUserIds } = input
   const humanRuleApplies = shouldAutoFollowThreadMessage(chat, newMessageId)
-  const isOpener = await claimThreadOpener(chat)
+  const isOpener = !input.isCommand && (await claimThreadOpener(chat))
   if (!humanRuleApplies && !isOpener) {
     return []
   }
