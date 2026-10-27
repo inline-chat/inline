@@ -105,6 +105,9 @@ impl FakeModel {
                 "request": request_line.trim(),
                 "model": body.get("model"),
                 "last_input": body.get("input").and_then(Value::as_array).and_then(|input| input.last().cloned()),
+                "ask_tool": std::env::var_os("INLINE_V2_E2E_DUMP_TOOLS").and_then(|_| {
+                    body.get("tools")?.as_array()?.iter().find(|tool| tool.get("name") == Some(&json!("request_user_input"))).cloned()
+                }),
                 "tools": body.get("tools").and_then(Value::as_array).map(|tools| {
                     tools
                         .iter()
@@ -124,6 +127,14 @@ impl FakeModel {
             }
         };
         let mut output = output;
+        // `_delay_ms` holds the reply back, so a turn stays running.
+        if let Some(delay) = output
+            .as_object_mut()
+            .and_then(|output| output.remove("_delay_ms"))
+            .and_then(|delay| delay.as_u64())
+        {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
         if output.get("id").is_none() {
             output["id"] = json!(format!("item-{number}"));
         }
@@ -318,6 +329,19 @@ async fn codex_round_trip_through_inline() {
         inline_tool("get_current_context", json!({})),
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_TOOLS_DONE"}]}),
+        // A question the owner answers through the card's form.
+        json!({"type": "function_call", "call_id": "call-ask", "name": "request_user_input",
+            "arguments": json!({"questions": [{"id": "color", "header": "Color",
+                "question": "Which color fits?", "options": [
+                    {"label": "Red", "description": "Warm"},
+                    {"label": "Blue", "description": "Cool"}]}]}).to_string()}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_ASKED"}]}),
+        // A slow reply, so a message sent meanwhile steers the running turn.
+        json!({"_delay_ms": 3000, "type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_BEFORE_STEER"}]}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_AFTER_STEER"}]}),
         // Escalation makes Codex ask for approval before running it.
         json!({"type": "function_call", "call_id": "call-1", "name": "exec_command",
             "arguments": json!({"cmd": "echo E2E_RAN > ran.txt",
@@ -473,7 +497,101 @@ async fn codex_round_trip_through_inline() {
         tool_outputs(&model)
     );
 
-    // 3. A command needs approval: the card carries Codex's own choices, and
+    // 3. A question card: the owner answers through its form, and the answer
+    // reaches Codex.
+    send(&owner, chat_id, "Ask me something").await;
+    let texts = wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the question card",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("Which color fits?"))
+        },
+    )
+    .await;
+    let card = texts
+        .iter()
+        .rev()
+        .find(|(_, text)| text.contains("Which color fits?"))
+        .map(|(id, _)| *id)
+        .unwrap();
+    owner
+        .invoke_rpc(
+            proto::Method::InvokeMessageAction,
+            proto::rpc_call::Input::InvokeMessageAction(proto::InvokeMessageActionInput {
+                peer_id: Some(super::api::chat_peer(chat_id)),
+                message_id: card,
+                action_id: super::render::QUESTION_FORM_ID.to_owned(),
+                form: Some(proto::MessageFormSubmission {
+                    values: vec![proto::MessageFormValue {
+                        field_id: "color".to_owned(),
+                        value: Some(proto::message_form_value::Value::Selection(
+                            proto::MessageFormSelection {
+                                option_ids: vec!["o1".to_owned()],
+                                other_text: None,
+                            },
+                        )),
+                        redacted: false,
+                    }],
+                }),
+            }),
+        )
+        .await
+        .unwrap();
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the answer after the question",
+        |texts| texts.iter().any(|(_, text)| text.contains("E2E_ASKED")),
+    )
+    .await;
+    assert!(
+        tool_outputs(&model)
+            .iter()
+            .any(|output| output.contains("Blue")),
+        "the form's choice reached Codex: {:#?}",
+        tool_outputs(&model)
+    );
+
+    // 4. A message sent while a turn runs steers it.
+    let before = model.request_count();
+    send(&owner, chat_id, "Start the long part").await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while model.request_count() == before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the long turn never reached the model"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    send(&owner, chat_id, "E2E_STEER also do this").await;
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the steered answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_AFTER_STEER"))
+        },
+    )
+    .await;
+    assert!(
+        model.requests.lock().unwrap().iter().any(|request| request
+            .get("last_input")
+            .is_some_and(|input| input.to_string().contains("E2E_STEER"))),
+        "the steer reached the running turn"
+    );
+
+    // 5. A command needs approval: the card carries Codex's own choices, and
     // the owner's approval runs it.
     send(&owner, chat_id, "Run the check").await;
     let texts = wait_for(
@@ -555,7 +673,7 @@ async fn codex_round_trip_through_inline() {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
-    // 4. /release hands the session back with a resume command.
+    // 6. /release hands the session back with a resume command.
     send(&owner, chat_id, "/release").await;
     wait_for(
         &model,
@@ -567,7 +685,7 @@ async fn codex_round_trip_through_inline() {
     )
     .await;
 
-    // 5. In a group thread, a mention starts a work that moves itself into a
+    // 7. In a group thread, a mention starts a work that moves itself into a
     // subthread; the parent keeps a card and the work goes on there.
     let group = owner
         .create_thread(CreateThreadRequest {
