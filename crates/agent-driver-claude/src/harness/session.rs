@@ -23,7 +23,8 @@ use inline_agent_bridge::harness::{
 };
 use inline_agent_bridge::{
     DriverCommand, DriverCommandInput, DriverError, DriverFuture, DriverModelOption,
-    DriverSettingOption, ProviderId, ProviderSessionId, SessionPageCursor, TurnId,
+    DriverSettingOption, HostToolCall, HostToolConfiguration, ProviderId, ProviderSessionId,
+    SessionPageCursor, TurnId,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -38,7 +39,7 @@ use crate::client::{
 };
 use crate::control::{InitializeRequest, InitializeResponse};
 use crate::input::UserMessage;
-use crate::mcp::{BoxFuture, SdkMcpServer};
+use crate::mcp::{BoxFuture, SdkMcpServer, ToolDefinition, ToolOutput, ToolServer};
 use crate::options::{LaunchOptions, ProcessHost, SessionStart};
 use crate::sessions::SessionStore;
 use crate::version::{ClaudeVersion, capability, probe};
@@ -62,6 +63,9 @@ pub struct ClaudeHarnessConfig {
     pub process_host: Option<ProcessHost>,
     /// Inline tools served in-process over `mcp_message`.
     pub mcp_servers: Vec<(String, Arc<dyn SdkMcpServer>)>,
+    /// Inline's host tools, served per session as the `inline` server so each
+    /// call names the session that made it (spec §4.8).
+    pub host_tools: Option<HostToolConfiguration>,
     /// Extra launch flags (labs: `--bare`).
     pub bare: bool,
 }
@@ -78,6 +82,7 @@ impl ClaudeHarnessConfig {
             env: Vec::new(),
             process_host: None,
             mcp_servers: Vec::new(),
+            host_tools: None,
             bare: false,
         }
     }
@@ -94,16 +99,86 @@ impl ClaudeHarnessConfig {
         options.client_app = Some(format!("inline-bridge/{}", self.driver_version));
         // Checkpoints make "undo this turn's changes" available (rewind_files).
         options.enable_file_checkpointing = true;
-        if !self.mcp_servers.is_empty() {
-            let names: Vec<&str> = self
-                .mcp_servers
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect();
+        let mut names: Vec<&str> = self
+            .mcp_servers
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect();
+        if self.host_tools.is_some() {
+            names.push(HOST_TOOLS_SERVER);
+            // Inline authorizes its own tools (bindings, explicit intent), as
+            // Codex dynamic tools are never prompted.
+            options.extra_args.push((
+                "allowedTools".to_owned(),
+                Some(format!("mcp__{HOST_TOOLS_SERVER}")),
+            ));
+        }
+        if !names.is_empty() {
             options.mcp_config = Some(crate::mcp::sdk_server_config(&names).to_string());
         }
         options
     }
+
+    /// The MCP servers one session gets: the configured ones, plus Inline's
+    /// host tools bound to that session.
+    fn session_servers(&self, session: &ProviderSessionId) -> Vec<(String, Arc<dyn SdkMcpServer>)> {
+        let mut servers = self.mcp_servers.clone();
+        if let Some(tools) = &self.host_tools {
+            servers.push((
+                HOST_TOOLS_SERVER.to_owned(),
+                Arc::new(host_tool_server(tools, session.clone())),
+            ));
+        }
+        servers
+    }
+}
+
+/// The in-process server name for Inline's host tools; Claude shows the tools
+/// as `mcp__inline__<name>`.
+const HOST_TOOLS_SERVER: &str = "inline";
+
+/// Inline's host tools as an MCP server for one session. MCP calls carry no
+/// turn, so the call is bound to the session alone, as the v2 bindings are.
+fn host_tool_server(tools: &HostToolConfiguration, session: ProviderSessionId) -> ToolServer {
+    let definitions = tools
+        .specs
+        .iter()
+        .map(|spec| ToolDefinition {
+            name: spec.name.clone(),
+            description: spec.description.clone(),
+            input_schema: spec.input_schema.clone(),
+            annotations: Some(json!({"readOnlyHint": spec.read_only})),
+        })
+        .collect();
+    let handler = tools.handler.clone();
+    ToolServer::new(
+        HOST_TOOLS_SERVER,
+        env!("CARGO_PKG_VERSION"),
+        definitions,
+        move |tool: String, arguments: Value| {
+            let handler = handler.clone();
+            let session = session.clone();
+            async move {
+                let Ok(turn_id) = TurnId::new("mcp") else {
+                    return ToolOutput::error("Inline tools are unavailable.");
+                };
+                let result = handler
+                    .call(HostToolCall {
+                        call_id: uuid::Uuid::new_v4().to_string(),
+                        session_id: session,
+                        turn_id,
+                        tool_name: tool,
+                        arguments,
+                    })
+                    .await;
+                if result.success {
+                    ToolOutput::text(result.content)
+                } else {
+                    ToolOutput::error(result.content)
+                }
+            }
+        },
+    )
 }
 
 struct CachedCatalog {
@@ -565,14 +640,10 @@ impl HarnessDriver for ClaudeHarness {
                 per_task_stop_affordance: true,
                 ..InitializeRequest::default()
             };
-            let session = ClaudeSession::connect(
-                key,
-                spec.folder.clone(),
-                &options,
-                &initialize,
-                self.config.mcp_servers.clone(),
-            )
-            .await?;
+            let servers = self.config.session_servers(&key.session);
+            let session =
+                ClaudeSession::connect(key, spec.folder.clone(), &options, &initialize, servers)
+                    .await?;
             let capabilities = session.inner.capabilities();
             let manifest = self.manifest(version, &capabilities);
             {
