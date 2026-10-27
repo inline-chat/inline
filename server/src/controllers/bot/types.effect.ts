@@ -570,7 +570,7 @@ const botMessageActionOptions = {
     text: Schema.optionalKey(Schema.String),
     confirm_text: Schema.optionalKey(Schema.String),
   })),
-  required_grant: Schema.optionalKey(Schema.Literals(["access", "invoke", "steer", "approve", "view", "configure", "owner"])),
+  required_grant: Schema.optionalKey(Schema.Literals(["access", "invoke", "steer", "approve", "configure", "owner"])),
 }
 
 // Annotated like BotRichBlock so route group types stay within the compiler's serialization limit.

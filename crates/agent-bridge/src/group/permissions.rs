@@ -42,8 +42,6 @@ pub struct Grants {
     #[serde(default)]
     pub approve: bool,
     #[serde(default)]
-    pub view: bool,
-    #[serde(default)]
     pub configure: bool,
 }
 
@@ -53,7 +51,6 @@ impl Grants {
         invoke: false,
         steer: false,
         approve: false,
-        view: false,
         configure: false,
     };
 
@@ -70,7 +67,7 @@ impl Grants {
     };
 
     pub const fn any(self) -> bool {
-        self.owner || self.invoke || self.steer || self.approve || self.view || self.configure
+        self.owner || self.invoke || self.steer || self.approve || self.configure
     }
 
     pub const fn permits(self, operation: Operation) -> bool {
@@ -173,12 +170,6 @@ mod tests {
             [Operation::Answer, Operation::Configure]
         );
 
-        // View alone still answers questions (any grant).
-        let view = Grants {
-            view: true,
-            ..Grants::NONE
-        };
-        assert_eq!(allowed(view), [Operation::Answer]);
     }
 
     #[test]

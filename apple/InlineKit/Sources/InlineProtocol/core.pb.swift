@@ -123,7 +123,6 @@ public nonisolated enum AgentGrantRequirement: SwiftProtobuf.Enum, Swift.CaseIte
 
   /// The owner and approval delegates.
   case approve // = 4
-  case view // = 5
   case configure // = 6
 
   /// Only the bot's owner.
@@ -141,7 +140,6 @@ public nonisolated enum AgentGrantRequirement: SwiftProtobuf.Enum, Swift.CaseIte
     case 2: self = .invoke
     case 3: self = .steer
     case 4: self = .approve
-    case 5: self = .view
     case 6: self = .configure
     case 7: self = .owner
     default: self = .UNRECOGNIZED(rawValue)
@@ -155,7 +153,6 @@ public nonisolated enum AgentGrantRequirement: SwiftProtobuf.Enum, Swift.CaseIte
     case .invoke: return 2
     case .steer: return 3
     case .approve: return 4
-    case .view: return 5
     case .configure: return 6
     case .owner: return 7
     case .UNRECOGNIZED(let i): return i
@@ -169,7 +166,6 @@ public nonisolated enum AgentGrantRequirement: SwiftProtobuf.Enum, Swift.CaseIte
     .invoke,
     .steer,
     .approve,
-    .view,
     .configure,
     .owner,
   ]
@@ -808,7 +804,6 @@ public nonisolated enum AgentGrantOperation: SwiftProtobuf.Enum, Swift.CaseItera
 
   /// Answer approvals as a delegate of the owner.
   case approve // = 3
-  case view // = 4
 
   /// Change the agent's settings.
   case configure // = 5
@@ -824,7 +819,6 @@ public nonisolated enum AgentGrantOperation: SwiftProtobuf.Enum, Swift.CaseItera
     case 1: self = .invoke
     case 2: self = .steer
     case 3: self = .approve
-    case 4: self = .view
     case 5: self = .configure
     default: self = .UNRECOGNIZED(rawValue)
     }
@@ -836,7 +830,6 @@ public nonisolated enum AgentGrantOperation: SwiftProtobuf.Enum, Swift.CaseItera
     case .invoke: return 1
     case .steer: return 2
     case .approve: return 3
-    case .view: return 4
     case .configure: return 5
     case .UNRECOGNIZED(let i): return i
     }
@@ -848,7 +841,6 @@ public nonisolated enum AgentGrantOperation: SwiftProtobuf.Enum, Swift.CaseItera
     .invoke,
     .steer,
     .approve,
-    .view,
     .configure,
   ]
 
@@ -26460,7 +26452,7 @@ nonisolated extension DialogFollowMode: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension AgentGrantRequirement: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_GRANT_REQUIREMENT_NONE\0\u{1}AGENT_GRANT_REQUIREMENT_ACCESS\0\u{1}AGENT_GRANT_REQUIREMENT_INVOKE\0\u{1}AGENT_GRANT_REQUIREMENT_STEER\0\u{1}AGENT_GRANT_REQUIREMENT_APPROVE\0\u{1}AGENT_GRANT_REQUIREMENT_VIEW\0\u{1}AGENT_GRANT_REQUIREMENT_CONFIGURE\0\u{1}AGENT_GRANT_REQUIREMENT_OWNER\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_GRANT_REQUIREMENT_NONE\0\u{1}AGENT_GRANT_REQUIREMENT_ACCESS\0\u{1}AGENT_GRANT_REQUIREMENT_INVOKE\0\u{1}AGENT_GRANT_REQUIREMENT_STEER\0\u{1}AGENT_GRANT_REQUIREMENT_APPROVE\0\u{2}\u{2}AGENT_GRANT_REQUIREMENT_CONFIGURE\0\u{1}AGENT_GRANT_REQUIREMENT_OWNER\0")
 }
 
 nonisolated extension GridTranscriptMessageKind: SwiftProtobuf._ProtoNameProviding {
@@ -26516,7 +26508,7 @@ nonisolated extension AgentSessionControl: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension AgentGrantOperation: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_GRANT_OPERATION_UNSPECIFIED\0\u{1}AGENT_GRANT_OPERATION_INVOKE\0\u{1}AGENT_GRANT_OPERATION_STEER\0\u{1}AGENT_GRANT_OPERATION_APPROVE\0\u{1}AGENT_GRANT_OPERATION_VIEW\0\u{1}AGENT_GRANT_OPERATION_CONFIGURE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AGENT_GRANT_OPERATION_UNSPECIFIED\0\u{1}AGENT_GRANT_OPERATION_INVOKE\0\u{1}AGENT_GRANT_OPERATION_STEER\0\u{1}AGENT_GRANT_OPERATION_APPROVE\0\u{2}\u{2}AGENT_GRANT_OPERATION_CONFIGURE\0")
 }
 
 nonisolated extension AgentParticipationMode: SwiftProtobuf._ProtoNameProviding {

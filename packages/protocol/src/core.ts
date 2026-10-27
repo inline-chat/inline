@@ -15957,10 +15957,6 @@ export enum AgentGrantRequirement {
      */
     APPROVE = 4,
     /**
-     * @generated from protobuf enum value: AGENT_GRANT_REQUIREMENT_VIEW = 5;
-     */
-    VIEW = 5,
-    /**
      * @generated from protobuf enum value: AGENT_GRANT_REQUIREMENT_CONFIGURE = 6;
      */
     CONFIGURE = 6,
@@ -16347,10 +16343,6 @@ export enum AgentGrantOperation {
      * @generated from protobuf enum value: AGENT_GRANT_OPERATION_APPROVE = 3;
      */
     APPROVE = 3,
-    /**
-     * @generated from protobuf enum value: AGENT_GRANT_OPERATION_VIEW = 4;
-     */
-    VIEW = 4,
     /**
      * Change the agent's settings.
      *

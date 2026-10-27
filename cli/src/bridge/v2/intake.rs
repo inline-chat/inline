@@ -126,7 +126,6 @@ pub(crate) fn grants_by_user(result: &proto::ListAgentGrantsResult) -> HashMap<i
                     Ok(Operation::Invoke) => grants.invoke = true,
                     Ok(Operation::Steer) => grants.steer = true,
                     Ok(Operation::Approve) => grants.approve = true,
-                    Ok(Operation::View) => grants.view = true,
                     Ok(Operation::Configure) => grants.configure = true,
                     _ => {}
                 }

@@ -102,7 +102,7 @@ const botMessageActionOptions = {
   confirm: t.Optional(t.Object({ title: t.String(), text: t.Optional(t.String()), confirm_text: t.Optional(t.String()) })),
   required_grant: t.Optional(t.Union([
     t.Literal("access"), t.Literal("invoke"), t.Literal("steer"), t.Literal("approve"),
-    t.Literal("view"), t.Literal("configure"), t.Literal("owner"),
+    t.Literal("configure"), t.Literal("owner"),
   ])),
 }
 

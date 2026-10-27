@@ -271,7 +271,7 @@ export type BotRichBlock =
 export type BotBlockStatus = "pending" | "running" | "waiting" | "done" | "failed" | "cancelled"
 
 /** What a viewer needs on the sending bot; the bot's owner always qualifies. */
-export type BotGrantRequirement = "access" | "invoke" | "steer" | "approve" | "view" | "configure" | "owner"
+export type BotGrantRequirement = "access" | "invoke" | "steer" | "approve" | "configure" | "owner"
 
 export type BotFormField = {
   field_id: string

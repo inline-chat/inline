@@ -868,7 +868,6 @@ mod tests {
             },
             Grants {
                 configure: true,
-                view: true,
                 ..Grants::NONE
             },
         ] {

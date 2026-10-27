@@ -949,7 +949,6 @@ const grantRequirements: Record<BotGrantRequirement, AgentGrantRequirement> = {
   invoke: AgentGrantRequirement.INVOKE,
   steer: AgentGrantRequirement.STEER,
   approve: AgentGrantRequirement.APPROVE,
-  view: AgentGrantRequirement.VIEW,
   configure: AgentGrantRequirement.CONFIGURE,
   owner: AgentGrantRequirement.OWNER,
 }

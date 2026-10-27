@@ -38,7 +38,6 @@ public struct AgentGrantAccess: Equatable, Sendable {
     case .invoke: return operations.contains(.invoke)
     case .steer: return operations.contains(.steer)
     case .approve: return operations.contains(.approve)
-    case .view: return operations.contains(.view)
     case .configure: return operations.contains(.configure)
     case .UNRECOGNIZED: return false
     }

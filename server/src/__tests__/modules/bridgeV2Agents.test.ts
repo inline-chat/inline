@@ -81,7 +81,7 @@ describe("bridge v2 agent server", () => {
     await rejects(grant(teammateId, [AgentGrantOperation.STEER], strangerId), RpcError_Code.USER_ID_INVALID)
 
     const first = await grant(teammateId, [AgentGrantOperation.INVOKE, AgentGrantOperation.STEER], botId)
-    await grant(strangerId, [AgentGrantOperation.VIEW])
+    await grant(strangerId, [AgentGrantOperation.CONFIGURE])
     expect(first.grant?.operations).toEqual([AgentGrantOperation.INVOKE, AgentGrantOperation.STEER])
 
     const asOwner = await listAgentGrants({ botUserId: BigInt(botId) }, ownerId)

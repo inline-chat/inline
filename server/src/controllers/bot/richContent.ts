@@ -305,7 +305,6 @@ const grantRequirements: Partial<Record<AgentGrantRequirement, BotGrantRequireme
   [AgentGrantRequirement.INVOKE]: "invoke",
   [AgentGrantRequirement.STEER]: "steer",
   [AgentGrantRequirement.APPROVE]: "approve",
-  [AgentGrantRequirement.VIEW]: "view",
   [AgentGrantRequirement.CONFIGURE]: "configure",
   [AgentGrantRequirement.OWNER]: "owner",
 }

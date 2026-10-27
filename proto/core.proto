@@ -504,7 +504,8 @@ enum AgentGrantRequirement {
   AGENT_GRANT_REQUIREMENT_STEER = 3;
   // The owner and approval delegates.
   AGENT_GRANT_REQUIREMENT_APPROVE = 4;
-  AGENT_GRANT_REQUIREMENT_VIEW = 5;
+  reserved 5;
+  reserved "AGENT_GRANT_REQUIREMENT_VIEW";
   AGENT_GRANT_REQUIREMENT_CONFIGURE = 6;
   // Only the bot's owner.
   AGENT_GRANT_REQUIREMENT_OWNER = 7;
@@ -1353,7 +1354,8 @@ enum AgentGrantOperation {
   AGENT_GRANT_OPERATION_STEER = 2;
   // Answer approvals as a delegate of the owner.
   AGENT_GRANT_OPERATION_APPROVE = 3;
-  AGENT_GRANT_OPERATION_VIEW = 4;
+  reserved 4;
+  reserved "AGENT_GRANT_OPERATION_VIEW";
   // Change the agent's settings.
   AGENT_GRANT_OPERATION_CONFIGURE = 5;
 }

@@ -35,12 +35,11 @@ const grantableOperations = [
   AgentGrantOperation.INVOKE,
   AgentGrantOperation.STEER,
   AgentGrantOperation.APPROVE,
-  AgentGrantOperation.VIEW,
   AgentGrantOperation.CONFIGURE,
 ] as const
 
 /** Operations a bot may grant on itself, as the bridge's /allowlist does. */
-const botGrantableMask = maskOf([AgentGrantOperation.INVOKE, AgentGrantOperation.STEER, AgentGrantOperation.VIEW])
+const botGrantableMask = maskOf([AgentGrantOperation.INVOKE, AgentGrantOperation.STEER])
 const importedMask = maskOf([AgentGrantOperation.INVOKE, AgentGrantOperation.STEER])
 
 function bit(operation: AgentGrantOperation): number {
@@ -89,8 +88,6 @@ export function satisfiesGrantRequirement(access: AgentAccess, requirement: Agen
       return (access.operations & bit(AgentGrantOperation.STEER)) !== 0
     case AgentGrantRequirement.APPROVE:
       return (access.operations & bit(AgentGrantOperation.APPROVE)) !== 0
-    case AgentGrantRequirement.VIEW:
-      return (access.operations & bit(AgentGrantOperation.VIEW)) !== 0
     case AgentGrantRequirement.CONFIGURE:
       return (access.operations & bit(AgentGrantOperation.CONFIGURE)) !== 0
     default:
