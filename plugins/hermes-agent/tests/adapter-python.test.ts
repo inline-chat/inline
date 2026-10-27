@@ -2303,8 +2303,8 @@ async def assert_forced_reply_thread_creation():
         raise AssertionError(f"unexpected sidecar path {path}")
 
     async def fake_fetch_message(chat_id, msg_id, **kwargs):
-        assert chat_id == "10"
-        assert msg_id == "6"
+        if (chat_id, msg_id) != ("10", "6"):
+            return None
         return {"id": "6", "chatId": "10", "fromId": "u1", "message": "parent quote"}
 
     adapter.handle_message = fake_handle_message
@@ -2381,7 +2381,7 @@ async def assert_forced_reply_thread_creation():
     assert in_thread_reply.success is True
     # Answers are plain messages unless they answer another bot.
     assert "replyToMsgId" not in calls[-1][1]
-    adapter._remember_bot_request("99", "sent-2")
+    adapter._remember_request_sender("99", "sent-2", True)
     bot_answer = await adapter.send("10", "agent reply", reply_to="sent-2", metadata={"thread_id": "99"})
     assert bot_answer.success is True
     assert calls[-1][1]["replyToMsgId"] == "sent-2"
@@ -3057,11 +3057,15 @@ async def assert_multi_bot_rules():
     adapter, events = make(follow_mode=None)
     await adapter._dispatch_message(message(331, "thanks, now break it down by plan", sender="500", bot=True, reply_to="m1"))
     assert len(events) == 1 and events[0].source.is_bot is True
-    assert adapter._reply_to_for_target("m-331", {"chatId": "10"}) == "m-331"
-    # Plain human requests get plain answers by default.
-    assert adapter._reply_to_for_target("m-321", {"chatId": "10"}) is None
-    first_mode = InlineAdapter(PlatformConfig(extra={**trusted_extra, "reply_to_mode": "first"}))
-    assert first_mode._reply_to_for_target("m-321", {"chatId": "10"}) == "m-321"
+    assert await adapter._reply_to_for_target("m-331", {"chatId": "10"}) == "m-331"
+    # Plain human requests get plain answers.
+    assert await adapter._reply_to_for_target("m-321", {"chatId": "10"}) is None
+    # After a restart nothing is remembered: the request's sender decides, read from Inline.
+    restarted = InlineAdapter(PlatformConfig(extra=trusted_extra))
+    async def fetch_bot_request(chat_id, message_id, **kwargs):
+        return {"id": message_id, "chatId": chat_id, "fromId": "500", "sender": {"id": "500", "bot": True}}
+    restarted._fetch_message = fetch_bot_request
+    assert await restarted._reply_to_for_target("m-331", {"chatId": "10"}) == "m-331"
     # Ambient bot output never wakes a following bot.
     adapter, events = make()
     await adapter._dispatch_message(message(332, "status: still crawling", sender="500", bot=True))

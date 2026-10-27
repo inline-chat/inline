@@ -48,14 +48,12 @@ answers. Review these before upgrading:
 - **Unfollow wins in free-response chats.** Mentions and replies still reach
   the bot.
 - **Bots enter a thread through its first message.** A thread follows the bots
-  its first message mentions. A thread only you and one bot can see, or one
-  under a bot's direct message, follows that bot. A bot mentioned later answers
-  once without following, and a command runs once without assigning anyone,
-  nor does a bot's answer to it: the first message that isn't a command
-  decides. The agent can follow or
+  its first message mentions or sends a command to. A thread only you and one
+  bot can see, or one under a bot's direct message, follows that bot. A bot
+  mentioned later answers once without following. The agent can follow or
   unfollow a thread itself.
 - **Answers quote the request only when answering another bot**, so that bot
-  sees the answer. Set `INLINE_REPLY_TO_MODE=first` to quote every answer.
+  sees the answer.
 - **Commands go to the bot they name.** Picking a command from Inline's
   suggestions names its bot. A command several bots offer, typed without a
   name, goes to the bot you replied to or the one bot following the thread;

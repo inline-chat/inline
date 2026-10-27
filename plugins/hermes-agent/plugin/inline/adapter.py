@@ -233,21 +233,6 @@ def _reply_thread_mode(value: Any, default: str = "auto") -> str:
     return default
 
 
-def _reply_to_mode(value: Any, default: str = "bots") -> str:
-    """When answers quote the message they answer: only bots (default), first chunk, or never."""
-    if value is None or str(value).strip() == "":
-        return default
-    text = str(value).strip().lower()
-    if text in {"bots", "bot"}:
-        return "bots"
-    if text in {"first", "all", "always", "on", "true", "1"}:
-        return "first"
-    if text in {"off", "never", "none", "false", "0"}:
-        return "off"
-    logger.warning("[inline] unknown reply_to_mode value %r; using %s", value, default)
-    return default
-
-
 def _normalize_sidecar_port(value: Any) -> int:
     if value is None or str(value).strip() == "":
         return _DEFAULT_SIDECAR_PORT
@@ -785,7 +770,6 @@ def _apply_yaml_config(yaml_cfg: dict, platform_cfg: dict) -> Optional[dict]:
         "parse_markdown",
         "require_mention",
         "strict_mention",
-        "reply_to_mode",
         "allowed_chats",
         "free_response_chats",
         "group_policy",
@@ -941,9 +925,6 @@ class InlineAdapter(BasePlatformAdapter):
                 "Turn it on in a chat with /threads on, the agent settings, or by asking the agent."
             )
             self._reply_thread_mode = "auto"
-        self._reply_to_mode = _reply_to_mode(
-            extra.get("reply_to_mode") if "reply_to_mode" in extra else inline_env("INLINE_REPLY_TO_MODE"),
-        )
 
         state_path = extra.get("state_path") or inline_env("INLINE_STATE_PATH")
         if state_path:
@@ -1033,8 +1014,8 @@ class InlineAdapter(BasePlatformAdapter):
         self._bot_agent_cache: "OrderedDict[str, tuple[float, Dict[str, Any]]]" = OrderedDict()
         self._reply_thread_cache: "OrderedDict[str, str]" = OrderedDict()
         self._reply_thread_parent_reply_ids: "OrderedDict[str, set[str]]" = OrderedDict()
-        # Requests that came from other bots, so answers reply to them and reach them.
-        self._bot_request_ids: "OrderedDict[str, None]" = OrderedDict()
+        # Whether each request came from a bot, so answers to bots reply to them and reach them.
+        self._request_sender_is_bot: "OrderedDict[str, bool]" = OrderedDict()
         # Commands this bot advertises in Inline's command menu, as last synced.
         self._advertised_commands: set[str] = set()
         self._reply_thread_parent_typing_targets: "OrderedDict[str, str]" = OrderedDict()
@@ -2702,8 +2683,7 @@ class InlineAdapter(BasePlatformAdapter):
             if not mentioned and not reply_wakes_thread and (addressed_to_others or not ambient):
                 self._remember_observed_context(chat_id, msg, text)
                 return
-        if sender_profile.get("bot") is True:
-            self._remember_bot_request(chat_id, msg_id)
+        self._remember_request_sender(chat_id, msg_id, sender_profile.get("bot") is True)
         if edit:
             text = f"message:edited:{text}" if text else "message:edited"
         if (
@@ -3954,29 +3934,35 @@ class InlineAdapter(BasePlatformAdapter):
         except OSError as exc:
             logger.warning("[inline] could not adopt legacy state %s: %s", legacy, exc)
 
-    def _reply_to_for_target(
+    async def _reply_to_for_target(
         self, reply_to: Optional[str], target: Dict[str, str], *, anchored: bool = False,
     ) -> Optional[str]:
+        """Answers quote the message only when it came from a bot: a bot wakes on replies to its
+        own messages, so that is how an answer reaches it. People get plain answers."""
         if not reply_to:
             return None
-        target_chat_id = target.get("chatId")
+        target_chat_id = target.get("chatId") or ""
         if target_chat_id:
             suppressed = self._reply_thread_parent_reply_ids.get(self._chat_key(target_chat_id), set())
             if str(reply_to) in suppressed:
                 return None
-        if anchored or self._reply_to_mode == "first":
+        if anchored:
             return str(reply_to)
-        if self._reply_to_mode == "bots" and self._is_bot_request(target_chat_id or "", reply_to):
-            return str(reply_to)
-        return None
+        key = f"{self._chat_key(target_chat_id)}:{reply_to}"
+        sender_is_bot = self._request_sender_is_bot.get(key)
+        if sender_is_bot is None and target_chat_id:
+            # Not seen since this process started, such as an answer finishing after a restart.
+            fetched = await self._fetch_message(target_chat_id, str(reply_to))
+            sender_is_bot = _inline_sender_profile({}, fetched).get("bot") is True if fetched else False
+            self._remember_request_sender(target_chat_id, str(reply_to), sender_is_bot)
+        return str(reply_to) if sender_is_bot else None
 
-    def _remember_bot_request(self, chat_id: str, msg_id: str) -> None:
-        self._bot_request_ids[f"{self._chat_key(chat_id)}:{msg_id}"] = None
-        while len(self._bot_request_ids) > _CHAT_INFO_CACHE_MAX_SIZE:
-            self._bot_request_ids.popitem(last=False)
-
-    def _is_bot_request(self, chat_id: str, msg_id: str) -> bool:
-        return f"{self._chat_key(chat_id)}:{msg_id}" in self._bot_request_ids
+    def _remember_request_sender(self, chat_id: str, msg_id: str, sender_is_bot: bool) -> None:
+        key = f"{self._chat_key(chat_id)}:{msg_id}"
+        self._request_sender_is_bot[key] = sender_is_bot
+        self._request_sender_is_bot.move_to_end(key)
+        while len(self._request_sender_is_bot) > _CHAT_INFO_CACHE_MAX_SIZE:
+            self._request_sender_is_bot.popitem(last=False)
 
     async def _get_chat_info(self, chat_id: str, *, required: bool = False) -> Dict[str, Any]:
         target = _target_from_chat_id(chat_id)
@@ -4822,7 +4808,7 @@ class InlineAdapter(BasePlatformAdapter):
                 first_result.error,
             )
             reply_to = agent_action_target
-        reply_to = self._reply_to_for_target(reply_to, target, anchored=bool(agent_action_target))
+        reply_to = await self._reply_to_for_target(reply_to, target, anchored=bool(agent_action_target))
         chunks = self.truncate_message(self.format_message(content), self.MAX_MESSAGE_LENGTH)
         message_ids: List[str] = []
         raw_responses: List[Any] = []
@@ -5138,7 +5124,7 @@ class InlineAdapter(BasePlatformAdapter):
             return _send_result(success=False, error=f"attachment exceeds Inline upload cap ({actual} > {limit})", error_kind="too_long")
         mime_type, _ = mimetypes.guess_type(safe_path)
         target = self._target_for(chat_id, metadata)
-        reply_to = self._reply_to_for_target(reply_to, target)
+        reply_to = await self._reply_to_for_target(reply_to, target)
         body = {
             "target": target,
             "path": safe_path,
