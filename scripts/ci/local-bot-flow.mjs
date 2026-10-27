@@ -116,7 +116,7 @@ try {
     const pkg = manifest.packages.find((entry) => entry.name === name)
     assert.ok(pkg, `missing ${name} candidate`)
     dependencies[name] = publishedHermes && name === "@inline-chat/hermes-agent-adapter"
-      ? "@inline-chat/hermes-agent-adapter@0.0.22"
+      ? "0.0.22"
       : `file:${path.join(artifactDir, pkg.file)}`
   }
   const consumer = await mkdtemp(path.join(os.tmpdir(), "inline-local-bot-flow-"))
