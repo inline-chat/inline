@@ -115,6 +115,9 @@ pub(crate) struct CodexMapper {
     requests: HashMap<String, PendingRequest>,
     answered: HashSet<String>,
     children: HashMap<String, ChildRef>,
+    /// When the account's exhausted limit window resets, from the latest
+    /// `account/rateLimits/updated`.
+    limit_resets_at: Option<i64>,
 }
 
 impl CodexMapper {
@@ -129,6 +132,7 @@ impl CodexMapper {
             requests: HashMap::new(),
             answered: HashSet::new(),
             children: HashMap::new(),
+            limit_resets_at: None,
         }
     }
 
@@ -359,6 +363,11 @@ impl CodexMapper {
             }
             "account/rateLimits/updated" => {
                 let limits = normalize_usage_limits(params);
+                self.limit_resets_at = limits
+                    .iter()
+                    .filter(|window| window.used_percent >= 100)
+                    .filter_map(|window| window.resets_at)
+                    .max();
                 if !limits.is_empty() {
                     events.push(Event::Usage {
                         usage: UsageUpdate {
@@ -512,6 +521,18 @@ impl CodexMapper {
             ("interrupted", _) => TurnOutcome::Interrupted,
             _ => TurnOutcome::Failed,
         };
+        // Out of usage: the work waits on the limit until it resets.
+        if parent.is_none()
+            && matches!(error_info, Some("usageLimitExceeded" | "rateLimitExceeded"))
+        {
+            events.push(Event::State {
+                state: RunState::Waiting {
+                    on: WaitingOn::Limit {
+                        resets_at: self.limit_resets_at,
+                    },
+                },
+            });
+        }
         if let Some(child) = parent {
             let status = match outcome {
                 TurnOutcome::Completed => ChildStatus::Completed,
@@ -1809,5 +1830,43 @@ mod tests {
             }
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_usage_limit_failure_waits_on_the_limit_until_it_resets() {
+        let mut mapper = CodexMapper::new("thread-1");
+        mapper.notification(
+            "account/rateLimits/updated",
+            &json!({"rateLimits": {"limitId": "codex",
+                "primary": {"usedPercent": 100, "windowDurationMins": 300, "resetsAt": 1_800_000_000},
+                "secondary": {"usedPercent": 40, "windowDurationMins": 10080, "resetsAt": 1_900_000_000}}}),
+        );
+        let mapped = mapper.notification(
+            "turn/completed",
+            &json!({"threadId": "thread-1", "turn": {"id": "turn-1", "status": "failed",
+                "error": {"message": "You've hit your usage limit.", "codexErrorInfo": "usageLimitExceeded"}}}),
+        );
+        assert!(mapped.events.iter().any(|event| matches!(
+            event,
+            Event::State {
+                state: RunState::Waiting {
+                    on: WaitingOn::Limit {
+                        resets_at: Some(1_800_000_000)
+                    }
+                }
+            }
+        )));
+        // Any other failure is just a failure.
+        let mapped = mapper.notification(
+            "turn/completed",
+            &json!({"threadId": "thread-1", "turn": {"id": "turn-2", "status": "failed",
+                "error": {"message": "boom", "codexErrorInfo": "internalServerError"}}}),
+        );
+        assert!(
+            !mapped
+                .events
+                .iter()
+                .any(|event| matches!(event, Event::State { .. }))
+        );
     }
 }

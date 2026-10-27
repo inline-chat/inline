@@ -302,6 +302,8 @@ pub(crate) async fn edit_markdown(
 pub(crate) struct Names {
     bot: InlineClient,
     cache: tokio::sync::Mutex<std::collections::HashMap<i64, String>>,
+    /// Whether each user is a bot, for senders the local store has not met.
+    bots: tokio::sync::Mutex<std::collections::HashMap<i64, bool>>,
 }
 
 impl Names {
@@ -309,7 +311,29 @@ impl Names {
         Self {
             bot,
             cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            bots: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    /// Whether the user is a bot (an agent), asking Inline once when the
+    /// store does not know. Unknown counts as a person.
+    pub(crate) async fn is_bot(&self, user_id: i64) -> bool {
+        if let Some(bot) = self.bots.lock().await.get(&user_id) {
+            return *bot;
+        }
+        let Some(user) = get_users(&self.bot, vec![user_id])
+            .await
+            .ok()
+            .and_then(|users| users.into_iter().find(|user| user.id == user_id))
+        else {
+            return false;
+        };
+        let bot = user.bot.unwrap_or(false);
+        self.bots.lock().await.insert(user_id, bot);
+        if let Some(name) = display_name(&user) {
+            self.remember(user_id, name).await;
+        }
+        bot
     }
 
     pub(crate) async fn remember(&self, user_id: i64, name: String) {

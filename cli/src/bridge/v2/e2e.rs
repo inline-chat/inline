@@ -104,6 +104,7 @@ impl FakeModel {
             requests.push(json!({
                 "request": request_line.trim(),
                 "model": body.get("model"),
+                "reasoning": body.get("reasoning"),
                 "last_input": body.get("input").and_then(Value::as_array).and_then(|input| input.last().cloned()),
                 // Everything the request carried, for context checks.
                 "input_text": body.get("input").map(Value::to_string),
@@ -136,6 +137,25 @@ impl FakeModel {
             .and_then(|delay| delay.as_u64())
         {
             tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+        // `_status` answers with that HTTP error and `_body` instead.
+        if let Some(status) = output.get("_status").and_then(Value::as_u64) {
+            let body = output
+                .get("_body")
+                .cloned()
+                .unwrap_or(Value::Null)
+                .to_string();
+            let _ = reader
+                .get_mut()
+                .write_all(
+                    format!(
+                        "HTTP/1.1 {status} Error\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await;
+            return;
         }
         if output.get("id").is_none() {
             output["id"] = json!(format!("item-{number}"));
@@ -240,6 +260,25 @@ async fn bot_texts(owner: &InlineClient, chat_id: i64, bot_user_id: i64) -> Vec<
             (message.message_id.get(), text)
         })
         .collect()
+}
+
+/// The message a message replies to.
+async fn reply_target(owner: &InlineClient, chat_id: i64, message_id: i64) -> Option<i64> {
+    let page = owner
+        .history(HistoryRequest {
+            chat_id: InlineId::new(chat_id),
+            limit: Some(100),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .unwrap();
+    page.messages
+        .into_iter()
+        .find(|message| message.message_id.get() == message_id)
+        .expect("the message")
+        .reply_to_message_id
+        .map(InlineId::get)
 }
 
 /// What the fake model saw, for failure messages.
@@ -403,6 +442,12 @@ async fn codex_round_trip_through_inline() {
         // A thread its owner bound to the agent: plain messages address it.
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_BOUND"}]}),
+        // Out of usage, then back once it reset.
+        json!({"_status": 429, "_body": {"error": {"type": "usage_limit_reached",
+            "message": "You've hit your usage limit.", "plan_type": "pro",
+            "resets_in_seconds": 3600}}}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_AFTER_LIMIT"}]}),
     ])
     .await;
     let codex_home = dir.path().join("codex-home");
@@ -565,6 +610,20 @@ async fn codex_round_trip_through_inline() {
                 && matches!(&item.control, Some(proto::bot_chat_settings_item::Control::Select(select)) if select.value == chosen)),
         "the document shows the chosen model"
     );
+    // A reasoning level for the bound thread below.
+    let bound_effort = updated
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .find(|item| item.id == "agent.reasoning")
+        .and_then(|item| match &item.control {
+            Some(proto::bot_chat_settings_item::Control::Select(select)) => select
+                .options
+                .iter()
+                .map(|option| option.value.clone())
+                .find(|value| value != "__inline_provider_default__"),
+            _ => None,
+        });
     send(&owner, chat_id, "Answer on the new model").await;
     wait_for(
         &model,
@@ -948,6 +1007,50 @@ async fn codex_round_trip_through_inline() {
     );
     bot.shutdown().await.unwrap();
     drop(bot);
+    // While it is down, a run whose Codex went missing reports what to fix.
+    let (broken_stop, broken, broken_bot) =
+        bridge.start_with(dir.path().join("missing-codex")).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let setup = loop {
+        let result = owner
+            .invoke_rpc(
+                proto::Method::GetAgentRuntime,
+                proto::rpc_call::Input::GetAgentRuntime(proto::GetAgentRuntimeInput {
+                    bot_user_id,
+                }),
+            )
+            .await
+            .unwrap();
+        let proto::rpc_result::Result::GetAgentRuntime(result) = result else {
+            panic!("unexpected result");
+        };
+        let runtime = result.runtime.expect("the runtime reported");
+        if runtime.status == proto::AgentRuntimeStatus::NeedsSetup as i32 {
+            break runtime.setup.expect("what to fix");
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the runtime never reported setup: {runtime:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    assert_eq!(
+        setup.reason,
+        proto::agent_runtime_setup::Reason::ExecutableMissing as i32
+    );
+    assert!(
+        setup
+            .text
+            .is_some_and(|text| text.contains("missing-codex"))
+    );
+    let _ = broken_stop.send(());
+    let outcome = tokio::time::timeout(Duration::from_secs(20), broken).await;
+    assert!(
+        matches!(outcome, Ok(Ok(Ok(())))),
+        "the broken run ended cleanly: {outcome:?}"
+    );
+    broken_bot.shutdown().await.unwrap();
+    drop(broken_bot);
     // Sent while the bridge is down: the restarted bridge catches up.
     send(&owner, chat_id, "Back after the restart").await;
     let (stop, running, _bot) = bridge.start().await;
@@ -1131,6 +1234,24 @@ async fn codex_round_trip_through_inline() {
         |texts| texts.iter().any(|(_, text)| text.contains("E2E_G2_ONE")),
     )
     .await;
+    // Joining a thread, the agent learns its title and who is in it.
+    let joined = model
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|request| request.to_string().contains("hello there"))
+        .and_then(|request| {
+            request
+                .get("input_text")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .expect("the first group turn");
+    assert!(
+        joined.contains("E2E group two") && joined.contains("Participants:"),
+        "the join context names the thread and its people: {joined}"
+    );
     owner
         .invoke_rpc(
             proto::Method::SetAgentParticipation,
@@ -1151,10 +1272,13 @@ async fn codex_round_trip_through_inline() {
         requests_before,
         "an unaddressed message in a mentions-only thread woke the agent"
     );
-    owner
+    let asked = owner
         .send_text(mention("what did I just say?"))
         .await
-        .unwrap();
+        .unwrap()
+        .message_id
+        .expect("sent")
+        .get();
     wait_for(
         &model,
         &owner,
@@ -1178,6 +1302,12 @@ async fn codex_round_trip_through_inline() {
         .find(|(_, text)| text.contains("E2E_G2_TWO"))
         .map(|(id, _)| *id)
         .unwrap();
+    // In a group thread the answer replies to whoever asked (spec §6).
+    assert_eq!(
+        reply_target(&owner, group_two, answer).await,
+        Some(asked),
+        "the group answer replies to the request"
+    );
     let mut reply = SendTextRequest::new(
         PeerRef::Chat {
             chat_id: InlineId::new(group_two),
@@ -1346,7 +1476,7 @@ async fn codex_round_trip_through_inline() {
     );
 
     // 10. A thread the owner bound to the agent is the agent's own: a plain
-    // message reaches it.
+    // message reaches it, on the model and reasoning its composer chain set.
     let bound = owner
         .invoke_rpc(
             proto::Method::CreateChat,
@@ -1365,7 +1495,11 @@ async fn codex_round_trip_through_inline() {
                 agent_context: Some(proto::AgentThreadContext {
                     bot_user_id,
                     agent_id: None,
-                    configuration: None,
+                    configuration: Some(proto::AgentThreadConfiguration {
+                        project_id: None,
+                        model_id: Some(chosen.clone()),
+                        reasoning_effort_id: bound_effort.clone(),
+                    }),
                 }),
                 ..Default::default()
             }),
@@ -1386,6 +1520,228 @@ async fn codex_round_trip_through_inline() {
         |texts| texts.iter().any(|(_, text)| text.contains("E2E_BOUND")),
     )
     .await;
+    let used = model
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|request| request.to_string().contains("a plain request"))
+        .cloned()
+        .expect("the bound thread's turn");
+    let texts = bot_texts(&owner, bound, bot_user_id).await;
+    let answer = texts
+        .iter()
+        .find(|(_, text)| text.contains("E2E_BOUND"))
+        .map(|(id, _)| *id)
+        .unwrap();
+    assert_eq!(
+        reply_target(&owner, bound, answer).await,
+        None,
+        "an answer in the agent's own thread stands on its own"
+    );
+    assert_eq!(
+        used.get("model").and_then(Value::as_str),
+        Some(chosen.as_str()),
+        "the bound thread ran on its composer's model"
+    );
+    if let Some(effort) = &bound_effort {
+        assert_eq!(
+            used.pointer("/reasoning/effort").and_then(Value::as_str),
+            Some(effort.as_str()),
+            "the bound thread ran on its composer's reasoning: {:?}",
+            used.get("reasoning")
+        );
+    }
+
+    // 11. Out of usage: one notice says so and the owner's attention points
+    // at it; the next turn that runs clears it.
+    send(&owner, chat_id, "Run into the limit").await;
+    let texts = wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the usage limit notice",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("reached its usage limit"))
+        },
+    )
+    .await;
+    let notice = texts
+        .iter()
+        .rev()
+        .find(|(_, text)| text.contains("reached its usage limit"))
+        .map(|(id, _)| *id)
+        .unwrap();
+    let dm_session = owner
+        .get_agent_session(proto::GetAgentSessionInput {
+            peer_id: Some(super::api::chat_peer(chat_id)),
+            bot_user_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .connection
+        .and_then(|connection| connection.agent_session)
+        .expect("the DM's work")
+        .id;
+    let state = wait_state(&owner, chat_id, dm_session, |state| {
+        state.waiting_reason == proto::AgentWaitingReason::Limit as i32
+    })
+    .await;
+    let attention = state.attention.expect("the owner's attention");
+    assert_eq!(attention.kind, proto::AgentAttentionKind::Limit as i32);
+    assert_eq!(attention.message_id, Some(notice));
+    assert_eq!(attention.user_ids, vec![owner_user_id]);
+    send(&owner, chat_id, "And now?").await;
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the answer after the limit",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_AFTER_LIMIT"))
+        },
+    )
+    .await;
+    wait_state(&owner, chat_id, dm_session, |state| {
+        state.attention.is_none() && state.run_state == proto::AgentRunState::Idle as i32
+    })
+    .await;
+
+    // 12. Agents going back and forth without a person: past the loop cap
+    // this agent stops answering the other one and says so, and the owner
+    // allows more in place.
+    let other_bot_id: i64 = env("INLINE_V2_E2E_OTHER_BOT_USER_ID").parse().unwrap();
+    let other_bot = client(
+        dir.path(),
+        "other-bot",
+        &env("INLINE_V2_E2E_OTHER_BOT_TOKEN"),
+    )
+    .await;
+    owner
+        .invoke_rpc(
+            proto::Method::SetAgentGrant,
+            proto::rpc_call::Input::SetAgentGrant(proto::SetAgentGrantInput {
+                bot_user_id,
+                user_id: other_bot_id,
+                operations: vec![
+                    proto::AgentGrantOperation::Invoke as i32,
+                    proto::AgentGrantOperation::Steer as i32,
+                ],
+            }),
+        )
+        .await
+        .unwrap();
+    let agents = owner
+        .create_thread(CreateThreadRequest {
+            title: Some("E2E agents".to_owned()),
+            space_id: None,
+            description: None,
+            emoji: None,
+            is_public: false,
+            participants: vec![
+                ChatCreateParticipant::from(InlineId::new(owner_user_id)),
+                ChatCreateParticipant::from(InlineId::new(bot_user_id)),
+                ChatCreateParticipant::from(InlineId::new(other_bot_id)),
+            ],
+        })
+        .await
+        .unwrap()
+        .chat_id
+        .get();
+    let agent_mention = |text: String| {
+        let mut request = SendTextRequest::new(
+            PeerRef::Chat {
+                chat_id: InlineId::new(agents),
+            },
+            format!("[@Codex](inline://user?id={bot_user_id}) {text}"),
+        );
+        request.parse_markdown = true;
+        request
+    };
+    let cap = inline_agent_bridge::group::DEFAULT_LOOP_CAP_HOPS;
+    for hop in 0..=cap {
+        other_bot
+            .send_text(agent_mention(format!("hop {hop}")))
+            .await
+            .unwrap();
+    }
+    let texts = wait_for(
+        &model,
+        &owner,
+        agents,
+        bot_user_id,
+        "the loop cap notice",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("stopped answering other agents"))
+        },
+    )
+    .await;
+    let notice = texts
+        .iter()
+        .find(|(_, text)| text.contains("stopped answering other agents"))
+        .map(|(id, _)| *id)
+        .unwrap();
+    // Past the cap another agent's message runs nothing.
+    settle(&model).await;
+    let requests_before = model.request_count();
+    other_bot
+        .send_text(agent_mention("one more hop".to_owned()))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        model.request_count(),
+        requests_before,
+        "an agent past the loop cap still started a turn"
+    );
+    // The other agent cannot lift the cap (refused by Inline or the
+    // bridge); the owner can.
+    let _ = invoke_action(&other_bot, agents, notice, "v2-0").await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(
+        bot_texts(&owner, agents, bot_user_id)
+            .await
+            .iter()
+            .any(|(id, text)| *id == notice && text.contains("stopped answering other agents")),
+        "the other agent extended the loop cap"
+    );
+    invoke_action(&owner, agents, notice, "v2-0").await.unwrap();
+    wait_for(
+        &model,
+        &owner,
+        agents,
+        bot_user_id,
+        "the loop cap lifted",
+        |texts| {
+            texts
+                .iter()
+                .any(|(id, text)| *id == notice && text.contains("answers other agents here again"))
+        },
+    )
+    .await;
+    other_bot
+        .send_text(agent_mention("and again".to_owned()))
+        .await
+        .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while model.request_count() == requests_before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the agent never answered after the owner allowed more"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    other_bot.shutdown().await.unwrap();
 
     let _ = stop.send(());
     let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
@@ -1393,6 +1749,56 @@ async fn codex_round_trip_through_inline() {
         matches!(outcome, Ok(Ok(Ok(())))),
         "runtime ended cleanly: {outcome:?}"
     );
+}
+
+/// Waits until the model has been quiet for a few seconds.
+async fn settle(model: &FakeModel) {
+    let mut last = model.request_count();
+    loop {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let now = model.request_count();
+        if now == last {
+            return;
+        }
+        last = now;
+    }
+}
+
+/// Waits until the work's reported state matches.
+async fn wait_state(
+    owner: &InlineClient,
+    chat_id: i64,
+    agent_session_id: i64,
+    matches: impl Fn(&proto::AgentSessionState) -> bool,
+) -> proto::AgentSessionState {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let states = owner
+            .invoke_rpc(
+                proto::Method::GetAgentSessionStates,
+                proto::rpc_call::Input::GetAgentSessionStates(proto::GetAgentSessionStatesInput {
+                    peer_id: Some(super::api::chat_peer(chat_id)),
+                }),
+            )
+            .await
+            .unwrap();
+        let proto::rpc_result::Result::GetAgentSessionStates(states) = states else {
+            panic!("unexpected result");
+        };
+        let state = states
+            .sessions
+            .iter()
+            .find(|session| session.id == agent_session_id)
+            .and_then(|session| session.state.clone());
+        if let Some(state) = state.as_ref().filter(|state| matches(state)) {
+            return state.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the work's state never matched; last: {state:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 /// One run of the bridge for the Codex test: its own bot client, tool host
@@ -1412,7 +1818,13 @@ impl CodexBridge {
     /// Starts the bridge on the bot's persisted store, so a restart catches
     /// up from where the last run stopped.
     async fn start(&self) -> (tokio::sync::oneshot::Sender<()>, Running, InlineClient) {
-        let executable = which_codex();
+        self.start_with(which_codex()).await
+    }
+
+    async fn start_with(
+        &self,
+        executable: std::path::PathBuf,
+    ) -> (tokio::sync::oneshot::Sender<()>, Running, InlineClient) {
         let bot = client(&self.dir, "bot", &env("INLINE_V2_E2E_BOT_TOKEN")).await;
         let tools = Tools::new(ToolsConfig {
             bot: bot.clone(),
@@ -1914,6 +2326,355 @@ async fn claude_round_trip_through_inline() {
         session_ref(lookup().await.unwrap()),
         "the restarted bridge resumed the same Claude session"
     );
+
+    // 7. Agent Settings: a model picked there runs the next turn.
+    let model_of = |needle: &str| {
+        api.conversation_calls()
+            .iter()
+            .rev()
+            .find(|served| served.body.to_string().contains(needle))
+            .and_then(|served| served.body["model"].as_str().map(str::to_owned))
+    };
+    let before = model_of("E2E_CLAUDE_RESTARTED").expect("the last turn's model");
+    let settings = owner
+        .invoke_rpc(
+            proto::Method::RequestBotChatSettings,
+            proto::rpc_call::Input::RequestBotChatSettings(proto::RequestBotChatSettingsInput {
+                peer_id: Some(super::api::chat_peer(chat_id)),
+                bot_user_id,
+                version: 1,
+            }),
+        )
+        .await
+        .unwrap();
+    let proto::rpc_result::Result::RequestBotChatSettings(settings) = settings else {
+        panic!("unexpected result");
+    };
+    let document = match settings.response.and_then(|response| response.result) {
+        Some(proto::bot_chat_settings_response::Result::Document(document)) => document,
+        other => panic!("no settings document: {other:?}"),
+    };
+    let Some(proto::bot_chat_settings_item::Control::Select(select)) = document
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .find(|item| item.id == "agent.model")
+        .and_then(|item| item.control.clone())
+    else {
+        panic!("the document offers a model select: {document:?}");
+    };
+    let chosen = select
+        .options
+        .iter()
+        .map(|option| option.value.clone())
+        .find(|value| value != "__inline_provider_default__" && value != "default")
+        .expect("Claude offers another model");
+    let invoked = owner
+        .invoke_rpc(
+            proto::Method::InvokeBotChatSettingsItem,
+            proto::rpc_call::Input::InvokeBotChatSettingsItem(
+                proto::InvokeBotChatSettingsItemInput {
+                    peer_id: Some(super::api::chat_peer(chat_id)),
+                    bot_user_id,
+                    version: 1,
+                    item_id: "agent.model".to_owned(),
+                    value: Some(proto::BotChatSettingsValue {
+                        value: Some(proto::bot_chat_settings_value::Value::StringValue(
+                            chosen.clone(),
+                        )),
+                    }),
+                    document_revision: document.revision.clone(),
+                },
+            ),
+        )
+        .await
+        .unwrap();
+    let proto::rpc_result::Result::InvokeBotChatSettingsItem(invoked) = invoked else {
+        panic!("unexpected result");
+    };
+    assert!(
+        matches!(
+            invoked.response.and_then(|response| response.result),
+            Some(proto::bot_chat_settings_response::Result::Document(_))
+        ),
+        "the model change was taken"
+    );
+    send(
+        &owner,
+        chat_id,
+        "On the new model\n@text E2E_CLAUDE_NEW_MODEL",
+    )
+    .await;
+    wait_for(
+        &api,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the answer on the new model",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_CLAUDE_NEW_MODEL"))
+        },
+    )
+    .await;
+    let after = model_of("E2E_CLAUDE_NEW_MODEL").expect("the new turn's model");
+    assert_ne!(
+        before, after,
+        "the turn after choosing {chosen} still ran on {before}"
+    );
+
+    // 8. A group thread: joining, the agent learns where it is; its answer
+    // replies to the request; in mentions-only mode a plain message comes
+    // along as context with the next mention.
+    let group = owner
+        .create_thread(CreateThreadRequest {
+            title: Some("E2E Claude group".to_owned()),
+            space_id: None,
+            description: None,
+            emoji: None,
+            is_public: false,
+            participants: vec![
+                ChatCreateParticipant::from(InlineId::new(owner_user_id)),
+                ChatCreateParticipant::from(InlineId::new(bot_user_id)),
+            ],
+        })
+        .await
+        .unwrap()
+        .chat_id
+        .get();
+    let mention = |chat: i64, text: &str| {
+        let mut request = SendTextRequest::new(
+            PeerRef::Chat {
+                chat_id: InlineId::new(chat),
+            },
+            format!("[@Claude](inline://user?id={bot_user_id}) {text}"),
+        );
+        request.parse_markdown = true;
+        request
+    };
+    let asked = owner
+        .send_text(mention(group, "hello group\n@text E2E_CLAUDE_G_ONE"))
+        .await
+        .unwrap()
+        .message_id
+        .expect("sent")
+        .get();
+    let texts = wait_for(
+        &api,
+        &owner,
+        group,
+        bot_user_id,
+        "the first group answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_CLAUDE_G_ONE"))
+        },
+    )
+    .await;
+    let answer = texts
+        .iter()
+        .find(|(_, text)| text.contains("E2E_CLAUDE_G_ONE"))
+        .map(|(id, _)| *id)
+        .unwrap();
+    assert_eq!(
+        reply_target(&owner, group, answer).await,
+        Some(asked),
+        "the group answer replies to the request"
+    );
+    let joined = api
+        .conversation_calls()
+        .iter()
+        .find(|served| served.body.to_string().contains("E2E_CLAUDE_G_ONE"))
+        .map(|served| served.body.to_string())
+        .expect("the first group turn");
+    assert!(
+        joined.contains("E2E Claude group") && joined.contains("Participants:"),
+        "the join context names the thread and its people"
+    );
+    owner
+        .invoke_rpc(
+            proto::Method::SetAgentParticipation,
+            proto::rpc_call::Input::SetAgentParticipation(proto::SetAgentParticipationInput {
+                peer_id: Some(super::api::chat_peer(group)),
+                bot_user_id,
+                mode: proto::AgentParticipationMode::MentionsOnly as i32,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+    let calls_before = api.conversation_calls().len();
+    send(&owner, group, "E2E_CLAUDE_PASSIVE for whoever reads this").await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        api.conversation_calls().len(),
+        calls_before,
+        "an unaddressed message in a mentions-only thread woke Claude"
+    );
+    owner
+        .send_text(mention(group, "what did I say?\n@text E2E_CLAUDE_G_TWO"))
+        .await
+        .unwrap();
+    wait_for(
+        &api,
+        &owner,
+        group,
+        bot_user_id,
+        "the second group answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_CLAUDE_G_TWO"))
+        },
+    )
+    .await;
+    assert!(
+        api.conversation_calls().iter().any(|served| {
+            let body = served.body.to_string();
+            body.contains("E2E_CLAUDE_G_TWO") && body.contains("E2E_CLAUDE_PASSIVE")
+        }),
+        "the observed message reached Claude as context"
+    );
+
+    // 9. A teammate: nothing until the owner grants access, then answered.
+    let teammate_id: i64 = env("INLINE_V2_E2E_TEAMMATE_USER_ID").parse().unwrap();
+    let teammate = client(dir.path(), "teammate", &env("INLINE_V2_E2E_TEAMMATE_TOKEN")).await;
+    let team = owner
+        .create_thread(CreateThreadRequest {
+            title: Some("E2E Claude team".to_owned()),
+            space_id: None,
+            description: None,
+            emoji: None,
+            is_public: false,
+            participants: vec![
+                ChatCreateParticipant::from(InlineId::new(owner_user_id)),
+                ChatCreateParticipant::from(InlineId::new(bot_user_id)),
+                ChatCreateParticipant::from(InlineId::new(teammate_id)),
+            ],
+        })
+        .await
+        .unwrap()
+        .chat_id
+        .get();
+    let calls_before = api.conversation_calls().len();
+    teammate
+        .send_text(mention(team, "can you help?\n@text E2E_CLAUDE_NO"))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        api.conversation_calls().len(),
+        calls_before,
+        "a teammate without access reached Claude"
+    );
+    owner
+        .invoke_rpc(
+            proto::Method::SetAgentGrant,
+            proto::rpc_call::Input::SetAgentGrant(proto::SetAgentGrantInput {
+                bot_user_id,
+                user_id: teammate_id,
+                operations: vec![
+                    proto::AgentGrantOperation::Invoke as i32,
+                    proto::AgentGrantOperation::Steer as i32,
+                ],
+            }),
+        )
+        .await
+        .unwrap();
+    teammate
+        .send_text(mention(team, "now?\n@text E2E_CLAUDE_TEAMMATE"))
+        .await
+        .unwrap();
+    wait_for(
+        &api,
+        &owner,
+        team,
+        bot_user_id,
+        "the answer to the teammate",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_CLAUDE_TEAMMATE"))
+        },
+    )
+    .await;
+    teammate.shutdown().await.unwrap();
+
+    // 10. A group work moves itself into a subthread with Inline's tool; the
+    // parent keeps a card and replies there reach the same work.
+    let moving = owner
+        .create_thread(CreateThreadRequest {
+            title: Some("E2E Claude move".to_owned()),
+            space_id: None,
+            description: None,
+            emoji: None,
+            is_public: false,
+            participants: vec![
+                ChatCreateParticipant::from(InlineId::new(owner_user_id)),
+                ChatCreateParticipant::from(InlineId::new(bot_user_id)),
+            ],
+        })
+        .await
+        .unwrap()
+        .chat_id
+        .get();
+    owner
+        .send_text(mention(
+            moving,
+            "take this to a subthread\n@tool mcp__inline__start_subthread {\"title\": \"E2E Claude sub\"}",
+        ))
+        .await
+        .unwrap();
+    wait_for(
+        &api,
+        &owner,
+        moving,
+        bot_user_id,
+        "the parent card",
+        |texts| texts.iter().any(|(_, text)| text.contains("continues in")),
+    )
+    .await;
+    // The tool's result names the subthread; Claude sees it next request.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let subthread = loop {
+        let moved = api.served().iter().find_map(|served| {
+            let body = served.body.to_string();
+            body.match_indices("inline://chat?id=")
+                .find_map(|(at, link)| {
+                    body[at + link.len()..]
+                        .chars()
+                        .take_while(char::is_ascii_digit)
+                        .collect::<String>()
+                        .parse::<i64>()
+                        .ok()
+                        .filter(|chat| *chat != moving)
+                })
+        });
+        if let Some(chat) = moved {
+            break chat;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the work never moved into a subthread"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    send(&owner, subthread, "keep going\n@text E2E_CLAUDE_SUB_REPLY").await;
+    wait_for(
+        &api,
+        &owner,
+        subthread,
+        bot_user_id,
+        "the subthread reply",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_CLAUDE_SUB_REPLY"))
+        },
+    )
+    .await;
 
     let _ = stop.send(());
     let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;

@@ -138,8 +138,10 @@ pub enum LoopVerdict {
     },
 }
 
-/// Agent-only hop counter for one conversation. Every message in the
-/// conversation is recorded, including this agent's own.
+/// Agent-only hop counter for one conversation. Every message the agent
+/// receives there is recorded: another agent's adds a hop and a person's
+/// resets the count. Its own messages are not counted, so the cap counts
+/// the other side's turns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoopGuard {
     hops: u32,

@@ -100,6 +100,10 @@ pub(crate) struct Agent {
     /// A work that moved into a subthread tells the main loop (from, to).
     pub moves: mpsc::UnboundedSender<(i64, i64)>,
     pub names: Arc<api::Names>,
+    /// The owner's DM with the agent, for notices meant for the owner.
+    pub dm_chat_id: i64,
+    /// The speak gate's daily budget, shared by every work of this agent.
+    pub gate_budget: std::sync::Mutex<DailySpeakGateBudget>,
 }
 
 impl Agent {
@@ -150,6 +154,12 @@ pub(crate) enum ActionData {
     /// Send the untruncated detail of a finished progress message.
     #[serde(rename = "o")]
     FullOutput,
+    /// More agent-only hops in this thread (spec §5.1 rule 6).
+    #[serde(rename = "lx")]
+    ExtendLoop,
+    /// More speak-gate checks for the rest of today.
+    #[serde(rename = "gr")]
+    RaiseGateBudget,
 }
 
 pub(crate) enum Command {
@@ -158,6 +168,9 @@ pub(crate) enum Command {
         input: Box<Input>,
         pending: PendingInput,
         message_id: i64,
+        /// In a group thread the final answer replies to the requester
+        /// (spec §6, placement); a DM or the agent's own thread has none.
+        answer_reply: bool,
     },
     /// A message the agent observes without a turn; batched until the next
     /// native boundary.
@@ -291,7 +304,8 @@ pub(crate) fn spawn(
         settings: thread_settings,
         consider: ConsiderQueue::default(),
         consider_lines: HashMap::new(),
-        gate_budget: DailySpeakGateBudget::default(),
+        answer_replies: HashMap::new(),
+        answer_to: None,
     };
     let task = tokio::spawn(actor.run(rx));
     WorkHandle {
@@ -374,7 +388,11 @@ struct Actor {
     /// Unaddressed messages waiting for a quiet, idle moment (spec §5.4).
     consider: ConsiderQueue,
     consider_lines: HashMap<i64, String>,
-    gate_budget: DailySpeakGateBudget,
+    /// Group input → its message, for the answer to reply to.
+    answer_replies: HashMap<InputId, i64>,
+    /// The message the next final answer replies to: the latest group input
+    /// the harness took.
+    answer_to: Option<i64>,
 }
 
 impl Actor {
@@ -419,12 +437,16 @@ impl Actor {
                 input,
                 pending,
                 message_id,
+                answer_reply,
             } => {
                 // Direct input restarts paused work (spec §4.5) and answers
                 // anything the speak gate was weighing.
                 self.paused = false;
                 self.consider.supersede();
                 self.consider_lines.clear();
+                if answer_reply {
+                    self.answer_replies.insert(input.id.clone(), message_id);
+                }
                 self.inputs
                     .insert(input.id.clone(), (*input, pending.clone(), message_id));
                 self.event(HoldEvent::AcquireRequested {
@@ -505,9 +527,12 @@ impl Actor {
             ParticipationMode::Active,
             &availability,
             self.paused,
-            &mut self.gate_budget,
+            &mut self.agent.gate_budget.lock().expect("gate budget"),
             DayKey::from_unix(now as i64 / 1000, 0),
         );
+        if let GateAdmission::BudgetExhausted { notify_owner: true } = admission {
+            self.gate_budget_reached().await;
+        }
         let lines: Vec<String> = ticket
             .message_ids
             .iter()
@@ -692,6 +717,8 @@ impl Actor {
     async fn action(&mut self, message_id: i64, actor: i64, data: ActionData) -> Option<String> {
         let grants = self.agent.access.grants(actor).await;
         match data {
+            // The main loop answers these; they never reach a work.
+            ActionData::ExtendLoop | ActionData::RaiseGateBudget => None,
             ActionData::Decision { i, d } => {
                 let card = self.cards.get(&message_id).cloned()?;
                 if card.interaction.as_str() != i {
@@ -1305,6 +1332,7 @@ impl Actor {
         match result {
             Ok(receipt) => {
                 self.mark(&pending.id, InputState::Accepted);
+                self.answer_to = self.answer_replies.remove(&pending.id);
                 // The harness may report the turn a moment later. Until then
                 // the delivery itself is live work, so an idle tick never
                 // lets go of a session that was just given a turn.
@@ -1692,6 +1720,9 @@ impl Actor {
         }
         let from = self.chat_id;
         self.chat_id = destination;
+        // The subthread is the work's own: its answer stands on its own.
+        self.answer_to = None;
+        self.answer_replies.clear();
         // Progress goes on in new messages in the subthread; the parent's
         // open progress messages close, since its card links there.
         self.edits.clear();
@@ -1823,6 +1854,8 @@ impl Actor {
                 TurnPhase::Started { inputs } => {
                     self.turn = Some(turn.clone());
                     self.turn_started = Some(now_ms() as i64 / 1000);
+                    // Running again: whatever limit it waited on has reset.
+                    self.waiting = None;
                     for input in inputs {
                         self.mark(input, InputState::Consumed);
                         self.inputs.remove(input);
@@ -1840,7 +1873,10 @@ impl Actor {
                         self.turn_started = None;
                     }
                     self.stopping = false;
-                    self.waiting = None;
+                    // A usage limit outlasts the turn it stopped.
+                    if !matches!(self.waiting, Some((proto::AgentWaitingReason::Limit, _))) {
+                        self.waiting = None;
+                    }
                 }
             },
             Event::Input { id, fact } => match fact {
@@ -1873,10 +1909,10 @@ impl Actor {
             },
             Event::State { state } => {
                 if let RunState::Waiting {
-                    on: WaitingOn::Limit { .. },
+                    on: WaitingOn::Limit { resets_at },
                 } = state
                 {
-                    self.waiting = Some((proto::AgentWaitingReason::Limit, 0));
+                    self.limit_reached(*resets_at).await;
                 }
                 if let Some(event) = run_state_event(state) {
                     self.event(event).await;
@@ -1904,6 +1940,53 @@ impl Actor {
         } else {
             self.report().await;
         }
+    }
+
+    /// Today's speak-gate checks ran out: the owner hears once, in the DM,
+    /// with one tap to allow more (spec §5.1 rule 6).
+    async fn gate_budget_reached(&self) {
+        let allowance = self
+            .agent
+            .gate_budget
+            .lock()
+            .expect("gate budget")
+            .allowance();
+        let text = format!(
+            "{} used today's {allowance} checks on whether to answer unaddressed messages. Until tomorrow it answers only when addressed.",
+            self.agent.agent_name
+        );
+        let actions = button_rows(&[(
+            "Allow more today",
+            ActionData::RaiseGateBudget,
+            ActionStyle::Primary,
+        )]);
+        if let Err(error) = api::send_doc(
+            &self.agent.bot,
+            self.agent.dm_chat_id,
+            None,
+            &paragraph(&text),
+            actions,
+            Notify::Normal,
+        )
+        .await
+        {
+            log::warn!(target: "inline::bridge::v2", "speak gate budget notice failed: {error}");
+        }
+    }
+
+    /// Out of usage: one notice says when it resets, and the work's attention
+    /// points the owner at it until a turn runs again.
+    async fn limit_reached(&mut self, resets_at: Option<i64>) {
+        if matches!(self.waiting, Some((proto::AgentWaitingReason::Limit, _))) {
+            return;
+        }
+        let text = limit_notice(&self.agent.agent_name, resets_at, now_ms() as i64 / 1000);
+        let notice = self
+            .send(&paragraph(&text), None, Notify::Normal)
+            .await
+            .unwrap_or(0);
+        self.waiting = Some((proto::AgentWaitingReason::Limit, notice));
+        self.report().await;
     }
 
     async fn render(&mut self, ops: Vec<RenderOp>) {
@@ -1955,8 +2038,14 @@ impl Actor {
                 RenderOp::Update { doc } => {
                     self.send(&doc, None, Notify::Silent).await;
                 }
-                RenderOp::Final { doc } | RenderOp::Notice { doc } => {
+                RenderOp::Final { doc } => {
                     // Edits still pending land before the answer.
+                    self.flush_edits(true).await;
+                    let reply_to = self.answer_to.take();
+                    self.send_in_reply(&doc, reply_to, None, Notify::Normal)
+                        .await;
+                }
+                RenderOp::Notice { doc } => {
                     self.flush_edits(true).await;
                     self.send(&doc, None, Notify::Normal).await;
                 }
@@ -2073,10 +2162,29 @@ impl Actor {
         actions: Option<proto::MessageActions>,
         notify: Notify,
     ) -> Option<i64> {
+        self.send_in_reply(doc, None, actions, notify).await
+    }
+
+    async fn send_in_reply(
+        &self,
+        doc: &Doc,
+        reply_to: Option<i64>,
+        actions: Option<proto::MessageActions>,
+        notify: Notify,
+    ) -> Option<i64> {
         if doc.is_empty() {
             return None;
         }
-        match api::send_doc(&self.agent.bot, self.chat_id, None, doc, actions, notify).await {
+        match api::send_doc(
+            &self.agent.bot,
+            self.chat_id,
+            reply_to,
+            doc,
+            actions,
+            notify,
+        )
+        .await
+        {
             Ok(id) => {
                 self.remember(id);
                 Some(id)
@@ -2379,7 +2487,28 @@ fn revision(started_ms: u64) -> i64 {
     now_ms().max(started_ms) as i64
 }
 
-fn paragraph(text: &str) -> Doc {
+/// "Codex reached its usage limit. It can work again in about 2 h 5 min."
+fn limit_notice(agent_name: &str, resets_at: Option<i64>, now: i64) -> String {
+    let when = match resets_at.map(|at| at - now) {
+        Some(left) if left > 0 => {
+            let minutes = (left + 59) / 60;
+            if minutes >= 60 {
+                format!(
+                    " It can work again in about {} h {} min.",
+                    minutes / 60,
+                    minutes % 60
+                )
+            } else {
+                format!(" It can work again in about {minutes} min.")
+            }
+        }
+        Some(_) => " It can work again now.".to_owned(),
+        None => " It can work again when the limit resets.".to_owned(),
+    };
+    format!("{agent_name} reached its usage limit.{when}")
+}
+
+pub(crate) fn paragraph(text: &str) -> Doc {
     let mut builder = DocBuilder::new();
     builder.paragraph(text);
     builder.finish()
@@ -2411,7 +2540,9 @@ fn step_label(step: &ReleaseStep) -> String {
     }
 }
 
-fn button_rows(buttons: &[(&str, ActionData, ActionStyle)]) -> Option<proto::MessageActions> {
+pub(crate) fn button_rows(
+    buttons: &[(&str, ActionData, ActionStyle)],
+) -> Option<proto::MessageActions> {
     let actions = buttons
         .iter()
         .enumerate()
@@ -2615,6 +2746,22 @@ mod tests {
                 i: "req-1".into(),
                 d: "accept".into()
             }
+        );
+    }
+
+    #[test]
+    fn a_limit_notice_says_when_the_agent_can_work_again() {
+        assert_eq!(
+            limit_notice("Codex", Some(1_000 + 7_500), 1_000),
+            "Codex reached its usage limit. It can work again in about 2 h 5 min."
+        );
+        assert_eq!(
+            limit_notice("Claude", Some(1_030), 1_000),
+            "Claude reached its usage limit. It can work again in about 1 min."
+        );
+        assert_eq!(
+            limit_notice("Codex", None, 1_000),
+            "Codex reached its usage limit. It can work again when the limit resets."
         );
     }
 }

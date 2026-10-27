@@ -303,6 +303,28 @@ pub(crate) fn invocation(
     Ok(Invocation::Change(change))
 }
 
+/// A bound thread's composer chain as a change: a model or reasoning this
+/// machine no longer offers falls back to the default instead of failing
+/// the turn.
+pub(crate) fn bound(
+    model: Option<String>,
+    effort: Option<String>,
+    catalog: &Catalog,
+) -> SettingsChange {
+    let model = model.filter(|model| catalog.models.iter().any(|known| &known.value == model));
+    let effort = effort.filter(|effort| {
+        catalog
+            .models
+            .iter()
+            .any(|model| model.reasoning.iter().any(|known| &known.value == effort))
+    });
+    SettingsChange {
+        model: Some(model.unwrap_or_default()),
+        effort: Some(effort.unwrap_or_default()),
+        ..SettingsChange::default()
+    }
+}
+
 /// Folds a change into a thread's choices. An empty string clears a field
 /// back to the harness's default.
 pub(crate) fn merge(into: &mut SettingsChange, change: &SettingsChange) {
@@ -554,5 +576,16 @@ mod tests {
         assert_eq!(models.default_model_id.as_deref(), Some("sol"));
         assert_eq!(models.options[0].reasoning_effort_ids, ["low", "high"]);
         assert_eq!(configuration.reasoning.unwrap().options.len(), 2);
+    }
+
+    #[test]
+    fn a_bound_choice_the_machine_lacks_falls_back_to_the_default() {
+        let change = bound(Some("luna".to_owned()), Some("high".to_owned()), &catalog());
+        assert_eq!(change.model.as_deref(), Some("luna"));
+        assert_eq!(change.effort.as_deref(), Some("high"));
+        let change = bound(Some("gone".to_owned()), Some("max".to_owned()), &catalog());
+        assert_eq!(change.model.as_deref(), Some(""));
+        assert_eq!(change.effort.as_deref(), Some(""));
+        assert_eq!(bound(None, None, &catalog()).model.as_deref(), Some(""));
     }
 }

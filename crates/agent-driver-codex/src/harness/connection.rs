@@ -436,9 +436,14 @@ impl HarnessDriver for CodexHarness {
     fn open<'a>(&'a self, spec: OpenSpec) -> HarnessFuture<'a, Arc<dyn Session>, OpenError> {
         Box::pin(async move {
             let connection = self.connection().await?;
+            let mut config = crate::driver::inline_thread_config();
+            // `thread/start` and `thread/resume` take no effort of their own.
+            if let Some(effort) = &spec.settings.effort {
+                config.insert("model_reasoning_effort".to_owned(), json!(effort));
+            }
             let mut params = json!({
                 "cwd": spec.folder,
-                "config": crate::driver::inline_thread_config(),
+                "config": config,
             });
             if let Some(model) = &spec.settings.model {
                 params["model"] = json!(model);

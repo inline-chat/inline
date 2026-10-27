@@ -12,13 +12,14 @@ use std::time::Duration;
 
 use inline_agent_bridge::ProviderSessionId;
 use inline_agent_bridge::group::{
-    ContextAuthorRole, ContextMessage, Conversation, Grants, GroupMessage, IntakeDecision,
-    IntakeFacts, LoopGuards, Operation, ParticipationMode, PendingInput, ReleaseCause, WorkPhase,
-    decide_intake, direct_input, origin_of,
+    ContextAuthorRole, ContextMessage, Conversation, DEFAULT_DAILY_SPEAK_GATE_BUDGET,
+    DEFAULT_LOOP_CAP_HOPS, DailySpeakGateBudget, DayKey, Grants, GroupMessage, IntakeDecision,
+    IntakeFacts, LoopGuards, LoopVerdict, Operation, ParticipationMode, PendingInput, ReleaseCause,
+    WorkPhase, decide_intake, direct_input, origin_of,
 };
 use inline_agent_bridge::harness::{
     Catalog, CatalogScope, Delivery, HarnessDriver, Input, InputContent, InputId, OutputMode,
-    SettingsChange, UserId,
+    RuntimeHealth, SettingsChange, SetupReason, UserId,
 };
 use inline_client::{
     AnswerBotChatSettingsRequest, AnswerMessageActionRequest, BotChatSettingsDocument,
@@ -33,17 +34,18 @@ use super::api::{self, Notify, chat_peer};
 use super::doc::DocBuilder;
 use super::intake::{MessageFacts, grants_by_user, group_message};
 use super::ledger::{Begin, InputState, Ledger, input_id};
-use super::render::{QUESTION_FORM_ID, Vocabulary};
+use super::render::{ActionStyle, QUESTION_FORM_ID, Vocabulary};
 use super::settings;
 use super::tools::Tools;
 use super::work::{
     AccessSource, ActionData, Agent, Command, Control, Known, OwnerCalls, SessionOp, WorkHandle,
+    button_rows, paragraph,
 };
 
 const DEFAULT_HEARTBEAT: Duration = Duration::from_secs(60);
 /// How long the harness's pickers are reused.
 const CATALOG_TTL: Duration = Duration::from_secs(60);
-const NO_STEER: &str = "You don't have access to do that with this agent.";
+const NO_ACCESS: &str = "You don't have access to do that with this agent.";
 /// How often the bot's Inline connection is checked.
 const CONNECTION_CHECK: Duration = Duration::from_secs(5);
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(300);
@@ -57,6 +59,8 @@ struct Reconnect {
 /// Messages of a group thread an agent sees when it joins.
 const JOIN_CONTEXT_MESSAGES: u32 = 40;
 const JOIN_CONTEXT_BYTES: usize = 24 * 1024;
+/// Ancestors of the trigger's reply chain read into the join context.
+const JOIN_REPLY_CHAIN: usize = 5;
 /// Settled ledger records are kept this long for replay detection.
 const LEDGER_RETENTION_SECS: i64 = 14 * 24 * 3600;
 
@@ -170,9 +174,15 @@ pub(crate) struct Runtime {
     own_threads: HashMap<i64, bool>,
     /// Chat → its model, reasoning and permissions (settings and commands).
     thread_settings: HashMap<i64, SettingsChange>,
+    /// Bound chat → the model and reasoning its composer chain last set, so
+    /// only a change there overrides a pick made in settings since.
+    bound_configs: HashMap<i64, (Option<String>, Option<String>)>,
     /// The harness's pickers, refreshed now and then.
     catalog: Option<(tokio::time::Instant, Catalog)>,
     reconnect: Reconnect,
+    /// The harness health the last heartbeat reported.
+    reported_health: Option<RuntimeHealth>,
+    capabilities_published: bool,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
     loop_guards: LoopGuards,
@@ -214,6 +224,8 @@ impl Runtime {
             tools,
             moves: moves_tx,
             names,
+            dm_chat_id: config.dm_chat_id,
+            gate_budget: std::sync::Mutex::new(DailySpeakGateBudget::default()),
         });
         Ok(Self {
             config,
@@ -224,8 +236,11 @@ impl Runtime {
             moves: Some(moves),
             own_threads: HashMap::new(),
             thread_settings: HashMap::new(),
+            bound_configs: HashMap::new(),
             catalog: None,
             reconnect: Reconnect::default(),
+            reported_health: None,
+            capabilities_published: false,
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
             loop_guards: LoopGuards::default(),
@@ -245,16 +260,7 @@ impl Runtime {
             log::warn!(target: "inline::bridge::v2", "allowlist import failed: {error}");
         }
         self.recover().await;
-        // Agent Settings and the composer chain read these.
-        let catalog = self.catalog().await;
-        if let Err(error) = self
-            .agent
-            .bot
-            .set_bot_capabilities(settings::capabilities(&catalog))
-            .await
-        {
-            log::warn!(target: "inline::bridge::v2", "settings capabilities not published: {error}");
-        }
+        self.publish_capabilities().await;
         let mut heartbeat = tokio::time::interval(self.heartbeat().await);
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         tokio::pin!(shutdown);
@@ -267,7 +273,13 @@ impl Runtime {
                 _ = &mut shutdown => break Ok(()),
                 // Before any delivery, so a subthread's first reply finds its work.
                 Some((from, to)) = moves.recv() => self.moved_work(from, to),
-                _ = connection.tick() => self.keep_connected().await,
+                _ = connection.tick() => {
+                    self.keep_connected().await;
+                    // A harness that needs setup shows in the apps right away.
+                    if self.reported_health.as_ref() != Some(&self.agent.harness.describe().health) {
+                        self.heartbeat().await;
+                    }
+                }
                 _ = heartbeat.tick() => {
                     let interval = self.heartbeat().await;
                     if interval != heartbeat.period() {
@@ -300,7 +312,8 @@ impl Runtime {
                 }
             }
         };
-        self.report_status(proto::AgentRuntimeStatus::Offline).await;
+        self.report_status(proto::AgentRuntimeStatus::Offline, None)
+            .await;
         for (_, work) in self.works.drain() {
             work.task.abort();
         }
@@ -336,8 +349,39 @@ impl Runtime {
         let _ = self.agent.ledger.prune(LEDGER_RETENTION_SECS);
     }
 
+    /// Agent Settings and the composer chain read these. A harness that
+    /// cannot list its models yet keeps what an earlier run published, and
+    /// is asked again with the next heartbeat.
+    async fn publish_capabilities(&mut self) {
+        if self.capabilities_published {
+            return;
+        }
+        let catalog = self.catalog().await;
+        if self.catalog.is_none() {
+            return;
+        }
+        match self
+            .agent
+            .bot
+            .set_bot_capabilities(settings::capabilities(&catalog))
+            .await
+        {
+            Ok(_) => self.capabilities_published = true,
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "settings capabilities not published: {error}");
+            }
+        }
+    }
+
     async fn heartbeat(&mut self) -> Duration {
-        match self.report_status(proto::AgentRuntimeStatus::Online).await {
+        self.publish_capabilities().await;
+        let health = self.agent.harness.describe().health;
+        let (status, setup) = runtime_status(&health, &self.config.agent_name);
+        let reported = self.report_status(status, setup).await;
+        if reported.is_some() {
+            self.reported_health = Some(health);
+        }
+        match reported {
             Some(result) => {
                 if let Some(runtime) = &result.runtime {
                     let mode = output_mode(runtime.default_output_mode);
@@ -358,6 +402,7 @@ impl Runtime {
     async fn report_status(
         &self,
         status: proto::AgentRuntimeStatus,
+        setup: Option<proto::AgentRuntimeSetup>,
     ) -> Option<proto::ReportAgentRuntimeResult> {
         let info = self.agent.harness.describe();
         api::report_runtime(
@@ -365,6 +410,7 @@ impl Runtime {
             proto::ReportAgentRuntimeInput {
                 provider: self.config.provider() as i32,
                 status: status as i32,
+                setup,
                 machine_label: Some(self.config.machine_label.clone()),
                 executable_path: self.config.executable_path.clone(),
                 executable_version: info.executable.version.clone(),
@@ -389,6 +435,14 @@ impl Runtime {
                 ..
             } => {
                 let toast = match serde_json::from_slice::<ActionData>(data) {
+                    Ok(ActionData::ExtendLoop) => {
+                        self.extend_loop(chat_id.get(), message_id.get(), actor_user_id.get())
+                            .await
+                    }
+                    Ok(ActionData::RaiseGateBudget) => {
+                        self.raise_gate_budget(chat_id.get(), message_id.get(), actor_user_id.get())
+                            .await
+                    }
                     Ok(data) => {
                         self.ask(chat_id.get(), |reply| Command::Action {
                             message_id: message_id.get(),
@@ -462,15 +516,40 @@ impl Runtime {
             // start_subthread) renamed in Inline renames its native session.
             // A group thread gave its title once, at the start (spec §15.7).
             ClientEvent::ChatUpserted { chat_id } => {
-                if let Some(work) = self.works.get(&chat_id.get())
-                    && let Ok(state) = self.agent.bot.chat_state(*chat_id).await
-                    && let Some(title) = state
-                        .dialog
-                        .filter(|dialog| {
-                            dialog.peer_user_id.is_none() && dialog.parent_chat_id.is_some()
-                        })
-                        .and_then(|dialog| dialog.title)
-                        .filter(|title| !title.trim().is_empty())
+                let chat_id = chat_id.get();
+                if !self.works.contains_key(&chat_id) {
+                    // Read again with the next message, binding included.
+                    self.own_threads.remove(&chat_id);
+                    return Ok(());
+                }
+                let Ok(state) = self.agent.bot.chat_state(InlineId::new(chat_id)).await else {
+                    return Ok(());
+                };
+                let Some(dialog) = state.dialog else {
+                    return Ok(());
+                };
+                // The composer chain of a thread bound to this agent keeps
+                // its model and reasoning on the thread.
+                if let Some((model, effort)) = dialog
+                    .agent_context
+                    .as_ref()
+                    .filter(|context| context.bot_user_id.get() == self.config.bot_user_id)
+                    .map(|context| {
+                        context
+                            .configuration
+                            .clone()
+                            .map(|configuration| {
+                                (configuration.model_id, configuration.reasoning_effort_id)
+                            })
+                            .unwrap_or_default()
+                    })
+                {
+                    self.bound_settings(chat_id, model, effort).await;
+                }
+                if dialog.peer_user_id.is_none()
+                    && dialog.parent_chat_id.is_some()
+                    && let Some(title) = dialog.title.filter(|title| !title.trim().is_empty())
+                    && let Some(work) = self.works.get(&chat_id)
                 {
                     let _ = work.tx.send(Command::Title(title)).await;
                 }
@@ -600,12 +679,25 @@ impl Runtime {
             Ok(result) => {
                 // Made by this agent's bot, or bound to it (an agent thread
                 // its owner started in the app).
-                let own = result.chat.is_some_and(|chat| {
-                    chat.created_by == Some(self.config.bot_user_id)
-                        || chat
-                            .agent_context
-                            .is_some_and(|context| context.bot_user_id == self.config.bot_user_id)
-                });
+                let bound = result
+                    .chat
+                    .as_ref()
+                    .and_then(|chat| chat.agent_context.as_ref())
+                    .filter(|context| context.bot_user_id == self.config.bot_user_id)
+                    .map(|context| context.configuration.clone().unwrap_or_default());
+                let own = bound.is_some()
+                    || result
+                        .chat
+                        .as_ref()
+                        .is_some_and(|chat| chat.created_by == Some(self.config.bot_user_id));
+                if let Some(configuration) = bound {
+                    self.bound_settings(
+                        chat_id,
+                        configuration.model_id,
+                        configuration.reasoning_effort_id,
+                    )
+                    .await;
+                }
                 self.own_threads.insert(chat_id, own);
                 own
             }
@@ -613,6 +705,124 @@ impl Runtime {
                 log::debug!(target: "inline::bridge::v2", "chat={chat_id} lookup failed: {error}");
                 false
             }
+        }
+    }
+
+    /// Agents went back and forth here without a person: this agent stops
+    /// answering other agents and says so, with one tap to allow more.
+    async fn loop_cap_reached(&self, chat_id: i64, limit: u32) {
+        let text = format!(
+            "{} stopped answering other agents here after {limit} agent messages in a row. A message from a person resets this.",
+            self.config.agent_name
+        );
+        let actions = button_rows(&[("Allow more", ActionData::ExtendLoop, ActionStyle::Default)]);
+        if let Err(error) = api::send_doc(
+            &self.agent.bot,
+            chat_id,
+            None,
+            &paragraph(&text),
+            actions,
+            Notify::Normal,
+        )
+        .await
+        {
+            log::warn!(target: "inline::bridge::v2", "loop cap notice failed: {error}");
+        }
+    }
+
+    async fn extend_loop(&mut self, chat_id: i64, message_id: i64, actor: i64) -> Option<String> {
+        if !self
+            .access
+            .grants(actor)
+            .await
+            .permits(Operation::Configure)
+        {
+            return Some(NO_ACCESS.to_owned());
+        }
+        self.loop_guards.extend(chat_id, DEFAULT_LOOP_CAP_HOPS);
+        let text = format!(
+            "{} answers other agents here again, for {DEFAULT_LOOP_CAP_HOPS} more agent messages.",
+            self.config.agent_name
+        );
+        let _ = api::edit_doc(
+            &self.agent.bot,
+            chat_id,
+            message_id,
+            &paragraph(&text),
+            Some(proto::MessageActions::default()),
+        )
+        .await;
+        Some(format!("Allowed {DEFAULT_LOOP_CAP_HOPS} more."))
+    }
+
+    async fn raise_gate_budget(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        actor: i64,
+    ) -> Option<String> {
+        if !self
+            .access
+            .grants(actor)
+            .await
+            .permits(Operation::Configure)
+        {
+            return Some(NO_ACCESS.to_owned());
+        }
+        let today = DayKey::from_unix(chrono::Utc::now().timestamp(), 0);
+        self.agent
+            .gate_budget
+            .lock()
+            .expect("gate budget")
+            .raise_today(today, DEFAULT_DAILY_SPEAK_GATE_BUDGET);
+        let text = format!(
+            "{} weighs unaddressed messages again today, for {DEFAULT_DAILY_SPEAK_GATE_BUDGET} more checks.",
+            self.config.agent_name
+        );
+        let _ = api::edit_doc(
+            &self.agent.bot,
+            chat_id,
+            message_id,
+            &paragraph(&text),
+            Some(proto::MessageActions::default()),
+        )
+        .await;
+        Some("Allowed more for today.".to_owned())
+    }
+
+    /// A bound thread's model and reasoning, as its composer chain set them.
+    /// Absent means the harness's default.
+    async fn bound_settings(
+        &mut self,
+        chat_id: i64,
+        model: Option<String>,
+        effort: Option<String>,
+    ) {
+        let seen = (model.clone(), effort.clone());
+        if self.bound_configs.get(&chat_id) == Some(&seen) {
+            return;
+        }
+        self.bound_configs.insert(chat_id, seen);
+        let catalog = self.catalog().await;
+        let change = settings::bound(model, effort, &catalog);
+        let current = self
+            .thread_settings
+            .get(&chat_id)
+            .cloned()
+            .unwrap_or_default();
+        let mut next = current.clone();
+        settings::merge(&mut next, &change);
+        if next == current {
+            return;
+        }
+        self.thread_settings.insert(chat_id, next);
+        if self.works.contains_key(&chat_id) {
+            let _ = self
+                .ask(chat_id, |reply| Command::Session {
+                    op: SessionOp::Settings(change),
+                    reply,
+                })
+                .await;
         }
     }
 
@@ -794,7 +1004,7 @@ impl Runtime {
         match name {
             "compact" | "clear" => {
                 if !grants.permits(Operation::Steer) {
-                    return NO_STEER.to_owned();
+                    return NO_ACCESS.to_owned();
                 }
                 if !self.works.contains_key(&chat_id) {
                     return "Nothing is open in this thread yet.".to_owned();
@@ -975,6 +1185,18 @@ impl Runtime {
         {
             return Ok(());
         }
+        // A sender the local store has not met yet: ask Inline whether it is
+        // an agent, so the loop cap sees agents it never saw before.
+        let resolved;
+        let message = if message.metadata.sender_is_bot.is_none() {
+            let mut known = message.clone();
+            known.metadata.sender_is_bot =
+                Some(self.agent.names.is_bot(message.sender_id.get()).await);
+            resolved = known;
+            &resolved
+        } else {
+            message
+        };
         let chat_id = message.chat_id.get();
         // The agent's own threads are the ones it made (`/new`, a moved work's
         // subthread, `create_chat`) or that are bound to it. A shared thread it
@@ -1030,6 +1252,14 @@ impl Runtime {
         let loop_verdict = self
             .loop_guards
             .record(chat_id, group.author.kind.is_agent());
+        if let LoopVerdict::CapReached {
+            limit,
+            notify_owners: true,
+            ..
+        } = loop_verdict
+        {
+            self.loop_cap_reached(chat_id, limit).await;
+        }
         let decision = decide_intake(IntakeFacts {
             message: &group,
             bot_user_id: self.config.bot_user_id,
@@ -1219,6 +1449,7 @@ impl Runtime {
                 input: Box::new(input),
                 pending,
                 message_id: group.message_id,
+                answer_reply: matches!(group.conversation, Conversation::Group),
             })
             .await
             .is_err()
@@ -1235,7 +1466,8 @@ impl Runtime {
     /// message itself.
     async fn join_context(&self, group: &GroupMessage) -> Option<inline_agent_bridge::TurnContext> {
         use inline_agent_bridge::group::{
-            ContextAuthorRole, ContextBudget, ContextMessage, JoinContext, JoinContextInput,
+            ContextAuthorRole, ContextBudget, ContextMessage, ContextParticipant, JoinContext,
+            JoinContextInput, LinkedThread,
         };
         let page = self
             .agent
@@ -1261,45 +1493,154 @@ impl Runtime {
                 names.insert(id, name);
             }
         }
+        let role = |sender: i64, is_bot: bool| {
+            if sender == self.config.bot_user_id {
+                ContextAuthorRole::Me
+            } else if sender == self.config.owner_user_id {
+                ContextAuthorRole::Owner
+            } else if is_bot {
+                ContextAuthorRole::Agent
+            } else {
+                ContextAuthorRole::Teammate
+            }
+        };
+        let context_message = |message: &MessageRecord, names: &HashMap<i64, String>| {
+            let sender = message.sender_id.get();
+            ContextMessage {
+                message_id: message.message_id.get(),
+                author_name: names
+                    .get(&sender)
+                    .cloned()
+                    .unwrap_or_else(|| format!("user {sender}")),
+                role: role(sender, message.metadata.sender_is_bot.unwrap_or(false)),
+                reply_to: message.reply_to_message_id.map(InlineId::get),
+                text: super::intake::message_text(&message.content).to_owned(),
+            }
+        };
         let mut recent: Vec<ContextMessage> = page
             .messages
             .iter()
             .filter(|message| message.message_id.get() != group.message_id)
-            .map(|message| {
-                let sender = message.sender_id.get();
-                ContextMessage {
-                    message_id: message.message_id.get(),
-                    author_name: names
-                        .get(&sender)
-                        .cloned()
-                        .unwrap_or_else(|| format!("user {sender}")),
-                    role: if sender == self.config.bot_user_id {
-                        ContextAuthorRole::Me
-                    } else if sender == self.config.owner_user_id {
-                        ContextAuthorRole::Owner
-                    } else if message.metadata.sender_is_bot.unwrap_or(false) {
-                        ContextAuthorRole::Agent
-                    } else {
-                        ContextAuthorRole::Teammate
-                    },
-                    reply_to: message.reply_to_message_id.map(InlineId::get),
-                    text: super::intake::message_text(&message.content).to_owned(),
-                }
-            })
+            .map(|message| context_message(message, &names))
             .collect();
         recent.sort_by_key(|message| message.message_id);
-        if recent.is_empty() {
+        // The trigger's reply chain, nearest first; ancestors older than the
+        // fetched window are read one by one.
+        let mut reply_chain = Vec::new();
+        let mut next = group.reply_to.as_ref().map(|reply| reply.message_id);
+        while let Some(id) = next.take() {
+            if reply_chain.len() >= JOIN_REPLY_CHAIN {
+                break;
+            }
+            let message = match recent.iter().find(|message| message.message_id == id) {
+                Some(message) => message.clone(),
+                None => {
+                    let Ok(page) = self
+                        .agent
+                        .bot
+                        .history(inline_client::HistoryRequest {
+                            chat_id: InlineId::new(group.chat_id),
+                            limit: Some(1),
+                            before_message_id: Some(InlineId::new(id + 1)),
+                            after_message_id: None,
+                        })
+                        .await
+                    else {
+                        break;
+                    };
+                    let Some(found) = page
+                        .messages
+                        .iter()
+                        .find(|message| message.message_id.get() == id)
+                    else {
+                        break;
+                    };
+                    context_message(found, &names)
+                }
+            };
+            next = message.reply_to;
+            reply_chain.push(message);
+        }
+        let state = self
+            .agent
+            .bot
+            .chat_state(InlineId::new(group.chat_id))
+            .await
+            .ok();
+        let title = state
+            .and_then(|state| state.dialog)
+            .and_then(|dialog| dialog.title);
+        let participants = match self
+            .agent
+            .bot
+            .chat_participants(inline_client::ChatParticipantsRequest {
+                chat_id: InlineId::new(group.chat_id),
+            })
+            .await
+        {
+            Ok(page) => page
+                .participants
+                .iter()
+                .map(|participant| {
+                    let id = participant.user_id.get();
+                    let user = page.users.iter().find(|user| user.user_id.get() == id);
+                    let name = user
+                        .and_then(|user| {
+                            user.display_name
+                                .clone()
+                                .or_else(|| user.first_name.clone())
+                                .or_else(|| user.username.clone())
+                        })
+                        .or_else(|| names.get(&id).cloned())
+                        .unwrap_or_else(|| format!("user {id}"));
+                    ContextParticipant {
+                        name,
+                        role: role(id, user.and_then(|user| user.is_bot).unwrap_or(false)),
+                    }
+                })
+                .collect(),
+            Err(error) => {
+                log::debug!(target: "inline::bridge::v2", "participants unavailable: {error}");
+                Vec::new()
+            }
+        };
+        // Threads the trigger links to, with their titles when this agent
+        // can see them.
+        let mut linked = Vec::new();
+        for entity in &group.entities {
+            if let inline_agent_bridge::group::MessageEntity::Link { chat_id, .. } = entity
+                && !linked
+                    .iter()
+                    .any(|thread: &LinkedThread| thread.chat_id == *chat_id)
+            {
+                let title = self
+                    .agent
+                    .bot
+                    .chat_state(InlineId::new(*chat_id))
+                    .await
+                    .ok()
+                    .and_then(|state| state.dialog)
+                    .and_then(|dialog| dialog.title);
+                linked.push(LinkedThread {
+                    chat_id: *chat_id,
+                    title,
+                });
+            }
+        }
+        // A thread's first message still tells the agent where it is.
+        if title.is_none() && participants.is_empty() && recent.is_empty() && reply_chain.is_empty()
+        {
             return None;
         }
         let context = JoinContext::build(
             &JoinContextInput {
                 chat_id: group.chat_id,
-                title: None,
-                participants: Vec::new(),
+                title,
+                participants,
                 recent,
                 earlier_unfetched: (!page.has_more).then_some(0),
-                reply_chain: Vec::new(),
-                linked: Vec::new(),
+                reply_chain,
+                linked,
                 trigger_message_id: group.message_id,
             },
             ContextBudget::bytes(JOIN_CONTEXT_BYTES),
@@ -1438,6 +1779,8 @@ impl Runtime {
                     input: Box::new(input),
                     pending,
                     message_id: group.message_id,
+                    // `/new` starts the work in its own thread.
+                    answer_reply: false,
                 })
                 .await;
         }
@@ -1531,6 +1874,63 @@ fn output_mode(mode: i32) -> OutputMode {
     }
 }
 
+/// What the apps show for the harness's health: online, or what to fix.
+fn runtime_status(
+    health: &RuntimeHealth,
+    agent_name: &str,
+) -> (proto::AgentRuntimeStatus, Option<proto::AgentRuntimeSetup>) {
+    use proto::agent_runtime_setup::Reason;
+    let RuntimeHealth::NeedsSetup { reason } = health else {
+        return (proto::AgentRuntimeStatus::Online, None);
+    };
+    let (code, text, min_version) = match reason {
+        SetupReason::UpdateRuntime { min_version, found } => (
+            Reason::UpdateRuntime,
+            match found {
+                Some(found) => {
+                    format!("Update {agent_name} to {min_version} or later (found {found}).")
+                }
+                None => format!("Update {agent_name} to {min_version} or later."),
+            },
+            Some(min_version.clone()),
+        ),
+        SetupReason::UpdateInline { detail } => (
+            Reason::UpdateInline,
+            format!("Update the Inline CLI to work with this {agent_name} ({detail})."),
+            None,
+        ),
+        SetupReason::ExecutableMissing { path } => (
+            Reason::ExecutableMissing,
+            format!("{agent_name} is no longer at {path}. Reinstall it or run setup again."),
+            None,
+        ),
+        SetupReason::ExecutableChanged { path, detail } => (
+            Reason::ExecutableChanged,
+            format!("{agent_name} at {path} changed ({detail}). Run setup again to trust it."),
+            None,
+        ),
+        SetupReason::SignIn => (
+            Reason::SignIn,
+            format!("Sign in to {agent_name} on this machine."),
+            None,
+        ),
+        SetupReason::FolderUnavailable { path } => (
+            Reason::FolderUnavailable,
+            format!("The folder {path} is not available on this machine."),
+            None,
+        ),
+        SetupReason::Harness { message, .. } => (Reason::Other, message.clone(), None),
+    };
+    (
+        proto::AgentRuntimeStatus::NeedsSetup,
+        Some(proto::AgentRuntimeSetup {
+            reason: code as i32,
+            text: Some(text),
+            min_version,
+        }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1548,5 +1948,29 @@ mod tests {
         );
         assert_eq!(command_arguments("/status", "status"), "");
         assert_eq!(command_arguments("/MODEL Sol", "model"), "Sol");
+    }
+
+    #[test]
+    fn a_harness_that_needs_setup_reports_the_fix() {
+        let (status, setup) = runtime_status(&RuntimeHealth::Ready, "Codex");
+        assert_eq!(status, proto::AgentRuntimeStatus::Online);
+        assert!(setup.is_none());
+        let (status, setup) = runtime_status(
+            &RuntimeHealth::NeedsSetup {
+                reason: SetupReason::UpdateRuntime {
+                    min_version: "0.150.0".to_owned(),
+                    found: Some("0.140.0".to_owned()),
+                },
+            },
+            "Codex",
+        );
+        assert_eq!(status, proto::AgentRuntimeStatus::NeedsSetup);
+        let setup = setup.unwrap();
+        assert_eq!(
+            setup.reason,
+            proto::agent_runtime_setup::Reason::UpdateRuntime as i32
+        );
+        assert_eq!(setup.min_version.as_deref(), Some("0.150.0"));
+        assert!(setup.text.unwrap().contains("found 0.140.0"));
     }
 }
