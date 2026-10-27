@@ -80,7 +80,7 @@ describe("two-service disposable broker transport", () => {
       unsubscribeSession()
 
       const marker = Number.parseInt(randomUUID().slice(0, 8), 16)
-      expect(await a.recordDesktopActivity(marker, 17)).toBe(true)
+      expect(await a.recordDesktopActivity(marker, 17, 15_000)).toBe(true)
       expect(await b.hasDesktopActivity(marker, 17)).toBe(true)
       expect(await b.hasDesktopActivity(marker, 18)).toBe(false)
 

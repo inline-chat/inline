@@ -46,7 +46,7 @@ import { getCachedUserProfilePhoto } from "@in/server/modules/cache/userPhotos"
 import { processAttachments } from "@in/server/db/models/messages"
 import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
-import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
+import { desktopPushSuppressionTracker, recordChatParticipation } from "@in/server/modules/notifications/desktopPushSuppression"
 import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
 import {
   maxNotificationNameBytes,
@@ -542,12 +542,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   const titleAttachments = documentTitleContext(dbFullDocument)
 
-  const recordDesktopChatActivityPromise = desktopPushSuppressionTracker.recordChatActivity({
-    userId: currentUserId,
-    sessionId: context.currentSessionId,
-    connectionId: context.currentConnectionId,
-    chatId,
-  })
+  const recordDesktopChatActivityPromise = recordChatParticipation(context, chatId)
 
   // encode message info
   const messageInfo: MessageInfo = {

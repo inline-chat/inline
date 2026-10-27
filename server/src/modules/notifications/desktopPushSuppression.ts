@@ -1,3 +1,4 @@
+import type { FunctionContext } from "@in/server/functions/_types"
 import { internalMessaging } from "@in/server/modules/internalMessaging/service"
 import { connectionManager } from "@in/server/ws/connections"
 
@@ -10,9 +11,16 @@ export type ShouldSuppressIOSSendMessagePushInput = { userId: number; chatId: nu
 
 type SessionClientTypeResolver = (input: { userId: number; sessionId: number; connectionId?: string }) => SessionClientType | null | Promise<SessionClientType | null>
 export type DesktopActivityStore = {
-  record(userId: number, chatId: number): Promise<boolean>
+  record(userId: number, chatId: number, ttlMs: number): Promise<boolean>
+  clear(userId: number, chatId: number): Promise<boolean>
   has(userId: number, chatId: number): Promise<boolean | undefined>
 }
+
+/**
+ * Sliding window after the last participation (send, compose action, reaction, edit) from a Mac.
+ * Reads never count: a Mac window left open on an empty desk keeps reading.
+ */
+export const DESKTOP_ACTIVITY_TTL_MS = 45_000
 
 type DesktopPushSuppressionTrackerOptions = {
   now?: () => number
@@ -36,7 +44,8 @@ export type DesktopPushSuppressionMetrics = {
 }
 
 const redisStore: DesktopActivityStore = {
-  record: (userId, chatId) => internalMessaging.recordDesktopActivity(userId, chatId),
+  record: (userId, chatId, ttlMs) => internalMessaging.recordDesktopActivity(userId, chatId, ttlMs),
+  clear: (userId, chatId) => internalMessaging.clearDesktopActivity(userId, chatId),
   has: (userId, chatId) => internalMessaging.hasDesktopActivity(userId, chatId),
 }
 
@@ -69,8 +78,13 @@ export class DesktopPushSuppressionTracker {
     try {
       const clientType = await this.resolveSessionClientType({ userId: input.userId, sessionId: input.sessionId, connectionId: input.connectionId })
       if (!clientType) { this.activityIgnoredUnknownSessionTypeTotal++; return }
-      if (clientType !== "macos") { this.activityIgnoredNonDesktopTotal++; return }
-      if (!await this.store.record(input.userId, input.chatId)) { this.errorsTotal++; return }
+      if (clientType !== "macos") {
+        this.activityIgnoredNonDesktopTotal++
+        // Participation from the phone means the user left the desk: pushes resume for this chat.
+        if (clientType === "ios" || clientType === "android") await this.store.clear(input.userId, input.chatId)
+        return
+      }
+      if (!await this.store.record(input.userId, input.chatId, DESKTOP_ACTIVITY_TTL_MS)) { this.errorsTotal++; return }
       this.activityRecordedTotal++
     } catch { this.errorsTotal++ }
   }
@@ -131,8 +145,21 @@ const defaultSessionClientTypeResolver: SessionClientTypeResolver = ({ userId, s
   if (!connectionId) return null
   const connection = connectionManager.getConnection(connectionId)
   if (connection?.userId !== userId || connection.sessionId !== sessionId) return null
-  return connection.clientType === "macos" ? "macos" : null
+  switch (connection.clientType) {
+    case "macos": case "ios": case "android": return connection.clientType
+    default: return null
+  }
 }
 
 export const desktopPushSuppressionTracker = new DesktopPushSuppressionTracker()
+
+/** The one hook participation paths call. Best effort; never throws. */
+export const recordChatParticipation = (context: FunctionContext, chatId: number): Promise<void> =>
+  desktopPushSuppressionTracker.recordChatActivity({
+    userId: context.currentUserId,
+    sessionId: context.currentSessionId,
+    connectionId: context.currentConnectionId,
+    chatId,
+  })
+
 export const getDesktopPushSuppressionMetrics = (): DesktopPushSuppressionMetrics => desktopPushSuppressionTracker.getMetrics()

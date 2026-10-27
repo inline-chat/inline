@@ -1,5 +1,5 @@
 import { describe, expect, it, spyOn } from "bun:test"
-import { DesktopPushSuppressionTracker, type DesktopActivityStore } from "./desktopPushSuppression"
+import { DESKTOP_ACTIVITY_TTL_MS, DesktopPushSuppressionTracker, type DesktopActivityStore } from "./desktopPushSuppression"
 import { connectionManager } from "@in/server/ws/connections"
 
 const fixture = () => {
@@ -7,9 +7,14 @@ const fixture = () => {
   let available = true
   const entries = new Map<string, number>()
   const store: DesktopActivityStore = {
-    async record(userId, chatId) {
+    async record(userId, chatId, ttlMs) {
       if (!available) return false
-      entries.set(`${userId}:${chatId}`, now + 15_000)
+      entries.set(`${userId}:${chatId}`, now + ttlMs)
+      return true
+    },
+    async clear(userId, chatId) {
+      if (!available) return false
+      entries.delete(`${userId}:${chatId}`)
       return true
     },
     async has(userId, chatId) {
@@ -29,7 +34,7 @@ const fixture = () => {
 describe("desktop push suppression", () => {
   it("uses the authenticated local connection and rejects a mismatched session", async () => {
     let records = 0
-    const store: DesktopActivityStore = { record: async () => { records++; return true }, has: async () => false }
+    const store: DesktopActivityStore = { record: async () => { records++; return true }, clear: async () => true, has: async () => false }
     const lookup = spyOn(connectionManager, "getConnection").mockImplementation(() => ({
       userId: 7, sessionId: 11, clientType: "macos",
     }) as never)
@@ -49,8 +54,28 @@ describe("desktop push suppression", () => {
     expect(await desktop.shouldSuppressIOSSendMessagePush({ userId: 7, chatId: 22, isUrgentNudge: false })).toEqual({ suppress: true, reason: "active_desktop_chat" })
     await desktop.recordChatActivity({ userId: 7, sessionId: 11, chatId: 23 })
     expect((await desktop.shouldSuppressIOSSendMessagePush({ userId: 7, chatId: 22, isUrgentNudge: false })).suppress).toBe(true)
-    advance(15_001)
+    advance(DESKTOP_ACTIVITY_TTL_MS + 1)
     expect((await desktop.shouldSuppressIOSSendMessagePush({ userId: 7, chatId: 22, isUrgentNudge: false })).suppress).toBe(false)
+  })
+
+  it("slides the window on each desktop participation", async () => {
+    const { desktop, advance } = fixture()
+    await desktop.recordChatActivity({ userId: 7, sessionId: 11, chatId: 22 })
+    advance(DESKTOP_ACTIVITY_TTL_MS - 3_000)
+    await desktop.recordChatActivity({ userId: 7, sessionId: 11, chatId: 22 })
+    advance(DESKTOP_ACTIVITY_TTL_MS - 1)
+    expect((await desktop.shouldSuppressIOSSendMessagePush({ userId: 7, chatId: 22, isUrgentNudge: false })).suppress).toBe(true)
+    advance(2)
+    expect((await desktop.shouldSuppressIOSSendMessagePush({ userId: 7, chatId: 22, isUrgentNudge: false })).suppress).toBe(false)
+  })
+
+  it("resumes push for that chat when the user participates from the phone", async () => {
+    const { desktop, ios } = fixture()
+    await desktop.recordChatActivity({ userId: 7, sessionId: 11, chatId: 22 })
+    await desktop.recordChatActivity({ userId: 7, sessionId: 11, chatId: 23 })
+    await ios.recordChatActivity({ userId: 7, sessionId: 30, chatId: 22 })
+    expect((await desktop.shouldSuppressIOSSendMessagePush({ userId: 7, chatId: 22, isUrgentNudge: false })).suppress).toBe(false)
+    expect((await desktop.shouldSuppressIOSSendMessagePush({ userId: 7, chatId: 23, isUrgentNudge: false })).suppress).toBe(true)
   })
 
   it("ignores non-macOS activity and bypasses urgent nudges", async () => {
@@ -66,7 +91,7 @@ describe("desktop push suppression", () => {
     disconnect()
     await desktop.recordChatActivity({ userId: 7, sessionId: 11, chatId: 22 })
     expect((await desktop.shouldSuppressIOSSendMessagePush({ userId: 7, chatId: 22, isUrgentNudge: false })).suppress).toBe(false)
-    advance(15_001)
+    advance(DESKTOP_ACTIVITY_TTL_MS + 1)
     reconnect()
     expect((await desktop.shouldSuppressIOSSendMessagePush({ userId: 7, chatId: 22, isUrgentNudge: false })).suppress).toBe(false)
     expect(desktop.getMetrics().errorsTotal).toBeGreaterThan(0)

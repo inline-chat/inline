@@ -24,6 +24,7 @@ import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 import { isImportedAgentMessage } from "@in/server/modules/agentSessions/service"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { publishDurableReference } from "@in/server/modules/internalMessaging/durable"
+import { recordChatParticipation } from "@in/server/modules/notifications/desktopPushSuppression"
 import {
   getMessageThreadProjectionsMap,
   isSubthreadParentMessage,
@@ -209,6 +210,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     chat,
     messageId: Number(input.messageId),
   })
+  void recordChatParticipation(context, chatId)
 
   return { updates: selfUpdates }
 }

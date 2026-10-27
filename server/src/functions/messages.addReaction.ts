@@ -8,6 +8,7 @@ import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { isSingleEmoji } from "@in/server/utils/emoji"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { recordChatParticipation } from "@in/server/modules/notifications/desktopPushSuppression"
 
 type Input = {
   emoji: string
@@ -67,6 +68,7 @@ export const addReaction = async (input: Input, context: FunctionContext): Promi
     emoji,
     added: true,
   })
+  void recordChatParticipation(context, chatId)
 
   return { updates: [update] }
 }

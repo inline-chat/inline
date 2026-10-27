@@ -633,8 +633,12 @@ export class InternalMessagingService {
   }
 
   /** Best-effort short-lived activity: never queued while disconnected. */
-  recordDesktopActivity(userId: number, chatId: number): Promise<boolean> {
-    return this.transport.setExpiring(`${prefix}:desktop-active:${userId}:${chatId}`, "1", 15_000)
+  recordDesktopActivity(userId: number, chatId: number, ttlMs: number): Promise<boolean> {
+    return this.transport.setExpiring(`${prefix}:desktop-active:${userId}:${chatId}`, "1", ttlMs)
+  }
+
+  clearDesktopActivity(userId: number, chatId: number): Promise<boolean> {
+    return this.transport.delete(`${prefix}:desktop-active:${userId}:${chatId}`)
   }
 
   /** undefined means unavailable and must be treated as allow-push. */

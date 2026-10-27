@@ -102,12 +102,12 @@ describe("empty Redis restart", () => {
         const view = await directoryA.list(userId)
         return view.status === "available" && view.connections.length === 2
       })
-      expect(await a.recordDesktopActivity(userId, 22)).toBe(true)
+      expect(await a.recordDesktopActivity(userId, 22, 15_000)).toBe(true)
       expect(await b.hasDesktopActivity(userId, 22)).toBe(true)
 
       redis.kill("SIGTERM")
       await redis.exited
-      expect(await a.recordDesktopActivity(userId, 23)).toBe(false)
+      expect(await a.recordDesktopActivity(userId, 23, 15_000)).toBe(false)
       expect(await b.hasDesktopActivity(userId, 23)).toBeUndefined()
       expect((await directoryA.list(userId)).status).toBe("unavailable")
 

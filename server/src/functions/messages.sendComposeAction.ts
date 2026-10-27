@@ -6,6 +6,7 @@ import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import * as transientRealtime from "@in/server/modules/internalMessaging/transient"
+import { recordChatParticipation } from "@in/server/modules/notifications/desktopPushSuppression"
 
 const MAX_CONCURRENT_COMPOSE_RECIPIENTS = 32
 
@@ -20,6 +21,7 @@ export const sendComposeAction = async (input: Input, context: FunctionContext):
   // Recipient projection is not authorization: the actor must have current
   // access to the chat before any typing/working state reaches its members.
   const chat = await ChatModel.getAuthorizedChatFromInputPeer(input.peer, context)
+  void recordChatParticipation(context, chat.id)
 
   // Get all users who should receive this update (handles DMs and threads with multiple participants)
   const updateGroup = await getUpdateGroupFromInputPeer(input.peer, { currentUserId: context.currentUserId })

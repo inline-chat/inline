@@ -16,6 +16,7 @@ export const sendComposeActionHandler = async (
     {
       currentSessionId: handlerContext.sessionId,
       currentUserId: handlerContext.userId,
+      currentConnectionId: handlerContext.connectionId,
     },
   )
 

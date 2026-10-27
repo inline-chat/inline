@@ -24,6 +24,7 @@ export const editMessage = async (
     {
       currentSessionId: handlerContext.sessionId,
       currentUserId: handlerContext.userId,
+      currentConnectionId: handlerContext.connectionId,
       isBot: handlerContext.isBot,
     },
   )
