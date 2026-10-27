@@ -45,6 +45,8 @@ pub(crate) enum RenderOp {
         doc: Doc,
         full: Vec<FullDetail>,
     },
+    /// Progress message `slot` only showed the answer streaming; remove it.
+    DropProgress { slot: u32 },
     /// A short Friendly update message.
     Update { doc: Doc },
     /// The final answer: a separate message that notifies.
@@ -105,6 +107,8 @@ struct Slot {
     id: u32,
     started_ms: u64,
     rows: Vec<Row>,
+    /// A progress message exists for this slot.
+    shown: bool,
 }
 
 /// Renders one session's stream.
@@ -246,6 +250,7 @@ impl Renderer {
                 id: self.next_slot,
                 started_ms: now,
                 rows: Vec::new(),
+                shown: false,
             });
             self.next_slot += 1;
             self.turn_slots += 1;
@@ -301,9 +306,10 @@ impl Renderer {
             }
         }
         let doc = self.progress_doc();
-        if let Some(slot) = &self.slot
+        if let Some(slot) = &mut self.slot
             && !doc.is_empty()
         {
+            slot.shown = true;
             ops.push(RenderOp::Progress { slot: slot.id, doc });
         }
     }
@@ -373,11 +379,12 @@ impl Renderer {
                     .insert(interaction.id.clone(), interaction.clone());
             }
         }
-        if let Some(slot) = &self.slot {
-            let doc = self.progress_doc();
-            if !doc.is_empty() {
-                ops.push(RenderOp::Progress { slot: slot.id, doc });
-            }
+        let doc = self.progress_doc();
+        if let Some(slot) = &mut self.slot
+            && !doc.is_empty()
+        {
+            slot.shown = true;
+            ops.push(RenderOp::Progress { slot: slot.id, doc });
         }
     }
 
@@ -400,8 +407,11 @@ impl Renderer {
         let mut builder = DocBuilder::new();
         self.write_rows(&mut builder);
         if builder.is_empty() {
-            // Nothing but the final answer happened: no progress message.
-            self.slot = None;
+            // Nothing but the final answer happened: no progress message. One
+            // that showed the answer streaming goes away; the answer follows.
+            if self.slot.take().is_some_and(|slot| slot.shown) {
+                ops.push(RenderOp::DropProgress { slot: id });
+            }
             return;
         }
         builder.footer(&format!("{verb} {}", elapsed_text(elapsed_ms)));
@@ -1314,6 +1324,59 @@ mod tests {
         assert!(
             matches!(&ops[0], RenderOp::CardClosed { doc, .. } if doc.text == "Yes, proceed (answered by user 7)")
         );
+    }
+
+    #[test]
+    fn an_answer_that_streamed_into_progress_leaves_only_the_answer() {
+        // Claude names no final phase: the text streams into progress, then
+        // turns out to be the answer.
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        let delta = Event::Item(
+            Item::new(
+                ItemId::new("m1").expect("id"),
+                None,
+                ItemUpdate::Delta {
+                    delta: ItemDelta {
+                        stream: DeltaStream::Text,
+                        index: None,
+                        text: "Hel".to_owned(),
+                    },
+                },
+                Value::Null,
+            )
+            .with_kind(ItemKind::Message),
+        );
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (10, delta),
+                (20, completed("m1", message("Hello"), None)),
+                (
+                    30,
+                    turn(TurnPhase::Completed {
+                        outcome: TurnOutcome::Completed,
+                        inputs_consumed: vec![],
+                        error: None,
+                        duration_ms: None,
+                    }),
+                ),
+            ],
+        );
+        assert!(matches!(
+            ops.first(),
+            Some(RenderOp::Progress { slot: 1, .. })
+        ));
+        assert!(
+            ops.iter()
+                .any(|op| matches!(op, RenderOp::DropProgress { slot: 1 })),
+            "{ops:?}"
+        );
+        assert!(
+            !ops.iter()
+                .any(|op| matches!(op, RenderOp::EndProgress { .. }))
+        );
+        assert!(matches!(ops.last(), Some(RenderOp::Final { doc }) if doc.text == "Hello"));
     }
 
     #[test]

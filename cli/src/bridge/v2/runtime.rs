@@ -20,22 +20,25 @@ use inline_agent_bridge::harness::{
     Delivery, HarnessDriver, Input, InputContent, InputId, OutputMode, UserId,
 };
 use inline_client::{
-    AnswerMessageActionRequest, BotInteractionEvent, ClientEvent, CreateReplyThreadRequest,
-    InlineClient, InlineId, LosslessEventReceiver, MessageRecord,
+    AnswerMessageActionRequest, BotInteractionEvent, ClientEvent, ClientStatus,
+    CreateReplyThreadRequest, InlineClient, InlineId, LosslessEventReceiver, MessageRecord,
 };
 use inline_protocol::proto;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 use super::api::{self, Notify, chat_peer};
 use super::doc::DocBuilder;
 use super::intake::{MessageFacts, grants_by_user, group_message};
 use super::ledger::{Begin, InputState, Ledger, input_id};
 use super::render::{QUESTION_FORM_ID, Vocabulary};
+use super::tools::Tools;
 use super::work::{
     AccessSource, ActionData, Agent, Command, Control, Known, OwnerCalls, WorkHandle,
 };
 
 const DEFAULT_HEARTBEAT: Duration = Duration::from_secs(60);
+/// How often the bot's Inline connection is checked.
+const CONNECTION_CHECK: Duration = Duration::from_secs(5);
 /// Messages of a group thread an agent sees when it joins.
 const JOIN_CONTEXT_MESSAGES: u32 = 40;
 const JOIN_CONTEXT_BYTES: usize = 24 * 1024;
@@ -144,6 +147,10 @@ pub(crate) struct Runtime {
     agent: Arc<Agent>,
     access: Arc<Access>,
     works: HashMap<i64, WorkHandle>,
+    /// A chat a work moved out of → where it went, so cards left behind still
+    /// reach it. Messages there never do: the parent may start its own work.
+    moved: HashMap<i64, i64>,
+    moves: Option<mpsc::UnboundedReceiver<(i64, i64)>>,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
     loop_guards: LoopGuards,
@@ -155,8 +162,10 @@ impl Runtime {
         bot: InlineClient,
         owner: Arc<dyn OwnerCalls>,
         harness: Arc<dyn HarnessDriver>,
+        tools: Option<Arc<Tools>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let ledger = Arc::new(Ledger::open(&config.ledger_path)?);
+        let (moves_tx, moves) = mpsc::unbounded_channel();
         let access = Arc::new(Access {
             bot: bot.clone(),
             owner_user_id: config.owner_user_id,
@@ -175,13 +184,20 @@ impl Runtime {
             owner_user_id: config.owner_user_id,
             bot_user_id: config.bot_user_id,
             folder: config.folder.clone(),
-            sent: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            sent: tools.as_ref().map_or_else(
+                || Arc::new(std::sync::Mutex::new(HashSet::new())),
+                |tools| tools.sent(),
+            ),
+            tools,
+            moves: moves_tx,
         });
         Ok(Self {
             config,
             agent,
             access,
             works: HashMap::new(),
+            moved: HashMap::new(),
+            moves: Some(moves),
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
             loop_guards: LoopGuards::default(),
@@ -204,9 +220,16 @@ impl Runtime {
         let mut heartbeat = tokio::time::interval(self.heartbeat().await);
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         tokio::pin!(shutdown);
+        let mut moves = self.moves.take().expect("run once");
+        let mut connection = tokio::time::interval(CONNECTION_CHECK);
+        connection.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let result = loop {
             tokio::select! {
+                biased;
                 _ = &mut shutdown => break Ok(()),
+                // Before any delivery, so a subthread's first reply finds its work.
+                Some((from, to)) = moves.recv() => self.moved_work(from, to),
+                _ = connection.tick() => self.keep_connected().await,
                 _ = heartbeat.tick() => {
                     let interval = self.heartbeat().await;
                     if interval != heartbeat.period() {
@@ -447,13 +470,56 @@ impl Runtime {
         }
     }
 
-    /// Asks a work actor and waits for its toast.
+    /// The client stops receiving events after a failure it does not retry
+    /// on its own. Resuming it restarts delivery where it stopped, so the
+    /// agent never goes quiet without a trace.
+    async fn keep_connected(&self) {
+        let snapshot = self.agent.bot.status_snapshot();
+        if snapshot.status != ClientStatus::Disconnected {
+            return;
+        }
+        log::warn!(
+            target: "inline::bridge::v2",
+            "Inline connection lost ({}); resuming",
+            snapshot
+                .failure
+                .as_ref()
+                .map_or("no detail".to_owned(), |failure| format!(
+                    "{:?}: {}",
+                    failure.category, failure.message
+                ))
+        );
+        if let Err(error) = self.agent.bot.resume_session().await {
+            log::warn!(target: "inline::bridge::v2", "resuming the Inline connection failed: {error}");
+        }
+    }
+
+    /// A work moved into a subthread: it is that chat's work from now on.
+    fn moved_work(&mut self, from: i64, to: i64) {
+        if let Some(work) = self.works.remove(&from) {
+            self.works.insert(to, work);
+        }
+        for destination in self.moved.values_mut() {
+            if *destination == from {
+                *destination = to;
+            }
+        }
+        self.moved.insert(from, to);
+    }
+
+    /// Asks a work actor and waits for its toast. Cards left in a chat the
+    /// work moved out of still reach it.
     async fn ask(
         &self,
         chat_id: i64,
         command: impl FnOnce(oneshot::Sender<Option<String>>) -> Command,
     ) -> Option<String> {
-        let Some(work) = self.works.get(&chat_id) else {
+        let work = self.works.get(&chat_id).or_else(|| {
+            self.moved
+                .get(&chat_id)
+                .and_then(|destination| self.works.get(destination))
+        });
+        let Some(work) = work else {
             return Some("This request is no longer pending.".to_owned());
         };
         let (reply, answer) = oneshot::channel();
@@ -872,6 +938,8 @@ impl Runtime {
             _ => Known::default(),
         };
         let mode = self.effective_mode(participation);
+        // A new work here takes the chat back from one that moved out.
+        self.moved.remove(&chat_id);
         self.works.insert(
             chat_id,
             super::work::spawn(self.agent.clone(), chat_id, known, mode),

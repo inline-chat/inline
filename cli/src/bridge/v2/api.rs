@@ -181,3 +181,119 @@ pub(crate) async fn import_grants(bot: &InlineClient, user_ids: Vec<i64>) -> Api
     )?;
     Ok(())
 }
+
+/// Reads a chat as the bot; the server refuses chats the bot cannot access.
+pub(crate) async fn get_chat(bot: &InlineClient, chat_id: i64) -> ApiResult<proto::GetChatResult> {
+    call!(
+        bot,
+        GetChat,
+        proto::GetChatInput {
+            peer_id: Some(chat_peer(chat_id)),
+            include_recent_messages: false,
+        }
+    )
+}
+
+pub(crate) async fn get_messages(
+    bot: &InlineClient,
+    chat_id: i64,
+    message_ids: Vec<i64>,
+) -> ApiResult<Vec<proto::Message>> {
+    Ok(call!(
+        bot,
+        GetMessages,
+        proto::GetMessagesInput {
+            peer_id: Some(chat_peer(chat_id)),
+            message_ids,
+        }
+    )?
+    .messages)
+}
+
+pub(crate) async fn search_messages(
+    bot: &InlineClient,
+    chat_id: i64,
+    query: String,
+    limit: i32,
+    offset_id: Option<i64>,
+) -> ApiResult<Vec<proto::Message>> {
+    Ok(call!(
+        bot,
+        SearchMessages,
+        proto::SearchMessagesInput {
+            peer_id: Some(chat_peer(chat_id)),
+            queries: vec![query],
+            limit: Some(limit),
+            offset_id,
+            filter: None,
+        }
+    )?
+    .messages)
+}
+
+pub(crate) async fn get_users(
+    bot: &InlineClient,
+    user_ids: Vec<i64>,
+) -> ApiResult<Vec<proto::User>> {
+    Ok(call!(bot, GetUsers, proto::GetUsersInput { user_ids })?.users)
+}
+
+/// Sends Markdown text (mentions as `[@Name](inline://user?id=N)`, thread
+/// links as `[Title](inline://chat?id=N)`) and returns the message ID.
+pub(crate) async fn send_markdown(
+    bot: &InlineClient,
+    chat_id: i64,
+    reply_to: Option<i64>,
+    text: &str,
+    random_id: i64,
+) -> ApiResult<i64> {
+    let result = call!(
+        bot,
+        SendMessage,
+        proto::SendMessageInput {
+            peer_id: Some(chat_peer(chat_id)),
+            message: Some(text.to_owned()),
+            reply_to_msg_id: reply_to,
+            random_id: Some(random_id),
+            parse_markdown: Some(true),
+            ..Default::default()
+        }
+    )?;
+    sent_message_id(&result.updates, random_id).ok_or(ApiError::UnexpectedResult("SendMessage"))
+}
+
+/// Moves a work's publication into a subthread of its chat (spec §5.2).
+pub(crate) async fn move_session(
+    bot: &InlineClient,
+    agent_session_id: i64,
+    destination: i64,
+) -> ApiResult<proto::MoveAgentSessionResult> {
+    call!(
+        bot,
+        MoveAgentSession,
+        proto::MoveAgentSessionInput {
+            agent_session_id,
+            destination_peer_id: Some(chat_peer(destination)),
+        }
+    )
+}
+
+pub(crate) async fn edit_markdown(
+    bot: &InlineClient,
+    chat_id: i64,
+    message_id: i64,
+    text: &str,
+) -> ApiResult<()> {
+    call!(
+        bot,
+        EditMessage,
+        proto::EditMessageInput {
+            message_id,
+            peer_id: Some(chat_peer(chat_id)),
+            text: text.to_owned(),
+            parse_markdown: Some(true),
+            ..Default::default()
+        }
+    )?;
+    Ok(())
+}

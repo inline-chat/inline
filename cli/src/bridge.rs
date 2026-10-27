@@ -3135,6 +3135,22 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         mut external_shutdown,
         standalone_runtime,
     } = launch;
+    let agent_name = if installation.display_name.trim().is_empty() {
+        installation.provider_id.clone()
+    } else {
+        installation.display_name.clone()
+    };
+    let attachments_dir = installation.state_dir.join("attachments");
+    // Inline tools, bound to the agent and its works (spec §4.8).
+    let tools = v2::tools::Tools::new(v2::tools::ToolsConfig {
+        bot: bot.clone(),
+        provider: inline_agent_bridge::ProviderId::new(installation.provider_id.as_str())?,
+        bot_user_id: installation.bot_user_id,
+        owner_user_id,
+        agent_name: agent_name.clone(),
+        folder: workspace.clone(),
+        attachments_dir: attachments_dir.clone(),
+    });
     let (harness, vocabulary, executable): (Arc<dyn HarnessDriver>, _, PathBuf) =
         match installation.provider_id.as_str() {
             "codex" => {
@@ -3153,16 +3169,17 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
                         cache_root: installation.state_dir.join("v2"),
                     },
                 );
+                harness.configure_host_tools(tools.configuration());
                 (Arc::new(harness), v2::render::Vocabulary::Codex, executable)
             }
             "claude" => {
                 let executable = resolve_executable(Path::new("claude"))?;
-                let harness = inline_agent_driver_claude::harness::ClaudeHarness::new(
-                    inline_agent_driver_claude::harness::ClaudeHarnessConfig::new(
-                        executable.clone(),
-                        env!("CARGO_PKG_VERSION"),
-                    ),
+                let mut config = inline_agent_driver_claude::harness::ClaudeHarnessConfig::new(
+                    executable.clone(),
+                    env!("CARGO_PKG_VERSION"),
                 );
+                config.host_tools = Some(tools.configuration());
+                let harness = inline_agent_driver_claude::harness::ClaudeHarness::new(config);
                 (
                     Arc::new(harness),
                     v2::render::Vocabulary::Claude,
@@ -3179,11 +3196,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
     let runtime = v2::runtime::Runtime::new(
         v2::runtime::V2Config {
             vocabulary,
-            agent_name: if installation.display_name.trim().is_empty() {
-                installation.provider_id.clone()
-            } else {
-                installation.display_name.clone()
-            },
+            agent_name,
             installation_id: installation.installation_id.clone(),
             owner_user_id,
             bot_user_id: installation.bot_user_id,
@@ -3195,7 +3208,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
             accept_messages_after: installation.accept_messages_after,
             allowlist,
             ledger_path: installation.state_dir.join("v2-ledger.sqlite"),
-            attachments_dir: installation.state_dir.join("attachments"),
+            attachments_dir,
         },
         bot.clone(),
         Arc::new(v2::runtime::OwnerConnection(owner_control.ok_or_else(
@@ -3207,6 +3220,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
             },
         )?)),
         harness,
+        Some(tools),
     )?;
     if let Some(readiness) = readiness {
         readiness.mark_ready(&installation.installation_id);

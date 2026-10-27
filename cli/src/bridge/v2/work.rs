@@ -15,18 +15,23 @@ use futures_util::StreamExt;
 use inline_agent_bridge::group::{
     ConsiderOutcome, ConsiderQueue, DailySpeakGateBudget, DayKey, GateAdmission, GateAvailability,
     Grants, GuideFacts, HandoffInstruction, HandoffProvider, HandoffTarget, HoldEffect, HoldEvent,
-    HoldMachine, HoldState, IdleRelease, Operation, ParticipationMode, PendingInput, ReleaseCause,
-    ReleaseReceipt, ReleaseRequest, ReleaseStep, ReleaseStepOutcome, SpeakGateError, SpeakVerdict,
-    WorkPhase, gate_admission, handoff_instruction, release_event, run_state_event, trusted_guide,
+    HoldMachine, HoldState, IdleRelease, Operation, ParticipationMode, PendingInput, Publication,
+    PublicationEffect, PublicationEvent, ReleaseCause, ReleaseReceipt, ReleaseRequest, ReleaseStep,
+    ReleaseStepOutcome, SpeakGateError, SpeakVerdict, WorkPhase, gate_admission,
+    handoff_instruction, release_event, run_state_event, trusted_guide,
 };
+use inline_agent_bridge::harness::ChatId;
 use inline_agent_bridge::harness::{
     Delivery, Event, EventStream, FieldAnswer, FieldId, FieldInput, HarnessDriver, HeldBy, Input,
     InputDisposition, InputFact, InputId, InteractionId, InteractionResponse, Op, OpError, OpKind,
     OpenError, OpenMode, OpenSpec, OutputMode, QuestionForm, QueueOp, RunState, SendError, Session,
     SteerPriority, TurnPhase, UserId, WaitingOn,
 };
-use inline_agent_bridge::{ProviderSessionId, TurnId};
-use inline_client::{FormFieldValue, FormValue, InlineClient};
+use inline_agent_bridge::{HostToolResult, ProviderSessionId, TurnId};
+use inline_client::{
+    CreateReplyThreadRequest, DeleteMessageRequest, FormFieldValue, FormValue, InlineClient,
+    InlineId,
+};
 use inline_protocol::proto;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -35,6 +40,7 @@ use super::api::{self, Notify, chat_peer};
 use super::doc::{Doc, DocBuilder};
 use super::ledger::{InputState, Ledger};
 use super::render::{ActionStyle, CardAction, FullDetail, RenderOp, Renderer, Vocabulary};
+use super::tools::{Tools, WorkTool};
 
 /// Progress edits are coalesced to at most one per slot in this window.
 const EDIT_INTERVAL: Duration = Duration::from_millis(1200);
@@ -49,6 +55,8 @@ const NO_ACCESS: &str = "You don't have access to do that with this agent.";
 /// Full details kept for "Full output", newest first out.
 const MAX_FULL_DETAILS: usize = 32;
 const MAX_FULL_DETAIL_BYTES: usize = 4 * 1024 * 1024;
+/// Tries at a subthread move whose outcome is unknown.
+const MOVE_ATTEMPTS: u32 = 3;
 
 /// Owner-authenticated calls a work needs: connect and look up its session.
 pub(crate) trait OwnerCalls: Send + Sync {
@@ -83,6 +91,10 @@ pub(crate) struct Agent {
     pub folder: PathBuf,
     /// Messages this bot sent, so replies to them address it.
     pub sent: Arc<std::sync::Mutex<HashSet<i64>>>,
+    /// Inline tools served to this agent's sessions (spec §4.8).
+    pub tools: Option<Arc<Tools>>,
+    /// A work that moved into a subthread tells the main loop (from, to).
+    pub moves: mpsc::UnboundedSender<(i64, i64)>,
 }
 
 impl Agent {
@@ -169,6 +181,11 @@ pub(crate) enum Command {
         reply: oneshot::Sender<Option<String>>,
     },
     SetMode(OutputMode),
+    /// A tool that acts through the work (spec §4.8).
+    Tool {
+        tool: WorkTool,
+        reply: oneshot::Sender<HostToolResult>,
+    },
 }
 
 /// The main loop's handle on one work.
@@ -201,6 +218,7 @@ pub(crate) fn spawn(
     output_mode: OutputMode,
 ) -> WorkHandle {
     let (tx, rx) = mpsc::channel(64);
+    let commands = tx.downgrade();
     let (phase_tx, phase) = watch::channel(if known.native.is_some() {
         WorkPhase::Idle
     } else {
@@ -212,6 +230,11 @@ pub(crate) fn spawn(
         renderer: Renderer::new(output_mode, agent.vocabulary, agent.agent_name.clone()),
         agent,
         chat_id,
+        commands,
+        detail: None,
+        publication: Publication::new(ChatId(chat_id)),
+        parent_card: None,
+        parent_card_text: None,
         agent_session_id: agent_session_id.clone(),
         native: known.native,
         session: None,
@@ -251,6 +274,8 @@ pub(crate) fn spawn(
 
 #[derive(Clone, Debug)]
 struct Card {
+    /// The chat the card was posted in; a move leaves it behind.
+    chat: i64,
     interaction: InteractionId,
     approval: bool,
     form: Option<QuestionForm>,
@@ -264,6 +289,16 @@ struct PendingEdit {
 struct Actor {
     agent: Arc<Agent>,
     chat_id: i64,
+    /// This actor's own command channel, for tool bindings.
+    commands: mpsc::WeakSender<Command>,
+    /// Status the agent reported for its chip (`report_status`).
+    detail: Option<String>,
+    /// Where output goes; moves into a subthread (spec §5.2).
+    publication: Publication,
+    /// The status card left in the parent after a move: (chat, message).
+    parent_card: Option<(i64, i64)>,
+    /// What the parent card shows, so a status update can redraw it.
+    parent_card_text: Option<(ParentCard, i64)>,
     agent_session_id: Arc<AtomicI64>,
     native: Option<ProviderSessionId>,
     hold: HoldMachine,
@@ -293,7 +328,7 @@ struct Actor {
     edits: HashMap<u32, PendingEdit>,
     /// Finished progress message → the detail it shows cut short.
     full: VecDeque<(i64, Vec<FullDetail>)>,
-    reported: Option<(i32, i32)>,
+    reported: Option<(i32, i32, Option<String>)>,
     phase: watch::Sender<WorkPhase>,
     started_ms: u64,
     /// Unaddressed messages waiting for a quiet, idle moment (spec §5.4).
@@ -393,6 +428,10 @@ impl Actor {
                 self.consider_lines.insert(message_id, line);
             }
             Command::SetMode(mode) => self.renderer.set_mode(mode),
+            Command::Tool { tool, reply } => {
+                let result = self.work_tool(tool).await;
+                let _ = reply.send(result);
+            }
         }
     }
 
@@ -925,6 +964,7 @@ impl Actor {
                 // closes stdin, then kills and reaps it).
                 self.session = None;
                 self.events = None;
+                self.unbind_tools();
                 Some(HoldEvent::Detached)
             }
             HoldEffect::Released { cause, receipts } => {
@@ -974,6 +1014,7 @@ impl Actor {
                 self.session = None;
                 self.events = None;
                 self.turn = None;
+                self.unbind_tools();
                 self.notice(&format!(
                     "{} stopped unexpectedly. Your next message starts it again.",
                     self.agent.agent_name
@@ -1040,9 +1081,14 @@ impl Actor {
         let native = session.key().session.clone();
         if fresh || self.native.as_ref() != Some(&native) {
             self.connect(&native).await.map_err(OpenFailure::Other)?;
+            // A fork or a fresh start replaces the work's session.
+            self.unbind_tools();
         }
         self.native = Some(native);
         self.attach(session);
+        if let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) {
+            tools.bind(native, self.chat_id, self.commands.clone());
+        }
         Ok(())
     }
 
@@ -1056,7 +1102,7 @@ impl Actor {
                 instructions: Some(trusted_guide(GuideFacts {
                     bot_user_id: self.agent.bot_user_id,
                     owner_user_id: self.agent.owner_user_id,
-                    inline_tools: false,
+                    inline_tools: self.agent.tools.is_some(),
                 })),
                 title: None,
                 after: None,
@@ -1161,11 +1207,18 @@ impl Actor {
         match result {
             Ok(receipt) => {
                 self.mark(&pending.id, InputState::Accepted);
+                // The harness may report the turn a moment later. Until then
+                // the delivery itself is live work, so an idle tick never
+                // lets go of a session that was just given a turn.
+                let mut live = session.live_work();
                 if let InputDisposition::Started { turn } | InputDisposition::Steered { turn } =
                     receipt.disposition
                 {
-                    self.turn = Some(turn);
+                    self.turn = Some(turn.clone());
+                    live.turn.get_or_insert(turn);
                 }
+                self.live = live.clone();
+                Box::pin(self.event(HoldEvent::Activity { live })).await;
             }
             Err(SendError::Unknown(reason)) => {
                 self.mark(&pending.id, InputState::Unknown);
@@ -1310,6 +1363,8 @@ impl Actor {
         self.session = None;
         self.events = None;
         self.turn = None;
+        // The harness confirmed the release: the session no longer acts here.
+        self.unbind_tools();
         self.close_release_card().await;
         if !cause.is_explicit() {
             return;
@@ -1344,6 +1399,211 @@ impl Actor {
             }
         }
         self.send(&builder.finish(), None, Notify::Normal).await;
+    }
+
+    // ---------------------------------------------------------------
+    // Tools that act through the work
+    // ---------------------------------------------------------------
+
+    fn unbind_tools(&self) {
+        if let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) {
+            tools.unbind(native);
+        }
+    }
+
+    async fn work_tool(&mut self, tool: WorkTool) -> HostToolResult {
+        match tool {
+            WorkTool::ReportStatus { text } => {
+                self.detail = text;
+                self.report().await;
+                if let Some(text) = self.detail.clone() {
+                    let effects = self.publication.handle(PublicationEvent::Summary { text });
+                    self.publication_effects(effects, None).await;
+                }
+                HostToolResult::success(match &self.detail {
+                    Some(_) => "Status updated.",
+                    None => "Status cleared.",
+                })
+            }
+            WorkTool::StartSubthread {
+                title,
+                summary,
+                anchor_message_id,
+            } => {
+                self.start_subthread(title, summary, anchor_message_id)
+                    .await
+            }
+        }
+    }
+
+    /// Moves this work's publication into a new subthread (spec §5.2). The
+    /// native session is unchanged; the parent keeps one status card.
+    async fn start_subthread(
+        &mut self,
+        title: String,
+        summary: Option<String>,
+        anchor_message_id: Option<i64>,
+    ) -> HostToolResult {
+        let Some(agent_session_id) =
+            Some(self.agent_session_id.load(Ordering::Acquire)).filter(|id| *id > 0)
+        else {
+            return HostToolResult::failure(
+                "This work is not recorded in Inline yet, so it cannot move.",
+            );
+        };
+        if self.publication.chat().is_none() {
+            return HostToolResult::failure("This work is already moving.");
+        }
+        let created = match self
+            .agent
+            .bot
+            .create_reply_thread(CreateReplyThreadRequest {
+                parent_chat_id: InlineId::new(self.chat_id),
+                parent_message_id: anchor_message_id.map(InlineId::new),
+                title: Some(title.clone()),
+                description: summary.clone(),
+                emoji: None,
+                participants: Vec::new(),
+                agent_context: None,
+            })
+            .await
+        {
+            Ok(created) => created,
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "subthread failed: {error}");
+                return HostToolResult::failure("Inline could not create the subthread.");
+            }
+        };
+        let destination = created.chat_id.get();
+        // Progress still pending lands in the parent before the move.
+        self.flush_edits(true).await;
+        let effects = self.publication.handle(PublicationEvent::MoveRequested {
+            destination: ChatId(destination),
+        });
+        let card = ParentCard {
+            title,
+            summary,
+            agent_session_id,
+        };
+        if let Some(reason) = self.publication_effects(effects, Some(&card)).await {
+            return HostToolResult::failure(format!(
+                "The work stayed in its thread: {reason}. The new subthread {destination} is empty."
+            ));
+        }
+        if self.publication.chat() != Some(ChatId(destination)) {
+            return HostToolResult::failure("Inline could not confirm the move.");
+        }
+        let from = self.chat_id;
+        self.chat_id = destination;
+        // Progress goes on in new messages in the subthread; the parent's
+        // open progress messages close, since its card links there.
+        self.edits.clear();
+        let open: Vec<i64> = self
+            .slots
+            .drain()
+            .map(|(_, message_id)| message_id)
+            .collect();
+        for message_id in open {
+            self.edit_in(
+                from,
+                message_id,
+                &paragraph("Continued in the subthread."),
+                None,
+            )
+            .await;
+        }
+        if let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) {
+            tools.move_work(native, destination);
+        }
+        let _ = self.agent.moves.send((from, destination));
+        HostToolResult::success(
+            serde_json::json!({
+                "chat_id": destination,
+                "link": format!("inline://chat?id={destination}"),
+                "note": "Your output now goes to the subthread; post a short summary back with send_message when done.",
+            })
+            .to_string(),
+        )
+    }
+
+    /// Carries out publication effects; returns why a move failed.
+    async fn publication_effects(
+        &mut self,
+        effects: Vec<PublicationEffect>,
+        card: Option<&ParentCard>,
+    ) -> Option<String> {
+        let mut queue: VecDeque<PublicationEffect> = effects.into();
+        let mut attempts = 0;
+        let mut failure = None;
+        while let Some(effect) = queue.pop_front() {
+            match effect {
+                PublicationEffect::CallMove { destination } => {
+                    let Some(card) = card else { continue };
+                    attempts += 1;
+                    let event = match api::move_session(
+                        &self.agent.bot,
+                        card.agent_session_id,
+                        destination.0,
+                    )
+                    .await
+                    {
+                        Ok(result) => PublicationEvent::MoveConfirmed {
+                            destination,
+                            moved: result.moved,
+                        },
+                        // The move is idempotent on the server, so an unknown
+                        // outcome is retried a few times.
+                        Err(error) if attempts < MOVE_ATTEMPTS => {
+                            log::warn!(target: "inline::bridge::v2", "move failed, retrying: {error}");
+                            PublicationEvent::MoveUnknown
+                        }
+                        Err(error) => PublicationEvent::MoveRejected {
+                            reason: error.to_string(),
+                        },
+                    };
+                    queue.extend(self.publication.handle(event));
+                }
+                PublicationEffect::PostParentStatus { parent, subthread } => {
+                    let Some(card) = card else { continue };
+                    let text = parent_card_text(&self.agent.agent_name, card, subthread.0, None);
+                    let random_id = rand::random::<i64>().abs().max(1);
+                    match api::send_markdown(&self.agent.bot, parent.0, None, &text, random_id)
+                        .await
+                    {
+                        Ok(message_id) => {
+                            self.remember(message_id);
+                            self.parent_card = Some((parent.0, message_id));
+                            self.parent_card_text = Some((card.clone(), subthread.0));
+                        }
+                        Err(error) => {
+                            log::warn!(target: "inline::bridge::v2", "parent card failed: {error}");
+                        }
+                    }
+                }
+                PublicationEffect::UpdateParentStatus { parent, summary } => {
+                    let (Some((chat, message_id)), Some((card, subthread))) =
+                        (self.parent_card, self.parent_card_text.clone())
+                    else {
+                        continue;
+                    };
+                    if chat != parent.0 {
+                        continue;
+                    }
+                    let text =
+                        parent_card_text(&self.agent.agent_name, &card, subthread, Some(&summary));
+                    if let Err(error) =
+                        api::edit_markdown(&self.agent.bot, chat, message_id, &text).await
+                    {
+                        log::warn!(target: "inline::bridge::v2", "parent card edit failed: {error}");
+                    }
+                }
+                PublicationEffect::MoveFailed { reason } => failure = Some(reason),
+                PublicationEffect::MoveBusy => failure = Some("a move is in progress".to_owned()),
+                // The actor publishes inline, so nothing is held during a move.
+                PublicationEffect::Publish { .. } => {}
+            }
+        }
+        failure
     }
 
     // ---------------------------------------------------------------
@@ -1486,6 +1746,12 @@ impl Actor {
                         self.keep_full(message_id, full);
                     }
                 }
+                RenderOp::DropProgress { slot } => {
+                    self.edits.remove(&slot);
+                    if let Some(message_id) = self.slots.remove(&slot) {
+                        self.delete(message_id).await;
+                    }
+                }
                 RenderOp::Update { doc } => {
                     self.send(&doc, None, Notify::Silent).await;
                 }
@@ -1525,6 +1791,7 @@ impl Actor {
                         self.cards.insert(
                             message_id,
                             Card {
+                                chat: self.chat_id,
                                 interaction,
                                 approval: form.is_none(),
                                 form,
@@ -1534,12 +1801,20 @@ impl Actor {
                 }
                 RenderOp::CardClosed { interaction, doc } => {
                     if let Some(message_id) = self.card_by_interaction.remove(&interaction) {
-                        self.cards.remove(&message_id);
+                        let chat = self
+                            .cards
+                            .remove(&message_id)
+                            .map_or(self.chat_id, |card| card.chat);
                         if self.waiting.is_some_and(|(_, card)| card == message_id) {
                             self.waiting = None;
                         }
-                        self.edit(message_id, &doc, Some(proto::MessageActions::default()))
-                            .await;
+                        self.edit_in(
+                            chat,
+                            message_id,
+                            &doc,
+                            Some(proto::MessageActions::default()),
+                        )
+                        .await;
                     }
                 }
             }
@@ -1614,10 +1889,34 @@ impl Actor {
     }
 
     async fn edit(&self, message_id: i64, doc: &Doc, actions: Option<proto::MessageActions>) {
-        if let Err(error) =
-            api::edit_doc(&self.agent.bot, self.chat_id, message_id, doc, actions).await
+        self.edit_in(self.chat_id, message_id, doc, actions).await;
+    }
+
+    async fn edit_in(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        doc: &Doc,
+        actions: Option<proto::MessageActions>,
+    ) {
+        if let Err(error) = api::edit_doc(&self.agent.bot, chat_id, message_id, doc, actions).await
         {
             log::warn!(target: "inline::bridge::v2", "edit failed: {error}");
+        }
+    }
+
+    async fn delete(&self, message_id: i64) {
+        if let Err(error) = self
+            .agent
+            .bot
+            .delete_message(DeleteMessageRequest {
+                chat_id: InlineId::new(self.chat_id),
+                message_id: InlineId::new(message_id),
+                external_id: None,
+            })
+            .await
+        {
+            log::warn!(target: "inline::bridge::v2", "delete failed: {error}");
         }
     }
 
@@ -1726,8 +2025,9 @@ impl Actor {
         };
         state.run_state = run_state as i32;
         state.queued_count = self.live.queued.len() as u32;
-        let key = (state.run_state, state.waiting_reason);
-        if self.reported == Some(key) {
+        state.detail = self.detail.clone();
+        let key = (state.run_state, state.waiting_reason, state.detail.clone());
+        if self.reported.as_ref() == Some(&key) {
             return;
         }
         self.reported = Some(key);
@@ -1738,6 +2038,41 @@ impl Actor {
             self.reported = None;
         }
     }
+}
+
+/// What the parent's status card says after a move.
+#[derive(Clone, Debug)]
+struct ParentCard {
+    title: String,
+    summary: Option<String>,
+    agent_session_id: i64,
+}
+
+fn parent_card_text(
+    agent_name: &str,
+    card: &ParentCard,
+    subthread: i64,
+    status: Option<&str>,
+) -> String {
+    let title: String = card
+        .title
+        .chars()
+        .filter(|character| !matches!(character, '[' | ']'))
+        .collect();
+    let mut text = format!("{agent_name} continues in [{title}](inline://chat?id={subthread}).");
+    if let Some(summary) = card
+        .summary
+        .as_deref()
+        .filter(|summary| !summary.is_empty())
+    {
+        text.push_str("\n\n");
+        text.push_str(summary);
+    }
+    if let Some(status) = status {
+        text.push_str("\n\nStatus: ");
+        text.push_str(status);
+    }
+    text
 }
 
 enum OpenFailure {
@@ -1824,6 +2159,7 @@ fn render_kind(op: &RenderOp) -> &'static str {
         RenderOp::EndProgress { .. } => "end_progress",
         RenderOp::Update { .. } => "update",
         RenderOp::Final { .. } => "final",
+        RenderOp::DropProgress { .. } => "drop_progress",
         RenderOp::Card { .. } => "card",
         RenderOp::CardClosed { .. } => "card_closed",
         RenderOp::Notice { .. } => "notice",

@@ -2,11 +2,11 @@
 
 use super::*;
 
-const MAX_HOST_TOOL_ARGUMENT_BYTES: usize = 32 * 1024;
+pub(in crate::bridge) const MAX_HOST_TOOL_ARGUMENT_BYTES: usize = 32 * 1024;
 const MAX_HOST_TOOL_CALL_ID_BYTES: usize = 256;
 const MAX_HOST_TOOL_RESULT_BYTES: usize = 16 * 1024;
-const HOST_TOOL_EXECUTION_TIMEOUT: Duration = Duration::from_secs(15);
-const RETURN_ATTACHMENT_TIMEOUT: Duration = Duration::from_secs(60);
+pub(in crate::bridge) const HOST_TOOL_EXECUTION_TIMEOUT: Duration = Duration::from_secs(15);
+pub(in crate::bridge) const RETURN_ATTACHMENT_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_RETURN_ATTACHMENT_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_VIDEO_THUMBNAIL_BYTES: usize = 2 * 1024 * 1024;
 
@@ -954,13 +954,6 @@ impl InlineToolHost {
                 "Returning a file requires an explicit request from the user.",
             );
         }
-        let Some(path) = string_arg(arguments, "path", 4_096) else {
-            return HostToolResult::failure("path is required.");
-        };
-        let requested_path = match local_file_argument(&path) {
-            Ok(path) => path,
-            Err(message) => return HostToolResult::failure(message),
-        };
         let Some(workspace) = self
             .route
             .store
@@ -977,113 +970,18 @@ impl InlineToolHost {
             workspace.path.as_path(),
             self.route.attachment_cache_dir.as_path(),
         ];
-        let (path, size_bytes) = match validated_return_attachment_path(&requested_path, &roots) {
-            Ok(value) => value,
-            Err(message) => return HostToolResult::failure(message),
-        };
-        let bytes = match tokio::fs::read(&path).await {
-            Ok(bytes) if bytes.len() as u64 == size_bytes => bytes,
-            _ => {
-                return HostToolResult::failure(
-                    "The local file changed before Inline could upload it.",
-                );
-            }
-        };
-        let file_name = string_arg(arguments, "file_name", 240)
-            .as_deref()
-            .and_then(safe_file_name)
-            .or_else(|| inbound_attachment_file_name(&record.direction.attachments, &path))
-            .or_else(|| {
-                unique_cached_attachment_file_name(
-                    &record.direction.attachments,
-                    &path,
-                    &bytes,
-                    &self.route.attachment_cache_dir,
-                )
-            })
-            .or_else(|| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .and_then(safe_file_name)
-            })
-            .unwrap_or_else(|| "agent-file".to_string());
-        let mime_type = mime_guess::from_path(&path)
-            .first_raw()
-            .unwrap_or("application/octet-stream")
-            .to_string();
-        let Some(media_kind) = string_arg(arguments, "kind", 16)
-            .as_deref()
-            .and_then(ReturnAttachmentKind::parse)
-        else {
-            return HostToolResult::failure(
-                "kind must be image, video, or file based on the user's request.",
-            );
-        };
-        if !media_kind.accepts_mime_type(&mime_type) {
-            return HostToolResult::failure(match media_kind {
-                ReturnAttachmentKind::Image => {
-                    "Image kind requires a supported raster image; use file for SVG or other documents."
-                }
-                ReturnAttachmentKind::Video => "Video kind requires a video media type.",
-                ReturnAttachmentKind::File => unreachable!("files accept any MIME type"),
-            });
-        }
-        let (video_metadata, video_thumbnail) = if media_kind == ReturnAttachmentKind::Video {
-            let metadata = inbound_video_metadata(
-                &record.direction.attachments,
-                &path,
-                &bytes,
-                &self.route.attachment_cache_dir,
-            )
-            .or(probe_video_metadata(&path).await);
-            let Some(metadata) = metadata else {
-                return HostToolResult::failure(
-                    "Inline could not verify this video's width, height, and duration, so it was not uploaded as a video. Install ffprobe or return the original attached video.",
-                );
-            };
-            let Some(thumbnail) = generate_video_thumbnail(&path).await else {
-                return HostToolResult::failure(
-                    "Inline could not generate a safe thumbnail for this video, so it was not uploaded. Install ffmpeg or return the video as a file.",
-                );
-            };
-            (Some(metadata), Some(thumbnail))
-        } else {
-            (None, None)
-        };
-        // Providers may retry a tool after Inline already accepted the upload.
-        // Bind idempotency to the authenticated direction and verified bytes,
-        // not to the provider-generated call ID, so retries cannot duplicate
-        // the same returned artifact in the conversation.
-        let idempotency_key =
-            return_attachment_idempotency_key(&record.event_id, media_kind.as_str(), &bytes);
-        let request = UploadRequest {
-            peer: PeerRef::Chat {
-                chat_id: InlineId::new(record.delivery_chat_id),
+        return_local_file(
+            &self.bot,
+            ReturnFile {
+                chat_id: record.delivery_chat_id,
+                arguments,
+                roots: &roots,
+                attachments: &record.direction.attachments,
+                attachment_cache_dir: &self.route.attachment_cache_dir,
+                idempotency_seed: &record.event_id,
             },
-            kind: media_kind.protocol_kind(),
-            file_name: Some(file_name.clone()),
-            mime_type: Some(mime_type),
-            size_bytes: Some(size_bytes),
-            caption: string_arg(arguments, "caption", 2_000),
-            width: video_metadata.map(|metadata| metadata.width),
-            height: video_metadata.map(|metadata| metadata.height),
-            duration_ms: video_metadata.map(|metadata| metadata.duration_ms),
-            external_id: ExternalId::try_new("agent-tool", format!("return-{idempotency_key}"))
-                .ok(),
-            random_id: Some(interaction_random_id("return-attachment", &idempotency_key)),
-            reply_to_message_id: None,
-        };
-        match self
-            .bot
-            .send_media_with_thumbnail(request, bytes, video_thumbnail)
-            .await
-        {
-            Ok(_) => HostToolResult::success(format!(
-                "Uploaded {file_name} to the current Inline conversation as {}. Do not return the local path to the user.",
-                media_kind.result_label()
-            )),
-            Err(_) => HostToolResult::failure("Inline could not upload the local file."),
-        }
+        )
+        .await
     }
 
     async fn update_bot_profile(&self, arguments: &serde_json::Value) -> HostToolResult {
@@ -1144,6 +1042,141 @@ impl InlineToolHost {
             Ok(_) => HostToolResult::success("Presence updated."),
             Err(_) => HostToolResult::failure("Inline rejected the presence update."),
         }
+    }
+}
+
+/// A local file an agent returns to a conversation as native Inline media.
+pub(in crate::bridge) struct ReturnFile<'a> {
+    pub chat_id: i64,
+    pub arguments: &'a serde_json::Value,
+    /// Folders the file must be inside.
+    pub roots: &'a [&'a Path],
+    /// The triggering message's attachments, for original names and video
+    /// metadata.
+    pub attachments: &'a [inline_agent_bridge::InputAttachment],
+    pub attachment_cache_dir: &'a Path,
+    /// Binds upload idempotency to the request rather than the provider call.
+    pub idempotency_seed: &'a str,
+}
+
+/// Validates and uploads a returned file (`path`, `kind`, `file_name`,
+/// `caption` arguments). The caller checks intent and authorization.
+pub(in crate::bridge) async fn return_local_file(
+    bot: &InlineClient,
+    request: ReturnFile<'_>,
+) -> HostToolResult {
+    let Some(path) = string_arg(request.arguments, "path", 4_096) else {
+        return HostToolResult::failure("path is required.");
+    };
+    let requested_path = match local_file_argument(&path) {
+        Ok(path) => path,
+        Err(message) => return HostToolResult::failure(message),
+    };
+    let roots = request.roots;
+    let (path, size_bytes) = match validated_return_attachment_path(&requested_path, roots) {
+        Ok(value) => value,
+        Err(message) => return HostToolResult::failure(message),
+    };
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) if bytes.len() as u64 == size_bytes => bytes,
+        _ => {
+            return HostToolResult::failure(
+                "The local file changed before Inline could upload it.",
+            );
+        }
+    };
+    let file_name = string_arg(request.arguments, "file_name", 240)
+        .as_deref()
+        .and_then(safe_file_name)
+        .or_else(|| inbound_attachment_file_name(request.attachments, &path))
+        .or_else(|| {
+            unique_cached_attachment_file_name(
+                request.attachments,
+                &path,
+                &bytes,
+                request.attachment_cache_dir,
+            )
+        })
+        .or_else(|| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .and_then(safe_file_name)
+        })
+        .unwrap_or_else(|| "agent-file".to_string());
+    let mime_type = mime_guess::from_path(&path)
+        .first_raw()
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    let Some(media_kind) = string_arg(request.arguments, "kind", 16)
+        .as_deref()
+        .and_then(ReturnAttachmentKind::parse)
+    else {
+        return HostToolResult::failure(
+            "kind must be image, video, or file based on the user's request.",
+        );
+    };
+    if !media_kind.accepts_mime_type(&mime_type) {
+        return HostToolResult::failure(match media_kind {
+            ReturnAttachmentKind::Image => {
+                "Image kind requires a supported raster image; use file for SVG or other documents."
+            }
+            ReturnAttachmentKind::Video => "Video kind requires a video media type.",
+            ReturnAttachmentKind::File => unreachable!("files accept any MIME type"),
+        });
+    }
+    let (video_metadata, video_thumbnail) = if media_kind == ReturnAttachmentKind::Video {
+        let metadata = inbound_video_metadata(
+            request.attachments,
+            &path,
+            &bytes,
+            request.attachment_cache_dir,
+        )
+        .or(probe_video_metadata(&path).await);
+        let Some(metadata) = metadata else {
+            return HostToolResult::failure(
+                "Inline could not verify this video's width, height, and duration, so it was not uploaded as a video. Install ffprobe or return the original attached video.",
+            );
+        };
+        let Some(thumbnail) = generate_video_thumbnail(&path).await else {
+            return HostToolResult::failure(
+                "Inline could not generate a safe thumbnail for this video, so it was not uploaded. Install ffmpeg or return the video as a file.",
+            );
+        };
+        (Some(metadata), Some(thumbnail))
+    } else {
+        (None, None)
+    };
+    // Providers may retry a tool after Inline already accepted the upload.
+    // Bind idempotency to the authenticated direction and verified bytes,
+    // not to the provider-generated call ID, so retries cannot duplicate
+    // the same returned artifact in the conversation.
+    let idempotency_key =
+        return_attachment_idempotency_key(request.idempotency_seed, media_kind.as_str(), &bytes);
+    let upload = UploadRequest {
+        peer: PeerRef::Chat {
+            chat_id: InlineId::new(request.chat_id),
+        },
+        kind: media_kind.protocol_kind(),
+        file_name: Some(file_name.clone()),
+        mime_type: Some(mime_type),
+        size_bytes: Some(size_bytes),
+        caption: string_arg(request.arguments, "caption", 2_000),
+        width: video_metadata.map(|metadata| metadata.width),
+        height: video_metadata.map(|metadata| metadata.height),
+        duration_ms: video_metadata.map(|metadata| metadata.duration_ms),
+        external_id: ExternalId::try_new("agent-tool", format!("return-{idempotency_key}")).ok(),
+        random_id: Some(interaction_random_id("return-attachment", &idempotency_key)),
+        reply_to_message_id: None,
+    };
+    match bot
+        .send_media_with_thumbnail(upload, bytes, video_thumbnail)
+        .await
+    {
+        Ok(_) => HostToolResult::success(format!(
+            "Uploaded {file_name} to the current Inline conversation as {}. Do not return the local path to the user.",
+            media_kind.result_label()
+        )),
+        Err(_) => HostToolResult::failure("Inline could not upload the local file."),
     }
 }
 
@@ -1463,11 +1496,15 @@ fn tool_input_schema(name: &str) -> serde_json::Value {
     })
 }
 
-fn positive_i64(arguments: &serde_json::Value, key: &str) -> Option<i64> {
+pub(in crate::bridge) fn positive_i64(arguments: &serde_json::Value, key: &str) -> Option<i64> {
     arguments.get(key)?.as_i64().filter(|value| *value > 0)
 }
 
-fn bounded_limit(arguments: &serde_json::Value, default: u32, maximum: u32) -> u32 {
+pub(in crate::bridge) fn bounded_limit(
+    arguments: &serde_json::Value,
+    default: u32,
+    maximum: u32,
+) -> u32 {
     arguments
         .get("limit")
         .and_then(serde_json::Value::as_u64)
@@ -1476,13 +1513,17 @@ fn bounded_limit(arguments: &serde_json::Value, default: u32, maximum: u32) -> u
         .clamp(1, maximum)
 }
 
-fn string_arg(arguments: &serde_json::Value, key: &str, maximum: usize) -> Option<String> {
+pub(in crate::bridge) fn string_arg(
+    arguments: &serde_json::Value,
+    key: &str,
+    maximum: usize,
+) -> Option<String> {
     let value = arguments.get(key)?.as_str()?.trim();
     (!value.is_empty() && !value.chars().any(char::is_control))
         .then(|| value.chars().take(maximum).collect())
 }
 
-fn bool_arg(arguments: &serde_json::Value, key: &str) -> bool {
+pub(in crate::bridge) fn bool_arg(arguments: &serde_json::Value, key: &str) -> bool {
     arguments.get(key).and_then(serde_json::Value::as_bool) == Some(true)
 }
 
@@ -1725,13 +1766,13 @@ fn safe_file_name(value: &str) -> Option<String> {
         .then(|| name.chars().take(240).collect())
 }
 
-fn valid_tool_call_id(call_id: &str) -> bool {
+pub(in crate::bridge) fn valid_tool_call_id(call_id: &str) -> bool {
     !call_id.is_empty()
         && call_id.len() <= MAX_HOST_TOOL_CALL_ID_BYTES
         && !call_id.chars().any(char::is_control)
 }
 
-fn validate_tool_arguments(
+pub(in crate::bridge) fn validate_tool_arguments(
     arguments: &serde_json::Value,
     schema: &serde_json::Value,
 ) -> Result<(), ()> {
@@ -1811,7 +1852,7 @@ fn validate_schema_value(value: &serde_json::Value, schema: &serde_json::Value) 
     Ok(())
 }
 
-fn bounded_tool_result(result: HostToolResult) -> HostToolResult {
+pub(in crate::bridge) fn bounded_tool_result(result: HostToolResult) -> HostToolResult {
     if result.content.len() <= MAX_HOST_TOOL_RESULT_BYTES {
         result
     } else {
@@ -1957,7 +1998,9 @@ fn project_agent_catalog(catalog: &proto::AgentConfigurationCatalog) -> serde_js
     })
 }
 
-fn project_proto_messages(messages: Vec<proto::Message>) -> Vec<serde_json::Value> {
+pub(in crate::bridge) fn project_proto_messages(
+    messages: Vec<proto::Message>,
+) -> Vec<serde_json::Value> {
     messages
         .into_iter()
         .take(100)
@@ -1974,14 +2017,14 @@ fn project_proto_messages(messages: Vec<proto::Message>) -> Vec<serde_json::Valu
         .collect()
 }
 
-fn json_result<T: Serialize, E>(result: Result<T, E>) -> HostToolResult {
+pub(in crate::bridge) fn json_result<T: Serialize, E>(result: Result<T, E>) -> HostToolResult {
     match result {
         Ok(value) => json_value_result(&value),
         Err(_) => HostToolResult::failure("Inline request failed."),
     }
 }
 
-fn json_value_result<T: Serialize>(value: &T) -> HostToolResult {
+pub(in crate::bridge) fn json_value_result<T: Serialize>(value: &T) -> HostToolResult {
     serde_json::to_string(value)
         .map(HostToolResult::success)
         .unwrap_or_else(|_| HostToolResult::failure("Inline result could not be encoded."))
