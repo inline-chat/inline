@@ -4,6 +4,7 @@ import Foundation
 import GRDB
 import InlineProtocol
 import Logger
+import os
 
 /// How an Agent publishes its work in a thread (spec §6). Detailed posts every
 /// harness item as progress; Friendly posts only short prose updates.
@@ -179,8 +180,8 @@ public struct AgentWorkState: Codable, Equatable, Sendable, Identifiable {
   /// Whether this state replaces `stored`, the state kept for the same
   /// session (in any chat). Revisions order one session's states across
   /// chats, since each chat's updates arrive in their own bucket. A move does
-  /// not change the revision; it only goes down into a subthread, so at an
-  /// equal revision the subthread wins over the chat it left.
+  /// advances the server revision. For older servers, an equal revision
+  /// may only advance to a directly known child.
   func supersedes(_ stored: AgentWorkState) -> Bool {
     if revision != stored.revision { return revision > stored.revision }
     if key == stored.key { return true }
@@ -236,6 +237,8 @@ public final class AgentWorkStateStore: ObservableObject {
   /// Bots whose runtime the server reports offline (lapsed heartbeats).
   @Published public private(set) var offlineBotUserIDs: Set<Int64> = []
 
+  private let auth: AuthHandle
+  private let persistenceGeneration = OSAllocatedUnfairLock(initialState: UInt64(0))
   private let database: AppDatabase?
   private let log = Log.scoped("AgentWorkStateStore")
   private var overrideRevisions: [AgentWorkState.Key: Int64] = [:]
@@ -244,7 +247,8 @@ public final class AgentWorkStateStore: ObservableObject {
   /// or for another account, never repopulates the cleared state.
   private var generation: UInt64 = 0
 
-  public init(database: AppDatabase? = nil) {
+  public init(database: AppDatabase? = nil, auth: AuthHandle = Auth.shared.handle) {
+    self.auth = auth
     self.database = database
     // Hydrate before any view reads, so first-frame reads never publish
     // from inside a view update.
@@ -407,36 +411,55 @@ public final class AgentWorkStateStore: ObservableObject {
 
   public func remove(_ key: AgentWorkState.Key) {
     let removed = states.removeValue(forKey: key)
-    guard let database else { return }
+    guard let database, let account = try? auth.beginAccountMutation() else { return }
+    let auth = auth
+    let fence = persistenceGeneration
+    let epoch = fence.withLock { $0 }
     let storageKey = key.storageKey
     let kind = Kind.session.rawValue
     Task.detached {
       try? await database.dbWriter.write { db in
-        // Only the row this store saw: a newer one synced since stays.
-        let rows = Row.filter(Column("kind") == kind && Column("key") == storageKey)
-        if let removed,
-           let row = try rows.fetchOne(db),
-           let stored = try? JSONDecoder().decode(AgentWorkState.self, from: row.payload),
-           stored.revision > removed.revision
-        {
-          return
+        try fence.withLock { current in
+          guard current == epoch else { return }
+          try auth.validateAccountMutation(account)
+          // Only the row this store saw: a newer one synced since stays.
+          let rows = Row.filter(Column("kind") == kind && Column("key") == storageKey)
+          if let removed,
+             let row = try rows.fetchOne(db),
+             let stored = try? JSONDecoder().decode(AgentWorkState.self, from: row.payload),
+             stored.revision > removed.revision
+          {
+            return
+          }
+          _ = try rows.deleteAll(db)
         }
-        _ = try rows.deleteAll(db)
       }
     }
   }
 
   public func removeAll() {
     generation &+= 1
+    let fence = persistenceGeneration
+    let epoch = fence.withLock { current in
+      current &+= 1
+      return current
+    }
     states.removeAll()
     outputOverrides.removeAll()
     defaultOutputModes.removeAll()
     runtimeBotUserIDs.removeAll()
     offlineBotUserIDs.removeAll()
     overrideRevisions.removeAll()
-    guard let database else { return }
+    guard let database, let account = try? auth.beginAccountMutation() else { return }
+    let auth = auth
     Task.detached {
-      try? await database.dbWriter.write { db in _ = try Row.deleteAll(db) }
+      try? await database.dbWriter.write { db in
+        try fence.withLock { current in
+          guard current == epoch else { return }
+          try auth.validateAccountMutation(account)
+          _ = try Row.deleteAll(db)
+        }
+      }
     }
   }
 
@@ -563,23 +586,36 @@ public final class AgentWorkStateStore: ObservableObject {
 
   /// Saves a session's state through the same ordering rule as sync.
   private func persistSession(_ state: AgentWorkState) {
-    guard let database else { return }
-    let generation = generation
-    Task.detached { [weak self] in
-      // A refresh that finished after a logout or reset writes nothing.
-      guard await self?.generation == generation else { return }
-      try? await database.dbWriter.write { db in _ = try Self.store(state, db: db) }
+    guard let database, let account = try? auth.beginAccountMutation() else { return }
+    let auth = auth
+    let fence = persistenceGeneration
+    let epoch = fence.withLock { $0 }
+    Task.detached {
+      try? await database.dbWriter.write { db in
+        try fence.withLock { current in
+          guard current == epoch else { return }
+          try auth.validateAccountMutation(account)
+          _ = try Self.store(state, db: db)
+        }
+      }
     }
   }
 
   private func persist(_ kind: Kind, key: String, value: some Encodable) {
-    guard let database, let payload = try? JSONEncoder().encode(value) else { return }
+    guard let database, let account = try? auth.beginAccountMutation(),
+          let payload = try? JSONEncoder().encode(value) else { return }
     let row = Row(kind: kind.rawValue, key: key, payload: payload)
-    let generation = generation
-    Task.detached { [weak self] in
-      // A refresh that finished after a logout or reset writes nothing.
-      guard await self?.generation == generation else { return }
-      try? await database.dbWriter.write { db in try row.save(db) }
+    let auth = auth
+    let fence = persistenceGeneration
+    let epoch = fence.withLock { $0 }
+    Task.detached {
+      try? await database.dbWriter.write { db in
+        try fence.withLock { current in
+          guard current == epoch else { return }
+          try auth.validateAccountMutation(account)
+          try row.save(db)
+        }
+      }
     }
   }
 

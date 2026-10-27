@@ -211,6 +211,7 @@ impl Runtime {
         // Each thread's settings, as a previous run left them.
         let mut thread_settings = HashMap::new();
         let mut bound_configs = HashMap::new();
+        let moved = ledger.moves()?.into_iter().collect();
         for (chat_id, saved, bound) in ledger.threads()? {
             if let Ok(saved) = serde_json::from_str::<SettingsChange>(&saved) {
                 thread_settings.insert(chat_id, saved);
@@ -247,7 +248,7 @@ impl Runtime {
             agent,
             access,
             works: HashMap::new(),
-            moved: HashMap::new(),
+            moved,
             moves: Some(moves),
             own_threads: HashMap::new(),
             thread_settings,
@@ -350,15 +351,20 @@ impl Runtime {
         };
         // Written but unconfirmed: the thread's session settles them when it
         // opens, by what it shows it already consumed.
-        let mut uncertain: HashMap<i64, Vec<(InputId, i64)>> = HashMap::new();
+        let mut uncertain: HashMap<i64, Vec<(InputId, i64, i64)>> = HashMap::new();
         for record in unresolved {
             if matches!(record.state, InputState::Unknown | InputState::Sent)
                 && let Ok(input) = InputId::new(record.input_id.clone())
             {
                 uncertain
-                    .entry(record.chat_id)
+                    .entry(
+                        self.agent
+                            .ledger
+                            .input_work(&record.input_id, record.chat_id)
+                            .unwrap_or(record.chat_id),
+                    )
                     .or_default()
-                    .push((input, record.message_id));
+                    .push((input, record.chat_id, record.message_id));
                 continue;
             }
             // Never written: it never ran.
@@ -380,22 +386,44 @@ impl Runtime {
                 .map_err(|error| error.to_string());
             if let Err(error) = opened {
                 log::warn!(target: "inline::bridge::v2", "chat={chat_id} cannot settle inputs: {error}");
-                for (input, message_id) in inputs {
+                for (input, request_chat_id, message_id) in inputs {
                     self.reply(
-                        chat_id,
+                        request_chat_id,
                         message_id,
                         &format!(
-                            "{} restarted while this was being delivered and could not check whether it arrived. Reply again if it still needs doing.",
+                            "{} restarted while this was being delivered and could not check whether it arrived. Check its native session before retrying.",
                             self.config.agent_name
                         ),
                     )
                     .await;
-                    let _ = self.agent.ledger.set(input.as_str(), InputState::Failed);
+                    let _ = self.agent.ledger.set(input.as_str(), InputState::Unknown);
                 }
                 continue;
             }
             if let Some(work) = self.works.get(&chat_id) {
                 let _ = work.tx.send(Command::Reconcile { inputs }).await;
+            }
+        }
+        // Consumed inputs can still have an unpublished final or interaction.
+        // Restore those works too; no input is resent.
+        match self.agent.ledger.output_chats() {
+            Ok(chats) => {
+                for chat_id in chats {
+                    if self.works.contains_key(&chat_id) {
+                        continue;
+                    }
+                    if self.ensure_work(chat_id, None).await.is_ok()
+                        && let Some(work) = self.works.get(&chat_id)
+                    {
+                        let _ = work
+                            .tx
+                            .send(Command::Reconcile { inputs: Vec::new() })
+                            .await;
+                    }
+                }
+            }
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "cannot recover pending publication: {error}")
             }
         }
         let _ = self.agent.ledger.prune(LEDGER_RETENTION_SECS);
@@ -1177,6 +1205,15 @@ impl Runtime {
 
     /// A work moved into a subthread: it is that chat's work from now on.
     fn moved_work(&mut self, from: i64, to: i64) {
+        if let Err(error) = self.agent.ledger.move_thread(from, to) {
+            log::warn!(target: "inline::bridge::v2", "cannot persist moved work: {error}");
+        }
+        if let Some(settings) = self.thread_settings.get(&from).cloned() {
+            self.thread_settings.insert(to, settings);
+        }
+        if let Some(bound) = self.bound_configs.get(&from).cloned() {
+            self.bound_configs.insert(to, bound);
+        }
         self.own_threads.insert(to, true);
         if let Some(work) = self.works.remove(&from) {
             self.works.insert(to, work);
@@ -1787,6 +1824,7 @@ impl Runtime {
         };
         let mode = self.effective_mode(participation);
         // A new work here takes the chat back from one that moved out.
+        self.agent.ledger.forget_move(chat_id)?;
         self.moved.remove(&chat_id);
         self.works.insert(
             chat_id,

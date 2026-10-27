@@ -45,7 +45,6 @@ use crate::sessions::SessionStore;
 use crate::version::{ClaudeVersion, PASSIVE_MIN, capability, probe};
 
 /// Recent transcript inputs a resumed session reports as already consumed.
-const RESTORED_INPUTS: usize = 50;
 const PROVIDER: &str = "claude";
 const CATALOG_TTL: Duration = Duration::from_secs(300);
 const SESSION_PAGE_SIZE: usize = 50;
@@ -663,16 +662,18 @@ impl HarnessDriver for ClaudeHarness {
                 version,
             )
             .await?;
-            // A resumed session's transcript settles inputs the bridge was
-            // unsure of: the recent ones it holds already ran.
+            // Restore positive consumption facts from the available transcript;
+            // the bridge preserves uncertainty when that history cannot be read.
             if let (Some(resumed), Some(store)) = (&resumed, self.store()) {
                 let consumed: Vec<Event> = store
                     .messages(resumed.as_str(), Some(&spec.folder), 0, None)
-                    .unwrap_or_default()
+                    .unwrap_or_else(|error| {
+                        log::warn!(target: "inline::claude", "input history unavailable during resume: {error}");
+                        Vec::new()
+                    })
                     .into_iter()
                     .rev()
                     .filter(|message| message.message_type == "user")
-                    .take(RESTORED_INPUTS)
                     .filter_map(|message| {
                         Some(Event::Input {
                             id: inline_agent_bridge::harness::InputId::new(message.uuid.as_str())

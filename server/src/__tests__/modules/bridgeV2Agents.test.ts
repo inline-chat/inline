@@ -338,10 +338,20 @@ describe("bridge v2 agent server", () => {
     expect(moved.moved).toBe(true)
     expect(moved.agentSession?.id).toBe(work.id)
     expect(moved.agentSession?.parentChatId).toBe(BigInt(chatId))
-    // A retry converges instead of publishing in both places.
-    expect((await moveAgentSession({ agentSessionId: work.id, destinationPeerId: subPeer }, botId)).moved).toBe(false)
+    expect(moved.agentSession?.state?.revision).toBeGreaterThan(work.state?.revision ?? 0n)
+    // A retry converges without advancing the ordering again.
+    const retried = await moveAgentSession({ agentSessionId: work.id, destinationPeerId: subPeer }, botId)
+    expect(retried.moved).toBe(false)
+    expect(retried.agentSession?.state?.revision).toBe(moved.agentSession?.state?.revision)
+    const grandchild = await testUtils.createChat(null, "Nested work", "thread", false, ownerId)
+    if (!grandchild) throw new Error("nested thread not created")
+    await db.update(chats).set({ parentChatId: sub.id }).where(eq(chats.id, grandchild.id))
+    await Promise.all([ownerId, botId].map((id) => testUtils.addParticipant(grandchild.id, id)))
+    const nestedPeer: InputPeer = { type: { oneofKind: "chat", chat: { chatId: BigInt(grandchild.id) } } }
+    const nested = await moveAgentSession({ agentSessionId: work.id, destinationPeerId: nestedPeer }, botId)
+    expect(nested.agentSession?.state?.revision).toBeGreaterThan(moved.agentSession?.state?.revision ?? 0n)
     // The native identity now resolves to the subthread, and the parent is free again.
-    expect((await connect("first", subPeer)).state).toBe(2)
+    expect((await connect("first", nestedPeer)).state).toBe(2)
     expect((await getAgentSession({ peerId: peer, botUserId: BigInt(botId) }, ownerId)).connection).toBeUndefined()
     // Moves only go into a subthread of the work's current chat.
     await rejects(moveAgentSession({ agentSessionId: work.id, destinationPeerId: peer }, botId), RpcError_Code.BAD_REQUEST)

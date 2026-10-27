@@ -1179,8 +1179,14 @@ impl HoldMachine {
                 }
             }
             (S::HeldElsewhere { pending, .. }, E::ForkHere) => {
-                effects.push(HoldEffect::Fork { pending });
-                S::Released
+                effects.push(HoldEffect::Fork {
+                    pending: pending.clone(),
+                });
+                S::Acquiring {
+                    pending,
+                    offer: Vec::new(),
+                    release: None,
+                }
             }
             (state @ S::HeldElsewhere { .. }, E::ReleaseRequested { request }) => {
                 effects.push(HoldEffect::Released {
@@ -2077,7 +2083,14 @@ mod tests {
                 pending: vec![input("a")]
             }]
         );
-        assert_eq!(machine.state(), &HoldState::Released);
+        assert!(matches!(machine.state(), HoldState::Acquiring { .. }));
+        assert_eq!(
+            machine.handle(HoldEvent::Acquired, 2),
+            [HoldEffect::Deliver {
+                inputs: vec![input("a")]
+            }]
+        );
+        assert!(matches!(machine.state(), HoldState::Held { .. }));
     }
 
     #[test]

@@ -5,7 +5,8 @@
 //! record written but never confirmed is settled by its session (what it
 //! shows it consumed), and one never written is reported to its sender;
 //! nothing is sent again, so input is neither dropped silently nor delivered
-//! twice. Only identities and states are stored, never text.
+//! twice. Pending outbound messages retain their existing stable identity and
+//! body here until Inline acknowledges publication.
 //!
 //! It also keeps each thread's settings (model, reasoning and permission
 //! ids), so a choice made in Agent Settings or by a command survives a
@@ -136,6 +137,21 @@ impl Ledger {
                  settings TEXT NOT NULL,
                  bound TEXT,
                  updated_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS v2_work_moves (
+                 source_chat_id INTEGER PRIMARY KEY,
+                 destination_chat_id INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS v2_input_work (
+                 input_id TEXT PRIMARY KEY,
+                 chat_id INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS v2_outputs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 random_id INTEGER NOT NULL UNIQUE,
+                 chat_id INTEGER NOT NULL,
+                 payload TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
              );",
         )?;
         Ok(Self {
@@ -222,6 +238,111 @@ impl Ledger {
             connection.prepare("SELECT chat_id, settings, bound FROM v2_threads")?;
         let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         rows.collect()
+    }
+
+    /// Retain a work's choices in its destination before asking Inline to move it.
+    /// The source remains intact, including when the operation creates a fork.
+    pub(crate) fn copy_thread(&self, from: i64, to: i64) -> rusqlite::Result<()> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection.execute(
+            "INSERT INTO v2_threads (chat_id, settings, bound, updated_at)
+             SELECT ?2, settings, bound, ?3 FROM v2_threads WHERE chat_id = ?1
+             ON CONFLICT (chat_id) DO UPDATE SET settings = excluded.settings,
+                 bound = excluded.bound, updated_at = excluded.updated_at",
+            params![from, to, now_seconds()],
+        )?;
+        Ok(())
+    }
+
+    /// Canonical work routing changes; input records keep their physical message chat.
+    pub(crate) fn move_thread(&self, from: i64, to: i64) -> rusqlite::Result<()> {
+        self.copy_thread(from, to)?;
+        let mut connection = self.connection.lock().expect("ledger poisoned");
+        let tx = connection.transaction()?;
+        tx.execute(
+            "INSERT INTO v2_input_work (input_id, chat_id)
+                    SELECT input_id, ?2 FROM v2_inputs WHERE chat_id = ?1
+                    ON CONFLICT (input_id) DO NOTHING",
+            params![from, to],
+        )?;
+        tx.execute(
+            "UPDATE v2_input_work SET chat_id = ?2 WHERE chat_id = ?1",
+            params![from, to],
+        )?;
+        tx.execute(
+            "UPDATE v2_work_moves SET destination_chat_id = ?2 WHERE destination_chat_id = ?1",
+            params![from, to],
+        )?;
+        tx.execute(
+            "INSERT INTO v2_work_moves (source_chat_id, destination_chat_id) VALUES (?1, ?2)
+                    ON CONFLICT (source_chat_id) DO UPDATE SET destination_chat_id = ?2",
+            params![from, to],
+        )?;
+        tx.execute(
+            "UPDATE v2_outputs SET chat_id = ?2 WHERE chat_id = ?1",
+            params![from, to],
+        )?;
+        tx.commit()
+    }
+
+    pub(crate) fn input_work(&self, input_id: &str, physical_chat: i64) -> rusqlite::Result<i64> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        Ok(connection
+            .query_row(
+                "SELECT chat_id FROM v2_input_work WHERE input_id = ?1",
+                [input_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(physical_chat))
+    }
+
+    pub(crate) fn forget_move(&self, chat_id: i64) -> rusqlite::Result<()> {
+        self.connection.lock().expect("ledger poisoned").execute(
+            "DELETE FROM v2_work_moves WHERE source_chat_id = ?1",
+            [chat_id],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn moves(&self) -> rusqlite::Result<Vec<(i64, i64)>> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        let mut statement =
+            connection.prepare("SELECT source_chat_id, destination_chat_id FROM v2_work_moves")?;
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect()
+    }
+
+    pub(crate) fn save_output(
+        &self,
+        chat_id: i64,
+        random_id: i64,
+        payload: &str,
+    ) -> rusqlite::Result<()> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection.execute("INSERT INTO v2_outputs (random_id, chat_id, payload, created_at) VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT (random_id) DO UPDATE SET chat_id = ?2, payload = ?3", params![random_id, chat_id, payload, now_seconds()])?;
+        Ok(())
+    }
+
+    pub(crate) fn outputs(&self, chat_id: i64) -> rusqlite::Result<Vec<String>> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        let mut statement =
+            connection.prepare("SELECT payload FROM v2_outputs WHERE chat_id = ?1 ORDER BY id")?;
+        statement.query_map([chat_id], |row| row.get(0))?.collect()
+    }
+
+    pub(crate) fn output_chats(&self) -> rusqlite::Result<Vec<i64>> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        let mut statement = connection.prepare("SELECT DISTINCT chat_id FROM v2_outputs")?;
+        statement.query_map([], |row| row.get(0))?.collect()
+    }
+
+    pub(crate) fn remove_output(&self, random_id: i64) -> rusqlite::Result<()> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection.execute("DELETE FROM v2_outputs WHERE random_id = ?1", [random_id])?;
+        Ok(())
     }
 
     /// Drops settled records older than `max_age_secs`.
@@ -311,6 +432,47 @@ mod tests {
                 r#"{"permission_mode":"default"}"#.to_owned(),
                 Some(r#"["m",null]"#.to_owned())
             )]
+        );
+    }
+    #[test]
+    fn pending_outputs_and_moved_choices_survive_reopening_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ledger.sqlite");
+        {
+            let ledger = Ledger::open(&path).unwrap();
+            ledger.save_thread(7, "plan", Some("bound-model")).unwrap();
+            ledger.begin("original-message", 7, 42, 9).unwrap();
+            ledger.set("original-message", InputState::Unknown).unwrap();
+            // Random IDs sort in the opposite direction from publication order.
+            ledger
+                .save_output(7, 90, "final body and target 7")
+                .unwrap();
+            ledger.save_output(7, 10, "open card").unwrap();
+            ledger
+                .save_output(7, 10, "closed card with the same ID")
+                .unwrap();
+            ledger.move_thread(7, 8).unwrap();
+            ledger.move_thread(8, 11).unwrap();
+        }
+        let ledger = Ledger::open(&path).unwrap();
+        assert_eq!(
+            ledger.outputs(11).unwrap(),
+            vec!["final body and target 7", "closed card with the same ID"]
+        );
+        let choices = ledger.threads().unwrap();
+        for chat in [7, 8, 11] {
+            assert!(choices.contains(&(chat, "plan".into(), Some("bound-model".into()))));
+        }
+        assert!(ledger.moves().unwrap().contains(&(7, 11)));
+        assert_eq!(ledger.get("original-message").unwrap().unwrap().chat_id, 7);
+        ledger.forget_move(7).unwrap();
+        ledger.begin("new-source-work", 7, 43, 9).unwrap();
+        assert_eq!(ledger.input_work("original-message", 7).unwrap(), 11);
+        assert_eq!(ledger.input_work("new-source-work", 7).unwrap(), 7);
+        ledger.remove_output(90).unwrap();
+        assert_eq!(
+            ledger.outputs(11).unwrap(),
+            vec!["closed card with the same ID"]
         );
     }
 }

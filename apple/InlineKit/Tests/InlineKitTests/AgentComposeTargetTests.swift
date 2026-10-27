@@ -149,6 +149,20 @@ struct AgentComposeTargetTests {
     #expect(store.state(peer: destination, botUserID: Self.bot)?.runState == .idle)
   }
 
+  @Test("server revisions order a DM move and an unseen intermediate thread")
+  @MainActor
+  func movedWorkSkipsUnseenAncestors() {
+    let store = AgentWorkStateStore()
+    let source = AgentWorkState.Key(peer: .user(id: 9), botUserID: Self.bot)
+    let destination = AgentWorkState.Key(peer: .thread(id: 12), botUserID: Self.bot)
+    store.apply(AgentWorkState(key: source, sessionID: 3, runState: .working, revision: 5))
+    // The intermediate child (revision 6) has not synced to this device.
+    store.apply(AgentWorkState(key: destination, sessionID: 3, runState: .working, revision: 7, parentChatID: 11))
+    store.apply(AgentWorkState(key: source, sessionID: 3, runState: .idle, revision: 5))
+    #expect(store.state(peer: source.peer, botUserID: Self.bot) == nil)
+    #expect(store.state(peer: destination.peer, botUserID: Self.bot)?.revision == 7)
+  }
+
   @Test("grant requirements: owner always qualifies, access needs any grant")
   func grantRequirements() {
     let owner = AgentGrantAccess(botUserID: Self.bot, ownerUserID: 1, viewerUserID: 1, operations: [], revision: 1)

@@ -26,7 +26,6 @@ use super::decisions;
 use crate::protocol::normalize_usage_limits;
 
 /// Recent turns a resumed thread's consumed inputs are read from.
-const RESTORED_TURNS: usize = 20;
 
 /// Prefix of `clientUserMessageId` values that carry an Inline input id.
 pub(crate) const CLIENT_MESSAGE_PREFIX: &str = "inline-agent-bridge:v2:";
@@ -164,14 +163,13 @@ impl CodexMapper {
     /// instead of resending them.
     pub(crate) fn restore_inputs(&mut self, response: &Value) -> Vec<Event> {
         let mut events = Vec::new();
-        // The recent turns are where an input it was unsure of would be.
+        // A still-unconfirmed input can predate the latest turns.
         for turn in response
             .pointer("/thread/turns")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
             .rev()
-            .take(RESTORED_TURNS)
         {
             let Some(id) = turn_id(turn.get("id")) else {
                 continue;
@@ -1937,5 +1935,27 @@ mod tests {
         );
         // Reported once.
         assert!(mapper.restore_inputs(&response).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod recovery_history_tests {
+    use super::*;
+
+    #[test]
+    fn consumed_input_before_twenty_recent_turns_is_restored() {
+        let mut mapper = CodexMapper::new("review-thread");
+        let input = InputId::new("already-consumed").unwrap();
+        let mut turns = vec![
+            json!({"id":"turn-0", "status":"completed", "items":[{"type":"userMessage", "id":"u1", "clientId":client_message_id(&input), "content":[]} ]}),
+        ];
+        for n in 1..=20 {
+            turns.push(json!({"id":format!("turn-{n}"), "status":"completed", "items":[]}));
+        }
+        assert!(
+            !mapper
+                .restore_inputs(&json!({"thread":{"turns":turns}}))
+                .is_empty()
+        );
     }
 }

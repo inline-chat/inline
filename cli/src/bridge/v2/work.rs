@@ -217,7 +217,7 @@ pub(crate) enum Command {
     /// Inputs a previous run left unconfirmed (input, message): the session
     /// opens to settle them.
     Reconcile {
-        inputs: Vec<(InputId, i64)>,
+        inputs: Vec<(InputId, i64, i64)>,
     },
     /// A tool that acts through the work (spec §4.8).
     Tool {
@@ -275,6 +275,22 @@ pub(crate) fn spawn(
         WorkPhase::None
     });
     let agent_session_id = Arc::new(AtomicI64::new(known.agent_session_id.unwrap_or(0)));
+    let outbox = agent
+        .ledger
+        .outputs(chat_id)
+        .unwrap_or_else(|error| {
+            log::error!(target: "inline::bridge::v2", "cannot restore output queue: {error}");
+            Vec::new()
+        })
+        .into_iter()
+        .filter_map(|payload| match serde_json::from_str(&payload) {
+            Ok(outgoing) => Some(outgoing),
+            Err(error) => {
+                log::error!(target: "inline::bridge::v2", "invalid retained output: {error}");
+                None
+            }
+        })
+        .collect();
     let actor = Actor {
         hold: HoldMachine::new(agent.idle_release()),
         renderer: Renderer::new(output_mode, agent.vocabulary, agent.agent_name.clone()),
@@ -320,7 +336,7 @@ pub(crate) fn spawn(
         answer_to: None,
         unsaved: std::sync::Mutex::new(HashMap::new()),
         uncertain: HashMap::new(),
-        outbox: VecDeque::new(),
+        outbox,
         rendering_turn: None,
     };
     let task = tokio::spawn(actor.run(rx));
@@ -351,6 +367,7 @@ fn text_digest(text: &str) -> String {
 }
 
 /// An answer or card waiting to be posted.
+#[derive(Clone, Serialize, Deserialize)]
 struct Outgoing {
     chat: i64,
     doc: Doc,
@@ -359,11 +376,14 @@ struct Outgoing {
     random_id: i64,
     /// A card's interaction and form, registered once it is posted.
     card: Option<(InteractionId, Option<QuestionForm>)>,
+    #[serde(default)]
+    closed: bool,
 }
 
 /// An input the harness may or may not have.
 #[derive(Clone, Copy, Debug)]
 struct Uncertain {
+    chat_id: i64,
     message_id: i64,
     /// Left by a previous run of the bridge.
     restarted: bool,
@@ -554,10 +574,11 @@ impl Actor {
                 }
             }
             Command::Reconcile { inputs } => {
-                for (input, message_id) in inputs {
+                for (input, chat_id, message_id) in inputs {
                     self.uncertain.insert(
                         input,
                         Uncertain {
+                            chat_id,
                             message_id,
                             restarted: true,
                         },
@@ -1151,17 +1172,12 @@ impl Actor {
                 self.retained.extend(inputs);
                 None
             }
-            HoldEffect::Fork { pending } => match self.fork_here().await {
-                Ok(()) => {
-                    for input in pending {
-                        self.deliver(input).await;
-                    }
-                    None
-                }
+            HoldEffect::Fork { .. } => match self.fork_here().await {
+                Ok(()) => Some(HoldEvent::Acquired),
                 Err(error) => {
                     self.notice(&format!("Could not fork the session: {error}"))
                         .await;
-                    None
+                    Some(HoldEvent::Detached)
                 }
             },
             HoldEffect::Lost => {
@@ -1207,6 +1223,10 @@ impl Actor {
             .map_err(|error| format!("Inline could not create the thread ({error})"))?;
         let from = self.chat_id;
         let destination = created.chat_id.get();
+        self.agent
+            .ledger
+            .copy_thread(from, destination)
+            .map_err(|error| format!("Could not retain thread settings: {error}"))?;
         self.chat_id = destination;
         self.publication = Publication::new(ChatId(destination));
         self.edits.clear();
@@ -1340,9 +1360,8 @@ impl Actor {
     }
 
     /// Inputs whose delivery was unknown are settled when a session opens:
-    /// a resumed session reports what it already consumed or queued, so
-    /// whatever it does not show never arrived. Nothing is sent again; the
-    /// sender hears what happened (spec §4.7).
+    /// a resumed session confirms what it consumed or queued. Missing history
+    /// is not evidence that an input never ran. Nothing is sent again.
     async fn settle_uncertain(&mut self, fresh: bool) {
         if self.uncertain.is_empty() {
             return;
@@ -1362,26 +1381,24 @@ impl Actor {
         for (input, uncertain) in std::mem::take(&mut self.uncertain) {
             let (state, text) = if queued.contains(&input) {
                 (InputState::Accepted, None)
-            } else if fresh {
-                (
-                    InputState::Failed,
-                    Some(format!(
-                        "{} could not confirm whether this ran: its previous session is gone. Send it again if it still needs doing.",
-                        self.agent.agent_name
-                    )),
-                )
             } else {
                 (
-                    InputState::Failed,
+                    InputState::Unknown,
                     Some(format!(
-                        "This did not reach {}. Send it again if it still needs doing.",
-                        self.agent.agent_name
+                        "{} could not confirm whether this ran{}. It may already have run; check its native session before retrying.",
+                        self.agent.agent_name,
+                        if fresh {
+                            ": its previous session is gone"
+                        } else {
+                            ""
+                        }
                     )),
                 )
             };
             self.mark(&input, state);
             if let Some(text) = text {
-                self.reply(uncertain.message_id, &text).await;
+                self.reply_in(uncertain.chat_id, uncertain.message_id, &text)
+                    .await;
             }
         }
     }
@@ -1391,7 +1408,8 @@ impl Actor {
         if let Some(uncertain) = self.uncertain.remove(input)
             && uncertain.restarted
         {
-            self.reply(
+            self.reply_in(
+                uncertain.chat_id,
                 uncertain.message_id,
                 &format!(
                     "This reached {} before the restart. Any reply it gave then is in the session.",
@@ -1575,6 +1593,13 @@ impl Actor {
                 self.uncertain.insert(
                     pending.id.clone(),
                     Uncertain {
+                        chat_id: self
+                            .agent
+                            .ledger
+                            .get(pending.id.as_str())
+                            .ok()
+                            .flatten()
+                            .map_or(self.chat_id, |record| record.chat_id),
                         message_id,
                         restarted: false,
                     },
@@ -1582,7 +1607,7 @@ impl Actor {
                 self.reply(
                     message_id,
                     &format!(
-                        "{} may not have received this ({reason}). It was not sent again; you'll hear here if it did not arrive.",
+                        "{} may not have received this ({reason}). It was not sent again. Check the native session before retrying.",
                         self.agent.agent_name
                     ),
                 )
@@ -1940,6 +1965,9 @@ impl Actor {
             }
         };
         let destination = created.chat_id.get();
+        if let Err(error) = self.agent.ledger.copy_thread(self.chat_id, destination) {
+            return HostToolResult::failure(format!("Could not retain thread settings: {error}"));
+        }
         // Progress still pending lands in the parent before the move.
         self.flush_edits(true).await;
         let effects = self.publication.handle(PublicationEvent::MoveRequested {
@@ -2029,7 +2057,7 @@ impl Actor {
                         // the move happened, so a lost reply is not taken
                         // for a refusal.
                         Err(error) => {
-                            let moved = self
+                            let lookup = self
                                 .agent
                                 .owner
                                 .lookup(proto::GetAgentSessionInput {
@@ -2037,9 +2065,20 @@ impl Actor {
                                     bot_user_id: self.agent.bot_user_id,
                                     ..Default::default()
                                 })
-                                .await
-                                .ok()
-                                .and_then(|result| result.connection)
+                                .await;
+                            let result = match lookup {
+                                Ok(result) => result,
+                                Err(lookup_error) => {
+                                    // Only this work waits. Publication remains fenced while
+                                    // Inline cannot establish where the move committed.
+                                    log::warn!(target: "inline::bridge::v2", "move lookup unavailable, retaining publication fence: {lookup_error}");
+                                    tokio::time::sleep(Duration::from_secs(2)).await;
+                                    queue.push_front(PublicationEffect::CallMove { destination });
+                                    continue;
+                                }
+                            };
+                            let moved = result
+                                .connection
                                 .and_then(|connection| connection.agent_session)
                                 .is_some_and(|session| session.id == card.agent_session_id);
                             if moved {
@@ -2134,6 +2173,7 @@ impl Actor {
                     for input in inputs_consumed {
                         self.mark(input, InputState::Consumed);
                         self.inputs.remove(input);
+                        self.settled(input).await;
                     }
                     if self.turn.as_ref() == Some(turn) {
                         self.turn = None;
@@ -2273,12 +2313,45 @@ impl Actor {
     /// Posts an answer or card; one Inline does not take yet is retried with
     /// the same random ID, now and with each tick, so it lands exactly once.
     async fn publish(&mut self, outgoing: Outgoing) {
+        // Retain every item immediately, even when an earlier item blocks the queue.
+        if let Err(error) = serde_json::to_string(&outgoing)
+            .map_err(|error| error.to_string())
+            .and_then(|payload| {
+                self.agent
+                    .ledger
+                    .save_output(self.chat_id, outgoing.random_id, &payload)
+                    .map_err(|error| error.to_string())
+            })
+        {
+            log::error!(target: "inline::bridge::v2", "cannot retain output: {error}");
+        }
+        self.outbox
+            .retain(|pending| pending.random_id != outgoing.random_id);
         self.outbox.push_back(outgoing);
         self.flush_outbox().await;
     }
 
     async fn flush_outbox(&mut self) {
         while let Some(outgoing) = self.outbox.pop_front() {
+            // Persist before the first attempt, including a closed card's replacement.
+            let saved = serde_json::to_string(&outgoing)
+                .map_err(|error| error.to_string())
+                .and_then(|payload| {
+                    self.agent
+                        .ledger
+                        .save_output(self.chat_id, outgoing.random_id, &payload)
+                        .map_err(|error| error.to_string())
+                });
+            if let Err(error) = saved {
+                log::error!(target: "inline::bridge::v2", "cannot retain output: {error}");
+                self.outbox.push_front(outgoing);
+                return;
+            }
+            // Restore native interactions before exposing their buttons after restart.
+            if outgoing.card.is_some() && self.session.is_none() {
+                self.outbox.push_front(outgoing);
+                return;
+            }
             let mut sent = None;
             for delay in PUBLISH_RETRIES {
                 tokio::time::sleep(delay).await;
@@ -2307,6 +2380,24 @@ impl Actor {
                 self.outbox.push_front(outgoing);
                 return;
             };
+            if outgoing.closed
+                && !self
+                    .edit_in(
+                        outgoing.chat,
+                        message_id,
+                        &outgoing.doc,
+                        Some(proto::MessageActions::default()),
+                    )
+                    .await
+            {
+                self.outbox.push_front(outgoing);
+                return;
+            }
+            if let Err(error) = self.agent.ledger.remove_output(outgoing.random_id) {
+                log::error!(target: "inline::bridge::v2", "cannot settle retained output: {error}");
+                self.outbox.push_front(outgoing);
+                return;
+            }
             self.remember(message_id);
             if let Some((interaction, form)) = outgoing.card {
                 self.card_by_interaction
@@ -2401,6 +2492,7 @@ impl Actor {
                         actions: None,
                         random_id,
                         card: None,
+                        closed: false,
                     })
                     .await;
                 }
@@ -2433,26 +2525,38 @@ impl Actor {
                         actions: buttons,
                         random_id,
                         card: Some((interaction, form)),
+                        closed: false,
                     })
                     .await;
                 }
                 RenderOp::CardClosed { interaction, doc } => {
+                    let random_id = self.output_id("card", Some(interaction.as_str()));
+                    let queued = self
+                        .outbox
+                        .iter()
+                        .find(|outgoing| outgoing.random_id == random_id);
+                    let mut chat = queued.map_or(self.chat_id, |outgoing| outgoing.chat);
                     if let Some(message_id) = self.card_by_interaction.remove(&interaction) {
-                        let chat = self
+                        chat = self
                             .cards
                             .remove(&message_id)
-                            .map_or(self.chat_id, |card| card.chat);
+                            .map_or(chat, |card| card.chat);
                         if self.waiting.is_some_and(|(_, card)| card == message_id) {
                             self.waiting = None;
                         }
-                        self.edit_in(
-                            chat,
-                            message_id,
-                            &doc,
-                            Some(proto::MessageActions::default()),
-                        )
-                        .await;
                     }
+                    // The original send may have committed without a reply. Recover
+                    // its ID with the same key, then clear the live buttons by edit.
+                    self.publish(Outgoing {
+                        chat,
+                        doc,
+                        reply_to: None,
+                        actions: Some(proto::MessageActions::default()),
+                        random_id,
+                        card: None,
+                        closed: true,
+                    })
+                    .await;
                 }
             }
         }
@@ -2595,9 +2699,13 @@ impl Actor {
     }
 
     async fn reply(&self, message_id: i64, text: &str) {
+        self.reply_in(self.chat_id, message_id, text).await;
+    }
+
+    async fn reply_in(&self, chat_id: i64, message_id: i64, text: &str) {
         match api::send_doc(
             &self.agent.bot,
-            self.chat_id,
+            chat_id,
             Some(message_id),
             &paragraph(text),
             None,
@@ -3137,5 +3245,149 @@ mod tests {
             limit_notice("Codex", None, 1_000),
             "Codex reached its usage limit. It can work again when the limit resets."
         );
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod recovery_tests {
+    use super::*;
+    fn actor(agent: Arc<Agent>) -> Actor {
+        let chat_id = 9;
+        let known = Known {
+            agent_session_id: Some(1),
+            native: Some(ProviderSessionId::new("fault-session").unwrap()),
+        };
+        let output_mode = OutputMode::Detailed;
+        let thread_settings = SettingsChange::default();
+        let (tx, _rx) = mpsc::channel(64);
+        let commands = tx.downgrade();
+        let (phase_tx, _phase) = watch::channel(WorkPhase::Idle);
+        let agent_session_id = Arc::new(AtomicI64::new(1));
+        let outbox = agent
+            .ledger
+            .outputs(chat_id)
+            .unwrap_or_else(|error| {
+                log::error!(target: "inline::bridge::v2", "cannot restore output queue: {error}");
+                Vec::new()
+            })
+            .into_iter()
+            .filter_map(|payload| match serde_json::from_str(&payload) {
+                Ok(outgoing) => Some(outgoing),
+                Err(error) => {
+                    log::error!(target: "inline::bridge::v2", "invalid retained output: {error}");
+                    None
+                }
+            })
+            .collect();
+        let actor = Actor {
+            hold: HoldMachine::new(agent.idle_release()),
+            renderer: Renderer::new(output_mode, agent.vocabulary, agent.agent_name.clone()),
+            agent,
+            chat_id,
+            commands,
+            detail: None,
+            publication: Publication::new(ChatId(chat_id)),
+            parent_card: None,
+            parent_card_text: None,
+            agent_session_id: agent_session_id.clone(),
+            native: known.native,
+            session: None,
+            events: None,
+            probe: None,
+            inputs: HashMap::new(),
+            retained: Vec::new(),
+            removing: HashSet::new(),
+            paused: false,
+            stopping: false,
+            turn: None,
+            turn_started: None,
+            waiting: None,
+            live: Default::default(),
+            cards: HashMap::new(),
+            card_by_interaction: HashMap::new(),
+            release_card: None,
+            offers: HashMap::new(),
+            slots: HashMap::new(),
+            edits: HashMap::new(),
+            full: VecDeque::new(),
+            reported: None,
+            phase: phase_tx,
+            started_ms: now_ms(),
+            passive: PassiveBatch::new(chat_id),
+            title: None,
+            rename_pending: false,
+            settings_pending: !settings::effective(&thread_settings).is_empty(),
+            settings: thread_settings,
+            consider: ConsiderQueue::default(),
+            consider_lines: HashMap::new(),
+            answer_replies: HashMap::new(),
+            answer_to: None,
+            unsaved: std::sync::Mutex::new(HashMap::new()),
+            uncertain: HashMap::new(),
+            outbox,
+            rendering_turn: None,
+        };
+        actor
+    }
+
+    pub(crate) async fn pending_output_survives_restart(agent: Arc<Agent>) {
+        let mut work = actor(agent.clone());
+        work.render(vec![RenderOp::Final {
+            doc: paragraph("retained final"),
+        }])
+        .await;
+        assert_eq!(work.outbox.len(), 1);
+        let final_id = work.outbox[0].random_id;
+        drop(work);
+        let mut work = actor(agent.clone());
+        assert_eq!(work.outbox[0].random_id, final_id);
+        assert_eq!(work.outbox[0].doc.text, "retained final");
+        // A live card cannot post without an adopted native interaction.
+        let interaction = InteractionId::new("pending-approval").unwrap();
+        work.render(vec![RenderOp::Card {
+            interaction: interaction.clone(),
+            doc: paragraph("Approve?"),
+            actions: vec![],
+            form: None,
+        }])
+        .await;
+        let card_id = work.output_id("card", Some(interaction.as_str()));
+        work.render(vec![RenderOp::CardClosed {
+            interaction,
+            doc: paragraph("Cancelled"),
+        }])
+        .await;
+        drop(work);
+        let work = actor(agent);
+        let closed = work
+            .outbox
+            .iter()
+            .find(|out| out.random_id == card_id)
+            .unwrap();
+        assert!(closed.closed);
+        assert!(closed.card.is_none());
+        assert_eq!(closed.doc.text, "Cancelled");
+        assert!(work.waiting.is_none());
+    }
+
+    pub(crate) async fn unavailable_move_lookup_keeps_publication_fenced(agent: Arc<Agent>) {
+        let mut work = actor(agent);
+        let effects = work.publication.handle(PublicationEvent::MoveRequested {
+            destination: ChatId(10),
+        });
+        let card = ParentCard {
+            title: "child".into(),
+            summary: None,
+            agent_session_id: 1,
+        };
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                work.publication_effects(effects, Some(&card))
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(work.publication.chat(), None);
     }
 }

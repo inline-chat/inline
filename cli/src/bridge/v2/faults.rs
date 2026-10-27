@@ -317,7 +317,7 @@ async fn an_unknown_delivery_is_settled_by_the_session_never_resent() {
 }
 
 #[tokio::test]
-async fn after_a_restart_the_session_settles_what_it_consumed_and_what_never_arrived() {
+async fn restart_accepts_positive_receipts_and_keeps_unconfirmed_input_unknown() {
     let (mut runtime, harness, _cleanup) = fixture(false);
     let (ran, _) = input(&runtime, 13);
     let (lost, _) = input(&runtime, 14);
@@ -333,7 +333,7 @@ async fn after_a_restart_the_session_settles_what_it_consumed_and_what_never_arr
     runtime.recover().await;
     until(|| {
         state(&runtime, &ran) == Some(InputState::Consumed)
-            && state(&runtime, &lost) == Some(InputState::Failed)
+            && state(&runtime, &lost) == Some(InputState::Unknown)
     })
     .await;
     assert!(matches!(
@@ -369,4 +369,112 @@ async fn a_thread_permission_choice_survives_a_restart() {
         Some("plan")
     );
     cleanup.tasks.push(restarted.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
+async fn a_stream_gap_is_not_proof_of_non_delivery() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    let (ran, _) = input(&runtime, 81);
+    runtime.agent.ledger.set(&ran, InputState::Unknown).unwrap();
+    harness.session.hub.emit(Event::Input {
+        id: InputId::new(ran.clone()).unwrap(),
+        fact: InputFact::Consumed {
+            turn: TurnId::new("already-ran").unwrap(),
+        },
+    });
+    // The actual bounded EventHub now reports a gap before its retained tail.
+    for _ in 0..40 {
+        harness.session.hub.emit(Event::State {
+            state: inline_agent_bridge::harness::RunState::Idle,
+        });
+    }
+    runtime.recover().await;
+    until(|| !harness.opened.lock().unwrap().is_empty()).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(state(&runtime, &ran), Some(InputState::Unknown));
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 0);
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
+async fn completed_turn_consumption_remains_consumed() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    let (ran, _) = input(&runtime, 82);
+    runtime.agent.ledger.set(&ran, InputState::Unknown).unwrap();
+    harness.session.hub.emit(Event::Turn {
+        turn: TurnId::new("already-completed").unwrap(),
+        phase: inline_agent_bridge::harness::TurnPhase::Completed {
+            outcome: inline_agent_bridge::TurnOutcome::Completed,
+            inputs_consumed: vec![InputId::new(ran.clone()).unwrap()],
+            error: None,
+            duration_ms: None,
+        },
+    });
+    runtime.recover().await;
+    until(|| state(&runtime, &ran) == Some(InputState::Consumed)).await;
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 0);
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
+async fn moved_work_keeps_permissions_on_restart() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    let reply = runtime
+        .command(9, 1, Grants::OWNER, "permissions", "plan")
+        .await;
+    assert!(reply.contains("Set for this thread"));
+    runtime.ensure_work(9, None).await.unwrap();
+    runtime.moved_work(9, 10);
+    cleanup.tasks.push(runtime.works.remove(&10).unwrap().task);
+    drop(runtime);
+    let mut restarted = super::faults::runtime(&mut cleanup, harness.clone());
+    restarted.ensure_work(10, None).await.unwrap();
+    let (_, command) = input(&restarted, 83);
+    restarted.works[&10].tx.send(command).await.unwrap();
+    until(|| !harness.opened.lock().unwrap().is_empty()).await;
+    assert_eq!(
+        harness
+            .opened
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .settings
+            .permission_mode
+            .as_deref(),
+        Some("plan"),
+        "the destination retains the saved permission mode"
+    );
+    cleanup
+        .tasks
+        .push(restarted.works.remove(&10).unwrap().task);
+}
+
+#[tokio::test]
+async fn pending_final_and_closed_card_recover_after_actor_restart() {
+    let (runtime, _, _cleanup) = fixture(false);
+    work::recovery_tests::pending_output_survives_restart(runtime.agent.clone()).await;
+}
+
+struct UnreachableOwner;
+impl OwnerCalls for UnreachableOwner {
+    fn connect(
+        &self,
+        _: proto::ConnectAgentSessionInput,
+    ) -> futures_util::future::BoxFuture<'_, Result<proto::ConnectAgentSessionResult, String>> {
+        Box::pin(async { Err("owner connection unavailable".into()) })
+    }
+    fn lookup(
+        &self,
+        _: proto::GetAgentSessionInput,
+    ) -> futures_util::future::BoxFuture<'_, Result<proto::GetAgentSessionResult, String>> {
+        Box::pin(async { Err("owner connection unavailable".into()) })
+    }
+}
+#[tokio::test]
+async fn unavailable_canonical_lookup_does_not_reopen_source_publication() {
+    let (mut runtime, _, _cleanup) = fixture(false);
+    Arc::get_mut(&mut runtime.agent).unwrap().owner = Arc::new(UnreachableOwner);
+    work::recovery_tests::unavailable_move_lookup_keeps_publication_fenced(runtime.agent.clone())
+        .await;
 }

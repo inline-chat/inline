@@ -8,7 +8,7 @@ use inline_agent_bridge::harness::{FieldInput, QuestionForm};
 use inline_protocol::proto;
 
 /// One message: fallback text plus structured blocks.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Doc {
     pub text: String,
     pub blocks: Vec<proto::Block>,

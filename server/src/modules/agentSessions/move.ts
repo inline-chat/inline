@@ -1,3 +1,4 @@
+import { AgentSessionState } from "@inline-chat/protocol/core"
 import type { MoveAgentSessionInput, MoveAgentSessionResult } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -7,6 +8,7 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { and, eq } from "drizzle-orm"
 import { agentSessionChatUpdate, encodeAgentSessionForViewer } from "./state"
+import { decryptAgentSessionState, encryptAgentSessionState } from "./stateFields"
 
 /**
  * Moves a work's canonical publication chat into a subthread of its current
@@ -51,8 +53,14 @@ export async function moveAgentSession(
       .where(and(eq(agentSessions.chatId, destination.id), eq(agentSessions.botUserId, current.botUserId))).limit(1)
     if (occupied) throw RealtimeRpcError.BadRequest()
 
+    // Cross-chat buckets can arrive in either order, including skipped ancestors.
+    // Advance the existing revision so every client orders canonical locations alike.
+    const stateRevision = current.stateRevision + 1n
+    const state = decryptAgentSessionState(current.stateEncrypted)
+      ?? AgentSessionState.create({ runState: current.runState })
+    state.revision = stateRevision
     const [row] = await tx.update(agentSessions)
-      .set({ chatId: destination.id, updatedAt: new Date() })
+      .set({ chatId: destination.id, stateRevision, stateEncrypted: encryptAgentSessionState(state), updatedAt: new Date() })
       .where(eq(agentSessions.id, current.id))
       .returning()
     if (!row) throw RealtimeRpcError.InternalError()
