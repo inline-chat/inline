@@ -39,6 +39,14 @@ use super::work::{
 const DEFAULT_HEARTBEAT: Duration = Duration::from_secs(60);
 /// How often the bot's Inline connection is checked.
 const CONNECTION_CHECK: Duration = Duration::from_secs(5);
+const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(300);
+
+/// Backoff for resuming a client that stopped receiving events.
+#[derive(Default)]
+struct Reconnect {
+    delay: Duration,
+    next: Option<tokio::time::Instant>,
+}
 /// Messages of a group thread an agent sees when it joins.
 const JOIN_CONTEXT_MESSAGES: u32 = 40;
 const JOIN_CONTEXT_BYTES: usize = 24 * 1024;
@@ -151,6 +159,7 @@ pub(crate) struct Runtime {
     /// reach it. Messages there never do: the parent may start its own work.
     moved: HashMap<i64, i64>,
     moves: Option<mpsc::UnboundedReceiver<(i64, i64)>>,
+    reconnect: Reconnect,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
     loop_guards: LoopGuards,
@@ -200,6 +209,7 @@ impl Runtime {
             works: HashMap::new(),
             moved: HashMap::new(),
             moves: Some(moves),
+            reconnect: Reconnect::default(),
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
             loop_guards: LoopGuards::default(),
@@ -422,13 +432,17 @@ impl Runtime {
                 self.answer(*interaction_id, toast).await;
                 Ok(())
             }
-            // A work thread renamed in Inline renames its native session.
+            // The agent's own work thread (a subthread: `/new` or
+            // start_subthread) renamed in Inline renames its native session.
+            // A group thread gave its title once, at the start (spec §15.7).
             ClientEvent::ChatUpserted { chat_id } => {
                 if let Some(work) = self.works.get(&chat_id.get())
                     && let Ok(state) = self.agent.bot.chat_state(*chat_id).await
                     && let Some(title) = state
                         .dialog
-                        .filter(|dialog| dialog.peer_user_id.is_none())
+                        .filter(|dialog| {
+                            dialog.peer_user_id.is_none() && dialog.parent_chat_id.is_some()
+                        })
                         .and_then(|dialog| dialog.title)
                         .filter(|title| !title.trim().is_empty())
                 {
@@ -489,11 +503,20 @@ impl Runtime {
     /// The client stops receiving events after a failure it does not retry
     /// on its own. Resuming it restarts delivery where it stopped, so the
     /// agent never goes quiet without a trace.
-    async fn keep_connected(&self) {
+    async fn keep_connected(&mut self) {
         let snapshot = self.agent.bot.status_snapshot();
         if snapshot.status != ClientStatus::Disconnected {
+            self.reconnect = Reconnect::default();
             return;
         }
+        // A failure that keeps coming back is retried less and less often.
+        let now = tokio::time::Instant::now();
+        if self.reconnect.next.is_some_and(|next| now < next) {
+            return;
+        }
+        self.reconnect.delay =
+            (self.reconnect.delay * 2).clamp(CONNECTION_CHECK, MAX_RECONNECT_DELAY);
+        self.reconnect.next = Some(now + self.reconnect.delay);
         log::warn!(
             target: "inline::bridge::v2",
             "Inline connection lost ({}); resuming",
