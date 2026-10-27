@@ -1,7 +1,7 @@
-import { and, eq, inArray } from "drizzle-orm"
+import { and, eq, inArray, isNull, lt, ne } from "drizzle-orm"
 import { MessageEntity_Type, type MessageEntities } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
-import { chats, users, type DbChat } from "@in/server/db/schema"
+import { chats, messages, users, type DbChat } from "@in/server/db/schema"
 import { getChatById, getReplyThreadAnchorSenderId, isReplyThread } from "@in/server/modules/subthreads"
 
 export const FRESH_NORMAL_THREAD_MESSAGE_ID_LIMIT = 15
@@ -104,6 +104,26 @@ export function isBotCommandMessage(entities: MessageEntities | undefined): bool
   return entities?.entities.some((entity) => entity.type === MessageEntity_Type.BOT_COMMAND) ?? false
 }
 
+/**
+ * Whether someone else wrote in the chat before this message. In a thread no ordinary message has
+ * opened yet, that earlier message was a command, so a bot writing now is answering it.
+ */
+async function hasEarlierMessageFromOthers(chatId: number, senderId: number, messageId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ messageId: messages.messageId })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.chatId, chatId),
+        lt(messages.messageId, messageId),
+        ne(messages.fromId, senderId),
+        isNull(messages.systemMessageEncrypted),
+      ),
+    )
+    .limit(1)
+  return row !== undefined
+}
+
 async function getBotUserIds(userIds: Iterable<number>): Promise<Set<number>> {
   const ids = Array.from(new Set(userIds))
   if (ids.length === 0) {
@@ -152,7 +172,17 @@ export async function resolveThreadAutoFollowUserIds(input: {
 }): Promise<number[]> {
   const { chat, currentUserId, eligibleUserIds, newMessageId, addressedUserIds } = input
   const humanRuleApplies = shouldAutoFollowThreadMessage(chat, newMessageId)
-  const isOpener = !input.isCommand && (await claimThreadOpener(chat))
+  const mayOpen = !input.isCommand && canUseThreadFollowMode(chat) && !chat.conversationStarted
+  let senderIsBot = input.senderIsBot
+  if (mayOpen && senderIsBot === undefined) {
+    senderIsBot = (await getBotUserIds([currentUserId])).has(currentUserId)
+  }
+  // A bot's answer to a command is part of that command, so it doesn't open the thread either;
+  // a bot that writes first, like a thread it starts for its own answer, still does.
+  const answersCommand =
+    mayOpen && senderIsBot === true && typeof newMessageId === "number" &&
+    (await hasEarlierMessageFromOthers(chat.id, currentUserId, newMessageId))
+  const isOpener = mayOpen && !answersCommand && (await claimThreadOpener(chat))
   if (!humanRuleApplies && !isOpener) {
     return []
   }
@@ -160,12 +190,12 @@ export async function resolveThreadAutoFollowUserIds(input: {
   const anchorSenderId = isReplyThread(chat) ? await getReplyThreadAnchorSenderId(chat) : undefined
   const otherMemberId = eligibleUserIds.size === 2 ? Array.from(eligibleUserIds).find((id) => id !== currentUserId) : undefined
   const botUserIds = await getBotUserIds([
-    ...(input.senderIsBot === undefined ? [currentUserId] : []),
+    ...(senderIsBot === undefined ? [currentUserId] : []),
     ...addressedUserIds,
     ...(anchorSenderId !== undefined ? [anchorSenderId] : []),
     ...(otherMemberId !== undefined ? [otherMemberId] : []),
   ])
-  const senderIsBot = input.senderIsBot ?? botUserIds.has(currentUserId)
+  senderIsBot ??= botUserIds.has(currentUserId)
   const followUserIds = new Set<number>()
 
   if (humanRuleApplies) {

@@ -324,6 +324,24 @@ describe("bots enter a thread through its opening message", () => {
     expect(await followMode(chat.id, chief.id)).toBeNull()
   })
 
+  test("a bot's answer to a command doesn't open the thread either", async () => {
+    await db.insert(botCommands).values({ botUserId: chief.id, command: "status", description: "Status" }).onConflictDoNothing()
+    const chat = await createThread([owner, alice, chief, scout])
+    await send(owner.id, chat.id, "/status", command("/status", chief.id))
+    await send(chief.id, chat.id, "Ready.", undefined, true)
+    await send(owner.id, chat.id, "@scout research this", mentions({ userId: scout.id, offset: 0, length: 6 }))
+
+    expect(await followMode(chat.id, chief.id)).toBeNull()
+    expect(await followMode(chat.id, scout.id)).toBe("following")
+  })
+
+  test("a bot that writes a thread's first message still follows it", async () => {
+    const chat = await createThread([owner, alice, chief, scout])
+    await send(chief.id, chat.id, "Here's the launch plan.", undefined, true)
+
+    expect(await followMode(chat.id, chief.id)).toBe("following")
+  })
+
   test("in a thread with one bot, a command doesn't assign it but the next message does", async () => {
     await db.insert(botCommands).values({ botUserId: chief.id, command: "status", description: "Status" }).onConflictDoNothing()
     const chat = await createThread([owner, chief])
