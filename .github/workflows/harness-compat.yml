@@ -105,7 +105,7 @@ jobs:
           if-no-files-found: ignore
 
   end-to-end:
-    name: Inline, bridge v2 and Codex end to end
+    name: Inline, bridge v2, Codex and Claude Code end to end
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -135,14 +135,15 @@ jobs:
           bun-version: '1.4.0'
       - name: Install native test dependencies
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - name: Install Codex
+      - name: Install Codex and Claude Code
         run: |
-          npm install --global "@openai/codex@latest"
+          npm install --global "@openai/codex@latest" "@anthropic-ai/claude-code@latest"
           codex --version
+          claude --version
       - run: bun install --frozen-lockfile
       - name: Build the CLI tests
         run: cargo test --locked -p inline-cli --no-run
-      - name: DM, approval, answer and release through the real runtime
+      - name: DM, tools, approval, subthread and release through the real runtime
         working-directory: server
         env:
           INLINE_E2E: "1"

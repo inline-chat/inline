@@ -6,12 +6,12 @@ import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 
-// The bridge v2 end-to-end run: this side creates an owner, their bot and
+// The bridge v2 end-to-end runs: this side creates an owner, their bot and
 // their DM, serves realtime, and runs the Rust side
-// (`cli/src/bridge/v2/e2e.rs`), which drives the real v2 runtime and a real
-// `codex app-server` against a local fake model. Discovered only with
-// INLINE_E2E=1 (see scripts/test-discovery.ts); it needs Codex installed and
-// builds the CLI tests.
+// (`cli/src/bridge/v2/e2e.rs`), which drives the real v2 runtime and the real
+// harness (`codex app-server`, or `claude`) against a local fake model.
+// Discovered only with INLINE_E2E=1 (see scripts/test-discovery.ts); it needs
+// Codex and Claude Code installed and builds the CLI tests.
 setupTestLifecycle()
 
 describe("bridge v2 end to end", () => {
@@ -27,7 +27,7 @@ describe("bridge v2 end to end", () => {
     app?.server?.stop?.()
   })
 
-  test("a DM runs Codex, asks for approval, answers and releases", async () => {
+  async function runRustSide(testName: string) {
     const suffix = crypto.randomUUID()
     const owner = await testUtils.createUser(`bridge-v2-owner-${suffix}@example.test`)
     const bot = await testUtils.createUser(`bridge-v2-bot-${suffix}@example.test`)
@@ -45,7 +45,7 @@ describe("bridge v2 end to end", () => {
     const origin = `127.0.0.1:${app.server.port}`
     const repo = path.resolve(import.meta.dir, "../../../..")
     const cargo = Bun.spawn(
-      ["cargo", "test", "-j", "2", "-p", "inline-cli", "bridge::v2::e2e::codex_round_trip_through_inline",
+      ["cargo", "test", "-j", "2", "-p", "inline-cli", `bridge::v2::e2e::${testName}`,
         "--", "--ignored", "--exact", "--nocapture"],
       {
         cwd: repo,
@@ -65,5 +65,13 @@ describe("bridge v2 end to end", () => {
       },
     )
     expect(await cargo.exited).toBe(0)
+  }
+
+  test("Codex: a DM answers, uses Inline tools, asks for approval and releases; a group work moves into a subthread", async () => {
+    await runRustSide("codex_round_trip_through_inline")
+  }, 30 * 60_000)
+
+  test("Claude Code: a DM answers, uses Inline tools, asks for approval and releases", async () => {
+    await runRustSide("claude_round_trip_through_inline")
   }, 30 * 60_000)
 })

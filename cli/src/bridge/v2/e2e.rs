@@ -16,8 +16,9 @@ use std::time::Duration;
 
 use inline_agent_bridge::harness::{ExecutableSource, HarnessDriver};
 use inline_client::{
-    AuthCredential, AuthToken, ClientIdentity, ConnectRequest, HistoryRequest, InlineClient,
-    InlineId, MessageContent, PeerRef, SdkBackend, SendTextRequest, SqliteStore,
+    AuthCredential, AuthToken, ChatCreateParticipant, ClientIdentity, ConnectRequest,
+    CreateThreadRequest, HistoryRequest, InlineClient, InlineId, MessageContent, PeerRef,
+    SdkBackend, SendTextRequest, SqliteStore,
 };
 use inline_protocol::proto;
 use serde_json::{Value, json};
@@ -26,7 +27,14 @@ use tokio::net::{TcpListener, TcpStream};
 
 use super::render::Vocabulary;
 use super::runtime::{Runtime, V2Config};
+use super::tools::{Tools, ToolsConfig};
 use super::work::OwnerCalls;
+
+// The Claude driver's fake Messages API: replies follow `@text` and `@tool`
+// directives in the user's message.
+#[allow(dead_code)]
+#[path = "../../../../crates/agent-driver-claude/tests/support/fake_messages.rs"]
+mod fake_messages;
 
 fn env(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} is required"))
@@ -96,7 +104,13 @@ impl FakeModel {
             requests.push(json!({
                 "request": request_line.trim(),
                 "model": body.get("model"),
-                "tools": body.get("tools").and_then(Value::as_array).map(Vec::len),
+                "last_input": body.get("input").and_then(Value::as_array).and_then(|input| input.last().cloned()),
+                "tools": body.get("tools").and_then(Value::as_array).map(|tools| {
+                    tools
+                        .iter()
+                        .map(|tool| tool.get("name").or(tool.get("type")).cloned())
+                        .collect::<Vec<_>>()
+                }),
             }));
             requests.len()
         };
@@ -215,8 +229,31 @@ async fn bot_texts(owner: &InlineClient, chat_id: i64, bot_user_id: i64) -> Vec<
         .collect()
 }
 
+/// What the fake model saw, for failure messages.
+trait Seen {
+    fn seen(&self) -> String;
+}
+
+impl Seen for FakeModel {
+    fn seen(&self) -> String {
+        format!("{:#?}", self.requests.lock().unwrap())
+    }
+}
+
+impl Seen for fake_messages::FakeMessages {
+    fn seen(&self) -> String {
+        format!(
+            "{:#?}",
+            self.served()
+                .iter()
+                .map(fake_messages::Served::summary)
+                .collect::<Vec<_>>()
+        )
+    }
+}
+
 async fn wait_for(
-    model: &FakeModel,
+    model: &dyn Seen,
     owner: &InlineClient,
     chat_id: i64,
     bot_user_id: i64,
@@ -231,8 +268,8 @@ async fn wait_for(
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "timed out waiting for {what}; bot said: {texts:#?}; model saw: {:#?}",
-            model.requests.lock().unwrap()
+            "timed out waiting for {what}; bot said: {texts:#?}; model saw: {}",
+            model.seen()
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -255,7 +292,7 @@ async fn send(owner: &InlineClient, chat_id: i64, text: &str) {
 async fn codex_round_trip_through_inline() {
     let _ = env_logger::builder()
         .is_test(true)
-        .parse_filters("inline::bridge::v2=debug,inline_agent_driver_codex=debug")
+        .parse_filters("inline::bridge::v2=debug,inline_agent_driver_codex=debug,inline_client=info")
         .try_init();
     let bot_user_id: i64 = env("INLINE_V2_E2E_BOT_USER_ID").parse().unwrap();
     let owner_user_id: i64 = env("INLINE_V2_E2E_OWNER_USER_ID").parse().unwrap();
@@ -265,11 +302,20 @@ async fn codex_round_trip_through_inline() {
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("README.md"), "e2e project\n").unwrap();
 
-    // Turn 1 answers directly. Turn 2 runs a command that needs approval,
-    // then answers.
+    // Turn 1 answers directly. Turn 2 uses Inline tools. Turn 3 runs a
+    // command that needs approval, then answers. In a group thread, the agent
+    // then moves its work into a subthread and keeps answering there.
+    let inline_tool = |name: &str, arguments: Value| {
+        json!({"type": "function_call", "call_id": format!("call-{name}-{}", uuid::Uuid::new_v4()),
+            "namespace": "inline", "name": name, "arguments": arguments.to_string()})
+    };
     let (model, base_url) = FakeModel::start(vec![
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_ANSWER_ONE"}]}),
+        inline_tool("send_message", json!({"text": "E2E_TOOL_SENT"})),
+        inline_tool("get_current_context", json!({})),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_TOOLS_DONE"}]}),
         // Escalation makes Codex ask for approval before running it.
         json!({"type": "function_call", "call_id": "call-1", "name": "exec_command",
             "arguments": json!({"cmd": "echo E2E_RAN > ran.txt",
@@ -278,6 +324,16 @@ async fn codex_round_trip_through_inline() {
                 "workdir": folder.display().to_string()}).to_string()}),
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_ANSWER_TWO"}]}),
+        inline_tool(
+            "start_subthread",
+            json!({"title": "E2E sub", "summary": "Moved for the long part"}),
+        ),
+        inline_tool("send_message", json!({"text": "E2E_IN_SUBTHREAD"})),
+        inline_tool("report_status", json!({"text": "Halfway"})),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_SUB_DONE"}]}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_SUB_REPLY"}]}),
     ])
     .await;
     let codex_home = dir.path().join("codex-home");
@@ -296,22 +352,32 @@ async fn codex_round_trip_through_inline() {
     unsafe { isolate_codex(&codex_home) };
 
     let executable = which_codex();
-    let harness: Arc<dyn HarnessDriver> =
-        Arc::new(inline_agent_driver_codex::harness::CodexHarness::new(
-            inline_agent_driver_codex::harness::CodexHarnessConfig {
-                launch: inline_agent_driver_codex::CodexLaunchConfig {
-                    executable: executable.clone(),
-                    ..Default::default()
-                },
-                source: ExecutableSource::Path,
-                pinned_sha256: None,
-                bridge_version: env!("CARGO_PKG_VERSION").to_owned(),
-                cache_root: dir.path().join("cache"),
-            },
-        ));
-
     let owner = client(dir.path(), "owner", &env("INLINE_V2_E2E_OWNER_TOKEN")).await;
     let bot = client(dir.path(), "bot", &env("INLINE_V2_E2E_BOT_TOKEN")).await;
+    let tools = Tools::new(ToolsConfig {
+        bot: bot.clone(),
+        provider: inline_agent_bridge::ProviderId::new("codex").unwrap(),
+        bot_user_id,
+        owner_user_id,
+        agent_name: "Codex".to_owned(),
+        folder: folder.clone(),
+        attachments_dir: dir.path().join("attachments"),
+    });
+    let codex = inline_agent_driver_codex::harness::CodexHarness::new(
+        inline_agent_driver_codex::harness::CodexHarnessConfig {
+            launch: inline_agent_driver_codex::CodexLaunchConfig {
+                executable: executable.clone(),
+                ..Default::default()
+            },
+            source: ExecutableSource::Path,
+            pinned_sha256: None,
+            bridge_version: env!("CARGO_PKG_VERSION").to_owned(),
+            cache_root: dir.path().join("cache"),
+        },
+    );
+    codex.configure_host_tools(tools.configuration());
+    let harness: Arc<dyn HarnessDriver> = Arc::new(codex);
+
     let mut events = bot.take_lossless_events().unwrap();
     let runtime = Runtime::new(
         V2Config {
@@ -333,6 +399,7 @@ async fn codex_round_trip_through_inline() {
         bot.clone(),
         Arc::new(OwnerClient(owner.clone())),
         harness,
+        Some(tools),
     )
     .unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
@@ -379,7 +446,32 @@ async fn codex_round_trip_through_inline() {
         .map(|session| session.id)
         .unwrap();
 
-    // 2. A command needs approval: the card carries Codex's own choices, and
+    // 2. Inline tools act as the agent: a message sent by the tool arrives,
+    // and the context names this work's thread.
+    send(&owner, chat_id, "Use your tools").await;
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the tool turn",
+        |texts| {
+            texts.iter().any(|(_, text)| text.contains("E2E_TOOL_SENT"))
+                && texts
+                    .iter()
+                    .any(|(_, text)| text.contains("E2E_TOOLS_DONE"))
+        },
+    )
+    .await;
+    assert!(
+        tool_outputs(&model)
+            .iter()
+            .any(|output| output.contains(&format!("\"chat_id\":{chat_id}"))),
+        "get_current_context names the DM: {:#?}",
+        tool_outputs(&model)
+    );
+
+    // 3. A command needs approval: the card carries Codex's own choices, and
     // the owner's approval runs it.
     send(&owner, chat_id, "Run the check").await;
     let texts = wait_for(
@@ -461,7 +553,7 @@ async fn codex_round_trip_through_inline() {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
-    // 3. /release hands the session back with a resume command.
+    // 4. /release hands the session back with a resume command.
     send(&owner, chat_id, "/release").await;
     wait_for(
         &model,
@@ -473,12 +565,132 @@ async fn codex_round_trip_through_inline() {
     )
     .await;
 
+    // 5. In a group thread, a mention starts a work that moves itself into a
+    // subthread; the parent keeps a card and the work goes on there.
+    let group = owner
+        .create_thread(CreateThreadRequest {
+            title: Some("E2E group".to_owned()),
+            space_id: None,
+            description: None,
+            emoji: None,
+            is_public: false,
+            participants: vec![
+                ChatCreateParticipant::from(InlineId::new(owner_user_id)),
+                ChatCreateParticipant::from(InlineId::new(bot_user_id)),
+            ],
+        })
+        .await
+        .unwrap()
+        .chat_id
+        .get();
+    let mut mention = SendTextRequest::new(
+        PeerRef::Chat {
+            chat_id: InlineId::new(group),
+        },
+        format!("[@Codex](inline://user?id={bot_user_id}) take this to a subthread"),
+    );
+    mention.parse_markdown = true;
+    owner.send_text(mention).await.unwrap();
+    wait_for(
+        &model,
+        &owner,
+        group,
+        bot_user_id,
+        "the parent card",
+        |texts| texts.iter().any(|(_, text)| text.contains("continues in")),
+    )
+    .await;
+    let subthread = tool_outputs(&model)
+        .iter()
+        .filter_map(|output| serde_json::from_str::<Value>(output).ok())
+        .find(|output| output.get("link").is_some())
+        .and_then(|output| output["chat_id"].as_i64())
+        .expect("start_subthread returned the subthread");
+    wait_for(
+        &model,
+        &owner,
+        subthread,
+        bot_user_id,
+        "output in the subthread",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_IN_SUBTHREAD"))
+                && texts.iter().any(|(_, text)| text.contains("E2E_SUB_DONE"))
+        },
+    )
+    .await;
+    let parent = bot_texts(&owner, group, bot_user_id).await;
+    assert!(
+        !parent.iter().any(|(_, text)| text.contains("E2E_SUB_DONE")),
+        "the answer went to the subthread only: {parent:#?}"
+    );
+    wait_for(
+        &model,
+        &owner,
+        group,
+        bot_user_id,
+        "the status on the parent card",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("Status: Halfway"))
+                && texts
+                    .iter()
+                    .any(|(_, text)| text.contains("Continued in the subthread."))
+        },
+    )
+    .await;
+    // The server publishes the work in the subthread now.
+    let moved = owner
+        .get_agent_session(proto::GetAgentSessionInput {
+            peer_id: Some(super::api::chat_peer(subthread)),
+            bot_user_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(
+        moved
+            .connection
+            .is_some_and(|connection| !connection.session_ref.is_empty()),
+        "the work is recorded in the subthread"
+    );
+    // A plain reply in the subthread reaches the same work.
+    send(&owner, subthread, "Keep going here").await;
+    wait_for(
+        &model,
+        &owner,
+        subthread,
+        bot_user_id,
+        "the subthread reply",
+        |texts| texts.iter().any(|(_, text)| text.contains("E2E_SUB_REPLY")),
+    )
+    .await;
+
     let _ = stop.send(());
     let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
     assert!(
         matches!(outcome, Ok(Ok(Ok(())))),
         "runtime ended cleanly: {outcome:?}"
     );
+}
+
+/// Outputs of Inline tool calls, as the model received them.
+fn tool_outputs(model: &FakeModel) -> Vec<String> {
+    model
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|request| request.get("last_input"))
+        .filter(|input| input.get("type") == Some(&json!("function_call_output")))
+        .filter_map(|input| match input.get("output") {
+            Some(Value::String(text)) => Some(text.clone()),
+            Some(other) => Some(other.to_string()),
+            None => None,
+        })
+        .collect()
 }
 
 /// The first approval button on a card.
@@ -505,6 +717,214 @@ async fn approve_action(owner: &InlineClient, chat_id: i64, message_id: i64) -> 
         .expect("the card has decision buttons")
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs the server side of the bridge v2 end-to-end test"]
+async fn claude_round_trip_through_inline() {
+    let _ = env_logger::builder()
+        .is_test(true)
+        .parse_filters("inline::bridge::v2=debug,inline_agent_driver_claude=debug,inline_client=info")
+        .try_init();
+    let bot_user_id: i64 = env("INLINE_V2_E2E_BOT_USER_ID").parse().unwrap();
+    let owner_user_id: i64 = env("INLINE_V2_E2E_OWNER_USER_ID").parse().unwrap();
+    let chat_id: i64 = env("INLINE_V2_E2E_DM_CHAT_ID").parse().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("project");
+    std::fs::create_dir_all(&folder).unwrap();
+    let api = fake_messages::FakeMessages::start().await;
+    let executable = which("claude", "INLINE_V2_E2E_CLAUDE");
+
+    let owner = client(dir.path(), "owner", &env("INLINE_V2_E2E_OWNER_TOKEN")).await;
+    let bot = client(dir.path(), "bot", &env("INLINE_V2_E2E_BOT_TOKEN")).await;
+    let tools = Tools::new(ToolsConfig {
+        bot: bot.clone(),
+        provider: inline_agent_bridge::ProviderId::new("claude").unwrap(),
+        bot_user_id,
+        owner_user_id,
+        agent_name: "Claude".to_owned(),
+        folder: folder.clone(),
+        attachments_dir: dir.path().join("attachments"),
+    });
+    let mut config = inline_agent_driver_claude::harness::ClaudeHarnessConfig::new(
+        executable.clone(),
+        env!("CARGO_PKG_VERSION"),
+    );
+    // An isolated config and a dummy key against the fake API: no account.
+    let config_dir = dir.path().join("claude-config");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    config.env = vec![
+        ("ANTHROPIC_BASE_URL".into(), api.base_url.clone().into()),
+        ("ANTHROPIC_API_KEY".into(), "sk-ant-e2e-dummy".into()),
+        ("CLAUDE_CONFIG_DIR".into(), config_dir.into_os_string()),
+        ("DISABLE_AUTOUPDATER".into(), "1".into()),
+        ("DISABLE_TELEMETRY".into(), "1".into()),
+        (
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(),
+            "1".into(),
+        ),
+        ("DISABLE_ERROR_REPORTING".into(), "1".into()),
+    ];
+    config.model = Some("claude-sonnet-4-5".to_owned());
+    // Ask before tools, so approvals become cards.
+    config.permission_mode = "default".to_owned();
+    config.host_tools = Some(tools.configuration());
+    let harness: Arc<dyn HarnessDriver> = Arc::new(
+        inline_agent_driver_claude::harness::ClaudeHarness::new(config),
+    );
+    let mut events = bot.take_lossless_events().unwrap();
+    let runtime = Runtime::new(
+        V2Config {
+            vocabulary: Vocabulary::Claude,
+            agent_name: "Claude".to_owned(),
+            installation_id: "e2e-claude".to_owned(),
+            owner_user_id,
+            bot_user_id,
+            bot_username: "e2e_claude_bot".to_owned(),
+            dm_chat_id: chat_id,
+            folder: folder.clone(),
+            machine_label: "e2e".to_owned(),
+            executable_path: Some(executable.display().to_string()),
+            accept_messages_after: 0,
+            allowlist: Vec::new(),
+            ledger_path: dir.path().join("ledger.sqlite"),
+            attachments_dir: dir.path().join("attachments"),
+        },
+        bot.clone(),
+        Arc::new(OwnerClient(owner.clone())),
+        harness,
+        Some(tools),
+    )
+    .unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let running = tokio::spawn(async move {
+        runtime
+            .run(&mut events, async {
+                let _ = stopped.await;
+            })
+            .await
+            .map_err(|error| error.to_string())
+    });
+
+    // 1. A DM message runs a turn and the answer arrives.
+    send(&owner, chat_id, "Say hello\n@text E2E_CLAUDE_ONE").await;
+    wait_for(
+        &api,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the first answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_CLAUDE_ONE"))
+        },
+    )
+    .await;
+
+    // 2. Inline tools reach Claude over `mcp_message` and act as the agent.
+    send(
+        &owner,
+        chat_id,
+        "Use a tool\n@tool mcp__inline__send_message {\"text\": \"E2E_CLAUDE_TOOL\"}",
+    )
+    .await;
+    wait_for(
+        &api,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the tool message",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_CLAUDE_TOOL"))
+                && texts.iter().any(|(_, text)| text.contains("FAKE-DONE"))
+        },
+    )
+    .await;
+
+    // 3. Asking before Bash: the card carries the command, and the owner's
+    // approval runs it.
+    send(
+        &owner,
+        chat_id,
+        "Run the check\n@tool Bash {\"command\": \"echo E2E_RAN > ran.txt\", \"description\": \"Write the marker\"}",
+    )
+    .await;
+    let texts = wait_for(
+        &api,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the approval card",
+        |texts| texts.iter().any(|(_, text)| text.contains("echo E2E_RAN")),
+    )
+    .await;
+    let card = texts
+        .iter()
+        .rev()
+        .find(|(_, text)| text.contains("echo E2E_RAN"))
+        .map(|(id, _)| *id)
+        .unwrap();
+    let action = approve_action(&owner, chat_id, card).await;
+    owner
+        .invoke_rpc(
+            proto::Method::InvokeMessageAction,
+            proto::rpc_call::Input::InvokeMessageAction(proto::InvokeMessageActionInput {
+                peer_id: Some(super::api::chat_peer(chat_id)),
+                message_id: card,
+                action_id: action,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+    wait_for(
+        &api,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the answer after approval",
+        |texts| {
+            texts
+                .iter()
+                .filter(|(_, text)| text.contains("FAKE-DONE"))
+                .count()
+                >= 2
+        },
+    )
+    .await;
+    assert_eq!(
+        std::fs::read_to_string(folder.join("ran.txt"))
+            .unwrap()
+            .trim(),
+        "E2E_RAN",
+        "the approved command ran in the work's folder"
+    );
+
+    // 4. /release ends the process and hands the session back.
+    send(&owner, chat_id, "/release").await;
+    wait_for(
+        &api,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the release handoff",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("claude --resume"))
+        },
+    )
+    .await;
+
+    let _ = stop.send(());
+    let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
+    assert!(
+        matches!(outcome, Ok(Ok(Ok(())))),
+        "runtime ended cleanly: {outcome:?}"
+    );
+}
+
 /// Points Codex at the temporary home and keeps its fake-model requests off
 /// any proxy (a system proxy would otherwise get 127.0.0.1 too).
 ///
@@ -519,16 +939,20 @@ unsafe fn isolate_codex(codex_home: &std::path::Path) {
 }
 
 fn which_codex() -> std::path::PathBuf {
-    if let Ok(path) = std::env::var("INLINE_V2_E2E_CODEX") {
+    which("codex", "INLINE_V2_E2E_CODEX")
+}
+
+fn which(name: &str, override_variable: &str) -> std::path::PathBuf {
+    if let Ok(path) = std::env::var(override_variable) {
         return path.into();
     }
     for dir in std::env::var("PATH").unwrap_or_default().split(':') {
-        let candidate = std::path::Path::new(dir).join("codex");
+        let candidate = std::path::Path::new(dir).join(name);
         if candidate.is_file() {
             return candidate;
         }
     }
-    panic!("codex is not installed");
+    panic!("{name} is not installed");
 }
 
 /// Codex and the fake model alone, without Inline: isolates model wiring.
@@ -542,8 +966,12 @@ async fn codex_reaches_the_fake_model() {
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("project");
     std::fs::create_dir_all(&folder).unwrap();
-    let (model, base_url) = FakeModel::start(vec![json!({"type": "message", "role": "assistant",
-        "content": [{"type": "output_text", "text": "E2E_ANSWER_ONE"}]})])
+    let (model, base_url) = FakeModel::start(vec![
+        json!({"type": "function_call", "call_id": "call-tool", "namespace": "inline",
+            "name": "get_current_context", "arguments": "{}"}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_ANSWER_ONE"}]}),
+    ])
     .await;
     let codex_home = dir.path().join("codex-home");
     std::fs::create_dir_all(&codex_home).unwrap();
@@ -571,6 +999,22 @@ async fn codex_reaches_the_fake_model() {
             cache_root: dir.path().join("cache"),
         },
     );
+    // Inline's tools as Codex dynamic tools, answered by an echo.
+    struct Echo;
+    impl inline_agent_bridge::HostToolHandler for Echo {
+        fn call<'a>(
+            &'a self,
+            call: inline_agent_bridge::HostToolCall,
+        ) -> inline_agent_bridge::HostToolFuture<'a> {
+            Box::pin(async move {
+                inline_agent_bridge::HostToolResult::success(format!("echo {}", call.tool_name))
+            })
+        }
+    }
+    harness.configure_host_tools(inline_agent_bridge::HostToolConfiguration {
+        specs: super::tools::specs(),
+        handler: Arc::new(Echo),
+    });
     let session = harness
         .open(OpenSpec {
             mode: OpenMode::Start,
