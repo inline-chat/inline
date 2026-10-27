@@ -1061,6 +1061,27 @@ impl HoldMachine {
                     phase: DetachPhase::Killing,
                 }
             }
+            // An explicit release while an idle one is under way: the detach
+            // goes on and ends as the explicit release, so its handoff follows.
+            (
+                S::Detaching {
+                    request,
+                    receipts,
+                    pending,
+                    phase,
+                },
+                E::ReleaseRequested { request: explicit },
+            ) if !request.cause.is_explicit() && explicit.cause.is_explicit() => {
+                effects.push(HoldEffect::ReleaseStarted {
+                    cause: explicit.cause,
+                });
+                S::Detaching {
+                    request: explicit,
+                    receipts,
+                    pending,
+                    phase,
+                }
+            }
             // The harness's own confirmation, or the process exiting.
             (
                 S::Detaching {
@@ -1476,6 +1497,31 @@ mod tests {
                 exit_grace_ms: 10_000
             }
         );
+    }
+
+    #[test]
+    fn an_explicit_release_during_an_idle_unsubscribe_ends_as_explicit() {
+        let mut machine = codex();
+        held(&mut machine, 0);
+        assert_eq!(
+            machine.handle(HoldEvent::Tick, MIN),
+            [HoldEffect::Unsubscribe]
+        );
+        let request = ReleaseRequest::new(ReleaseCause::Command, Some(UserId(7)));
+        assert_eq!(
+            machine.handle(HoldEvent::ReleaseRequested { request }, MIN + 10),
+            [HoldEffect::ReleaseStarted {
+                cause: ReleaseCause::Command
+            }]
+        );
+        assert_eq!(
+            machine.handle(HoldEvent::NativeReleased, MIN + 20),
+            [HoldEffect::Released {
+                cause: ReleaseCause::Command,
+                receipts: Vec::new(),
+            }]
+        );
+        assert!(matches!(machine.state(), HoldState::Released));
     }
 
     #[test]
