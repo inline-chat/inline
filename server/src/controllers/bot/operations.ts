@@ -1235,7 +1235,7 @@ const sendMessage = async (
     actions: toProtocolActions(input.actions),
     sendMode: input.silent ? MessageSendMode.MODE_SILENT : undefined,
     sourceChatId,
-  }, context)
+  }, { ...context, isBot: true })
 
   const sent = await MessageModel.getMessageByRandomId(
     randomId,

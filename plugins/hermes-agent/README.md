@@ -27,7 +27,7 @@ Supported:
 - Realtime inbound messages, catch-up, replies to bot messages, and action callbacks.
 - Inbound SDK receipts remain pending until Python handles the event. Temporary routing-metadata and authorization failures retry before deduplication or effects, preserving per-chat order while other chats can progress. Lost acknowledgement responses retry only the acknowledgement. Agent-button preflight retries are bounded, then show a retry prompt so an unavailable button cannot indefinitely block the shared action cursor. Shutdown leaves unresolved receipts available for catch-up; this is an at-least-once handoff, not a durable exactly-once guarantee for model turns or external effects.
 - Outbound text, Markdown parsing, opt-in edit-message streaming, long-message splitting, edits, deletes, typing, and presence.
-- Inline reply-thread routing, explicit-request auto mode, `/threads` controls, explicit `/follow` and `/unfollow` dialog relevance controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
+- Inline reply threads per chat (Auto or On, in DMs and groups, set with `/threads`, the agent settings, or by asking the agent), one thread per conversation, explicit `/follow` and `/unfollow` dialog relevance controls, parent chat metadata, parent/thread prompt fallback, and thread-specific skill bindings.
 - Native Hermes `inline` tool for current-chat/thread reads, bounded history and search, exact message lookup, button-message sends, editing/deleting bot-owned messages, reactions, pin/unpin/list pins, reply-thread creation, top-level thread/chat creation outside the current conversation, and avatar presence/status.
 - Cached, privacy-safe sender names/usernames plus chat/thread IDs, selective reply/thread/observed context, and parent-thread context, with first-name/username Markdown mention guidance and current chat/thread links.
 - OpenClaw-style entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
@@ -51,17 +51,19 @@ Unsupported or intentionally limited:
 - Live voice sessions or calls. Voice file messages are supported, but realtime audio is not.
 - Media without a usable Inline CDN/local URL. Those messages still produce text summaries, but Hermes may not receive a local file path.
 
-## Release 0.0.22
+## Release 1.0.0
 
-This release includes typed service-notice filtering before agent admission,
-current shared-session setup guidance, and the pinned realtime SDK `0.0.18`.
-Private thread creation with omitted participants includes the connected account.
-Clarification choices use two-column rows within Inline's button limit.
-Hermes keeps its supported agent activity surface; unsupported experimental tool
-timelines remain disabled.
+A major release with breaking changes. Bots join a thread through its first
+message, and later mentions get one answer. Leading mentions and replies decide
+who a message is for. Reply threads are Auto or On per chat, DMs included, with
+one thread per conversation. Each Hermes 0.22 profile keeps its own bot, state
+and sidecar. Agents can follow, unfollow and manage chats, and they show Working
+while they work. Status and doctor report whether messages reach the agent. See
+"Upgrading to 1.0" in the [Hermes docs](https://inline.chat/docs/hermes) for every
+change. Pinned realtime SDK `0.0.20`.
 
 ```sh
-npm install -g @inline-chat/hermes-agent-adapter@0.0.22
+npm install -g @inline-chat/hermes-agent-adapter@1.0.0
 inline-hermes install --force
 ```
 
@@ -170,7 +172,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.22   inline-platform
+enabled      user     1.0.0    inline-platform
 ```
 
 ## Update Or Reinstall
@@ -193,8 +195,8 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 
 - Hermes Agent: requires the external user plugin registry and native platform
   plugin loader available in Hermes Agent `>=0.21.3`. This package was validated
-  against Hermes Agent `0.21.5` from source commit `f97608f178d1ffeca59860195ab7da295f7c8e5f` (tag
-  `v2026.9.24`).
+  against Hermes Agent `0.22.5` from source commit `bf0203a794a07aac3ff764972ab9087baa4e4f4e` (tag
+  `v0.22.5`), and installs on the minimum `0.21.3`.
 - CI checks the minimum supported Hermes release, newest stable source, and upstream
   `main`. A six-hour scheduled check also tests the published npm `latest` adapter.
   `inline-hermes doctor` requires successful host loading and compatibility validation;
@@ -307,14 +309,14 @@ Access control follows Hermes' native platform model:
 | `INLINE_STRICT_MENTION` | Requires an @mention on every group turn, including replies to the bot and followed threads. Defaults to `false`. |
 | `INLINE_ALLOWED_CHATS` | Comma-separated group/thread chat ids where the bot may respond. Parent chat ids also match their Inline reply threads. DMs are not filtered. Empty means no chat restriction. |
 | `INLINE_FREE_RESPONSE_CHATS` | Comma-separated group/thread chat ids where no mention is required. Parent chat ids also match their Inline reply threads. Useful for dedicated agent rooms. |
-| `INLINE_REPLY_THREADS` | Controls top-level reply-thread creation. `auto` creates a child reply thread only for an explicit thread request; `on` always creates; `off` stays flat. Existing child-thread conversations always remain in their thread. Defaults to `auto`. |
+| `INLINE_REPLY_THREADS` | Retired in 1.0; the default is always Auto: answers stay in the chat, and a thread starts only when someone asks for one. Turn On per chat (DM or group) with `/threads on`, the agent settings, or by asking the agent. `on` here is read as Auto with a warning, so a new tab's first message never gets a thread; `off` reads as Auto. Existing threads always keep their conversation. |
 | `INLINE_CONTEXT_BACKFILL` | Automatic context mode. `selective` is the default, `off` disables automatic history windows, and `always` restores recent-history backfill on every turn. |
 | `INLINE_THREAD_CONTEXT_LIMIT` | Max current chat/thread messages for selective thread or mention-gap context. Must be `0` through `100`; defaults to `30`. |
 | `INLINE_REPLY_CONTEXT_LIMIT` | Max messages in the anchored window around a replied-to Inline message. Must be `0` through `50`; defaults to `10`. |
 | `INLINE_OBSERVED_CONTEXT_LIMIT` | Max unmentioned group messages kept in the observed-context buffer. Must be `0` through `100`; defaults to `20`. |
 | `INLINE_OBSERVE_UNMENTIONED_MESSAGES` | Buffers unmentioned group messages that pass chat/user policy but do not wake the bot. Defaults to `true`; set to `false` to disable. |
 | `INLINE_CONTEXT_HISTORY_LIMIT` | Legacy compatibility shortcut. `0` maps to `INLINE_CONTEXT_BACKFILL=off`; `1` through `20` maps to `always` with that thread-context limit. Prefer the explicit settings above. |
-| `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On/Off buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
+| `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
 | `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. Reactions on bot messages are always delivered. |
 | `INLINE_REACTIONS` | Shows 👀 while Hermes handles an inbound message, then ✅ on success or ❌ on failure. Cancellation clears the working marker. Defaults to `false`. |
 | `INLINE_PARSE_MARKDOWN` | Controls whether supported outbound Inline Markdown is parsed. Defaults to `true`; `false` preserves the supplied syntax literally. |
@@ -322,19 +324,19 @@ Access control follows Hermes' native platform model:
 | `INLINE_COMMAND_LIMIT` | Caps native Inline bot command sync. Must be `1` through `100`; defaults to `100`. |
 | `INLINE_MEDIA_MAX_MB` | Maximum inbound media download size for URL-backed Inline attachments. Defaults to `25`. |
 | `INLINE_UPLOAD_MAX_MB` | Maximum outbound local file upload size. The Python adapter and Node sidecar both enforce it before upload bytes are read. Defaults to `300`. |
-| `INLINE_STATE_PATH` | Persistent Inline SDK state file. Defaults to `~/.hermes/inline/sdk-state.json`. |
+| `INLINE_STATE_PATH` | Persistent Inline SDK state file. Defaults to one file per profile and bot under the profile's `inline/` folder. The default profile reuses the older shared `~/.hermes/inline/sdk-state.json` once; other profiles catch up from now. |
 | `INLINE_RPC_TIMEOUT_MS` | Realtime RPC timeout for the Node sidecar. |
 | `INLINE_CONNECT_TIMEOUT_MS` | Adapter startup timeout while waiting for the sidecar to become realtime-ready. Defaults to `20000`. |
 | `INLINE_CONNECT_RETRY_INITIAL_MS` | Initial sidecar retry delay after realtime startup failure. Defaults to `1000`. |
 | `INLINE_CONNECT_RETRY_MAX_MS` | Maximum sidecar retry delay after repeated realtime startup failures. Defaults to `15000`. |
-| `INLINE_SIDECAR_PORT` | Fixed loopback port for the sidecar. Must be `1` through `65535`. Defaults to `8794`; `test-send` uses a random free port. |
+| `INLINE_SIDECAR_PORT` | Fixed loopback port for the sidecar. Must be `1` through `65535`. Defaults to a free port per adapter, so several profiles can share one gateway; `8794` when `INLINE_SIDECAR_AUTOSTART=false`. |
 | `INLINE_SIDECAR_BIND` | Sidecar bind host. Must be loopback: `127.0.0.1`, `localhost`, or `::1`. Defaults to `127.0.0.1`. |
 | `INLINE_HERMES_SENTRY_DSN` | Explicitly enables adapter and sidecar error reporting to the configured collector. Reporting is disabled when unset. |
 | `INLINE_PLUGIN_TELEMETRY` | Set to `off`, `0`, or `false` to disable explicitly configured plugin error reporting. `DO_NOT_TRACK=1` is also honored. |
 | `platforms.inline.typing_indicator` | Hermes-native toggle for Inline typing/presence while a turn is running. Defaults to `true`; set to `false` to keep busy threads visually quiet. |
 | `platforms.inline.gateway_restart_notification` | Hermes-native toggle for gateway online/restarted notices. Defaults to `true`. |
 
-Policy is evaluated in three ordered stages: **access**, then **wake**, then **delivery**. Access checks the chat and sender policy and is a hard gate; a mention, reply, callback, or command never grants access to a blocked chat or actor. Wake decides whether an allowed group turn invokes Hermes: free-response chats wake normally, while mention-gated chats require an explicit mention unless a configured reply-to-bot or followed-thread exception applies. Delivery keeps existing child-thread conversations in place; top-level `auto` creates a child only for explicit thread intent, `on` always creates one, and `off` stays flat.
+Policy is evaluated in three ordered stages: **access**, then **wake**, then **delivery**. Access checks the chat and sender policy and is a hard gate; a mention, reply, callback, or command never grants access to a blocked chat or actor. Wake decides whether an allowed group turn invokes Hermes: free-response chats wake normally, while mention-gated chats require an explicit mention unless a configured reply-to-bot or followed-thread exception applies. Delivery keeps existing child-thread conversations in place; in a chat set to On a top-level message gets its answer in a reply thread, and in Auto it stays in the chat unless someone asks for a thread. A thread under the bot's DM stays that DM for its person: DM access, no mention needed, and one session (`dm:<dm>:<thread>`, like a Slack DM thread). Anyone else in that thread keeps group rules.
 
 `open` controls intake; it does not grant permission to use the bot. After
 Inline's sender and group/thread restrictions pass, the adapter asks Hermes'
@@ -348,7 +350,11 @@ policy, or excluded group. DMs remain exempt from `allowed_chats`.
 Child-thread authorization preserves both the child and parent chat IDs so
 Hermes can select the correct profile. If required group metadata is unavailable,
 the adapter denies the operation instead of guessing a profile. Controls that
-change the parent's reply-thread mode also require access to that parent;
+change the parent's reply-thread mode also require access to that parent, and
+follow Hermes' own slash-command access: when `allow_admin_from` or
+`group_allow_admin_from` is set, only admins and people allowed to run
+`threads` (`user_allowed_commands`) can change it, from `/threads`, the settings
+card, or by asking the agent;
 thread-local model and following settings remain available to an authorized
 child-thread user.
 
@@ -418,13 +424,12 @@ Restart the gateway after refreshing the plugin. Version 0.0.19 removes the
 in-chat updater so the same plugin can comply with the catalog's exact-commit
 trust policy. Hermes's own `/update` command is unchanged.
 
-Run `/follow` in an Inline DM, group, or reply thread to explicitly opt into
-eligible unmentioned activity waking Hermes. Run `/unfollow` to explicitly opt
-out; server auto-follow heuristics will not turn following back on, while
-mentions and replies retain their normal relevance behavior. If an otherwise
-implicit follow/reply wake begins with a concrete mention of another person,
-Hermes treats that explicit address as higher priority and does not respond
-unless the bot is also explicitly mentioned.
+Run `/follow` in an Inline group or reply thread to opt into eligible
+unmentioned activity waking Hermes, and `/unfollow` to opt out; mentions and
+replies still reach it. The agent can do the same itself with the `inline`
+tool's `set_follow_mode` action. A message that starts by mentioning someone
+else isn't for Hermes, even if it mentions Hermes later, and a reply to another
+person or bot doesn't wake it unless it mentions Hermes.
 
 The model-callable `inline` tool keeps reply and top-level creation separate:
 `create_thread` creates a reply subthread under the current or explicit parent
@@ -435,6 +440,14 @@ for space-wide visibility. It returns the new chat ID so Hermes can link it in
 the normal reply. Omitted or empty private participants create a conversation
 accessible only to the connected account. Include intended human participants
 explicitly; owning the bot does not grant membership in its private conversations.
+When a person asks for a private chat, `create_chat` adds them automatically;
+pass `include_requester: false` for a deliberately bot-only chat. A thread that
+`create_thread` starts from the current message hangs off that message only in
+its own chat; another parent needs an explicit `parent_message_id`.
+
+`add_participants`, `update_chat` (title or emoji) and `delete_chat` manage
+chats through the same server operations as the apps, so the server decides
+what the bot may change. `delete_chat` always needs an explicit `chat_id`.
 
 The plugin id is `inline`, which is intentionally the same id an eventual
 bundled Hermes adapter should use.

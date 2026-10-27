@@ -22,6 +22,7 @@ import {
   MessageActionRow,
   MessageActions,
   MessageActionToast,
+  UpdateComposeAction_ComposeAction,
   type InlineSdkClientOptions,
   type InlineSdkGetMessagesParams,
   type InlineSdkSendMessageParams,
@@ -32,10 +33,6 @@ import {
   type BotChatSettingsResponse,
 } from "@inline-chat/realtime-sdk"
 
-// The server contract defines UNFOLLOWED = 2, but the currently published
-// protocol package predates that generated enum member. Keep the compatibility
-// value named and typed until the dependency catches up.
-const DIALOG_FOLLOW_MODE_UNFOLLOWED = 2 as DialogFollowMode
 import {
   SidecarError,
   asOptionalRecord,
@@ -330,6 +327,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     case "/create-subthread":
       await endpointCreateSubthread(res, body)
       return
+    case "/add-participants":
+      await endpointAddParticipants(res, body)
+      return
+    case "/update-chat":
+      await endpointUpdateChat(res, body)
+      return
+    case "/delete-chat":
+      await endpointDeleteChat(res, body)
+      return
     case "/create-chat":
       await endpointCreateChat(res, body)
       return
@@ -429,12 +435,20 @@ async function endpointDelete(res: ServerResponse, body: unknown) {
 async function endpointTyping(res: ServerResponse, body: unknown) {
   const record = asRecord(body)
   const target = parseTarget(record)
-  const typing = (readOptionalString(record, "state") ?? "start") !== "stop"
+  const state = readOptionalString(record, "state") ?? "start"
   if ("userId" in target) {
     writeJson(res, 200, { ok: true, result: { skipped: "typing is chat-only" } })
     return
   }
-  await client.sendTyping({ chatId: target.chatId, typing })
+  if (state === "working") {
+    // The server shows WORKING as typing to clients that have not opted in to it.
+    await client.invokeUncheckedRaw(Method.SEND_COMPOSE_ACTION, {
+      oneofKind: "sendComposeAction",
+      sendComposeAction: { peerId: inputPeerFromTarget(target), action: UpdateComposeAction_ComposeAction.WORKING },
+    })
+  } else {
+    await client.sendTyping({ chatId: target.chatId, typing: state !== "stop" })
+  }
   writeJson(res, 200, { ok: true, result: {} })
 }
 
@@ -587,7 +601,7 @@ async function endpointFollowMode(res: ServerResponse, body: unknown) {
   const mode = readRequiredString(record, "mode")
   const followMode = mode === "following"
     ? DialogFollowMode.FOLLOWING
-    : mode === "unfollowed" ? DIALOG_FOLLOW_MODE_UNFOLLOWED : null
+    : mode === "unfollowed" ? DialogFollowMode.UNFOLLOWED : null
   if (followMode == null) {
     throw new SidecarError("mode must be following or unfollowed", "bad_format")
   }
@@ -767,6 +781,50 @@ async function endpointCreateSubthread(res: ServerResponse, body: unknown) {
       chatId: subthread?.id?.toString() ?? null,
     },
   })
+}
+
+// Chat management goes through the same server operations as the apps, so the server's own
+// permission checks decide what a bot may change.
+async function endpointAddParticipants(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const chatId = readRequiredInlineId(record, "chatId")
+  const userIds = readInlineIdArray(record, "userIds", 50, true)
+  const added: string[] = []
+  for (const userId of userIds) {
+    await client.invokeUncheckedRaw(Method.ADD_CHAT_PARTICIPANT, {
+      oneofKind: "addChatParticipant",
+      addChatParticipant: { chatId, userId },
+    })
+    added.push(userId.toString())
+  }
+  writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), addedUserIds: added } })
+}
+
+async function endpointUpdateChat(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const chatId = readRequiredInlineId(record, "chatId")
+  const title = readOptionalString(record, "title")
+  const emoji = readOptionalString(record, "emoji")
+  if (title === undefined && emoji === undefined) {
+    throw new SidecarError("update-chat requires title or emoji", "bad_format")
+  }
+  const result = await client.invokeUncheckedRaw(Method.UPDATE_CHAT_INFO, {
+    oneofKind: "updateChatInfo",
+    updateChatInfo: { chatId, ...(title !== undefined ? { title } : {}), ...(emoji !== undefined ? { emoji } : {}) },
+  })
+  const typed = result as { oneofKind?: string; updateChatInfo?: { chat?: Record<string, unknown> } }
+  const chat = typed.oneofKind === "updateChatInfo" ? typed.updateChatInfo?.chat : undefined
+  writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), chat: safeJson(chat ?? null) } })
+}
+
+async function endpointDeleteChat(res: ServerResponse, body: unknown) {
+  const record = asRecord(body)
+  const chatId = readRequiredInlineId(record, "chatId")
+  await client.invokeUncheckedRaw(Method.DELETE_CHAT, {
+    oneofKind: "deleteChat",
+    deleteChat: { peerId: inputPeerFromTarget({ chatId }) },
+  })
+  writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), deleted: true } })
 }
 
 async function endpointCreateChat(res: ServerResponse, body: unknown) {

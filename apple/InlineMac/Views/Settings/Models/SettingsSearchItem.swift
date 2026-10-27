@@ -82,7 +82,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
 #endif
 
   // Experimental
-  case agentActivity
   case newThreadAgentPicker
   case richContentRenderer
   case inlineMathAttachments
@@ -140,7 +139,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .softwareUpdate, .automaticUpdates, .updateChannel:
       .updates
 #endif
-    case .agentActivity, .newThreadAgentPicker, .richContentRenderer, .inlineMathAttachments,
+    case .newThreadAgentPicker, .richContentRenderer, .inlineMathAttachments,
          .richMessageMultiBlockSelection, .richCopyMarkdownEditing, .selectMultipleMessages, .quickForward,
          .gridTranscription, .fileBrowser, .nativeFileDownloads:
       .experimental
@@ -206,7 +205,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .automaticUpdates: "Automatic Updates"
     case .updateChannel: "Update Channel"
 #endif
-    case .agentActivity: "Agent Activity"
     case .newThreadAgentPicker: "New Thread Agent Picker"
     case .richContentRenderer: "Rich Content Renderer"
     case .inlineMathAttachments: "Inline Math Attachments"
@@ -269,7 +267,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .softwareUpdate: "Status"
     case .automaticUpdates, .updateChannel: "Automatic Updates"
 #endif
-    case .agentActivity, .newThreadAgentPicker, .richContentRenderer, .inlineMathAttachments,
+    case .newThreadAgentPicker, .richContentRenderer, .inlineMathAttachments,
          .richMessageMultiBlockSelection:
       "Agents"
     case .richCopyMarkdownEditing, .selectMultipleMessages, .quickForward: "Messages"
@@ -339,7 +337,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .automaticUpdates: ["auto update"]
     case .updateChannel: ["beta", "stable", "tip", "nightly"]
 #endif
-    case .agentActivity: ["working", "spinner", "steps"]
     case .newThreadAgentPicker: ["agent", "thread", "composer"]
     case .richContentRenderer: ["markdown", "agent"]
     case .inlineMathAttachments: ["latex", "formula", "math"]

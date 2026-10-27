@@ -536,7 +536,7 @@ function threadTitleSystemPrompt(kind: ThreadTitleKind, today: string): string {
     return `${shared} This is a reply thread to the labeled parent message in the labeled parent chat. Name the focused topic of the reply conversation using the parent context and the full reply transcript. Do not prefix the title with Re: or Reply. Do not choose an emoji for reply threads; return emoji as null.`
   }
 
-  return `${shared} Optionally return one broadly safe, relevant emoji when it genuinely helps recognition. Keep it tasteful and understated, not formal, cheesy, suggestive, insulting, graphic, political, or religious. Omit it for sensitive, serious, ordinary, or ambiguous topics.`
+  return `${shared} Return one broadly safe, relevant emoji for most threads, everyday work topics included: it helps people spot the thread in a list. Keep it tasteful and understated, not formal, cheesy, suggestive, insulting, graphic, political, or religious. Return emoji as null only for sensitive or serious topics, or when no emoji clearly fits.`
 }
 
 function sanitizeTitle(value: string | null | undefined): string | undefined {

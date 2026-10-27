@@ -27,7 +27,7 @@ const plugin = publishing ? '' : fs.readFileSync('plugin/inline/plugin.yaml', 'u
 const probe = publishing ? '' : fs.readFileSync('plugin/inline/cli.py', 'utf8')
 fs.appendFileSync(process.env.HERMES_STAGE_CALLS, JSON.stringify({ program, args, manifest, plugin, probe }) + '\n')
 if (program === 'npm' && args[0] === 'install') {
-  assert.equal(manifest.version, '0.0.22')
+  assert.equal(manifest.version, '1.0.0')
   assert(args.includes('--ignore-scripts'))
   if (manifest.dependencies['@inline-chat/realtime-sdk'].startsWith('file:')) {
     for (const [name, version] of [['realtime-sdk', '0.0.18'], ['protocol', '0.0.15']]) {
@@ -39,10 +39,10 @@ if (program === 'npm' && args[0] === 'install') {
 } else if (program === 'bun') {
   assert.equal(args[0], 'run')
   if (args[1] === 'check') {
-    assert.equal(manifest.version, '0.0.22', 'source contracts must precede stamping')
-    assert(plugin.includes('version: 0.0.22\n'))
-    assert(probe.includes('inline-hermes-agent-adapter/0.0.22'))
-    assert.equal(fs.readFileSync('README.md', 'utf8'), 'source version 0.0.22')
+    assert.equal(manifest.version, '1.0.0', 'source contracts must precede stamping')
+    assert(plugin.includes('version: 1.0.0\n'))
+    assert(probe.includes('inline-hermes-agent-adapter/1.0.0'))
+    assert.equal(fs.readFileSync('README.md', 'utf8'), 'source version 1.0.0')
     assert(!manifest.dependencies['@inline-chat/realtime-sdk'].startsWith('file:'))
     if (process.env.HERMES_STAGE_FAIL_CHECK) process.exit(12)
   } else {
@@ -96,16 +96,16 @@ describe("Hermes tag release staging", () => {
     for (const name of ["LICENSE", "RELEASE.md", "tsconfig.json", "vitest.config.ts"]) {
       await writeFile(path.join(packageRoot, name), "fixture")
     }
-    await writeFile(path.join(packageRoot, "README.md"), "source version 0.0.22")
+    await writeFile(path.join(packageRoot, "README.md"), "source version 1.0.0")
     await writeFile(path.join(directory, "source/.oxlintignore"), "")
     await writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
-      name: "@inline-chat/hermes-agent-adapter", version: "0.0.22", type: "module",
+      name: "@inline-chat/hermes-agent-adapter", version: "1.0.0", type: "module",
       dependencies: { "@inline-chat/realtime-sdk": "0.0.18", yaml: "2.9.0" },
     }))
     await mkdir(path.join(directory, "source/packages/protocol"), { recursive: true })
     await writeFile(path.join(directory, "source/packages/protocol/package.json"), '{"version":"0.0.15"}')
-    await writeFile(path.join(packageRoot, "plugin/inline/plugin.yaml"), "name: inline-platform\nversion: 0.0.22\n")
-    await writeFile(path.join(packageRoot, "plugin/inline/cli.py"), '_PROBE_USER_AGENT = "inline-hermes-agent-adapter/0.0.22"\n')
+    await writeFile(path.join(packageRoot, "plugin/inline/plugin.yaml"), "name: inline-platform\nversion: 1.0.0\n")
+    await writeFile(path.join(packageRoot, "plugin/inline/cli.py"), '_PROBE_USER_AGENT = "inline-hermes-agent-adapter/1.0.0"\n')
     await writeFile(path.join(packageRoot, "plugin/inline/sidecar/index.mjs"), "source-bundle")
     await mkdir(bin)
     for (const name of ["npm", "bun", "git"]) {
@@ -162,7 +162,7 @@ describe("Hermes tag release staging", () => {
       expect(result.code, result.error).toBe(0)
       const recorded = await operations()
       expect(recorded.map(({ program, args }) => `${program} ${args[0]}`)).toEqual(["npm install", "bun run", "npm pack"])
-      expect(recorded[2].manifest).toMatchObject({ version: "0.0.22", dependencies: { "@inline-chat/realtime-sdk": "0.0.18", yaml: "2.9.0" } })
+      expect(recorded[2].manifest).toMatchObject({ version: "1.0.0", dependencies: { "@inline-chat/realtime-sdk": "0.0.18", yaml: "2.9.0" } })
       expect(recorded[2].manifest.gitHead).toBeUndefined()
       expect(await Bun.file(path.join(outputDir, "release-artifact.json")).exists()).toBe(false)
     }

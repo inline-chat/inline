@@ -1,7 +1,9 @@
 import { BotCommandsModel } from "@in/server/db/models/botCommands"
+import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import type { DbChat } from "@in/server/db/schema"
 import { getBotUserIdsForChatScope } from "@in/server/functions/bot.peerDiscovery"
+import { getFollowingDialogUserIds } from "@in/server/modules/dialogFollow"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import {
   MessageEntity_Type,
@@ -14,6 +16,8 @@ type ResolveBotCommandTargetsInput = {
   entities: MessageEntities | undefined
   chat: DbChat
   currentUserId: number
+  /** The message this one replies to, which can settle a command several bots advertise. */
+  replyToMessageId?: number | undefined
 }
 
 type ParsedBotCommand = {
@@ -54,14 +58,18 @@ const structuredTarget = (entity: MessageEntity): number | null => {
 }
 
 /**
- * Validates new-client command targets and backfills a unique catalog target
- * for range-only entities emitted by older clients.
+ * Validates new-client command targets and backfills a target for range-only entities from
+ * typed commands and older clients. A command only one bot in the chat advertises goes to it.
+ * When several advertise it, the bot whose message this replies to wins, then the one bot that
+ * follows the thread. Otherwise the command stays untargeted and bots treat it as addressed to
+ * none of them.
  */
 export const resolveBotCommandTargets = async ({
   text,
   entities,
   chat,
   currentUserId,
+  replyToMessageId,
 }: ResolveBotCommandTargetsInput): Promise<MessageEntities | undefined> => {
   const commandEntities = (entities?.entities ?? []).filter(
     (entity): entity is MessageEntity => entity?.type === MessageEntity_Type.BOT_COMMAND,
@@ -77,8 +85,21 @@ export const resolveBotCommandTargets = async ({
       .map((row) => [row.user.username!.toLowerCase(), row.user.id] as const),
   )
 
+  let replyToSender: Promise<number | undefined> | undefined
+  const replyToSenderId = () =>
+    (replyToSender ??=
+      replyToMessageId === undefined
+        ? Promise.resolve(undefined)
+        : MessageModel.getSenderIdForMessage({ chatId: chat.id, messageId: replyToMessageId }).catch(() => undefined))
+  const settleAmbiguousTarget = async (advertisedTargets: number[]): Promise<number | undefined> => {
+    const replySender = await replyToSenderId()
+    if (replySender !== undefined && advertisedTargets.includes(replySender)) return replySender
+    const following = await getFollowingDialogUserIds({ chatId: chat.id, userIds: advertisedTargets })
+    return following.length === 1 ? following[0] : undefined
+  }
+
   let changed = false
-  const resolved = (entities?.entities ?? []).map((entity) => {
+  const resolved = await Promise.all((entities?.entities ?? []).map(async (entity) => {
     if (!entity || entity.type !== MessageEntity_Type.BOT_COMMAND) return entity
 
     const parsed = parseBotCommandEntity(text, entity)
@@ -102,7 +123,13 @@ export const resolveBotCommandTargets = async ({
       throw RealtimeRpcError.BadRequest()
     }
 
-    const target = selectedTarget ?? (advertisedTargets.length === 1 ? advertisedTargets[0] : undefined)
+    const target =
+      selectedTarget ??
+      (advertisedTargets.length === 1
+        ? advertisedTargets[0]
+        : advertisedTargets.length > 1
+          ? await settleAmbiguousTarget(advertisedTargets)
+          : undefined)
     if (!target || explicitEntityTarget === target) return entity
 
     changed = true
@@ -113,7 +140,7 @@ export const resolveBotCommandTargets = async ({
         botCommand: { botUserId: BigInt(target) },
       },
     }
-  })
+  }))
 
   return changed ? { entities: resolved } : entities
 }
