@@ -353,6 +353,8 @@ async fn codex_round_trip_through_inline() {
                 "workdir": folder.display().to_string()}).to_string()}),
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_ANSWER_TWO"}]}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_AFTER_RESTART"}]}),
         inline_tool(
             "start_subthread",
             json!({"title": "E2E sub", "summary": "Moved for the long part"}),
@@ -380,66 +382,16 @@ async fn codex_round_trip_through_inline() {
     // SAFETY: set before any thread reads the environment for Codex.
     unsafe { isolate_codex(&codex_home) };
 
-    let executable = which_codex();
     let owner = client(dir.path(), "owner", &env("INLINE_V2_E2E_OWNER_TOKEN")).await;
-    let bot = client(dir.path(), "bot", &env("INLINE_V2_E2E_BOT_TOKEN")).await;
-    let tools = Tools::new(ToolsConfig {
-        bot: bot.clone(),
-        provider: inline_agent_bridge::ProviderId::new("codex").unwrap(),
-        bot_user_id,
-        owner_user_id,
-        agent_name: "Codex".to_owned(),
+    let bridge = CodexBridge {
+        dir: dir.path().to_owned(),
         folder: folder.clone(),
-        attachments_dir: dir.path().join("attachments"),
-    });
-    let codex = inline_agent_driver_codex::harness::CodexHarness::new(
-        inline_agent_driver_codex::harness::CodexHarnessConfig {
-            launch: inline_agent_driver_codex::CodexLaunchConfig {
-                executable: executable.clone(),
-                ..Default::default()
-            },
-            source: ExecutableSource::Path,
-            pinned_sha256: None,
-            bridge_version: env!("CARGO_PKG_VERSION").to_owned(),
-            cache_root: dir.path().join("cache"),
-        },
-    );
-    codex.configure_host_tools(tools.configuration());
-    let harness: Arc<dyn HarnessDriver> = Arc::new(codex);
-
-    let mut events = bot.take_lossless_events().unwrap();
-    let runtime = Runtime::new(
-        V2Config {
-            vocabulary: Vocabulary::Codex,
-            agent_name: "Codex".to_owned(),
-            installation_id: "e2e-installation".to_owned(),
-            owner_user_id,
-            bot_user_id,
-            bot_username: "e2e_codex_bot".to_owned(),
-            dm_chat_id: chat_id,
-            folder: folder.clone(),
-            machine_label: "e2e".to_owned(),
-            executable_path: Some(executable.display().to_string()),
-            accept_messages_after: 0,
-            allowlist: Vec::new(),
-            ledger_path: dir.path().join("ledger.sqlite"),
-            attachments_dir: dir.path().join("attachments"),
-        },
-        bot.clone(),
-        Arc::new(OwnerClient(owner.clone())),
-        harness,
-        Some(tools),
-    )
-    .unwrap();
-    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let running = tokio::spawn(async move {
-        runtime
-            .run(&mut events, async {
-                let _ = stopped.await;
-            })
-            .await
-            .map_err(|error| error.to_string())
-    });
+        owner: owner.clone(),
+        owner_user_id,
+        bot_user_id,
+        dm_chat_id: chat_id,
+    };
+    let (stop, running, bot) = bridge.start().await;
 
     // 1. A DM message runs a turn and the answer arrives.
     send(&owner, chat_id, "Say the first answer").await;
@@ -503,25 +455,7 @@ async fn codex_round_trip_through_inline() {
     // 3. A question card: the owner answers through its form, and the answer
     // reaches Codex.
     send(&owner, chat_id, "Ask me something").await;
-    let texts = wait_for(
-        &model,
-        &owner,
-        chat_id,
-        bot_user_id,
-        "the question card",
-        |texts| {
-            texts
-                .iter()
-                .any(|(_, text)| text.contains("Which color fits?"))
-        },
-    )
-    .await;
-    let card = texts
-        .iter()
-        .rev()
-        .find(|(_, text)| text.contains("Which color fits?"))
-        .map(|(id, _)| *id)
-        .unwrap();
+    let (card, _) = wait_card(&model, &owner, chat_id, "Which color fits?", CardKind::Form).await;
     owner
         .invoke_rpc(
             proto::Method::InvokeMessageAction,
@@ -633,22 +567,8 @@ async fn codex_round_trip_through_inline() {
     // 5. A command needs approval: the card carries Codex's own choices, and
     // the owner's approval runs it.
     send(&owner, chat_id, "Run the check").await;
-    let texts = wait_for(
-        &model,
-        &owner,
-        chat_id,
-        bot_user_id,
-        "the approval card",
-        |texts| texts.iter().any(|(_, text)| text.contains("echo E2E_RAN")),
-    )
-    .await;
-    let card = texts
-        .iter()
-        .rev()
-        .find(|(_, text)| text.contains("echo E2E_RAN"))
-        .map(|(id, _)| *id)
-        .unwrap();
-    let action = approve_action(&owner, chat_id, card).await;
+    let (card, action) =
+        wait_card(&model, &owner, chat_id, "echo E2E_RAN", CardKind::Buttons).await;
     owner
         .invoke_rpc(
             proto::Method::InvokeMessageAction,
@@ -696,6 +616,63 @@ async fn codex_round_trip_through_inline() {
         |texts| texts.iter().any(|(_, text)| text.contains("codex resume")),
     )
     .await;
+
+    // 6b. The bridge restarts (new client, new Codex process, same ledger):
+    // the next message resumes the same native session from the server.
+    let session_ref = |work: proto::GetAgentSessionResult| {
+        work.connection
+            .map(|connection| connection.session_ref)
+            .unwrap_or_default()
+    };
+    let before_restart = session_ref(
+        owner
+            .get_agent_session(proto::GetAgentSessionInput {
+                peer_id: Some(super::api::chat_peer(chat_id)),
+                bot_user_id,
+                ..Default::default()
+            })
+            .await
+            .unwrap(),
+    );
+    let _ = stop.send(());
+    let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
+    assert!(
+        matches!(outcome, Ok(Ok(Ok(())))),
+        "runtime ended cleanly: {outcome:?}"
+    );
+    bot.shutdown().await.unwrap();
+    drop(bot);
+    // Sent while the bridge is down: the restarted bridge catches up.
+    send(&owner, chat_id, "Back after the restart").await;
+    let (stop, running, _bot) = bridge.start().await;
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the answer after the restart",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_AFTER_RESTART"))
+        },
+    )
+    .await;
+    let after_restart = session_ref(
+        owner
+            .get_agent_session(proto::GetAgentSessionInput {
+                peer_id: Some(super::api::chat_peer(chat_id)),
+                bot_user_id,
+                ..Default::default()
+            })
+            .await
+            .unwrap(),
+    );
+    assert!(!before_restart.is_empty());
+    assert_eq!(
+        before_restart, after_restart,
+        "the restarted bridge resumed the same Codex thread"
+    );
 
     // 7. In a group thread, a mention starts a work that moves itself into a
     // subthread; the parent keeps a card and the work goes on there.
@@ -817,6 +794,85 @@ async fn codex_round_trip_through_inline() {
     );
 }
 
+/// One run of the bridge for the Codex test: its own bot client, tool host
+/// and Codex process, over the shared ledger.
+struct CodexBridge {
+    dir: std::path::PathBuf,
+    folder: std::path::PathBuf,
+    owner: InlineClient,
+    owner_user_id: i64,
+    bot_user_id: i64,
+    dm_chat_id: i64,
+}
+
+type Running = tokio::task::JoinHandle<Result<(), String>>;
+
+impl CodexBridge {
+    /// Starts the bridge on the bot's persisted store, so a restart catches
+    /// up from where the last run stopped.
+    async fn start(&self) -> (tokio::sync::oneshot::Sender<()>, Running, InlineClient) {
+        let executable = which_codex();
+        let bot = client(&self.dir, "bot", &env("INLINE_V2_E2E_BOT_TOKEN")).await;
+        let tools = Tools::new(ToolsConfig {
+            bot: bot.clone(),
+            provider: inline_agent_bridge::ProviderId::new("codex").unwrap(),
+            bot_user_id: self.bot_user_id,
+            owner_user_id: self.owner_user_id,
+            agent_name: "Codex".to_owned(),
+            folder: self.folder.clone(),
+            attachments_dir: self.dir.join("attachments"),
+        });
+        let codex = inline_agent_driver_codex::harness::CodexHarness::new(
+            inline_agent_driver_codex::harness::CodexHarnessConfig {
+                launch: inline_agent_driver_codex::CodexLaunchConfig {
+                    executable: executable.clone(),
+                    ..Default::default()
+                },
+                source: ExecutableSource::Path,
+                pinned_sha256: None,
+                bridge_version: env!("CARGO_PKG_VERSION").to_owned(),
+                cache_root: self.dir.join("cache"),
+            },
+        );
+        codex.configure_host_tools(tools.configuration());
+        let harness: Arc<dyn HarnessDriver> = Arc::new(codex);
+        let mut events = bot.take_lossless_events().unwrap();
+        let runtime = Runtime::new(
+            V2Config {
+                vocabulary: Vocabulary::Codex,
+                agent_name: "Codex".to_owned(),
+                installation_id: "e2e-installation".to_owned(),
+                owner_user_id: self.owner_user_id,
+                bot_user_id: self.bot_user_id,
+                bot_username: "e2e_codex_bot".to_owned(),
+                dm_chat_id: self.dm_chat_id,
+                folder: self.folder.clone(),
+                machine_label: "e2e".to_owned(),
+                executable_path: Some(executable.display().to_string()),
+                accept_messages_after: 0,
+                allowlist: Vec::new(),
+                ledger_path: self.dir.join("ledger.sqlite"),
+                attachments_dir: self.dir.join("attachments"),
+            },
+            bot.clone(),
+            Arc::new(OwnerClient(self.owner.clone())),
+            harness,
+            Some(tools),
+        )
+        .unwrap();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let running = tokio::spawn(async move {
+            runtime
+                .run(&mut events, async {
+                    let _ = stopped.await;
+                })
+                .await
+                .map_err(|error| error.to_string())
+        });
+        (stop, running, bot)
+    }
+}
+
 /// Waits until the server reports the work idle.
 async fn wait_idle(owner: &InlineClient, chat_id: i64, agent_session_id: i64) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
@@ -866,28 +922,76 @@ fn tool_outputs(model: &FakeModel) -> Vec<String> {
         .collect()
 }
 
-/// The first approval button on a card.
-async fn approve_action(owner: &InlineClient, chat_id: i64, message_id: i64) -> String {
-    let page = owner
-        .history(HistoryRequest {
-            chat_id: InlineId::new(chat_id),
-            limit: Some(100),
-            before_message_id: None,
-            after_message_id: None,
-        })
-        .await
-        .unwrap();
-    let message = page
-        .messages
-        .into_iter()
-        .find(|message| message.message_id.get() == message_id)
-        .expect("card");
-    message
-        .metadata
-        .actions
-        .first()
-        .map(|action| action.action_id.clone())
-        .expect("the card has decision buttons")
+enum CardKind {
+    Buttons,
+    Form,
+}
+
+/// Waits for the bot's card whose text contains `needle`: the message with
+/// decision buttons, or with a form. A progress row can show the same text
+/// first. Returns the card and its first button.
+async fn wait_card(
+    model: &dyn Seen,
+    owner: &InlineClient,
+    chat_id: i64,
+    needle: &str,
+    kind: CardKind,
+) -> (i64, String) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    loop {
+        let result = owner
+            .invoke_rpc(
+                proto::Method::GetChatHistory,
+                proto::rpc_call::Input::GetChatHistory(proto::GetChatHistoryInput {
+                    peer_id: Some(super::api::chat_peer(chat_id)),
+                    limit: Some(100),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .unwrap();
+        let proto::rpc_result::Result::GetChatHistory(history) = result else {
+            panic!("unexpected result");
+        };
+        for message in &history.messages {
+            if !message
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains(needle)
+            {
+                continue;
+            }
+            match kind {
+                CardKind::Buttons => {
+                    if let Some(action) = message
+                        .actions
+                        .as_ref()
+                        .and_then(|actions| actions.rows.first())
+                        .and_then(|row| row.actions.first())
+                    {
+                        return (message.id, action.action_id.clone());
+                    }
+                }
+                CardKind::Form => {
+                    if message.block_content.as_ref().is_some_and(|content| {
+                        content
+                            .blocks
+                            .iter()
+                            .any(|block| matches!(block.kind, Some(proto::block::Kind::Form(_))))
+                    }) {
+                        return (message.id, String::new());
+                    }
+                }
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for the card with {needle}; model saw: {}",
+            model.seen()
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1028,22 +1132,7 @@ async fn claude_round_trip_through_inline() {
         "Run the check\n@tool Bash {\"command\": \"echo E2E_RAN > ran.txt\", \"description\": \"Write the marker\"}",
     )
     .await;
-    let texts = wait_for(
-        &api,
-        &owner,
-        chat_id,
-        bot_user_id,
-        "the approval card",
-        |texts| texts.iter().any(|(_, text)| text.contains("echo E2E_RAN")),
-    )
-    .await;
-    let card = texts
-        .iter()
-        .rev()
-        .find(|(_, text)| text.contains("echo E2E_RAN"))
-        .map(|(id, _)| *id)
-        .unwrap();
-    let action = approve_action(&owner, chat_id, card).await;
+    let (card, action) = wait_card(&api, &owner, chat_id, "echo E2E_RAN", CardKind::Buttons).await;
     owner
         .invoke_rpc(
             proto::Method::InvokeMessageAction,
