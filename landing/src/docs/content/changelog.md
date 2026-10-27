@@ -7,6 +7,51 @@ Release notes for Inline apps, developer tools, and integrations.
 
 > [Download the latest Inline apps](/download).
 
+## October 27, 2026
+
+### New
+
+- 🪟 A floating **call pill** on macOS keeps the people in your Grid room, mic, screen share, and leave within reach while you work in other apps.
+- 🔔 Notifications you read or delete on one device now **clear on your other devices** too, on iOS and macOS.
+- 📦 Send files and videos up to **500 MB**, up from 200 MB.
+- 🔍 Search **macOS Settings**. Press Command-F in Settings and jump straight to the option you need.
+
+### Quality of life improvements
+
+- Manage your bots on iOS: edit their profile, photo, and username, open their chat, or delete them. You can also change a bot's username on macOS.
+- Send or discard a voice message on iOS while you're still recording. The recording bar now matches macOS.
+- Archiving a chat on macOS now also closes and unpins it, with an undo toast to bring it back.
+- Chats on iOS open with their messages ready, and the chat you tapped stays highlighted.
+- Grid keeps you in your room after restarting the app or recovering a call, and your Mac stays awake while you're in a call.
+- Added **Call Diagnostics** to the macOS Help menu, so you can send us a report when a call sounds off.
+- macOS now offers Beta and Tip update channels. If you were on Stable, you're now on Beta.
+- Refreshed the app icon and message bubble tails.
+
+### Better tools and APIs for agents and hackers
+
+- The local agent bridge in [CLI](/docs/cli) 0.7.18 now **heals itself** after network, sign-in, and rate-limit errors, without `inline bridge restart`. It only stops when it needs you to sign in or finish setup.
+- CLI browser sign-in now asks you to confirm the code shown in your terminal, including with Google and Apple sign-in. A sign-in link on its own can no longer authorize someone else's terminal.
+- The CLI, SDK, and [Bot API](/docs/bot-api) now handle 500 MB files, and large transfers survive slow or interrupted connections.
+- In the [Bot API](/docs/bot-api), `forwardMessage` and `forwardMessages` take `copy: true` to send messages without a forward header. `sendMessage` now only accepts media your bot uploaded, so use `copy` to resend someone else's media. `getFile` also takes the `chat_id` and `message_id` of the message carrying the file.
+- [OpenClaw](/docs/openclaw) and [Hermes](/docs/hermes) no longer wake on name patterns or wake words. Mentions, replies, followed threads, and commands still wake them. In OpenClaw group chats with several bots, the mentions at the start of a message decide who it's for.
+- [OpenClaw](/docs/openclaw) now supports 2026.10.5 and adds an `inline_follow` tool, so the agent can follow or unfollow a chat itself. `toolsBySender` now matches numeric user ids only. Groups that still key senders by name have tools turned off until you update the config.
+- Local agents now ignore other people's bots unless you add them to your allowlist.
+
+### Fixes
+
+- Fixed message links opening at the bottom of the chat on macOS, and the message highlight on iOS.
+- Fixed a hang when pasting rich text from web pages.
+- Fixed profile photos that failed to load or kept retrying.
+- Fixed notifications that could still show messages after signing out or switching accounts on iOS.
+- Pinning and unpinning messages now shows up right away in open chats.
+- Fixed voice messages on iOS changing width after they appear.
+- Fixed more ghost rows in the macOS sidebar.
+- Fixed the Grid Resume button showing while leaving or switching rooms on macOS.
+- Your email and phone number are now only visible to you.
+- Improved server reliability and response times.
+
+---
+
 ## October 10, 2026
 
 [macOS 0.2, build 5957](https://public-assets.inline.chat/mac/beta/5957/Inline.dmg) · [macOS 0.2 tip, build 5959](https://public-assets.inline.chat/mac/tip/5959/Inline.dmg) · [iOS TestFlight build 1342](https://testflight.apple.com/join/FkC3f7fz)
