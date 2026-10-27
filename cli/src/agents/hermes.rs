@@ -16,7 +16,7 @@ const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 const MACHINE_SETUP_PROTOCOL_VERSION: u64 = 1;
 // Install and verify the published Hermes adapter.
 const MINIMUM_HERMES_PLUGIN_VERSION: &str = "0.0.22";
-const HERMES_PLUGIN_PACKAGE_SPEC: &str = "@inline-chat/hermes-agent-adapter";
+const HERMES_PLUGIN_PACKAGE_SPEC: &str = "@inline-chat/hermes-agent-adapter@1.0.0-alpha.1";
 
 struct HermesProfile {
     home: Option<PathBuf>,
@@ -851,7 +851,7 @@ mod tests {
             vec![
                 "exec",
                 "--yes",
-                "--package=@inline-chat/hermes-agent-adapter",
+                "--package=@inline-chat/hermes-agent-adapter@1.0.0-alpha.1",
                 "--",
                 "inline-hermes",
                 "install",
