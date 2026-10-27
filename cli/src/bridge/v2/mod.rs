@@ -11,5 +11,6 @@ pub(crate) mod intake;
 pub(crate) mod ledger;
 pub(crate) mod render;
 pub(crate) mod runtime;
+pub(crate) mod settings;
 pub(crate) mod tools;
 pub(crate) mod work;

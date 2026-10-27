@@ -26,7 +26,7 @@ use inline_agent_bridge::harness::{
     Delivery, Event, EventStream, FieldAnswer, FieldId, FieldInput, HarnessDriver, HeldBy, Input,
     InputDisposition, InputFact, InputId, InteractionId, InteractionResponse, Op, OpError, OpKind,
     OpenError, OpenMode, OpenSpec, OutputMode, QuestionForm, QueueOp, RunState, SendError, Session,
-    SteerPriority, TurnPhase, UserId, WaitingOn,
+    SettingsChange, SteerPriority, TurnPhase, UserId, WaitingOn,
 };
 use inline_agent_bridge::{HostToolResult, MAX_SESSION_TITLE_CHARS, ProviderSessionId, TurnId};
 use inline_client::{
@@ -41,6 +41,7 @@ use super::api::{self, Notify, chat_peer};
 use super::doc::{Doc, DocBuilder};
 use super::ledger::{InputState, Ledger};
 use super::render::{ActionStyle, CardAction, FullDetail, RenderOp, Renderer, Vocabulary};
+use super::settings;
 use super::tools::{Tools, WorkTool};
 
 /// Progress edits are coalesced to at most one per slot in this window.
@@ -188,11 +189,27 @@ pub(crate) enum Command {
     SetMode(OutputMode),
     /// The Inline thread's title changed (spec §15.7: Inline → harness).
     Title(String),
+    /// A session operation from settings or a command; answers with a toast.
+    Session {
+        op: SessionOp,
+        reply: oneshot::Sender<Option<String>>,
+    },
     /// A tool that acts through the work (spec §4.8).
     Tool {
         tool: WorkTool,
         reply: oneshot::Sender<HostToolResult>,
     },
+}
+
+/// Operations on the work's native session from Agent Settings, the
+/// composer chain or a command.
+#[derive(Clone, Debug)]
+pub(crate) enum SessionOp {
+    /// Model, reasoning or permissions for this thread from the next message
+    /// on (Oct 26). An empty string clears a field back to the default.
+    Settings(SettingsChange),
+    Compact,
+    Clear,
 }
 
 /// The main loop's handle on one work.
@@ -223,6 +240,7 @@ pub(crate) fn spawn(
     chat_id: i64,
     known: Known,
     output_mode: OutputMode,
+    thread_settings: SettingsChange,
 ) -> WorkHandle {
     let (tx, rx) = mpsc::channel(64);
     let commands = tx.downgrade();
@@ -269,6 +287,8 @@ pub(crate) fn spawn(
         passive: PassiveBatch::new(chat_id),
         title: None,
         rename_pending: false,
+        settings_pending: !settings::effective(&thread_settings).is_empty(),
+        settings: thread_settings,
         consider: ConsiderQueue::default(),
         consider_lines: HashMap::new(),
         gate_budget: DailySpeakGateBudget::default(),
@@ -347,6 +367,10 @@ struct Actor {
     title: Option<String>,
     /// The native session still needs `title`.
     rename_pending: bool,
+    /// This thread's model, reasoning and permissions.
+    settings: SettingsChange,
+    /// `settings` changed since the native session last took them.
+    settings_pending: bool,
     /// Unaddressed messages waiting for a quiet, idle moment (spec §5.4).
     consider: ConsiderQueue,
     consider_lines: HashMap<i64, String>,
@@ -440,6 +464,10 @@ impl Actor {
                 self.consider_lines.insert(message_id, line);
             }
             Command::SetMode(mode) => self.renderer.set_mode(mode),
+            Command::Session { op, reply } => {
+                let toast = self.session_op(op).await;
+                let _ = reply.send(toast);
+            }
             Command::Title(title) => {
                 if self.title.as_deref() != Some(title.as_str()) {
                     self.title = Some(title);
@@ -1137,6 +1165,7 @@ impl Actor {
             self.rename_pending = self.title.is_some();
         }
         self.sync_title().await;
+        self.sync_settings().await;
         Ok(())
     }
 
@@ -1146,7 +1175,7 @@ impl Actor {
             .open(OpenSpec {
                 mode,
                 folder: self.agent.folder.clone(),
-                settings: Default::default(),
+                settings: settings::effective(&self.settings),
                 instructions: Some(trusted_guide(GuideFacts {
                     bot_user_id: self.agent.bot_user_id,
                     owner_user_id: self.agent.owner_user_id,
@@ -1512,6 +1541,63 @@ impl Actor {
                 && &session != native
             {
                 tools.bind_child(&session, native);
+            }
+        }
+    }
+
+    async fn session_op(&mut self, op: SessionOp) -> Option<String> {
+        match op {
+            SessionOp::Settings(change) => {
+                settings::merge(&mut self.settings, &change);
+                self.settings_pending = true;
+                if self.held_session().is_none() {
+                    return Some("Applies to this thread from the next message.".to_owned());
+                }
+                self.sync_settings().await
+            }
+            SessionOp::Compact => self.native_op(Op::Compact, "Compacting the context.").await,
+            SessionOp::Clear => self.native_op(Op::Clear, "Context cleared.").await,
+        }
+    }
+
+    async fn native_op(&mut self, op: Op, done: &str) -> Option<String> {
+        let Some(session) = self.held_session() else {
+            return Some("Nothing is open in this thread yet.".to_owned());
+        };
+        match session.control(op).await {
+            Ok(_) => Some(done.to_owned()),
+            Err(error) => Some(format!("Not available: {error}")),
+        }
+    }
+
+    /// Hands this thread's settings to the held session. A harness that
+    /// cannot change a running session takes them at its next open.
+    async fn sync_settings(&mut self) -> Option<String> {
+        if !self.settings_pending {
+            return None;
+        }
+        let change = settings::effective(&self.settings);
+        let session = self.held_session()?;
+        if change.is_empty() {
+            self.settings_pending = false;
+            return Some("Back to the harness's defaults from the next session.".to_owned());
+        }
+        match session
+            .control(Op::Settings {
+                change,
+                scope: inline_agent_bridge::harness::SettingsScope::Thread,
+            })
+            .await
+        {
+            Ok(_) => {
+                self.settings_pending = false;
+                Some("Applies to this thread from the next message.".to_owned())
+            }
+            Err(error) => {
+                log::debug!(target: "inline::bridge::v2", "settings not applied: {error}");
+                Some(format!(
+                    "Applies when this thread's session next opens ({error})."
+                ))
             }
         }
     }

@@ -327,6 +327,9 @@ async fn codex_round_trip_through_inline() {
     let (model, base_url) = FakeModel::start(vec![
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_ANSWER_ONE"}]}),
+        // After /model, the next turn runs on the chosen model.
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_NEW_MODEL"}]}),
         inline_tool("send_message", json!({"text": "E2E_TOOL_SENT"})),
         inline_tool("get_current_context", json!({})),
         json!({"type": "message", "role": "assistant",
@@ -461,6 +464,123 @@ async fn codex_round_trip_through_inline() {
         .as_ref()
         .map(|session| session.id)
         .unwrap();
+
+    // 1b. Commands and settings: /status and an unknown command answer in
+    // text; the settings document comes from the harness's catalog, and a
+    // model chosen there runs the next turn.
+    send(&owner, chat_id, "/status").await;
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the status",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.starts_with("Codex on e2e"))
+        },
+    )
+    .await;
+    send(&owner, chat_id, "/frobnicate now").await;
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the unavailable command",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.starts_with("/frobnicate isn't available"))
+        },
+    )
+    .await;
+    let settings = owner
+        .invoke_rpc(
+            proto::Method::RequestBotChatSettings,
+            proto::rpc_call::Input::RequestBotChatSettings(proto::RequestBotChatSettingsInput {
+                peer_id: Some(super::api::chat_peer(chat_id)),
+                bot_user_id,
+                version: 1,
+            }),
+        )
+        .await
+        .unwrap();
+    let proto::rpc_result::Result::RequestBotChatSettings(settings) = settings else {
+        panic!("unexpected result");
+    };
+    let document = match settings.response.and_then(|response| response.result) {
+        Some(proto::bot_chat_settings_response::Result::Document(document)) => document,
+        other => panic!("no settings document: {other:?}"),
+    };
+    let model_item = document
+        .sections
+        .iter()
+        .flat_map(|section| &section.items)
+        .find(|item| item.id == "agent.model")
+        .expect("the document offers a model");
+    let Some(proto::bot_chat_settings_item::Control::Select(select)) = &model_item.control else {
+        panic!("the model is a select");
+    };
+    let chosen = select
+        .options
+        .iter()
+        .map(|option| option.value.clone())
+        .find(|value| value != "__inline_provider_default__" && value != "gpt-5")
+        .expect("the catalog offers another model");
+    let invoked = owner
+        .invoke_rpc(
+            proto::Method::InvokeBotChatSettingsItem,
+            proto::rpc_call::Input::InvokeBotChatSettingsItem(
+                proto::InvokeBotChatSettingsItemInput {
+                    peer_id: Some(super::api::chat_peer(chat_id)),
+                    bot_user_id,
+                    version: 1,
+                    item_id: "agent.model".to_owned(),
+                    value: Some(proto::BotChatSettingsValue {
+                        value: Some(proto::bot_chat_settings_value::Value::StringValue(
+                            chosen.clone(),
+                        )),
+                    }),
+                    document_revision: document.revision.clone(),
+                },
+            ),
+        )
+        .await
+        .unwrap();
+    let proto::rpc_result::Result::InvokeBotChatSettingsItem(invoked) = invoked else {
+        panic!("unexpected result");
+    };
+    let updated = match invoked.response.and_then(|response| response.result) {
+        Some(proto::bot_chat_settings_response::Result::Document(document)) => document,
+        other => panic!("the change was refused: {other:?}"),
+    };
+    assert!(
+        updated
+            .sections
+            .iter()
+            .flat_map(|section| &section.items)
+            .any(|item| item.id == "agent.model"
+                && matches!(&item.control, Some(proto::bot_chat_settings_item::Control::Select(select)) if select.value == chosen)),
+        "the document shows the chosen model"
+    );
+    send(&owner, chat_id, "Answer on the new model").await;
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the answer on the new model",
+        |texts| texts.iter().any(|(_, text)| text.contains("E2E_NEW_MODEL")),
+    )
+    .await;
+    let used = model.requests.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(
+        used.get("model").and_then(Value::as_str),
+        Some(chosen.as_str()),
+        "the next turn ran on the model chosen in settings"
+    );
 
     // 2. Inline tools act as the agent: a message sent by the tool arrives,
     // and the context names this work's thread.

@@ -17,11 +17,14 @@ use inline_agent_bridge::group::{
     decide_intake, direct_input, origin_of,
 };
 use inline_agent_bridge::harness::{
-    Delivery, HarnessDriver, Input, InputContent, InputId, OutputMode, UserId,
+    Catalog, CatalogScope, Delivery, HarnessDriver, Input, InputContent, InputId, OutputMode,
+    SettingsChange, UserId,
 };
 use inline_client::{
-    AnswerMessageActionRequest, BotInteractionEvent, ClientEvent, ClientStatus,
-    CreateReplyThreadRequest, InlineClient, InlineId, LosslessEventReceiver, MessageRecord,
+    AnswerBotChatSettingsRequest, AnswerMessageActionRequest, BotChatSettingsDocument,
+    BotChatSettingsProblemCode, BotChatSettingsResponse, BotInteractionEvent, BotSettingsValue,
+    ClientEvent, ClientStatus, CreateReplyThreadRequest, InlineClient, InlineId,
+    LosslessEventReceiver, MessageRecord,
 };
 use inline_protocol::proto;
 use tokio::sync::{mpsc, oneshot};
@@ -31,12 +34,16 @@ use super::doc::DocBuilder;
 use super::intake::{MessageFacts, grants_by_user, group_message};
 use super::ledger::{Begin, InputState, Ledger, input_id};
 use super::render::{QUESTION_FORM_ID, Vocabulary};
+use super::settings;
 use super::tools::Tools;
 use super::work::{
-    AccessSource, ActionData, Agent, Command, Control, Known, OwnerCalls, WorkHandle,
+    AccessSource, ActionData, Agent, Command, Control, Known, OwnerCalls, SessionOp, WorkHandle,
 };
 
 const DEFAULT_HEARTBEAT: Duration = Duration::from_secs(60);
+/// How long the harness's pickers are reused.
+const CATALOG_TTL: Duration = Duration::from_secs(60);
+const NO_STEER: &str = "You don't have access to do that with this agent.";
 /// How often the bot's Inline connection is checked.
 const CONNECTION_CHECK: Duration = Duration::from_secs(5);
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(300);
@@ -161,6 +168,10 @@ pub(crate) struct Runtime {
     moves: Option<mpsc::UnboundedReceiver<(i64, i64)>>,
     /// Chat → whether this agent created it, so it is the agent's own thread.
     own_threads: HashMap<i64, bool>,
+    /// Chat → its model, reasoning and permissions (settings and commands).
+    thread_settings: HashMap<i64, SettingsChange>,
+    /// The harness's pickers, refreshed now and then.
+    catalog: Option<(tokio::time::Instant, Catalog)>,
     reconnect: Reconnect,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
@@ -212,6 +223,8 @@ impl Runtime {
             moved: HashMap::new(),
             moves: Some(moves),
             own_threads: HashMap::new(),
+            thread_settings: HashMap::new(),
+            catalog: None,
             reconnect: Reconnect::default(),
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
@@ -232,6 +245,16 @@ impl Runtime {
             log::warn!(target: "inline::bridge::v2", "allowlist import failed: {error}");
         }
         self.recover().await;
+        // Agent Settings and the composer chain read these.
+        let catalog = self.catalog().await;
+        if let Err(error) = self
+            .agent
+            .bot
+            .set_bot_capabilities(settings::capabilities(&catalog))
+            .await
+        {
+            log::warn!(target: "inline::bridge::v2", "settings capabilities not published: {error}");
+        }
         let mut heartbeat = tokio::time::interval(self.heartbeat().await);
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         tokio::pin!(shutdown);
@@ -464,6 +487,38 @@ impl Runtime {
                 }
                 Ok(())
             }
+            ClientEvent::BotInteraction(BotInteractionEvent::ChatSettingsRequested {
+                request_id,
+                chat_id,
+                actor_user_id,
+                version,
+            }) => {
+                let response = self
+                    .chat_settings(chat_id.get(), actor_user_id.get(), *version, None)
+                    .await;
+                self.answer_settings(*request_id, response).await;
+                Ok(())
+            }
+            ClientEvent::BotInteraction(BotInteractionEvent::ChatSettingsItemInvoked {
+                request_id,
+                chat_id,
+                actor_user_id,
+                version,
+                item_id,
+                value,
+                document_revision,
+            }) => {
+                let response = self
+                    .chat_settings(
+                        chat_id.get(),
+                        actor_user_id.get(),
+                        *version,
+                        Some((item_id, value.as_ref(), document_revision)),
+                    )
+                    .await;
+                self.answer_settings(*request_id, response).await;
+                Ok(())
+            }
             ClientEvent::BotInteraction(BotInteractionEvent::FilesystemRequested {
                 request_id,
                 chat_id,
@@ -559,6 +614,249 @@ impl Runtime {
                 false
             }
         }
+    }
+
+    /// The harness's pickers, kept for a minute.
+    async fn catalog(&mut self) -> Catalog {
+        if let Some((at, catalog)) = &self.catalog
+            && at.elapsed() < CATALOG_TTL
+        {
+            return catalog.clone();
+        }
+        match self
+            .agent
+            .harness
+            .catalog(CatalogScope {
+                folder: Some(self.config.folder.clone()),
+                session: None,
+            })
+            .await
+        {
+            Ok(catalog) => {
+                self.catalog = Some((tokio::time::Instant::now(), catalog.clone()));
+                catalog
+            }
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "catalog unavailable: {error}");
+                self.catalog
+                    .as_ref()
+                    .map(|(_, catalog)| catalog.clone())
+                    .unwrap_or_default()
+            }
+        }
+    }
+
+    fn settings_document(&self, chat_id: i64, catalog: &Catalog) -> BotChatSettingsDocument {
+        let default = SettingsChange::default();
+        let folder = self
+            .config
+            .folder
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "the agent's folder".to_owned());
+        settings::document(&settings::DocumentFacts {
+            catalog,
+            settings: self.thread_settings.get(&chat_id).unwrap_or(&default),
+            folder_label: &folder,
+            machine_label: &self.config.machine_label,
+            can_compact: self.works.contains_key(&chat_id),
+        })
+    }
+
+    /// Agent Settings and the composer chain for one thread (spec §6):
+    /// the owner or a CONFIGURE grantee reads and changes them.
+    async fn chat_settings(
+        &mut self,
+        chat_id: i64,
+        actor: i64,
+        version: u32,
+        invoked: Option<(&str, Option<&BotSettingsValue>, &str)>,
+    ) -> BotChatSettingsResponse {
+        if version != settings::SETTINGS_VERSION {
+            return settings::problem(
+                BotChatSettingsProblemCode::Unavailable,
+                "This settings version is not supported. Update Inline and try again.",
+                None,
+            );
+        }
+        if !self
+            .access
+            .grants(actor)
+            .await
+            .permits(Operation::Configure)
+        {
+            return settings::problem(
+                BotChatSettingsProblemCode::Unavailable,
+                "Only the agent's owner, or someone they let configure it, can change these settings.",
+                None,
+            );
+        }
+        let catalog = self.catalog().await;
+        let current = self.settings_document(chat_id, &catalog);
+        let Some((item_id, value, revision)) = invoked else {
+            return BotChatSettingsResponse::Document(current);
+        };
+        if revision != current.revision {
+            return settings::problem(
+                BotChatSettingsProblemCode::Stale,
+                "These settings changed. Here are the current ones.",
+                Some(current),
+            );
+        }
+        let op = match settings::invocation(item_id, value, &catalog) {
+            Ok(settings::Invocation::Change(change)) => {
+                settings::merge(self.thread_settings.entry(chat_id).or_default(), &change);
+                SessionOp::Settings(change)
+            }
+            Ok(settings::Invocation::Compact) => SessionOp::Compact,
+            Err(message) => {
+                return settings::problem(
+                    BotChatSettingsProblemCode::InvalidValue,
+                    message,
+                    Some(current),
+                );
+            }
+        };
+        if self.works.contains_key(&chat_id) {
+            let _ = self
+                .ask(chat_id, |reply| Command::Session { op, reply })
+                .await;
+        }
+        BotChatSettingsResponse::Document(self.settings_document(chat_id, &catalog))
+    }
+
+    async fn answer_settings(&self, request_id: u64, response: BotChatSettingsResponse) {
+        if let Err(error) = self
+            .agent
+            .bot
+            .answer_bot_chat_settings(AnswerBotChatSettingsRequest {
+                request_id,
+                response,
+            })
+            .await
+        {
+            log::warn!(target: "inline::bridge::v2", "settings answer failed: {error}");
+        }
+    }
+
+    /// A slash command other than the controls and `/queue`. The harness's
+    /// own meanings win (spec §2); anything else is said to be unavailable,
+    /// never sent as a prompt (§4.1).
+    async fn command(
+        &mut self,
+        chat_id: i64,
+        actor: i64,
+        grants: Grants,
+        name: &str,
+        arguments: &str,
+    ) -> String {
+        let item = match name {
+            "model" => Some(settings::ITEM_MODEL),
+            "reasoning" => Some(settings::ITEM_REASONING),
+            "permissions" => Some(settings::ITEM_PERMISSIONS),
+            _ => None,
+        };
+        if let Some(item) = item {
+            if !grants.permits(Operation::Configure) {
+                return "Only the agent's owner, or someone they let configure it, can change that."
+                    .to_owned();
+            }
+            let catalog = self.catalog().await;
+            let argument = arguments.trim();
+            if argument.is_empty() {
+                return settings::describe(
+                    item,
+                    &catalog,
+                    self.thread_settings
+                        .get(&chat_id)
+                        .unwrap_or(&SettingsChange::default()),
+                );
+            }
+            let value = BotSettingsValue::String(settings::command_value(argument).to_owned());
+            return match settings::invocation(item, Some(&value), &catalog) {
+                Ok(settings::Invocation::Change(change)) => {
+                    settings::merge(self.thread_settings.entry(chat_id).or_default(), &change);
+                    if self.works.contains_key(&chat_id) {
+                        self.ask(chat_id, |reply| Command::Session {
+                            op: SessionOp::Settings(change),
+                            reply,
+                        })
+                        .await
+                        .unwrap_or_else(|| "Set for this thread.".to_owned())
+                    } else {
+                        "Set for this thread, from the next message.".to_owned()
+                    }
+                }
+                Ok(settings::Invocation::Compact) => "Use /compact.".to_owned(),
+                Err(message) => message.to_owned(),
+            };
+        }
+        match name {
+            "compact" | "clear" => {
+                if !grants.permits(Operation::Steer) {
+                    return NO_STEER.to_owned();
+                }
+                if !self.works.contains_key(&chat_id) {
+                    return "Nothing is open in this thread yet.".to_owned();
+                }
+                let op = if name == "compact" {
+                    SessionOp::Compact
+                } else {
+                    SessionOp::Clear
+                };
+                self.ask(chat_id, |reply| Command::Session { op, reply })
+                    .await
+                    .unwrap_or_else(|| "Done.".to_owned())
+            }
+            "status" => self.status(chat_id, actor).await,
+            other => format!(
+                "/{other} isn't available with {}. Try /status, /model, /reasoning, /permissions, /compact, /clear, /queue, /stop, /pause, /resume, /new or /release.",
+                self.config.agent_name
+            ),
+        }
+    }
+
+    async fn status(&mut self, chat_id: i64, _actor: i64) -> String {
+        let phase = self.works.get(&chat_id).map(|work| *work.phase.borrow());
+        let state = match phase {
+            None | Some(WorkPhase::None) => "Nothing has run in this thread yet.",
+            Some(WorkPhase::Idle) => "Idle.",
+            Some(WorkPhase::Running) => "Working.",
+            Some(WorkPhase::Paused) => "Paused. Mention the agent or send /resume to go on.",
+        };
+        let catalog = self.catalog().await;
+        let settings = self
+            .thread_settings
+            .get(&chat_id)
+            .cloned()
+            .unwrap_or_default();
+        let label = |value: &Option<String>| value.clone().unwrap_or_else(|| "default".to_owned());
+        let info = self.agent.harness.describe();
+        format!(
+            "{} on {}: {state}\nModel: {}. Reasoning: {}. Permissions: {}.\nFolder: {}. {} {}.{}",
+            self.config.agent_name,
+            self.config.machine_label,
+            label(&settings.model),
+            label(&settings.effort),
+            label(&settings.permission_mode),
+            self.config
+                .folder
+                .file_name()
+                .map_or_else(|| "?".into(), |name| name.to_string_lossy()),
+            match self.config.vocabulary {
+                Vocabulary::Codex => "Codex",
+                Vocabulary::Claude => "Claude Code",
+            },
+            info.executable
+                .version
+                .as_deref()
+                .unwrap_or("(version unknown)"),
+            if catalog.models.is_empty() {
+                ""
+            } else {
+                " Models: /model."
+            }
+        )
     }
 
     /// A work moved into a subthread: it is that chat's work from now on.
@@ -806,10 +1104,7 @@ impl Runtime {
         // parent), and must not run again: a second `/new` returned the same
         // thread and replaced its starting work.
         if let Some((name, _)) = group.command()
-            && matches!(
-                name,
-                "new" | "stop" | "pause" | "resume" | "release" | "terminal"
-            )
+            && name != "queue"
         {
             let id = input_id(
                 self.config.bot_user_id,
@@ -835,6 +1130,17 @@ impl Runtime {
             Some("terminal") => Some(Control::Release(ReleaseCause::ContinueInTerminal)),
             _ => None,
         };
+        if let Some((name, _)) = group.command()
+            && control.is_none()
+            && name != "queue"
+        {
+            let arguments = command_arguments(&group.text, name);
+            let answer = self
+                .command(chat_id, group.author.user_id, grants, name, arguments)
+                .await;
+            self.reply(chat_id, group.message_id, &answer).await;
+            return Ok(());
+        }
         if let Some(control) = control {
             let toast = if self.works.contains_key(&chat_id) {
                 self.ask(chat_id, |reply| Command::Control {
@@ -1038,7 +1344,16 @@ impl Runtime {
         self.moved.remove(&chat_id);
         self.works.insert(
             chat_id,
-            super::work::spawn(self.agent.clone(), chat_id, known, mode),
+            super::work::spawn(
+                self.agent.clone(),
+                chat_id,
+                known,
+                mode,
+                self.thread_settings
+                    .get(&chat_id)
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
         );
         Ok(())
     }
@@ -1071,7 +1386,16 @@ impl Runtime {
         let mode = self.effective_mode(participation.as_ref());
         self.works.insert(
             chat_id,
-            super::work::spawn(self.agent.clone(), chat_id, Known::default(), mode),
+            super::work::spawn(
+                self.agent.clone(),
+                chat_id,
+                Known::default(),
+                mode,
+                self.thread_settings
+                    .get(&chat_id)
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
         );
         let task = group
             .text
@@ -1185,9 +1509,44 @@ struct FileQuery<'a> {
     limit: Option<u32>,
 }
 
+/// The text after `/name` (and an optional `@bot`), trimmed.
+fn command_arguments<'a>(text: &'a str, name: &str) -> &'a str {
+    let lower = text.to_ascii_lowercase();
+    let Some(start) = lower.find(&format!("/{name}")) else {
+        return "";
+    };
+    let rest = &text[start + name.len() + 1..];
+    let rest = match rest.split_once(char::is_whitespace) {
+        Some((token, after)) if token.starts_with('@') || token.is_empty() => after,
+        Some((_, after)) => after,
+        None => "",
+    };
+    rest.trim()
+}
+
 fn output_mode(mode: i32) -> OutputMode {
     match proto::AgentOutputMode::try_from(mode) {
         Ok(proto::AgentOutputMode::Friendly) => OutputMode::Friendly,
         _ => OutputMode::Detailed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_arguments_follow_the_command_and_its_bot() {
+        assert_eq!(command_arguments("/model luna", "model"), "luna");
+        assert_eq!(
+            command_arguments("/model@codex_bot  luna ", "model"),
+            "luna"
+        );
+        assert_eq!(
+            command_arguments("@Codex /reasoning high", "reasoning"),
+            "high"
+        );
+        assert_eq!(command_arguments("/status", "status"), "");
+        assert_eq!(command_arguments("/MODEL Sol", "model"), "Sol");
     }
 }
