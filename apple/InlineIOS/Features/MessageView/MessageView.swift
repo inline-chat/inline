@@ -40,6 +40,16 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   var onReactionsMenu: ((FullMessage) -> Void)?
   var onAvatarTap: (() -> Void)?
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
+  /// Local state that changes the layout, such as an opened disclosure, changed; the host
+  /// replans the row.
+  var onContentStateChange: ((FullMessage) -> Void)?
+  /// A streaming message revealed into a new line, or finished; the host replans the row with
+  /// the short line motion.
+  var onRevealLineChange: ((FullMessage) -> Void)?
+  /// The line count the pending replan was asked for, so each new line asks once.
+  private var requestedRevealLine: Int?
+  /// Rich bodies: lists, code, tables and the rest. Created on first use.
+  private var richView: MessageRichView?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -95,7 +105,25 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         crossfadeText(from: textView.frame)
       }
       textView.setLayout(layout.text ?? .empty)
+      // A streaming message keeps drawing at the pacer's count, which runs ahead of the plan
+      // within the planned line.
+      let pacer = MessageStreamPacer.shared
+      if pacer.isStreaming(content.message.id), layout.text != nil {
+        pacer.attach(self, to: content.message.id)
+        textView.revealedLength = pacer.revealedLength(for: content.message.id) ?? layout.revealedLength
+      } else {
+        textView.revealedLength = layout.revealedLength
+      }
+      requestedRevealLine = nil
       textView.accessibilityLabel = content.accessibilityLabel
+      if let rich = layout.rich {
+        let view = richView ?? makeRichView()
+        view.isHidden = false
+        view.apply(rich, palette: content.richPalette, photos: content.rich?.photos ?? [:], animated: animated)
+        view.accessibilityLabel = content.accessibilityLabel
+      } else {
+        richView?.isHidden = true
+      }
       nameView.setLayout(layout.name ?? .empty)
       nameView.isHidden = layout.name == nil
       timeView.configure(
@@ -198,7 +226,12 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       bubbleContentView.frame = layout.bubble.frame
       bubbleView.frame = bubbleContentView.bounds
       bubbleView.layoutFill()
-      textView.textFrame = local(layout.frame(.text)) ?? .zero
+      if layout.rich != nil, let richView {
+        richView.untransformedFrame = local(layout.frame(.text)) ?? .zero
+        richView.layoutNodes()
+      } else {
+        textView.textFrame = local(layout.frame(.text)) ?? .zero
+      }
       textView.alpha = 1
       nameView.textFrame = layout.frame(.name) ?? .zero
       // Nodes with children lay them out inside this block, so their insides move on the same
@@ -282,6 +315,31 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
     bubbleView.updateLightingVector(startY: CGFloat(vector.startY), endY: CGFloat(vector.endY))
   }
 
+  // MARK: - Streaming
+
+  /// Draws the first `length` characters. Entering a line past the planned ones asks the host
+  /// to replan, so the bubble and row grow a line at a time.
+  func reveal(_ length: Int) {
+    guard let layout, let text = layout.text, let message = content?.message else { return }
+    textView.revealedLength = length
+    let planned = Self.lineIndex(of: layout.revealedLength ?? text.length, in: text)
+    let current = Self.lineIndex(of: length, in: text)
+    guard current > planned, requestedRevealLine != current else { return }
+    requestedRevealLine = current
+    onRevealLineChange?(message)
+  }
+
+  /// The stream went idle: draw everything and let the host show the time.
+  func finishStreaming() {
+    textView.revealedLength = nil
+    guard let message = content?.message else { return }
+    onRevealLineChange?(message)
+  }
+
+  private static func lineIndex(of length: Int, in text: TextLayout) -> Int {
+    text.lines.firstIndex { NSMaxRange($0.range) > length } ?? max(0, text.lineCount - 1)
+  }
+
   func performMessageGestureAction(_ action: MessageGestureAction) {
     guard let message = content?.message else { return }
     MessageViewActions.perform(action, on: message, onReactionsMenu: onReactionsMenu)
@@ -290,7 +348,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   /// Where a sent message's flight lands, in this view's coordinates: the bubble, the drawn text
   /// with a little padding, and the first baseline.
   func sendAnimationTargetFrames() -> (bubble: CGRect, text: CGRect, textInTextView: CGRect, firstBaseline: CGFloat)? {
-    guard let layout, let text = layout.text, text.lineCount > 0 else { return nil }
+    guard let layout, let text = layout.text, text.lineCount > 0, layout.rich == nil else { return nil }
     let glyphs = text.lines.map(\.frame).reduce(CGRect.null) { $0.union($1) }
     let padded = glyphs.insetBy(dx: -1.5, dy: -1.5).integral
     let textRect = textView.convert(textView.viewRect(forTextRect: padded), to: self)
@@ -312,18 +370,37 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
     )
   }
 
+  /// Whether a pan at `point` belongs to a code block or table that scrolls sideways.
+  func scrollsHorizontally(at point: CGPoint) -> Bool {
+    var view = hitTest(point, with: nil)
+    while let current = view, current !== self {
+      if let scroll = current as? UIScrollView, scroll.contentSize.width > scroll.bounds.width + 0.5 { return true }
+      view = current.superview
+    }
+    return false
+  }
+
+  /// The text and character under a point in this view's coordinates, in plain or rich bodies.
+  private func textHit(at point: CGPoint) -> (NSAttributedString, Int)? {
+    if let richView, !richView.isHidden {
+      return richView.textHit(at: convert(point, to: richView))
+    }
+    guard let index = textView.characterIndex(at: convert(point, to: textView)) else { return nil }
+    return (textView.layout.text.attributedString, index)
+  }
+
   /// Link under a point in this view's coordinates.
   func linkURL(at point: CGPoint) -> URL? {
-    guard let index = textView.characterIndex(at: convert(point, to: textView)) else { return nil }
-    return MessageViewActions.linkURL(in: textView.layout.text.attributedString, at: index)
+    guard let (text, index) = textHit(at: point) else { return nil }
+    return MessageViewActions.linkURL(in: text, at: index)
   }
 
   // MARK: - Interaction
 
   override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
     if gestureRecognizer === textTap {
-      guard let index = textView.characterIndex(at: gestureRecognizer.location(in: textView)) else { return false }
-      return MessageViewActions.isInteractive(textView.layout.text.attributedString, at: index)
+      guard let (text, index) = textHit(at: gestureRecognizer.location(in: self)) else { return false }
+      return MessageViewActions.isInteractive(text, at: index)
     }
     if gestureRecognizer === linkLongPress {
       return linkURL(at: gestureRecognizer.location(in: self)) != nil
@@ -342,7 +419,8 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
     var view = touch.view
     while let current = view, current !== self {
-      if current is MessageReactionPillView || current is MessageAcknowledgementView || current is MessageBlockHostView {
+      // Pills, disclosures and copy buttons are controls.
+      if current is UIControl || current is MessageAcknowledgementView || current is MessageBlockHostView {
         return false
       }
       view = current.superview
@@ -376,10 +454,10 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
 
   @objc private func handleTextTap(_ gesture: UITapGestureRecognizer) {
     guard let message = content?.message,
-          let index = textView.characterIndex(at: gesture.location(in: textView))
+          let (text, index) = textHit(at: gesture.location(in: self))
     else { return }
     MessageViewActions.handleTap(
-      in: textView.layout.text.attributedString,
+      in: text,
       at: index,
       message: message,
       spaceId: spaceId,
@@ -405,6 +483,20 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       MessageViewActions.toggleReaction(emoji, on: message)
     }
     bubbleContentView.addSubview(view)
+    return view
+  }
+
+  private func makeRichView() -> MessageRichView {
+    let view = MessageRichView()
+    view.isAccessibilityElement = true
+    view.accessibilityTraits = .staticText
+    view.onDisclosureToggle = { [weak self] path, isExpanded in
+      guard let message = self?.content?.message else { return }
+      MessageRichState.shared.set(isExpanded, at: path, for: message.id)
+      self?.onContentStateChange?(message)
+    }
+    bubbleContentView.insertSubview(view, aboveSubview: textView)
+    richView = view
     return view
   }
 

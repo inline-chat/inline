@@ -67,6 +67,9 @@ struct MessageViewContent {
   let reactions: [MessageReactionPillView.Model]
   /// Forward header, reply, media, file or voice, in order.
   let blocks: [MessageBlock]
+  /// Paragraphs, lists, code and the rest, when the message has structure.
+  let rich: MessageRichContent?
+  let richPalette: MessageRichView.Palette
   let showsAcknowledgement: Bool
   let accessibilityLabel: String
 
@@ -80,16 +83,12 @@ struct MessageViewContent {
           model.isSticker != true,
           // The old file path and rich blocks stay with the current view for now.
           message.file == nil,
-          message.attachments.allSatisfy(MessageBlock.supports),
-          model.blockContentPayload == nil
+          message.attachments.allSatisfy(MessageBlock.supports)
     else { return false }
     let hasText = message.displayText?.isEmpty == false
     let hasContent = message.photoInfo != nil || message.videoInfo != nil || message.documentInfo != nil
-      || model.hasVoice
-    guard hasText || hasContent else { return false }
-    // Code blocks need their own block renderer.
-    let entities = message.translationEntities ?? model.entities
-    return entities?.entities.contains { $0.type == .pre } != true
+      || model.hasVoice || model.displayBlockContentPayload != nil
+    return hasText || hasContent
   }
 
   /// `footer` is `.reserved` while a message streams: the time keeps its place but stays hidden.
@@ -97,7 +96,8 @@ struct MessageViewContent {
   static func make(
     _ message: FullMessage,
     context: MessageRowContext,
-    footer: MessageLayoutInput.Footer.Visibility = .visible
+    footer: MessageLayoutInput.Footer.Visibility = .visible,
+    revealedLength: Int? = nil
   ) -> MessageViewContent? {
     // A captionless voice note's display text is its "Voice message" preview; it has no caption.
     let text = message.message.hasVoice && message.message.text?.isEmpty != false ? "" : message.displayText ?? ""
@@ -138,6 +138,18 @@ struct MessageViewContent {
     let body = text.isEmpty
       ? MessageText(NSAttributedString())
       : bodyText(text, message: message, isEmoji: isEmoji, textColor: textColor, context: context)
+    let richSecondary: UIColor = outgoing ? UIColor.white.withAlphaComponent(0.7) : theme.incomingSecondaryText.uiColor
+    let rich = isEmoji ? nil : MessageRichContent.make(
+      for: message,
+      body: body.attributedString,
+      style: .init(
+        baseFont: ChatTypography.font(17, compatibleWith: traits),
+        textColor: textColor,
+        secondaryColor: richSecondary,
+        traits: traits
+      ),
+      expanded: MessageRichState.shared.expanded(for: message.id)
+    )
     let time = MessageText(NSAttributedString(
       string: timeFormatter.string(from: model.date),
       attributes: [
@@ -175,7 +187,14 @@ struct MessageViewContent {
     metrics.cornerRadius = MessageBubbleGeometry.cornerRadius
     metrics.maximumBubbleWidthFraction = MessageBubbleWidthPolicy.maximumWidthFraction
 
-    let input = MessageLayoutInput(
+    let bodyInput: MessageLayoutInput.Body = if let rich {
+      .rich(rich.blocks)
+    } else if isEmoji {
+      .emoji(body)
+    } else {
+      .text(body)
+    }
+    var input = MessageLayoutInput(
       rowWidth: context.rowWidth,
       grid: grid,
       layoutDirection: context.isRightToLeft ? .rightToLeft : .leftToRight,
@@ -184,13 +203,14 @@ struct MessageViewContent {
       tail: context.isLastInGroup ? (outgoing ? .trailing : .leading) : .none,
       avatar: outgoing ? .none : context.avatar,
       name: name,
-      body: isEmoji ? .emoji(body) : .text(body),
+      body: bodyInput,
       footer: .init(time: time, statusSize: statusSize, visibility: footer),
       reactions: reactions.map { .init(id: $0.emoji, size: MessageReactionPillView.size(for: $0)) },
       blocks: blocks.map(\.input),
       acknowledgementSize: acknowledgementSize,
       metrics: metrics
     )
+    input.revealedLength = revealedLength
 
     let lighting = outgoing ? theme.outgoingLighting : theme.incomingLighting
     let supportsLighting = !isEmoji && !isBareMedia && model.status != .failed
@@ -205,6 +225,8 @@ struct MessageViewContent {
       statusSize: statusSize ?? .zero,
       reactions: reactions,
       blocks: blocks,
+      rich: rich,
+      richPalette: .init(text: textColor, secondary: richSecondary, accent: outgoing ? .white : theme.primary.uiColor),
       showsAcknowledgement: showsAcknowledgement,
       accessibilityLabel: ([name?.string] + MessageBlock.accessibilityDescription(of: blocks, message: message)
         + [text.isEmpty ? nil : text, time.string]).compactMap(\.self).joined(separator: ", ")
