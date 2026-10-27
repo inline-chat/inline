@@ -51,17 +51,19 @@ Unsupported or intentionally limited:
 - Live voice sessions or calls. Voice file messages are supported, but realtime audio is not.
 - Media without a usable Inline CDN/local URL. Those messages still produce text summaries, but Hermes may not receive a local file path.
 
-## Release 0.0.22
+## Release 1.0.0
 
-This release includes typed service-notice filtering before agent admission,
-current shared-session setup guidance, and the pinned realtime SDK `0.0.18`.
-Private thread creation with omitted participants includes the connected account.
-Clarification choices use two-column rows within Inline's button limit.
-Hermes keeps its supported agent activity surface; unsupported experimental tool
-timelines remain disabled.
+A major release with breaking changes. Bots join a thread through its first
+message, and later mentions get one answer. Leading mentions and replies decide
+who a message is for. Reply threads are Auto or On per chat, DMs included, with
+one thread per conversation. Each Hermes 0.22 profile keeps its own bot, state
+and sidecar. Agents can follow, unfollow and manage chats, and they show Working
+while they work. Status and doctor report whether messages reach the agent. See
+"Upgrading to 1.0" in the [Hermes docs](https://inline.chat/docs/hermes) for every
+change. Pinned realtime SDK `0.0.20`.
 
 ```sh
-npm install -g @inline-chat/hermes-agent-adapter@0.0.22
+npm install -g @inline-chat/hermes-agent-adapter@1.0.0
 inline-hermes install --force
 ```
 
@@ -170,7 +172,7 @@ uv run ./hermes plugins list --plain --no-bundled
 Expected local output includes:
 
 ```text
-enabled      user     0.0.22   inline-platform
+enabled      user     1.0.0    inline-platform
 ```
 
 ## Update Or Reinstall
@@ -193,8 +195,8 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 
 - Hermes Agent: requires the external user plugin registry and native platform
   plugin loader available in Hermes Agent `>=0.21.3`. This package was validated
-  against Hermes Agent `0.21.5` from source commit `f97608f178d1ffeca59860195ab7da295f7c8e5f` (tag
-  `v2026.9.24`).
+  against Hermes Agent `0.22.5` from source commit `bf0203a794a07aac3ff764972ab9087baa4e4f4e` (tag
+  `v0.22.5`), and installs on the minimum `0.21.3`.
 - CI checks the minimum supported Hermes release, newest stable source, and upstream
   `main`. A six-hour scheduled check also tests the published npm `latest` adapter.
   `inline-hermes doctor` requires successful host loading and compatibility validation;

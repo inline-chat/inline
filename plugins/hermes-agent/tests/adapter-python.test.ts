@@ -462,7 +462,7 @@ with tempfile.TemporaryDirectory(prefix="inline-hermes-catalog-metadata-") as tm
     legacy_dir.mkdir(parents=True)
     catalog_dir.mkdir(parents=True)
     (legacy_dir / "plugin.yaml").write_text("version: 0.0.1\n", encoding="utf-8")
-    (catalog_dir / "plugin.yaml").write_text("version: 0.0.22\n", encoding="utf-8")
+    (catalog_dir / "plugin.yaml").write_text("version: 1.0.0\n", encoding="utf-8")
     saved_adapter_file = inline_adapter_module.__file__
     saved_cli_file = inline_cli.__file__
     saved_catalog_home = os.environ.get("HERMES_HOME")
@@ -471,13 +471,13 @@ with tempfile.TemporaryDirectory(prefix="inline-hermes-catalog-metadata-") as tm
         inline_adapter_module.__file__ = str(catalog_dir / "adapter.py")
         inline_cli.__file__ = str(catalog_dir / "cli.py")
         os.environ["HERMES_HOME"] = str(catalog_home)
-        assert inline_adapter_module._installed_inline_plugin_version() == "0.0.22"
-        assert inline_cli._plugin_version() == "0.0.22"
+        assert inline_adapter_module._installed_inline_plugin_version() == "1.0.0"
+        assert inline_cli._plugin_version() == "1.0.0"
         # Distinct directory timestamps ensure the test catches the legacy path.
         Path.lstat = lambda self: types.SimpleNamespace(st_ctime=100 if self == catalog_dir else 200)
         assert inline_adapter_module._inline_install_timestamp() == "1970-01-01T00:01:40Z"
         catalog_text = _inline_version_text()
-        assert "Plugin version: 0.0.22" in catalog_text
+        assert "Plugin version: 1.0.0" in catalog_text
         assert "1970-01-01T00:01:40Z" in catalog_text
         assert "Plugin version: 0.0.1\n" not in catalog_text
     finally:
