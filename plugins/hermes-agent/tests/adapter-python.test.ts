@@ -3246,6 +3246,90 @@ def assert_follow_tool():
 
 assert_follow_tool()
 
+# Local IPC must bypass machine proxies, and a lost write response is read back.
+def assert_follow_tool_local_http():
+    import http.server
+    import threading
+
+    state = {"mode": "following", "drop": False, "apply": True}
+    calls = []
+    proxy_calls = []
+
+    class Sidecar(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            assert self.headers.get("x-hermes-sidecar-token") == "local-test-only"
+            body = json.loads(self.rfile.read(int(self.headers["content-length"])))
+            calls.append(self.path)
+            if self.path == "/follow-mode":
+                if state["apply"]:
+                    state["mode"] = body["mode"]
+                if state["drop"]:
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    self.connection.close()
+                    return
+                result = {"mode": state["mode"]}
+            else:
+                assert self.path == "/chat"
+                result = {"chatId": "10", "dialogFollowMode": "2" if state["mode"] == "unfollowed" else "1"}
+            payload = json.dumps({"ok": True, "result": result}).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    class Proxy(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            proxy_calls.append(self.path)
+            self.send_response(502)
+            self.end_headers()
+            self.wfile.write(b'{"ok":false,"error":"loopback request reached proxy"}')
+
+    sidecar = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Sidecar)
+    proxy = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Proxy)
+    threads = [threading.Thread(target=server.serve_forever, daemon=True) for server in (sidecar, proxy)]
+    for thread in threads:
+        thread.start()
+    saved = (inline_tools._sidecar_config, urllib.request.getproxies, urllib.request.proxy_bypass, urllib.request._opener)
+    inline_tools._sidecar_config = lambda: (f"http://127.0.0.1:{sidecar.server_port}", "local-test-only")
+    urllib.request.getproxies = lambda: {"http": f"http://127.0.0.1:{proxy.server_port}"}
+    urllib.request.proxy_bypass = lambda host: False
+    urllib.request._opener = None
+    try:
+        result = inline_tools._set_follow_mode({"chat_id": "10", "mode": "unfollowed"})
+        assert result["mode"] == "unfollowed", result
+        assert calls == ["/follow-mode", "/chat"]
+        assert not proxy_calls, proxy_calls
+
+        state.update(mode="following", drop=True, apply=True)
+        calls.clear()
+        result = inline_tools._set_follow_mode({"chat_id": "10", "mode": "unfollowed"})
+        assert result["mode"] == "unfollowed", result
+        assert calls == ["/follow-mode", "/chat"]
+
+        state.update(mode="following", drop=True, apply=False)
+        try:
+            inline_tools._set_follow_mode({"chat_id": "10", "mode": "unfollowed"})
+        except inline_tools.InlineToolError as error:
+            assert error.error_kind == "transient", error
+        else:
+            raise AssertionError("a lost, unapplied write must not report success")
+    finally:
+        inline_tools._sidecar_config, urllib.request.getproxies, urllib.request.proxy_bypass, urllib.request._opener = saved
+        for server in (sidecar, proxy):
+            server.shutdown()
+            server.server_close()
+        for thread in threads:
+            thread.join()
+
+assert_follow_tool_local_http()
+
 # Multiplexed gateways: each profile's tools reach its own bot's sidecar.
 def assert_profile_tool_routing():
     saved_sidecars = dict(inline_tools._sidecars)

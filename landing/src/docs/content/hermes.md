@@ -5,11 +5,11 @@ description: "Connect an existing Hermes Agent to Inline, locally or on an Umbre
 
 ## 1.0 alpha
 
-The profile-isolated bridge is available as `1.0.0-alpha.1`. Install the exact
+The profile-isolated bridge is available as `1.0.0-alpha.2`. Install the exact
 alpha in the same user, home, profile, and npm prefix as the existing gateway:
 
 ```bash
-npm install -g @inline-chat/hermes-agent-adapter@1.0.0-alpha.1
+npm install -g @inline-chat/hermes-agent-adapter@1.0.0-alpha.2
 inline-hermes install --force
 hermes gateway restart
 inline-hermes doctor --json

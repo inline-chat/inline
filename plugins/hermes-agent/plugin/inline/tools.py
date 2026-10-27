@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import http.client
 from collections import OrderedDict
 import os
 import re
@@ -680,13 +681,16 @@ def _sidecar_call(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        # IPC stays on loopback even when the host configures an HTTP proxy.
+        # The sidecar token must never be forwarded to that proxy.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=15) as response:
             raw = response.read().decode("utf-8")
             status = response.status
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         status = exc.code
-    except urllib.error.URLError as exc:
+    except (OSError, http.client.HTTPException) as exc:
         raise InlineToolError(f"Inline sidecar is not reachable: {exc}", "transient") from exc
 
     try:
