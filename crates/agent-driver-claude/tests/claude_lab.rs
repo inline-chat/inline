@@ -315,6 +315,16 @@ async fn lab_passive_idle() {
         "api": api_parts(&lab),
     }}));
     finish(&lab, &client).await;
+    if !lab
+        .version
+        .at_least(inline_agent_driver_claude::version::PASSIVE_MIN)
+    {
+        // Older CLIs run a turn for `shouldQuery: false`; the harness reports
+        // passive delivery unavailable there, so record what happened.
+        lab.note(json!({"passive": format!("unsupported: {calls_after_passive} model call(s)")}));
+        lab.save();
+        return;
+    }
     assert_eq!(
         calls_after_passive, 0,
         "passive input must not call the model"
@@ -428,17 +438,23 @@ async fn agent_tool_name(lab: &Lab, client: &ClaudeClient) -> String {
     lab.send(client, &UserMessage::text("list tools").with_uuid("w0"))
         .await;
     assert!(lab.recorder.wait_results(1, TURN).await);
-    let tools = lab.recorder.of("system", Some("init"))[0]["tools"].clone();
-    let names: Vec<&str> = tools
-        .as_array()
-        .map(|tools| tools.iter().filter_map(Value::as_str).collect())
+    // The init frame may list the legacy alias (`Task`); the model is offered
+    // the tool's current name, which is what a tool call must use.
+    let names: Vec<String> = lab
+        .api
+        .conversation_calls()
+        .last()
+        .map(|call| call.tool_names())
         .unwrap_or_default();
-    let tool = if names.contains(&"Agent") {
+    let tool = if names.iter().any(|name| name == "Agent") {
         "Agent"
     } else {
         "Task"
     };
-    assert!(names.contains(&tool), "no subagent tool offered: {names:?}");
+    assert!(
+        names.iter().any(|name| name == tool),
+        "no subagent tool offered: {names:?}"
+    );
     tool.to_string()
 }
 
@@ -446,7 +462,18 @@ async fn subagent(lab_name: &str, background: bool) {
     let Some(lab) = Lab::start(lab_name).await else {
         return;
     };
-    let client = start_bypass(&lab).await;
+    // As the harness launches it: subagent text arrives with its parent.
+    let options = lab.options(SessionStart::new_session());
+    let (client, _) = lab
+        .connect(
+            &options,
+            allow_all(),
+            InitializeRequest {
+                forward_subagent_text: true,
+                ..InitializeRequest::default()
+            },
+        )
+        .await;
     let tool = agent_tool_name(&lab, &client).await;
     let prompt = if background {
         "@sleep 3000\n@text SUB-BG-OK"
@@ -529,6 +556,12 @@ async fn lab_brief_mode() {
     let Some(lab) = Lab::start("brief_mode").await else {
         return;
     };
+    if !lab.help.contains("--brief") {
+        // The harness reports Friendly mode unavailable on this CLI.
+        lab.note(json!({"brief": "unsupported: no --brief flag"}));
+        lab.save();
+        return;
+    }
     let mut options = lab.options(SessionStart::new_session());
     options.brief = true;
     let (client, _) = lab
@@ -546,8 +579,12 @@ async fn lab_brief_mode() {
     });
     lab.note(json!({"send_user_message_tool": definition}));
     let Some(definition) = definition else {
+        // Brief mode is gated by an account entitlement (`isBriefEntitled`;
+        // `tengu_brief_mode_enabled {gated: true}`), which a lab key never
+        // has. Friendly mode then falls back to Claude's text between tools.
+        lab.note(json!({"brief": "gated: --brief offered no SendUserMessage tool"}));
         finish(&lab, &client).await;
-        panic!("--brief offers no SendUserMessage tool");
+        return;
     };
     // Fill every required string property with the update text.
     let mut input = Map::new();

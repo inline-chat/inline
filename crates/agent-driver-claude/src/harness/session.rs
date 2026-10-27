@@ -42,7 +42,7 @@ use crate::input::UserMessage;
 use crate::mcp::{BoxFuture, SdkMcpServer, ToolDefinition, ToolOutput, ToolServer};
 use crate::options::{LaunchOptions, ProcessHost, SessionStart};
 use crate::sessions::SessionStore;
-use crate::version::{ClaudeVersion, capability, probe};
+use crate::version::{ClaudeVersion, PASSIVE_MIN, capability, probe};
 
 const PROVIDER: &str = "claude";
 const CATALOG_TTL: Duration = Duration::from_secs(300);
@@ -334,7 +334,7 @@ impl ClaudeHarness {
                     min_version: CORE_FLOOR.to_string(),
                 }
             },
-            availability: availability(capabilities),
+            availability: availability(capabilities, version),
             methods: capabilities.iter().cloned().collect(),
             server_requests: [
                 "can_use_tool",
@@ -375,11 +375,19 @@ pub fn parse_permission_modes(help: &str) -> Vec<String> {
 }
 
 /// What this connection can do, from the CLI's advertised capabilities.
-pub fn availability(capabilities: &[String]) -> AvailabilityMatrix {
+pub fn availability(capabilities: &[String], version: ClaudeVersion) -> AvailabilityMatrix {
     let has = |name: &str| capabilities.iter().any(|capability| capability == name);
     let mut matrix = AvailabilityMatrix::default();
     for kind in DeliveryKind::ALL {
         matrix = matrix.with_delivery(kind, Availability::Supported);
+    }
+    if !version.at_least(PASSIVE_MIN) {
+        matrix = matrix.with_delivery(
+            DeliveryKind::Passive,
+            Availability::unavailable(
+                "this Claude Code runs every message as a turn; update it for passive context",
+            ),
+        );
     }
     let unavailable = |reason: &str| Availability::unavailable(reason);
     matrix
@@ -638,12 +646,21 @@ impl HarnessDriver for ClaudeHarness {
                     .then(|| spec.title.clone())
                     .flatten(),
                 per_task_stop_affordance: true,
+                // Subagent text arrives under its parent tool call, so
+                // Detailed mode nests a subagent's work like Claude Code.
+                forward_subagent_text: true,
                 ..InitializeRequest::default()
             };
             let servers = self.config.session_servers(&key.session);
-            let session =
-                ClaudeSession::connect(key, spec.folder.clone(), &options, &initialize, servers)
-                    .await?;
+            let session = ClaudeSession::connect(
+                key,
+                spec.folder.clone(),
+                &options,
+                &initialize,
+                servers,
+                version,
+            )
+            .await?;
             let capabilities = session.inner.capabilities();
             let manifest = self.manifest(version, &capabilities);
             {
@@ -774,6 +791,7 @@ struct SessionInner {
     /// Set once a wait ended without any lifecycle frame: this CLI predates
     /// them, so later sends do not wait.
     lifecycle_absent: std::sync::atomic::AtomicBool,
+    version: ClaudeVersion,
 }
 
 impl SessionInner {
@@ -868,6 +886,7 @@ impl ClaudeSession {
         options: &LaunchOptions,
         initialize: &InitializeRequest,
         mcp_servers: Vec<(String, Arc<dyn SdkMcpServer>)>,
+        version: ClaudeVersion,
     ) -> Result<Self, OpenError> {
         let slot = Arc::new(Mutex::new(None));
         let config = ClientConfig {
@@ -906,6 +925,7 @@ impl ClaudeSession {
             acks: Mutex::new(HashMap::new()),
             lifecycle_seen: std::sync::atomic::AtomicBool::new(false),
             lifecycle_absent: std::sync::atomic::AtomicBool::new(false),
+            version,
         });
         *slot.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(Arc::downgrade(&inner));
         let pump = Arc::downgrade(&inner);
@@ -1051,7 +1071,7 @@ impl Session for ClaudeSession {
     }
 
     fn availability(&self) -> AvailabilityMatrix {
-        availability(&self.inner.capabilities())
+        availability(&self.inner.capabilities(), self.inner.version)
     }
 
     fn events(&self) -> EventStream {

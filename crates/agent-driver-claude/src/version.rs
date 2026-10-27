@@ -52,6 +52,10 @@ impl fmt::Display for ClaudeVersion {
 /// `client_composed` (verbatim prompts) is honoured from this release.
 pub const CLIENT_COMPOSED_MIN: ClaudeVersion = ClaudeVersion::new(2, 1, 248);
 
+/// `shouldQuery: false` is honoured (verified from the 2.1.292 lab baseline;
+/// 2.0.32 runs a turn for it). Older CLIs get no passive delivery.
+pub const PASSIVE_MIN: ClaudeVersion = ClaudeVersion::new(2, 1, 292);
+
 /// Protocol capabilities `system/init` advertises.
 pub mod capability {
     /// The interrupt response lists `still_queued`.
