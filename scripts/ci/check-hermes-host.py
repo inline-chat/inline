@@ -26,6 +26,8 @@ home = Path(os.environ["HERMES_HOME"])
 plugin = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else home / "plugins" / "inline"
 manifest = yaml.safe_load((plugin / "plugin.yaml").read_text())
 assert "inline" in manifest.get("provides_tools", []), "inline tool missing from plugin.yaml"
+v1_adapter = int(str(manifest["version"]).split(".", 1)[0]) >= 1
+active_typing_state = "working" if v1_adapter else "start"
 
 # Older hosts retain the deprecated-import scanner. After the compat layer's
 # removal, plugin_compat remains only as updater stubs; real loading below is
@@ -134,7 +136,7 @@ asyncio.run(exercise())
 
 async def exercise_restarted_thread_reply():
     # Published 0.0.x adapters keep the physical chat as their session chat.
-    if not hasattr(sys.modules[type(adapter).__module__], "_session_chat_id"):
+    if not v1_adapter:
         return
 
     def new_adapter():
@@ -307,7 +309,7 @@ async def exercise_authorization():
             assert len(mutations) == 1, "paired sender lost reply threads in their DM"
 
         # Who may change reply threads follows Hermes' own admin lists.
-        if importlib.util.find_spec("gateway.slash_access"):
+        if v1_adapter and importlib.util.find_spec("gateway.slash_access"):
             adapter.config.extra["group_allow_admin_from"] = ["42"]
             assert adapter._may_change_reply_threads("42", "group")
             assert not adapter._may_change_reply_threads("43", "group")
@@ -560,7 +562,7 @@ async def exercise_ordinary_presentation():
                 calls.append((request.url.path, body))
                 if request.url.path == "/chat":
                     return httpx.Response(200, json={"ok": True, "result": {"id": "6101", "title": "Offline fixture"}})
-                if request.url.path == "/typing" and body["state"] == "working":
+                if request.url.path == "/typing" and body["state"] == active_typing_state:
                     typing_started.set()
                 if request.url.path == "/send" and failed_send:
                     return httpx.Response(400, json={"ok": False, "error": "rejected fixture reply", "errorKind": "bad_format"})
@@ -591,7 +593,7 @@ async def exercise_ordinary_presentation():
                 await asyncio.wait_for(wait_idle(), timeout=10)
                 assert outcomes == ["failure" if failed_send else "success"], outcomes
                 typing = [body for route, body in calls if route == "/typing"]
-                assert typing and any(body["state"] == "working" for body in typing)
+                assert typing and any(body["state"] == active_typing_state for body in typing)
                 assert typing[-1]["state"] == "stop"
                 assert all("experimentalAgentActivity" not in body for body in typing)
                 reactions = [body for route, body in calls if route == "/reaction"]
