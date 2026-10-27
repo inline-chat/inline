@@ -345,6 +345,9 @@ async fn codex_round_trip_through_inline() {
         // A slow reply that /stop interrupts; it must never be posted.
         json!({"_delay_ms": 6000, "type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_NEVER_POSTED"}]}),
+        // `/new` starts a fresh session in a new thread under the DM message.
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_NEW_THREAD"}]}),
         // Escalation makes Codex ask for approval before running it.
         json!({"type": "function_call", "call_id": "call-1", "name": "exec_command",
             "arguments": json!({"cmd": "echo E2E_RAN > ran.txt",
@@ -562,6 +565,76 @@ async fn codex_round_trip_through_inline() {
             .iter()
             .any(|(_, text)| text.contains("E2E_NEVER_POSTED")),
         "a stopped turn posted its late reply: {texts:#?}"
+    );
+
+    // 4c. `/new` opens a thread under the message with a fresh session.
+    send(&owner, chat_id, "/new the side task").await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    let new_thread = loop {
+        let chats = owner
+            .invoke_rpc(
+                proto::Method::GetChats,
+                proto::rpc_call::Input::GetChats(proto::GetChatsInput {
+                    include_subthreads: Some(true),
+                }),
+            )
+            .await
+            .unwrap();
+        let proto::rpc_result::Result::GetChats(chats) = chats else {
+            panic!("unexpected result");
+        };
+        if let Some(chat) = chats
+            .chats
+            .iter()
+            .find(|chat| chat.parent_chat_id == Some(chat_id))
+        {
+            break chat.id;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "/new opened no thread under the DM; bot said: {:#?}",
+            bot_texts(&owner, chat_id, bot_user_id).await
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    wait_for(
+        &model,
+        &owner,
+        new_thread,
+        bot_user_id,
+        "the answer in the new thread",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_NEW_THREAD"))
+        },
+    )
+    .await;
+    let new_work = owner
+        .get_agent_session(proto::GetAgentSessionInput {
+            peer_id: Some(super::api::chat_peer(new_thread)),
+            bot_user_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .connection
+        .map(|connection| connection.session_ref)
+        .unwrap_or_default();
+    let dm_work = owner
+        .get_agent_session(proto::GetAgentSessionInput {
+            peer_id: Some(super::api::chat_peer(chat_id)),
+            bot_user_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .connection
+        .map(|connection| connection.session_ref)
+        .unwrap_or_default();
+    assert!(
+        !new_work.is_empty() && new_work != dm_work,
+        "the new thread has its own session"
     );
 
     // 5. A command needs approval: the card carries Codex's own choices, and
@@ -1524,4 +1597,124 @@ async fn codex_reaches_the_fake_model() {
     }
     eprintln!("MODEL SAW {:#?}", model.requests.lock().unwrap());
     assert!(model.request_count() >= 1, "the model was reached");
+}
+
+/// Two Codex threads on one app-server connection, without Inline: each gets
+/// its own turn events.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "runs the installed Codex against a local fake model"]
+async fn codex_two_threads_on_one_connection() {
+    use inline_agent_bridge::harness::{
+        Delivery, Input, InputContent, InputId, OpenMode, OpenSpec, Origin, UserId,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("project");
+    std::fs::create_dir_all(&folder).unwrap();
+    let (model, base_url) = FakeModel::start(vec![
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "ANSWER_A"}]}),
+        // A's second turn is interrupted while its reply is held back.
+        json!({"_delay_ms": 6000, "type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "ANSWER_A_LATE"}]}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "ANSWER_B"}]}),
+    ])
+    .await;
+    let codex_home = dir.path().join("codex-home");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    std::fs::write(
+        codex_home.join("config.toml"),
+        format!(
+            "model_provider = \"inline_e2e\"\nmodel = \"gpt-5\"\napproval_policy = \"on-request\"\n\
+             sandbox_mode = \"read-only\"\n\n[model_providers.inline_e2e]\nname = \"Inline E2E\"\n\
+             base_url = \"{base_url}\"\nwire_api = \"responses\"\nrequires_openai_auth = false\n\
+             supports_websockets = false\n"
+        ),
+    )
+    .unwrap();
+    // SAFETY: set before Codex starts.
+    unsafe { isolate_codex(&codex_home) };
+    let harness = inline_agent_driver_codex::harness::CodexHarness::new(
+        inline_agent_driver_codex::harness::CodexHarnessConfig {
+            launch: inline_agent_driver_codex::CodexLaunchConfig {
+                executable: which_codex(),
+                ..Default::default()
+            },
+            source: ExecutableSource::Path,
+            pinned_sha256: None,
+            bridge_version: env!("CARGO_PKG_VERSION").to_owned(),
+            cache_root: dir.path().join("cache"),
+        },
+    );
+    let spec = || OpenSpec {
+        mode: OpenMode::Start,
+        folder: folder.clone(),
+        settings: Default::default(),
+        instructions: None,
+        title: None,
+        after: None,
+        output_mode: Default::default(),
+    };
+    let input = |text: &str| Input {
+        id: InputId::new(uuid::Uuid::new_v4().to_string()).unwrap(),
+        content: InputContent::text(text),
+        origin: Origin::Owner { user: UserId(1) },
+        delivery: Delivery::Turn,
+    };
+    let a = harness.open(spec()).await.unwrap();
+    let mut a_events = a.events();
+    tokio::time::timeout(Duration::from_secs(30), a.send(input("first")))
+        .await
+        .expect("turn/start A answered")
+        .unwrap();
+    assert!(
+        turn_completed(&mut a_events).await,
+        "thread A completed its turn"
+    );
+    // A's next turn waits on the model; interrupt it, then start B.
+    a.send(input("slow")).await.unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while model.request_count() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "A's slow turn never reached the model"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    a.control(inline_agent_bridge::harness::Op::Interrupt {
+        cancel_queued: false,
+    })
+    .await
+    .unwrap();
+    assert!(
+        turn_completed(&mut a_events).await,
+        "A's interrupted turn ended"
+    );
+    let b = harness.open(spec()).await.unwrap();
+    let mut b_events = b.events();
+    tokio::time::timeout(Duration::from_secs(30), b.send(input("second")))
+        .await
+        .expect("turn/start B answered while A is open")
+        .unwrap();
+    assert!(
+        turn_completed(&mut b_events).await,
+        "thread B completed its turn"
+    );
+}
+
+async fn turn_completed(events: &mut inline_agent_bridge::harness::EventStream) -> bool {
+    use futures_util::StreamExt;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while let Ok(Some(envelope)) = tokio::time::timeout_at(deadline, events.next()).await {
+        if matches!(
+            envelope.event,
+            inline_agent_bridge::harness::Event::Turn {
+                phase: inline_agent_bridge::harness::TurnPhase::Completed { .. },
+                ..
+            }
+        ) {
+            return true;
+        }
+    }
+    false
 }

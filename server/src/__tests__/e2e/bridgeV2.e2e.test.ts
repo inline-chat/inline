@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test"
 import path from "node:path"
 import Elysia from "elysia"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
@@ -13,6 +13,10 @@ import { eq } from "drizzle-orm"
 // Discovered only with INLINE_E2E=1 (see scripts/test-discovery.ts); it needs
 // Codex and Claude Code installed and builds the CLI tests.
 setupTestLifecycle()
+
+// The server makes no model calls of its own here: untitled threads (`/new`)
+// keep their default titles instead of asking OpenAI for one.
+mock.module("@in/server/libs/openAI", () => ({ openaiClient: undefined }))
 
 describe("bridge v2 end to end", () => {
   let app: any
