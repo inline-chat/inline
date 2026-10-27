@@ -509,11 +509,17 @@ impl HarnessDriver for CodexHarness {
             // The initial state comes from the thread's own turns: a resumed
             // thread may already be running one.
             let (active, finished) = thread_turns(&response);
-            let running = {
+            let (running, consumed) = {
                 let mut mapper = inner.mapper.lock().expect("mapper poisoned");
                 mapper.restore_turns(active.clone(), finished);
-                mapper.active_turn().is_some()
+                (
+                    mapper.active_turn().is_some(),
+                    mapper.restore_inputs(&response),
+                )
             };
+            for event in consumed {
+                inner.hub.emit(event);
+            }
             inner.hub.emit(Event::State {
                 state: if running {
                     RunState::Working
@@ -1001,6 +1007,7 @@ impl Session for CodexSession {
                 input: input.id,
                 disposition,
                 native: response,
+                acceptance: inline_agent_bridge::harness::Acceptance::Accepted,
             })
         })
     }
@@ -1076,6 +1083,14 @@ impl Session for CodexSession {
                 &op,
             )?;
             let response = self.connection.request(request).await.map_err(op_error)?;
+            // `deleted: false`: the entry ran or was taken before the delete.
+            if let Op::Queue {
+                action: QueueOp::Remove { .. },
+            } = op
+                && response.get("deleted").and_then(Value::as_bool) == Some(false)
+            {
+                return Err(OpError::NotQueued);
+            }
             if matches!(op, Op::Compact | Op::Review { .. })
                 && let Some(turn) = response
                     .pointer("/turn/id")

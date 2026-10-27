@@ -262,6 +262,29 @@ async fn bot_texts(owner: &InlineClient, chat_id: i64, bot_user_id: i64) -> Vec<
         .collect()
 }
 
+/// Waits until the agent's message with `needle` replies to `asked`.
+async fn wait_reply(
+    owner: &InlineClient,
+    chat_id: i64,
+    bot_user_id: i64,
+    needle: &str,
+    asked: i64,
+) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        for (id, text) in bot_texts(owner, chat_id, bot_user_id).await {
+            if text.contains(needle) && reply_target(owner, chat_id, id).await == Some(asked) {
+                return;
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no answer with {needle} replies to message {asked}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
 /// The message a message replies to.
 async fn reply_target(owner: &InlineClient, chat_id: i64, message_id: i64) -> Option<i64> {
     let page = owner
@@ -1295,6 +1318,8 @@ async fn codex_round_trip_through_inline() {
             .is_some_and(|input| input.contains("E2E_PASSIVE_LINE")),
         "the observed message reached the agent as context"
     );
+    // In a group thread the answer replies to whoever asked (spec §6).
+    wait_reply(&owner, group_two, bot_user_id, "E2E_G2_TWO", asked).await;
     let texts = bot_texts(&owner, group_two, bot_user_id).await;
     let answer = texts
         .iter()
@@ -1302,12 +1327,6 @@ async fn codex_round_trip_through_inline() {
         .find(|(_, text)| text.contains("E2E_G2_TWO"))
         .map(|(id, _)| *id)
         .unwrap();
-    // In a group thread the answer replies to whoever asked (spec §6).
-    assert_eq!(
-        reply_target(&owner, group_two, answer).await,
-        Some(asked),
-        "the group answer replies to the request"
-    );
     let mut reply = SendTextRequest::new(
         PeerRef::Chat {
             chat_id: InlineId::new(group_two),
@@ -2473,16 +2492,9 @@ async fn claude_round_trip_through_inline() {
         },
     )
     .await;
-    let answer = texts
-        .iter()
-        .find(|(_, text)| text.contains("E2E_CLAUDE_G_ONE"))
-        .map(|(id, _)| *id)
-        .unwrap();
-    assert_eq!(
-        reply_target(&owner, group, answer).await,
-        Some(asked),
-        "the group answer replies to the request"
-    );
+    let _ = texts;
+    // Claude streams into progress first; the final answer replaces it.
+    wait_reply(&owner, group, bot_user_id, "E2E_CLAUDE_G_ONE", asked).await;
     let joined = api
         .conversation_calls()
         .iter()

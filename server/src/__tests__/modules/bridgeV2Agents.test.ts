@@ -18,6 +18,7 @@ import { db } from "@in/server/db"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { agentGrants, agentRuntimes, chats, updates, users } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
+import { answerMessageAction } from "@in/server/functions/messages.answerMessageAction"
 import { invokeMessageAction } from "@in/server/functions/messages.invokeMessageAction"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { controlAgentSession } from "@in/server/modules/agentSessions/control"
@@ -218,7 +219,26 @@ describe("bridge v2 agent server", () => {
     // Work bar controls need the steer grant.
     await rejects(controlAgentSession({ agentSessionId, op: AgentSessionControl.PAUSE }, teammateId), RpcError_Code.AGENT_GRANT_REQUIRED)
     await grant(teammateId, [AgentGrantOperation.STEER])
-    expect((await controlAgentSession({ agentSessionId, op: AgentSessionControl.PAUSE }, teammateId)).interactionId).toBeGreaterThan(0n)
+    const { interactionId } = await controlAgentSession({ agentSessionId, op: AgentSessionControl.PAUSE }, teammateId)
+    expect(interactionId).toBeGreaterThan(0n)
+
+    // The bot answers the control like a button, and the toast reaches the
+    // person who pressed it; nobody else can answer it.
+    const toast = { kind: { oneofKind: "toast" as const, toast: { text: "Paused." } } }
+    await rejects(
+      answerMessageAction({ interactionId, ui: toast }, { currentUserId: teammateId, currentSessionId: 0 }),
+      RpcError_Code.BAD_REQUEST,
+    )
+    await answerMessageAction({ interactionId, ui: toast }, { currentUserId: botId, currentSessionId: 0 })
+    const [answered] = await db.select().from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, teammateId)))
+      .orderBy(desc(updates.seq)).limit(1)
+    const answer = UpdatesModel.decrypt(answered!).payload.update
+    expect(answer.oneofKind).toBe("userMessageActionAnswered")
+    if (answer.oneofKind === "userMessageActionAnswered") {
+      expect(answer.userMessageActionAnswered.interactionId).toBe(interactionId)
+      expect(answer.userMessageActionAnswered.ui).toEqual(toast)
+    }
   })
 
   test("setting only the output mode never joins the agent to ambient conversation", async () => {

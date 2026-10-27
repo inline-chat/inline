@@ -59,6 +59,21 @@ pub(crate) async fn send_doc(
     notify: Notify,
 ) -> ApiResult<i64> {
     let random_id = rand::random::<i64>().abs().max(1);
+    send_doc_as(bot, chat_id, reply_to, doc, actions, notify, random_id).await
+}
+
+/// Sends a rendered message under a caller-chosen random ID. Inline keeps one
+/// message per sender and random ID, so a retry with the same ID returns the
+/// message a lost reply already created instead of posting it twice.
+pub(crate) async fn send_doc_as(
+    bot: &InlineClient,
+    chat_id: i64,
+    reply_to: Option<i64>,
+    doc: &Doc,
+    actions: Option<proto::MessageActions>,
+    notify: Notify,
+    random_id: i64,
+) -> ApiResult<i64> {
     let result = call!(
         bot,
         SendMessage,

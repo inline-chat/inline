@@ -16,7 +16,14 @@ on:
       - crates/agent-bridge/**
       - crates/agent-driver-codex/**
       - crates/agent-driver-claude/**
+      - crates/client/**
+      - crates/protocol/**
+      - proto/**
+      - cli/src/bridge.rs
       - cli/src/bridge/v2/**
+      - server/src/modules/agentSessions/**
+      - server/src/modules/agents/**
+      - server/src/functions/messages.answerMessageAction.ts
       - server/src/__tests__/e2e/**
       - .github/workflows/harness-compat.yml
 

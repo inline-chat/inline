@@ -122,6 +122,33 @@ struct AgentComposeTargetTests {
     #expect(store.outputMode(peer: peer, botUserID: Self.bot) == .detailed)
   }
 
+  @Test("a moved work never moves back on a late update from the chat it left")
+  @MainActor
+  func movedWorkStaysMoved() {
+    let store = AgentWorkStateStore()
+    let source = Peer.thread(id: 10)
+    let destination = Peer.thread(id: 11)
+    let sourceKey = AgentWorkState.Key(peer: source, botUserID: Self.bot)
+    let destinationKey = AgentWorkState.Key(peer: destination, botUserID: Self.bot)
+    store.apply(AgentWorkState(key: sourceKey, sessionID: 3, runState: .working, revision: 5))
+    // The move: same revision, into a subthread of the source.
+    store.apply(AgentWorkState(
+      key: destinationKey, sessionID: 3, runState: .working, revision: 5, parentChatID: 10
+    ))
+    #expect(store.state(peer: source, botUserID: Self.bot) == nil)
+    #expect(store.state(peer: destination, botUserID: Self.bot)?.revision == 5)
+    // A late source page, at the same or an older revision, is ignored.
+    store.apply(AgentWorkState(key: sourceKey, sessionID: 3, runState: .idle, revision: 5))
+    store.apply(AgentWorkState(key: sourceKey, sessionID: 3, runState: .idle, revision: 4))
+    #expect(store.state(peer: source, botUserID: Self.bot) == nil)
+    #expect(store.state(peer: destination, botUserID: Self.bot)?.runState == .working)
+    // Newer state in the destination still applies.
+    store.apply(AgentWorkState(
+      key: destinationKey, sessionID: 3, runState: .idle, revision: 6, parentChatID: 10
+    ))
+    #expect(store.state(peer: destination, botUserID: Self.bot)?.runState == .idle)
+  }
+
   @Test("grant requirements: owner always qualifies, access needs any grant")
   func grantRequirements() {
     let owner = AgentGrantAccess(botUserID: Self.bot, ownerUserID: 1, viewerUserID: 1, operations: [], revision: 1)

@@ -194,6 +194,21 @@ pub struct InputReceipt {
     /// Native response, kept for the journal.
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub native: Value,
+    /// How far the harness confirmed it.
+    #[serde(default)]
+    pub acceptance: Acceptance,
+}
+
+/// How far a harness confirmed an input it did not refuse.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Acceptance {
+    /// The harness acknowledged it.
+    #[default]
+    Accepted,
+    /// Only the write is known (a CLI without acknowledgements): it stays
+    /// unconfirmed until the harness shows consuming it.
+    Written,
 }
 
 /// What the harness did with an accepted input.

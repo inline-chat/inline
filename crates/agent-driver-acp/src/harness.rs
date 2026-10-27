@@ -381,6 +381,7 @@ impl Session for AcpSession {
                         input: input.id,
                         disposition: InputDisposition::Started { turn },
                         native: Value::Null,
+                        acceptance: inline_agent_bridge::harness::Acceptance::Accepted,
                     })
                 }
                 (Delivery::Steer { expected_turn, .. }, active)
@@ -405,6 +406,7 @@ impl Session for AcpSession {
                             turn: expected_turn.clone(),
                         },
                         native: Value::Null,
+                        acceptance: inline_agent_bridge::harness::Acceptance::Accepted,
                     })
                 }
                 (Delivery::Queue | Delivery::Passive, _) => {

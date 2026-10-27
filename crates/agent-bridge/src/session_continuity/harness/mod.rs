@@ -47,8 +47,8 @@ pub use ids::{
     WorkRef,
 };
 pub use input::{
-    Delivery, DeliveryKind, Input, InputContent, InputDisposition, InputReceipt, Origin,
-    SteerPriority,
+    Acceptance, Delivery, DeliveryKind, Input, InputContent, InputDisposition, InputReceipt,
+    Origin, SteerPriority,
 };
 pub use op::{
     FieldAnswer, GoalOp, InteractionResponse, Op, OpError, OpKind, OpOutcome, QueueOp,

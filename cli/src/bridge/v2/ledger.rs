@@ -2,9 +2,14 @@
 //!
 //! An Inline delivery is acknowledged only after its input is recorded here,
 //! and every native receipt moves the record forward. After a restart, a
-//! record that never reached a confirmed state is reported to the sender
-//! instead of being sent again, so input is neither dropped silently nor
-//! delivered twice. Only identities and states are stored, never text.
+//! record written but never confirmed is settled by its session (what it
+//! shows it consumed), and one never written is reported to its sender;
+//! nothing is sent again, so input is neither dropped silently nor delivered
+//! twice. Only identities and states are stored, never text.
+//!
+//! It also keeps each thread's settings (model, reasoning and permission
+//! ids), so a choice made in Agent Settings or by a command survives a
+//! restart.
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -125,7 +130,13 @@ impl Ledger {
                  created_at INTEGER NOT NULL,
                  updated_at INTEGER NOT NULL
              );
-             CREATE INDEX IF NOT EXISTS v2_inputs_open ON v2_inputs (state, chat_id);",
+             CREATE INDEX IF NOT EXISTS v2_inputs_open ON v2_inputs (state, chat_id);
+             CREATE TABLE IF NOT EXISTS v2_threads (
+                 chat_id INTEGER PRIMARY KEY,
+                 settings TEXT NOT NULL,
+                 bound TEXT,
+                 updated_at INTEGER NOT NULL
+             );",
         )?;
         Ok(Self {
             connection: Mutex::new(connection),
@@ -185,6 +196,32 @@ impl Ledger {
         )?;
         let rows = statement.query_map([], row_record)?;
         rows.filter_map(Result::transpose).collect()
+    }
+
+    /// Saves a thread's settings and the composer configuration they last
+    /// took, both as JSON.
+    pub(crate) fn save_thread(
+        &self,
+        chat_id: i64,
+        settings: &str,
+        bound: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection.execute(
+            "INSERT INTO v2_threads (chat_id, settings, bound, updated_at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (chat_id) DO UPDATE SET settings = ?2, bound = ?3, updated_at = ?4",
+            params![chat_id, settings, bound, now_seconds()],
+        )?;
+        Ok(())
+    }
+
+    /// Every saved thread: (chat, settings, composer configuration).
+    pub(crate) fn threads(&self) -> rusqlite::Result<Vec<(i64, String, Option<String>)>> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        let mut statement =
+            connection.prepare("SELECT chat_id, settings, bound FROM v2_threads")?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        rows.collect()
     }
 
     /// Drops settled records older than `max_age_secs`.
@@ -251,5 +288,29 @@ mod tests {
         assert_eq!(ledger.unresolved().unwrap().len(), 1);
         ledger.set(&id, InputState::Consumed).unwrap();
         assert!(ledger.unresolved().unwrap().is_empty());
+    }
+
+    #[test]
+    fn thread_settings_survive_reopening() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ledger.sqlite");
+        {
+            let ledger = Ledger::open(&path).unwrap();
+            ledger
+                .save_thread(7, r#"{"permission_mode":"plan"}"#, None)
+                .unwrap();
+            ledger
+                .save_thread(7, r#"{"permission_mode":"default"}"#, Some(r#"["m",null]"#))
+                .unwrap();
+        }
+        let ledger = Ledger::open(&path).unwrap();
+        assert_eq!(
+            ledger.threads().unwrap(),
+            vec![(
+                7,
+                r#"{"permission_mode":"default"}"#.to_owned(),
+                Some(r#"["m",null]"#.to_owned())
+            )]
+        );
     }
 }

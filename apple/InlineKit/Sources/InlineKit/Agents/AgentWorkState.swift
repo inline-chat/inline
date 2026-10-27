@@ -127,6 +127,9 @@ public struct AgentWorkState: Codable, Equatable, Sendable, Identifiable {
   public var startedAt: Date?
   public var updatedAt: Date
   public var revision: Int64
+  /// The chat a subthread's work sits under. A work only moves down into a
+  /// subthread, so this orders a move against the chat it left.
+  public var parentChatID: Int64?
 
   public init(
     key: Key,
@@ -138,7 +141,8 @@ public struct AgentWorkState: Codable, Equatable, Sendable, Identifiable {
     detail: String? = nil,
     startedAt: Date? = nil,
     updatedAt: Date = Date(),
-    revision: Int64 = 0
+    revision: Int64 = 0,
+    parentChatID: Int64? = nil
   ) {
     self.key = key
     self.sessionID = sessionID
@@ -150,6 +154,7 @@ public struct AgentWorkState: Codable, Equatable, Sendable, Identifiable {
     self.startedAt = startedAt
     self.updatedAt = updatedAt
     self.revision = revision
+    self.parentChatID = parentChatID
   }
 
   public init?(session: InlineProtocol.AgentSession) {
@@ -166,8 +171,21 @@ public struct AgentWorkState: Codable, Equatable, Sendable, Identifiable {
       detail: state.hasDetail && !state.detail.isEmpty ? state.detail : nil,
       startedAt: state.hasStartedAt ? Date(timeIntervalSince1970: TimeInterval(state.startedAt)) : nil,
       updatedAt: Date(timeIntervalSince1970: TimeInterval(state.updatedAt)),
-      revision: state.revision
+      revision: state.revision,
+      parentChatID: session.hasParentChatID ? session.parentChatID : nil
     )
+  }
+
+  /// Whether this state replaces `stored`, the state kept for the same
+  /// session (in any chat). Revisions order one session's states across
+  /// chats, since each chat's updates arrive in their own bucket. A move does
+  /// not change the revision; it only goes down into a subthread, so at an
+  /// equal revision the subthread wins over the chat it left.
+  func supersedes(_ stored: AgentWorkState) -> Bool {
+    if revision != stored.revision { return revision > stored.revision }
+    if key == stored.key { return true }
+    guard case let .thread(storedChatID) = stored.key.peer else { return false }
+    return parentChatID == storedChatID
   }
 
   public func isWaiting(for userID: Int64?) -> Bool {
@@ -293,11 +311,17 @@ public final class AgentWorkStateStore: ObservableObject {
   /// Applies a server state, ignoring anything older for the same session.
   public func apply(_ state: AgentWorkState) {
     hydrateIfNeeded()
-    if let current = states[state.key] {
-      if current.sessionID == state.sessionID, current.revision > state.revision { return }
+    // The same session in any chat: an older state, or the chat a move
+    // left, never moves it back.
+    if let stored = states.values.first(where: { $0.sessionID == state.sessionID }),
+       !state.supersedes(stored)
+    {
+      return
+    }
+    if let current = states[state.key], current.sessionID != state.sessionID {
       // Another session of the same agent replaces the shown one only when
       // it is newer; the server owns the default-session rule.
-      if current.sessionID != state.sessionID, current.updatedAt > state.updatedAt { return }
+      if current.updatedAt > state.updatedAt { return }
     }
     // A moved session reports its destination peer; drop it from the chat
     // it left so the source's work bar and badge clear.
@@ -306,7 +330,7 @@ public final class AgentWorkStateStore: ObservableObject {
     }
     guard states[state.key] != state else { return }
     states[state.key] = state
-    persist(.session, key: state.key.storageKey, value: state)
+    persistSession(state)
   }
 
   public func apply(participation: InlineProtocol.AgentParticipation) {
@@ -382,8 +406,24 @@ public final class AgentWorkStateStore: ObservableObject {
   }
 
   public func remove(_ key: AgentWorkState.Key) {
-    states[key] = nil
-    delete(.session, key: key.storageKey)
+    let removed = states.removeValue(forKey: key)
+    guard let database else { return }
+    let storageKey = key.storageKey
+    let kind = Kind.session.rawValue
+    Task.detached {
+      try? await database.dbWriter.write { db in
+        // Only the row this store saw: a newer one synced since stays.
+        let rows = Row.filter(Column("kind") == kind && Column("key") == storageKey)
+        if let removed,
+           let row = try rows.fetchOne(db),
+           let stored = try? JSONDecoder().decode(AgentWorkState.self, from: row.payload),
+           stored.revision > removed.revision
+        {
+          return
+        }
+        _ = try rows.deleteAll(db)
+      }
+    }
   }
 
   public func removeAll() {
@@ -412,15 +452,27 @@ public final class AgentWorkStateStore: ObservableObject {
     db: Database
   ) throws -> Bool {
     guard let state = AgentWorkState(session: update.agentSession) else { return false }
+    return try store(state, db: db)
+  }
+
+  /// Saves a session's state unless the stored one is newer: the one rule
+  /// for sync, refreshes and settings responses alike, applied inside the
+  /// write so a late save never overwrites a newer row.
+  @discardableResult
+  nonisolated static func store(_ state: AgentWorkState, db: Database) throws -> Bool {
     let decoder = JSONDecoder()
     let rows = try Row.filter(Column("kind") == Kind.session.rawValue).fetchAll(db)
     let stored = rows.compactMap { row in
       (try? decoder.decode(AgentWorkState.self, from: row.payload)).map { (row, $0) }
     }
-    if let current = stored.first(where: { $0.1.key == state.key })?.1 {
-      if current.sessionID == state.sessionID, current.revision > state.revision { return false }
-      if current.sessionID != state.sessionID, current.updatedAt > state.updatedAt { return false }
-      if current == state { return false }
+    if let same = stored.first(where: { $0.1.sessionID == state.sessionID })?.1 {
+      if !state.supersedes(same) || same == state { return false }
+    }
+    if let current = stored.first(where: { $0.1.key == state.key })?.1,
+       current.sessionID != state.sessionID,
+       current.updatedAt > state.updatedAt
+    {
+      return false
     }
     // A moved session reports its destination; drop it from the chat it left.
     for (row, existing) in stored where existing.sessionID == state.sessionID && existing.key != state.key {
@@ -509,6 +561,17 @@ public final class AgentWorkStateStore: ObservableObject {
     }
   }
 
+  /// Saves a session's state through the same ordering rule as sync.
+  private func persistSession(_ state: AgentWorkState) {
+    guard let database else { return }
+    let generation = generation
+    Task.detached { [weak self] in
+      // A refresh that finished after a logout or reset writes nothing.
+      guard await self?.generation == generation else { return }
+      try? await database.dbWriter.write { db in _ = try Self.store(state, db: db) }
+    }
+  }
+
   private func persist(_ kind: Kind, key: String, value: some Encodable) {
     guard let database, let payload = try? JSONEncoder().encode(value) else { return }
     let row = Row(kind: kind.rawValue, key: key, payload: payload)
@@ -517,16 +580,6 @@ public final class AgentWorkStateStore: ObservableObject {
       // A refresh that finished after a logout or reset writes nothing.
       guard await self?.generation == generation else { return }
       try? await database.dbWriter.write { db in try row.save(db) }
-    }
-  }
-
-  private func delete(_ kind: Kind, key: String) {
-    guard let database else { return }
-    let kind = kind.rawValue
-    Task.detached {
-      try? await database.dbWriter.write { db in
-        _ = try Row.filter(Column("kind") == kind && Column("key") == key).deleteAll(db)
-      }
     }
   }
 

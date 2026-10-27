@@ -25,6 +25,9 @@ use serde_json::{Map, Value, json};
 use super::decisions;
 use crate::protocol::normalize_usage_limits;
 
+/// Recent turns a resumed thread's consumed inputs are read from.
+const RESTORED_TURNS: usize = 20;
+
 /// Prefix of `clientUserMessageId` values that carry an Inline input id.
 pub(crate) const CLIENT_MESSAGE_PREFIX: &str = "inline-agent-bridge:v2:";
 
@@ -154,6 +157,50 @@ impl CodexMapper {
         if finished.is_some() {
             self.last_finished_turn = finished;
         }
+    }
+
+    /// Inline inputs a resumed thread's turns already consumed, from the
+    /// `thread/*` response, so the bridge settles any it was unsure of
+    /// instead of resending them.
+    pub(crate) fn restore_inputs(&mut self, response: &Value) -> Vec<Event> {
+        let mut events = Vec::new();
+        // The recent turns are where an input it was unsure of would be.
+        for turn in response
+            .pointer("/thread/turns")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .rev()
+            .take(RESTORED_TURNS)
+        {
+            let Some(id) = turn_id(turn.get("id")) else {
+                continue;
+            };
+            for item in turn
+                .get("items")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if let (
+                    ItemBody::Message {
+                        role: MessageRole::User,
+                        input: Some(input),
+                        ..
+                    },
+                    _,
+                    _,
+                ) = item_body(item)
+                    && self.seen_inputs.insert(input.clone())
+                {
+                    events.push(Event::Input {
+                        id: input,
+                        fact: InputFact::Consumed { turn: id.clone() },
+                    });
+                }
+            }
+        }
+        events
     }
 
     /// Records the turn returned by `turn/start` before its notification arrives.
@@ -1868,5 +1915,27 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, Event::State { .. }))
         );
+    }
+
+    #[test]
+    fn a_resumed_thread_reports_the_inline_inputs_it_consumed() {
+        let mut mapper = CodexMapper::new("thread-1");
+        let input = InputId::new("in-7").unwrap();
+        let response = json!({"thread": {"turns": [{"id": "turn-1", "status": "completed",
+            "items": [{"type": "userMessage", "id": "u1", "clientId": client_message_id(&input),
+                "content": [{"type": "text", "text": "hi"}]},
+                {"type": "userMessage", "id": "u2", "content": []}]}]}});
+        let events = mapper.restore_inputs(&response);
+        assert_eq!(
+            events,
+            vec![Event::Input {
+                id: input,
+                fact: InputFact::Consumed {
+                    turn: TurnId::new("turn-1").unwrap()
+                }
+            }]
+        );
+        // Reported once.
+        assert!(mapper.restore_inputs(&response).is_empty());
     }
 }

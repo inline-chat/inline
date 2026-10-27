@@ -44,6 +44,8 @@ use crate::options::{LaunchOptions, ProcessHost, SessionStart};
 use crate::sessions::SessionStore;
 use crate::version::{ClaudeVersion, PASSIVE_MIN, capability, probe};
 
+/// Recent transcript inputs a resumed session reports as already consumed.
+const RESTORED_INPUTS: usize = 50;
 const PROVIDER: &str = "claude";
 const CATALOG_TTL: Duration = Duration::from_secs(300);
 const SESSION_PAGE_SIZE: usize = 50;
@@ -661,6 +663,28 @@ impl HarnessDriver for ClaudeHarness {
                 version,
             )
             .await?;
+            // A resumed session's transcript settles inputs the bridge was
+            // unsure of: the recent ones it holds already ran.
+            if let (Some(resumed), Some(store)) = (&resumed, self.store()) {
+                let consumed: Vec<Event> = store
+                    .messages(resumed.as_str(), Some(&spec.folder), 0, None)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .rev()
+                    .filter(|message| message.message_type == "user")
+                    .take(RESTORED_INPUTS)
+                    .filter_map(|message| {
+                        Some(Event::Input {
+                            id: inline_agent_bridge::harness::InputId::new(message.uuid.as_str())
+                                .ok()?,
+                            fact: inline_agent_bridge::harness::InputFact::Consumed {
+                                turn: TurnId::new(message.uuid.as_str()).ok()?,
+                            },
+                        })
+                    })
+                    .collect();
+                session.inner.emit_all(consumed);
+            }
             let capabilities = session.inner.capabilities();
             let manifest = self.manifest(version, &capabilities);
             {
@@ -1188,10 +1212,18 @@ impl Session for ClaudeSession {
             };
             let mut native = message.to_value();
             native["inline_ack"] = json!(lifecycle.as_deref().unwrap_or("written"));
+            // Without a lifecycle frame only the write is known; the turn
+            // that consumes it confirms it.
+            let acceptance = if lifecycle.is_some() {
+                inline_agent_bridge::harness::Acceptance::Accepted
+            } else {
+                inline_agent_bridge::harness::Acceptance::Written
+            };
             Ok(InputReceipt {
                 input: input.id,
                 disposition,
                 native,
+                acceptance,
             })
         })
     }

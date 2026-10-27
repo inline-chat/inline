@@ -436,6 +436,10 @@ pub enum OpError {
     /// The harness rejected the operation.
     #[error("harness rejected the operation: {0}")]
     Rejected(String),
+    /// A queue entry to remove was no longer queued: it already ran or was
+    /// taken, so there is nothing left to hold.
+    #[error("the entry is no longer queued")]
+    NotQueued,
     /// The harness may or may not have applied it. Never retried automatically.
     #[error("operation outcome is unknown: {0}")]
     Unknown(String),

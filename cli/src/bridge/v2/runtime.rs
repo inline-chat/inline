@@ -208,6 +208,17 @@ impl Runtime {
             cache: tokio::sync::Mutex::new(None),
         });
         let names = Arc::new(api::Names::new(bot.clone()));
+        // Each thread's settings, as a previous run left them.
+        let mut thread_settings = HashMap::new();
+        let mut bound_configs = HashMap::new();
+        for (chat_id, saved, bound) in ledger.threads()? {
+            if let Ok(saved) = serde_json::from_str::<SettingsChange>(&saved) {
+                thread_settings.insert(chat_id, saved);
+            }
+            if let Some(Ok(bound)) = bound.map(|bound| serde_json::from_str(&bound)) {
+                bound_configs.insert(chat_id, bound);
+            }
+        }
         let agent = Arc::new(Agent {
             bot,
             owner,
@@ -239,8 +250,8 @@ impl Runtime {
             moved: HashMap::new(),
             moves: Some(moves),
             own_threads: HashMap::new(),
-            thread_settings: HashMap::new(),
-            bound_configs: HashMap::new(),
+            thread_settings,
+            bound_configs,
             catalog: None,
             reconnect: Reconnect::default(),
             reported_health: None,
@@ -337,19 +348,55 @@ impl Runtime {
                 return;
             }
         };
+        // Written but unconfirmed: the thread's session settles them when it
+        // opens, by what it shows it already consumed.
+        let mut uncertain: HashMap<i64, Vec<(InputId, i64)>> = HashMap::new();
         for record in unresolved {
-            let text = match record.state {
-                InputState::Unknown | InputState::Sent => format!(
-                    "{} restarted while this was being delivered, so it may or may not have arrived. Reply again if it still needs doing.",
-                    self.config.agent_name
-                ),
-                _ => format!(
+            if matches!(record.state, InputState::Unknown | InputState::Sent)
+                && let Ok(input) = InputId::new(record.input_id.clone())
+            {
+                uncertain
+                    .entry(record.chat_id)
+                    .or_default()
+                    .push((input, record.message_id));
+                continue;
+            }
+            // Never written: it never ran.
+            self.reply(
+                record.chat_id,
+                record.message_id,
+                &format!(
                     "{} restarted before this ran. Reply again if it still needs doing.",
                     self.config.agent_name
                 ),
-            };
-            self.reply(record.chat_id, record.message_id, &text).await;
+            )
+            .await;
             let _ = self.agent.ledger.set(&record.input_id, InputState::Failed);
+        }
+        for (chat_id, inputs) in uncertain {
+            let opened = self
+                .ensure_work(chat_id, None)
+                .await
+                .map_err(|error| error.to_string());
+            if let Err(error) = opened {
+                log::warn!(target: "inline::bridge::v2", "chat={chat_id} cannot settle inputs: {error}");
+                for (input, message_id) in inputs {
+                    self.reply(
+                        chat_id,
+                        message_id,
+                        &format!(
+                            "{} restarted while this was being delivered and could not check whether it arrived. Reply again if it still needs doing.",
+                            self.config.agent_name
+                        ),
+                    )
+                    .await;
+                    let _ = self.agent.ledger.set(input.as_str(), InputState::Failed);
+                }
+                continue;
+            }
+            if let Some(work) = self.works.get(&chat_id) {
+                let _ = work.tx.send(Command::Reconcile { inputs }).await;
+            }
         }
         let _ = self.agent.ledger.prune(LEDGER_RETENTION_SECS);
     }
@@ -821,6 +868,30 @@ impl Runtime {
         Some("Allowed more for today.".to_owned())
     }
 
+    /// Saves a thread's settings so they survive a restart.
+    fn save_thread(&self, chat_id: i64) {
+        let settings = self
+            .thread_settings
+            .get(&chat_id)
+            .cloned()
+            .unwrap_or_default();
+        let bound = self
+            .bound_configs
+            .get(&chat_id)
+            .and_then(|bound| serde_json::to_string(bound).ok());
+        let saved = serde_json::to_string(&settings)
+            .map_err(|error| error.to_string())
+            .and_then(|settings| {
+                self.agent
+                    .ledger
+                    .save_thread(chat_id, &settings, bound.as_deref())
+                    .map_err(|error| error.to_string())
+            });
+        if let Err(error) = saved {
+            log::warn!(target: "inline::bridge::v2", "thread settings not saved: {error}");
+        }
+    }
+
     /// A bound thread's model and reasoning, as its composer chain set them.
     /// Absent means the harness's default.
     async fn bound_settings(
@@ -844,9 +915,11 @@ impl Runtime {
         let mut next = current.clone();
         settings::merge(&mut next, &change);
         if next == current {
+            self.save_thread(chat_id);
             return;
         }
         self.thread_settings.insert(chat_id, next);
+        self.save_thread(chat_id);
         if self.works.contains_key(&chat_id) {
             let _ = self
                 .ask(chat_id, |reply| Command::Session {
@@ -947,6 +1020,7 @@ impl Runtime {
         let op = match settings::invocation(item_id, value, &catalog) {
             Ok(settings::Invocation::Change(change)) => {
                 settings::merge(self.thread_settings.entry(chat_id).or_default(), &change);
+                self.save_thread(chat_id);
                 SessionOp::Settings(change)
             }
             Ok(settings::Invocation::Compact) => SessionOp::Compact,
@@ -1017,6 +1091,7 @@ impl Runtime {
             return match settings::invocation(item, Some(&value), &catalog) {
                 Ok(settings::Invocation::Change(change)) => {
                     settings::merge(self.thread_settings.entry(chat_id).or_default(), &change);
+                    self.save_thread(chat_id);
                     if self.works.contains_key(&chat_id) {
                         self.ask(chat_id, |reply| Command::Session {
                             op: SessionOp::Settings(change),
@@ -2004,3 +2079,7 @@ mod tests {
         assert!(setup.text.unwrap().contains("found 0.140.0"));
     }
 }
+
+#[cfg(test)]
+#[path = "faults.rs"]
+mod faults;

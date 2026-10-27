@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use inline_agent_bridge::group::{
     ConsiderOutcome, ConsiderQueue, ContextBudget, ContextMessage, DailySpeakGateBudget, DayKey,
     GateAdmission, GateAvailability, Grants, GuideFacts, HandoffInstruction, HandoffProvider,
@@ -23,10 +23,10 @@ use inline_agent_bridge::group::{
 };
 use inline_agent_bridge::harness::ChatId;
 use inline_agent_bridge::harness::{
-    Delivery, Event, EventStream, FieldAnswer, FieldId, FieldInput, HarnessDriver, HeldBy, Input,
-    InputDisposition, InputFact, InputId, InteractionId, InteractionResponse, Op, OpError, OpKind,
-    OpenError, OpenMode, OpenSpec, OutputMode, QuestionForm, QueueOp, RunState, SendError, Session,
-    SettingsChange, SteerPriority, TurnPhase, UserId, WaitingOn,
+    Acceptance, Delivery, Event, EventStream, FieldAnswer, FieldId, FieldInput, HarnessDriver,
+    HeldBy, Input, InputDisposition, InputFact, InputId, InteractionId, InteractionResponse, Op,
+    OpError, OpKind, OpenError, OpenMode, OpenSpec, OutputMode, QuestionForm, QueueOp, RunState,
+    SendError, Session, SettingsChange, SteerPriority, TurnPhase, UserId, WaitingOn,
 };
 use inline_agent_bridge::{HostToolResult, MAX_SESSION_TITLE_CHARS, ProviderSessionId, TurnId};
 use inline_client::{
@@ -47,6 +47,13 @@ use super::tools::{Tools, WorkTool};
 /// Progress edits are coalesced to at most one per slot in this window.
 const EDIT_INTERVAL: Duration = Duration::from_millis(1200);
 const TICK: Duration = Duration::from_secs(15);
+/// Waits before each attempt to post an answer or card; after the last one
+/// it waits for the next tick.
+const PUBLISH_RETRIES: [Duration; 3] = [
+    Duration::ZERO,
+    Duration::from_millis(500),
+    Duration::from_secs(2),
+];
 const NOT_PENDING: &str = "This request is no longer pending.";
 /// Trusted instructions for the speak gate's side call.
 const SPEAK_GATE_GUIDE: &str = "You take part in this Inline thread but nobody addressed you. \
@@ -207,6 +214,11 @@ pub(crate) enum Command {
         op: SessionOp,
         reply: oneshot::Sender<Option<String>>,
     },
+    /// Inputs a previous run left unconfirmed (input, message): the session
+    /// opens to settle them.
+    Reconcile {
+        inputs: Vec<(InputId, i64)>,
+    },
     /// A tool that acts through the work (spec §4.8).
     Tool {
         tool: WorkTool,
@@ -306,6 +318,10 @@ pub(crate) fn spawn(
         consider_lines: HashMap::new(),
         answer_replies: HashMap::new(),
         answer_to: None,
+        unsaved: std::sync::Mutex::new(HashMap::new()),
+        uncertain: HashMap::new(),
+        outbox: VecDeque::new(),
+        rendering_turn: None,
     };
     let task = tokio::spawn(actor.run(rx));
     WorkHandle {
@@ -323,6 +339,34 @@ struct Card {
     interaction: InteractionId,
     approval: bool,
     form: Option<QuestionForm>,
+}
+
+/// A short digest of an answer's text, for its identity.
+fn text_digest(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(text.as_bytes())[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// An answer or card waiting to be posted.
+struct Outgoing {
+    chat: i64,
+    doc: Doc,
+    reply_to: Option<i64>,
+    actions: Option<proto::MessageActions>,
+    random_id: i64,
+    /// A card's interaction and form, registered once it is posted.
+    card: Option<(InteractionId, Option<QuestionForm>)>,
+}
+
+/// An input the harness may or may not have.
+#[derive(Clone, Copy, Debug)]
+struct Uncertain {
+    message_id: i64,
+    /// Left by a previous run of the bridge.
+    restarted: bool,
 }
 
 struct PendingEdit {
@@ -372,7 +416,9 @@ struct Actor {
     edits: HashMap<u32, PendingEdit>,
     /// Finished progress message → the detail it shows cut short.
     full: VecDeque<(i64, Vec<FullDetail>)>,
-    reported: Option<(i32, i32, Option<String>)>,
+    /// The state last published, without its revision and time, so any
+    /// published change (queue count, attention) is sent again.
+    reported: Option<proto::AgentSessionState>,
     phase: watch::Sender<WorkPhase>,
     started_ms: u64,
     /// Messages observed since the agent last took input (spec §5.1).
@@ -388,6 +434,15 @@ struct Actor {
     /// Unaddressed messages waiting for a quiet, idle moment (spec §5.4).
     consider: ConsiderQueue,
     consider_lines: HashMap<i64, String>,
+    /// Answers and cards that could not be posted yet, retried under the
+    /// same random ID until Inline takes them.
+    outbox: VecDeque<Outgoing>,
+    /// The turn whose output is being rendered, for the answer's identity.
+    rendering_turn: Option<TurnId>,
+    /// Inputs whose delivery was unknown, until the session settles them.
+    uncertain: HashMap<InputId, Uncertain>,
+    /// Ledger states not saved yet, written again with the next update.
+    unsaved: std::sync::Mutex<HashMap<InputId, InputState>>,
     /// Group input → its message, for the answer to reply to.
     answer_replies: HashMap<InputId, i64>,
     /// The message the next final answer replies to: the latest group input
@@ -417,6 +472,7 @@ impl Actor {
                     }
                 },
                 _ = tick.tick() => {
+                    self.flush_outbox().await;
                     self.event(HoldEvent::Tick).await;
                     self.consider_now().await;
                 }
@@ -495,6 +551,24 @@ impl Actor {
                     self.title = Some(title);
                     self.rename_pending = true;
                     self.sync_title().await;
+                }
+            }
+            Command::Reconcile { inputs } => {
+                for (input, message_id) in inputs {
+                    self.uncertain.insert(
+                        input,
+                        Uncertain {
+                            message_id,
+                            restarted: true,
+                        },
+                    );
+                }
+                // Opening the session settles them (see `settle_uncertain`).
+                if self.session.is_some() {
+                    self.settle_uncertain(false).await;
+                } else {
+                    self.event(HoldEvent::AcquireRequested { input: None })
+                        .await;
                 }
             }
             Command::Tool { tool, reply } => {
@@ -642,7 +716,13 @@ impl Actor {
                     })
                     .await
                 {
-                    Ok(_) => self.mark(&input, InputState::Pending),
+                    Ok(_) => {
+                        self.mark(&input, InputState::Pending);
+                    }
+                    // It ran before it could be held; nothing to keep.
+                    Err(OpError::NotQueued) => {
+                        self.removing.remove(&input);
+                    }
                     Err(error) => {
                         self.removing.remove(&input);
                         return Some(format!(
@@ -1071,31 +1151,19 @@ impl Actor {
                 self.retained.extend(inputs);
                 None
             }
-            HoldEffect::Fork { pending } => {
-                let Some(native) = self.native.clone() else {
-                    self.notice("There is no session to fork.").await;
-                    return None;
-                };
-                match self
-                    .open(OpenMode::Fork {
-                        session: native,
-                        at: None,
-                    })
-                    .await
-                {
-                    Ok(()) => {
-                        for input in pending {
-                            self.deliver(input).await;
-                        }
-                        None
+            HoldEffect::Fork { pending } => match self.fork_here().await {
+                Ok(()) => {
+                    for input in pending {
+                        self.deliver(input).await;
                     }
-                    Err(error) => {
-                        self.notice(&format!("Could not fork the session: {error}"))
-                            .await;
-                        None
-                    }
+                    None
                 }
-            }
+                Err(error) => {
+                    self.notice(&format!("Could not fork the session: {error}"))
+                        .await;
+                    None
+                }
+            },
             HoldEffect::Lost => {
                 self.session = None;
                 self.events = None;
@@ -1111,10 +1179,78 @@ impl Actor {
         }
     }
 
+    /// Fork here: a new session belongs in a new thread (as with `/new`), so
+    /// the fork continues in a subthread of this one, and this thread keeps
+    /// the original session, still held elsewhere.
+    async fn fork_here(&mut self) -> Result<(), String> {
+        let native = self.native.clone().ok_or("there is no session to fork")?;
+        let session = self
+            .open_session(OpenMode::Fork {
+                session: native,
+                at: None,
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        let created = self
+            .agent
+            .bot
+            .create_reply_thread(CreateReplyThreadRequest {
+                parent_chat_id: InlineId::new(self.chat_id),
+                parent_message_id: None,
+                title: Some(format!("{} fork", self.agent.agent_name)),
+                description: None,
+                emoji: None,
+                participants: Vec::new(),
+                agent_context: None,
+            })
+            .await
+            .map_err(|error| format!("Inline could not create the thread ({error})"))?;
+        let from = self.chat_id;
+        let destination = created.chat_id.get();
+        self.chat_id = destination;
+        self.publication = Publication::new(ChatId(destination));
+        self.edits.clear();
+        self.slots.clear();
+        self.answer_to = None;
+        self.answer_replies.clear();
+        self.adopt(session, true)
+            .await
+            .map_err(|error| error.to_string())?;
+        let _ = self.agent.moves.send((from, destination));
+        let link = format!("inline://chat?id={destination}");
+        let random_id = rand::random::<i64>().abs().max(1);
+        if let Ok(id) = api::send_markdown(
+            &self.agent.bot,
+            from,
+            None,
+            &format!(
+                "Forked into [a new thread]({link}); the session here stays where it is held."
+            ),
+            random_id,
+        )
+        .await
+        {
+            self.remember(id);
+        }
+        Ok(())
+    }
+
     async fn acquire(&mut self) -> Option<HoldEvent> {
+        // A session the holder probe already resumed is adopted like any
+        // other, with its tools, title and settings.
         if let Some(session) = self.probe.take() {
-            self.attach(session);
-            return Some(HoldEvent::Acquired);
+            return match self.adopt(session, false).await {
+                Ok(()) => Some(HoldEvent::Acquired),
+                Err(OpenFailure::HeldElsewhere(by)) => Some(HoldEvent::AcquireConflict { by }),
+                Err(OpenFailure::Other(message)) => {
+                    self.notice(&format!(
+                        "{} could not start: {message}",
+                        self.agent.agent_name
+                    ))
+                    .await;
+                    Some(HoldEvent::Detached)
+                }
+            };
         }
         let mode = match self.native.clone() {
             Some(session) => OpenMode::Resume { session },
@@ -1151,19 +1287,25 @@ impl Actor {
     async fn open(&mut self, mode: OpenMode) -> Result<(), OpenFailure> {
         let fresh = !matches!(mode, OpenMode::Resume { .. });
         let session = match self.open_session(mode.clone()).await {
+            // The native session is gone. A new session belongs in a new
+            // thread, so this one says how to start one.
             Err(OpenFailure::Other(message))
                 if matches!(mode, OpenMode::Resume { .. }) && message == NOT_FOUND =>
             {
-                // The native session is gone; start a new one and say so.
-                self.notice(&format!(
-                    "The previous {} session was not found on this machine, so a new one started.",
-                    self.agent.agent_name
-                ))
-                .await;
-                self.open_session(OpenMode::Start).await?
+                return Err(OpenFailure::Other(
+                    "its session is no longer on this machine. Start a fresh thread with /new"
+                        .to_owned(),
+                ));
             }
             other => other?,
         };
+        self.adopt(session, fresh).await
+    }
+
+    /// Makes an opened session this work's: records it in Inline, binds its
+    /// tools, settles inputs whose delivery was unknown, and brings its
+    /// title and settings up to date.
+    async fn adopt(&mut self, session: Arc<dyn Session>, fresh: bool) -> Result<(), OpenFailure> {
         let native = session.key().session.clone();
         if fresh || self.native.as_ref() != Some(&native) {
             self.connect(&native).await.map_err(OpenFailure::Other)?;
@@ -1175,6 +1317,7 @@ impl Actor {
         if let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) {
             tools.bind(native, self.chat_id, self.commands.clone());
         }
+        self.settle_uncertain(fresh).await;
         // A new session takes the thread's title; a rename made while the
         // session was let go reaches it now.
         if fresh && self.title.is_none() {
@@ -1194,6 +1337,69 @@ impl Actor {
         self.sync_title().await;
         self.sync_settings().await;
         Ok(())
+    }
+
+    /// Inputs whose delivery was unknown are settled when a session opens:
+    /// a resumed session reports what it already consumed or queued, so
+    /// whatever it does not show never arrived. Nothing is sent again; the
+    /// sender hears what happened (spec §4.7).
+    async fn settle_uncertain(&mut self, fresh: bool) {
+        if self.uncertain.is_empty() {
+            return;
+        }
+        // What the session reported while opening is already buffered.
+        while let Some(Some(envelope)) = next_envelope(&mut self.events).now_or_never() {
+            Box::pin(self.envelope(envelope)).await;
+        }
+        let queued: Vec<InputId> = self
+            .session
+            .as_ref()
+            .map(|session| session.live_work().queued)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|queued| queued.input)
+            .collect();
+        for (input, uncertain) in std::mem::take(&mut self.uncertain) {
+            let (state, text) = if queued.contains(&input) {
+                (InputState::Accepted, None)
+            } else if fresh {
+                (
+                    InputState::Failed,
+                    Some(format!(
+                        "{} could not confirm whether this ran: its previous session is gone. Send it again if it still needs doing.",
+                        self.agent.agent_name
+                    )),
+                )
+            } else {
+                (
+                    InputState::Failed,
+                    Some(format!(
+                        "This did not reach {}. Send it again if it still needs doing.",
+                        self.agent.agent_name
+                    )),
+                )
+            };
+            self.mark(&input, state);
+            if let Some(text) = text {
+                self.reply(uncertain.message_id, &text).await;
+            }
+        }
+    }
+
+    /// An input whose delivery was unknown is settled by the session: it ran.
+    async fn settled(&mut self, input: &InputId) {
+        if let Some(uncertain) = self.uncertain.remove(input)
+            && uncertain.restarted
+        {
+            self.reply(
+                uncertain.message_id,
+                &format!(
+                    "This reached {} before the restart. Any reply it gave then is in the session.",
+                    self.agent.agent_name
+                ),
+            )
+            .await;
+        }
     }
 
     async fn open_session(&self, mode: OpenMode) -> Result<Arc<dyn Session>, OpenFailure> {
@@ -1310,7 +1516,20 @@ impl Actor {
                 None => Delivery::Turn,
             };
         }
-        self.mark(&pending.id, InputState::Sent);
+        // Recorded as written before it is: an input the ledger cannot track
+        // is never sent.
+        if !self.mark(&pending.id, InputState::Sent) {
+            self.inputs.remove(&pending.id);
+            self.reply(
+                message_id,
+                &format!(
+                    "This was not sent: {} could not record it on this machine. Check the disk, then send it again.",
+                    self.agent.agent_name
+                ),
+            )
+            .await;
+            return;
+        }
         let mut result = session.send(input.clone()).await;
         // The turn started or ended between the check and the send.
         if let Err(
@@ -1331,7 +1550,10 @@ impl Actor {
         }
         match result {
             Ok(receipt) => {
-                self.mark(&pending.id, InputState::Accepted);
+                // A bare write stays Sent until the harness shows taking it.
+                if receipt.acceptance == Acceptance::Accepted {
+                    self.mark(&pending.id, InputState::Accepted);
+                }
                 self.answer_to = self.answer_replies.remove(&pending.id);
                 // The harness may report the turn a moment later. Until then
                 // the delivery itself is live work, so an idle tick never
@@ -1347,11 +1569,20 @@ impl Actor {
                 Box::pin(self.event(HoldEvent::Activity { live })).await;
             }
             Err(SendError::Unknown(reason)) => {
+                // Never resent: the session settles it, as it runs or when it
+                // next opens.
                 self.mark(&pending.id, InputState::Unknown);
+                self.uncertain.insert(
+                    pending.id.clone(),
+                    Uncertain {
+                        message_id,
+                        restarted: false,
+                    },
+                );
                 self.reply(
                     message_id,
                     &format!(
-                        "{} may or may not have received this ({reason}). It was not sent again; check before resending.",
+                        "{} may not have received this ({reason}). It was not sent again; you'll hear here if it did not arrive.",
                         self.agent.agent_name
                     ),
                 )
@@ -1467,6 +1698,15 @@ impl Actor {
         .await
         {
             Ok(Ok(_)) => ReleaseStepOutcome::Done,
+            // It ran before it could be held: nothing is left to keep.
+            Ok(Err(OpError::NotQueued)) => {
+                if let ReleaseStep::KeepQueuedPending { queued } = step
+                    && let Some(input) = &queued.input
+                {
+                    self.removing.remove(input);
+                }
+                return ReleaseStepOutcome::Done;
+            }
             Ok(Err(OpError::Unknown(reason))) => ReleaseStepOutcome::Unknown { reason },
             Ok(Err(OpError::InteractionNotPending)) => ReleaseStepOutcome::Done,
             Ok(Err(error)) => ReleaseStepOutcome::Failed {
@@ -1785,9 +2025,34 @@ impl Actor {
                             log::warn!(target: "inline::bridge::v2", "move failed, retrying: {error}");
                             PublicationEvent::MoveUnknown
                         }
-                        Err(error) => PublicationEvent::MoveRejected {
-                            reason: error.to_string(),
-                        },
+                        // Out of retries: only Inline's record says whether
+                        // the move happened, so a lost reply is not taken
+                        // for a refusal.
+                        Err(error) => {
+                            let moved = self
+                                .agent
+                                .owner
+                                .lookup(proto::GetAgentSessionInput {
+                                    peer_id: Some(chat_peer(destination.0)),
+                                    bot_user_id: self.agent.bot_user_id,
+                                    ..Default::default()
+                                })
+                                .await
+                                .ok()
+                                .and_then(|result| result.connection)
+                                .and_then(|connection| connection.agent_session)
+                                .is_some_and(|session| session.id == card.agent_session_id);
+                            if moved {
+                                PublicationEvent::MoveConfirmed {
+                                    destination,
+                                    moved: true,
+                                }
+                            } else {
+                                PublicationEvent::MoveRejected {
+                                    reason: error.to_string(),
+                                }
+                            }
+                        }
                     };
                     queue.extend(self.publication.handle(event));
                 }
@@ -1859,11 +2124,13 @@ impl Actor {
                     for input in inputs {
                         self.mark(input, InputState::Consumed);
                         self.inputs.remove(input);
+                        self.settled(input).await;
                     }
                 }
                 TurnPhase::Completed {
                     inputs_consumed, ..
                 } => {
+                    self.rendering_turn = Some(turn.clone());
                     for input in inputs_consumed {
                         self.mark(input, InputState::Consumed);
                         self.inputs.remove(input);
@@ -1883,6 +2150,7 @@ impl Actor {
                 InputFact::Consumed { .. } => {
                     self.mark(id, InputState::Consumed);
                     self.inputs.remove(id);
+                    self.settled(id).await;
                 }
                 // Taken out of the queue by this bridge (pause or release):
                 // kept pending in Inline.
@@ -1989,6 +2257,82 @@ impl Actor {
         self.report().await;
     }
 
+    /// A stable random ID for one answer or card of this work's session,
+    /// so a retry, or the same output rendered again, is posted once.
+    fn output_id(&self, kind: &str, token: Option<&str>) -> i64 {
+        match (&self.native, token) {
+            (Some(native), Some(token)) => crate::bridge::helpers::interaction_random_id(
+                &format!("v2-{kind}"),
+                &format!("{native}:{token}"),
+            )
+            .get(),
+            _ => rand::random::<i64>().abs().max(1),
+        }
+    }
+
+    /// Posts an answer or card; one Inline does not take yet is retried with
+    /// the same random ID, now and with each tick, so it lands exactly once.
+    async fn publish(&mut self, outgoing: Outgoing) {
+        self.outbox.push_back(outgoing);
+        self.flush_outbox().await;
+    }
+
+    async fn flush_outbox(&mut self) {
+        while let Some(outgoing) = self.outbox.pop_front() {
+            let mut sent = None;
+            for delay in PUBLISH_RETRIES {
+                tokio::time::sleep(delay).await;
+                match api::send_doc_as(
+                    &self.agent.bot,
+                    outgoing.chat,
+                    outgoing.reply_to,
+                    &outgoing.doc,
+                    outgoing.actions.clone(),
+                    Notify::Normal,
+                    outgoing.random_id,
+                )
+                .await
+                {
+                    Ok(id) => {
+                        sent = Some(id);
+                        break;
+                    }
+                    Err(error) => {
+                        log::warn!(target: "inline::bridge::v2", "chat={} publish failed: {error}", outgoing.chat);
+                    }
+                }
+            }
+            let Some(message_id) = sent else {
+                // Kept in order; the next tick tries again.
+                self.outbox.push_front(outgoing);
+                return;
+            };
+            self.remember(message_id);
+            if let Some((interaction, form)) = outgoing.card {
+                self.card_by_interaction
+                    .insert(interaction.clone(), message_id);
+                self.waiting = Some((
+                    if form.is_some() {
+                        proto::AgentWaitingReason::Question
+                    } else {
+                        proto::AgentWaitingReason::Approval
+                    },
+                    message_id,
+                ));
+                self.cards.insert(
+                    message_id,
+                    Card {
+                        chat: outgoing.chat,
+                        interaction,
+                        approval: form.is_none(),
+                        form,
+                    },
+                );
+                self.report().await;
+            }
+        }
+    }
+
     async fn render(&mut self, ops: Vec<RenderOp>) {
         for op in ops {
             log::debug!(target: "inline::bridge::v2", "chat={} render={}", self.chat_id, render_kind(&op));
@@ -2042,8 +2386,23 @@ impl Actor {
                     // Edits still pending land before the answer.
                     self.flush_edits(true).await;
                     let reply_to = self.answer_to.take();
-                    self.send_in_reply(&doc, reply_to, None, Notify::Normal)
-                        .await;
+                    // The turn and the text: a retry or a re-render of this
+                    // answer is the same message, another answer is not.
+                    let token = self
+                        .turn
+                        .as_ref()
+                        .or(self.rendering_turn.as_ref())
+                        .map(|turn| format!("{turn}:{}", text_digest(&doc.text)));
+                    let random_id = self.output_id("final", token.as_deref());
+                    self.publish(Outgoing {
+                        chat: self.chat_id,
+                        doc,
+                        reply_to,
+                        actions: None,
+                        random_id,
+                        card: None,
+                    })
+                    .await;
                 }
                 RenderOp::Notice { doc } => {
                     self.flush_edits(true).await;
@@ -2066,27 +2425,16 @@ impl Actor {
                         }
                         doc
                     };
-                    if let Some(message_id) = self.send(&doc, buttons, Notify::Normal).await {
-                        self.card_by_interaction
-                            .insert(interaction.clone(), message_id);
-                        self.waiting = Some((
-                            if form.is_some() {
-                                proto::AgentWaitingReason::Question
-                            } else {
-                                proto::AgentWaitingReason::Approval
-                            },
-                            message_id,
-                        ));
-                        self.cards.insert(
-                            message_id,
-                            Card {
-                                chat: self.chat_id,
-                                interaction,
-                                approval: form.is_none(),
-                                form,
-                            },
-                        );
-                    }
+                    let random_id = self.output_id("card", Some(interaction.as_str()));
+                    self.publish(Outgoing {
+                        chat: self.chat_id,
+                        doc,
+                        reply_to: None,
+                        actions: buttons,
+                        random_id,
+                        card: Some((interaction, form)),
+                    })
+                    .await;
                 }
                 RenderOp::CardClosed { interaction, doc } => {
                     if let Some(message_id) = self.card_by_interaction.remove(&interaction) {
@@ -2121,8 +2469,15 @@ impl Actor {
         for slot in due {
             if let (Some(edit), Some(message_id)) =
                 (self.edits.remove(&slot), self.slots.get(&slot).copied())
+                && !self
+                    .edit_in(self.chat_id, message_id, &edit.doc, None)
+                    .await
             {
-                self.edit(message_id, &edit.doc, None).await;
+                // Tried again later, unless a newer edit replaced it.
+                self.edits.entry(slot).or_insert(PendingEdit {
+                    doc: edit.doc,
+                    due: now + EDIT_INTERVAL,
+                });
             }
         }
     }
@@ -2206,10 +2561,13 @@ impl Actor {
         message_id: i64,
         doc: &Doc,
         actions: Option<proto::MessageActions>,
-    ) {
-        if let Err(error) = api::edit_doc(&self.agent.bot, chat_id, message_id, doc, actions).await
-        {
-            log::warn!(target: "inline::bridge::v2", "edit failed: {error}");
+    ) -> bool {
+        match api::edit_doc(&self.agent.bot, chat_id, message_id, doc, actions).await {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "edit failed: {error}");
+                false
+            }
         }
     }
 
@@ -2263,9 +2621,21 @@ impl Actor {
         }
     }
 
-    fn mark(&self, input: &InputId, state: InputState) {
-        if let Err(error) = self.agent.ledger.set(input.as_str(), state) {
-            log::warn!(target: "inline::bridge::v2", "ledger update failed: {error}");
+    /// Records where an input stands; true once it is saved. A failed save
+    /// is kept and written again with the next one, and until then the
+    /// ledger still holds the earlier state, which a restart reconciles.
+    /// Callers about to cause a native effect check the result (spec §4.7).
+    fn mark(&self, input: &InputId, state: InputState) -> bool {
+        let mut unsaved = self.unsaved.lock().expect("unsaved");
+        unsaved.remove(input);
+        unsaved.retain(|id, state| self.agent.ledger.set(id.as_str(), *state).is_err());
+        match self.agent.ledger.set(input.as_str(), state) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "ledger update failed: {error}");
+                unsaved.insert(input.clone(), state);
+                false
+            }
         }
     }
 
@@ -2334,7 +2704,11 @@ impl Actor {
         state.run_state = run_state as i32;
         state.queued_count = self.live.queued.len() as u32;
         state.detail = self.detail.clone();
-        let key = (state.run_state, state.waiting_reason, state.detail.clone());
+        let key = proto::AgentSessionState {
+            revision: 0,
+            updated_at: 0,
+            ..state.clone()
+        };
         if self.reported.as_ref() == Some(&key) {
             return;
         }
