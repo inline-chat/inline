@@ -45,7 +45,12 @@ const adapterBin = path.join(consumer, "node_modules/.bin/inline-hermes")
 const run = (bin, args, timeout = 180_000) => execFileSync(bin, args, { cwd: consumer, env, encoding: "utf8", timeout })
 assert.match(run(adapterBin, ["help"]), /inline-hermes install/)
 console.log(run(adapterBin, ["install", "--hermes-home", home, "--force", "--json"]))
-for (const file of ["adapter.py", "cli.py", "tools.py", "profile.py", "plugin.yaml", "sidecar/index.mjs"]) {
+const pluginFiles = ["adapter.py", "cli.py", "tools.py", "plugin.yaml", "sidecar/index.mjs"]
+// Profile isolation ships in adapter v1; npm latest remains the 0.0.x line
+// during its alpha. Keep validating that published consumer without requiring
+// a module it never shipped. Every v1+ artifact must include the new module.
+if (!installedManifest.version.startsWith("0.")) pluginFiles.push("profile.py")
+for (const file of pluginFiles) {
   assert.deepEqual(
     await readFile(path.join(home, "plugins/inline", file)),
     await readFile(path.join(installedHermes, "plugin/inline", file)),

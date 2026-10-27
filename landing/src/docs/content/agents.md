@@ -77,7 +77,7 @@ Support status:
 
 ## Bridge v2 alpha
 
-[CLI `0.7.19-alpha.1`](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.19-alpha.1)
+[CLI `0.7.19-alpha.2`](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.19-alpha.2)
 includes the native Codex and Claude bridge. Download the archive for your
 platform from that prerelease and verify its published checksum. The normal
 installer, updater, and Homebrew remain on the stable release.
