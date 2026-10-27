@@ -59,20 +59,50 @@ async function isThreadOpener(chat: ThreadAutoFollowChat, newMessageId: number |
   return earlier === undefined
 }
 
-/** Users a message is addressed to for following: everyone it mentions, and the bot a command names. */
-export function getAddressedUserIds(entities: MessageEntities | undefined): Set<number> {
+/**
+ * Users a message is addressed to for following: the run of mentions and bot commands it starts
+ * with, or every one of them when it doesn't start with one.
+ */
+export function getAddressedUserIds(text: string | undefined, entities: MessageEntities | undefined): Set<number> {
   const addressed = new Set<number>()
-  for (const entity of entities?.entities ?? []) {
+  if (!entities) {
+    return addressed
+  }
+
+  const mentions: { offset: number; end: number; userId: number }[] = []
+  for (const entity of entities.entities) {
     const target =
       entity.type === MessageEntity_Type.MENTION && entity.entity.oneofKind === "mention"
         ? entity.entity.mention.userId
         : entity.type === MessageEntity_Type.BOT_COMMAND && entity.entity.oneofKind === "botCommand"
           ? entity.entity.botCommand.botUserId
           : undefined
-    const userId = Number(target)
-    if (target !== undefined && Number.isSafeInteger(userId) && userId > 0) {
-      addressed.add(userId)
+    if (target === undefined) {
+      continue
     }
+    const userId = Number(target)
+    if (!Number.isSafeInteger(userId) || userId <= 0) {
+      continue
+    }
+    const offset = Number(entity.offset)
+    mentions.push({ offset, end: offset + Number(entity.length), userId })
+  }
+  mentions.sort((a, b) => a.offset - b.offset)
+
+  const source = text ?? ""
+  const leading: number[] = []
+  let cursor = source.length - source.trimStart().length
+  for (const mention of mentions) {
+    if (mention.offset !== cursor) {
+      break
+    }
+    leading.push(mention.userId)
+    const rest = source.slice(mention.end)
+    cursor = mention.end + (rest.length - rest.replace(/^[\s,]+/, "").length)
+  }
+
+  for (const userId of leading.length > 0 ? leading : mentions.map((mention) => mention.userId)) {
+    addressed.add(userId)
   }
   return addressed
 }

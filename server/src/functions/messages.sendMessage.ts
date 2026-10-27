@@ -586,7 +586,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     currentUserId,
     updateGroup,
     newMessageId: newMessage.messageId,
-    addressedUserIds: getAddressedUserIds(entities),
+    addressedUserIds: getAddressedUserIds(text, entities),
     senderIsBot: context.isBot,
   })
 

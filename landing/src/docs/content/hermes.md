@@ -48,7 +48,7 @@ answers. Review these before upgrading:
 - **Unfollow wins in free-response chats.** Mentions and replies still reach
   the bot.
 - **Bots enter a thread through its first message.** A thread follows the bots
-  its first message mentions or sends a command to. A thread only you and one
+  its first message is for, by mention or command. A thread only you and one
   bot can see, or one under a bot's direct message, follows that bot. A bot
   mentioned later answers once without following. The agent can follow or
   unfollow a thread itself.
