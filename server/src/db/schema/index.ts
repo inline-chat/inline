@@ -51,3 +51,4 @@ export * from "./agentSessions"
 
 export * from "./authDeliveryBudgets"
 export * from "./recentRealtimeBuckets"
+export * from "./chatAccess"
