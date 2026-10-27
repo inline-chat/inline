@@ -232,6 +232,12 @@ final class RealtimeSendTests {
       syncStorage: SendTestSyncStorage()
     )
 
+    // Let the initial transport start finish so logout does not interleave with it.
+    let initialized = await waitForCondition(timeout: .seconds(2)) {
+      await !transport.sentMessages.isEmpty
+    }
+    #expect(initialized)
+
     await realtime.loggedOut()
 
     let blockedID = UUID()
@@ -246,13 +252,14 @@ final class RealtimeSendTests {
     }
     #expect(rpcCallsAfterBlockedTransaction == rpcCallsBeforeBlockedTransaction)
 
+    let messagesBeforeResume = await transport.sentMessages.count
     await realtime.resumeAfterLocalDataReset()
 
     let resumedID = UUID()
     _ = await realtime.sendQueued(SendTestTransaction(id: resumedID))
     #expect(await SendTestRecorder.shared.didRunOptimistic(resumedID))
     let dispatched = await waitForCondition(timeout: .seconds(2)) {
-      await !transport.sentMessages.isEmpty
+      await transport.sentMessages.count > messagesBeforeResume
     }
     #expect(dispatched)
 
@@ -750,7 +757,9 @@ final class RealtimeSendTests {
         )
       )
     }
-    let firstAttempt = await waitForCondition(timeout: .seconds(1)) {
+    // A deferred first dispatch waits for the queue's one-second retry tick, so
+    // the first attempt can land just after one second.
+    let firstAttempt = await waitForCondition(timeout: .seconds(3)) {
       await transport.targetAttemptCount == 1
     }
     guard firstAttempt else {
