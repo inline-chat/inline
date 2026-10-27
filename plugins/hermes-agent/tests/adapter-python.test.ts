@@ -3065,7 +3065,11 @@ async def assert_multi_bot_rules():
     async def fetch_bot_request(chat_id, message_id, **kwargs):
         return {"id": message_id, "chatId": chat_id, "fromId": "500", "sender": {"id": "500", "bot": True}}
     restarted._fetch_message = fetch_bot_request
-    assert await restarted._reply_to_for_target("m-331", {"chatId": "10"}) == "m-331"
+    assert await restarted._reply_to_for_target("m-331", {"chatId": "10"}, request_chat_id="10") == "m-331"
+    # An answer moved into a thread never looks the parent's message id up in the thread.
+    moved = InlineAdapter(PlatformConfig(extra=trusted_extra))
+    moved._fetch_message = fetch_bot_request
+    assert await moved._reply_to_for_target("m-331", {"chatId": "77"}, request_chat_id="10") is None
     # Ambient bot output never wakes a following bot.
     adapter, events = make()
     await adapter._dispatch_message(message(332, "status: still crawling", sender="500", bot=True))

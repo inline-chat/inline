@@ -3935,7 +3935,7 @@ class InlineAdapter(BasePlatformAdapter):
             logger.warning("[inline] could not adopt legacy state %s: %s", legacy, exc)
 
     async def _reply_to_for_target(
-        self, reply_to: Optional[str], target: Dict[str, str], *, anchored: bool = False,
+        self, reply_to: Optional[str], target: Dict[str, str], *, request_chat_id: str = "", anchored: bool = False,
     ) -> Optional[str]:
         """Answers quote the message only when it came from a bot: a bot wakes on replies to its
         own messages, so that is how an answer reaches it. People get plain answers."""
@@ -3950,8 +3950,10 @@ class InlineAdapter(BasePlatformAdapter):
             return str(reply_to)
         key = f"{self._chat_key(target_chat_id)}:{reply_to}"
         sender_is_bot = self._request_sender_is_bot.get(key)
-        if sender_is_bot is None and target_chat_id:
+        if sender_is_bot is None and target_chat_id and self._chat_key(request_chat_id) == self._chat_key(target_chat_id):
             # Not seen since this process started, such as an answer finishing after a restart.
+            # Message ids are per chat, so only look it up where the request was sent; an answer
+            # moved into a thread would otherwise read the thread's message with the same id.
             fetched = await self._fetch_message(target_chat_id, str(reply_to))
             sender_is_bot = _inline_sender_profile({}, fetched).get("bot") is True if fetched else False
             self._remember_request_sender(target_chat_id, str(reply_to), sender_is_bot)
@@ -4808,7 +4810,7 @@ class InlineAdapter(BasePlatformAdapter):
                 first_result.error,
             )
             reply_to = agent_action_target
-        reply_to = await self._reply_to_for_target(reply_to, target, anchored=bool(agent_action_target))
+        reply_to = await self._reply_to_for_target(reply_to, target, request_chat_id=chat_id, anchored=bool(agent_action_target))
         chunks = self.truncate_message(self.format_message(content), self.MAX_MESSAGE_LENGTH)
         message_ids: List[str] = []
         raw_responses: List[Any] = []
@@ -5124,7 +5126,7 @@ class InlineAdapter(BasePlatformAdapter):
             return _send_result(success=False, error=f"attachment exceeds Inline upload cap ({actual} > {limit})", error_kind="too_long")
         mime_type, _ = mimetypes.guess_type(safe_path)
         target = self._target_for(chat_id, metadata)
-        reply_to = await self._reply_to_for_target(reply_to, target)
+        reply_to = await self._reply_to_for_target(reply_to, target, request_chat_id=chat_id)
         body = {
             "target": target,
             "path": safe_path,
