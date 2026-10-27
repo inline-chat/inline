@@ -465,7 +465,7 @@ async fn codex_round_trip_through_inline() {
                 action_id: super::render::QUESTION_FORM_ID.to_owned(),
                 form: Some(proto::MessageFormSubmission {
                     values: vec![proto::MessageFormValue {
-                        field_id: "color".to_owned(),
+                        field_id: "f0".to_owned(),
                         value: Some(proto::message_form_value::Value::Selection(
                             proto::MessageFormSelection {
                                 option_ids: vec!["o1".to_owned()],
@@ -1124,7 +1124,59 @@ async fn claude_round_trip_through_inline() {
     )
     .await;
 
-    // 3. Asking before Bash: the card carries the command, and the owner's
+    // 3. AskUserQuestion: the card is an Inline form, and the owner's choice
+    // reaches Claude as the tool's answer.
+    send(
+        &owner,
+        chat_id,
+        &format!(
+            "Ask me\n@tool AskUserQuestion {}",
+            json!({"questions": [{"question": "Which color fits?", "header": "Color",
+                "multiSelect": false, "options": [
+                    {"label": "Red", "description": "Warm"},
+                    {"label": "Blue", "description": "Cool"}]}]})
+        ),
+    )
+    .await;
+    let (card, _) = wait_card(&api, &owner, chat_id, "Which color fits?", CardKind::Form).await;
+    owner
+        .invoke_rpc(
+            proto::Method::InvokeMessageAction,
+            proto::rpc_call::Input::InvokeMessageAction(proto::InvokeMessageActionInput {
+                peer_id: Some(super::api::chat_peer(chat_id)),
+                message_id: card,
+                action_id: super::render::QUESTION_FORM_ID.to_owned(),
+                form: Some(proto::MessageFormSubmission {
+                    values: vec![proto::MessageFormValue {
+                        field_id: "f0".to_owned(),
+                        value: Some(proto::message_form_value::Value::Selection(
+                            proto::MessageFormSelection {
+                                option_ids: vec!["o1".to_owned()],
+                                other_text: None,
+                            },
+                        )),
+                        redacted: false,
+                    }],
+                }),
+            }),
+        )
+        .await
+        .unwrap();
+    wait_for(
+        &api,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "Claude's answer after the question",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("FAKE-DONE") && text.contains("Blue"))
+        },
+    )
+    .await;
+
+    // 4. Asking before Bash: the card carries the command, and the owner's
     // approval runs it.
     send(
         &owner,
@@ -1156,7 +1208,7 @@ async fn claude_round_trip_through_inline() {
                 .iter()
                 .filter(|(_, text)| text.contains("FAKE-DONE"))
                 .count()
-                >= 2
+                >= 3
         },
     )
     .await;
@@ -1168,7 +1220,7 @@ async fn claude_round_trip_through_inline() {
         "the approved command ran in the work's folder"
     );
 
-    // 4. /release ends the process and hands the session back.
+    // 5. /release ends the process and hands the session back.
     send(&owner, chat_id, "/release").await;
     wait_for(
         &api,

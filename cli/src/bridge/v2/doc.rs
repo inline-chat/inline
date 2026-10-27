@@ -189,7 +189,8 @@ impl DocBuilder {
         let fields = form
             .fields
             .iter()
-            .map(|field| {
+            .enumerate()
+            .map(|(index, field)| {
                 let label = self.span(&field.prompt);
                 let kind = match &field.input {
                     FieldInput::Select {
@@ -246,7 +247,9 @@ impl DocBuilder {
                     }
                 };
                 proto::BlockFormField {
-                    field_id: field.id.to_string(),
+                    // Harness field IDs can be free text (Claude uses the
+                    // question); Inline's must be short identifiers.
+                    field_id: form_field_id(index),
                     label: Some(label),
                     description: None,
                     required: field.required,
@@ -382,6 +385,11 @@ impl DocBuilder {
 
 pub(crate) use proto::block_callout::Kind as CalloutKind;
 pub(crate) use proto::block_diff::Change as DiffChange;
+
+/// The Inline form field ID of a harness question, by position.
+pub(crate) fn form_field_id(index: usize) -> String {
+    format!("f{index}")
+}
 
 #[cfg(test)]
 mod tests {

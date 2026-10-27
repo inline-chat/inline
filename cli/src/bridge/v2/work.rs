@@ -2415,10 +2415,12 @@ pub(crate) fn card_actions(
 pub(crate) fn form_answers(form: &QuestionForm, values: &[FormValue]) -> Vec<FieldAnswer> {
     form.fields
         .iter()
-        .filter_map(|field| {
+        .enumerate()
+        .filter_map(|(index, field)| {
+            let field_id = super::doc::form_field_id(index);
             let value = values
                 .iter()
-                .find(|value| value.field_id == field.id.as_str())?
+                .find(|value| value.field_id == field_id)?
                 .value
                 .as_ref()?;
             let answers = match (value, &field.input) {
@@ -2457,7 +2459,8 @@ mod tests {
         let form = QuestionForm {
             title: None,
             fields: vec![FormField {
-                id: FieldId::new("pick").unwrap(),
+                // Claude names a question by its text.
+                id: FieldId::new("Which one fits?").unwrap(),
                 header: None,
                 prompt: "Which?".into(),
                 input: FieldInput::Select {
@@ -2482,7 +2485,7 @@ mod tests {
         let answers = form_answers(
             &form,
             &[FormValue {
-                field_id: "pick".into(),
+                field_id: "f0".into(),
                 value: Some(FormFieldValue::Selection {
                     option_ids: vec!["o1".into()],
                     other: Some("Green".into()),
@@ -2490,6 +2493,7 @@ mod tests {
             }],
         );
         assert_eq!(answers.len(), 1);
+        assert_eq!(answers[0].field.as_str(), "Which one fits?");
         assert_eq!(
             answers[0].values,
             vec!["Blue".to_owned(), "Green".to_owned()]
