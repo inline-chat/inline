@@ -1176,6 +1176,79 @@ async fn claude_round_trip_through_inline() {
     )
     .await;
 
+    // 3b. A message sent while Claude works steers it.
+    let before = api.conversation_calls().len();
+    send(
+        &owner,
+        chat_id,
+        "Slow one\n@sleep 3000\n@text E2E_CLAUDE_SLOW",
+    )
+    .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while api.conversation_calls().len() == before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the slow turn never reached the API"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    send(&owner, chat_id, "E2E_CLAUDE_STEER also this").await;
+    wait_for(
+        &api,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the steered reply",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_CLAUDE_SLOW"))
+                && texts
+                    .iter()
+                    .any(|(_, text)| text.contains("FAKE-OK") && text.contains("E2E_CLAUDE_STEER"))
+        },
+    )
+    .await;
+
+    // 3c. /stop interrupts a running turn; its late reply never appears.
+    let before = api.conversation_calls().len();
+    send(
+        &owner,
+        chat_id,
+        "Slow two\n@sleep 6000\n@text E2E_CLAUDE_NEVER",
+    )
+    .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while api.conversation_calls().len() == before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the slow turn never reached the API"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    send(&owner, chat_id, "/stop").await;
+    let work_id = owner
+        .get_agent_session(proto::GetAgentSessionInput {
+            peer_id: Some(super::api::chat_peer(chat_id)),
+            bot_user_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .connection
+        .and_then(|connection| connection.agent_session)
+        .map(|session| session.id)
+        .unwrap();
+    wait_idle(&owner, chat_id, work_id).await;
+    tokio::time::sleep(Duration::from_secs(7)).await;
+    let texts = bot_texts(&owner, chat_id, bot_user_id).await;
+    assert!(
+        !texts
+            .iter()
+            .any(|(_, text)| text.contains("E2E_CLAUDE_NEVER")),
+        "a stopped Claude turn posted its late reply: {texts:#?}"
+    );
+
     // 4. Asking before Bash: the card carries the command, and the owner's
     // approval runs it.
     send(
