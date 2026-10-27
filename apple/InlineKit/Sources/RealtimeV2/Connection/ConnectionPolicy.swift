@@ -12,6 +12,9 @@ public struct ConnectionPolicy: Sendable {
   /// How long one command may run before the manager reports it as stalled. Every later
   /// command, timer and lifecycle event waits behind it.
   public var stalledCommandReportDelay: Duration
+  /// How long the manager may stay connecting, authenticating or in backoff before it reports
+  /// the episode once and rechecks that a deadline is pending. Repeats at this interval.
+  public var stuckEpisodeReportDelay: Duration
 
   public init(
     backoff: BackoffPolicy = .default,
@@ -22,7 +25,8 @@ public struct ConnectionPolicy: Sendable {
     pingTimeoutConstrained: Duration = .seconds(12),
     backgroundGrace: Duration = .seconds(20),
     wakeProbeTimeout: Duration = .seconds(2),
-    stalledCommandReportDelay: Duration = .seconds(20)
+    stalledCommandReportDelay: Duration = .seconds(20),
+    stuckEpisodeReportDelay: Duration = .seconds(60)
   ) {
     self.backoff = backoff
     self.authTimeout = authTimeout
@@ -33,6 +37,7 @@ public struct ConnectionPolicy: Sendable {
     self.backgroundGrace = backgroundGrace
     self.wakeProbeTimeout = wakeProbeTimeout
     self.stalledCommandReportDelay = stalledCommandReportDelay
+    self.stuckEpisodeReportDelay = stuckEpisodeReportDelay
   }
 
   public func pingTimeout(for quality: ConnectionNetworkQuality) -> Duration {

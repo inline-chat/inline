@@ -10,6 +10,12 @@ private struct ConnectionCommand: Sendable {
   let receipt: ConnectionCommandReceipt?
 }
 
+private struct StuckEpisode {
+  let startedAt: TimeInterval
+  let sessionAtStart: UInt64
+  var reported = false
+}
+
 private actor ConnectionCommandReceipt {
   private var finished = false
   private var waiter: CheckedContinuation<Void, Never>?
@@ -81,6 +87,13 @@ actor ConnectionManager {
   private var mediaRetentionRevision: UInt64 = 0
   // System-invoked work may run while UIKit is inactive. Keep lifecycle state truthful.
   private var userInitiatedOperations = 0
+  // True from `startConnecting` until that attempt is retired. The session ID survives into
+  // backoff, and transport lifecycle events cross the ordered session pipeline, so one can
+  // arrive after its attempt ended; `handleCommand` drops those.
+  private var attemptLive = false
+  private var stuckEpisode: StuckEpisode?
+  private var stuckWatchdogTask: Task<Void, Never>?
+  private var lastEventUptimes: [String: TimeInterval] = [:]
 
   init(
     session: ProtocolSessionType,
@@ -117,6 +130,7 @@ actor ConnectionManager {
     pingTimeoutTask?.cancel()
     wakeProbeTask?.cancel()
     probeTimeoutTask?.cancel()
+    stuckWatchdogTask?.cancel()
   }
 
   // MARK: - Public API
@@ -229,8 +243,16 @@ actor ConnectionManager {
     )
   }
 
+  /// Simulates an unknown state-machine hole: the current state loses the deadline that would
+  /// end it, without changing state.
+  func dropPendingDeadlinesForTesting() {
+    cancelAllTimers()
+  }
+
   func shutdownForTesting() async {
     cancelAllTimers()
+    stuckWatchdogTask?.cancel()
+    stuckWatchdogTask = nil
     backgroundConnectionRetained = false
     mediaConnectionRetained = false
     pendingPingNonce = nil
@@ -413,8 +435,10 @@ actor ConnectionManager {
         )
         return
       }
+      // `startConnecting` owns this state and arms its connect timeout; the event only confirms
+      // it. Moving back to connecting from a later state would leave no timer to leave it.
       if state != .connectingTransport {
-        await transition(to: .connectingTransport, reason: .none)
+        log.warning("Ignoring late transport connecting event_session=\(eventSessionID) state=\(state)")
       }
 
     case let .transportConnected(eventSessionID):
@@ -468,18 +492,21 @@ actor ConnectionManager {
       guard state == .authenticating else { return }
       log.error("Realtime authenticated handshake timed out")
       lastErrorDescription = "auth_failed"
+      attemptLive = false
       await session.stopTransport()
       await handleTransportDisconnect(reason: .authFailed)
 
     case .connectTimeout:
       guard state == .connectingTransport else { return }
       lastErrorDescription = "connect_timeout"
+      attemptLive = false
       await session.stopTransport()
       await handleTransportDisconnect(reason: .transportDisconnected)
 
     case .pingTimeout:
       guard state == .open else { return }
       lastErrorDescription = "ping_timeout"
+      attemptLive = false
       await session.stopTransport()
       await handleTransportDisconnect(reason: .pingTimeout)
 
@@ -494,6 +521,9 @@ actor ConnectionManager {
       await transition(to: .backgroundSuspended, reason: .backgroundSuspended)
       await stopTransportAndReset()
 
+    case .livenessWatchdog:
+      // `handleCommand` restores a missing deadline after every event, this one included.
+      reportStuckEpisodeIfNeeded()
     }
   }
 
@@ -561,6 +591,7 @@ actor ConnectionManager {
 
   private func handleCommand(_ command: ConnectionCommand) async {
     let startedAt = ProcessInfo.processInfo.systemUptime
+    lastEventUptimes[command.event.diagnosticName] = command.enqueuedAt
     let queueMilliseconds = Int((startedAt - command.enqueuedAt) * 1_000)
     if queueMilliseconds >= 250 {
       log.warning(
@@ -582,9 +613,20 @@ actor ConnectionManager {
       await command.receipt?.finish()
       return
     }
+    // Earlier sessions are rejected by each handler. A retired attempt keeps its session ID
+    // through backoff, so its late lifecycle events are dropped here, before any handler.
+    if command.event.transportSessionID == sessionID, !attemptLive {
+      log.warning(
+        "Ignoring transport event for a retired attempt event=\(command.event.diagnosticName) " +
+          "session=\(sessionID) state=\(state)"
+      )
+      await command.receipt?.finish()
+      return
+    }
 
     let stallReport = reportStall(of: command.event)
     await handle(command.event)
+    await restoreMissingDeadline(after: command.event)
     stallReport.cancel()
 
     let handleMilliseconds = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000)
@@ -706,6 +748,7 @@ actor ConnectionManager {
     guard state != .stopped, state != .waitingForConstraints, state != .backgroundSuspended, state != .backoff else {
       return
     }
+    attemptLive = false
     handshakeTask?.cancel()
     handshakeTask = nil
     cancelAllTimers()
@@ -732,6 +775,7 @@ actor ConnectionManager {
 
   private func startConnecting() async {
     sessionID = sessionID &+ 1
+    attemptLive = true
     cancelAllTimers()
     handshakeTask?.cancel()
     handshakeTask = nil
@@ -759,6 +803,7 @@ actor ConnectionManager {
     state = newState
     reason = newReason
     stateSince = timeProvider.now()
+    updateStuckWatchdog()
     snapshotContinuation.yield(currentSnapshot())
     // Debug only: info would add a second Sentry breadcrumb beside the structured transition crumb.
     log.debug(
@@ -816,6 +861,7 @@ actor ConnectionManager {
   }
 
   private func stopTransportAndReset() async {
+    attemptLive = false
     cancelAllTimers()
     let stoppingStartTask = transportStartTask
     transportStartTask = nil
@@ -831,6 +877,97 @@ actor ConnectionManager {
     let appActiveEffective = constraints.appActive || backgroundConnectionRetained
       || mediaConnectionRetained || userInitiatedOperations > 0
     return constraints.authAvailable && constraints.networkAvailable && appActiveEffective && constraints.userWantsConnection
+  }
+
+  // MARK: - Liveness
+
+  /// Every state that waits on outside progress must own the deadline that ends the wait.
+  /// Without one the state never changes again, and the UI shows "Connecting..." until relaunch.
+  private func missingDeadline() -> String? {
+    switch state {
+    case .connectingTransport:
+      attemptLive && connectTimeoutTask != nil ? nil : "connect_timeout"
+    case .authenticating:
+      attemptLive && authTimeoutTask != nil ? nil : "auth_timeout"
+    case .open:
+      attemptLive && pingTask != nil ? nil : "ping_loop"
+    case .backoff:
+      backoffTask != nil ? nil : "backoff_timer"
+    case .stopped, .waitingForConstraints, .backgroundSuspended:
+      nil
+    }
+  }
+
+  /// Runs after every command, so a hole in any handler is reported and repaired by the next
+  /// event or watchdog tick instead of wedging the connection.
+  private func restoreMissingDeadline(after event: ConnectionEvent) async {
+    guard let missing = missingDeadline() else { return }
+    log.error(
+      "Realtime connection has no pending deadline state=\(state) missing=\(missing) " +
+        "event=\(event.diagnosticName) session=\(sessionID) attempt_live=\(attemptLive ? 1 : 0)"
+    )
+    if state == .backoff {
+      scheduleBackoff(sessionID: sessionID)
+      return
+    }
+    await stopTransportAndReset()
+    guard constraintsSatisfied() else {
+      await transition(to: .waitingForConstraints, reason: .constraintUnavailable)
+      return
+    }
+    attempt = attempt &+ 1
+    await transition(to: .backoff, reason: .transportDisconnected)
+    scheduleBackoff(sessionID: sessionID)
+  }
+
+  /// An episode spans every connecting, authenticating and backoff state between two opens
+  /// (or until the manager stops waiting). Its watchdog reaches the manager through the command
+  /// queue, so it never observes a handler mid-await.
+  private func updateStuckWatchdog() {
+    switch state {
+    case .connectingTransport, .authenticating, .backoff:
+      guard stuckEpisode == nil else { return }
+      stuckEpisode = StuckEpisode(startedAt: ProcessInfo.processInfo.systemUptime, sessionAtStart: sessionID)
+      let interval = policy.stuckEpisodeReportDelay
+      let timeProvider = self.timeProvider
+      stuckWatchdogTask = Task { [weak self] in
+        while !Task.isCancelled {
+          await timeProvider.sleep(for: interval)
+          guard !Task.isCancelled else { return }
+          await self?.submit(.livenessWatchdog)
+        }
+      }
+    case .open, .stopped, .waitingForConstraints, .backgroundSuspended:
+      stuckEpisode = nil
+      stuckWatchdogTask?.cancel()
+      stuckWatchdogTask = nil
+    }
+  }
+
+  private func reportStuckEpisodeIfNeeded() {
+    guard var episode = stuckEpisode, !episode.reported else { return }
+    let now = ProcessInfo.processInfo.systemUptime
+    let elapsedMilliseconds = Int((now - episode.startedAt) * 1_000)
+    // A tick queued by an earlier episode can arrive before this one is due.
+    guard elapsedMilliseconds >= Self.milliseconds(policy.stuckEpisodeReportDelay) else { return }
+    episode.reported = true
+    stuckEpisode = episode
+    let pending = [
+      ("connect", connectTimeoutTask), ("auth", authTimeoutTask), ("backoff", backoffTask), ("ping", pingTask),
+    ].compactMap { entry -> String? in entry.1 == nil ? nil : entry.0 }
+    let recentEvents = lastEventUptimes.sorted { $0.value > $1.value }.prefix(6)
+      .map { "\($0.key):\(Int((now - $0.value) * 1_000))ms" }
+    log.error(
+      "Realtime connection stuck not_open_ms=\(elapsedMilliseconds) state=\(state) reason=\(reason) " +
+        "attempt=\(attempt) session=\(sessionID) attempts_started=\(sessionID &- episode.sessionAtStart) " +
+        "attempt_live=\(attemptLive ? 1 : 0) pending=\(pending.isEmpty ? "none" : pending.joined(separator: ",")) " +
+        "start_task=\(transportStartTask == nil ? 0 : 1) last_error=\((lastErrorDescription ?? "none").prefix(120)) " +
+        "recent_events=\(recentEvents.joined(separator: ","))"
+    )
+  }
+
+  private static func milliseconds(_ duration: Duration) -> Int {
+    Int(duration.components.seconds * 1_000 + duration.components.attoseconds / 1_000_000_000_000_000)
   }
 
   // MARK: - Timers

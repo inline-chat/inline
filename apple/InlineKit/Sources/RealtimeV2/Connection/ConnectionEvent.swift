@@ -35,6 +35,9 @@ public enum ConnectionEvent: Sendable {
   case pingTimeout
   case backoffFired
   case backgroundGraceExpired
+  /// Periodic check while the manager is not connected; reports a stuck episode and restores
+  /// a missing deadline even when no other event arrives.
+  case livenessWatchdog
 }
 
 extension ConnectionEvent {
@@ -66,6 +69,19 @@ extension ConnectionEvent {
     case .pingTimeout: "pingTimeout"
     case .backoffFired: "backoffFired"
     case .backgroundGraceExpired: "backgroundGraceExpired"
+    case .livenessWatchdog: "livenessWatchdog"
+    }
+  }
+
+  /// The attempt a transport lifecycle event belongs to; nil for every other event.
+  var transportSessionID: UInt64? {
+    switch self {
+    case let .transportConnecting(sessionID), let .transportConnected(sessionID), let .protocolOpen(sessionID):
+      sessionID
+    case let .transportDisconnected(sessionID, _):
+      sessionID
+    default:
+      nil
     }
   }
 }
