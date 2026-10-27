@@ -3951,6 +3951,13 @@ class InlineAdapter(BasePlatformAdapter):
         key = f"{self._chat_key(target_chat_id)}:{reply_to}"
         sender_is_bot = self._request_sender_is_bot.get(key)
         if sender_is_bot is None and target_chat_id and self._chat_key(request_chat_id) == self._chat_key(target_chat_id):
+            info = await self._get_chat_info(target_chat_id)
+            if not info:
+                return None
+            if self._chat_info_id(info, "parentChatId") and self._chat_info_id(info, "parentMessageId") == str(reply_to):
+                # Hermes keys an opener on its child session chat. After a restart that is
+                # indistinguishable from an equal message id in the child; do not guess.
+                return None
             # Not seen since this process started, such as an answer finishing after a restart.
             # Message ids are per chat, so only look it up where the request was sent; an answer
             # moved into a thread would otherwise read the thread's message with the same id.

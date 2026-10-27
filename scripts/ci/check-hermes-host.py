@@ -132,6 +132,81 @@ async def exercise():
 asyncio.run(exercise())
 
 
+async def exercise_restarted_thread_reply():
+    def new_adapter():
+        instance = platform_registry.create_adapter("inline", PlatformConfig(
+            enabled=True, token="offline-test-token", extra={
+                "dm_policy": "open", "group_policy": "open", "allow_all_users": True,
+                "require_mention": False, "context_backfill": "off", "sync_commands": False,
+                "text_debounce_seconds": 0,
+            },
+        ))
+        instance._me_id = "999"
+        instance.set_authorization_check(lambda *_args, **_kwargs: True)
+        return instance
+
+    prepared, received = new_adapter(), []
+    prepared._reply_thread_overrides["10"] = "on"
+
+    async def receive(event):
+        received.append(event)
+
+    async def group_info(chat_id, **kwargs):
+        return {"id": chat_id, "dialogFollowMode": 1}
+
+    async def create_thread(*args):
+        return "77"
+
+    with patch.object(prepared, "handle_message", receive), patch.object(prepared, "_get_chat_info", group_info), patch.object(prepared, "_create_reply_thread", create_thread):
+        await prepared._dispatch_message({"kind": "message.new", "seq": 5001, "chatId": "10", "message": {
+            "id": "5", "chatId": "10", "fromId": "42", "message": "prepare the launch",
+            "sender": {"id": "42", "bot": False}, "peerId": {"type": {"oneofKind": "chat"}},
+        }})
+    request = received[0]
+    assert (request.source.chat_id, request.source.thread_id, request.message_id) == ("77", "77", "5")
+
+    restarted, sent, lookups = new_adapter(), [], []
+
+    def transport(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True, "result": {"messageId": "202"}})
+
+    async def child_info(chat_id, **kwargs):
+        return {"id": chat_id, "parentChatId": "10", "parentMessageId": "5"}
+
+    async def unrelated_bot_message(chat_id, message_id, **kwargs):
+        lookups.append((chat_id, message_id))
+        return {"id": message_id, "chatId": chat_id, "fromId": "500", "sender": {"id": "500", "bot": True}}
+
+    async def no_obligation(*args, **kwargs):
+        return None
+
+    restarted._http_client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    try:
+        with patch.object(restarted, "_get_chat_info", child_info), patch.object(restarted, "_fetch_message", unrelated_bot_message):
+            metadata = {"thread_id": request.source.thread_id}
+            if hasattr(restarted, "send_final_ledgered"):
+                with patch.object(restarted, "_record_delivery_obligation", no_obligation):
+                    result, _ = await restarted.send_final_ledgered(
+                        request, "offline-thread-reply", "launch ready", metadata, reply_to=request.message_id,
+                    )
+            else:
+                result = await restarted._send_with_retry(
+                    chat_id=request.source.chat_id, content="launch ready", reply_to=request.message_id, metadata=metadata,
+                )
+            assert result.success
+            assert lookups == [], "the native caller looked up the parent's id in the child"
+            assert "replyToMsgId" not in sent[-1], sent[-1]
+            result = await restarted.send("77", "worker result", reply_to="6", metadata=metadata)
+            assert result.success and sent[-1]["replyToMsgId"] == "6", sent[-1]
+            assert lookups == [("77", "6")]
+    finally:
+        await restarted._http_client.aclose()
+
+
+asyncio.run(exercise_restarted_thread_reply())
+
+
 async def exercise_authorization():
     from gateway.run import GatewayRunner
     from gateway.pairing import PairingStore
