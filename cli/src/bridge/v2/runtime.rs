@@ -543,10 +543,14 @@ impl Runtime {
         }
         match api::get_chat(&self.agent.bot, chat_id).await {
             Ok(result) => {
-                let own = result
-                    .chat
-                    .and_then(|chat| chat.created_by)
-                    .is_some_and(|creator| creator == self.config.bot_user_id);
+                // Made by this agent's bot, or bound to it (an agent thread
+                // its owner started in the app).
+                let own = result.chat.is_some_and(|chat| {
+                    chat.created_by == Some(self.config.bot_user_id)
+                        || chat
+                            .agent_context
+                            .is_some_and(|context| context.bot_user_id == self.config.bot_user_id)
+                });
                 self.own_threads.insert(chat_id, own);
                 own
             }
@@ -675,8 +679,9 @@ impl Runtime {
         }
         let chat_id = message.chat_id.get();
         // The agent's own threads are the ones it made (`/new`, a moved work's
-        // subthread, `create_chat`). A shared thread it was mentioned in stays
-        // a group thread, where only addressed messages reach it.
+        // subthread, `create_chat`) or that are bound to it. A shared thread it
+        // was mentioned in stays a group thread, where only addressed
+        // messages reach it.
         let conversation = if chat_id == self.config.dm_chat_id {
             Conversation::Dm
         } else if self.is_own_thread(chat_id).await {

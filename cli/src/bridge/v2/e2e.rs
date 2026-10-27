@@ -397,6 +397,9 @@ async fn codex_round_trip_through_inline() {
                 "workdir": folder.display().to_string()}).to_string()}),
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_TEAMMATE_RAN"}]}),
+        // A thread its owner bound to the agent: plain messages address it.
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_BOUND"}]}),
     ])
     .await;
     let codex_home = dir.path().join("codex-home");
@@ -1221,6 +1224,48 @@ async fn codex_round_trip_through_inline() {
             .trim(),
         "TEAM"
     );
+
+    // 10. A thread the owner bound to the agent is the agent's own: a plain
+    // message reaches it.
+    let bound = owner
+        .invoke_rpc(
+            proto::Method::CreateChat,
+            proto::rpc_call::Input::CreateChat(proto::CreateChatInput {
+                title: Some("E2E bound".to_owned()),
+                participants: vec![
+                    proto::InputChatParticipant {
+                        user_id: Some(owner_user_id),
+                        group_id: None,
+                    },
+                    proto::InputChatParticipant {
+                        user_id: Some(bot_user_id),
+                        group_id: None,
+                    },
+                ],
+                agent_context: Some(proto::AgentThreadContext {
+                    bot_user_id,
+                    agent_id: None,
+                    configuration: None,
+                }),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+    let proto::rpc_result::Result::CreateChat(bound) = bound else {
+        panic!("unexpected result");
+    };
+    let bound = bound.chat.unwrap().id;
+    send(&owner, bound, "a plain request").await;
+    wait_for(
+        &model,
+        &owner,
+        bound,
+        bot_user_id,
+        "the answer in the bound thread",
+        |texts| texts.iter().any(|(_, text)| text.contains("E2E_BOUND")),
+    )
+    .await;
 
     let _ = stop.send(());
     let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
