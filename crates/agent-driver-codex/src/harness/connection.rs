@@ -436,46 +436,8 @@ impl HarnessDriver for CodexHarness {
     fn open<'a>(&'a self, spec: OpenSpec) -> HarnessFuture<'a, Arc<dyn Session>, OpenError> {
         Box::pin(async move {
             let connection = self.connection().await?;
-            let mut config = crate::driver::inline_thread_config();
-            // `thread/start` and `thread/resume` take no effort of their own.
-            if let Some(effort) = &spec.settings.effort {
-                config.insert("model_reasoning_effort".to_owned(), json!(effort));
-            }
-            let mut params = json!({
-                "cwd": spec.folder,
-                "config": config,
-            });
-            if let Some(model) = &spec.settings.model {
-                params["model"] = json!(model);
-            }
-            if let Some(permissions) = &spec.settings.permission_mode {
-                params["permissions"] = json!(permissions);
-            }
-            if let Some(speed) = &spec.settings.speed {
-                params["serviceTier"] = json!(speed);
-            }
-            if let Some(instructions) = &spec.instructions {
-                params["developerInstructions"] = json!(instructions);
-            }
-            let method = match &spec.mode {
-                OpenMode::Start => {
-                    if let Some(tools) = self.dynamic_tools() {
-                        params["dynamicTools"] = tools;
-                    }
-                    "thread/start"
-                }
-                OpenMode::Resume { session } => {
-                    params["threadId"] = json!(session.as_str());
-                    "thread/resume"
-                }
-                OpenMode::Fork { session, at } => {
-                    params["threadId"] = json!(session.as_str());
-                    if let Some(inline_agent_bridge::harness::ForkPoint::Turn { turn }) = at {
-                        params["lastTurnId"] = json!(turn.as_str());
-                    }
-                    "thread/fork"
-                }
-            };
+            let Request { method, params } =
+                super::delivery::open_request(&spec, self.dynamic_tools());
             // A resume can run input persisted in the native queue and ask for
             // approval right away, so the session listens before it loads, and
             // the queue it may run is published first.

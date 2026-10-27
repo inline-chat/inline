@@ -54,8 +54,16 @@ jobs:
       - name: Record the app-server schema
         run: |
           mkdir -p "$RUNNER_TEMP/codex-schema"
-          codex app-server generate-json-schema --out "$RUNNER_TEMP/codex-schema" || \
-            codex app-server generate-json-schema --experimental --out "$RUNNER_TEMP/codex-schema"
+          codex app-server generate-json-schema --experimental --out "$RUNNER_TEMP/codex-schema" || \
+            codex app-server generate-json-schema --out "$RUNNER_TEMP/codex-schema"
+      # Codex ignores parameters it does not know, so a renamed field would
+      # fail silently; this checks every one the driver sends.
+      - name: Request parameters match the schema
+        env:
+          INLINE_CODEX_SCHEMA_DIR: ${{ runner.temp }}/codex-schema
+        run: >-
+          cargo test --locked -p inline-agent-driver-codex
+          request_params_exist_in_the_installed_schema -- --ignored
       - name: Context, compaction and delivery labs
         env:
           INLINE_CODEX_CONTEXT_EXECUTABLE: codex

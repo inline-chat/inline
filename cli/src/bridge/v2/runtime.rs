@@ -59,6 +59,8 @@ struct Reconnect {
 /// Messages of a group thread an agent sees when it joins.
 const JOIN_CONTEXT_MESSAGES: u32 = 40;
 const JOIN_CONTEXT_BYTES: usize = 24 * 1024;
+/// Parents followed to find a subthread tree's root.
+const LOOP_SCOPE_DEPTH: usize = 8;
 /// Ancestors of the trigger's reply chain read into the join context.
 const JOIN_REPLY_CHAIN: usize = 5;
 /// Settled ledger records are kept this long for replay detection.
@@ -186,6 +188,8 @@ pub(crate) struct Runtime {
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
     loop_guards: LoopGuards,
+    /// Chat → the root of its subthread tree, the loop cap's scope.
+    loop_roots: HashMap<i64, i64>,
 }
 
 impl Runtime {
@@ -244,6 +248,7 @@ impl Runtime {
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
             loop_guards: LoopGuards::default(),
+            loop_roots: HashMap::new(),
         })
     }
 
@@ -708,6 +713,31 @@ impl Runtime {
         }
     }
 
+    /// The loop cap counts a whole subthread tree, so agents handing work
+    /// to each other through subthreads share one count (spec §5.1 rule 6).
+    async fn loop_scope(&mut self, chat_id: i64) -> i64 {
+        if let Some(root) = self.loop_roots.get(&chat_id) {
+            return *root;
+        }
+        let mut root = chat_id;
+        for _ in 0..LOOP_SCOPE_DEPTH {
+            let parent = self
+                .agent
+                .bot
+                .chat_state(InlineId::new(root))
+                .await
+                .ok()
+                .and_then(|state| state.dialog)
+                .and_then(|dialog| dialog.parent_chat_id);
+            match parent {
+                Some(parent) => root = parent.get(),
+                None => break,
+            }
+        }
+        self.loop_roots.insert(chat_id, root);
+        root
+    }
+
     /// Agents went back and forth here without a person: this agent stops
     /// answering other agents and says so, with one tap to allow more.
     async fn loop_cap_reached(&self, chat_id: i64, limit: u32) {
@@ -739,7 +769,8 @@ impl Runtime {
         {
             return Some(NO_ACCESS.to_owned());
         }
-        self.loop_guards.extend(chat_id, DEFAULT_LOOP_CAP_HOPS);
+        let scope = self.loop_scope(chat_id).await;
+        self.loop_guards.extend(scope, DEFAULT_LOOP_CAP_HOPS);
         let text = format!(
             "{} answers other agents here again, for {DEFAULT_LOOP_CAP_HOPS} more agent messages.",
             self.config.agent_name
@@ -1249,9 +1280,8 @@ impl Runtime {
             .works
             .get(&chat_id)
             .map_or(WorkPhase::None, |work| *work.phase.borrow());
-        let loop_verdict = self
-            .loop_guards
-            .record(chat_id, group.author.kind.is_agent());
+        let scope = self.loop_scope(chat_id).await;
+        let loop_verdict = self.loop_guards.record(scope, group.author.kind.is_agent());
         if let LoopVerdict::CapReached {
             limit,
             notify_owners: true,

@@ -8,8 +8,8 @@
 //! | Passive | `additionalContext` on the next turn, or `thread/inject_items` |
 
 use inline_agent_bridge::harness::{
-    ChildKind, Delivery, GoalOp, Input, InputContent, Op, OpError, Origin, QueueOp, ReviewTarget,
-    SettingsScope,
+    ChildKind, Delivery, ForkPoint, GoalOp, Input, InputContent, Op, OpError, OpenMode, OpenSpec,
+    Origin, QueueOp, ReviewTarget, SettingsScope,
 };
 use inline_agent_bridge::{InputAttachmentKind, TurnId};
 use serde_json::{Map, Value, json};
@@ -21,6 +21,52 @@ use super::mapper::client_message_id;
 pub(crate) struct Request {
     pub method: &'static str,
     pub params: Value,
+}
+
+/// The request that starts, resumes or forks a thread. `dynamic_tools` are
+/// Inline's tools, offered to a new thread.
+pub(crate) fn open_request(spec: &OpenSpec, dynamic_tools: Option<Value>) -> Request {
+    let mut config = crate::driver::inline_thread_config();
+    // `thread/start` and `thread/resume` take no effort of their own.
+    if let Some(effort) = &spec.settings.effort {
+        config.insert("model_reasoning_effort".to_owned(), json!(effort));
+    }
+    let mut params = json!({
+        "cwd": spec.folder,
+        "config": config,
+    });
+    if let Some(model) = &spec.settings.model {
+        params["model"] = json!(model);
+    }
+    if let Some(permissions) = &spec.settings.permission_mode {
+        params["permissions"] = json!(permissions);
+    }
+    if let Some(speed) = &spec.settings.speed {
+        params["serviceTier"] = json!(speed);
+    }
+    if let Some(instructions) = &spec.instructions {
+        params["developerInstructions"] = json!(instructions);
+    }
+    let method = match &spec.mode {
+        OpenMode::Start => {
+            if let Some(tools) = dynamic_tools {
+                params["dynamicTools"] = tools;
+            }
+            "thread/start"
+        }
+        OpenMode::Resume { session } => {
+            params["threadId"] = json!(session.as_str());
+            "thread/resume"
+        }
+        OpenMode::Fork { session, at } => {
+            params["threadId"] = json!(session.as_str());
+            if let Some(ForkPoint::Turn { turn }) = at {
+                params["lastTurnId"] = json!(turn.as_str());
+            }
+            "thread/fork"
+        }
+    };
+    Request { method, params }
 }
 
 /// The request that delivers an input. `active_turn` is the running turn the
@@ -625,5 +671,206 @@ mod tests {
             ),
             Err(OpError::Unavailable(_))
         ));
+    }
+
+    /// Every parameter the driver sends must exist in the installed Codex's
+    /// protocol. Codex ignores unknown ones, so a renamed or missing field
+    /// fails silently (the reasoning effort did, on `thread/start`). Methods
+    /// a version lacks are the manifest's business and are skipped here.
+    /// Harness compatibility CI runs it against each Codex version with
+    /// `INLINE_CODEX_SCHEMA_DIR` set to `codex app-server
+    /// generate-json-schema --experimental --out <dir>`.
+    #[test]
+    #[ignore = "needs INLINE_CODEX_SCHEMA_DIR"]
+    fn request_params_exist_in_the_installed_schema() {
+        use inline_agent_bridge::ProviderSessionId;
+        use inline_agent_bridge::harness::{ModeId, OutputMode, SettingsChange};
+
+        let dir = std::env::var("INLINE_CODEX_SCHEMA_DIR").expect("INLINE_CODEX_SCHEMA_DIR");
+        let schema: Value = serde_json::from_str(
+            &std::fs::read_to_string(std::path::Path::new(&dir).join("ClientRequest.json"))
+                .expect("ClientRequest.json"),
+        )
+        .expect("schema");
+        let definitions = &schema["definitions"];
+        // Property names of a definition, through `$ref`, `allOf` and `anyOf`.
+        fn properties(definition: &Value, definitions: &Value, out: &mut Vec<String>) {
+            if let Some(reference) = definition["$ref"].as_str()
+                && let Some(name) = reference.rsplit('/').next()
+            {
+                properties(&definitions[name], definitions, out);
+            }
+            if let Some(map) = definition["properties"].as_object() {
+                out.extend(map.keys().cloned());
+            }
+            for key in ["allOf", "anyOf", "oneOf"] {
+                for part in definition[key].as_array().into_iter().flatten() {
+                    properties(part, definitions, out);
+                }
+            }
+        }
+        let accepted = |method: &str| -> Option<Vec<String>> {
+            let variant = schema["oneOf"].as_array()?.iter().find(|variant| {
+                variant
+                    .pointer("/properties/method/enum/0")
+                    .and_then(Value::as_str)
+                    == Some(method)
+            })?;
+            let mut out = Vec::new();
+            properties(&variant["properties"]["params"], definitions, &mut out);
+            Some(out)
+        };
+
+        let settings = SettingsChange {
+            model: Some("gpt-5".to_owned()),
+            effort: Some("low".to_owned()),
+            speed: Some("fast".to_owned()),
+            permission_mode: Some("default".to_owned()),
+            folder: Some("/tmp/project".into()),
+        };
+        let spec = |mode| OpenSpec {
+            mode,
+            folder: "/tmp/project".into(),
+            settings: settings.clone(),
+            instructions: Some("guide".to_owned()),
+            title: None,
+            after: None,
+            output_mode: OutputMode::Detailed,
+        };
+        let session = ProviderSessionId::new("thread-1").expect("id");
+        let turn = TurnId::new("turn-1").expect("id");
+        let mut requests = vec![
+            open_request(&spec(OpenMode::Start), Some(json!([]))),
+            open_request(
+                &spec(OpenMode::Resume {
+                    session: session.clone(),
+                }),
+                None,
+            ),
+            open_request(
+                &spec(OpenMode::Fork {
+                    session,
+                    at: Some(ForkPoint::Turn { turn: turn.clone() }),
+                }),
+                None,
+            ),
+        ];
+        // A teammate's input with context: provenance and both context kinds.
+        let origin = Origin::Teammate { user: UserId(2) };
+        for delivery in [
+            Delivery::Turn,
+            Delivery::Steer {
+                expected_turn: turn.clone(),
+                priority: SteerPriority::Next,
+            },
+            Delivery::Queue,
+            Delivery::Passive,
+        ] {
+            let mut input = input(delivery, origin.clone());
+            input.content.context = Some(TurnContext {
+                instructions: "trusted".to_owned(),
+                conversation: "untrusted".to_owned(),
+            });
+            requests.push(input_request("thread-1", &input));
+        }
+        let running = TurnFacts {
+            active: Some(&turn),
+            last_finished: Some(&turn),
+        };
+        let idle = TurnFacts {
+            active: None,
+            last_finished: Some(&turn),
+        };
+        let ops = [
+            (
+                running,
+                Op::Interrupt {
+                    cancel_queued: false,
+                },
+            ),
+            (
+                running,
+                Op::Queue {
+                    action: QueueOp::Start,
+                },
+            ),
+            (
+                running,
+                Op::Settings {
+                    change: settings.clone(),
+                    scope: SettingsScope::Thread,
+                },
+            ),
+            (
+                running,
+                Op::Settings {
+                    change: settings.clone(),
+                    scope: SettingsScope::Turn,
+                },
+            ),
+            (idle, Op::Compact),
+            (
+                idle,
+                Op::Rename {
+                    title: "Title".to_owned(),
+                },
+            ),
+            (idle, Op::Archive),
+            (idle, Op::Unarchive),
+            (
+                idle,
+                Op::Mode {
+                    mode: ModeId::new("plan").expect("id"),
+                },
+            ),
+            (
+                idle,
+                Op::Goal {
+                    action: GoalOp::Set {
+                        objective: "ship".to_owned(),
+                    },
+                },
+            ),
+            (
+                idle,
+                Op::Goal {
+                    action: GoalOp::Clear,
+                },
+            ),
+            (
+                idle,
+                Op::Sample {
+                    prompt: "speak?".to_owned(),
+                },
+            ),
+        ];
+        for (turns, op) in &ops {
+            requests.push(op_request("thread-1", *turns, Some("gpt-5"), op).expect("request"));
+        }
+
+        let mut unknown = Vec::new();
+        for request in &requests {
+            let Some(accepted) = accepted(request.method) else {
+                eprintln!(
+                    "{} is not in this Codex; the manifest gates it",
+                    request.method
+                );
+                continue;
+            };
+            for key in request
+                .params
+                .as_object()
+                .into_iter()
+                .flat_map(|params| params.keys())
+            {
+                if !accepted.contains(key) {
+                    unknown.push(format!("{} {key}", request.method));
+                }
+            }
+        }
+        assert!(
+            unknown.is_empty(),
+            "parameters this Codex does not know (it would ignore them): {unknown:#?}"
+        );
     }
 }
