@@ -14,8 +14,19 @@ export type PostCommitHook = {
   merge?: (next: PostCommitHook) => void
 }
 
+/**
+ * Work that must run inside the root transaction as its last statements,
+ * after the callback has returned and before COMMIT. Registrations with the
+ * same key merge, and a savepoint's registrations belong to its root.
+ */
+export type PreCommitTask = {
+  run: (tx: Transaction) => Promise<void>
+  merge?: (next: PreCommitTask) => void
+}
+
 type HookState = {
   hooks: Map<string | symbol, PostCommitHook>
+  preCommit: Map<string | symbol, PreCommitTask>
 }
 
 type TransactionCallback<T> = (tx: Transaction) => Promise<T>
@@ -107,6 +118,27 @@ const addHook = (state: HookState, key: string | symbol, hook: PostCommitHook) =
 
 const mergeHooks = (target: HookState, source: HookState) => {
   for (const [key, hook] of source.hooks) addHook(target, key, hook)
+  for (const [key, task] of source.preCommit) addPreCommitTask(target, key, task)
+}
+
+const addPreCommitTask = (state: HookState, key: string | symbol, task: PreCommitTask) => {
+  const current = state.preCommit.get(key)
+  if (!current) {
+    state.preCommit.set(key, task)
+    return
+  }
+  if (!current.merge) throw new Error("Pre-commit task key was registered more than once without a merge function")
+  current.merge(task)
+}
+
+const runPreCommitTasks = async (tx: Transaction, state: HookState) => {
+  // A task may register another one (for example a sync after a sync), so
+  // drain until nothing new was added.
+  while (state.preCommit.size > 0) {
+    const tasks = [...state.preCommit.values()]
+    state.preCommit.clear()
+    for (const task of tasks) await task.run(tx)
+  }
 }
 
 const wrapNestedTransaction = (tx: Transaction, parentState: HookState) => {
@@ -120,7 +152,9 @@ const wrapNestedTransaction = (tx: Transaction, parentState: HookState) => {
     value: async <T>(callback: TransactionCallback<T>, config?: unknown): Promise<T> => {
       let nestedState: HookState | undefined
       const result = await original(async (nestedTx) => {
-        nestedState = { hooks: new Map() }
+        // A savepoint keeps its own registrations; they reach the root (and run
+        // before COMMIT) only if the savepoint is released, never if it rolls back.
+        nestedState = { hooks: new Map(), preCommit: new Map() }
         hookStates.set(nestedTx, nestedState)
         wrapNestedTransaction(nestedTx, nestedState)
         try {
@@ -159,11 +193,14 @@ export const installPostCommitHooks = <TDatabase extends object>(database: TData
         // Includes pool admission, BEGIN and Drizzle's transaction settings.
         // It is not a pure pool-wait or server-execution measurement.
         databaseDiagnostics.record("transaction.admission", performance.now() - admittedAt)
-        rootState = { hooks: new Map() }
-        hookStates.set(tx, rootState)
-        wrapNestedTransaction(tx, rootState)
+        const state: HookState = { hooks: new Map(), preCommit: new Map() }
+        rootState = state
+        hookStates.set(tx, state)
+        wrapNestedTransaction(tx, state)
         try {
-          return await callback(tx)
+          const value = await callback(tx)
+          await runPreCommitTasks(tx, state)
+          return value
         } finally {
           hookStates.delete(tx)
         }
@@ -187,6 +224,18 @@ export const registerPostCommitHook = (tx: Transaction, key: string | symbol, ho
     throw new Error("Post-commit hooks require a transaction created by the configured database")
   }
   addHook(state, key, hook)
+}
+
+/**
+ * Run `task` as the last work of this transaction's root, just before COMMIT.
+ * Returns false when `tx` was not created by the configured database, in which
+ * case the caller decides whether to run the work inline.
+ */
+export const registerPreCommitTask = (tx: Transaction, key: string | symbol, task: PreCommitTask): boolean => {
+  const state = hookStates.get(tx)
+  if (!state) return false
+  addPreCommitTask(state, key, task)
+  return true
 }
 
 /**

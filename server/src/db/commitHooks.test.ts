@@ -5,7 +5,9 @@ import {
   maxConcurrentPostCommitHooks,
   maxQueuedPostCommitHooks,
   registerPostCommitHook,
+  registerPreCommitTask,
   type PostCommitHook,
+  type PreCommitTask,
   waitForPostCommitHooks,
 } from "./commitHooks"
 
@@ -123,5 +125,47 @@ describe("post-commit hooks", () => {
     if (!captured) throw new Error("Expected a transaction to be captured")
     expect(() => registerPostCommitHook(captured!, "late", { run: async () => {} }))
       .toThrow("Post-commit hooks require a transaction created by the configured database")
+  })
+})
+
+describe("pre-commit tasks", () => {
+  test("run once after the root callback's writes, including registrations from savepoints", async () => {
+    const database = createFakeDatabase()
+    const events: string[] = []
+    const scopes: string[] = []
+    class ScopeTask implements PreCommitTask {
+      constructor(readonly scope: string) {}
+      run = async () => { events.push(`pre-commit:${scopes.join(",")}`) }
+      merge = (next: PreCommitTask) => { if (next instanceof ScopeTask) scopes.push(next.scope) }
+    }
+
+    await database.transaction(async (tx) => {
+      scopes.push("root")
+      registerPreCommitTask(tx, "sync", new ScopeTask("root"))
+      await tx.transaction(async (savepoint) => {
+        registerPreCommitTask(savepoint, "sync", new ScopeTask("savepoint"))
+      })
+      events.push("write")
+    })
+
+    expect(events).toEqual(["write", "pre-commit:root,savepoint"])
+  })
+
+  test("never run when the transaction callback fails", async () => {
+    const database = createFakeDatabase()
+    let ran = false
+    await expect(database.transaction(async (tx) => {
+      registerPreCommitTask(tx, "sync", { run: async () => { ran = true } })
+      throw new Error("rolled back")
+    })).rejects.toThrow("rolled back")
+    expect(ran).toBe(false)
+  })
+
+  test("report unregistered transactions so callers can run the work inline", async () => {
+    const database = createFakeDatabase()
+    let captured: Transaction | undefined
+    await database.transaction(async (tx) => { captured = tx })
+    if (!captured) throw new Error("Expected a transaction to be captured")
+    expect(registerPreCommitTask(captured, "late", { run: async () => {} })).toBe(false)
   })
 })
