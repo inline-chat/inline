@@ -504,11 +504,20 @@ impl Actor {
             let Ok(id) = InputId::new(uuid::Uuid::new_v4().to_string()) else {
                 return;
             };
+            let mut content = inline_agent_bridge::harness::InputContent::text(
+                "You decided a reply would help. Answer the recent thread messages now.",
+            );
+            // The messages it decided to answer travel with the turn.
+            content.context = self
+                .passive
+                .drain(ContextBudget::bytes(PASSIVE_CONTEXT_BYTES))
+                .map(|passive| inline_agent_bridge::TurnContext {
+                    instructions: String::new(),
+                    conversation: passive.text,
+                });
             let input = Input {
                 id,
-                content: inline_agent_bridge::harness::InputContent::text(
-                    "You decided a reply would help. Answer the recent thread messages now.",
-                ),
+                content,
                 origin: inline_agent_bridge::harness::Origin::Scheduled,
                 delivery: Delivery::Turn,
             };
@@ -1486,6 +1495,26 @@ impl Actor {
         }
     }
 
+    /// A native sub-agent (a Codex collab thread) acts for this work, so its
+    /// tool calls resolve through this session.
+    fn bind_children(&self, item: &inline_agent_bridge::harness::Item) {
+        let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) else {
+            return;
+        };
+        let started = match item.update.body() {
+            Some(inline_agent_bridge::harness::ItemBody::Child { child, .. }) => Some(child),
+            _ => None,
+        };
+        for child in started.into_iter().chain(item.parent.as_ref()) {
+            if child.kind == inline_agent_bridge::harness::ChildKind::Subagent
+                && let Ok(session) = ProviderSessionId::new(child.id.as_str())
+                && &session != native
+            {
+                tools.bind_child(&session, native);
+            }
+        }
+    }
+
     fn unbind_tools(&self) {
         if let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) {
             tools.unbind(native);
@@ -1699,6 +1728,9 @@ impl Actor {
             envelope.seq,
             event_kind(&envelope.event)
         );
+        if let Event::Item(item) = &envelope.event {
+            self.bind_children(item);
+        }
         match &envelope.event {
             Event::Turn { turn, phase } => match phase {
                 TurnPhase::Started { inputs } => {

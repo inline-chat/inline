@@ -127,6 +127,15 @@ impl Tools {
             .insert(session.as_str().to_owned(), commands);
     }
 
+    /// A native child session (a Codex sub-agent thread) acting for its
+    /// parent's work.
+    pub(crate) fn bind_child(&self, child: &ProviderSessionId, parent: &ProviderSessionId) {
+        self.bindings
+            .lock()
+            .expect("tool bindings")
+            .bind_child(&self.key(child), &self.key(parent));
+    }
+
     /// The work moved its publication into a subthread.
     pub(crate) fn move_work(&self, session: &ProviderSessionId, chat_id: i64) {
         self.bindings
