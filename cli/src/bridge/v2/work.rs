@@ -382,6 +382,7 @@ impl Actor {
             }
             self.publish_phase();
         }
+        log::debug!(target: "inline::bridge::v2", "chat={} work stopped", self.chat_id);
     }
 
     // ---------------------------------------------------------------

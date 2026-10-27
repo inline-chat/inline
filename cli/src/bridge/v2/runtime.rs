@@ -768,6 +768,31 @@ impl Runtime {
         participation: Option<proto::AgentParticipation>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let chat_id = group.chat_id;
+        // A command runs once per message. The same message comes back when
+        // it is edited or updated (creating a reply thread updates its
+        // parent), and must not run again: a second `/new` returned the same
+        // thread and replaced its starting work.
+        if let Some((name, _)) = group.command()
+            && matches!(
+                name,
+                "new" | "stop" | "pause" | "resume" | "release" | "terminal"
+            )
+        {
+            let id = input_id(
+                self.config.bot_user_id,
+                chat_id,
+                group.message_id,
+                "command",
+            );
+            if let Begin::Seen(_) =
+                self.agent
+                    .ledger
+                    .begin(&id, chat_id, group.message_id, group.author.user_id)?
+            {
+                return Ok(());
+            }
+            self.agent.ledger.set(&id, InputState::Consumed)?;
+        }
         let control = match group.command().map(|(name, _)| name) {
             Some("new") => return self.new_thread(group, grants, participation).await,
             Some("stop") => Some(Control::Stop),
