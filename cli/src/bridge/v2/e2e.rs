@@ -350,6 +350,9 @@ async fn codex_round_trip_through_inline() {
         // `/new` starts a fresh session in a new thread under the DM message.
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_NEW_THREAD"}]}),
+        // After /pause, a direct message restarts the work.
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_AFTER_PAUSE"}]}),
         // Escalation makes Codex ask for approval before running it.
         json!({"type": "function_call", "call_id": "call-1", "name": "exec_command",
             "arguments": json!({"cmd": "echo E2E_RAN > ran.txt",
@@ -658,6 +661,87 @@ async fn codex_round_trip_through_inline() {
         !new_work.is_empty() && new_work != dm_work,
         "the new thread has its own session"
     );
+
+    // 4d. Editing a message that already ran does not run it again.
+    let first = owner
+        .history(HistoryRequest {
+            chat_id: InlineId::new(chat_id),
+            limit: Some(100),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .unwrap()
+        .messages
+        .into_iter()
+        .find(|message| {
+            message.sender_id.get() == owner_user_id
+                && matches!(&message.content, MessageContent::Text { text } if text == "Say the first answer")
+        })
+        .map(|message| message.message_id)
+        .unwrap();
+    let requests_before = model.request_count();
+    owner
+        .edit_message(inline_client::EditMessageRequest {
+            chat_id: InlineId::new(chat_id),
+            message_id: first,
+            text: "Say the first answer, edited".to_owned(),
+            external_id: None,
+            parse_markdown: false,
+        })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        model.request_count(),
+        requests_before,
+        "an edited message ran again"
+    );
+
+    // 4e. /pause: the work reports paused; the next message restarts it.
+    send(&owner, chat_id, "/pause").await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let states = owner
+            .invoke_rpc(
+                proto::Method::GetAgentSessionStates,
+                proto::rpc_call::Input::GetAgentSessionStates(proto::GetAgentSessionStatesInput {
+                    peer_id: Some(super::api::chat_peer(chat_id)),
+                }),
+            )
+            .await
+            .unwrap();
+        let proto::rpc_result::Result::GetAgentSessionStates(states) = states else {
+            panic!("unexpected result");
+        };
+        if states.sessions.iter().any(|session| {
+            session
+                .state
+                .as_ref()
+                .is_some_and(|state| state.run_state == proto::AgentRunState::Paused as i32)
+        }) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the work never reported paused"
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    send(&owner, chat_id, "Carry on").await;
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the answer after pause",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_AFTER_PAUSE"))
+        },
+    )
+    .await;
 
     // 5. A command needs approval: the card carries Codex's own choices, and
     // the owner's approval runs it.
