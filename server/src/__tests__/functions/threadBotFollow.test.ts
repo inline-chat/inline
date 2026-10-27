@@ -114,7 +114,7 @@ describe("bots enter a thread through its opening message", () => {
     expect(await followMode(chat.id, scout.id)).toBeNull()
   })
 
-  test("an opener that starts with a person keeps later-mentioned bots out", async () => {
+  test("every bot an opener mentions follows, not only a leading one", async () => {
     const chat = await createThread([owner, alice, scout])
     await send(
       owner.id,
@@ -123,7 +123,7 @@ describe("bots enter a thread through its opening message", () => {
       mentions({ userId: alice.id, offset: 0, length: 6 }, { userId: scout.id, offset: 11, length: 6 }),
     )
 
-    expect(await followMode(chat.id, scout.id)).toBeNull()
+    expect(await followMode(chat.id, scout.id)).toBe("following")
   })
 
   test("an opener addressing two bots makes both follow", async () => {
@@ -300,17 +300,9 @@ describe("bots enter a thread through its opening message", () => {
 })
 
 describe("getAddressedUserIds", () => {
-  test("a leading run of mentions decides", () => {
+  test("every mention counts, wherever it is", () => {
     const run = mentions({ userId: 1, offset: 0, length: 2 }, { userId: 2, offset: 4, length: 2 }, { userId: 3, offset: 12, length: 2 })
-    expect([...getAddressedUserIds("@a, @b compare @c", run)]).toEqual([1, 2])
-  })
-
-  test("without a leading mention, every mention counts", () => {
-    expect([...getAddressedUserIds("hey @a", mentions({ userId: 1, offset: 4, length: 2 }))]).toEqual([1])
-  })
-
-  test("leading whitespace still counts as leading", () => {
-    expect([...getAddressedUserIds("  @a hi", mentions({ userId: 1, offset: 2, length: 2 }))]).toEqual([1])
+    expect([...getAddressedUserIds(run)]).toEqual([1, 2, 3])
   })
 
   test("a bot command addresses its target bot", () => {
@@ -324,6 +316,6 @@ describe("getAddressedUserIds", () => {
         },
       ],
     }
-    expect([...getAddressedUserIds("/help@scout", entities)]).toEqual([9])
+    expect([...getAddressedUserIds(entities)]).toEqual([9])
   })
 })
