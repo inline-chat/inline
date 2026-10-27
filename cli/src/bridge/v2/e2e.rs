@@ -382,6 +382,10 @@ async fn codex_round_trip_through_inline() {
         // A plain reply to the agent's answer addresses it.
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_G2_REPLY"}]}),
+        // Friendly mode: a tool call shows no progress; the answer does.
+        inline_tool("get_current_context", json!({})),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_FRIENDLY_DONE"}]}),
         // A teammate with access: an answer, then a command only the owner
         // may approve.
         json!({"type": "message", "role": "assistant",
@@ -1068,6 +1072,43 @@ async fn codex_round_trip_through_inline() {
         |texts| texts.iter().any(|(_, text)| text.contains("E2E_G2_REPLY")),
     )
     .await;
+
+    // 8b. Friendly mode for this thread: no progress messages, only the
+    // answer. The change reaches the running bridge without a restart.
+    owner
+        .invoke_rpc(
+            proto::Method::SetAgentParticipation,
+            proto::rpc_call::Input::SetAgentParticipation(proto::SetAgentParticipationInput {
+                peer_id: Some(super::api::chat_peer(group_two)),
+                bot_user_id,
+                output_mode: Some(proto::AgentOutputMode::Friendly as i32),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+    let seen_before = bot_texts(&owner, group_two, bot_user_id).await.len();
+    // The mode change arrives as an access update; give it a moment.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    owner.send_text(mention("friendly please")).await.unwrap();
+    let texts = wait_for(
+        &model,
+        &owner,
+        group_two,
+        bot_user_id,
+        "the friendly answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_FRIENDLY_DONE"))
+        },
+    )
+    .await;
+    let new: Vec<&String> = texts[seen_before..].iter().map(|(_, text)| text).collect();
+    assert!(
+        !new.iter().any(|text| text.contains("get_current_context")),
+        "Friendly mode showed progress: {new:#?}"
+    );
 
     // 9. A teammate: no access until the owner grants it, and never the
     // owner's approvals.
