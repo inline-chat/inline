@@ -4214,7 +4214,7 @@ fn unresolved_update_peer(kind: &str) -> BackendError {
     )
 }
 
-fn update_kind(update: &proto::update::Update) -> &'static str {
+pub(crate) fn update_kind(update: &proto::update::Update) -> &'static str {
     use proto::update::Update;
     match update {
         Update::NewMessage(_) => "new_message",

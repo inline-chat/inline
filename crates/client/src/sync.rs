@@ -1335,9 +1335,19 @@ fn insert_unique_update(
         if source == "fetched/realtime merge" && same_logical_message_update(existing, &update) {
             return Ok(());
         }
+        let kind = |update: &proto::Update| {
+            update
+                .update
+                .as_ref()
+                .map_or("unknown", crate::sdk_backend::update_kind)
+        };
         return Err(BackendError::new(
             ClientErrorCategory::ProtocolMismatch,
-            format!("conflicting Inline updates shared sequence {seq} in {source}"),
+            format!(
+                "conflicting Inline updates shared sequence {seq} in {source} ({} and {})",
+                kind(existing),
+                kind(&update)
+            ),
         ));
     }
     updates.insert(seq, update);
@@ -1368,6 +1378,13 @@ fn same_logical_message_update(left: &proto::Update, right: &proto::Update) -> b
             }
             _ => false,
         },
+        // A realtime delete names the peer the deleter used (a DM as its chat),
+        // the stored copy names it for the viewer: the same message IDs at the
+        // same sequence are the same deletion.
+        (
+            Some(proto::update::Update::DeleteMessages(left)),
+            Some(proto::update::Update::DeleteMessages(right)),
+        ) => !left.message_ids.is_empty() && left.message_ids == right.message_ids,
         _ => false,
     }
 }
@@ -3008,6 +3025,44 @@ mod tests {
             &mut merged,
             2,
             edit_message_update(2, 20, 7, 103),
+            "fetched/realtime merge",
+        )
+        .unwrap_err();
+        assert_eq!(error.category, ClientErrorCategory::ProtocolMismatch);
+    }
+
+    fn delete_messages_update(seq: i32, peer: proto::Peer, message_ids: Vec<i64>) -> proto::Update {
+        proto::Update {
+            seq: Some(seq),
+            date: Some(20),
+            update: Some(proto::update::Update::DeleteMessages(
+                proto::UpdateDeleteMessages {
+                    message_ids,
+                    peer_id: Some(peer),
+                },
+            )),
+        }
+    }
+
+    #[test]
+    fn fetched_realtime_merge_accepts_a_dm_delete_named_from_either_side() {
+        let fetched = delete_messages_update(
+            4,
+            proto::Peer {
+                r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 41 })),
+            },
+            vec![2],
+        );
+        let realtime = delete_messages_update(4, chat_peer(7), vec![2]);
+        let mut merged = BTreeMap::new();
+        insert_unique_update(&mut merged, 4, fetched.clone(), "fetched page").unwrap();
+        insert_unique_update(&mut merged, 4, realtime, "fetched/realtime merge").unwrap();
+        assert_eq!(merged.get(&4), Some(&fetched));
+
+        let error = insert_unique_update(
+            &mut merged,
+            4,
+            delete_messages_update(4, chat_peer(7), vec![3]),
             "fetched/realtime merge",
         )
         .unwrap_err();
