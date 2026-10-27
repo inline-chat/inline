@@ -61,6 +61,26 @@ pub(super) fn working_directory_message(path: &Path) -> String {
     format!("Working directory: {}", markdown_code_span(&display))
 }
 
+/// "Mo's Codex · MacBook Pro" from the owner, the provider and the machine
+/// ("Mo's MacBook Pro" names the owner once).
+fn default_bot_name(first_name: &str, provider: &str, machine: &str) -> String {
+    let machine = machine.trim();
+    let machine = [
+        format!("{first_name}'s "),
+        format!("{first_name}\u{2019}s "),
+    ]
+    .iter()
+    .find_map(|prefix| machine.strip_prefix(prefix.as_str()))
+    .unwrap_or(machine)
+    .trim();
+    let name = if machine.is_empty() {
+        format!("{first_name}'s {provider}")
+    } else {
+        format!("{first_name}'s {provider} \u{b7} {machine}")
+    };
+    name.chars().take(64).collect()
+}
+
 #[cfg(test)]
 mod working_directory_tests {
     use super::*;
@@ -345,6 +365,8 @@ pub(super) async fn provision_dev_bot(
     let requested_name = requested_name
         .map(str::trim)
         .filter(|name| !name.is_empty());
+    // A new bot is this machine's (one bot per machine per provider), so its
+    // default name carries the machine.
     let default_name = || {
         let first_name = me
             .first_name
@@ -352,7 +374,7 @@ pub(super) async fn provision_dev_bot(
             .map(str::trim)
             .filter(|name| !name.is_empty())
             .unwrap_or("My");
-        format!("{first_name}'s {}", provider.display_name)
+        default_bot_name(first_name, provider.display_name, &account.host_label)
     };
     let create_name = requested_name
         .map(str::to_owned)
@@ -719,6 +741,23 @@ async fn sync_agent_command_catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_bots_are_named_for_their_machine() {
+        assert_eq!(
+            default_bot_name("Mo", "Codex", "Mo's MacBook Pro"),
+            "Mo's Codex \u{b7} MacBook Pro"
+        );
+        assert_eq!(
+            default_bot_name("Mo", "Claude", "Mo\u{2019}s Mac mini"),
+            "Mo's Claude \u{b7} Mac mini"
+        );
+        assert_eq!(
+            default_bot_name("Mo", "Codex", "devbox"),
+            "Mo's Codex \u{b7} devbox"
+        );
+        assert_eq!(default_bot_name("Mo", "Codex", "  "), "Mo's Codex");
+    }
 
     fn bot(id: i64, username: &str) -> proto::User {
         proto::User {
