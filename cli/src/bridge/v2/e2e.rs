@@ -342,6 +342,9 @@ async fn codex_round_trip_through_inline() {
             "content": [{"type": "output_text", "text": "E2E_BEFORE_STEER"}]}),
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_AFTER_STEER"}]}),
+        // A slow reply that /stop interrupts; it must never be posted.
+        json!({"_delay_ms": 6000, "type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_NEVER_POSTED"}]}),
         // Escalation makes Codex ask for approval before running it.
         json!({"type": "function_call", "call_id": "call-1", "name": "exec_command",
             "arguments": json!({"cmd": "echo E2E_RAN > ran.txt",
@@ -591,6 +594,42 @@ async fn codex_round_trip_through_inline() {
         "the steer reached the running turn"
     );
 
+    // 4b. /stop interrupts a running turn: its late reply is dropped and the
+    // work settles idle.
+    let before = model.request_count();
+    send(&owner, chat_id, "Begin something slow").await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while model.request_count() == before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the slow turn never reached the model"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    send(&owner, chat_id, "/stop").await;
+    let work_id = owner
+        .get_agent_session(proto::GetAgentSessionInput {
+            peer_id: Some(super::api::chat_peer(chat_id)),
+            bot_user_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .connection
+        .and_then(|connection| connection.agent_session)
+        .map(|session| session.id)
+        .unwrap();
+    wait_idle(&owner, chat_id, work_id).await;
+    // Past the held reply's delay: nothing from the stopped turn appears.
+    tokio::time::sleep(Duration::from_secs(7)).await;
+    let texts = bot_texts(&owner, chat_id, bot_user_id).await;
+    assert!(
+        !texts
+            .iter()
+            .any(|(_, text)| text.contains("E2E_NEVER_POSTED")),
+        "a stopped turn posted its late reply: {texts:#?}"
+    );
+
     // 5. A command needs approval: the card carries Codex's own choices, and
     // the owner's approval runs it.
     send(&owner, chat_id, "Run the check").await;
@@ -644,34 +683,7 @@ async fn codex_round_trip_through_inline() {
     );
 
     // The run state reached the server and settled.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    loop {
-        let states = owner
-            .invoke_rpc(
-                proto::Method::GetAgentSessionStates,
-                proto::rpc_call::Input::GetAgentSessionStates(proto::GetAgentSessionStatesInput {
-                    peer_id: Some(super::api::chat_peer(chat_id)),
-                }),
-            )
-            .await
-            .unwrap();
-        let proto::rpc_result::Result::GetAgentSessionStates(states) = states else {
-            panic!("unexpected result");
-        };
-        let state = states
-            .sessions
-            .iter()
-            .find(|session| session.id == agent_session_id)
-            .and_then(|session| session.state.clone());
-        if state.is_some_and(|state| state.run_state == proto::AgentRunState::Idle as i32) {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "run state never settled to idle"
-        );
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
+    wait_idle(&owner, chat_id, agent_session_id).await;
 
     // 6. /release hands the session back with a resume command.
     send(&owner, chat_id, "/release").await;
@@ -803,6 +815,38 @@ async fn codex_round_trip_through_inline() {
         matches!(outcome, Ok(Ok(Ok(())))),
         "runtime ended cleanly: {outcome:?}"
     );
+}
+
+/// Waits until the server reports the work idle.
+async fn wait_idle(owner: &InlineClient, chat_id: i64, agent_session_id: i64) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let states = owner
+            .invoke_rpc(
+                proto::Method::GetAgentSessionStates,
+                proto::rpc_call::Input::GetAgentSessionStates(proto::GetAgentSessionStatesInput {
+                    peer_id: Some(super::api::chat_peer(chat_id)),
+                }),
+            )
+            .await
+            .unwrap();
+        let proto::rpc_result::Result::GetAgentSessionStates(states) = states else {
+            panic!("unexpected result");
+        };
+        let state = states
+            .sessions
+            .iter()
+            .find(|session| session.id == agent_session_id)
+            .and_then(|session| session.state.clone());
+        if state.is_some_and(|state| state.run_state == proto::AgentRunState::Idle as i32) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "run state never settled to idle"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 /// Outputs of Inline tool calls, as the model received them.
