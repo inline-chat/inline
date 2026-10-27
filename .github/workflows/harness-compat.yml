@@ -61,6 +61,7 @@ jobs:
       - name: Request parameters match the schema
         env:
           INLINE_CODEX_SCHEMA_DIR: ${{ runner.temp }}/codex-schema
+          INLINE_CODEX_SCHEMA_FLOOR: ${{ matrix.version == '0.146.0' }}
         run: >-
           cargo test --locked -p inline-agent-driver-codex
           request_params_exist_in_the_installed_schema -- --ignored

@@ -848,6 +848,13 @@ mod tests {
             requests.push(op_request("thread-1", *turns, Some("gpt-5"), op).expect("request"));
         }
 
+        // Optional fields newer than the floor, which the floor ignores
+        // harmlessly. Tolerated only when CI checks the floor itself.
+        const NEWER_THAN_FLOOR: &[(&str, &str)] = &[
+            ("thread/goal/set", "origin"),
+            ("thread/goal/clear", "origin"),
+        ];
+        let floor = std::env::var("INLINE_CODEX_SCHEMA_FLOOR").is_ok_and(|value| value == "true");
         let mut unknown = Vec::new();
         for request in &requests {
             let Some(accepted) = accepted(request.method) else {
@@ -863,7 +870,8 @@ mod tests {
                 .into_iter()
                 .flat_map(|params| params.keys())
             {
-                if !accepted.contains(key) {
+                let tolerated = floor && NEWER_THAN_FLOOR.contains(&(request.method, key.as_str()));
+                if !accepted.contains(key) && !tolerated {
                     unknown.push(format!("{} {key}", request.method));
                 }
             }
