@@ -238,6 +238,8 @@ public final class AgentWorkStateStore: ObservableObject {
   @Published public private(set) var offlineBotUserIDs: Set<Int64> = []
 
   private let auth: AuthHandle
+  // Writer closures run synchronously on GRDB's queue. withLockUnchecked below
+  // keeps the non-Sendable Database on that queue while fencing a reset.
   private let persistenceGeneration = OSAllocatedUnfairLock(initialState: UInt64(0))
   private let database: AppDatabase?
   private let log = Log.scoped("AgentWorkStateStore")
@@ -419,7 +421,7 @@ public final class AgentWorkStateStore: ObservableObject {
     let kind = Kind.session.rawValue
     Task.detached {
       try? await database.dbWriter.write { db in
-        try fence.withLock { current in
+        try fence.withLockUnchecked { current in
           guard current == epoch else { return }
           try auth.validateAccountMutation(account)
           // Only the row this store saw: a newer one synced since stays.
@@ -454,7 +456,7 @@ public final class AgentWorkStateStore: ObservableObject {
     let auth = auth
     Task.detached {
       try? await database.dbWriter.write { db in
-        try fence.withLock { current in
+        try fence.withLockUnchecked { current in
           guard current == epoch else { return }
           try auth.validateAccountMutation(account)
           _ = try Row.deleteAll(db)
@@ -592,7 +594,7 @@ public final class AgentWorkStateStore: ObservableObject {
     let epoch = fence.withLock { $0 }
     Task.detached {
       try? await database.dbWriter.write { db in
-        try fence.withLock { current in
+        try fence.withLockUnchecked { current in
           guard current == epoch else { return }
           try auth.validateAccountMutation(account)
           _ = try Self.store(state, db: db)
@@ -610,7 +612,7 @@ public final class AgentWorkStateStore: ObservableObject {
     let epoch = fence.withLock { $0 }
     Task.detached {
       try? await database.dbWriter.write { db in
-        try fence.withLock { current in
+        try fence.withLockUnchecked { current in
           guard current == epoch else { return }
           try auth.validateAccountMutation(account)
           try row.save(db)
