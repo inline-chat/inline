@@ -1010,81 +1010,21 @@ async fn claude_round_trip_through_inline() {
     let folder = dir.path().join("project");
     std::fs::create_dir_all(&folder).unwrap();
     let api = fake_messages::FakeMessages::start().await;
-    let executable = which("claude", "INLINE_V2_E2E_CLAUDE");
-
     let owner = client(dir.path(), "owner", &env("INLINE_V2_E2E_OWNER_TOKEN")).await;
-    let bot = client(dir.path(), "bot", &env("INLINE_V2_E2E_BOT_TOKEN")).await;
-    let tools = Tools::new(ToolsConfig {
-        bot: bot.clone(),
-        provider: inline_agent_bridge::ProviderId::new("claude").unwrap(),
-        bot_user_id,
-        owner_user_id,
-        agent_name: "Claude".to_owned(),
-        folder: folder.clone(),
-        attachments_dir: dir.path().join("attachments"),
-    });
-    let mut config = inline_agent_driver_claude::harness::ClaudeHarnessConfig::new(
-        executable.clone(),
-        env!("CARGO_PKG_VERSION"),
-    );
     // An isolated config and a dummy key against the fake API: no account.
     let config_dir = dir.path().join("claude-config");
     std::fs::create_dir_all(&config_dir).unwrap();
-    config.env = vec![
-        ("ANTHROPIC_BASE_URL".into(), api.base_url.clone().into()),
-        ("ANTHROPIC_API_KEY".into(), "sk-ant-e2e-dummy".into()),
-        ("CLAUDE_CONFIG_DIR".into(), config_dir.into_os_string()),
-        ("DISABLE_AUTOUPDATER".into(), "1".into()),
-        ("DISABLE_TELEMETRY".into(), "1".into()),
-        (
-            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(),
-            "1".into(),
-        ),
-        ("DISABLE_ERROR_REPORTING".into(), "1".into()),
-        // Newer Claude Code defers MCP tools behind ToolSearch; the scripted
-        // model calls Inline's tools directly.
-        ("ENABLE_TOOL_SEARCH".into(), "false".into()),
-    ];
-    config.model = Some("claude-sonnet-4-5".to_owned());
-    // Ask before tools, so approvals become cards.
-    config.permission_mode = "default".to_owned();
-    config.host_tools = Some(tools.configuration());
-    let harness: Arc<dyn HarnessDriver> = Arc::new(
-        inline_agent_driver_claude::harness::ClaudeHarness::new(config),
-    );
-    let mut events = bot.take_lossless_events().unwrap();
-    let runtime = Runtime::new(
-        V2Config {
-            vocabulary: Vocabulary::Claude,
-            agent_name: "Claude".to_owned(),
-            installation_id: "e2e-claude".to_owned(),
-            owner_user_id,
-            bot_user_id,
-            bot_username: "e2e_claude_bot".to_owned(),
-            dm_chat_id: chat_id,
-            folder: folder.clone(),
-            machine_label: "e2e".to_owned(),
-            executable_path: Some(executable.display().to_string()),
-            accept_messages_after: 0,
-            allowlist: Vec::new(),
-            ledger_path: dir.path().join("ledger.sqlite"),
-            attachments_dir: dir.path().join("attachments"),
-        },
-        bot.clone(),
-        Arc::new(OwnerClient(owner.clone())),
-        harness,
-        Some(tools),
-    )
-    .unwrap();
-    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let running = tokio::spawn(async move {
-        runtime
-            .run(&mut events, async {
-                let _ = stopped.await;
-            })
-            .await
-            .map_err(|error| error.to_string())
-    });
+    let bridge = ClaudeBridge {
+        dir: dir.path().to_owned(),
+        folder: folder.clone(),
+        config_dir,
+        api_base_url: api.base_url.clone(),
+        owner: owner.clone(),
+        owner_user_id,
+        bot_user_id,
+        dm_chat_id: chat_id,
+    };
+    let (stop, running, bot) = bridge.start().await;
 
     // 1. A DM message runs a turn and the answer arrives.
     send(&owner, chat_id, "Say hello\n@text E2E_CLAUDE_ONE").await;
@@ -1309,12 +1249,152 @@ async fn claude_round_trip_through_inline() {
     )
     .await;
 
+    // 6. The bridge restarts on the same store: a message sent while it was
+    // down is caught up, and the released session resumes (`--resume`).
+    let session_ref = |work: proto::GetAgentSessionResult| {
+        work.connection
+            .map(|connection| connection.session_ref)
+            .unwrap_or_default()
+    };
+    let lookup = || {
+        owner.get_agent_session(proto::GetAgentSessionInput {
+            peer_id: Some(super::api::chat_peer(chat_id)),
+            bot_user_id,
+            ..Default::default()
+        })
+    };
+    let before_restart = session_ref(lookup().await.unwrap());
     let _ = stop.send(());
     let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
     assert!(
         matches!(outcome, Ok(Ok(Ok(())))),
         "runtime ended cleanly: {outcome:?}"
     );
+    bot.shutdown().await.unwrap();
+    drop(bot);
+    send(&owner, chat_id, "Back again\n@text E2E_CLAUDE_RESTARTED").await;
+    let (stop, running, _bot) = bridge.start().await;
+    wait_for(
+        &api,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the answer after the restart",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_CLAUDE_RESTARTED"))
+        },
+    )
+    .await;
+    assert!(!before_restart.is_empty());
+    assert_eq!(
+        before_restart,
+        session_ref(lookup().await.unwrap()),
+        "the restarted bridge resumed the same Claude session"
+    );
+
+    let _ = stop.send(());
+    let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
+    assert!(
+        matches!(outcome, Ok(Ok(Ok(())))),
+        "runtime ended cleanly: {outcome:?}"
+    );
+}
+
+/// One run of the bridge for the Claude test, over the shared ledger and the
+/// bot's persisted store.
+struct ClaudeBridge {
+    dir: std::path::PathBuf,
+    folder: std::path::PathBuf,
+    config_dir: std::path::PathBuf,
+    api_base_url: String,
+    owner: InlineClient,
+    owner_user_id: i64,
+    bot_user_id: i64,
+    dm_chat_id: i64,
+}
+
+impl ClaudeBridge {
+    async fn start(&self) -> (tokio::sync::oneshot::Sender<()>, Running, InlineClient) {
+        let executable = which("claude", "INLINE_V2_E2E_CLAUDE");
+        let bot = client(&self.dir, "bot", &env("INLINE_V2_E2E_BOT_TOKEN")).await;
+        let tools = Tools::new(ToolsConfig {
+            bot: bot.clone(),
+            provider: inline_agent_bridge::ProviderId::new("claude").unwrap(),
+            bot_user_id: self.bot_user_id,
+            owner_user_id: self.owner_user_id,
+            agent_name: "Claude".to_owned(),
+            folder: self.folder.clone(),
+            attachments_dir: self.dir.join("attachments"),
+        });
+        let mut config = inline_agent_driver_claude::harness::ClaudeHarnessConfig::new(
+            executable.clone(),
+            env!("CARGO_PKG_VERSION"),
+        );
+        config.env = vec![
+            (
+                "ANTHROPIC_BASE_URL".into(),
+                self.api_base_url.clone().into(),
+            ),
+            ("ANTHROPIC_API_KEY".into(), "sk-ant-e2e-dummy".into()),
+            (
+                "CLAUDE_CONFIG_DIR".into(),
+                self.config_dir.clone().into_os_string(),
+            ),
+            ("DISABLE_AUTOUPDATER".into(), "1".into()),
+            ("DISABLE_TELEMETRY".into(), "1".into()),
+            (
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(),
+                "1".into(),
+            ),
+            ("DISABLE_ERROR_REPORTING".into(), "1".into()),
+            // Newer Claude Code defers MCP tools behind ToolSearch; the scripted
+            // model calls Inline's tools directly.
+            ("ENABLE_TOOL_SEARCH".into(), "false".into()),
+        ];
+        config.model = Some("claude-sonnet-4-5".to_owned());
+        // Ask before tools, so approvals become cards.
+        config.permission_mode = "default".to_owned();
+        config.host_tools = Some(tools.configuration());
+        let harness: Arc<dyn HarnessDriver> = Arc::new(
+            inline_agent_driver_claude::harness::ClaudeHarness::new(config),
+        );
+        let mut events = bot.take_lossless_events().unwrap();
+        let runtime = Runtime::new(
+            V2Config {
+                vocabulary: Vocabulary::Claude,
+                agent_name: "Claude".to_owned(),
+                installation_id: "e2e-claude".to_owned(),
+                owner_user_id: self.owner_user_id,
+                bot_user_id: self.bot_user_id,
+                bot_username: "e2e_claude_bot".to_owned(),
+                dm_chat_id: self.dm_chat_id,
+                folder: self.folder.clone(),
+                machine_label: "e2e".to_owned(),
+                executable_path: Some(executable.display().to_string()),
+                accept_messages_after: 0,
+                allowlist: Vec::new(),
+                ledger_path: self.dir.join("ledger.sqlite"),
+                attachments_dir: self.dir.join("attachments"),
+            },
+            bot.clone(),
+            Arc::new(OwnerClient(self.owner.clone())),
+            harness,
+            Some(tools),
+        )
+        .unwrap();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let running = tokio::spawn(async move {
+            runtime
+                .run(&mut events, async {
+                    let _ = stopped.await;
+                })
+                .await
+                .map_err(|error| error.to_string())
+        });
+        (stop, running, bot)
+    }
 }
 
 /// Points Codex at the temporary home and keeps its fake-model requests off
