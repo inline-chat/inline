@@ -3,6 +3,24 @@ title: "Hermes Agent"
 description: "Connect an existing Hermes Agent to Inline, locally or on an Umbrel server."
 ---
 
+## 1.0 alpha
+
+The profile-isolated bridge is available as `1.0.0-alpha.1`. Install the exact
+alpha in the same user, home, profile, and npm prefix as the existing gateway:
+
+```bash
+npm install -g @inline-chat/hermes-agent-adapter@1.0.0-alpha.1
+inline-hermes install --force
+hermes gateway restart
+inline-hermes doctor --json
+hermes inline status --json --probe
+```
+
+Restart at an idle boundary. Keep the existing profile state for recovery, and
+read the upgrade notes below. Verify a real inbound message and its final reply
+after restarting. The npm `latest` channel and the Hermes source catalog keep
+their separately released versions; installing either does not select this alpha.
+
 ## Before you begin
 
 Use Hermes Agent `>=0.21.3`, Node.js `>=20`, npm, and the

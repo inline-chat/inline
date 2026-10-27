@@ -179,7 +179,7 @@ public struct AgentWorkState: Codable, Equatable, Sendable, Identifiable {
 
   /// Whether this state replaces `stored`, the state kept for the same
   /// session (in any chat). Revisions order one session's states across
-  /// chats, since each chat's updates arrive in their own bucket. A move does
+  /// chats, since each chat's updates arrive in their own bucket. A move
   /// advances the server revision. For older servers, an equal revision
   /// may only advance to a directly known child.
   func supersedes(_ stored: AgentWorkState) -> Bool {

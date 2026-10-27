@@ -487,6 +487,18 @@ jobs:
           HERMES_BIN: ${{ steps.hermes-host.outputs.hermes-bin }}
           HERMES_PYTHON_BIN: ${{ steps.hermes-host.outputs.python-bin }}
         run: bun --no-env-file scripts/ci/local-bot-flow.mjs "$RUNNER_TEMP/inline-packages"
+      - name: Verify published Hermes against the new server
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/test_db
+          INLINE_TEST_REDIS_URL: redis://127.0.0.1:6379
+          HERMES_BIN: ${{ steps.hermes-host.outputs.hermes-bin }}
+          HERMES_PYTHON_BIN: ${{ steps.hermes-host.outputs.python-bin }}
+          INLINE_E2E_PUBLISHED_HERMES: '1'
+        run: bun --no-env-file scripts/ci/local-bot-flow.mjs "$RUNNER_TEMP/inline-packages"
+      - name: Verify published OpenClaw still registers in its current host
+        run: |
+          node scripts/ci/pack-published-openclaw.mjs "$RUNNER_TEMP/published-openclaw" @inline-openclaw/inline@0.0.72
+          node scripts/ci/check-openclaw-admission.mjs "$RUNNER_TEMP/published-openclaw" latest
       - name: Upload scenario receipts
         if: always()
         uses: actions/upload-artifact@v4
