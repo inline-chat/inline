@@ -4,6 +4,8 @@ import { createBot } from "@in/server/functions/createBot"
 import { setBotCommands } from "@in/server/functions/bot.setCommands"
 import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
 import { setupTestLifecycle, testUtils } from "@in/server/__tests__/setup"
+import { db } from "@in/server/db"
+import { dialogs, messages } from "@in/server/db/schema"
 
 const commandEntities = (text: string, botUserId?: number): MessageEntities => ({
   entities: [
@@ -93,6 +95,53 @@ describe("bot command target resolution", () => {
 
     expect(entities).toBe(original)
     expect(entities?.entities[0]?.entity.oneofKind).toBeUndefined()
+  })
+
+  test("a shared command replying to one bot's message goes to that bot", async () => {
+    await db.insert(messages).values({ chatId: chat.id, messageId: 1, fromId: betaBotUserId, text: "beta said" })
+    const entities = await resolveBotCommandTargets({
+      text: "/help",
+      entities: commandEntities("/help"),
+      chat,
+      currentUserId: creator.id,
+      replyToMessageId: 1,
+    })
+
+    expect(entities?.entities[0]?.entity).toEqual({
+      oneofKind: "botCommand",
+      botCommand: { botUserId: BigInt(betaBotUserId) },
+    })
+  })
+
+  test("a shared command goes to the one bot following the thread", async () => {
+    await db.insert(dialogs).values({ chatId: chat.id, userId: alphaBotUserId, followMode: "following" })
+    const entities = await resolveBotCommandTargets({
+      text: "/help",
+      entities: commandEntities("/help"),
+      chat,
+      currentUserId: creator.id,
+    })
+
+    expect(entities?.entities[0]?.entity).toEqual({
+      oneofKind: "botCommand",
+      botCommand: { botUserId: BigInt(alphaBotUserId) },
+    })
+  })
+
+  test("a shared command stays untargeted when several bots follow and no reply settles it", async () => {
+    await db.insert(dialogs).values([
+      { chatId: chat.id, userId: alphaBotUserId, followMode: "following" },
+      { chatId: chat.id, userId: betaBotUserId, followMode: "following" },
+    ])
+    const original = commandEntities("/help")
+    const entities = await resolveBotCommandTargets({
+      text: "/help",
+      entities: original,
+      chat,
+      currentUserId: creator.id,
+    })
+
+    expect(entities).toBe(original)
   })
 
   test("resolves a 64-character textual bot suffix and validates its catalog", async () => {

@@ -132,6 +132,85 @@ async def exercise():
 asyncio.run(exercise())
 
 
+async def exercise_restarted_thread_reply():
+    # Published 0.0.x adapters keep the physical chat as their session chat.
+    if not hasattr(sys.modules[type(adapter).__module__], "_session_chat_id"):
+        return
+
+    def new_adapter():
+        instance = platform_registry.create_adapter("inline", PlatformConfig(
+            enabled=True, token="offline-test-token", extra={
+                "dm_policy": "open", "group_policy": "open", "allow_all_users": True,
+                "require_mention": False, "context_backfill": "off", "sync_commands": False,
+                "text_debounce_seconds": 0,
+            },
+        ))
+        instance._me_id = "999"
+        instance.set_authorization_check(lambda *_args, **_kwargs: True)
+        return instance
+
+    prepared, received = new_adapter(), []
+    prepared._reply_thread_overrides["10"] = "on"
+
+    async def receive(event):
+        received.append(event)
+
+    async def group_info(chat_id, **kwargs):
+        return {"id": chat_id, "dialogFollowMode": 1}
+
+    async def create_thread(*args):
+        return "77"
+
+    with patch.object(prepared, "handle_message", receive), patch.object(prepared, "_get_chat_info", group_info), patch.object(prepared, "_create_reply_thread", create_thread):
+        await prepared._dispatch_message({"kind": "message.new", "seq": 5001, "chatId": "10", "message": {
+            "id": "5", "chatId": "10", "fromId": "42", "message": "prepare the launch",
+            "sender": {"id": "42", "bot": False}, "peerId": {"type": {"oneofKind": "chat"}},
+        }})
+    request = received[0]
+    assert (request.source.chat_id, request.source.thread_id, request.message_id) == ("77", "77", "5")
+
+    restarted, sent, lookups = new_adapter(), [], []
+
+    def transport(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True, "result": {"messageId": "202"}})
+
+    async def child_info(chat_id, **kwargs):
+        return {"id": chat_id, "parentChatId": "10", "parentMessageId": "5"}
+
+    async def unrelated_bot_message(chat_id, message_id, **kwargs):
+        lookups.append((chat_id, message_id))
+        return {"id": message_id, "chatId": chat_id, "fromId": "500", "sender": {"id": "500", "bot": True}}
+
+    async def no_obligation(*args, **kwargs):
+        return None
+
+    restarted._http_client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    try:
+        with patch.object(restarted, "_get_chat_info", child_info), patch.object(restarted, "_fetch_message", unrelated_bot_message):
+            metadata = {"thread_id": request.source.thread_id}
+            if hasattr(restarted, "send_final_ledgered"):
+                with patch.object(restarted, "_record_delivery_obligation", no_obligation):
+                    result, _ = await restarted.send_final_ledgered(
+                        request, "offline-thread-reply", "launch ready", metadata, reply_to=request.message_id,
+                    )
+            else:
+                result = await restarted._send_with_retry(
+                    chat_id=request.source.chat_id, content="launch ready", reply_to=request.message_id, metadata=metadata,
+                )
+            assert result.success
+            assert lookups == [], "the native caller looked up the parent's id in the child"
+            assert "replyToMsgId" not in sent[-1], sent[-1]
+            result = await restarted.send("77", "worker result", reply_to="6", metadata=metadata)
+            assert result.success and sent[-1]["replyToMsgId"] == "6", sent[-1]
+            assert lookups == [("77", "6")]
+    finally:
+        await restarted._http_client.aclose()
+
+
+asyncio.run(exercise_restarted_thread_reply())
+
+
 async def exercise_authorization():
     from gateway.run import GatewayRunner
     from gateway.pairing import PairingStore
@@ -215,17 +294,27 @@ async def exercise_authorization():
             }})
 
         with patch.object(adapter, "handle_message", receive), patch.object(adapter, "_send_thread_status", status), patch.object(adapter, "_create_reply_thread", create_thread):
-            await dispatch("43", "/threads off", 1001)
+            await dispatch("43", "/threads auto", 1001)
             assert "101" not in adapter._reply_thread_overrides
-            assert delivered[-1].text == "/threads off", "unknown DM lost host pairing ingress"
+            assert delivered[-1].text == "/threads auto", "unknown DM lost host pairing ingress"
             assert delivered[-1].source.user_id == "43"
-            await dispatch("42", "/threads off", 1002)
-            assert adapter._reply_thread_overrides["101"] == "off"
+            await dispatch("42", "/threads auto", 1002)
+            assert adapter._reply_thread_overrides["101"] == "auto"
             adapter._set_reply_threads_for_chat("101", "on")
             await dispatch("43", "ordinary unknown message", 1003)
             assert not mutations, "unknown sender created a reply thread before host authorization"
             await dispatch("42", "ordinary paired message", 1004)
-            assert len(mutations) == 1, "paired sender lost automatic threads"
+            assert len(mutations) == 1, "paired sender lost reply threads in their DM"
+
+        # Who may change reply threads follows Hermes' own admin lists.
+        if importlib.util.find_spec("gateway.slash_access"):
+            adapter.config.extra["group_allow_admin_from"] = ["42"]
+            assert adapter._may_change_reply_threads("42", "group")
+            assert not adapter._may_change_reply_threads("43", "group")
+            adapter.config.extra["group_user_allowed_commands"] = ["threads"]
+            assert adapter._may_change_reply_threads("43", "group")
+            for key in ("group_allow_admin_from", "group_user_allowed_commands"):
+                adapter.config.extra.pop(key, None)
 
         assert runner.pairing_store.revoke("inline", "42")
         assert authorized() is False, "revocation was hidden by cached adapter authorization"
@@ -471,7 +560,7 @@ async def exercise_ordinary_presentation():
                 calls.append((request.url.path, body))
                 if request.url.path == "/chat":
                     return httpx.Response(200, json={"ok": True, "result": {"id": "6101", "title": "Offline fixture"}})
-                if request.url.path == "/typing" and body["state"] == "start":
+                if request.url.path == "/typing" and body["state"] == "working":
                     typing_started.set()
                 if request.url.path == "/send" and failed_send:
                     return httpx.Response(400, json={"ok": False, "error": "rejected fixture reply", "errorKind": "bad_format"})
@@ -502,7 +591,7 @@ async def exercise_ordinary_presentation():
                 await asyncio.wait_for(wait_idle(), timeout=10)
                 assert outcomes == ["failure" if failed_send else "success"], outcomes
                 typing = [body for route, body in calls if route == "/typing"]
-                assert typing and any(body["state"] == "start" for body in typing)
+                assert typing and any(body["state"] == "working" for body in typing)
                 assert typing[-1]["state"] == "stop"
                 assert all("experimentalAgentActivity" not in body for body in typing)
                 reactions = [body for route, body in calls if route == "/reaction"]

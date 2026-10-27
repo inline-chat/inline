@@ -3,9 +3,6 @@ import Foundation
 import InlineConfig
 
 public enum ExperimentalFeatureFlags {
-  public static let agentActivityKey = AgentActivityFeature.preferenceKey
-  public static var agentActivityEnabled: Bool { AgentActivityFeature.isEnabled }
-
   public static let gridTranscriptionKey = "experimental.gridTranscription"
 
   /// Opt-in while the Grid transcription client experience is being rebuilt.

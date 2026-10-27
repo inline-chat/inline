@@ -110,6 +110,9 @@ fn setup_progress_message(
         ("phase.completed", "verification", Some("skipped")) => {
             "Agent readiness verification skipped."
         }
+        ("phase.completed", "verification", Some("action_required")) => {
+            "Agent configured, but it isn't receiving messages yet."
+        }
         ("phase.completed", "verification", _) => "Agent is ready.",
         _ => "Agent setup is progressing...",
     }
@@ -1144,6 +1147,18 @@ fn print_dry_run(
 mod app_protocol_tests {
     use super::*;
     use clap::Parser;
+
+    #[test]
+    fn verification_that_needs_action_is_not_reported_as_ready() {
+        assert_eq!(
+            setup_progress_message("phase.completed", "verification", Some("action_required")),
+            "Agent configured, but it isn't receiving messages yet."
+        );
+        assert_eq!(
+            setup_progress_message("phase.completed", "verification", Some("ready")),
+            "Agent is ready."
+        );
+    }
 
     #[test]
     fn verbose_is_global_repeatable_and_retry_keeps_mutation_constraints() {

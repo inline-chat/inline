@@ -362,6 +362,49 @@ describe("inline-hermes installer", () => {
     expect(text).not.toContain("secret-token")
   })
 
+  it("fails doctor when the agent is installed but Inline messages aren't reaching it", async () => {
+    const home = await tempDir()
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    await useFakeHermes(home, {
+      action: "inline.status",
+      setupProtocolVersion: 1,
+      configured: true,
+      probe: { ok: true, botUserId: "42" },
+      receiving: { ok: false, reason: "gateway_not_running", next: "Start the gateway: `hermes gateway start`." },
+    })
+
+    expect(await main(["install", "--hermes-home", home, "--force"])).toBe(0)
+    await writeEnabledHermesConfig(home)
+    expect(await main(["doctor", "--hermes-home", home, "--json"])).toBe(1)
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
+    expect(payload.activation.receiving).toEqual({
+      ok: false,
+      reason: "gateway_not_running",
+      next: "Start the gateway: `hermes gateway start`.",
+    })
+    expect(payload.issues).toContain(
+      "Inline messages aren't reaching this agent (gateway_not_running). Start the gateway: `hermes gateway start`.",
+    )
+  })
+
+  it("passes doctor when Hermes reports Inline connected", async () => {
+    const home = await tempDir()
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
+    await useFakeHermes(home, {
+      action: "inline.status",
+      setupProtocolVersion: 1,
+      configured: true,
+      probe: { ok: true, botUserId: "42" },
+      receiving: { ok: true, reason: "connected", next: null },
+    })
+
+    expect(await main(["install", "--hermes-home", home, "--force"])).toBe(0)
+    await writeEnabledHermesConfig(home)
+    expect(await main(["doctor", "--hermes-home", home, "--json"])).toBe(0)
+    const payload = JSON.parse(String(log.mock.calls.at(-1)?.[0]))
+    expect(payload.activation.receiving.ok).toBe(true)
+  })
+
   it.each([
     ["missing attestation", undefined, 0],
     ["failed host loader", { ok: false, reason: "plugin_load_failed" }, 0],

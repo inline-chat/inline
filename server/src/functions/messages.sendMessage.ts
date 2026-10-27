@@ -88,7 +88,7 @@ import {
 import { queueMessageThreadLinkMaterialization } from "@in/server/modules/threadGraph"
 import { resolveThreadTitleLinks } from "@in/server/modules/message/resolveThreadTitleLinks"
 import { resolveGroupMentions } from "@in/server/modules/message/resolveGroupMentions"
-import { resolveThreadAutoFollowUserIds } from "@in/server/modules/threadAutoFollow"
+import { getAddressedUserIds, resolveThreadAutoFollowUserIds } from "@in/server/modules/threadAutoFollow"
 import { resolveBotCommandTargets } from "@in/server/modules/message/resolveBotCommandTargets"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
 import { ModelError } from "@in/server/db/models/_errors"
@@ -188,6 +188,12 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const date = messageDate.date
   const fromId = context.currentUserId
   const currentUserId = context.currentUserId
+  let senderIsBotLookup: Promise<boolean> | undefined
+  const senderIsBot = () =>
+    (senderIsBotLookup ??=
+      context.isBot !== undefined
+        ? Promise.resolve(context.isBot)
+        : UsersModel.getUserById(currentUserId).then((user) => user?.bot === true))
   let chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, currentUserId)
   await ensurePrivatePeerCanReceiveMessages(chat, currentUserId)
@@ -198,9 +204,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     if (!Number.isSafeInteger(sourceChatId) || sourceChatId <= 0 || sourceChatId === chatId) {
       throw RealtimeRpcError.BadRequest()
     }
-    const sender = await UsersModel.getUserById(currentUserId)
     const sourceChat = await getChatById(sourceChatId)
-    if (!sender?.bot || !sourceChat) throw RealtimeRpcError.BadRequest()
+    if (!(await senderIsBot()) || !sourceChat) throw RealtimeRpcError.BadRequest()
     await AccessGuards.ensureChatAccess(sourceChat, currentUserId)
     const sourceContext = chatAgentContext(sourceChat)
     const destinationContext = chatAgentContext(chat)
@@ -258,6 +263,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
         entities,
         chat,
         currentUserId,
+        replyToMessageId: replyToMsgIdNumber ?? undefined,
       })
     }
   } catch (error) {
@@ -327,11 +333,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // Encrypt
   const encryptedMessage = text ? encryptMessage(text) : undefined
   const normalizedActions = normalizeAndValidateMessageActions(input.actions)
-  if (normalizedActions !== undefined) {
-    const sender = await UsersModel.getUserById(currentUserId)
-    if (!sender?.bot) {
-      throw RealtimeRpcError.BadRequest()
-    }
+  if (normalizedActions !== undefined && !(await senderIsBot())) {
+    throw RealtimeRpcError.BadRequest()
   }
 
   // photo, video, document, voice ids
@@ -583,6 +586,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     currentUserId,
     updateGroup,
     newMessageId: newMessage.messageId,
+    addressedUserIds: getAddressedUserIds(text, entities),
+    senderIsBot: context.isBot,
   })
 
   const sidebarOpenUserIds = await getSidebarOpenUserIds({
@@ -913,11 +918,15 @@ const autoFollowThreadMessage = async ({
   currentUserId,
   updateGroup,
   newMessageId,
+  addressedUserIds,
+  senderIsBot,
 }: {
   chat: DbChat
   currentUserId: number
   updateGroup: UpdateGroup
   newMessageId: number
+  addressedUserIds: ReadonlySet<number>
+  senderIsBot: boolean | undefined
 }) => {
   const eligibleUserIds = new Set(updateGroup.userIds)
   const candidateUserIds = await resolveThreadAutoFollowUserIds({
@@ -925,6 +934,8 @@ const autoFollowThreadMessage = async ({
     currentUserId,
     eligibleUserIds,
     newMessageId,
+    addressedUserIds,
+    senderIsBot,
   })
   if (candidateUserIds.length === 0) {
     return

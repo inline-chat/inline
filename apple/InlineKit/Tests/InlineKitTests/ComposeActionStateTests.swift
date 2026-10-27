@@ -54,7 +54,7 @@ struct ComposeActionStateTests {
 
   @Test("working is explicit and stopping one agent preserves another")
   func workingLifecycle() {
-    let actions = ComposeActions(agentActivityEnabled: true)
+    let actions = ComposeActions()
     let peer = Peer.thread(id: 501)
     actions.addComposeAction(for: peer, action: .working, userId: 1)
     let state = actions.activityState(for: peer)
@@ -64,20 +64,6 @@ struct ComposeActionStateTests {
     actions.removeComposeAction(for: peer, userId: 1)
     #expect(state.presentation?.action == .working)
     actions.removeComposeAction(for: peer, userId: 2)
-    #expect(state.presentation == nil)
-  }
-
-  @Test("disabled agent activity falls back to typing across presentation APIs")
-  func disabledWorkingUsesTyping() {
-    let actions = ComposeActions(agentActivityEnabled: false)
-    let peer = Peer.thread(id: 502)
-    let state = actions.activityState(for: peer)
-    actions.addComposeAction(for: peer, action: .working, userId: 7)
-    #expect(state.presentation?.action == .typing)
-    #expect(state.presentation?.text == "typing")
-    #expect(actions.getComposeAction(for: peer)?.action == .typing)
-    #expect(actions.getTypingUsers(for: peer) == [7])
-    actions.removeAllComposeActions(for: peer)
     #expect(state.presentation == nil)
   }
 
