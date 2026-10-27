@@ -3,6 +3,7 @@ members = [
   "cli",
   "crates/agent-bridge",
   "crates/agent-driver-acp",
+  "crates/agent-driver-claude",
   "crates/agent-driver-codex",
   "crates/client",
   "crates/protocol",
@@ -56,7 +57,7 @@ tokio-tungstenite = { version = "0.29.0", features = [
 ] }
 tower = { version = "0.5.3", features = ["util"] }
 url = "2.5.4"
-uuid = { version = "1.24.0", features = ["v4"] }
+uuid = { version = "1.24.0", features = ["v4", "v5"] }
 
 [profile.release]
 lto = "fat"

@@ -1,13 +1,22 @@
 import type {
+  BotBlockStatus,
   BotFile,
+  BotFormField,
+  BotGrantRequirement,
   BotRichBlock,
   BotRichMessage,
   BotRichText,
   BotUser,
 } from "@inline-chat/bot-api-types"
 import {
+  AgentGrantRequirement,
+  BlockCallout_Kind,
+  BlockDiff_Change,
   BlockDisclosure_Kind,
+  BlockFormText_Kind,
   BlockList_Kind,
+  BlockMeter_Tone,
+  BlockStatus,
   BlockTable_Alignment,
   MessageEntity_Type,
   Photo_Format,
@@ -256,6 +265,52 @@ const imageDimensions = (image: BlockImage): { width?: number; height?: number }
   return {}
 }
 
+const blockStatuses: Partial<Record<BlockStatus, BotBlockStatus>> = {
+  [BlockStatus.PENDING]: "pending",
+  [BlockStatus.RUNNING]: "running",
+  [BlockStatus.WAITING]: "waiting",
+  [BlockStatus.DONE]: "done",
+  [BlockStatus.FAILED]: "failed",
+  [BlockStatus.CANCELLED]: "cancelled",
+}
+const blockStatus = (value: BlockStatus): BotBlockStatus | undefined => blockStatuses[value]
+
+const diffChanges: Partial<Record<BlockDiff_Change, "added" | "modified" | "deleted" | "renamed">> = {
+  [BlockDiff_Change.ADDED]: "added",
+  [BlockDiff_Change.MODIFIED]: "modified",
+  [BlockDiff_Change.DELETED]: "deleted",
+  [BlockDiff_Change.RENAMED]: "renamed",
+}
+
+const calloutKinds: Partial<Record<BlockCallout_Kind, "info" | "success" | "warning" | "error">> = {
+  [BlockCallout_Kind.INFO]: "info",
+  [BlockCallout_Kind.SUCCESS]: "success",
+  [BlockCallout_Kind.WARNING]: "warning",
+  [BlockCallout_Kind.ERROR]: "error",
+}
+
+const meterTones: Partial<Record<BlockMeter_Tone, "warning" | "critical">> = {
+  [BlockMeter_Tone.WARNING]: "warning",
+  [BlockMeter_Tone.CRITICAL]: "critical",
+}
+
+const textFieldKinds: Record<BlockFormText_Kind, "single_line" | "multiline" | "secret"> = {
+  [BlockFormText_Kind.SINGLE_LINE]: "single_line",
+  [BlockFormText_Kind.MULTILINE]: "multiline",
+  [BlockFormText_Kind.SECRET]: "secret",
+}
+
+const grantRequirements: Partial<Record<AgentGrantRequirement, BotGrantRequirement>> = {
+  [AgentGrantRequirement.ACCESS]: "access",
+  [AgentGrantRequirement.INVOKE]: "invoke",
+  [AgentGrantRequirement.STEER]: "steer",
+  [AgentGrantRequirement.APPROVE]: "approve",
+  [AgentGrantRequirement.CONFIGURE]: "configure",
+  [AgentGrantRequirement.OWNER]: "owner",
+}
+export const botGrantRequirement = (value: AgentGrantRequirement): BotGrantRequirement | undefined =>
+  grantRequirements[value]
+
 const alignment = (value: BlockTable_Alignment): "left" | "center" | "right" => {
   if (value === BlockTable_Alignment.CENTER) return "center"
   if (value === BlockTable_Alignment.RIGHT) return "right"
@@ -320,8 +375,121 @@ const encodeBlocks = (input: {
           blocks: blocks(block.kind.disclosure.children),
           is_open: trueOrUndefined(block.kind.disclosure.initiallyOpen),
           kind: block.kind.disclosure.kind === BlockDisclosure_Kind.PROGRESS ? "progress" : undefined,
+          status: blockStatus(block.kind.disclosure.status),
+          meta: block.kind.disclosure.meta ? richText(block.kind.disclosure.meta) : undefined,
           is_rtl: trueOrUndefined(block.kind.disclosure.isRtl),
         }]
+      case "diff": {
+        const diff = block.kind.diff
+        return [{
+          type: "diff",
+          path: richText(diff.path),
+          diff: diff.text ? richText(diff.text) : undefined,
+          change: diffChanges[diff.change],
+          previous_path: diff.previousPath ? richText(diff.previousPath) : undefined,
+          additions: diff.additions,
+          deletions: diff.deletions,
+          language: diff.language,
+          is_truncated: trueOrUndefined(diff.truncated),
+        }]
+      }
+      case "fields":
+        return [{
+          type: "fields",
+          fields: block.kind.fields.fields.map((field) => ({
+            label: richText(field.label),
+            value: richText(field.value),
+            is_monospace: trueOrUndefined(field.monospace),
+          })),
+          is_rtl: trueOrUndefined(block.kind.fields.isRtl),
+        }]
+      case "steps":
+        return [{
+          type: "steps",
+          steps: block.kind.steps.steps.map((step) => ({
+            text: richText(step.text),
+            status: blockStatus(step.status),
+            detail: step.detail ? richText(step.detail) : undefined,
+          })),
+          is_rtl: trueOrUndefined(block.kind.steps.isRtl),
+        }]
+      case "callout":
+        return [{
+          type: "callout",
+          kind: calloutKinds[block.kind.callout.kind],
+          title: block.kind.callout.title ? richText(block.kind.callout.title) : undefined,
+          blocks: blocks(block.kind.callout.children),
+          is_rtl: trueOrUndefined(block.kind.callout.isRtl),
+        }]
+      case "meter":
+        return [{
+          type: "meter",
+          label: richText(block.kind.meter.label),
+          value: block.kind.meter.value,
+          max: block.kind.meter.max,
+          meta: block.kind.meter.meta ? richText(block.kind.meter.meta) : undefined,
+          tone: meterTones[block.kind.meter.tone],
+        }]
+      case "form": {
+        const form = block.kind.form
+        return [{
+          type: "form",
+          form_id: form.formId,
+          title: form.title ? richText(form.title) : undefined,
+          fields: form.fields.flatMap((field): BotFormField[] => {
+            const base = {
+              field_id: field.fieldId,
+              label: richText(field.label),
+              description: field.description ? richText(field.description) : undefined,
+              is_required: trueOrUndefined(field.required),
+            }
+            switch (field.kind.oneofKind) {
+              case "select": {
+                const select = field.kind.select
+                return [{
+                  ...base,
+                  type: "select" as const,
+                  options: select.options.map((option) => ({
+                    option_id: option.optionId,
+                    label: richText(option.label),
+                    description: option.description ? richText(option.description) : undefined,
+                  })),
+                  is_multiple: trueOrUndefined(select.multiple),
+                  default_option_ids: select.defaultOptionIds.length > 0 ? select.defaultOptionIds : undefined,
+                  allow_other: trueOrUndefined(select.allowOther),
+                }]
+              }
+              case "text":
+                return [{
+                  ...base,
+                  type: "text" as const,
+                  kind: textFieldKinds[field.kind.text.kind],
+                  placeholder: field.kind.text.placeholder,
+                  default_value: field.kind.text.defaultValue,
+                  max_length: field.kind.text.maxLength,
+                }]
+              case "toggle":
+                return [{ ...base, type: "toggle" as const, default_value: field.kind.toggle.defaultValue }]
+              case "number":
+                return [{
+                  ...base,
+                  type: "number" as const,
+                  default_value: field.kind.number.defaultValue,
+                  min: field.kind.number.min,
+                  max: field.kind.number.max,
+                  step: field.kind.number.step,
+                  is_integer: trueOrUndefined(field.kind.number.integer),
+                }]
+              default:
+                return []
+            }
+          }),
+          submit_label: form.submitLabel,
+          required_grant: botGrantRequirement(form.requiredGrant),
+          is_closed: trueOrUndefined(form.closed),
+          is_rtl: trueOrUndefined(form.isRtl),
+        }]
+      }
       case "list": {
         const list = block.kind.list
         const start = list.start ?? 1n

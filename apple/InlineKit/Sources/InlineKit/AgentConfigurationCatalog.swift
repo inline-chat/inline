@@ -6,6 +6,12 @@ public struct AgentConfigurationOption: Identifiable, Equatable, Sendable {
   public let id: String
   public let label: String
   public let description: String?
+
+  public init(id: String, label: String, description: String?) {
+    self.id = id
+    self.label = label
+    self.description = description
+  }
 }
 
 public struct AgentModelConfigurationOption: Identifiable, Equatable, Sendable {
@@ -14,6 +20,20 @@ public struct AgentModelConfigurationOption: Identifiable, Equatable, Sendable {
   public let description: String?
   public let reasoningEffortIDs: [String]
   public let defaultReasoningEffortID: String?
+
+  public init(
+    id: String,
+    label: String,
+    description: String?,
+    reasoningEffortIDs: [String] = [],
+    defaultReasoningEffortID: String? = nil
+  ) {
+    self.id = id
+    self.label = label
+    self.description = description
+    self.reasoningEffortIDs = reasoningEffortIDs
+    self.defaultReasoningEffortID = defaultReasoningEffortID
+  }
 }
 
 public struct AgentConfigurationCatalogSnapshot: Equatable, Sendable {
@@ -241,6 +261,19 @@ public final class AgentConfigurationCatalogStore {
       }
     } catch {
       return nil
+    }
+  }
+
+  /// Synchronous read of the durable cache for first-frame presentation. The
+  /// row is tiny and keyed by primary key, so it is safe on the main thread.
+  public func cachedSnapshot(botUserID: Int64) -> AgentConfigurationCatalogSnapshot? {
+    try? database.reader.read { db -> AgentConfigurationCatalogSnapshot? in
+      guard let record = try StoredAgentConfigurationCatalog.fetchOne(db, key: botUserID),
+        let protocolCatalog = try? InlineProtocol.AgentConfigurationCatalog(
+          serializedBytes: record.payload
+        )
+      else { return nil }
+      return try AgentConfigurationCatalogSnapshot(protocolCatalog: protocolCatalog)
     }
   }
 

@@ -48,6 +48,7 @@ export * from "./serverConfig"
 export * from "./reservedUsernames"
 export * from "./inlineProtocol"
 export * from "./agentSessions"
+export * from "./agents"
 
 export * from "./authDeliveryBudgets"
 export * from "./recentRealtimeBuckets"

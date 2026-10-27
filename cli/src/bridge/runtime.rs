@@ -53,7 +53,7 @@ pub(super) use admission::{accept_provider_unavailable_delivery, recover_failed_
 mod conversation;
 pub(in crate::bridge) use conversation::*;
 mod content;
-use content::*;
+pub(in crate::bridge) use content::{materialize_inbound_attachments, normalize_inbound_content};
 mod settings_recovery;
 use settings_recovery::*;
 mod queue_ui;

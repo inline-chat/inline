@@ -3,6 +3,7 @@ import {
   AgentSessionMessageRole,
   AgentSessionMessageSyncState,
   AgentSessionProvider,
+  AgentSessionRelation,
   AgentSessionSyncMode,
   ConnectAgentSessionState,
   MessageEntities,
@@ -56,6 +57,8 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { and, eq, exists, gt, inArray, ne, or, sql } from "drizzle-orm"
+import { AgentSessionMovedError, MAX_MOVE_RETRIES } from "./moved"
+import { agentSessionV2Fields, encryptWorkspaceLabel } from "./stateFields"
 import {
   agentSessionHash,
   agentSourceHash,
@@ -70,6 +73,7 @@ import {
 const log = new Log("AgentSessions")
 const MAX_BATCH_SIZE = 100
 const MAX_PROJECT_REF_BYTES = 512
+const MAX_WORKSPACE_LABEL_BYTES = 256
 
 type AgentSessionContext = {
   session: DbAgentSession
@@ -193,7 +197,33 @@ async function encodeAgentSession(row: DbAgentSession, viewerUserId: number): Pr
     provider: row.provider,
     statusMessageId: statusMessage ? BigInt(statusMessage.messageId) : undefined,
     parentChatId: chat.parentChatId ? BigInt(chat.parentChatId) : undefined,
+    ...agentSessionV2Fields(row),
   }
+}
+
+function validRelation(relation: AgentSessionRelation): boolean {
+  return relation >= AgentSessionRelation.UNSPECIFIED && relation <= AgentSessionRelation.FORK
+}
+
+/** A parent must be another session of the same bot and owner. */
+async function verifiedParentSession(input: {
+  parentId: bigint | undefined
+  relation: AgentSessionRelation
+  botUserId: number
+  ownerUserId: number
+}): Promise<bigint | null> {
+  if (input.parentId === undefined) {
+    if (input.relation !== AgentSessionRelation.UNSPECIFIED) throw RealtimeRpcError.BadRequest()
+    return null
+  }
+  if (input.relation === AgentSessionRelation.UNSPECIFIED) throw RealtimeRpcError.BadRequest()
+  const [parent] = await db.select({ id: agentSessions.id }).from(agentSessions).where(and(
+    eq(agentSessions.id, input.parentId),
+    eq(agentSessions.botUserId, input.botUserId),
+    eq(agentSessions.ownerUserId, input.ownerUserId),
+  )).limit(1)
+  if (!parent) throw RealtimeRpcError.BadRequest()
+  return parent.id
 }
 
 export async function connectAgentSession(
@@ -205,6 +235,8 @@ export async function connectAgentSession(
   const instanceRef = ensureBounded(input.instanceRef, 512, true)!
   const sessionRef = ensureBounded(input.sessionRef, 512, true)!
   const projectRef = ensureBounded(input.projectRef, MAX_PROJECT_REF_BYTES, false)
+  const workspaceLabel = ensureBounded(input.workspaceLabel, MAX_WORKSPACE_LABEL_BYTES, false)
+  if (!validRelation(input.relation)) throw RealtimeRpcError.BadRequest()
   const sessionKeyHash = agentSessionHash(input.provider, instanceRef, sessionRef)
 
   // An omitted peer is an owner-authenticated, read-only identity lookup. It
@@ -232,6 +264,12 @@ export async function connectAgentSession(
 
   const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, { currentUserId })
   await verifiedOwnerBotChat({ chat, botUserId, ownerUserId: currentUserId })
+  const parentSessionId = await verifiedParentSession({
+    parentId: input.parentAgentSessionId,
+    relation: input.relation,
+    botUserId,
+    ownerUserId: currentUserId,
+  })
   const statusGlobalId = await statusMessageGlobalId({
     chatId: chat.id,
     botUserId,
@@ -241,11 +279,12 @@ export async function connectAgentSession(
   const result = await db.transaction(async (tx) => {
     const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).for("update").limit(1)
     if (!lockedChat) throw RealtimeRpcError.PeerIdInvalid()
+    // A thread bound to an agent pins that agent's project. Other agents can
+    // still work there (spec §5: several agents per thread, one work each).
     const boundContext = chatAgentContext(lockedChat)
-    if (boundContext && Number(boundContext.botUserId) !== botUserId) {
-      throw RealtimeRpcError.BadRequest()
+    if (boundContext && Number(boundContext.botUserId) === botUserId) {
+      ensureSelectedProjectRef(boundContext, projectRef)
     }
-    ensureSelectedProjectRef(boundContext, projectRef)
 
     const [external] = await tx.select().from(agentSessions).where(and(
         eq(agentSessions.botUserId, botUserId),
@@ -263,6 +302,7 @@ export async function connectAgentSession(
         .set({
           projectRefEncrypted: external.projectRefEncrypted,
           statusMessageGlobalId: statusGlobalId ?? external.statusMessageGlobalId,
+          ...(workspaceLabel === undefined ? {} : { workspaceLabelEncrypted: encryptWorkspaceLabel(workspaceLabel) }),
           updatedAt: new Date(),
         })
         .where(eq(agentSessions.id, external.id))
@@ -273,10 +313,9 @@ export async function connectAgentSession(
       }
     }
 
+    // One work per (thread, agent).
     const [occupied] = await tx.select().from(agentSessions).where(
-      boundContext
-        ? eq(agentSessions.chatId, chat.id)
-        : and(eq(agentSessions.chatId, chat.id), eq(agentSessions.botUserId, botUserId)),
+      and(eq(agentSessions.chatId, chat.id), eq(agentSessions.botUserId, botUserId)),
     ).limit(1)
     if (occupied) throw RealtimeRpcError.BadRequest()
 
@@ -292,6 +331,9 @@ export async function connectAgentSession(
         sessionRefEncrypted: encryptAgentRef(sessionRef),
         projectRefEncrypted: projectRef ? encryptAgentRef(projectRef) : null,
         statusMessageGlobalId: statusGlobalId ?? null,
+        parentSessionId,
+        relation: input.relation,
+        workspaceLabelEncrypted: workspaceLabel === undefined ? null : encryptWorkspaceLabel(workspaceLabel),
       })
       .onConflictDoNothing()
       .returning()
@@ -335,10 +377,7 @@ export async function getAgentSession(
   const botUserId = safePositiveNumber(input.botUserId)
   const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, { currentUserId })
   await verifiedOwnerBotChat({ chat, botUserId, ownerUserId: currentUserId })
-  const [row] = await db.select().from(agentSessions).where(and(
-    eq(agentSessions.chatId, chat.id),
-    eq(agentSessions.botUserId, botUserId),
-  )).limit(1)
+  const row = await selectedAgentSession({ chatId: chat.id, botUserId, sessionId: input.agentSessionId })
   if (!row) return {}
   if (row.ownerUserId !== currentUserId) throw RealtimeRpcError.UserIdInvalid()
   return {
@@ -349,6 +388,20 @@ export async function getAgentSession(
       projectRef: row.projectRefEncrypted ? decryptAgentRef(row.projectRefEncrypted) : undefined,
     },
   }
+}
+
+/** The conversation's one work for this bot; a given ID must match it. */
+async function selectedAgentSession(input: {
+  chatId: number
+  botUserId: number
+  sessionId?: bigint
+}): Promise<DbAgentSession | undefined> {
+  const [row] = await db.select().from(agentSessions).where(and(
+    eq(agentSessions.chatId, input.chatId),
+    eq(agentSessions.botUserId, input.botUserId),
+  )).limit(1)
+  if (row && input.sessionId !== undefined && row.id !== input.sessionId) return undefined
+  return row
 }
 
 async function prepareSync(input: AgentSessionMessageSync): Promise<PreparedSync> {
@@ -593,19 +646,38 @@ export async function syncAgentSessionMessages(
   if (input.messages.length === 0 || input.messages.length > MAX_BATCH_SIZE) {
     throw RealtimeRpcError.BadRequest()
   }
-  const context = await loadSyncContext(input.agentSessionId, botUserId)
   const prepared = await Promise.all(input.messages.map(prepareSync))
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await syncAgentSessionMessagesOnce(input, botUserId, prepared)
+    } catch (error) {
+      // The work moved to another chat between reading and locking; publish
+      // in its new chat.
+      if (error instanceof AgentSessionMovedError && attempt < MAX_MOVE_RETRIES) continue
+      throw error
+    }
+  }
+}
 
+async function syncAgentSessionMessagesOnce(
+  input: SyncAgentSessionMessagesInput,
+  botUserId: number,
+  prepared: Awaited<ReturnType<typeof prepareSync>>[],
+): Promise<SyncAgentSessionMessagesResult> {
+  const context = await loadSyncContext(input.agentSessionId, botUserId)
   const projected: ProjectedUpdate[] = []
   const results = await db.transaction(async (tx) => {
+    // Every writer of a work locks its chat, then the session (moves lock
+    // both chats in ID order first), and checks the session is still there.
+    const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, context.chat.id)).for("update").limit(1)
     const [lockedSession] = await tx
       .select()
       .from(agentSessions)
       .where(and(eq(agentSessions.id, context.session.id), eq(agentSessions.botUserId, botUserId)))
       .for("update")
       .limit(1)
-    const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, context.chat.id)).for("update").limit(1)
     if (!lockedSession || !lockedChat) throw RealtimeRpcError.BadRequest()
+    if (lockedSession.chatId !== lockedChat.id) throw new AgentSessionMovedError()
 
     let nextMessageId = Math.max(lockedChat.lastMsgId ?? 0, lockedChat.messageIdCounter ?? 0)
     let lastCreatedMessageId: number | undefined

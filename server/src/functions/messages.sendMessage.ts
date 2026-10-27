@@ -56,6 +56,7 @@ import {
 import { notificationPhotoUrl } from "@in/server/modules/notifications/notificationPhoto"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { prepareBlockContent, type PreparedBlockContent } from "@in/server/modules/message/blockContentStorage"
+import { validateBotBlockContent } from "@in/server/modules/message/botBlockContent"
 import { getPreviewRoutesFromMessage, processUrlPreviews } from "@in/server/modules/urlPreview/processUrlPreview"
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import {
@@ -126,6 +127,9 @@ type Input = {
 
   /** Canonical structural projection supplied by trusted internal callers such as forwarding. */
   blockContent?: BlockContent
+
+  /** Bot-supplied structural content over the unparsed `message` text; validated strictly. */
+  botBlockContent?: BlockContent
 
   /** whether to process markdown string */
   parseMarkdown?: boolean
@@ -301,8 +305,15 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const mentionedUserIds = new Set<number>([...getMentionedUserIds(entities), ...groupMentions.mentionedUserIds])
 
   let preparedBlockContent: PreparedBlockContent | undefined
-  const parsedBlockContent = input.blockContent
-    ? { blockContent: input.blockContent, imageSources: [] }
+  let botBlockContent: BlockContent | undefined
+  if (input.botBlockContent) {
+    const sender = await UsersModel.getUserById(currentUserId)
+    if (!sender?.bot || input.parseMarkdown || input.blockContent) throw RealtimeRpcError.BadRequest()
+    botBlockContent = validateBotBlockContent(text, input.botBlockContent)
+  }
+  const trustedBlockContent = input.blockContent ?? botBlockContent
+  const parsedBlockContent = trustedBlockContent
+    ? { blockContent: trustedBlockContent, imageSources: [] }
     : outgoingText?.blockContent
     ? {
         blockContent: outgoingText.blockContent,
@@ -332,7 +343,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   // Encrypt
   const encryptedMessage = text ? encryptMessage(text) : undefined
-  const normalizedActions = normalizeAndValidateMessageActions(input.actions)
+  const normalizedActions = normalizeAndValidateMessageActions(input.actions, botBlockContent)
   if (normalizedActions !== undefined && !(await senderIsBot())) {
     throw RealtimeRpcError.BadRequest()
   }

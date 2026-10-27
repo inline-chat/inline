@@ -4,13 +4,16 @@ import type {
   BotEventChat,
   BotEventMessage,
   BotFile,
+  BotFormSubmission,
+  BotFormValue,
   BotMedia,
   BotMessageAction,
+  BotMessageActionOptions,
   BotPeerId,
   BotReaction,
   BotUser,
 } from "@inline-chat/bot-api-types"
-import type { MessageActions, MessageEntities } from "@inline-chat/protocol/core"
+import { MessageAction_Style, type MessageAction, type MessageActions, type MessageEntities, type MessageFormSubmission } from "@inline-chat/protocol/core"
 import { BotUpdatesModel } from "@in/server/db/models/botUpdates"
 import { BotAgentsModel } from "@in/server/db/models/botAgents"
 import { chatAgentContext } from "@in/server/modules/agentConfiguration"
@@ -18,7 +21,7 @@ import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import { encodeBotEntities, type BotUserJson } from "@in/server/controllers/bot/entityCodec"
-import { encodeBotRichMessageFromStored } from "@in/server/controllers/bot/richContent"
+import { botGrantRequirement, encodeBotRichMessageFromStored } from "@in/server/controllers/bot/richContent"
 import type { UpdateGroup } from "@in/server/modules/updates"
 import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import { Log } from "@in/server/utils/log"
@@ -142,16 +145,50 @@ const commandTargets = (entities: MessageEntities | null | undefined): number[] 
 
 export const encodeBotActions = (actions: MessageActions | null | undefined): BotMessageAction[][] | undefined =>
   actions?.rows.map((row) => row.actions.flatMap<BotMessageAction>((action) => {
-    if (action.action.oneofKind === "copyText") {
-      return [{ action_id: action.actionId, text: action.text, type: "copy_text", copy_text: action.action.copyText.text }]
+    const base = { action_id: action.actionId, text: action.text, ...botActionOptions(action) }
+    switch (action.action.oneofKind) {
+      case "copyText":
+        return [{ ...base, type: "copy_text", copy_text: action.action.copyText.text }]
+      case "openUrl":
+        return [{ ...base, type: "open_url", url: action.action.openUrl.url }]
+      case "openLink": {
+        const { peerId, messageId } = action.action.openLink
+        return [{
+          ...base,
+          type: "open_link",
+          ...(peerId?.type.oneofKind === "chat" ? { chat_id: Number(peerId.type.chat.chatId) } : {}),
+          ...(peerId?.type.oneofKind === "user" ? { user_id: Number(peerId.type.user.userId) } : {}),
+          ...(messageId === undefined ? {} : { message_id: Number(messageId) }),
+        }]
+      }
+      case "callback": {
+        const bytes = Buffer.from(action.action.callback.data)
+        const text = bytes.toString("utf8")
+        return [Buffer.from(text, "utf8").equals(bytes)
+          ? { ...base, type: "callback", callback_data: text }
+          : { ...base, type: "callback", callback_data_base64: bytes.toString("base64") }]
+      }
+      default:
+        return []
     }
-    if (action.action.oneofKind !== "callback") return []
-    const bytes = Buffer.from(action.action.callback.data)
-    const text = bytes.toString("utf8")
-    return [Buffer.from(text, "utf8").equals(bytes)
-      ? { action_id: action.actionId, text: action.text, type: "callback", callback_data: text }
-      : { action_id: action.actionId, text: action.text, type: "callback", callback_data_base64: bytes.toString("base64") }]
   }))
+
+function botActionOptions(action: MessageAction): BotMessageActionOptions {
+  return {
+    ...(action.style === MessageAction_Style.PRIMARY ? { style: "primary" as const } : {}),
+    ...(action.style === MessageAction_Style.DESTRUCTIVE ? { style: "destructive" as const } : {}),
+    ...(action.confirm
+      ? {
+          confirm: {
+            title: action.confirm.title,
+            ...(action.confirm.text === undefined ? {} : { text: action.confirm.text }),
+            ...(action.confirm.confirmText === undefined ? {} : { confirm_text: action.confirm.confirmText }),
+          },
+        }
+      : {}),
+    ...(botGrantRequirement(action.requiredGrant) ? { required_grant: botGrantRequirement(action.requiredGrant) } : {}),
+  }
+}
 
 const toFile = (file: {
   fileUniqueId: string
@@ -500,6 +537,8 @@ async function actionInvoked(input: {
   actionId: string
   interactionId: bigint
   data: Uint8Array
+  /** Stored copy: secret values are already redacted. */
+  form?: MessageFormSubmission
 }): Promise<void> {
   const actor = (await UsersModel.getUsersWithPhotos([input.actorUserId]))[0]?.user
   if (!actor) return
@@ -516,10 +555,31 @@ async function actionInvoked(input: {
         action: Buffer.from(value, "utf8").equals(bytes)
           ? { action_id: input.actionId, callback_data: value }
           : { action_id: input.actionId, callback_data_base64: bytes.toString("base64") },
+        ...(input.form ? { form: botFormSubmission(input.form) } : {}),
       },
     },
     sourceEventId: `action:${input.botUserId}:${input.interactionId}`,
   })
+}
+
+/** Secret fields appear as redacted; HTTP bots never receive their values. */
+function botFormSubmission(form: MessageFormSubmission): BotFormSubmission {
+  return {
+    values: form.values.map((value): BotFormValue => {
+      if (value.redacted) return { field_id: value.fieldId, redacted: true }
+      switch (value.value.oneofKind) {
+        case "text": return { field_id: value.fieldId, text: value.value.text }
+        case "selection": return {
+          field_id: value.fieldId,
+          option_ids: value.value.selection.optionIds,
+          ...(value.value.selection.otherText === undefined ? {} : { other_text: value.value.selection.otherText }),
+        }
+        case "toggle": return { field_id: value.fieldId, toggle: value.value.toggle }
+        case "number": return { field_id: value.fieldId, number: value.value.number }
+        default: return { field_id: value.fieldId }
+      }
+    }),
+  }
 }
 
 async function participationChanged(input: {

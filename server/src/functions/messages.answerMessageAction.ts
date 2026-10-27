@@ -34,12 +34,19 @@ export const answerMessageAction = async (input: Input, context: FunctionContext
     throw RealtimeRpcError.BadRequest()
   }
 
+  // A message button, or a work bar control relayed to the session's bot:
+  // both are answered with a toast for the person who pressed it.
   const decrypted = UpdatesModel.decrypt(invocation)
-  if (decrypted.payload.update.oneofKind !== "userMessageActionInvoked") {
+  const update = decrypted.payload.update
+  const payload =
+    update.oneofKind === "userMessageActionInvoked"
+      ? update.userMessageActionInvoked
+      : update.oneofKind === "userAgentSessionControl"
+        ? update.userAgentSessionControl
+        : undefined
+  if (!payload) {
     throw RealtimeRpcError.BadRequest()
   }
-
-  const payload = decrypted.payload.update.userMessageActionInvoked
   const normalizedUi = normalizeActionResponseUi(input.ui)
   const targetUserId = Number(payload.actorUserId)
   if (!Number.isSafeInteger(targetUserId) || targetUserId <= 0) {

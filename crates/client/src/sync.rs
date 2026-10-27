@@ -146,6 +146,46 @@ impl DiscoveryTarget {
     }
 }
 
+/// The crash-replay copy of a batch never stores form text: a text answer may
+/// be a secret, and the live submission is the only copy that carries it. A
+/// replay delivers the field as redacted, so the bot asks again.
+fn redact_form_text(updates: &[proto::Update]) -> std::borrow::Cow<'_, [proto::Update]> {
+    use proto::message_form_value::Value;
+    let has_text = |update: &proto::Update| {
+        matches!(
+            &update.update,
+            Some(proto::update::Update::MessageActionInvoked(invoked))
+                if invoked.form.as_ref().is_some_and(|form| form
+                    .values
+                    .iter()
+                    .any(|value| matches!(value.value, Some(Value::Text(_)))))
+        )
+    };
+    if !updates.iter().any(has_text) {
+        return std::borrow::Cow::Borrowed(updates);
+    }
+    std::borrow::Cow::Owned(
+        updates
+            .iter()
+            .cloned()
+            .map(|mut update| {
+                if let Some(proto::update::Update::MessageActionInvoked(invoked)) =
+                    &mut update.update
+                    && let Some(form) = &mut invoked.form
+                {
+                    for value in &mut form.values {
+                        if matches!(value.value, Some(Value::Text(_))) {
+                            value.value = None;
+                            value.redacted = true;
+                        }
+                    }
+                }
+                update
+            })
+            .collect(),
+    )
+}
+
 fn discovery_target(seq: i64) -> DiscoveryTarget {
     if seq == 0 {
         DiscoveryTarget::Latest
@@ -732,7 +772,7 @@ impl SyncManager {
         sidecars: Option<proto::UpdateSidecars>,
     ) -> BackendResult<CommittedSyncBatch> {
         validate_journal_updates(&updates)?;
-        let payload = encode_pending_payload(&updates, sidecars.as_ref())?;
+        let payload = encode_pending_payload(&redact_form_text(&updates), sidecars.as_ref())?;
         self.store
             .save_pending_sync_batch(PendingSyncBatch {
                 key,
@@ -1295,9 +1335,19 @@ fn insert_unique_update(
         if source == "fetched/realtime merge" && same_logical_message_update(existing, &update) {
             return Ok(());
         }
+        let kind = |update: &proto::Update| {
+            update
+                .update
+                .as_ref()
+                .map_or("unknown", crate::sdk_backend::update_kind)
+        };
         return Err(BackendError::new(
             ClientErrorCategory::ProtocolMismatch,
-            format!("conflicting Inline updates shared sequence {seq} in {source}"),
+            format!(
+                "conflicting Inline updates shared sequence {seq} in {source} ({} and {})",
+                kind(existing),
+                kind(&update)
+            ),
         ));
     }
     updates.insert(seq, update);
@@ -1328,6 +1378,13 @@ fn same_logical_message_update(left: &proto::Update, right: &proto::Update) -> b
             }
             _ => false,
         },
+        // A realtime delete names the peer the deleter used (a DM as its chat),
+        // the stored copy names it for the viewer: the same message IDs at the
+        // same sequence are the same deletion.
+        (
+            Some(proto::update::Update::DeleteMessages(left)),
+            Some(proto::update::Update::DeleteMessages(right)),
+        ) => !left.message_ids.is_empty() && left.message_ids == right.message_ids,
         _ => false,
     }
 }
@@ -2974,9 +3031,81 @@ mod tests {
         assert_eq!(error.category, ClientErrorCategory::ProtocolMismatch);
     }
 
+    fn delete_messages_update(seq: i32, peer: proto::Peer, message_ids: Vec<i64>) -> proto::Update {
+        proto::Update {
+            seq: Some(seq),
+            date: Some(20),
+            update: Some(proto::update::Update::DeleteMessages(
+                proto::UpdateDeleteMessages {
+                    message_ids,
+                    peer_id: Some(peer),
+                },
+            )),
+        }
+    }
+
+    #[test]
+    fn fetched_realtime_merge_accepts_a_dm_delete_named_from_either_side() {
+        let fetched = delete_messages_update(
+            4,
+            proto::Peer {
+                r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 41 })),
+            },
+            vec![2],
+        );
+        let realtime = delete_messages_update(4, chat_peer(7), vec![2]);
+        let mut merged = BTreeMap::new();
+        insert_unique_update(&mut merged, 4, fetched.clone(), "fetched page").unwrap();
+        insert_unique_update(&mut merged, 4, realtime, "fetched/realtime merge").unwrap();
+        assert_eq!(merged.get(&4), Some(&fetched));
+
+        let error = insert_unique_update(
+            &mut merged,
+            4,
+            delete_messages_update(4, chat_peer(7), vec![3]),
+            "fetched/realtime merge",
+        )
+        .unwrap_err();
+        assert_eq!(error.category, ClientErrorCategory::ProtocolMismatch);
+    }
+
     fn chat_peer(chat_id: i64) -> proto::Peer {
         proto::Peer {
             r#type: Some(proto::peer::Type::Chat(proto::PeerChat { chat_id })),
         }
+    }
+
+    #[test]
+    fn replay_copies_never_hold_form_text() {
+        use proto::message_form_value::Value;
+        let update = proto::Update {
+            update: Some(proto::update::Update::MessageActionInvoked(
+                proto::UpdateMessageActionInvoked {
+                    form: Some(proto::MessageFormSubmission {
+                        values: vec![
+                            proto::MessageFormValue {
+                                field_id: "token".to_owned(),
+                                value: Some(Value::Text("synthetic-secret".to_owned())),
+                                redacted: false,
+                            },
+                            proto::MessageFormValue {
+                                field_id: "ok".to_owned(),
+                                value: Some(Value::Toggle(true)),
+                                redacted: false,
+                            },
+                        ],
+                    }),
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        };
+        let redacted = super::redact_form_text(std::slice::from_ref(&update));
+        let Some(proto::update::Update::MessageActionInvoked(invoked)) = &redacted[0].update else {
+            panic!("update");
+        };
+        let values = &invoked.form.as_ref().unwrap().values;
+        assert!(values[0].value.is_none() && values[0].redacted);
+        assert_eq!(values[1].value, Some(Value::Toggle(true)));
     }
 }

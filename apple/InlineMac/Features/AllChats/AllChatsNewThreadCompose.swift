@@ -1563,7 +1563,7 @@ private struct AllChatsComposeAccessoryView: View {
 }
 
 @available(macOS 26.0, *)
-private struct AgentConfigurationMenu: View {
+struct AgentConfigurationMenu: View {
   let title: String
   let automaticTitle: String?
   let options: [AgentConfigurationOption]
@@ -1616,7 +1616,7 @@ private struct AgentConfigurationMenu: View {
 }
 
 @available(macOS 26.0, *)
-private struct AgentModelConfigurationMenu: View {
+struct AgentModelConfigurationMenu: View {
   let title: String
   let automaticTitle: String?
   let options: [AgentModelConfigurationOption]
@@ -1667,7 +1667,7 @@ private struct AgentModelConfigurationMenu: View {
 }
 
 @available(macOS 26.0, *)
-private struct AgentConfigurationOptionMenuLabel: View {
+struct AgentConfigurationOptionMenuLabel: View {
   let title: String
   let description: String?
   let isSelected: Bool
@@ -1697,7 +1697,7 @@ private struct AgentConfigurationOptionMenuLabel: View {
 }
 
 @available(macOS 26.0, *)
-private struct AllChatsComposePillLabel: View {
+struct AllChatsComposePillLabel: View {
   let title: String
   var showsRobot = false
   @State private var isHovering = false

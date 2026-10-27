@@ -4790,6 +4790,7 @@ async fn send_message(
         actions: None,
         initial_agent_context: None,
         source_chat_id: None,
+        ..Default::default()
     };
 
     realtime.call(input).await
@@ -4811,6 +4812,7 @@ fn edit_message_input(
         entities: None,
         parse_markdown: Some(true),
         actions: None,
+        ..Default::default()
     }
 }
 
@@ -6295,6 +6297,7 @@ mod installed_message_action_tests {
                 }),
                 message_id,
                 action_id,
+                ..Default::default()
             })
             .await
             .expect("invoke real message action");

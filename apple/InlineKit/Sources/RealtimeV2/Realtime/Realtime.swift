@@ -2421,7 +2421,8 @@ public actor RealtimeV2 {
            .urlPreviewUnavailable,
            .agentSessionMessageImmutable,
            .spaceInviteInvalid,
-           .mediaNotOwned:
+           .mediaNotOwned,
+           .agentGrantRequired:
         return true
       case .unknown,
            .unauthenticated,

@@ -327,11 +327,19 @@ fn normalized_audio_mime_type(value: &str) -> Option<&str> {
     .then_some(mime_type)
 }
 
-fn inline_thread_config() -> BTreeMap<String, Value> {
-    BTreeMap::from([(
-        DEFAULT_MODE_REQUEST_USER_INPUT.to_string(),
-        Value::Bool(true),
-    )])
+pub(crate) fn inline_thread_config() -> BTreeMap<String, Value> {
+    BTreeMap::from([
+        (
+            DEFAULT_MODE_REQUEST_USER_INPUT.to_string(),
+            Value::Bool(true),
+        ),
+        // The feature above is marked under development; its warning would
+        // otherwise open every session.
+        (
+            "suppress_unstable_features_warning".to_string(),
+            Value::Bool(true),
+        ),
+    ])
 }
 
 const CONTROL_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -1790,7 +1798,7 @@ async fn dispatch_incoming<W>(
     }
 }
 
-async fn execute_host_tool_call(
+pub(crate) async fn execute_host_tool_call(
     configuration: HostToolConfiguration,
     params: &Value,
 ) -> HostToolResult {

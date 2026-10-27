@@ -474,6 +474,15 @@ pub enum BotInteractionEvent {
         path: String,
         /// Exclusive filename cursor; never log this value.
         after: String,
+        /// `LIST_WORK_FILES`: the work whose folder is listed.
+        #[serde(default)]
+        agent_session_id: Option<i64>,
+        /// `LIST_WORK_FILES`: file-name query; never log this value.
+        #[serde(default)]
+        query: Option<String>,
+        /// `LIST_WORK_FILES`: requested page size.
+        #[serde(default)]
+        limit: Option<u32>,
     },
     /// A client opened the bot settings surface for a chat.
     ChatSettingsRequested {
@@ -503,6 +512,49 @@ pub enum BotInteractionEvent {
         /// Revision the client rendered before invoking the item.
         document_revision: String,
     },
+}
+
+/// One submitted form field.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormValue {
+    /// The field ID.
+    pub field_id: String,
+    /// The value; `None` when the server redacted a secret.
+    pub value: Option<FormFieldValue>,
+}
+
+/// A submitted form field's value. Text may be a secret, so it is never
+/// written to logs or the event outbox.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FormFieldValue {
+    /// Text, including secret text.
+    Text(String),
+    /// Selected option IDs and the optional "Other" answer.
+    Selection {
+        /// Selected option IDs.
+        option_ids: Vec<String>,
+        /// The "Other" text.
+        other: Option<String>,
+    },
+    /// A toggle.
+    Toggle(bool),
+    /// A number, as the shortest decimal text that round-trips.
+    Number(String),
+}
+
+impl fmt::Debug for FormFieldValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Text(_) => formatter.write_str("Text(<redacted>)"),
+            Self::Selection { option_ids, other } => formatter
+                .debug_struct("Selection")
+                .field("option_ids", option_ids)
+                .field("has_other", &other.is_some())
+                .finish(),
+            Self::Toggle(value) => formatter.debug_tuple("Toggle").field(value).finish(),
+            Self::Number(value) => formatter.debug_tuple("Number").field(value).finish(),
+        }
+    }
 }
 
 /// Committed client event for apps, bridges, agents, and hosts.
@@ -580,6 +632,41 @@ pub enum ClientEvent {
         action_id: String,
         /// Opaque bot-defined payload.
         data: Vec<u8>,
+    },
+    /// A bot message form was submitted; answered like an action.
+    MessageFormSubmitted {
+        /// Server interaction ID.
+        interaction_id: InlineId,
+        /// Chat containing the form.
+        chat_id: InlineId,
+        /// Message containing the form.
+        message_id: InlineId,
+        /// User who submitted the form.
+        actor_user_id: InlineId,
+        /// The form ID.
+        form_id: String,
+        /// Submitted values; secret values are present only in the live delivery.
+        values: Vec<FormValue>,
+    },
+    /// Someone used a work bar control on one of this bot's agent sessions.
+    AgentSessionControlRequested {
+        /// Server interaction ID.
+        interaction_id: InlineId,
+        /// Chat the control was used in.
+        chat_id: InlineId,
+        /// The controlled session.
+        agent_session_id: InlineId,
+        /// User who used the control.
+        actor_user_id: InlineId,
+        /// `AgentSessionControl` value: stop, pause or resume.
+        op: i32,
+    },
+    /// Agent grants or participation changed; reread them before acting.
+    AgentAccessChanged {
+        /// Chat whose participation changed, when it was a participation change.
+        chat_id: Option<InlineId>,
+        /// Grant subject, when it was a grant change.
+        user_id: Option<InlineId>,
     },
     /// A previously invoked message action received a UI response.
     MessageActionAnswered {
@@ -673,6 +760,13 @@ pub enum ClientEvent {
 }
 
 impl ClientEvent {
+    /// Events delivered to the host but never stored in the event outbox:
+    /// form submissions can carry secrets. A crash before the host handles
+    /// one leaves the form open to submit again.
+    pub const fn is_never_persisted(&self) -> bool {
+        matches!(self, Self::MessageFormSubmitted { .. })
+    }
+
     /// Returns the event delivery reliability class.
     pub const fn reliability(&self) -> EventReliability {
         match self {
@@ -693,6 +787,9 @@ impl ClientEvent {
             | Self::SpaceMemberChanged { .. }
             | Self::UserSettingsChanged { .. }
             | Self::MessageActionInvoked { .. }
+            | Self::MessageFormSubmitted { .. }
+            | Self::AgentSessionControlRequested { .. }
+            | Self::AgentAccessChanged { .. }
             | Self::MessageActionAnswered { .. }
             | Self::MessageUpserted { .. }
             | Self::MessageStored { .. }

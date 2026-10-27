@@ -38,7 +38,7 @@ describe("block content parser", () => {
       { blocks: [{ kind: { oneofKind: "footer", footer: range } }] },
       { blocks: [{ kind: { oneofKind: "heading", heading: { level: 2, text: range } } }] },
       { blocks: [{ kind: { oneofKind: "code", code: { text: range, language: "swift" } } }] },
-      { blocks: [{ kind: { oneofKind: "disclosure", disclosure: {
+      { blocks: [{ kind: { oneofKind: "disclosure", disclosure: { status: 0,
         kind: BlockDisclosure_Kind.DEFAULT,
         activityKind: BlockDisclosure_ActivityKind.UNSPECIFIED,
         summary: range, children: [{ kind: { oneofKind: "separator", separator: {} } }],

@@ -28,7 +28,9 @@ export const sendMessage = async (
       isSticker: input.isSticker ?? false,
       entities: input.entities,
       actions: input.actions,
-      parseMarkdown: input.parseMarkdown ?? (handlerContext.isBot ? true : undefined),
+      // Structured content is laid over the literal text, so Markdown stays off.
+      parseMarkdown: input.blockContent ? input.parseMarkdown : input.parseMarkdown ?? (handlerContext.isBot ? true : undefined),
+      botBlockContent: input.blockContent,
       sendMode: input.sendMode ?? undefined,
       initialAgentContext: input.initialAgentContext,
       sourceChatId: input.sourceChatId === undefined ? undefined : Number(input.sourceChatId),

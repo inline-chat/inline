@@ -68,6 +68,8 @@ export function liveRequirements(updates: readonly Update[], recipient: number):
       case "messageActionInvoked": chat(u.messageActionInvoked.chatId); break
       case "deleteMessages": peer(u.deleteMessages.peerId); break
       case "pinnedMessages": peer(u.pinnedMessages.peerId); break
+      case "agentSessionState": peer(u.agentSessionState.agentSession?.peerId); break
+      case "agentParticipation": peer(u.agentParticipation.participation?.peerId); break
       case "clearChatHistory":
         if (u.clearChatHistory.target.oneofKind === "spaceId") space(u.clearChatHistory.target.spaceId)
         else if (u.clearChatHistory.target.oneofKind === "peerId") peer(u.clearChatHistory.target.peerId)
@@ -91,7 +93,10 @@ export function liveRequirements(updates: readonly Update[], recipient: number):
       case "updateMessageId": case "deleteChat": case "userRemovedFromChat": case "participantGroupDelete":
       case "updateReadMaxId": case "updateUserSettings": case "markAsUnread": case "dialogArchived":
       case "dialogNotificationSettings": case "dialogFollowMode": case "dialogCollapsedMaxId":
-      case "dialogFolder": case "dialogTranslation": case "updatedUser": case "messageActionAnswered": break
+      case "dialogFolder": case "dialogTranslation": case "updatedUser": case "messageActionAnswered":
+      case "agentGrant": case "agentRuntime": break
+      // Like an action invocation, the bot must still have access to the session's chat.
+      case "agentSessionControl": chat(u.agentSessionControl.chatId); break
       // Other transports already own these transient events and repair hints.
       case "updateComposeAction": case "updateUserStatus": case "botPresence":
       case "chatSkipPts": case "chatHasNewUpdates": case "spaceHasNewUpdates": case "userHasNewUpdates":

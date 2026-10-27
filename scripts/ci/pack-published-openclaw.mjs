@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 
 const directory = path.resolve(process.argv[2] ?? "")
-if (!process.argv[2]) throw new Error("usage: pack-published-openclaw.mjs OUTPUT_DIR")
+if (!process.argv[2]) throw new Error("usage: pack-published-openclaw.mjs OUTPUT_DIR [PACKAGE_SPEC]")
 await mkdir(directory, { recursive: true })
 const packages = []
 async function pack(spec) {
@@ -14,7 +14,7 @@ async function pack(spec) {
     sha256: createHash("sha256").update(await readFile(archive)).digest("hex") })
   return JSON.parse(execFileSync("tar", ["-xOzf", archive, "package/package.json"], { encoding: "utf8" }))
 }
-const plugin = await pack("@inline-openclaw/inline@latest")
+const plugin = await pack(process.argv[3] ?? "@inline-openclaw/inline@latest")
 const sdk = await pack(`@inline-chat/realtime-sdk@${plugin.dependencies["@inline-chat/realtime-sdk"]}`)
 await pack(`@inline-chat/protocol@${sdk.dependencies["@inline-chat/protocol"]}`)
 await writeFile(path.join(directory, "manifest.json"), JSON.stringify({ sourceSha: "published-npm", packages }, null, 2) + "\n")

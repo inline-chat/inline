@@ -462,17 +462,17 @@ pub async fn spawn_codex_driver(
 }
 
 #[derive(Clone)]
-struct ProcessControl {
+pub(crate) struct ProcessControl {
     shutdown: mpsc::Sender<()>,
     completion: watch::Receiver<Option<Result<(), DriverError>>>,
 }
 
 impl ProcessControl {
-    fn is_finished(&self) -> bool {
+    pub(crate) fn is_finished(&self) -> bool {
         self.completion.borrow().is_some()
     }
 
-    async fn shutdown(&self) -> Result<(), DriverError> {
+    pub(crate) async fn shutdown(&self) -> Result<(), DriverError> {
         let _ = self.shutdown.send(()).await;
         let mut completion = self.completion.clone();
         loop {
@@ -773,12 +773,19 @@ fn socket_adapter_io_error(error: std::io::Error) -> DriverError {
     DriverError::Unavailable(format!("Codex shared app-server adapter failed: {error}"))
 }
 
-async fn spawn_codex_stdio_client(
+/// A private `codex app-server` child over stdio, before any protocol handshake.
+pub(crate) struct StdioProcess {
+    pub(crate) peer: CodexPeer<CodexDriverWriter>,
+    pub(crate) control: ProcessControl,
+    pub(crate) stderr_tail: RedactedStderrTail,
+    pub(crate) process_status: CodexProcessStatus,
+}
+
+/// Spawns a private app-server child over stdio and wires its peer.
+pub(crate) async fn spawn_stdio_process(
     config: &CodexLaunchConfig,
     arguments: Vec<OsString>,
-    bridge_version: &str,
-    version: CodexVersionProbe,
-) -> Result<SpawnedCodexDriver, CodexLaunchError> {
+) -> Result<StdioProcess, CodexLaunchError> {
     if let Some(host) = config.process_host.as_ref() {
         reap_stale_process_host(&host.lock_file)
             .await
@@ -821,16 +828,36 @@ async fn spawn_codex_stdio_client(
     let process_status = CodexProcessStatus::new();
     let control = supervise_child(child, process_id, process_status.clone());
     process_guard.disarm();
-    let hook_control = control.clone();
-    let shutdown_hook = Arc::new(move || {
-        let control = hook_control.clone();
-        Box::pin(async move { control.shutdown().await }) as super::driver::ShutdownFuture
-    });
     let peer = CodexPeer::new(
         stdout,
         Box::new(stdin) as CodexDriverWriter,
         config.incoming_capacity,
     );
+    Ok(StdioProcess {
+        peer,
+        control,
+        stderr_tail,
+        process_status,
+    })
+}
+
+async fn spawn_codex_stdio_client(
+    config: &CodexLaunchConfig,
+    arguments: Vec<OsString>,
+    bridge_version: &str,
+    version: CodexVersionProbe,
+) -> Result<SpawnedCodexDriver, CodexLaunchError> {
+    let StdioProcess {
+        peer,
+        control,
+        stderr_tail,
+        process_status,
+    } = spawn_stdio_process(config, arguments).await?;
+    let hook_control = control.clone();
+    let shutdown_hook = Arc::new(move || {
+        let control = hook_control.clone();
+        Box::pin(async move { control.shutdown().await }) as super::driver::ShutdownFuture
+    });
     let driver = match CodexAppServerDriver::initialize_with_shutdown(
         peer,
         bridge_version,
@@ -949,7 +976,7 @@ fn verified_app_server_version(
     }
 }
 
-fn app_server_version_from_user_agent(user_agent: &str) -> Option<Version> {
+pub(crate) fn app_server_version_from_user_agent(user_agent: &str) -> Option<Version> {
     user_agent.split_whitespace().find_map(|component| {
         let (_, raw_version) = component.split_once('/')?;
         Version::parse(raw_version.trim_end_matches([';', ')'])).ok()

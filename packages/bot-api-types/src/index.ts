@@ -196,6 +196,56 @@ export type BotRichBlock =
       blocks: BotRichBlock[]
       is_open?: true
       kind?: "progress"
+      status?: BotBlockStatus
+      /** Trailing secondary text on the summary row, such as "48s". */
+      meta?: BotRichText
+      is_rtl?: true
+    }
+  | {
+      type: "diff"
+      path: BotRichText
+      /** Unified diff lines; absent for binary or omitted content. */
+      diff?: BotRichText
+      change?: "added" | "modified" | "deleted" | "renamed"
+      previous_path?: BotRichText
+      additions?: number
+      deletions?: number
+      language?: string
+      is_truncated?: true
+    }
+  | {
+      type: "fields"
+      fields: Array<{ label: BotRichText; value: BotRichText; is_monospace?: true }>
+      is_rtl?: true
+    }
+  | {
+      type: "steps"
+      steps: Array<{ text: BotRichText; status?: BotBlockStatus; detail?: BotRichText }>
+      is_rtl?: true
+    }
+  | {
+      type: "callout"
+      kind?: "info" | "success" | "warning" | "error"
+      title?: BotRichText
+      blocks: BotRichBlock[]
+      is_rtl?: true
+    }
+  | {
+      type: "meter"
+      label: BotRichText
+      value: number
+      max: number
+      meta?: BotRichText
+      tone?: "warning" | "critical"
+    }
+  | {
+      type: "form"
+      form_id: string
+      title?: BotRichText
+      fields: BotFormField[]
+      submit_label?: string
+      required_grant?: BotGrantRequirement
+      is_closed?: true
       is_rtl?: true
     }
   | {
@@ -217,6 +267,42 @@ export type BotRichBlock =
       width?: number
       height?: number
     }
+
+export type BotBlockStatus = "pending" | "running" | "waiting" | "done" | "failed" | "cancelled"
+
+/** What a viewer needs on the sending bot; the bot's owner always qualifies. */
+export type BotGrantRequirement = "access" | "invoke" | "steer" | "approve" | "configure" | "owner"
+
+export type BotFormField = {
+  field_id: string
+  label: BotRichText
+  description?: BotRichText
+  is_required?: true
+} & (
+  | {
+      type: "select"
+      options: Array<{ option_id: string; label: BotRichText; description?: BotRichText }>
+      is_multiple?: true
+      default_option_ids?: string[]
+      allow_other?: true
+    }
+  | {
+      type: "text"
+      kind?: "single_line" | "multiline" | "secret"
+      placeholder?: string
+      default_value?: string
+      max_length?: number
+    }
+  | { type: "toggle"; default_value?: boolean }
+  | {
+      type: "number"
+      default_value?: number
+      min?: number
+      max?: number
+      step?: number
+      is_integer?: true
+    }
+)
 
 export type BotRichMessage = {
   blocks: BotRichBlock[]
@@ -290,7 +376,31 @@ export type BotMedia =
   | { type: "voice"; file: BotFile; waveform_base64?: string }
   | { type: "nudge" }
 
-export type BotMessageAction =
+export type BotMessageActionOptions = {
+  style?: "primary" | "destructive"
+  /** Ask before running the action. */
+  confirm?: { title: string; text?: string; confirm_text?: string }
+  /** Grant on this bot the viewer needs; the server rejects callbacks without it. */
+  required_grant?: BotGrantRequirement
+}
+
+export type BotMessageAction = BotMessageActionOptions & (
+  | {
+      action_id: string
+      text: string
+      type: "open_url"
+      /** Web URL or app link such as codex://threads/<id>, opened client-side. */
+      url: string
+    }
+  | {
+      action_id: string
+      text: string
+      type: "open_link"
+      /** Inline chat or DM to open; never broadens access. */
+      chat_id?: number
+      user_id?: number
+      message_id?: number
+    }
   | {
       action_id: string
       text: string
@@ -318,6 +428,18 @@ export type BotMessageAction =
       type: "copy_text"
       copy_text: string
     }
+)
+
+/** Secret fields always arrive redacted over the Bot API; use the realtime protocol to receive them. */
+export type BotFormValue =
+  | { field_id: string; text: string }
+  | { field_id: string; option_ids: string[]; other_text?: string }
+  | { field_id: string; toggle: boolean }
+  | { field_id: string; number: number }
+  | { field_id: string; redacted: true }
+  | { field_id: string }
+
+export type BotFormSubmission = { values: BotFormValue[] }
 
 export type BotReaction = { emoji: string }
 export type BotMessageReaction = BotReaction & {
@@ -440,6 +562,8 @@ export type BotUpdate = BotUpdateBase &
               | { callback_data?: never; callback_data_base64: string }
               | { callback_data?: never; callback_data_base64?: never }
             )
+          /** Present when a form block was submitted; `action.action_id` is its form ID. */
+          form?: BotFormSubmission
         }
       }
     | { bot_participation: BotParticipationChange }

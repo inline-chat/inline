@@ -580,7 +580,11 @@ extension UIMessageView {
   func createMessageActionButton(for action: InlineProtocol.MessageAction) -> MessageActionButton {
     let button = MessageActionButton(type: .system)
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.configure(action: action, outgoing: outgoing)
+    button.configure(
+      action: action,
+      outgoing: outgoing,
+      presentation: MessageActionPerformer.presentation(for: action, message: message)
+    )
     button.addTarget(self, action: #selector(handleMessageActionButtonTap), for: .touchUpInside)
     return button
   }

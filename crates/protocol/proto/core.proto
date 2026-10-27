@@ -418,6 +418,12 @@ message MessageActions { repeated MessageActionRow rows = 1; }
 message MessageActionRow { repeated MessageAction actions = 1; }
 
 message MessageAction {
+  enum Style {
+    STYLE_DEFAULT = 0;
+    STYLE_PRIMARY = 1;
+    STYLE_DESTRUCTIVE = 2;
+  }
+
   // Bot-defined stable identifier for this button/action.
   string action_id = 1;
 
@@ -427,7 +433,19 @@ message MessageAction {
   oneof action {
     MessageActionCallback callback = 3;
     MessageActionCopyText copy_text = 4;
+    MessageActionOpenUrl open_url = 5;
+    MessageActionOpenLink open_link = 6;
   }
+
+  Style style = 7;
+
+  // Ask before running the action.
+  optional MessageActionConfirm confirm = 8;
+
+  // Grant on the sending bot that the viewer needs. Clients disable the button,
+  // with the reason, for viewers without it; the server rejects callback
+  // invocations without it before the bot sees them.
+  AgentGrantRequirement required_grant = 9;
 }
 
 message MessageActionCallback {
@@ -440,16 +458,58 @@ message MessageActionCopyText {
   string text = 1;
 }
 
+// Opens a web URL or an app link such as codex://threads/<id>, client-side
+// without notifying the bot. Clients show the destination before opening a
+// non-web scheme.
+message MessageActionOpenUrl { string url = 1; }
+
+// Navigates to an Inline chat or message, client-side. It never broadens
+// access: viewers without access to the target see that they lack it.
+message MessageActionOpenLink {
+  Peer peer_id = 1;
+  optional int64 message_id = 2;
+}
+
+message MessageActionConfirm {
+  string title = 1;
+  optional string text = 2;
+  // Confirm button label; the confirm button takes the action's style.
+  optional string confirm_text = 3;
+}
+
 message MessageActionResponseUi {
   oneof kind {
     MessageActionToast toast = 1;
+    MessageActionAlert alert = 2;
     // Reserved for future expandability:
-    // 2 => alert
     // 3 => open_url
   }
 }
 
 message MessageActionToast { string text = 1; }
+
+message MessageActionAlert {
+  optional string title = 1;
+  string text = 2;
+}
+
+// What a viewer needs on a bot to use one of its actions or forms. The bot's
+// owner always qualifies.
+enum AgentGrantRequirement {
+  // Anyone who can see the message.
+  AGENT_GRANT_REQUIREMENT_NONE = 0;
+  // Any grant on the bot. Used for answering an agent's questions.
+  AGENT_GRANT_REQUIREMENT_ACCESS = 1;
+  AGENT_GRANT_REQUIREMENT_INVOKE = 2;
+  AGENT_GRANT_REQUIREMENT_STEER = 3;
+  // The owner and approval delegates.
+  AGENT_GRANT_REQUIREMENT_APPROVE = 4;
+  reserved 5;
+  reserved "AGENT_GRANT_REQUIREMENT_VIEW";
+  AGENT_GRANT_REQUIREMENT_CONFIGURE = 6;
+  // Only the bot's owner.
+  AGENT_GRANT_REQUIREMENT_OWNER = 7;
+}
 
 message MessageService {
   oneof event {
@@ -514,7 +574,28 @@ message Block {
     // Display math points to the same canonical TeX source as MATH entities.
     // Clients that cannot render math retain the readable source text.
     BlockText math = 12;
+    // Agent and bot blocks. Like every block, their text is a range into
+    // Message.message, which stays the complete fallback for older clients.
+    // Clients that meet an unknown kind render the flat text instead.
+    BlockDiff diff = 13;
+    BlockFields fields = 14;
+    BlockSteps steps = 15;
+    BlockCallout callout = 16;
+    BlockMeter meter = 17;
+    BlockForm form = 18;
   }
+}
+
+// Progress of a disclosure row or a step. Unspecified shows no status.
+enum BlockStatus {
+  BLOCK_STATUS_UNSPECIFIED = 0;
+  BLOCK_STATUS_PENDING = 1;
+  BLOCK_STATUS_RUNNING = 2;
+  // Blocked on a person: an approval, question or dialog.
+  BLOCK_STATUS_WAITING = 3;
+  BLOCK_STATUS_DONE = 4;
+  BLOCK_STATUS_FAILED = 5;
+  BLOCK_STATUS_CANCELLED = 6;
 }
 
 message BlockHeading {
@@ -606,6 +687,9 @@ message BlockDisclosure {
   repeated Block children = 4;
   optional bool is_rtl = 5;
   ActivityKind activity_kind = 6;
+  BlockStatus status = 7;
+  // Trailing secondary text on the summary row, such as "48s" or "3 files".
+  optional BlockText meta = 8;
 }
 
 message BlockQuote {
@@ -629,6 +713,188 @@ message BlockTable {
 }
 
 message BlockTableRow { repeated BlockText cells = 1; }
+
+// One file's change. The fallback text carries the path and the unified diff,
+// usually as a "diff" code block.
+message BlockDiff {
+  enum Change {
+    CHANGE_UNSPECIFIED = 0;
+    CHANGE_ADDED = 1;
+    CHANGE_MODIFIED = 2;
+    CHANGE_DELETED = 3;
+    CHANGE_RENAMED = 4;
+  }
+
+  // File path as the harness reports it.
+  BlockText path = 1;
+  // Unified diff lines ("@@", " ", "+", "-"). Absent for binary or omitted
+  // content. Clients render it LTR and monospaced.
+  optional BlockText text = 2;
+  Change change = 3;
+  optional BlockText previous_path = 4;
+  optional uint32 additions = 5;
+  optional uint32 deletions = 6;
+  // Syntax highlighting hint for the file's language.
+  optional string language = 7;
+  // The sender shortened the diff body.
+  optional bool truncated = 8;
+}
+
+// Label and value pairs, such as an approval's command, folder and reason.
+message BlockFields {
+  repeated BlockField fields = 1;
+  optional bool is_rtl = 2;
+}
+
+message BlockField {
+  BlockText label = 1;
+  BlockText value = 2;
+  // The value is a command, path or identifier: render it LTR and monospaced.
+  bool monospace = 3;
+}
+
+// An ordered plan or todo list.
+message BlockSteps {
+  repeated BlockStep steps = 1;
+  optional bool is_rtl = 2;
+}
+
+message BlockStep {
+  BlockText text = 1;
+  BlockStatus status = 2;
+  // Secondary line, such as the step's active form or a note.
+  optional BlockText detail = 3;
+}
+
+message BlockCallout {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_INFO = 1;
+    KIND_SUCCESS = 2;
+    KIND_WARNING = 3;
+    KIND_ERROR = 4;
+  }
+
+  Kind kind = 1;
+  optional BlockText title = 2;
+  repeated Block children = 3;
+  optional bool is_rtl = 4;
+}
+
+// A bounded quantity such as context or usage. The fallback text carries the
+// formatted numbers.
+message BlockMeter {
+  enum Tone {
+    TONE_UNSPECIFIED = 0;
+    TONE_WARNING = 1;
+    TONE_CRITICAL = 2;
+  }
+
+  BlockText label = 1;
+  double value = 2;
+  // Greater than zero; clients clamp value into [0, max].
+  double max = 3;
+  optional BlockText meta = 4;
+  Tone tone = 5;
+}
+
+// An interactive form with one submit. Submitting invokes the message action
+// whose action_id equals form_id, with a MessageFormSubmission. The fallback
+// text lists the fields and options so older clients can answer in text.
+message BlockForm {
+  // Bot-chosen identity, unique among the message's action and form IDs.
+  string form_id = 1;
+  optional BlockText title = 2;
+  repeated BlockFormField fields = 3;
+  // Submit button label. Clients default to "Submit".
+  optional string submit_label = 4;
+  // Checked by the server before the bot sees a submission.
+  AgentGrantRequirement required_grant = 5;
+  // Read-only: the form was answered or withdrawn. Clients show the defaults
+  // as the answers and never show secret values.
+  bool closed = 6;
+  optional bool is_rtl = 7;
+}
+
+message BlockFormField {
+  // Unique within the form; same character set as MessageAction.action_id.
+  string field_id = 1;
+  BlockText label = 2;
+  optional BlockText description = 3;
+  bool required = 4;
+
+  oneof kind {
+    BlockFormSelect select = 5;
+    BlockFormText text = 6;
+    BlockFormToggle toggle = 7;
+    BlockFormNumber number = 8;
+  }
+}
+
+message BlockFormSelect {
+  repeated BlockFormOption options = 1;
+  // Multi-select when true, single choice otherwise.
+  bool multiple = 2;
+  repeated string default_option_ids = 3;
+  // Also offer a free-text "Other" answer.
+  bool allow_other = 4;
+}
+
+message BlockFormOption {
+  string option_id = 1;
+  BlockText label = 2;
+  optional BlockText description = 3;
+}
+
+message BlockFormText {
+  enum Kind {
+    KIND_SINGLE_LINE = 0;
+    KIND_MULTILINE = 1;
+    // Relayed to the bot but never persisted, logged or kept in history.
+    // A secret field has no default value.
+    KIND_SECRET = 2;
+  }
+
+  Kind kind = 1;
+  optional string placeholder = 2;
+  optional string default_value = 3;
+  optional uint32 max_length = 4;
+}
+
+message BlockFormToggle { bool default_value = 1; }
+
+message BlockFormNumber {
+  optional double default_value = 1;
+  optional double min = 2;
+  optional double max = 3;
+  optional double step = 4;
+  // Only whole numbers are valid.
+  bool integer = 5;
+}
+
+// Values submitted for a BlockForm.
+message MessageFormSubmission { repeated MessageFormValue values = 1; }
+
+message MessageFormValue {
+  string field_id = 1;
+
+  oneof value {
+    string text = 2;
+    MessageFormSelection selection = 3;
+    bool toggle = 4;
+    double number = 5;
+  }
+
+  // Set by the server on every stored or replayed copy of a secret field. The
+  // value is only present in the live delivery to the bot.
+  bool redacted = 6;
+}
+
+message MessageFormSelection {
+  repeated string option_ids = 1;
+  // The "Other" answer, when the select allows one.
+  optional string other_text = 2;
+}
 
 message Message {
   int64 id = 1;
@@ -912,7 +1178,379 @@ message AgentSession {
   optional int64 status_message_id = 5;
   // Authoritative parent for a reply-thread session. Omitted for top-level chats.
   optional int64 parent_chat_id = 6;
+  // Session this one was started from, for subagent, delegation and fork
+  // sessions.
+  optional int64 parent_session_id = 7;
+  AgentSessionRelation relation = 8;
+  // Thin run state reported by the bridge. Absent until the first report.
+  optional AgentSessionState state = 9;
+  // Short display name of the native folder, project or environment. The
+  // opaque workspace identity stays server-private.
+  optional string workspace_label = 10;
 }
+
+enum AgentSessionRelation {
+  AGENT_SESSION_RELATION_UNSPECIFIED = 0;
+  AGENT_SESSION_RELATION_SUBAGENT = 1;
+  AGENT_SESSION_RELATION_DELEGATION = 2;
+  AGENT_SESSION_RELATION_FORK = 3;
+}
+
+enum AgentRunState {
+  AGENT_RUN_STATE_UNKNOWN = 0;
+  AGENT_RUN_STATE_IDLE = 1;
+  AGENT_RUN_STATE_WORKING = 2;
+  // See AgentSessionState.waiting_reason.
+  AGENT_RUN_STATE_WAITING = 3;
+  AGENT_RUN_STATE_STOPPING = 4;
+  // Stopped by Pause; only a direct mention, a reply or Resume restarts it.
+  AGENT_RUN_STATE_PAUSED = 5;
+  // Another client (terminal, provider app) holds the native session.
+  AGENT_RUN_STATE_HELD_ELSEWHERE = 6;
+  AGENT_RUN_STATE_OFFLINE = 7;
+  // Explicitly released from Inline; the harness has not let go of the native
+  // session yet, so a terminal or app cannot take it over until RELEASED.
+  AGENT_RUN_STATE_RELEASING = 8;
+  // The harness released the native session; another client may continue it.
+  AGENT_RUN_STATE_RELEASED = 9;
+}
+
+enum AgentWaitingReason {
+  AGENT_WAITING_REASON_UNSPECIFIED = 0;
+  AGENT_WAITING_REASON_APPROVAL = 1;
+  AGENT_WAITING_REASON_QUESTION = 2;
+  AGENT_WAITING_REASON_DIALOG = 3;
+  AGENT_WAITING_REASON_LIMIT = 4;
+  AGENT_WAITING_REASON_SETUP = 5;
+}
+
+enum AgentAttentionKind {
+  AGENT_ATTENTION_KIND_UNSPECIFIED = 0;
+  AGENT_ATTENTION_KIND_APPROVAL = 1;
+  AGENT_ATTENTION_KIND_QUESTION = 2;
+  AGENT_ATTENTION_KIND_DIALOG = 3;
+  AGENT_ATTENTION_KIND_LIMIT = 4;
+  AGENT_ATTENTION_KIND_SETUP = 5;
+  AGENT_ATTENTION_KIND_ERROR = 6;
+}
+
+// Something in a session needs a person. The server pushes the listed people
+// when the attention starts or changes.
+message AgentAttention {
+  AgentAttentionKind kind = 1;
+  // Who it is for, such as the owner and approval delegates for an approval.
+  // The server keeps only people with access to the session's chat.
+  repeated int64 user_ids = 2;
+  // The card (approval, question) in the session's chat.
+  optional int64 message_id = 3;
+  // Short notification text, such as "Approve: cargo test".
+  optional string text = 4;
+}
+
+message AgentHeldBy {
+  enum Client {
+    CLIENT_UNSPECIFIED = 0;
+    CLIENT_TERMINAL = 1;
+    // The provider's own app (ChatGPT app for Codex, Claude app for Claude).
+    CLIENT_PROVIDER_APP = 2;
+    CLIENT_IDE = 3;
+    CLIENT_OTHER = 4;
+  }
+
+  Client client = 1;
+  // Display text, such as "Terminal on MacBook".
+  optional string label = 2;
+}
+
+// Thin per-session run state. The server stores state, not transcripts.
+message AgentSessionState {
+  AgentRunState run_state = 1;
+  // Set while run_state is WAITING.
+  AgentWaitingReason waiting_reason = 2;
+  optional AgentAttention attention = 3;
+  // Set while run_state is HELD_ELSEWHERE.
+  optional AgentHeldBy held_by = 4;
+  // Inputs queued in the harness or held pending in Inline.
+  uint32 queued_count = 5;
+  // Short text for chips and badges, such as "Limit resets 3:00 PM".
+  optional string detail = 6;
+  // Bridge-assigned and increasing per session; the server ignores reports
+  // older than the stored revision.
+  int64 revision = 7;
+  // Server time of the last accepted change, Unix seconds. Ignored on input.
+  int64 updated_at = 8;
+  // When the current work started, Unix seconds, for "Working for 48s".
+  optional int64 started_at = 9;
+}
+
+enum AgentRuntimeStatus {
+  AGENT_RUNTIME_STATUS_UNSPECIFIED = 0;
+  AGENT_RUNTIME_STATUS_ONLINE = 1;
+  // Reported on clean shutdown, or derived by the server from missed
+  // heartbeats.
+  AGENT_RUNTIME_STATUS_OFFLINE = 2;
+  AGENT_RUNTIME_STATUS_NEEDS_SETUP = 3;
+}
+
+message AgentRuntimeSetup {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    // The harness is older than the core floor: "Update Codex/Claude".
+    REASON_UPDATE_RUNTIME = 1;
+    // The harness is newer than this bridge can parse: "Update Inline CLI".
+    REASON_UPDATE_INLINE = 2;
+    REASON_EXECUTABLE_MISSING = 3;
+    REASON_EXECUTABLE_CHANGED = 4;
+    REASON_SIGN_IN = 5;
+    REASON_FOLDER_UNAVAILABLE = 6;
+    REASON_ORGANIZATION = 7;
+    REASON_OTHER = 8;
+  }
+
+  Reason reason = 1;
+  // Human-readable fix.
+  optional string text = 2;
+  optional string min_version = 3;
+}
+
+// One bridge runtime: one bot per machine per provider.
+message AgentRuntime {
+  int64 bot_user_id = 1;
+  AgentSessionProvider provider = 2;
+  AgentRuntimeStatus status = 3;
+  optional AgentRuntimeSetup setup = 4;
+  optional string machine_label = 5;
+  optional string executable_version = 6;
+  optional int64 last_seen = 7;
+  // Owner-only fields, omitted for other viewers.
+  optional string executable_path = 8;
+  optional string manifest_hash = 9;
+  optional string bridge_version = 10;
+  // The agent's output mode, set in Agent Settings by the owner or a CONFIGURE
+  // grantee. Unspecified means Detailed.
+  AgentOutputMode default_output_mode = 11;
+}
+
+enum AgentOutputMode {
+  // Use the agent's default.
+  AGENT_OUTPUT_MODE_UNSPECIFIED = 0;
+  AGENT_OUTPUT_MODE_DETAILED = 1;
+  AGENT_OUTPUT_MODE_FRIENDLY = 2;
+}
+
+// Work bar controls, relayed to the bot, which maps them to harness operations.
+enum AgentSessionControl {
+  AGENT_SESSION_CONTROL_UNSPECIFIED = 0;
+  AGENT_SESSION_CONTROL_STOP = 1;
+  AGENT_SESSION_CONTROL_PAUSE = 2;
+  AGENT_SESSION_CONTROL_RESUME = 3;
+}
+
+enum AgentGrantOperation {
+  AGENT_GRANT_OPERATION_UNSPECIFIED = 0;
+  // Start work.
+  AGENT_GRANT_OPERATION_INVOKE = 1;
+  // Steer, queue, stop, pause and resume work.
+  AGENT_GRANT_OPERATION_STEER = 2;
+  // Answer approvals as a delegate of the owner.
+  AGENT_GRANT_OPERATION_APPROVE = 3;
+  reserved 4;
+  reserved "AGENT_GRANT_OPERATION_VIEW";
+  // Change the agent's settings.
+  AGENT_GRANT_OPERATION_CONFIGURE = 5;
+}
+
+// Opt-in access to a bot for one person. No grants means owner-only. Any grant
+// lets its holder answer the agent's questions.
+message AgentGrant {
+  int64 id = 1;
+  int64 bot_user_id = 2;
+  // Subject. Space and chat subjects are reserved for later.
+  int64 user_id = 3;
+  repeated AgentGrantOperation operations = 4;
+  int64 revision = 5;
+  optional int64 granted_by = 6;
+  // Last change, Unix seconds.
+  int64 date = 7;
+}
+
+enum AgentParticipationMode {
+  AGENT_PARTICIPATION_MODE_UNSPECIFIED = 0;
+  // Joined: considers unaddressed messages through the speak gate.
+  AGENT_PARTICIPATION_MODE_ACTIVE = 1;
+  AGENT_PARTICIPATION_MODE_MENTIONS_ONLY = 2;
+  // No ambient evaluation; direct input still reaches the agent.
+  AGENT_PARTICIPATION_MODE_MUTED = 3;
+}
+
+// How one agent takes part in one chat.
+message AgentParticipation {
+  Peer peer_id = 1;
+  int64 bot_user_id = 2;
+  AgentParticipationMode mode = 3;
+  optional int64 joined_by = 4;
+  // One work per (chat, bot), so no default session to choose.
+  reserved 5;
+  int64 revision = 6;
+  // Last change, Unix seconds.
+  int64 date = 7;
+  // Per-thread override of the agent's default output mode. Absent means the
+  // default (AgentRuntime.default_output_mode).
+  optional AgentOutputMode output_mode = 8;
+}
+
+// Bot → server heartbeat for the calling bot's runtime.
+message ReportAgentRuntimeInput {
+  AgentSessionProvider provider = 1;
+  // ONLINE or NEEDS_SETUP while running; OFFLINE on clean shutdown.
+  AgentRuntimeStatus status = 2;
+  optional AgentRuntimeSetup setup = 3;
+  optional string machine_label = 4;
+  optional string executable_path = 5;
+  optional string executable_version = 6;
+  optional string manifest_hash = 7;
+  optional string bridge_version = 8;
+}
+
+message ReportAgentRuntimeResult {
+  AgentRuntime runtime = 1;
+  // Refetch grants with listAgentGrants when this changes.
+  int64 grants_revision = 2;
+  // Heartbeat at this interval; the runtime counts as offline after missing
+  // a few.
+  uint32 heartbeat_interval_seconds = 3;
+}
+
+message GetAgentRuntimeInput { int64 bot_user_id = 1; }
+
+message GetAgentRuntimeResult {
+  // Absent when the bot never reported a runtime (v1 bridges, other bots).
+  optional AgentRuntime runtime = 1;
+}
+
+// Bot → server run-state report for one of its sessions. The server updates
+// chat members in realtime and pushes the attention's people when it changes.
+message UpdateAgentSessionStateInput {
+  int64 agent_session_id = 1;
+  AgentSessionState state = 2;
+}
+
+message UpdateAgentSessionStateResult {
+  AgentSession agent_session = 1;
+  // False when the report was older than the stored revision.
+  bool applied = 2;
+}
+
+message GetAgentSessionStatesInput {
+  // One chat's sessions. When omitted: the viewer's chats' sessions that are
+  // not idle, for sidebar badges.
+  optional InputPeer peer_id = 1;
+}
+
+message GetAgentSessionStatesResult { repeated AgentSession sessions = 1; }
+
+message ListAgentGrantsInput {
+  // Omitted or zero when the calling bot lists its own grants.
+  int64 bot_user_id = 1;
+}
+
+message ListAgentGrantsResult {
+  // All grants for the owner and the bot; only the viewer's own otherwise.
+  repeated AgentGrant grants = 1;
+  int64 revision = 2;
+  int64 owner_user_id = 3;
+}
+
+// Creates or replaces one person's grant. Owner, or the bot itself for grants
+// without APPROVE and CONFIGURE (the bridge's /allowlist).
+message SetAgentGrantInput {
+  int64 bot_user_id = 1;
+  int64 user_id = 2;
+  // Non-empty.
+  repeated AgentGrantOperation operations = 3;
+}
+
+message SetAgentGrantResult {
+  AgentGrant grant = 1;
+  int64 revision = 2;
+}
+
+message DeleteAgentGrantInput {
+  int64 bot_user_id = 1;
+  int64 user_id = 2;
+}
+
+message DeleteAgentGrantResult { int64 revision = 1; }
+
+// Bot → server migration of a bridge's allowed_user_ids into grants with
+// INVOKE and STEER. People who already have a grant keep it unchanged.
+message ImportAgentGrantsInput { repeated int64 user_ids = 1; }
+
+message ImportAgentGrantsResult {
+  repeated AgentGrant grants = 1;
+  int64 revision = 2;
+}
+
+message GetAgentParticipationsInput { InputPeer peer_id = 1; }
+
+message GetAgentParticipationsResult {
+  repeated AgentParticipation participations = 1;
+}
+
+// The bot itself (joining on a mention or invite), its owner, or a CONFIGURE
+// grantee.
+message SetAgentParticipationInput {
+  InputPeer peer_id = 1;
+  int64 bot_user_id = 2;
+  // Unspecified keeps the current mode (active for a new participation).
+  AgentParticipationMode mode = 3;
+  reserved 4;
+  // Bot only: the person whose mention or invite joined the agent.
+  optional int64 joined_by = 5;
+  // Owner or CONFIGURE grantee. Absent keeps the override; UNSPECIFIED clears
+  // it back to the agent's default.
+  optional AgentOutputMode output_mode = 6;
+}
+
+// Owner or a CONFIGURE grantee. Absent fields stay unchanged. The bot must
+// have reported its runtime.
+message UpdateAgentSettingsInput {
+  int64 bot_user_id = 1;
+  optional AgentOutputMode default_output_mode = 2;
+}
+
+message UpdateAgentSettingsResult { AgentRuntime runtime = 1; }
+
+// Work bar stop, pause and resume. The owner, or a STEER grantee of the
+// session's bot.
+message ControlAgentSessionInput {
+  int64 agent_session_id = 1;
+  AgentSessionControl op = 2;
+}
+
+// Moves a work's canonical publication chat into a subthread of its current
+// chat (spec §5.2), keeping the work, its native identity and its delivery
+// ledger. The parent keeps its status card. Idempotent: a retry after a crash
+// returns moved = false with the same destination, so the bridge publishes
+// everything after the first successful result in the destination only.
+// The session's bot or its owner; both must have access to the destination.
+message MoveAgentSessionInput {
+  int64 agent_session_id = 1;
+  InputPeer destination_peer_id = 2;
+}
+
+message MoveAgentSessionResult {
+  AgentSession agent_session = 1;
+  // False when the work was already published in the destination.
+  bool moved = 2;
+}
+
+message ControlAgentSessionResult {
+  // Same identity the bot sees on UpdateAgentSessionControl.
+  int64 interaction_id = 1;
+}
+
+message SetAgentParticipationResult { AgentParticipation participation = 1; }
 
 enum ConnectAgentSessionState {
   CONNECT_AGENT_SESSION_STATE_UNSPECIFIED = 0;
@@ -937,6 +1575,12 @@ message ConnectAgentSessionInput {
   optional string project_ref = 6;
   // Optional bot-authored message in peer_id used as the pinned connection card.
   optional int64 status_message_id = 7;
+  // Session this one was started from, owned by the same bot.
+  optional int64 parent_agent_session_id = 8;
+  AgentSessionRelation relation = 9;
+  // One work per (chat, bot): /new creates a new thread instead.
+  reserved 10;
+  optional string workspace_label = 11;
 }
 
 message ConnectAgentSessionResult {
@@ -959,6 +1603,9 @@ message GetAgentSessionInput {
   InputPeer peer_id = 1;
   // Bridge bot connection to look up. The authenticated caller must own it.
   int64 bot_user_id = 2;
+  // Must match the conversation's work when given. A conversation holds at
+  // most one work per bot.
+  optional int64 agent_session_id = 3;
 }
 
 message GetAgentSessionResult {
@@ -1489,6 +2136,8 @@ message RpcError {
     SPACE_INVITE_INVALID = 20;
     // Media or file not uploaded by the sender, or missing. Forward the source message to resend it.
     MEDIA_NOT_OWNED = 21;
+    // The viewer lacks the bot grant an action or form requires.
+    AGENT_GRANT_REQUIRED = 22;
   }
 }
 
@@ -1643,6 +2292,19 @@ enum Method {
   OPEN_GRID_THREAD = 147;
   SET_GRID_TRANSCRIPTION = 148;
   LIST_GRID_TRANSCRIPTS = 149;
+  REPORT_AGENT_RUNTIME = 150;
+  GET_AGENT_RUNTIME = 151;
+  UPDATE_AGENT_SESSION_STATE = 152;
+  GET_AGENT_SESSION_STATES = 153;
+  LIST_AGENT_GRANTS = 154;
+  SET_AGENT_GRANT = 155;
+  DELETE_AGENT_GRANT = 156;
+  IMPORT_AGENT_GRANTS = 157;
+  GET_AGENT_PARTICIPATIONS = 158;
+  SET_AGENT_PARTICIPATION = 159;
+  UPDATE_AGENT_SETTINGS = 160;
+  CONTROL_AGENT_SESSION = 161;
+  MOVE_AGENT_SESSION = 162;
 }
 
 message RpcCall {
@@ -1797,6 +2459,19 @@ message RpcCall {
     OpenGridThreadInput openGridThread = 148;
     SetGridTranscriptionInput setGridTranscription = 149;
     ListGridTranscriptsInput listGridTranscripts = 150;
+    ReportAgentRuntimeInput reportAgentRuntime = 151;
+    GetAgentRuntimeInput getAgentRuntime = 152;
+    UpdateAgentSessionStateInput updateAgentSessionState = 153;
+    GetAgentSessionStatesInput getAgentSessionStates = 154;
+    ListAgentGrantsInput listAgentGrants = 155;
+    SetAgentGrantInput setAgentGrant = 156;
+    DeleteAgentGrantInput deleteAgentGrant = 157;
+    ImportAgentGrantsInput importAgentGrants = 158;
+    GetAgentParticipationsInput getAgentParticipations = 159;
+    SetAgentParticipationInput setAgentParticipation = 160;
+    UpdateAgentSettingsInput updateAgentSettings = 161;
+    ControlAgentSessionInput controlAgentSession = 162;
+    MoveAgentSessionInput moveAgentSession = 163;
   }
 }
 
@@ -1953,6 +2628,19 @@ message RpcResult {
     OpenGridThreadResult openGridThread = 148;
     SetGridTranscriptionResult setGridTranscription = 149;
     ListGridTranscriptsResult listGridTranscripts = 150;
+    ReportAgentRuntimeResult reportAgentRuntime = 151;
+    GetAgentRuntimeResult getAgentRuntime = 152;
+    UpdateAgentSessionStateResult updateAgentSessionState = 153;
+    GetAgentSessionStatesResult getAgentSessionStates = 154;
+    ListAgentGrantsResult listAgentGrants = 155;
+    SetAgentGrantResult setAgentGrant = 156;
+    DeleteAgentGrantResult deleteAgentGrant = 157;
+    ImportAgentGrantsResult importAgentGrants = 158;
+    GetAgentParticipationsResult getAgentParticipations = 159;
+    SetAgentParticipationResult setAgentParticipation = 160;
+    UpdateAgentSettingsResult updateAgentSettings = 161;
+    ControlAgentSessionResult controlAgentSession = 162;
+    MoveAgentSessionResult moveAgentSession = 163;
   }
 }
 
@@ -3257,6 +3945,9 @@ message EditMessageInput {
   // - present + empty rows: clear actions
   // - present + non-empty rows: replace actions
   optional MessageActions actions = 9;
+  // Bot only: replaces the structured content, with ranges into `text`, as on
+  // SendMessageInput. When absent, the server derives it from `text` as before.
+  optional BlockContent block_content = 11;
 }
 
 message EditMessageResult { repeated Update updates = 1; }
@@ -3335,6 +4026,11 @@ message SendMessageInput {
   // Ephemeral provenance for a bot-authored cross-Chat Agent handoff. The
   // server validates it and never persists it with the message.
   optional int64 source_chat_id = 12;
+
+  // Bot only: structured content whose text ranges point into `message`, which
+  // is the flat fallback older clients render with `entities`. Cannot be
+  // combined with parse_markdown.
+  optional BlockContent block_content = 13;
 }
 
 message SendMessageResult { repeated Update updates = 2; }
@@ -3342,7 +4038,10 @@ message SendMessageResult { repeated Update updates = 2; }
 message InvokeMessageActionInput {
   InputPeer peer_id = 1;
   int64 message_id = 2;
+  // A callback action's ID, or a form's form_id when submitting it.
   string action_id = 3;
+  // Required when action_id names a BlockForm, absent otherwise.
+  optional MessageFormSubmission form = 4;
 }
 
 message InvokeMessageActionResult {
@@ -3907,6 +4606,11 @@ message Update {
     UpdateDialogTranslation dialog_translation = 50;
     UpdateSpaceProfile space_profile = 51;
     UpdateUserHasNewUpdates user_has_new_updates = 52;
+    UpdateAgentSessionState agent_session_state = 53;
+    UpdateAgentParticipation agent_participation = 54;
+    UpdateAgentGrant agent_grant = 55;
+    UpdateAgentRuntime agent_runtime = 56;
+    UpdateAgentSessionControl agent_session_control = 57;
   }
 }
 
@@ -4132,6 +4836,44 @@ message UpdateMessageActionInvoked {
   int64 actor_user_id = 4;
   string action_id = 5;
   bytes data = 6;
+  // A form submission. Secret values are present only in the live delivery;
+  // catch-up copies mark them redacted.
+  optional MessageFormSubmission form = 7;
+}
+
+// A chat member's view of an agent session's run state changed.
+message UpdateAgentSessionState {
+  AgentSession agent_session = 1;
+  // The chat whose update bucket carries this update. It differs from
+  // agent_session.peer_id in the chat a work moved out of; apps use it for the
+  // bucket's sequence and drop the work from that chat.
+  optional Peer bucket_peer_id = 2;
+}
+
+message UpdateAgentParticipation {
+  AgentParticipation participation = 1;
+}
+
+// Sent to a bot's owner, the bot and the grant's subject.
+message UpdateAgentGrant {
+  int64 bot_user_id = 1;
+  int64 user_id = 2;
+  // Absent when the grant was deleted.
+  optional AgentGrant grant = 3;
+  int64 revision = 4;
+}
+
+// Sent to a bot's owner when its runtime status, setup state or settings
+// change, and to the bot when its settings change.
+message UpdateAgentRuntime { AgentRuntime runtime = 1; }
+
+// Sent to the session's bot when someone uses a work bar control.
+message UpdateAgentSessionControl {
+  int64 interaction_id = 1;
+  int64 agent_session_id = 2;
+  AgentSessionControl op = 3;
+  int64 actor_user_id = 4;
+  int64 chat_id = 5;
 }
 
 message UpdateMessageActionAnswered {
@@ -5052,12 +5794,26 @@ message RequestBotFilesystemInput {
     OPERATION_UNSPECIFIED = 0;
     LIST = 1;
     REGISTER_FOLDER = 2;
+    // Files in one work's folder for the composer's file picker. The owner or
+    // an INVOKE grantee on the session's bot. Paths are relative to the work's
+    // folder, which is never revealed.
+    LIST_WORK_FILES = 3;
   }
   Operation operation = 4;
-  // Empty starts at the host home directory; otherwise an absolute path.
+  // LIST and REGISTER_FOLDER: empty starts at the host home directory,
+  // otherwise an absolute path. LIST_WORK_FILES: a relative directory, empty
+  // for the work's folder.
   string path = 5;
-  // Exclusive filename cursor for bounded, lexically ordered listing pages.
+  // Exclusive cursor for bounded, lexically ordered listing pages: a filename,
+  // or a relative path for LIST_WORK_FILES.
   string after = 6;
+  // LIST_WORK_FILES: the work whose folder is listed.
+  optional int64 agent_session_id = 7;
+  // LIST_WORK_FILES: match file names under path instead of listing one
+  // directory.
+  optional string query = 8;
+  // LIST_WORK_FILES: page size, at most 200.
+  optional uint32 limit = 9;
 }
 message BotFilesystemEntry {
   string name = 1;
@@ -5071,6 +5827,9 @@ message BotFilesystemEntry {
   Kind kind = 2;
   uint64 size = 3;
 }
+// For LIST_WORK_FILES, path, parent_path and entry names are relative to the
+// work's folder (names are full relative paths, so query results can nest), and
+// next_after is the last entry's name.
 message BotFilesystemListing {
   string path = 1;
   optional string parent_path = 2;

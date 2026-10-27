@@ -3185,6 +3185,13 @@ actor Sync {
         .user
       case .chatOpen:
         .user
+      case let .agentSessionState(payload):
+        // A moved work's update in the chat it left names that chat's bucket.
+        .chat(peer: payload.hasBucketPeerID ? payload.bucketPeerID : payload.agentSession.peerID)
+      case let .agentParticipation(payload):
+        .chat(peer: payload.participation.peerID)
+      case .agentGrant, .agentRuntime, .agentSessionControl:
+        .user
       default:
         nil
     }
@@ -3465,6 +3472,9 @@ actor BucketActor {
       case .chatOpen:
         true
       case .messageActionInvoked, .messageActionAnswered:
+        true
+      case .agentSessionState, .agentParticipation, .agentGrant, .agentRuntime, .agentSessionControl:
+        // Thin agent state; catch-up repairs work bars and sidebar badges.
         true
       case .dialogFollowMode, .dialogCollapsedMaxID, .dialogTranslation:
         true

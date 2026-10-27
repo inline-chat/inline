@@ -196,6 +196,14 @@ export class RealtimeRpcError extends Error {
       RealtimeRpcError.SpaceOwnerRequired,
     )
   }
+  public static AgentGrantRequired() {
+    return RealtimeRpcError.create(
+      RpcError_Code.AGENT_GRANT_REQUIRED,
+      "You don't have access to this agent action",
+      403,
+      RealtimeRpcError.AgentGrantRequired,
+    )
+  }
   /** Same response for missing and not-owned media, so ids can't be probed. */
   public static MediaNotOwned() {
     const [, status, description] = InlineError.ApiError.MEDIA_NOT_OWNED

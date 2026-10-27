@@ -274,6 +274,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       guard let self, self.accountOperationAdmissionIsOpen, Auth.shared.isLoggedIn else { return }
       await self.dependencies.gridRuntime.applicationDidWake()
     }
+    Task { @MainActor [weak self] in
+      guard let self, self.accountOperationAdmissionIsOpen, Auth.shared.isLoggedIn else { return }
+      // Sidebar agent badges: reconcile the cached busy sessions across chats.
+      await AgentWorkStateStore.shared.refresh()
+    }
 
     if !didHandleInitialActivation {
       didHandleInitialActivation = true
@@ -752,6 +757,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       await Transactions.shared.clearAllAndWait()
       try requireLocalDataResetMayContinue()
       await AgentConfigurationCatalogStore.shared.clear()
+      await MainActor.run {
+        AgentWorkStateStore.shared.removeAll()
+        AgentGrantStore.shared.removeAll()
+        MessageFormDraftStore.shared.reset()
+      }
       ObjectCache.shared.clear()
       try await FileCache.shared.clearCache()
       await dependencies.commandBarCatalog.reset()

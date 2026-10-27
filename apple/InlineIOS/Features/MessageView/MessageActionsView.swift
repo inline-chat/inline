@@ -15,6 +15,7 @@ final class MessageActionsView: UIView {
   private var message: Message?
   private var loadingSubscription: AnyCancellable?
   private var answeredSubscription: AnyCancellable?
+  private var grantsSubscription: AnyCancellable?
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -85,7 +86,11 @@ final class MessageActionsView: UIView {
         rowStack.distribution = .fillEqually
         for action in row.actions {
           let button = MessageActionButton(type: .system)
-          button.configure(action: action, outgoing: false)
+          button.configure(
+            action: action,
+            outgoing: false,
+            presentation: MessageActionPerformer.presentation(for: action, message: message)
+          )
           button.useMinimalPresentation()
           button.addTarget(self, action: #selector(handleTap(_:)), for: .touchUpInside)
           rowStack.addArrangedSubview(button)
@@ -100,6 +105,13 @@ final class MessageActionsView: UIView {
 
   private func subscribe() {
     guard loadingSubscription == nil else { return }
+    // Grants load once per bot; re-render so buttons the viewer cannot use
+    // turn disabled with their reason.
+    grantsSubscription = AgentGrantStore.shared.$accessByBotUserID
+      .removeDuplicates()
+      .dropFirst()
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in self?.refreshPresentations() }
     loadingSubscription = MessageActionInteractionState.shared.loadingPublisher
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in self?.updateLoading() }
@@ -109,10 +121,29 @@ final class MessageActionsView: UIView {
         guard let message = self?.message,
               event.key.peerId == message.peerId,
               event.key.messageId == message.messageId,
-              let toastText = event.toastText
+              let self
         else { return }
-        ToastManager.shared.showToast(toastText, type: .info)
+        if let toastText = event.toastText {
+          ToastManager.shared.showToast(toastText, type: .info)
+        }
+        if let alert = event.alert {
+          MessageActionPerformer.presentAlert(alert, from: self)
+        }
       }
+  }
+
+  private func refreshPresentations() {
+    guard let message else { return }
+    for row in Self.rows(for: message) {
+      for action in row.actions {
+        buttons[action.actionID]?.configure(
+          action: action,
+          outgoing: false,
+          presentation: MessageActionPerformer.presentation(for: action, message: message)
+        )
+      }
+    }
+    updateLoading()
   }
 
   private func updateLoading() {
@@ -131,14 +162,13 @@ final class MessageActionsView: UIView {
 
   @objc private func handleTap(_ sender: MessageActionButton) {
     guard let action = sender.messageAction, let message else { return }
-    switch action.action {
-    case .callback:
-      invokeCallback(action, on: message)
-    case let .copyText(copyText):
-      UIPasteboard.general.string = copyText.text
-      ToastManager.shared.showToast("Copied", type: .success, systemImage: "doc.on.doc")
-    case nil:
-      break
+    let presentation = MessageActionPerformer.presentation(for: action, message: message)
+    MessageActionPerformer.run(presentation, from: self) { [weak self] in
+      if presentation.intent == .callback {
+        self?.invokeCallback(action, on: message)
+      } else {
+        MessageActionPerformer.performLocal(presentation.intent)
+      }
     }
   }
 

@@ -19,6 +19,7 @@ flate2 = "1.0.30"
 inline-agent-bridge = { path = "../crates/agent-bridge" }
 inline-agent-driver-acp = { path = "../crates/agent-driver-acp" }
 inline-agent-driver-codex = { path = "../crates/agent-driver-codex" }
+inline-agent-driver-claude = { path = "../crates/agent-driver-claude" }
 inline-client = { path = "../crates/client" }
 inline-protocol = { path = "../crates/protocol" }
 inline-sdk = { path = "../crates/sdk" }
@@ -26,6 +27,8 @@ libc = "0.2"
 log.workspace = true
 mime_guess = "2.0.5"
 rand = "0.8.5"
+rusqlite.workspace = true
+uuid.workspace = true
 regex = "1.10"
 reqwest = { version = "0.12.12", default-features = false, features = [
   "json",

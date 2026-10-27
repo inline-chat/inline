@@ -74,6 +74,9 @@ mod reply_threads;
 mod service;
 mod stream_ui;
 mod supervisor;
+// Bridge v2 runtime pieces; wired in behind the per-provider flag.
+#[allow(dead_code)]
+mod v2;
 use allowlist_ui::*;
 use approval_ui::*;
 use copy::{BridgeNotice, failure_message, session_open_notice};
@@ -2000,6 +2003,28 @@ async fn run_provider_installation(
     let current_workspace_id = workspace.workspace_id.clone();
     let workspace = workspace.path;
 
+    if v2_enabled_for(&installation.provider_id) {
+        return run_v2_provider(V2Launch {
+            installation: &installation,
+            owner_user_id: account.owner_user_id,
+            dm_chat_id: dm_chat_id.get(),
+            workspace,
+            machine_label: if account.host_label.trim().is_empty() {
+                local_host_label()
+            } else {
+                account.host_label.clone()
+            },
+            allowlist: policy.allowed_user_ids().collect(),
+            owner_control: owner_control.clone(),
+            bot,
+            inline_events,
+            readiness: shared_provider_readiness.as_ref(),
+            external_shutdown,
+            standalone_runtime,
+        })
+        .await;
+    }
+
     let provider_launch =
         ProviderLaunch::from_installation(&installation).map_err(provider_setup_required)?;
     let provider_ledger = FailureLedger::provider(&installation);
@@ -3066,6 +3091,160 @@ async fn run_provider_installation(
     bot_shutdown?;
     owner_control_shutdown?;
     Ok(())
+}
+
+/// Providers with a v2 driver. Every other provider (ACP agents such as
+/// OpenCode) keeps running on v1, whatever `INLINE_BRIDGE_V2` says.
+const V2_PROVIDERS: &[&str] = &["codex", "claude"];
+
+/// Bridge v2 per provider while it is staged: `INLINE_BRIDGE_V2=codex,claude`
+/// (or `all`, meaning every provider v2 supports). v1 stays the default.
+fn v2_enabled_for(provider_id: &str) -> bool {
+    v2_enabled_in(env::var("INLINE_BRIDGE_V2").ok().as_deref(), provider_id)
+}
+
+fn v2_enabled_in(setting: Option<&str>, provider_id: &str) -> bool {
+    V2_PROVIDERS.contains(&provider_id)
+        && setting.is_some_and(|value| {
+            value.split(',').map(str::trim).any(|entry| {
+                entry.eq_ignore_ascii_case("all") || entry.eq_ignore_ascii_case(provider_id)
+            })
+        })
+}
+
+struct V2Launch<'a> {
+    installation: &'a ProviderInstallationConfig,
+    owner_user_id: i64,
+    dm_chat_id: i64,
+    workspace: PathBuf,
+    machine_label: String,
+    allowlist: Vec<i64>,
+    owner_control: Option<Arc<OwnerControl>>,
+    bot: InlineClient,
+    inline_events: inline_client::LosslessEventReceiver,
+    readiness: Option<&'a ProviderReadiness>,
+    external_shutdown: Option<tokio::sync::watch::Receiver<bool>>,
+    standalone_runtime: bool,
+}
+
+/// Serves one provider on the v2 session contract instead of the v1 driver.
+async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error::Error>> {
+    use inline_agent_bridge::harness::{ExecutableSource, HarnessDriver};
+    let V2Launch {
+        installation,
+        owner_user_id,
+        dm_chat_id,
+        workspace,
+        machine_label,
+        allowlist,
+        owner_control,
+        bot,
+        mut inline_events,
+        readiness,
+        mut external_shutdown,
+        standalone_runtime,
+    } = launch;
+    let agent_name = if installation.display_name.trim().is_empty() {
+        installation.provider_id.clone()
+    } else {
+        installation.display_name.clone()
+    };
+    let attachments_dir = installation.state_dir.join("attachments");
+    // Inline tools, bound to the agent and its works (spec §4.8).
+    let tools = v2::tools::Tools::new(v2::tools::ToolsConfig {
+        bot: bot.clone(),
+        provider: inline_agent_bridge::ProviderId::new(installation.provider_id.as_str())?,
+        bot_user_id: installation.bot_user_id,
+        owner_user_id,
+        agent_name: agent_name.clone(),
+        folder: workspace.clone(),
+        attachments_dir: attachments_dir.clone(),
+    });
+    let (harness, vocabulary, executable): (Arc<dyn HarnessDriver>, _, PathBuf) =
+        match installation.provider_id.as_str() {
+            "codex" => {
+                let ProviderLaunch::Codex(launch) = ProviderLaunch::from_installation(installation)
+                    .map_err(provider_setup_required)?
+                else {
+                    return Err(io::Error::other("codex launch was not a Codex launch").into());
+                };
+                let executable = launch.executable.clone();
+                let harness = inline_agent_driver_codex::harness::CodexHarness::new(
+                    inline_agent_driver_codex::harness::CodexHarnessConfig {
+                        launch,
+                        source: ExecutableSource::Path,
+                        pinned_sha256: None,
+                        bridge_version: env!("CARGO_PKG_VERSION").to_owned(),
+                        cache_root: installation.state_dir.join("v2"),
+                    },
+                );
+                harness.configure_host_tools(tools.configuration());
+                (Arc::new(harness), v2::render::Vocabulary::Codex, executable)
+            }
+            "claude" => {
+                let executable = resolve_executable(Path::new("claude"))?;
+                let mut config = inline_agent_driver_claude::harness::ClaudeHarnessConfig::new(
+                    executable.clone(),
+                    env!("CARGO_PKG_VERSION"),
+                );
+                config.host_tools = Some(tools.configuration());
+                let harness = inline_agent_driver_claude::harness::ClaudeHarness::new(config);
+                (
+                    Arc::new(harness),
+                    v2::render::Vocabulary::Claude,
+                    executable,
+                )
+            }
+            other => {
+                return Err(io::Error::other(format!(
+                    "bridge v2 does not support the {other} provider yet"
+                ))
+                .into());
+            }
+        };
+    let runtime = v2::runtime::Runtime::new(
+        v2::runtime::V2Config {
+            vocabulary,
+            agent_name,
+            installation_id: installation.installation_id.clone(),
+            owner_user_id,
+            bot_user_id: installation.bot_user_id,
+            bot_username: installation.bot_username.clone(),
+            dm_chat_id,
+            folder: workspace,
+            machine_label,
+            executable_path: Some(executable.display().to_string()),
+            accept_messages_after: installation.accept_messages_after,
+            allowlist,
+            ledger_path: installation.state_dir.join("v2-ledger.sqlite"),
+            attachments_dir,
+        },
+        bot.clone(),
+        Arc::new(v2::runtime::OwnerConnection(owner_control.ok_or_else(
+            || {
+                io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "bridge v2 needs the owner connection to record its work",
+                )
+            },
+        )?)),
+        harness,
+        Some(tools),
+    )?;
+    if let Some(readiness) = readiness {
+        readiness.mark_ready(&installation.installation_id);
+    }
+    eprintln!(
+        "{} bridge v2 ready for @{}.",
+        installation.provider_id, installation.bot_username
+    );
+    let shutdown = async move {
+        tokio::select! {
+            _ = wait_for_standalone_termination(standalone_runtime) => {}
+            _ = wait_for_control_shutdown(&mut external_shutdown) => {}
+        }
+    };
+    runtime.run(&mut inline_events, shutdown).await
 }
 
 fn publishes_initial_provider_catalog(provider_id: &str) -> bool {

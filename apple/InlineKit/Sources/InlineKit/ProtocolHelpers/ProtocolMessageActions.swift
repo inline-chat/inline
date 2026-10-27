@@ -44,11 +44,17 @@ extension InlineProtocol.MessageAction: Codable {
     case actionID
     case text
     case action
+    // The complete protobuf, so style, confirm and required_grant survive.
+    case protobuf
   }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
 
+    if let data = try container.decodeIfPresent(Data.self, forKey: .protobuf) {
+      try self.init(serializedBytes: data)
+      return
+    }
     self.init()
     actionID = try container.decode(String.self, forKey: .actionID)
     text = try container.decode(String.self, forKey: .text)
@@ -60,6 +66,7 @@ extension InlineProtocol.MessageAction: Codable {
     try container.encode(actionID, forKey: .actionID)
     try container.encode(text, forKey: .text)
     try container.encodeIfPresent(action, forKey: .action)
+    try container.encode(serializedData(), forKey: .protobuf)
   }
 }
 
@@ -67,6 +74,8 @@ extension InlineProtocol.MessageAction.OneOf_Action: Codable {
   private enum CodingKeys: String, CodingKey {
     case callback
     case copyText
+    case openURL
+    case openLink
   }
 
   public init(from decoder: Decoder) throws {
@@ -76,6 +85,10 @@ extension InlineProtocol.MessageAction.OneOf_Action: Codable {
       self = .callback(callback)
     } else if let copyText = try container.decodeIfPresent(MessageActionCopyText.self, forKey: .copyText) {
       self = .copyText(copyText)
+    } else if let data = try container.decodeIfPresent(Data.self, forKey: .openURL) {
+      self = try .openURL(MessageActionOpenUrl(serializedBytes: data))
+    } else if let data = try container.decodeIfPresent(Data.self, forKey: .openLink) {
+      self = try .openLink(MessageActionOpenLink(serializedBytes: data))
     } else {
       throw DecodingError.dataCorrupted(
         DecodingError.Context(
@@ -94,6 +107,10 @@ extension InlineProtocol.MessageAction.OneOf_Action: Codable {
       try container.encode(callback, forKey: .callback)
     case let .copyText(copyText):
       try container.encode(copyText, forKey: .copyText)
+    case let .openURL(openURL):
+      try container.encode(openURL.serializedData(), forKey: .openURL)
+    case let .openLink(openLink):
+      try container.encode(openLink.serializedData(), forKey: .openLink)
     }
   }
 }

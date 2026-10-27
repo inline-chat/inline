@@ -12,6 +12,7 @@ import {
   smallint,
   timestamp,
   uniqueIndex,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core"
 import { sql } from "drizzle-orm"
 
@@ -35,6 +36,20 @@ export const agentSessions = pgTable(
     projectRefEncrypted: bytea("project_ref_encrypted"),
     statusMessageGlobalId: bigint("status_message_global_id", { mode: "bigint" })
       .references(() => messages.globalId, { onDelete: "set null" }),
+    // Bridge v2. The encrypted project_ref is the session's workspace identity.
+    parentSessionId: bigint("parent_session_id", { mode: "bigint" })
+      .references((): AnyPgColumn => agentSessions.id, { onDelete: "set null" }),
+    relation: smallint("relation").default(0).notNull(),
+    workspaceLabelEncrypted: bytea("workspace_label_encrypted"),
+    // Thin run state. The full AgentSessionState is in state_encrypted; these
+    // plaintext copies only serve queries and push targeting.
+    runState: smallint("run_state").default(0).notNull(),
+    attentionKind: smallint("attention_kind").default(0).notNull(),
+    attentionUserIds: integer("attention_user_ids").array(),
+    heldBy: smallint("held_by").default(0).notNull(),
+    stateRevision: bigint("state_revision", { mode: "bigint" }).default(sql`0`).notNull(),
+    stateEncrypted: bytea("state_encrypted"),
+    stateUpdatedAt: timestamp("state_updated_at", { mode: "date", precision: 3 }),
     createdAt: timestamp("created_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
   },
@@ -44,7 +59,14 @@ export const agentSessions = pgTable(
       table.provider,
       table.sessionKeyHash,
     ),
+    // One work per (chat, bot); /new creates a new thread.
     chatBotUnique: uniqueIndex("agent_sessions_chat_bot_unique").on(table.chatId, table.botUserId),
+    activeStateIndex: index("agent_sessions_active_state_idx")
+      .on(table.chatId)
+      .where(sql`${table.runState} not in (0, 1)`),
+    parentIndex: index("agent_sessions_parent_idx")
+      .on(table.parentSessionId)
+      .where(sql`${table.parentSessionId} is not null`),
     ownerIndex: index("agent_sessions_owner_idx").on(table.ownerUserId),
     statusMessageUnique: uniqueIndex("agent_sessions_status_message_unique")
       .on(table.statusMessageGlobalId)

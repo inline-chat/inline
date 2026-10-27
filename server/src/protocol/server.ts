@@ -12,6 +12,7 @@ import type { PartialMessage } from "@protobuf-ts/runtime";
 import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
 import { MessageActionResponseUi } from "@inline-chat/protocol/core";
+import { MessageFormSubmission } from "@inline-chat/protocol/core";
 import { Chat } from "@inline-chat/protocol/core";
 import { MessageServiceGridTranscript } from "@inline-chat/protocol/core";
 import { BlockContent } from "@inline-chat/protocol/core";
@@ -27,10 +28,18 @@ import { ChatPermissions } from "@inline-chat/protocol/core";
 import { SpaceSettings } from "@inline-chat/protocol/core";
 import { User } from "@inline-chat/protocol/core";
 import { Member } from "@inline-chat/protocol/core";
+import { AgentOutputMode } from "@inline-chat/protocol/core";
+import { AgentParticipationMode } from "@inline-chat/protocol/core";
+import { AgentSessionState } from "@inline-chat/protocol/core";
+import { AgentSessionRelation } from "@inline-chat/protocol/core";
+import { AgentSessionProvider } from "@inline-chat/protocol/core";
 import { Reaction } from "@inline-chat/protocol/core";
 import { AgentThreadContext } from "@inline-chat/protocol/core";
 import { ChatParticipantGroup } from "@inline-chat/protocol/core";
 import { ChatParticipant } from "@inline-chat/protocol/core";
+import { UpdateAgentSessionControl } from "@inline-chat/protocol/core";
+import { UpdateAgentRuntime } from "@inline-chat/protocol/core";
+import { UpdateAgentGrant } from "@inline-chat/protocol/core";
 import { UpdateSpaceProfile } from "@inline-chat/protocol/core";
 import { UpdateDialogTranslation } from "@inline-chat/protocol/core";
 import { ChatAcknowledgement } from "@inline-chat/protocol/core";
@@ -378,6 +387,36 @@ export interface ServerUpdate {
          */
         spaceProfile: UpdateSpaceProfile;
     } | {
+        oneofKind: "agentSessionState";
+        /**
+         * @generated from protobuf field: server.ServerChatUpdateAgentSessionState agent_session_state = 50;
+         */
+        agentSessionState: ServerChatUpdateAgentSessionState;
+    } | {
+        oneofKind: "agentParticipation";
+        /**
+         * @generated from protobuf field: server.ServerChatUpdateAgentParticipation agent_participation = 51;
+         */
+        agentParticipation: ServerChatUpdateAgentParticipation;
+    } | {
+        oneofKind: "userAgentGrant";
+        /**
+         * @generated from protobuf field: UpdateAgentGrant user_agent_grant = 52;
+         */
+        userAgentGrant: UpdateAgentGrant;
+    } | {
+        oneofKind: "userAgentRuntime";
+        /**
+         * @generated from protobuf field: UpdateAgentRuntime user_agent_runtime = 53;
+         */
+        userAgentRuntime: UpdateAgentRuntime;
+    } | {
+        oneofKind: "userAgentSessionControl";
+        /**
+         * @generated from protobuf field: UpdateAgentSessionControl user_agent_session_control = 54;
+         */
+        userAgentSessionControl: UpdateAgentSessionControl;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -662,6 +701,85 @@ export interface ServerChatUpdateReaction {
      * @generated from protobuf field: Reaction reaction = 1;
      */
     reaction?: Reaction;
+}
+/**
+ * Snapshot of an agent session's thin state. The client peer is encoded per
+ * recipient from the chat.
+ *
+ * @generated from protobuf message server.ServerChatUpdateAgentSessionState
+ */
+export interface ServerChatUpdateAgentSessionState {
+    /**
+     * @generated from protobuf field: int64 agent_session_id = 1;
+     */
+    agentSessionId: bigint;
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 2;
+     */
+    botUserId: bigint;
+    /**
+     * @generated from protobuf field: AgentSessionProvider provider = 3;
+     */
+    provider: AgentSessionProvider;
+    /**
+     * @generated from protobuf field: optional int64 status_message_id = 4;
+     */
+    statusMessageId?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 parent_session_id = 5;
+     */
+    parentSessionId?: bigint;
+    /**
+     * @generated from protobuf field: AgentSessionRelation relation = 6;
+     */
+    relation: AgentSessionRelation;
+    /**
+     * @generated from protobuf field: optional AgentSessionState state = 7;
+     */
+    state?: AgentSessionState;
+    /**
+     * @generated from protobuf field: optional string workspace_label = 8;
+     */
+    workspaceLabel?: string;
+    /**
+     * The work's publication chat when it differs from this bucket's chat
+     * (after a move into a subthread).
+     *
+     * @generated from protobuf field: optional int64 chat_id = 9;
+     */
+    chatId?: bigint;
+}
+/**
+ * Snapshot of an agent's participation. The client peer is encoded per
+ * recipient from the chat.
+ *
+ * @generated from protobuf message server.ServerChatUpdateAgentParticipation
+ */
+export interface ServerChatUpdateAgentParticipation {
+    /**
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
+    /**
+     * @generated from protobuf field: AgentParticipationMode mode = 2;
+     */
+    mode: AgentParticipationMode;
+    /**
+     * @generated from protobuf field: optional int64 joined_by = 3;
+     */
+    joinedBy?: bigint;
+    /**
+     * @generated from protobuf field: int64 revision = 5;
+     */
+    revision: bigint;
+    /**
+     * @generated from protobuf field: int64 date = 6;
+     */
+    date: bigint;
+    /**
+     * @generated from protobuf field: optional AgentOutputMode output_mode = 7;
+     */
+    outputMode?: AgentOutputMode;
 }
 /**
  * @generated from protobuf message server.ServerChatUpdateDeleteReaction
@@ -1208,6 +1326,12 @@ export interface ServerUserUpdateMessageActionInvoked {
      * @generated from protobuf field: bytes data = 5;
      */
     data: Uint8Array;
+    /**
+     * Form submission with every secret value removed and marked redacted.
+     *
+     * @generated from protobuf field: optional MessageFormSubmission form = 6;
+     */
+    form?: MessageFormSubmission;
 }
 /**
  * Update for a user when bot answers a previously invoked action.
@@ -1392,7 +1516,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 46, name: "user_removed_from_chat", kind: "message", oneof: "update", T: () => ServerUserUpdateRemovedFromChat },
             { no: 47, name: "acknowledgement", kind: "message", oneof: "update", T: () => ChatAcknowledgement },
             { no: 48, name: "user_dialog_translation", kind: "message", oneof: "update", T: () => UpdateDialogTranslation },
-            { no: 49, name: "space_profile", kind: "message", oneof: "update", T: () => UpdateSpaceProfile }
+            { no: 49, name: "space_profile", kind: "message", oneof: "update", T: () => UpdateSpaceProfile },
+            { no: 50, name: "agent_session_state", kind: "message", oneof: "update", T: () => ServerChatUpdateAgentSessionState },
+            { no: 51, name: "agent_participation", kind: "message", oneof: "update", T: () => ServerChatUpdateAgentParticipation },
+            { no: 52, name: "user_agent_grant", kind: "message", oneof: "update", T: () => UpdateAgentGrant },
+            { no: 53, name: "user_agent_runtime", kind: "message", oneof: "update", T: () => UpdateAgentRuntime },
+            { no: 54, name: "user_agent_session_control", kind: "message", oneof: "update", T: () => UpdateAgentSessionControl }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1691,6 +1820,36 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         spaceProfile: UpdateSpaceProfile.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceProfile)
                     };
                     break;
+                case /* server.ServerChatUpdateAgentSessionState agent_session_state */ 50:
+                    message.update = {
+                        oneofKind: "agentSessionState",
+                        agentSessionState: ServerChatUpdateAgentSessionState.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).agentSessionState)
+                    };
+                    break;
+                case /* server.ServerChatUpdateAgentParticipation agent_participation */ 51:
+                    message.update = {
+                        oneofKind: "agentParticipation",
+                        agentParticipation: ServerChatUpdateAgentParticipation.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).agentParticipation)
+                    };
+                    break;
+                case /* UpdateAgentGrant user_agent_grant */ 52:
+                    message.update = {
+                        oneofKind: "userAgentGrant",
+                        userAgentGrant: UpdateAgentGrant.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userAgentGrant)
+                    };
+                    break;
+                case /* UpdateAgentRuntime user_agent_runtime */ 53:
+                    message.update = {
+                        oneofKind: "userAgentRuntime",
+                        userAgentRuntime: UpdateAgentRuntime.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userAgentRuntime)
+                    };
+                    break;
+                case /* UpdateAgentSessionControl user_agent_session_control */ 54:
+                    message.update = {
+                        oneofKind: "userAgentSessionControl",
+                        userAgentSessionControl: UpdateAgentSessionControl.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userAgentSessionControl)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -1847,6 +2006,21 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* UpdateSpaceProfile space_profile = 49; */
         if (message.update.oneofKind === "spaceProfile")
             UpdateSpaceProfile.internalBinaryWrite(message.update.spaceProfile, writer.tag(49, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateAgentSessionState agent_session_state = 50; */
+        if (message.update.oneofKind === "agentSessionState")
+            ServerChatUpdateAgentSessionState.internalBinaryWrite(message.update.agentSessionState, writer.tag(50, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateAgentParticipation agent_participation = 51; */
+        if (message.update.oneofKind === "agentParticipation")
+            ServerChatUpdateAgentParticipation.internalBinaryWrite(message.update.agentParticipation, writer.tag(51, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateAgentGrant user_agent_grant = 52; */
+        if (message.update.oneofKind === "userAgentGrant")
+            UpdateAgentGrant.internalBinaryWrite(message.update.userAgentGrant, writer.tag(52, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateAgentRuntime user_agent_runtime = 53; */
+        if (message.update.oneofKind === "userAgentRuntime")
+            UpdateAgentRuntime.internalBinaryWrite(message.update.userAgentRuntime, writer.tag(53, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateAgentSessionControl user_agent_session_control = 54; */
+        if (message.update.oneofKind === "userAgentSessionControl")
+            UpdateAgentSessionControl.internalBinaryWrite(message.update.userAgentSessionControl, writer.tag(54, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2815,6 +2989,197 @@ class ServerChatUpdateReaction$Type extends MessageType<ServerChatUpdateReaction
  * @generated MessageType for protobuf message server.ServerChatUpdateReaction
  */
 export const ServerChatUpdateReaction = new ServerChatUpdateReaction$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerChatUpdateAgentSessionState$Type extends MessageType<ServerChatUpdateAgentSessionState> {
+    constructor() {
+        super("server.ServerChatUpdateAgentSessionState", [
+            { no: 1, name: "agent_session_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "provider", kind: "enum", T: () => ["AgentSessionProvider", AgentSessionProvider, "AGENT_SESSION_PROVIDER_"] },
+            { no: 4, name: "status_message_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "parent_session_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "relation", kind: "enum", T: () => ["AgentSessionRelation", AgentSessionRelation, "AGENT_SESSION_RELATION_"] },
+            { no: 7, name: "state", kind: "message", T: () => AgentSessionState },
+            { no: 8, name: "workspace_label", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerChatUpdateAgentSessionState>): ServerChatUpdateAgentSessionState {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.agentSessionId = 0n;
+        message.botUserId = 0n;
+        message.provider = 0;
+        message.relation = 0;
+        if (value !== undefined)
+            reflectionMergePartial<ServerChatUpdateAgentSessionState>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateAgentSessionState): ServerChatUpdateAgentSessionState {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 agent_session_id */ 1:
+                    message.agentSessionId = reader.int64().toBigInt();
+                    break;
+                case /* int64 bot_user_id */ 2:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* AgentSessionProvider provider */ 3:
+                    message.provider = reader.int32();
+                    break;
+                case /* optional int64 status_message_id */ 4:
+                    message.statusMessageId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 parent_session_id */ 5:
+                    message.parentSessionId = reader.int64().toBigInt();
+                    break;
+                case /* AgentSessionRelation relation */ 6:
+                    message.relation = reader.int32();
+                    break;
+                case /* optional AgentSessionState state */ 7:
+                    message.state = AgentSessionState.internalBinaryRead(reader, reader.uint32(), options, message.state);
+                    break;
+                case /* optional string workspace_label */ 8:
+                    message.workspaceLabel = reader.string();
+                    break;
+                case /* optional int64 chat_id */ 9:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerChatUpdateAgentSessionState, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 agent_session_id = 1; */
+        if (message.agentSessionId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.agentSessionId);
+        /* int64 bot_user_id = 2; */
+        if (message.botUserId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.botUserId);
+        /* AgentSessionProvider provider = 3; */
+        if (message.provider !== 0)
+            writer.tag(3, WireType.Varint).int32(message.provider);
+        /* optional int64 status_message_id = 4; */
+        if (message.statusMessageId !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.statusMessageId);
+        /* optional int64 parent_session_id = 5; */
+        if (message.parentSessionId !== undefined)
+            writer.tag(5, WireType.Varint).int64(message.parentSessionId);
+        /* AgentSessionRelation relation = 6; */
+        if (message.relation !== 0)
+            writer.tag(6, WireType.Varint).int32(message.relation);
+        /* optional AgentSessionState state = 7; */
+        if (message.state)
+            AgentSessionState.internalBinaryWrite(message.state, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* optional string workspace_label = 8; */
+        if (message.workspaceLabel !== undefined)
+            writer.tag(8, WireType.LengthDelimited).string(message.workspaceLabel);
+        /* optional int64 chat_id = 9; */
+        if (message.chatId !== undefined)
+            writer.tag(9, WireType.Varint).int64(message.chatId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerChatUpdateAgentSessionState
+ */
+export const ServerChatUpdateAgentSessionState = new ServerChatUpdateAgentSessionState$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerChatUpdateAgentParticipation$Type extends MessageType<ServerChatUpdateAgentParticipation> {
+    constructor() {
+        super("server.ServerChatUpdateAgentParticipation", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "mode", kind: "enum", T: () => ["AgentParticipationMode", AgentParticipationMode, "AGENT_PARTICIPATION_MODE_"] },
+            { no: 3, name: "joined_by", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "output_mode", kind: "enum", opt: true, T: () => ["AgentOutputMode", AgentOutputMode, "AGENT_OUTPUT_MODE_"] }
+        ]);
+    }
+    create(value?: PartialMessage<ServerChatUpdateAgentParticipation>): ServerChatUpdateAgentParticipation {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        message.mode = 0;
+        message.revision = 0n;
+        message.date = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerChatUpdateAgentParticipation>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateAgentParticipation): ServerChatUpdateAgentParticipation {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* AgentParticipationMode mode */ 2:
+                    message.mode = reader.int32();
+                    break;
+                case /* optional int64 joined_by */ 3:
+                    message.joinedBy = reader.int64().toBigInt();
+                    break;
+                case /* int64 revision */ 5:
+                    message.revision = reader.int64().toBigInt();
+                    break;
+                case /* int64 date */ 6:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                case /* optional AgentOutputMode output_mode */ 7:
+                    message.outputMode = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerChatUpdateAgentParticipation, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        /* AgentParticipationMode mode = 2; */
+        if (message.mode !== 0)
+            writer.tag(2, WireType.Varint).int32(message.mode);
+        /* optional int64 joined_by = 3; */
+        if (message.joinedBy !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.joinedBy);
+        /* int64 revision = 5; */
+        if (message.revision !== 0n)
+            writer.tag(5, WireType.Varint).int64(message.revision);
+        /* int64 date = 6; */
+        if (message.date !== 0n)
+            writer.tag(6, WireType.Varint).int64(message.date);
+        /* optional AgentOutputMode output_mode = 7; */
+        if (message.outputMode !== undefined)
+            writer.tag(7, WireType.Varint).int32(message.outputMode);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerChatUpdateAgentParticipation
+ */
+export const ServerChatUpdateAgentParticipation = new ServerChatUpdateAgentParticipation$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerChatUpdateDeleteReaction$Type extends MessageType<ServerChatUpdateDeleteReaction> {
     constructor() {
@@ -4539,7 +4904,8 @@ class ServerUserUpdateMessageActionInvoked$Type extends MessageType<ServerUserUp
             { no: 2, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "actor_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "action_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 5, name: "data", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+            { no: 5, name: "data", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 6, name: "form", kind: "message", T: () => MessageFormSubmission }
         ]);
     }
     create(value?: PartialMessage<ServerUserUpdateMessageActionInvoked>): ServerUserUpdateMessageActionInvoked {
@@ -4573,6 +4939,9 @@ class ServerUserUpdateMessageActionInvoked$Type extends MessageType<ServerUserUp
                 case /* bytes data */ 5:
                     message.data = reader.bytes();
                     break;
+                case /* optional MessageFormSubmission form */ 6:
+                    message.form = MessageFormSubmission.internalBinaryRead(reader, reader.uint32(), options, message.form);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4600,6 +4969,9 @@ class ServerUserUpdateMessageActionInvoked$Type extends MessageType<ServerUserUp
         /* bytes data = 5; */
         if (message.data.length)
             writer.tag(5, WireType.LengthDelimited).bytes(message.data);
+        /* optional MessageFormSubmission form = 6; */
+        if (message.form)
+            MessageFormSubmission.internalBinaryWrite(message.form, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

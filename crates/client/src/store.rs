@@ -392,10 +392,9 @@ pub trait ClientStore: fmt::Debug + Send + Sync + 'static {
         events: Vec<ClientEvent>,
     ) -> BoxFuture<'static, StoreResult<Vec<ClientEventDelivery>>> {
         Box::pin(async move {
-            if events
-                .iter()
-                .any(|event| event.reliability() == EventReliability::Lossless)
-            {
+            if events.iter().any(|event| {
+                event.reliability() == EventReliability::Lossless && !event.is_never_persisted()
+            }) {
                 return Err(StoreError::new(
                     ClientErrorCategory::Unsupported,
                     "client store does not support a durable event outbox",
@@ -762,7 +761,7 @@ fn append_memory_client_events(
     events
         .into_iter()
         .map(|event| {
-            if event.reliability() == EventReliability::BestEffort {
+            if event.reliability() == EventReliability::BestEffort || event.is_never_persisted() {
                 return ClientEventDelivery::ephemeral(event);
             }
             state.next_client_event_id = state.next_client_event_id.saturating_add(1).max(1);
@@ -3363,7 +3362,7 @@ fn append_sqlite_client_events(
     events
         .into_iter()
         .map(|event| {
-            if event.reliability() == EventReliability::BestEffort {
+            if event.reliability() == EventReliability::BestEffort || event.is_never_persisted() {
                 return Ok(ClientEventDelivery::ephemeral(event));
             }
             let event_json = serde_json::to_string(&event)
@@ -5871,6 +5870,40 @@ mod tests {
 
         drop(reopened);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn form_submissions_reach_the_host_but_never_the_outbox() {
+        let path = sqlite_temp_path("form-secrets");
+        let store = SqliteStore::open(&path).unwrap();
+        let deliveries = store
+            .append_client_events(vec![ClientEvent::MessageFormSubmitted {
+                interaction_id: InlineId::new(1),
+                chat_id: InlineId::new(7),
+                message_id: InlineId::new(9),
+                actor_user_id: InlineId::new(3),
+                form_id: "q".to_owned(),
+                values: vec![crate::FormValue {
+                    field_id: "token".to_owned(),
+                    value: Some(crate::FormFieldValue::Text("synthetic-secret".to_owned())),
+                }],
+            }])
+            .await
+            .unwrap();
+        assert_eq!(deliveries.len(), 1);
+        assert_eq!(deliveries[0].delivery_id, None);
+        drop(store);
+        let reopened = SqliteStore::open(&path).unwrap();
+        assert!(reopened.pending_client_events().await.unwrap().is_empty());
+        drop(reopened);
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(
+            !bytes
+                .windows(b"synthetic-secret".len())
+                .any(|window| window == b"synthetic-secret")
+        );
+        let debug = format!("{:?}", deliveries[0].event);
+        assert!(!debug.contains("synthetic-secret"));
     }
 
     #[tokio::test]

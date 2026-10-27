@@ -161,6 +161,7 @@ import {
   getAgentSessionHandler,
   syncAgentSessionMessagesHandler,
 } from "@in/server/realtime/handlers/agentSessions"
+import { AgentHandlers } from "@in/server/realtime/handlers/agents"
 
 const log = new Log("Realtime.RPC")
 
@@ -191,6 +192,84 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       if (call.input.oneofKind !== "getAgentSession") throw RealtimeRpcError.BadRequest()
       const result = await getAgentSessionHandler(call.input.getAgentSession, handlerContext)
       return { oneofKind: "getAgentSession", getAgentSession: result }
+    }
+
+    case Method.REPORT_AGENT_RUNTIME: {
+      if (call.input.oneofKind !== "reportAgentRuntime") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.reportAgentRuntime(call.input.reportAgentRuntime, handlerContext.userId)
+      return { oneofKind: "reportAgentRuntime", reportAgentRuntime: result }
+    }
+
+    case Method.GET_AGENT_RUNTIME: {
+      if (call.input.oneofKind !== "getAgentRuntime") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.getAgentRuntime(call.input.getAgentRuntime, handlerContext.userId)
+      return { oneofKind: "getAgentRuntime", getAgentRuntime: result }
+    }
+
+    case Method.UPDATE_AGENT_SESSION_STATE: {
+      if (call.input.oneofKind !== "updateAgentSessionState") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.updateAgentSessionState(call.input.updateAgentSessionState, handlerContext.userId)
+      return { oneofKind: "updateAgentSessionState", updateAgentSessionState: result }
+    }
+
+    case Method.GET_AGENT_SESSION_STATES: {
+      if (call.input.oneofKind !== "getAgentSessionStates") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.getAgentSessionStates(call.input.getAgentSessionStates, handlerContext.userId)
+      return { oneofKind: "getAgentSessionStates", getAgentSessionStates: result }
+    }
+
+    case Method.LIST_AGENT_GRANTS: {
+      if (call.input.oneofKind !== "listAgentGrants") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.listAgentGrants(call.input.listAgentGrants, handlerContext.userId)
+      return { oneofKind: "listAgentGrants", listAgentGrants: result }
+    }
+
+    case Method.SET_AGENT_GRANT: {
+      if (call.input.oneofKind !== "setAgentGrant") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.setAgentGrant(call.input.setAgentGrant, handlerContext.userId)
+      return { oneofKind: "setAgentGrant", setAgentGrant: result }
+    }
+
+    case Method.DELETE_AGENT_GRANT: {
+      if (call.input.oneofKind !== "deleteAgentGrant") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.deleteAgentGrant(call.input.deleteAgentGrant, handlerContext.userId)
+      return { oneofKind: "deleteAgentGrant", deleteAgentGrant: result }
+    }
+
+    case Method.IMPORT_AGENT_GRANTS: {
+      if (call.input.oneofKind !== "importAgentGrants") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.importAgentGrants(call.input.importAgentGrants, handlerContext.userId)
+      return { oneofKind: "importAgentGrants", importAgentGrants: result }
+    }
+
+    case Method.GET_AGENT_PARTICIPATIONS: {
+      if (call.input.oneofKind !== "getAgentParticipations") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.getAgentParticipations(call.input.getAgentParticipations, handlerContext.userId)
+      return { oneofKind: "getAgentParticipations", getAgentParticipations: result }
+    }
+
+    case Method.SET_AGENT_PARTICIPATION: {
+      if (call.input.oneofKind !== "setAgentParticipation") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.setAgentParticipation(call.input.setAgentParticipation, handlerContext.userId)
+      return { oneofKind: "setAgentParticipation", setAgentParticipation: result }
+    }
+
+    case Method.UPDATE_AGENT_SETTINGS: {
+      if (call.input.oneofKind !== "updateAgentSettings") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.updateAgentSettings(call.input.updateAgentSettings, handlerContext.userId)
+      return { oneofKind: "updateAgentSettings", updateAgentSettings: result }
+    }
+
+    case Method.CONTROL_AGENT_SESSION: {
+      if (call.input.oneofKind !== "controlAgentSession") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.controlAgentSession(call.input.controlAgentSession, handlerContext.userId)
+      return { oneofKind: "controlAgentSession", controlAgentSession: result }
+    }
+
+    case Method.MOVE_AGENT_SESSION: {
+      if (call.input.oneofKind !== "moveAgentSession") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.moveAgentSession(call.input.moveAgentSession, handlerContext.userId)
+      return { oneofKind: "moveAgentSession", moveAgentSession: result }
     }
 
     case Method.GET_ME: {

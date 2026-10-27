@@ -279,6 +279,11 @@ extension AppDelegate {
       await Transactions.shared.clearAllAndWait()
     }) else { return }
     await AgentConfigurationCatalogStore.shared.clear()
+    await MainActor.run {
+      AgentWorkStateStore.shared.removeAll()
+      AgentGrantStore.shared.removeAll()
+      MessageFormDraftStore.shared.reset()
+    }
     ObjectCache.shared.clear()
 
     beginLogoutPhase(.database, attempt: attempt)

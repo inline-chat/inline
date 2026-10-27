@@ -78,6 +78,11 @@ message ServerUpdate {
     ChatAcknowledgement acknowledgement = 47;
     UpdateDialogTranslation user_dialog_translation = 48;
     UpdateSpaceProfile space_profile = 49;
+    ServerChatUpdateAgentSessionState agent_session_state = 50;
+    ServerChatUpdateAgentParticipation agent_participation = 51;
+    UpdateAgentGrant user_agent_grant = 52;
+    UpdateAgentRuntime user_agent_runtime = 53;
+    UpdateAgentSessionControl user_agent_session_control = 54;
   }
 }
 
@@ -196,6 +201,34 @@ message ServerChatUpdateMessageAttachment {
 // A reaction mutation is part of the chat bucket so catch-up preserves its
 // order relative to other chat mutations.
 message ServerChatUpdateReaction { Reaction reaction = 1; }
+
+// Snapshot of an agent session's thin state. The client peer is encoded per
+// recipient from the chat.
+message ServerChatUpdateAgentSessionState {
+  int64 agent_session_id = 1;
+  int64 bot_user_id = 2;
+  AgentSessionProvider provider = 3;
+  optional int64 status_message_id = 4;
+  optional int64 parent_session_id = 5;
+  AgentSessionRelation relation = 6;
+  optional AgentSessionState state = 7;
+  optional string workspace_label = 8;
+  // The work's publication chat when it differs from this bucket's chat
+  // (after a move into a subthread).
+  optional int64 chat_id = 9;
+}
+
+// Snapshot of an agent's participation. The client peer is encoded per
+// recipient from the chat.
+message ServerChatUpdateAgentParticipation {
+  int64 bot_user_id = 1;
+  AgentParticipationMode mode = 2;
+  optional int64 joined_by = 3;
+  reserved 4;
+  int64 revision = 5;
+  int64 date = 6;
+  optional AgentOutputMode output_mode = 7;
+}
 
 message ServerChatUpdateDeleteReaction {
   string emoji = 1;
@@ -405,6 +438,8 @@ message ServerUserUpdateMessageActionInvoked {
   int64 actor_user_id = 3;
   string action_id = 4;
   bytes data = 5;
+  // Form submission with every secret value removed and marked redacted.
+  optional MessageFormSubmission form = 6;
 }
 
 // Update for a user when bot answers a previously invoked action.

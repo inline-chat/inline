@@ -93,6 +93,7 @@ import {
 import { makeCombinedWebsocket, type CoreWebSocketData } from "./combinedWebsocket"
 import { MAX_HTTP_UPLOAD_BYTES } from "../../modules/files/limits"
 import { isLegacyFileUploadRequest, limitHttpRequestBody } from "./requestBodyLimit"
+import { startAgentRuntimeSweeper, stopAgentRuntimeSweeper } from "@in/server/modules/agents/runtime"
 export type { CoreWebSocketData } from "./combinedWebsocket"
 
 export interface CoreHttpDrain {
@@ -445,6 +446,7 @@ export const startCoreProductionServer = async <
   const producerStopFailures: unknown[] = []
   const stopBackgroundProducers = (): Promise<void> => producerStopPromise ??= (async () => {
     if (!startBackgroundProcesses) return
+    await stopAgentRuntimeSweeper()
     // Stop all producers before any application/hint drain. Disposing the
     // runtime first would also close the database those drains still require.
     const result = await bridge.runPromiseExit(Effect.all([
@@ -666,6 +668,9 @@ export const startCoreProductionServer = async <
           cause: processStartExit.cause,
         })
       }
+      // Agent runtimes that stop heartbeating go offline even when no bot
+      // reaches this process after a restart.
+      startAgentRuntimeSweeper()
     }
     admitting = true
   } catch (cause) {

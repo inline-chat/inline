@@ -1,0 +1,169 @@
+name: Harness compatibility
+
+# Bridge v2 runs the installed Codex and Claude Code. Their protocols change
+# weekly, so this checks the current, prerelease and floor versions against
+# local fake model servers (no accounts, no model usage) on a schedule, and on
+# changes to the drivers or the v2 runtime (spec §9).
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - crates/agent-bridge/**
+      - crates/agent-driver-codex/**
+      - crates/agent-driver-claude/**
+      - crates/client/**
+      - crates/protocol/**
+      - proto/**
+      - cli/src/bridge.rs
+      - cli/src/bridge/v2/**
+      - server/src/modules/agentSessions/**
+      - server/src/modules/agents/**
+      - server/src/functions/messages.answerMessageAction.ts
+      - server/src/__tests__/e2e/**
+      - .github/workflows/harness-compat.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codex:
+    name: Codex ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # latest and alpha follow npm dist-tags; 0.146.0 is the driver's floor.
+        version: [latest, alpha, 0.146.0]
+    steps:
+      - uses: actions/checkout@v6
+      - run: bash scripts/ci/ensure-public-workspaces.sh
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - name: Install native test dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install Codex ${{ matrix.version }}
+        run: |
+          npm install --global "@openai/codex@${{ matrix.version }}"
+          codex --version
+      - name: Record the app-server schema
+        run: |
+          mkdir -p "$RUNNER_TEMP/codex-schema"
+          codex app-server generate-json-schema --experimental --out "$RUNNER_TEMP/codex-schema" || \
+            codex app-server generate-json-schema --out "$RUNNER_TEMP/codex-schema"
+      # Codex ignores parameters it does not know, so a renamed field would
+      # fail silently; this checks every one the driver sends.
+      - name: Request parameters match the schema
+        env:
+          INLINE_CODEX_SCHEMA_DIR: ${{ runner.temp }}/codex-schema
+          INLINE_CODEX_SCHEMA_FLOOR: ${{ matrix.version == '0.146.0' }}
+        run: >-
+          cargo test --locked -p inline-agent-driver-codex
+          request_params_exist_in_the_installed_schema -- --ignored
+      - name: Context, compaction and delivery labs
+        env:
+          INLINE_CODEX_CONTEXT_EXECUTABLE: codex
+        run: >-
+          cargo test --locked -p inline-agent-driver-codex native_context
+          -- --ignored --test-threads=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: codex-schema-${{ matrix.version }}
+          path: ${{ runner.temp }}/codex-schema
+          if-no-files-found: ignore
+
+  claude:
+    name: Claude Code ${{ matrix.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # 2.1.292 is the lab baseline; 2.0.32 is the driver's floor.
+        version: [latest, 2.1.292, 2.0.32]
+    steps:
+      - uses: actions/checkout@v6
+      - run: bash scripts/ci/ensure-public-workspaces.sh
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - name: Install native test dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install Claude Code ${{ matrix.version }}
+        run: |
+          npm install --global "@anthropic-ai/claude-code@${{ matrix.version }}"
+          claude --version
+      - name: Labs against the fake Messages API
+        run: |
+          CLAUDE_LAB_BIN="$(command -v claude)"
+          export CLAUDE_LAB_BIN
+          export CLAUDE_LAB_OUT="$RUNNER_TEMP/claude-lab"
+          cargo test --locked -p inline-agent-driver-claude --test claude_lab -- --ignored --test-threads=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-lab-${{ matrix.version }}
+          path: ${{ runner.temp }}/claude-lab
+          if-no-files-found: ignore
+
+  end-to-end:
+    name: Inline, bridge v2, Codex and Claude Code end to end
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+      - run: bash scripts/ci/ensure-public-workspaces.sh
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - name: Install native test dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install Codex and Claude Code
+        run: |
+          npm install --global "@openai/codex@latest" "@anthropic-ai/claude-code@latest"
+          codex --version
+          claude --version
+      - run: bun install --frozen-lockfile
+      - name: Build the CLI tests
+        run: cargo test --locked -p inline-cli --no-run
+      - name: DM, tools, approval, subthread and release through the real runtime
+        working-directory: server
+        env:
+          INLINE_E2E: "1"
+          INLINE_BRIDGE_V2_E2E_TARGET: ${{ github.workspace }}/target
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: bun --no-env-file scripts/test-runner.ts --jobs 1 src/__tests__/e2e/bridgeV2.e2e.test.ts

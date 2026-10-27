@@ -14,6 +14,7 @@ const postgresModule = createRequire(path.join(serverRoot, "package.json"))("pos
 const postgres = postgresModule.default ?? postgresModule
 const artifactDir = path.resolve(process.argv[2] ?? "")
 if (!process.argv[2]) throw new Error("usage: local-bot-flow.mjs ARTIFACT_DIR")
+const publishedHermes = process.env.INLINE_E2E_PUBLISHED_HERMES === "1"
 const hermesBin = process.env.HERMES_BIN
 const hermesPython = process.env.HERMES_PYTHON_BIN
 if (!hermesBin || !hermesPython) throw new Error("HERMES_BIN and HERMES_PYTHON_BIN are required for the real Hermes transport test")
@@ -114,13 +115,17 @@ try {
   for (const name of names) {
     const pkg = manifest.packages.find((entry) => entry.name === name)
     assert.ok(pkg, `missing ${name} candidate`)
-    dependencies[name] = `file:${path.join(artifactDir, pkg.file)}`
+    dependencies[name] = publishedHermes && name === "@inline-chat/hermes-agent-adapter"
+      ? "0.0.22"
+      : `file:${path.join(artifactDir, pkg.file)}`
   }
   const consumer = await mkdtemp(path.join(os.tmpdir(), "inline-local-bot-flow-"))
   await writeFile(path.join(consumer, "package.json"), JSON.stringify({ type: "module", private: true, dependencies }))
   execFileSync("npm", ["install", "--ignore-scripts", "--legacy-peer-deps", "--no-audit", "--no-fund"], {
     cwd: consumer, stdio: "inherit", timeout: 180_000,
   })
+  const hermesVersion = JSON.parse(await readFile(path.join(consumer, "node_modules/@inline-chat/hermes-agent-adapter/package.json"), "utf8")).version
+  if (publishedHermes) assert.equal(hermesVersion, "0.0.22", "published Hermes compatibility version")
   const flow = path.join(consumer, "flow.mjs")
   await writeFile(flow, await readFile(path.join(repoRoot, "scripts/ci/local-packed-flow.mjs")))
   execFileSync("bun", ["--no-env-file", flow], {
@@ -154,7 +159,7 @@ try {
   runHermes(hermesBin, ["plugins", "enable", "inline-platform"])
   await writeFile(path.join(consumer, "hermes-human.mjs"), await readFile(path.join(repoRoot, "scripts/ci/hermes-local-human.mjs")))
   runHermes(hermesPython, [path.join(repoRoot, "scripts/ci/hermes-local-flow.py")])
-  await writeFile(path.join(artifactDir, "hermes-flow-receipt.json"), JSON.stringify({ sourceSha: manifest.sourceSha,
+  await writeFile(path.join(artifactDir, publishedHermes ? "published-hermes-flow-receipt.json" : "hermes-flow-receipt.json"), JSON.stringify({ sourceSha: manifest.sourceSha, adapterVersion: hermesVersion,
     scenarios: [{ scenario: "hermes-real-host-inbound-and-persisted-reply", status: "passed" }] }, null, 2) + "\n")
   await closeDb()
   closeDb = undefined

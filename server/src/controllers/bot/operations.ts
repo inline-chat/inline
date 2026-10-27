@@ -36,6 +36,7 @@ import type {
   PinMessageParams,
   SendChatActionParams,
   SendMessageParams,
+  BotGrantRequirement,
   SendReactionParams,
   SetThreadTitleParams,
   SearchMessagesParams,
@@ -47,7 +48,9 @@ import type {
   UpdateAgentParams,
 } from "@inline-chat/bot-api-types"
 import {
+  AgentGrantRequirement,
   InputPeer,
+  MessageAction_Style,
   MessageAction,
   MessageActionCallback,
   MessageActionCopyText,
@@ -941,6 +944,17 @@ const randomId64 = (): bigint => {
   return id === 0n ? 1n : id
 }
 
+const grantRequirements: Record<BotGrantRequirement, AgentGrantRequirement> = {
+  access: AgentGrantRequirement.ACCESS,
+  invoke: AgentGrantRequirement.INVOKE,
+  steer: AgentGrantRequirement.STEER,
+  approve: AgentGrantRequirement.APPROVE,
+  configure: AgentGrantRequirement.CONFIGURE,
+  owner: AgentGrantRequirement.OWNER,
+}
+const protocolGrantRequirement = (value: BotGrantRequirement | undefined): AgentGrantRequirement =>
+  value === undefined ? AgentGrantRequirement.NONE : grantRequirements[value]
+
 const toProtocolActions = (
   actions:
     | SendMessageParams["actions"]
@@ -952,27 +966,50 @@ const toProtocolActions = (
     rows: actions.map((row) =>
       MessageActionRow.create({
         actions: row.map((action) => {
-          if (action.type === "copy_text") {
-            return MessageAction.create({
-              actionId: action.action_id,
-              text: action.text,
-              action: {
-                oneofKind: "copyText",
-                copyText: MessageActionCopyText.create({ text: action.copy_text }),
-              },
-            })
-          }
-          const data = action.callback_data_base64 !== undefined
-            ? Buffer.from(action.callback_data_base64, "base64")
-            : Buffer.from(action.callback_data ?? "", "utf8")
-          return MessageAction.create({
+          const options = {
             actionId: action.action_id,
             text: action.text,
-            action: {
-              oneofKind: "callback",
-              callback: MessageActionCallback.create({ data }),
-            },
-          })
+            style: action.style === "primary"
+              ? MessageAction_Style.PRIMARY
+              : action.style === "destructive" ? MessageAction_Style.DESTRUCTIVE : MessageAction_Style.DEFAULT,
+            confirm: action.confirm
+              ? { title: action.confirm.title, text: action.confirm.text, confirmText: action.confirm.confirm_text }
+              : undefined,
+            requiredGrant: protocolGrantRequirement(action.required_grant),
+          }
+          switch (action.type) {
+            case "copy_text":
+              return MessageAction.create({
+                ...options,
+                action: { oneofKind: "copyText", copyText: MessageActionCopyText.create({ text: action.copy_text }) },
+              })
+            case "open_url":
+              return MessageAction.create({ ...options, action: { oneofKind: "openUrl", openUrl: { url: action.url } } })
+            case "open_link":
+              return MessageAction.create({
+                ...options,
+                action: {
+                  oneofKind: "openLink",
+                  openLink: {
+                    peerId: action.chat_id !== undefined
+                      ? { type: { oneofKind: "chat", chat: { chatId: BigInt(action.chat_id) } } }
+                      : action.user_id !== undefined
+                        ? { type: { oneofKind: "user", user: { userId: BigInt(action.user_id) } } }
+                        : undefined,
+                    messageId: action.message_id === undefined ? undefined : BigInt(action.message_id),
+                  },
+                },
+              })
+            case "callback": {
+              const data = action.callback_data_base64 !== undefined
+                ? Buffer.from(action.callback_data_base64, "base64")
+                : Buffer.from(action.callback_data ?? "", "utf8")
+              return MessageAction.create({
+                ...options,
+                action: { oneofKind: "callback", callback: MessageActionCallback.create({ data }) },
+              })
+            }
+          }
         }),
       }),
     ),

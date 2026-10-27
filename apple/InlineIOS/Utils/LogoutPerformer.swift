@@ -87,6 +87,11 @@ enum LogoutPerformer {
     NotionTaskService.shared.resetSession()
     await Transactions.shared.clearAllAndWait()
     await AgentConfigurationCatalogStore.shared.clear()
+    await MainActor.run {
+      AgentWorkStateStore.shared.removeAll()
+      AgentGrantStore.shared.removeAll()
+      MessageFormDraftStore.shared.reset()
+    }
 
     BotAgentDirectory.shared.clear()
     TabsManager.shared.reset()

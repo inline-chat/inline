@@ -284,6 +284,31 @@ public actor UpdatesEngine: Sendable {
             deferredEffects.append(.botPresence(botPresence))
           }
 
+        // Durable agent state: catch-up repairs badges, so apply from every
+        // source. The rows are written in this transaction, with the bucket
+        // cursor; the main-actor cache reloads them after the commit.
+        case let .agentSessionState(agentSessionState):
+          if try AgentWorkStateStore.project(sessionState: agentSessionState, db: db) {
+            deferredEffects.append(.agentStateCommitted)
+          }
+
+        case let .agentParticipation(agentParticipation):
+          if try AgentWorkStateStore.project(participation: agentParticipation.participation, db: db) {
+            deferredEffects.append(.agentStateCommitted)
+          }
+
+        case let .agentGrant(agentGrant):
+          deferredEffects.append(.agentGrant(agentGrant))
+
+        case let .agentRuntime(agentRuntime):
+          if try AgentWorkStateStore.project(runtime: agentRuntime.runtime, db: db) {
+            deferredEffects.append(.agentStateCommitted)
+          }
+
+        case .agentSessionControl:
+          // Addressed to the session's bot; the app has nothing to project.
+          break
+
         default:
           break
       }
@@ -1707,6 +1732,11 @@ enum RealtimeUpdateDiagnostics {
       case .chatPermissions: return "chatPermissions"
       case .dialogCollapsedMaxID: return "dialogCollapsedMaxID"
       case .dialogFolder: return "dialogFolder"
+      case .agentSessionState: return "agentSessionState"
+      case .agentParticipation: return "agentParticipation"
+      case .agentGrant: return "agentGrant"
+      case .agentRuntime: return "agentRuntime"
+      case .agentSessionControl: return "agentSessionControl"
     }
   }
 }
@@ -2011,6 +2041,9 @@ enum DeferredUpdateEffect: Sendable {
   case composeAction(InlineProtocol.UpdateComposeAction)
   case messageActionAnswered(InlineProtocol.UpdateMessageActionAnswered)
   case botPresence(InlineProtocol.UpdateBotPresence)
+  /// Agent rows changed in the committed transaction.
+  case agentStateCommitted
+  case agentGrant(InlineProtocol.UpdateAgentGrant)
 
   nonisolated func perform() {
     switch self {
@@ -2020,6 +2053,10 @@ enum DeferredUpdateEffect: Sendable {
         update.apply()
       case let .botPresence(update):
         BotPresenceNotifications.post(update)
+      case .agentStateCommitted:
+        Task { @MainActor in AgentWorkStateStore.shared.reloadCommitted() }
+      case let .agentGrant(update):
+        Task { @MainActor in AgentGrantStore.shared.apply(update) }
     }
   }
 }
@@ -2825,11 +2862,13 @@ extension InlineProtocol.UpdateMessageActionAnswered {
       let trimmed = toast.text.trimmingCharacters(in: .whitespacesAndNewlines)
       return trimmed.isEmpty ? nil : trimmed
     }()
+    let alert = hasUi ? MessageActionAlertContent(ui) : nil
 
     Task { @MainActor in
       MessageActionInteractionState.shared.finish(
         interactionId: interactionID,
-        toastText: toastText
+        toastText: toastText,
+        alert: alert
       )
     }
   }

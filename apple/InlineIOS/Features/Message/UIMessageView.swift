@@ -38,6 +38,7 @@ class UIMessageView: UIView {
   private var translationCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
   private var messageActionAnsweredCancellable: AnyCancellable?
+  private var messageActionGrantsCancellable: AnyCancellable?
   var messageActionButtonsById: [String: MessageActionButton] = [:]
   private var bubbleHorizontalConstraint: NSLayoutConstraint?
   private var isTranslating = false {
@@ -411,6 +412,7 @@ class UIMessageView: UIView {
     translationCancellable?.cancel()
     messageActionLoadingCancellable?.cancel()
     messageActionAnsweredCancellable?.cancel()
+    messageActionGrantsCancellable?.cancel()
   }
 
   init(
@@ -1024,6 +1026,18 @@ class UIMessageView: UIView {
   func setupMessageActionStateSubscriptions() {
     messageActionLoadingCancellable?.cancel()
     messageActionAnsweredCancellable?.cancel()
+    messageActionGrantsCancellable?.cancel()
+
+    // Grants load once per bot; re-render so buttons the viewer cannot use
+    // turn disabled with their reason.
+    messageActionGrantsCancellable = AgentGrantStore.shared.$accessByBotUserID
+      .map { [botUserID = message.fromId] in $0[botUserID] }
+      .removeDuplicates()
+      .dropFirst()
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.refreshMessageActionPresentations()
+      }
 
     messageActionLoadingCancellable = MessageActionInteractionState.shared.loadingPublisher
       .receive(on: DispatchQueue.main)
@@ -1043,7 +1057,23 @@ class UIMessageView: UIView {
             type: .info
           )
         }
+        if let alert = event.alert {
+          MessageActionPerformer.presentAlert(alert, from: self)
+        }
       }
+  }
+
+  func refreshMessageActionPresentations() {
+    for row in messageActionRows {
+      for action in row.actions {
+        messageActionButtonsById[action.actionID]?.configure(
+          action: action,
+          outgoing: outgoing,
+          presentation: MessageActionPerformer.presentation(for: action, message: message)
+        )
+      }
+    }
+    updateMessageActionButtonsLoadingState()
   }
 
   func updateMessageActionButtonsLoadingState() {
@@ -1066,18 +1096,13 @@ class UIMessageView: UIView {
   @objc func handleMessageActionButtonTap(_ sender: MessageActionButton) {
     guard let action = sender.messageAction else { return }
 
-    switch action.action {
-      case .callback:
-        invokeMessageCallbackAction(action)
-      case let .copyText(copyText):
-        UIPasteboard.general.string = copyText.text
-        ToastManager.shared.showToast(
-          "Copied",
-          type: .success,
-          systemImage: "doc.on.doc"
-        )
-      case nil:
-        break
+    let presentation = MessageActionPerformer.presentation(for: action, message: message)
+    MessageActionPerformer.run(presentation, from: self) { [weak self] in
+      if presentation.intent == .callback {
+        self?.invokeMessageCallbackAction(action)
+      } else {
+        MessageActionPerformer.performLocal(presentation.intent)
+      }
     }
   }
 
