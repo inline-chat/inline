@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { chatParticipantGroups } from "@in/server/db/schema/userGroups"
@@ -142,6 +143,7 @@ export async function removeChatParticipant(
         { userIds: [userId], chatIds: [input.chatId] },
         { tx },
       )
+      await syncChatAccess(tx, { kind: "chats", chatIds: [input.chatId], userIds: [userId] })
 
       return { update, accessUpdates, permissionUpdates }
     }))
@@ -264,6 +266,7 @@ async function removeChatParticipantGroup(
         { userIds: affectedUserIds, chatIds: [input.chatId] },
         { tx },
       )
+      await syncChatAccess(tx, { kind: "chats", chatIds: [input.chatId] })
 
       return { update, affectedUserIds, accessUpdates, permissionUpdates }
     },

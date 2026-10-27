@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import type { Chat, Dialog, DialogFolder, GetChatsInput, Message, Space, User } from "@inline-chat/protocol/core"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -125,17 +126,21 @@ async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise
 
     let newChats: typeof existingChats = []
     if (missingChatPairs.length > 0) {
-      newChats = await db
-        .insert(chats)
-        .values(
-          missingChatPairs.map((pair) => ({
-            type: "private" as const,
-            minUserId: pair.minUserId,
-            maxUserId: pair.maxUserId,
-          })),
-        )
-        .onConflictDoNothing()
-        .returning()
+      newChats = await db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(chats)
+          .values(
+            missingChatPairs.map((pair) => ({
+              type: "private" as const,
+              minUserId: pair.minUserId,
+              maxUserId: pair.maxUserId,
+            })),
+          )
+          .onConflictDoNothing()
+          .returning()
+        await syncChatAccess(tx, { kind: "chats", chatIds: inserted.map((chat) => chat.id) })
+        return inserted
+      })
     }
 
     const allChatsToProcess = [...existingChats, ...newChats]

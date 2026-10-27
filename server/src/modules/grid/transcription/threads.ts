@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { registerPostCommitHook } from "@in/server/db/commitHooks"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { chats, chatParticipants, dialogs, gridRooms, members, messages, users, userNotDeleted, UpdateBucket, type DbChat } from "@in/server/db/schema"
@@ -133,6 +134,7 @@ export async function grantGridTranscriptUsers(tx: Transaction, input: { chatIds
   const chatIds = Array.from(new Set(input.chatIds)).sort((a, b) => a - b)
   const userIds = Array.from(new Set(input.userIds)).sort((a, b) => a - b)
   if (chatIds.length === 0 || userIds.length === 0) return
+  await syncChatAccess(tx, { kind: "chats", chatIds, userIds })
   const chatRows = await tx.select().from(chats).where(inArray(chats.id, chatIds)).orderBy(chats.id).for("update")
   if (chatRows.length !== chatIds.length) throw RealtimeRpcError.ChatIdInvalid()
   const rootIds = await getRootChatIdsForAccessEvents(tx, chatIds)
@@ -207,6 +209,7 @@ async function createPrivateGridChat(tx: Transaction, input: {
     parentChatId: input.parentChatId ?? null, parentMessageId: input.parentMessageId ?? null,
   }).returning()
   if (!chat) throw RealtimeRpcError.InternalError()
+  await syncChatAccess(tx, { kind: "chats", chatIds: [chat.id] })
   const update = await UpdatesModel.insertUpdate(tx, {
     update: { oneofKind: "newChat", newChat: { chatId: BigInt(chat.id) } }, bucket: UpdateBucket.Chat, entity: chat,
   })

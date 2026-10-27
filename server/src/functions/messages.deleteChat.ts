@@ -1,3 +1,4 @@
+import { chatSubtreeIds, syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import type { InputPeer, Peer, Update } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
@@ -226,6 +227,7 @@ async function deleteChatWithOptions(
           update: persistedAccessUpdates[index]!,
         }))
 
+        await syncChatAccess(tx, { kind: "chats", chatIds: await chatSubtreeIds(tx, [chat.id]) })
         await tx.delete(chatParticipants).where(eq(chatParticipants.chatId, chat.id))
         await tx.delete(dialogs).where(eq(dialogs.chatId, chat.id))
         await tx.delete(chats).where(eq(chats.id, chat.id))

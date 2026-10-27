@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { chatTitleFields, chatTitleMatches } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import { chats, chatParticipants, dialogs, members, type DbChat } from "@in/server/db/schema"
@@ -190,6 +191,8 @@ export async function moveThread(
         entity: chat,
       })
 
+      // The thread and its subthreads now resolve access through the target Space.
+      await syncChatAccess(tx, { kind: "chats", chatIds: [chat.id] })
       const [chatRecord] = await tx
         .update(chats)
         .set({

@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import {
   chatParticipantGroups,
@@ -309,6 +310,7 @@ export async function updateChatVisibility(
         },
         { tx },
       )
+      await syncChatAccess(tx, { kind: "chats", chatIds: [chat.id] })
 
       return {
         chat: chatRecord,

@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import {
   chatParticipantGroups,
@@ -218,6 +219,8 @@ export async function updateUserGroup(
         accessBefore,
         permissionTargetChatIds,
       })
+      // Creating or deleting a group grants nothing: deletion is refused while a thread uses it.
+      await syncChatAccess(tx, { kind: "groups", groupIds: [input.groupId] })
 
       return { group: updatedGroup, membershipUpdates }
     })

@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import { and, eq, inArray, isNotNull, isNull, or } from "drizzle-orm"
 import { InlineError } from "@in/server/types/errors"
@@ -340,6 +341,7 @@ export const handler = async (
               .returning()
             if (chat) created.push(chat)
           }
+          await syncChatAccess(tx, { kind: "chats", chatIds: created.map((chat) => chat.id) })
           return created
         })
 
