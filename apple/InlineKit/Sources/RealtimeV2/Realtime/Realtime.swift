@@ -979,6 +979,7 @@ public actor RealtimeV2 {
       }
       await transactions.deletePersisted(transactionId: transactionId, owner: completingOwner)
       await transactions.finishExecution(for: transactionWrapper)
+      SendTelemetry.record(transactionWrapper, .sent)
       await transactions.satisfy(blockers: transaction.satisfiedBlockersOnSuccess)
       resumeTransactionContinuation(for: transactionId, returning: rpcResult)
       await transactions.signalQueue()
@@ -989,8 +990,12 @@ public actor RealtimeV2 {
         return
       }
       switch TransactionCompletionFailure(error, historyUnavailable: historyUnavailableReason) {
-        case .superseded: await transaction.cancelled()
-        case let .failed(reported): await transaction.failed(error: reported)
+        case .superseded:
+          await transaction.cancelled()
+          SendTelemetry.record(transactionWrapper, .canceled)
+        case let .failed(reported):
+          await transaction.failed(error: reported)
+          SendTelemetry.record(transactionWrapper, .failed, error: reported)
       }
       await transactions.deletePersisted(transactionId: transactionId, owner: completingOwner)
       await transactions.finishExecution(for: transactionWrapper)
@@ -1026,6 +1031,7 @@ public actor RealtimeV2 {
     if case .commitOutcomeUnknownAfterReconnect = error {
       log.warning("Transaction commit outcome is unknown transaction_id=\(transactionId)")
       await transaction.commitOutcomeUnknown()
+      SendTelemetry.record(transactionWrapper, .commitUnknown)
       await transactions.deletePersisted(transactionId: transactionId, owner: completingOwner)
       await transactions.finishExecution(for: transactionWrapper)
       guard completingOwner == transactionOwner else { return }
@@ -1069,6 +1075,7 @@ public actor RealtimeV2 {
       return
     }
     await transaction.failed(error: error)
+    SendTelemetry.record(transactionWrapper, .failed, error: error)
     await transactions.deletePersisted(transactionId: transactionId, owner: completingOwner)
     await transactions.finishExecution(for: transactionWrapper)
     guard completingOwner == transactionOwner else { return }
@@ -1084,6 +1091,7 @@ public actor RealtimeV2 {
     beginTransactionOperation()
     defer { endTransactionOperation() }
     await transaction.failed(error: error)
+    SendTelemetry.record(transactionWrapper, .failed, error: error)
     guard completingOwner == transactionOwner else { return }
     resumeTransactionContinuation(for: transactionId, throwing: error)
   }

@@ -857,7 +857,7 @@ public final class FileDownloader: NSObject, Sendable {
     let native = nativeTasks[token]
     let cdn = activeTasks.removeValue(forKey: id)
     let callbacks = downloadCompletions.removeValue(forKey: id)
-    cdnSources[token] = nil
+    cdnSources.removeValue(forKey: token)?.record(.canceled, downloadID: id)
     let joined = joinedCompletions.removeValue(forKey: token) ?? []
     activeDownloadTokens[id] = nil
     accountTokens[token] = nil
@@ -941,7 +941,9 @@ public final class FileDownloader: NSObject, Sendable {
     }
   }
 
-  private func startCDNDownload(id: String, token: UUID, url: URL, localUrl: URL, expectedBytes: Int64) {
+  private func startCDNDownload(
+    id: String, token: UUID, url: URL, localUrl: URL, expectedBytes: Int64, afterFallback: Bool = false
+  ) {
     guard isActiveDownload(id: id, token: token) else {
       finishTransfer(id: id, token: token, result: .failure(URLError(.cancelled)))
       return
@@ -949,13 +951,24 @@ public final class FileDownloader: NSObject, Sendable {
     let task = session.downloadTask(with: url)
     task.taskDescription = id
     activeTasks[id] = task
-    cdnSources[token] = CDNSource(localURL: localUrl, expectedBytes: expectedBytes)
+    cdnSources[token] = CDNSource(
+      localURL: localUrl, expectedBytes: expectedBytes, startedAt: Date(), afterFallback: afterFallback
+    )
     task.resume()
   }
 
   private struct CDNSource {
     let localURL: URL
     let expectedBytes: Int64
+    let startedAt: Date
+    let afterFallback: Bool
+
+    func record(_ outcome: DownloadTelemetry.Outcome, downloadID: String) {
+      DownloadTelemetry.record(
+        outcome, transport: .cdn, downloadID: downloadID, expectedBytes: expectedBytes, startedAt: startedAt,
+        afterFallback: afterFallback
+      )
+    }
   }
   private var cdnSources: [UUID: CDNSource] = [:]
 
@@ -964,6 +977,10 @@ public final class FileDownloader: NSObject, Sendable {
     operation: @escaping NativeDownloadOperation
   ) {
     let throttler = progressThrottler
+    let startedAt = Date()
+    let record: @Sendable (DownloadTelemetry.Outcome) -> Void = { outcome in
+      DownloadTelemetry.record(outcome, transport: .native, downloadID: id, expectedBytes: expectedBytes, startedAt: startedAt)
+    }
     nativeTasks[token] = Task { [weak self] in
       guard let self else { return }
       defer { self.nativeTasks[token] = nil }
@@ -995,15 +1012,25 @@ public final class FileDownloader: NSObject, Sendable {
         }
         self.nativeTasks[token] = nil
         self.finishTransfer(id: id, token: token, result: .success(file))
+        record(.success)
       } catch {
-        guard self.activeDownloadTokens[id] == token else { return }
+        guard self.activeDownloadTokens[id] == token else {
+          record(.canceled)
+          return
+        }
         // The operation has returned only after its child ranges and file handle
         // have settled. Relinquish native ownership before admitting CDN fallback.
         self.nativeTasks[token] = nil
-        if !Task.isCancelled, self.isActiveDownload(id: id, token: token), !Self.isCancellation(error), !NativeMessageFileDownload.isPermissionFailure(error), let url {
+        let canceled = Task.isCancelled || !self.isActiveDownload(id: id, token: token) || Self.isCancellation(error)
+        let permission = NativeMessageFileDownload.isPermissionFailure(error)
+        if !canceled, !permission, let url {
           self.log.warning(Self.nativeFallbackLog(error))
-          self.startCDNDownload(id: id, token: token, url: url, localUrl: localUrl, expectedBytes: expectedBytes)
+          record(.fallback(DownloadTelemetry.errorClass(error)))
+          self.startCDNDownload(
+            id: id, token: token, url: url, localUrl: localUrl, expectedBytes: expectedBytes, afterFallback: true
+          )
         } else {
+          record(canceled ? .canceled : permission ? .permission : .failed(DownloadTelemetry.errorClass(error)))
           self.finishTransfer(id: id, token: token, result: .failure(
             self.isActiveDownload(id: id, token: token) ? error : URLError(.cancelled)
           ))
@@ -1013,23 +1040,11 @@ public final class FileDownloader: NSObject, Sendable {
   }
 
   private static func nativeFallbackLog(_ error: any Error) -> String {
-    if let rpc = error as? RealtimeDirectRpcError {
-      switch rpc {
-      case let .rpcError(code, _, status):
-        return "native_fallback class=rpc status=\(status) code=\(code.rawValue)"
-      case .notConnected: return "native_fallback class=rpc_disconnected"
-      case .timeout: return "native_fallback class=rpc_timeout"
-      case .commitOutcomeUnknown: return "native_fallback class=rpc_outcome_unknown"
-      case .capacityExceeded: return "native_fallback class=rpc_capacity"
-      case .notAuthorized: return "native_fallback class=rpc_unauthorized"
-      case .unknown: return "native_fallback class=rpc_unknown"
-      }
+    if case let .rpcError(code, _, status)? = error as? RealtimeDirectRpcError {
+      return "native_fallback class=rpc status=\(status) code=\(code.rawValue)"
     }
-    if let network = error as? URLError { return "native_fallback class=network code=\(network.code.rawValue)" }
-    if let filesystem = error as? POSIXError { return "native_fallback class=filesystem code=\(filesystem.code.rawValue)" }
-    if error is NativeFileDownloadError { return "native_fallback class=native" }
-    if error is FileDownloadValidationError { return "native_fallback class=validation" }
-    return "native_fallback class=other"
+    let errorClass = DownloadTelemetry.errorClass(error)
+    return "native_fallback class=\(errorClass.name)" + (errorClass.code.map { " code=\($0)" } ?? "")
   }
 
   private var downloadCompletions: [String: DownloadCompletion] = [:]
@@ -1042,7 +1057,13 @@ public final class FileDownloader: NSObject, Sendable {
     let completion = downloadCompletions.removeValue(forKey: id)
     let joined = joinedCompletions.removeValue(forKey: token) ?? []
     activeTasks[id] = nil
-    cdnSources[token] = nil
+    if let source = cdnSources.removeValue(forKey: token) {
+      switch result {
+      case .success: source.record(.success, downloadID: id)
+      case let .failure(error):
+        source.record(Self.isCancellation(error) ? .canceled : .failed(DownloadTelemetry.errorClass(error)), downloadID: id)
+      }
+    }
     if case let .failure(error) = result { failDownload(id: id, token: token, error: error) }
     completion?.handler(result)
     for handler in joined { handler(token, result) }

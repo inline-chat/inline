@@ -2394,17 +2394,20 @@ actor Sync {
         span.end(
           "attempt=\(attempt) success=true duration_ms=\(PerformanceTrace.elapsedMilliseconds(since: attemptStartedAt))"
         )
+        let completion: [String: Any] = [
+          "attempt": attempt,
+          "duration_ms": PerformanceTrace.elapsedMilliseconds(since: totalStartedAt),
+          "success": true,
+        ]
         PerformanceTrace.breadcrumb(
           "sync state check completed",
           category: "sync.lifecycle",
           // This is discovery completion; exact bucket targets may still hold
           // the global checkpoint behind this pass.
-          data: [
-            "attempt": attempt,
-            "duration_ms": PerformanceTrace.elapsedMilliseconds(since: totalStartedAt),
-            "success": true,
-          ]
+          data: completion
         )
+        // One per connection: how long until the client knew what it missed, across retries.
+        PerformanceTrace.healthEvent("sync.catchup", data: completion)
         return
       } catch {
         mergeActiveDiscoveryTargetsIntoQueue()

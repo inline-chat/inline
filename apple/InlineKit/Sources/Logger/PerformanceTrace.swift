@@ -108,11 +108,13 @@ public enum PerformanceTrace {
     "changed",
     "click_to_connected_ms",
     "connect_ms",
+    "count",
     "deleted",
     "direct_capacity_rejections",
     "down_ms",
     "duration_ms",
     "elapsed_ms",
+    "error_code",
     "ephemeral_expired",
     "ephemeral_superseded",
     "failed",
@@ -149,6 +151,7 @@ public enum PerformanceTrace {
     "window_saturations",
   ]
   private static let breadcrumbBooleanKeys: Set<String> = [
+    "after_fallback",
     "cold_start",
     "during_handshake",
     "inbound_message_too_large",
@@ -176,6 +179,27 @@ public enum PerformanceTrace {
     ],
     "fallback_reason": ["deadline", "startup_failure", "operator_preference"],
     "provider_state": ["disconnected", "connecting", "reconnecting", "connected", "disconnecting"],
+    "download_outcome": ["success", "fallback", "permission", "canceled", "failed", "not_found"],
+    "transport": ["native", "cdn"],
+    "error_class": [
+      "rpc", "rpc_disconnected", "rpc_timeout", "rpc_outcome_unknown", "rpc_capacity", "rpc_unauthorized",
+      "rpc_unknown", "network", "filesystem", "native", "validation", "http", "empty", "other",
+      "timeout", "invalid", "history_unavailable", "persistence_failed", "commit_outcome_unknown",
+      "rejected_before_execution", "dependency_failed",
+    ],
+    "size_bucket": ["unknown", "lt_1mb", "1_10mb", "10_100mb", "100_500mb", "gt_500mb"],
+    "carrier": ["v2", "v3"],
+    "media": ["document", "video", "voice", "photo"],
+    "send_outcome": ["sent", "failed", "commit_unknown", "canceled"],
+    "fallback_kind": [
+      "video_transcode_export_preset", "share_photo_heic_as_document", "share_photo_mime_as_document",
+      "create_thread_direct",
+    ],
+    "notification_outcome": [
+      "decrypted", "plaintext", "unsupported_payload", "key_missing", "decrypt_failed", "withheld", "sync",
+    ],
+    "withheld_reason": ["missingRecipient", "missingFence", "fenceUnavailable", "signedOut", "otherAccount"],
+    "delivery_end": ["expired"],
   ]
   private static let connectionReasonValues: Set<String> = [
     "none", "user_stop", "auth_lost", "auth_failed", "auth_timeout", "transport_error", "transport_disconnected",
@@ -184,7 +208,15 @@ public enum PerformanceTrace {
   ]
   private static let healthEventNames: Set<String> = [
     "realtime.connection.opened", "realtime.connection.recovered", "realtime.v3_fallback", "realtime.v3_upgrade",
+    "files.download", "messages.send", "sync.catchup", "app.fallback", "notifications.delivery",
   ]
+  private static let platformName: String = {
+    #if os(macOS)
+    return "macos"
+    #else
+    return "ios"
+    #endif
+  }()
   private static let diagnosticTagValues: [String: Set<String>] = ["realtime.protocol": ["v2", "v3"]]
   private static let maxBreadcrumbMetricMagnitude = 1_000_000_000_000.0
   private static let maxBreadcrumbMetricCount = 16
@@ -241,8 +273,9 @@ public enum PerformanceTrace {
   /// attributes use the breadcrumb projection: allow-listed numbers, booleans and enum values only.
   public static func healthEvent(_ name: String, data: [String: Any] = [:]) {
     guard SentrySDK.isEnabled, healthEventNames.contains(name) else { return }
-    let projection = privacySafeBreadcrumbProjection(message: name, category: name, data: data)
-    SentrySDK.logger.info(name, attributes: projection.data)
+    var attributes = privacySafeBreadcrumbProjection(message: name, category: name, data: data).data
+    attributes["platform"] = platformName
+    SentrySDK.logger.info(name, attributes: attributes)
   }
 
   /// Low-cardinality Sentry scope tags, so later errors can be filtered by connection context.

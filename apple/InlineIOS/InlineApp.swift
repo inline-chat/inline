@@ -102,6 +102,7 @@ private struct InlineSceneRoot: View {
         if newValue == .active {
           appDelegate.sceneRouterRegistry.activate(sceneID)
           synchronizeUserSettings()
+          ExtensionHealth.flush()
           // After a real trip to the background (not Control Center or a
           // permission prompt), renew Grid presence and reconnect media now
           // rather than at the next heartbeat. A process that never opened

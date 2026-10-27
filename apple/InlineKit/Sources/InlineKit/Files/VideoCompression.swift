@@ -180,6 +180,7 @@ public actor VideoCompressor {
       throw CancellationError()
     } catch {
       log.warning("Telegram-style transcode failed, falling back to export preset: \(error.localizedDescription)")
+      PerformanceTrace.healthEvent("app.fallback", data: ["fallback_kind": "video_transcode_export_preset"])
       guard let presetName = selectPreset(
         maxDimension: maxDimension,
         targetMaxDimension: options.maxDimension,

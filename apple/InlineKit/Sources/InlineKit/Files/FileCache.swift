@@ -273,8 +273,17 @@ public actor FileCache: Sendable {
     maxRetries: Int,
     generation: UUID
   ) async -> URL? {
-    defer { finishDownload(photoID, generation: generation) }
+    let startedAt = Date()
     var attempt = 0
+    var outcome = DownloadTelemetry.Outcome.canceled
+    var receivedBytes: Int64 = 0
+    defer {
+      finishDownload(photoID, generation: generation)
+      DownloadTelemetry.record(
+        outcome, transport: .cdn, downloadID: "photo_\(photoID)", expectedBytes: receivedBytes,
+        startedAt: startedAt, attempts: attempt
+      )
+    }
 
     while attempt < maxRetries {
       attempt += 1
@@ -296,6 +305,7 @@ public actor FileCache: Sendable {
           guard 200 ... 299 ~= httpResponse.statusCode else {
             if httpResponse.statusCode == 404 {
               log.error("Photo \(photoID) not found (404) - will not retry")
+              outcome = .notFound
               break
             }
             throw URLError(.badServerResponse)
@@ -309,8 +319,10 @@ public actor FileCache: Sendable {
             try? await Task.sleep(for: .seconds(Double(attempt)))
             continue
           }
+          outcome = .failed(.init(name: "empty", code: nil))
           break
         }
+        receivedBytes = Int64(data.count)
 
         // Success - same logic as original
         log.debug("Successfully downloaded photo \(photoID) (\(data.count) bytes)")
@@ -356,7 +368,9 @@ public actor FileCache: Sendable {
         log.debug("Saved downloaded photo size for \(photoID)")
 
         await reloadAllMessagesForPhoto(photoID, generation: generation)
-        return !Task.isCancelled && downloadGenerations[photoID] == generation ? localUrl : nil
+        guard !Task.isCancelled, downloadGenerations[photoID] == generation else { return nil }
+        outcome = .success
+        return localUrl
 
       } catch {
         if Self.isCancellation(error) || Task.isCancelled {
@@ -373,9 +387,11 @@ public actor FileCache: Sendable {
           try? await Task.sleep(for: .seconds(delay))
         } else if attempt >= maxRetries {
           log.error("Failed to download photo \(photoID) after \(maxRetries) attempts")
+          outcome = .failed(DownloadTelemetry.errorClass(error))
           break
         } else {
           log.error("Photo \(photoID) download failed with non-recoverable error", error: error)
+          outcome = .failed(DownloadTelemetry.errorClass(error))
           break
         }
       }
