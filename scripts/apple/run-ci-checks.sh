@@ -41,7 +41,7 @@ run_logged() {
 failures=0
 for package in "$@"; do
   case "$package" in
-    InlineKit|InlineUI|InlineIOSUI|InlineMacUI|InlineRealtimeCore|InlineMacSidebarModel|InlineThumbnailing|InlineSyntaxHighlighting|InlineMacScripting|InlineMath|MemojiKit|InlineDevCompanion)
+    InlineKit|InlineUI|InlineIOSUI|InlineMacUI|InlineRealtimeCore|InlineMacSidebarModel|InlineThumbnailing|InlineSyntaxHighlighting|InlineMacScripting|InlineMath|MemojiKit|InlineDevCompanion|InlineMessageLayout)
       ;;
     *)
       echo "error: unsupported Swift package '$package'" >&2

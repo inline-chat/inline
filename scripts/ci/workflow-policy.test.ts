@@ -40,7 +40,7 @@ describe("public CI contracts", () => {
     const source = read(".github/workflows/apple-validation.yml")
     for (const pkg of ["InlineKit", "InlineUI", "InlineIOSUI", "InlineMacUI", "InlineRealtimeCore",
       "InlineMacSidebarModel", "InlineThumbnailing", "InlineSyntaxHighlighting", "InlineMacScripting",
-      "InlineMath", "MemojiKit", "InlineDevCompanion"]) {
+      "InlineMath", "MemojiKit", "InlineDevCompanion", "InlineMessageLayout"]) {
       expect(source, pkg).toContain(pkg)
     }
     expect(source).not.toContain("platform=iOS Simulator")
