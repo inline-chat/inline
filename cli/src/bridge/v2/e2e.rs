@@ -376,6 +376,9 @@ async fn codex_round_trip_through_inline() {
             "content": [{"type": "output_text", "text": "E2E_G2_ONE"}]}),
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_G2_TWO"}]}),
+        // A plain reply to the agent's answer addresses it.
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_G2_REPLY"}]}),
     ])
     .await;
     let codex_home = dir.path().join("codex-home");
@@ -946,6 +949,30 @@ async fn codex_round_trip_through_inline() {
             .is_some_and(|input| input.contains("E2E_PASSIVE_LINE")),
         "the observed message reached the agent as context"
     );
+    let texts = bot_texts(&owner, group_two, bot_user_id).await;
+    let answer = texts
+        .iter()
+        .rev()
+        .find(|(_, text)| text.contains("E2E_G2_TWO"))
+        .map(|(id, _)| *id)
+        .unwrap();
+    let mut reply = SendTextRequest::new(
+        PeerRef::Chat {
+            chat_id: InlineId::new(group_two),
+        },
+        "and one more thing",
+    );
+    reply.reply_to_message_id = Some(InlineId::new(answer));
+    owner.send_text(reply).await.unwrap();
+    wait_for(
+        &model,
+        &owner,
+        group_two,
+        bot_user_id,
+        "the answer to a reply",
+        |texts| texts.iter().any(|(_, text)| text.contains("E2E_G2_REPLY")),
+    )
+    .await;
 
     let _ = stop.send(());
     let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
