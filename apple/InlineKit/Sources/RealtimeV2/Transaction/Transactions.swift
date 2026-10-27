@@ -1098,9 +1098,11 @@ actor Transactions {
           if expiredTransaction.dispatchPhase == .mayHaveExecuted {
             log.trace("Transaction \(expiredTransaction.id) expired with unknown commit outcome")
             await expiredTransaction.transaction.commitOutcomeUnknown()
+            SendTelemetry.record(expiredTransaction, .commitUnknown)
           } else {
             log.trace("Transaction \(expiredTransaction.id) expired before dispatch, calling failed()")
             await expiredTransaction.transaction.failed(error: .timeout)
+            SendTelemetry.record(expiredTransaction, .failed, error: .timeout)
           }
 
           // Delete expired transaction from disk

@@ -58,10 +58,10 @@ struct ConnectionTelemetry: Sendable {
 
 /// The protocol carrying the current connection. Transport selection records it when a connection
 /// authenticates; errors are tagged with it and connection telemetry reads it on open.
-enum RealtimeTelemetryContext {
+public enum RealtimeTelemetryContext {
   private static let current = Mutex<String?>(nil)
 
-  static var protocolName: String? { current.withLock { $0 } }
+  public static var protocolName: String? { current.withLock { $0 } }
 
   static func recordProtocol(_ name: String) {
     current.withLock { $0 = name }

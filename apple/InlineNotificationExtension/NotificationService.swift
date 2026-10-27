@@ -13,6 +13,7 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
   private let deliveryLock = NSLock()
   private var currentDelivery: InlineNotificationDelivery?
   private let accountFence: any NotificationAccountFenceStorage = KeychainNotificationAccountFenceStorage()
+  private static let healthEvent = "notifications.delivery"
 
   override func didReceive(
     _ request: UNNotificationRequest,
@@ -48,12 +49,16 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
     guard admission.isAdmitted else {
       if case let .rejected(reason) = admission {
         logger.info("notification content withheld: \(reason.rawValue, privacy: .public)")
+        ExtensionHealthOutbox.shared.record(Self.healthEvent, [
+          "notification_outcome": "withheld", "withheld_reason": reason.rawValue,
+        ])
       }
       delivery.finish()
       return
     }
     let work = Task { @MainActor in
       if isSyncPush {
+        ExtensionHealthOutbox.shared.record(Self.healthEvent, ["notification_outcome": "sync"])
         await processSyncPush(request, delivery: delivery)
         return
       }
@@ -95,7 +100,8 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
       delivery.finish()
       return
     }
-    let (photoURL, syncOps) = hydrateFromEncryptedContentIfNeeded(content: content)
+    let (photoURL, syncOps, hydration) = hydrateFromEncryptedContentIfNeeded(content: content)
+    ExtensionHealthOutbox.shared.record(Self.healthEvent, ["notification_outcome": hydration])
     let recipientUserID = NotificationAccountAdmission.recipientUserID(in: content.userInfo)
     var bestContent: UNNotificationContent = content
     // Commit the decrypted text before the first suspension. A newer push or expiry can finish
@@ -172,6 +178,7 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
   }
 
   override func serviceExtensionTimeWillExpire() {
+    ExtensionHealthOutbox.shared.record(Self.healthEvent, ["delivery_end": "expired"])
     deliveryLock.withLock { currentDelivery }?.finish()
   }
 }
@@ -258,19 +265,19 @@ private extension NotificationService {
   /// never userInfo.
   func hydrateFromEncryptedContentIfNeeded(
     content: UNMutableNotificationContent
-  ) -> (photoURL: URL?, syncOps: NotificationSyncOps?) {
+  ) -> (photoURL: URL?, syncOps: NotificationSyncOps?, outcome: String) {
     guard let envelope = EncryptedPayloadEnvelope(userInfo: content.userInfo) else {
-      return (nil, nil)
+      return (nil, nil, "plaintext")
     }
 
     guard envelope.version == 1, envelope.algorithm == "X25519_HKDF_SHA256_AES256_GCM" else {
       logger.error("unsupported encrypted payload metadata")
-      return (nil, nil)
+      return (nil, nil, "unsupported_payload")
     }
 
     guard let privateKeyData = loadPushContentPrivateKeyData() else {
       logger.error("push-content private key missing")
-      return (nil, nil)
+      return (nil, nil, "key_missing")
     }
 
     do {
@@ -279,7 +286,7 @@ private extension NotificationService {
       let payload = try JSONDecoder().decode(DecryptedSendMessagePayload.self, from: payloadData)
       guard payload.kind == "send_message" else {
         logger.error("unsupported decrypted payload kind")
-        return (nil, nil)
+        return (nil, nil, "unsupported_payload")
       }
 
       content.title = payload.title
@@ -313,11 +320,12 @@ private extension NotificationService {
       let object = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any]
       return (
         InlineNotificationPhoto.url(inDecryptedContent: payloadData),
-        NotificationSyncOps(jsonObject: object?["sync"])
+        NotificationSyncOps(jsonObject: object?["sync"]),
+        "decrypted"
       )
     } catch {
       logger.error("failed to decrypt encrypted notification content")
-      return (nil, nil)
+      return (nil, nil, "decrypt_failed")
     }
   }
 

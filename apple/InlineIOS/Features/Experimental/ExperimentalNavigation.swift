@@ -276,6 +276,10 @@ struct ExperimentalSheetView: View {
       NavigationStack {
         ChatInfoView(chatItem: chatItem)
       }
+    case .whatsNew:
+      if let announcement = WhatsNewStore.shared.announcement {
+        WhatsNewView(announcement: announcement, onContinue: { router.dismissSheet() })
+      }
     }
   }
 }

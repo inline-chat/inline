@@ -1345,8 +1345,10 @@ class ShareState: ObservableObject {
         mimeType: mimeType
       ) {
         log.warning(tagged("Failed to transcode HEIC photo; falling back to document"))
+        ExtensionHealth.record("app.fallback", ["fallback_kind": "share_photo_heic_as_document"])
       } else {
         log.warning(tagged("Unsupported photo MIME type; falling back to document (\(mimeType.text))"))
+        ExtensionHealth.record("app.fallback", ["fallback_kind": "share_photo_mime_as_document"])
       }
       resolvedFileType = .document
     }

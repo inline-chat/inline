@@ -28,6 +28,7 @@ struct CreateThreadExecutor {
       reservedChatId = try await reservedChatIdProvider()
     } catch {
       createThreadLog.error("Failed to acquire reserved chat id; falling back to direct create", error: error)
+      PerformanceTrace.healthEvent("app.fallback", data: ["fallback_kind": "create_thread_direct"])
       return try await directCreate()
     }
 
