@@ -19,7 +19,7 @@ use inline_agent_bridge::group::{
     ParticipationMode, PassiveBatch, PendingInput, Publication, PublicationEffect,
     PublicationEvent, ReleaseCause, ReleaseReceipt, ReleaseRequest, ReleaseStep,
     ReleaseStepOutcome, SpeakGateError, SpeakVerdict, WorkPhase, gate_admission,
-    handoff_instruction, passive_input, release_event, run_state_event, trusted_guide,
+    handoff_instruction, release_event, run_state_event, trusted_guide,
 };
 use inline_agent_bridge::harness::ChatId;
 use inline_agent_bridge::harness::{
@@ -1214,15 +1214,26 @@ impl Actor {
             self.retained.push(pending);
             return;
         };
-        // What the thread said since the agent last took input comes first,
-        // as context only.
-        if let Some(context) = self
+        // What the thread said since the agent last took input travels with
+        // it as untrusted context, kept apart from the author's words. Every
+        // harness and version keeps that apart; a separate passive message
+        // would start a turn on older Claude Code.
+        if let Some(passive) = self
             .passive
             .drain(ContextBudget::bytes(PASSIVE_CONTEXT_BYTES))
-            && let Ok(id) = InputId::new(uuid::Uuid::new_v4().to_string())
-            && let Err(error) = session.send(passive_input(context, id)).await
         {
-            log::warn!(target: "inline::bridge::v2", "passive context not delivered: {error}");
+            let context =
+                input
+                    .content
+                    .context
+                    .get_or_insert_with(|| inline_agent_bridge::TurnContext {
+                        instructions: String::new(),
+                        conversation: String::new(),
+                    });
+            if !context.conversation.is_empty() {
+                context.conversation.push_str("\n\n");
+            }
+            context.conversation.push_str(&passive.text);
         }
         if !matches!(input.delivery, Delivery::Queue | Delivery::Passive) {
             input.delivery = match live_turn(&session) {

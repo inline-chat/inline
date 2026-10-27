@@ -602,12 +602,24 @@ async fn codex_round_trip_through_inline() {
         |texts| texts.iter().any(|(_, text)| text.contains("continues in")),
     )
     .await;
-    let subthread = tool_outputs(&model)
-        .iter()
-        .filter_map(|output| serde_json::from_str::<Value>(output).ok())
-        .find(|output| output.get("link").is_some())
-        .and_then(|output| output["chat_id"].as_i64())
-        .expect("start_subthread returned the subthread");
+    // The model sees the tool's result only with its next request.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let subthread = loop {
+        if let Some(subthread) = tool_outputs(&model)
+            .iter()
+            .filter_map(|output| serde_json::from_str::<Value>(output).ok())
+            .find(|output| output.get("link").is_some())
+            .and_then(|output| output["chat_id"].as_i64())
+        {
+            break subthread;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "start_subthread never returned: {:#?}",
+            tool_outputs(&model)
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
     wait_for(
         &model,
         &owner,
@@ -763,6 +775,9 @@ async fn claude_round_trip_through_inline() {
             "1".into(),
         ),
         ("DISABLE_ERROR_REPORTING".into(), "1".into()),
+        // Newer Claude Code defers MCP tools behind ToolSearch; the scripted
+        // model calls Inline's tools directly.
+        ("ENABLE_TOOL_SEARCH".into(), "false".into()),
     ];
     config.model = Some("claude-sonnet-4-5".to_owned());
     // Ask before tools, so approvals become cards.

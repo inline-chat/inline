@@ -94,7 +94,8 @@ jobs:
           claude --version
       - name: Labs against the fake Messages API
         run: |
-          export CLAUDE_LAB_BIN="$(command -v claude)"
+          CLAUDE_LAB_BIN="$(command -v claude)"
+          export CLAUDE_LAB_BIN
           export CLAUDE_LAB_OUT="$RUNNER_TEMP/claude-lab"
           cargo test --locked -p inline-agent-driver-claude --test claude_lab -- --ignored --test-threads=1
       - uses: actions/upload-artifact@v4
