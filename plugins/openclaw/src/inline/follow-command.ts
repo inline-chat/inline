@@ -36,6 +36,31 @@ const INLINE_FOLLOW_COMMAND_DESCRIPTIONS: Record<InlineFollowCommand, string> = 
 // public protocol enum only names UNSPECIFIED and FOLLOWING.
 export const DIALOG_FOLLOW_MODE_UNFOLLOWED = 2 as DialogFollowMode
 
+const INLINE_FOLLOW_MODE_CHANGES_KEY = Symbol.for("openclaw.inlineFollowModeChanges")
+const INLINE_FOLLOW_MODE_CHANGES_MAX = 1000
+
+function inlineFollowModeChanges(): Set<string> {
+  const state = globalThis as { [INLINE_FOLLOW_MODE_CHANGES_KEY]?: Set<string> }
+  return (state[INLINE_FOLLOW_MODE_CHANGES_KEY] ??= new Set())
+}
+
+// Follow state changed outside the monitor, by a tool or a plugin command. The
+// monitor caches chat metadata, so it refetches the chat before routing there.
+export function markInlineFollowModeChanged(params: { accountId: string; chatId: bigint }): void {
+  const changes = inlineFollowModeChanges()
+  const key = `${params.accountId}:${String(params.chatId)}`
+  changes.delete(key)
+  changes.add(key)
+  for (const oldest of changes) {
+    if (changes.size <= INLINE_FOLLOW_MODE_CHANGES_MAX) break
+    changes.delete(oldest)
+  }
+}
+
+export function takeInlineFollowModeChanged(params: { accountId: string; chatId: bigint }): boolean {
+  return inlineFollowModeChanges().delete(`${params.accountId}:${String(params.chatId)}`)
+}
+
 export function listInlineFollowCommandSpecs(): InlineFollowCommandSpec[] {
   return (["follow", "unfollow"] as const).map((name) => ({
     name,
@@ -124,7 +149,7 @@ export async function updateInlineFollowMode(params: {
 export function inlineFollowCommandSuccessText(command: InlineFollowCommand): string {
   return command === "follow"
     ? "Following this chat—eligible messages can wake OpenClaw without an @mention."
-    : "Unfollowed this chat—automatic follow and reply wakes are off."
+    : "Unfollowed this chat—OpenClaw now answers only messages addressed to it."
 }
 
 export function inlineFollowCommandUsageText(command: InlineFollowCommand): string {
@@ -152,10 +177,10 @@ export function summarizeInlineFollowCommandError(error: unknown): string {
   return redacted.length > 500 ? `${redacted.slice(0, 499)}…` : redacted
 }
 
-async function withInlineFollowClient<T>(params: {
+export async function withInlineFollowClient<T>(params: {
   cfg: OpenClawConfig
   accountId?: string | null
-  fn: (client: InlineSdkClient) => Promise<T>
+  fn: (client: InlineSdkClient, accountId: string) => Promise<T>
 }): Promise<T> {
   const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
   if (!account.configured || !account.baseUrl) {
@@ -168,7 +193,7 @@ async function withInlineFollowClient<T>(params: {
   })
   await client.connect()
   try {
-    return await params.fn(client)
+    return await params.fn(client, account.accountId)
   } finally {
     await client.close().catch(() => {})
   }
@@ -195,8 +220,12 @@ export async function handleInlineFollowCommand(
     await withInlineFollowClient({
       cfg,
       ...(ctx.accountId ? { accountId: ctx.accountId } : {}),
-      fn: async (client) => {
-        await updateInlineFollowMode({ client, target, command })
+      fn: async (client, accountId) => {
+        try {
+          await updateInlineFollowMode({ client, target, command })
+        } finally {
+          if ("chatId" in target) markInlineFollowModeChanged({ accountId, chatId: target.chatId })
+        }
       },
     })
     return { text: inlineFollowCommandSuccessText(command) }

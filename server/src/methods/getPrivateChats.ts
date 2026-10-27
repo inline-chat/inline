@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import { and, eq, inArray, or } from "drizzle-orm"
 import { chats, dialogs, files, messages, users, type DbChat } from "@in/server/db/schema"
@@ -43,15 +44,19 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
 
   // NOTE(@mo): have to re-enable this so members don't error on missing chat or dialog client side
   if (!selfChat) {
-    const [newSelfChat] = await db
-      .insert(chats)
-      .values({
-        type: "private",
-        date: new Date(),
-        minUserId: currentUserId,
-        maxUserId: currentUserId,
-      })
-      .returning()
+    const [newSelfChat] = await db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(chats)
+        .values({
+          type: "private",
+          date: new Date(),
+          minUserId: currentUserId,
+          maxUserId: currentUserId,
+        })
+        .returning()
+      if (inserted[0]) await syncChatAccess(tx, { kind: "chats", chatIds: [inserted[0].id] })
+      return inserted
+    })
     selfChat = newSelfChat
   }
   if (!selfChatDialog && selfChat) {

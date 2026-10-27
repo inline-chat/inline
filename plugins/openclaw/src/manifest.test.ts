@@ -72,6 +72,7 @@ describe("plugin manifest", () => {
         "inline_forward",
         "inline_bot_presence",
         "inline_parent_context",
+        "inline_follow",
       ]),
     )
     expect(json.channelEnvVars).toBeUndefined()

@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db, schema } from "@in/server/db"
 import { userNotDeleted, users } from "@in/server/db/schema/users"
 import { BotTokensModel } from "@in/server/db/models/botTokens"
@@ -32,14 +33,17 @@ export const deleteBot = async (
     .from(schema.sessions)
     .where(and(eq(schema.sessions.userId, botUserId), isNull(schema.sessions.revoked)))
 
-  await db
-    .update(users)
-    .set({
-      deleted: true,
-      online: false,
-      username: null,
-    })
-    .where(eq(users.id, botUserId))
+  await db.transaction(async (tx) => {
+    await tx
+      .update(users)
+      .set({
+        deleted: true,
+        online: false,
+        username: null,
+      })
+      .where(eq(users.id, botUserId))
+    await syncChatAccess(tx, { kind: "deletedUsers", userIds: [botUserId] })
+  })
 
   await BotTokensModel.deleteByBotUserId(botUserId)
 

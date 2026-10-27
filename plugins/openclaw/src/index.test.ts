@@ -106,6 +106,7 @@ describe("plugin entry", () => {
       "inline_forward",
       "inline_bot_presence",
       "inline_parent_context",
+      "inline_follow",
     ])
     expect(registeredCommandNames).toEqual([
       "threadreply",

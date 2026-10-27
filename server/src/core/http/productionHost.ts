@@ -26,6 +26,7 @@ import {
   BotWebhookDeliveryProcess,
 } from "../../modules/botUpdates/delivery.effect"
 import { McpEventsProcess } from "../../modules/mcpEvents/worker.effect"
+import { ChatAccessVerifierProcess } from "../../modules/authorization/chatAccessVerifier.effect"
 import {
   BlockContentImageProcess,
 } from "../../modules/message/blockContentImageWorker.effect"
@@ -451,12 +452,13 @@ export const startCoreProductionServer = async <
     const result = await bridge.runPromiseExit(Effect.all([
       BotWebhookDeliveryProcess.use((process) => process.stop).pipe(Effect.exit),
       McpEventsProcess.use((process) => process.stop).pipe(Effect.exit),
+      ChatAccessVerifierProcess.use((process) => process.stop).pipe(Effect.exit),
       BlockContentImageProcess.use((process) => process.stop).pipe(Effect.exit),
       NativeUploadProcess.use((process) => process.stop).pipe(Effect.exit),
       GridProviderEffectsProcess.use((process) => process.stop).pipe(Effect.exit),
       DatabaseHealthMonitorProcess.use((process) => process.stop).pipe(Effect.exit),
       UserSettingsCleanupProcess.use((process) => process.stop).pipe(Effect.exit),
-    ], { concurrency: 7 }))
+    ], { concurrency: 8 }))
     if (Exit.isFailure(result)) producerStopFailures.push(result.cause)
     else for (const stopped of result.value) {
       if (Exit.isFailure(stopped)) producerStopFailures.push(stopped.cause)
@@ -641,6 +643,7 @@ export const startCoreProductionServer = async <
                 (process) => process.start,
               ),
               McpEventsProcess.use((process) => process.start),
+              ChatAccessVerifierProcess.use((process) => process.start),
               BlockContentImageProcess.use(
                 (process) => process.start,
               ),

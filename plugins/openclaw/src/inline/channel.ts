@@ -45,6 +45,7 @@ import { isInlineReplyThreadsEnabled, resolveInlineReplyThreadChatId } from "./r
 import { recordInlineThreadParticipation } from "./thread-participation.js"
 import { looksLikeInlineTargetId, normalizeInlineTarget } from "./normalize.js"
 import { monitorInlineProvider } from "./monitor.js"
+import { sendInlineWorkingAction } from "./compose-action.js"
 import { sanitizeInlineVisibleText } from "./outbound-sanitize.js"
 import {
   buildInlineCommandsListChannelData,
@@ -890,7 +891,7 @@ async function sendTypingInline(params: {
     cfg: params.cfg,
     accountId: params.accountId ?? null,
     fn: async (client) => {
-      await client.sendTyping({ chatId, typing: params.typing })
+      await sendInlineWorkingAction(client, { chatId, working: params.typing })
     },
   })
 }
@@ -1889,6 +1890,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       "- Inline bot command discovery: use `peer-bot-commands`/`bot-commands` to read commands available in the current or target chat/user/reply thread; use `inline_bot_commands` only to manage this bot's registered command menu.",
       "- Inline special tools: use `inline_members` to find users in a space and reuse returned `user:<id>` DM targets. It can infer `spaceId` inside a current Inline space chat/reply thread; pass `spaceId` explicitly otherwise. Use `inline_parent_context` for more parent-chat history from the current reply thread, with `beforeMessageId`, `afterMessageId`, or `messageId` for older/newer/around windows.",
       "- Inline special tools: use `inline_nudge` to send a nudge, `inline_forward` to forward message ids between chats or users, and `inline_bot_presence` to move or emote through your on-screen body without sending a chat message.",
+      "- Inline follow state: when someone asks you to follow or unfollow a group chat or reply thread, use `inline_follow`; report the `followMode` it returns. Following lets that chat's messages reach you without an @mention; unfollowing limits you to messages addressed to you.",
       "- Inline bot profile setup: use `inline_update_profile` only when the user explicitly asks to change your Inline bot display name or profile photo.",
       "- Inline bot avatar setup: use `inline_bot_avatar` only when the user explicitly asks you to install, replace, or clear your on-screen avatar. Do not call it during ordinary chat, do not invent file paths, and do not use it for mood/state changes.",
       "- Inline bot command setup: use `inline_bot_commands` to get, set, or delete this bot's registered command menu; do not use it to execute slash commands.",

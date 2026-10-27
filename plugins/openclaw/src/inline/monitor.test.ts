@@ -4023,7 +4023,8 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("keeps inferred attention when the bot is also explicitly mentioned", async () => {
+  it("takes no turn when the leading mention names someone else, even with a later mention of the bot", async () => {
+    const runtime = { log: vi.fn(), error: vi.fn() }
     const harness = await setupMonitorHarness({
       me: {
         userId: 777n,
@@ -4066,26 +4067,25 @@ describe("inline/monitor", () => {
         },
       },
       dispatchReplyPayload: {
-        text: "bot was explicitly addressed",
+        text: "should not send",
       },
     })
 
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
       account: buildAccount({ groupPolicy: "open", requireMention: true, replyThreads: true }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      runtime: runtime as any,
       abortSignal: new AbortController().signal,
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
 
     await waitFor(() => {
-      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          ExplicitlyMentionedBot: true,
-        }),
+      expect(runtime.log).toHaveBeenCalledWith(
+        expect.stringContaining("inline: drop group chat 7203 (no mention)"),
       )
     })
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
 
     await handle.stop()
   })
@@ -4271,7 +4271,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chatId: 7401n,
-          text: "Unfollowed this chat—automatic follow and reply wakes are off.",
+          text: "Unfollowed this chat—OpenClaw now answers only messages addressed to it.",
           replyToMsgId: 30n,
         }),
       )
@@ -9004,7 +9004,7 @@ describe("inline/monitor", () => {
     } finally { await handle.stop() }
   })
 
-  it.each([undefined, false])("keeps legacy typing and temporary progress when activity is %s", async (experimentalAgentActivity) => {
+  it.each([undefined, false])("shows Working and keeps temporary progress when activity is %s", async (experimentalAgentActivity) => {
     const harness = await setupMonitorHarness({
       dispatchTypingLifecycle: true,
       events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
@@ -9028,7 +9028,7 @@ describe("inline/monitor", () => {
       expect(progress?.parseMarkdown).toBe(false)
       expect(progress?.text).not.toContain('activity="agent"')
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(4, expect.objectContaining({ oneofKind: "deleteMessages" }))
-      expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.sendComposeAction?.action === 6)).toBe(false)
+      expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.sendComposeAction?.action === 6)).toBe(true)
       expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 773n, typing: true })
       expect(harness.agentEventListenerCount()).toBe(0)
       expect(harness.calls.dispatchReply.mock.calls[0]?.[0]?.replyOptions?.onAgentRunStart).toBeUndefined()
@@ -13290,7 +13290,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("does not wake for a reply to the bot while the dialog is explicitly unfollowed", async () => {
+  it("still wakes for a reply to the bot while the dialog is explicitly unfollowed", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -13321,7 +13321,7 @@ describe("inline/monitor", () => {
         ],
       },
       dispatchReplyPayload: {
-        text: "should not send",
+        text: "reply while unfollowed",
       },
     })
 
@@ -13338,10 +13338,12 @@ describe("inline/monitor", () => {
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
 
-    await handle.done
-    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
-    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
-    expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({ ImplicitMentionKinds: ["reply_to_bot"] }),
+      )
+    })
 
     await handle.stop()
   })
@@ -15463,4 +15465,265 @@ it("the real SDK delivers a different chat through the monitor while a reaction 
     await handle.stop()
     await client.close()
   }
+})
+
+describe("inline/monitor bot addressing rules", () => {
+  const ROOM = 9600n
+  const BOT = 777n
+  const SENDER = 51n
+
+  const mention = (offset: number, length: number, userId: bigint) => ({
+    type: 1,
+    offset: BigInt(offset),
+    length: BigInt(length),
+    entity: { oneofKind: "mention", mention: { userId } },
+  })
+  const botCommand = (length: number, botUserId: bigint) => ({
+    type: 13,
+    offset: 0n,
+    length: BigInt(length),
+    entity: { oneofKind: "botCommand", botCommand: { botUserId } },
+  })
+  const history = {
+    otherPerson: { id: 590n, date: 1_700_000_590n, fromId: 52n, message: "status is green" },
+    bot: { id: 591n, date: 1_700_000_591n, fromId: BOT, message: "I ran the checks", out: true },
+    sender: { id: 592n, date: 1_700_000_592n, fromId: SENDER, message: "first thought" },
+  }
+
+  async function runInbound(params: {
+    message: Record<string, unknown>
+    dialogFollowMode?: number
+    account?: Record<string, unknown>
+    participants?: Array<{ id: bigint; firstName?: string; bot?: boolean }>
+  }) {
+    const runtime = { log: vi.fn(), error: vi.fn() }
+    const harness = await setupMonitorHarness({
+      me: { userId: BOT, username: "inlinebot" },
+      events: [{
+        kind: "message.new",
+        chatId: ROOM,
+        message: { id: 600n, date: 1_700_000_600n, fromId: SENDER, mentioned: false, ...params.message },
+      }],
+      chats: {
+        [String(ROOM)]: {
+          kind: "group",
+          title: "Rules room",
+          ...(params.dialogFollowMode != null ? { dialogFollowMode: params.dialogFollowMode } : {}),
+        },
+      },
+      historyByChat: { [String(ROOM)]: [history.otherPerson, history.bot, history.sender] },
+      ...(params.participants ? { participants: { [String(ROOM)]: params.participants } } : {}),
+      dispatchReplyPayload: { text: "bot reply" },
+    } as any)
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", historyLimit: 10, ...params.account } as any),
+      runtime: runtime as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    return { harness, handle, runtime }
+  }
+
+  async function expectNoTurn(
+    run: Awaited<ReturnType<typeof runInbound>>,
+    reason = `inline: drop group chat ${String(ROOM)} (no mention)`,
+  ) {
+    try {
+      await waitFor(() => expect(run.runtime.log).toHaveBeenCalledWith(expect.stringContaining(reason)))
+      expect(run.harness.calls.dispatchReply).not.toHaveBeenCalled()
+      expect(run.harness.calls.sendMessage).not.toHaveBeenCalled()
+    } finally {
+      await run.handle.stop()
+    }
+  }
+
+  async function expectTurn(run: Awaited<ReturnType<typeof runInbound>>) {
+    try {
+      await waitFor(() => expect(run.harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+    } finally {
+      await run.handle.stop()
+    }
+  }
+
+  it("is addressed when this bot is in the leading run of mentions", async () => {
+    await expectTurn(await runInbound({
+      message: {
+        message: "@Ada, @inlinebot compare",
+        mentioned: true,
+        entities: { entities: [mention(0, 4, 42n), mention(6, 10, BOT)] },
+      },
+      account: { requireMention: true },
+    }))
+  })
+
+  it("takes no turn in a free-response room when the message leads with someone else", async () => {
+    await expectNoTurn(await runInbound({
+      message: {
+        message: "@Ada can you check",
+        entities: { entities: [mention(0, 4, 42n)] },
+      },
+      account: { requireMention: false },
+    }))
+  })
+
+  it("takes no turn on a reply to the bot that leads with someone else", async () => {
+    await expectNoTurn(await runInbound({
+      message: {
+        message: "@Ada see above",
+        replyToMsgId: history.bot.id,
+        entities: { entities: [mention(0, 4, 42n)] },
+      },
+      account: { requireMention: true, replyToBotWithoutMention: true },
+    }))
+  })
+
+  it("ignores a reply to another person in a followed thread", async () => {
+    await expectNoTurn(await runInbound({
+      message: { message: "agreed", replyToMsgId: history.otherPerson.id },
+      dialogFollowMode: 1,
+      account: { requireMention: true },
+    }))
+  })
+
+  it("ignores a reply to another person in a free-response room", async () => {
+    await expectNoTurn(await runInbound({
+      message: { message: "agreed", replyToMsgId: history.otherPerson.id },
+      account: { requireMention: false },
+    }))
+  })
+
+  it("answers a reply to another person that mentions the bot", async () => {
+    await expectTurn(await runInbound({
+      message: {
+        message: "@inlinebot is this right?",
+        mentioned: true,
+        replyToMsgId: history.otherPerson.id,
+        entities: { entities: [mention(0, 10, BOT)] },
+      },
+      account: { requireMention: false },
+    }))
+  })
+
+  it("treats a reply to the sender's own message as ordinary conversation", async () => {
+    await expectTurn(await runInbound({
+      message: { message: "and one more thing", replyToMsgId: history.sender.id },
+      dialogFollowMode: 1,
+      account: { requireMention: true },
+    }))
+  })
+
+  it("lets an explicit unfollow beat a free-response room", async () => {
+    await expectNoTurn(await runInbound({
+      message: { message: "anyone around?" },
+      dialogFollowMode: 2,
+      account: { requireMention: false },
+    }))
+  })
+
+  it("still answers mentions and replies in an unfollowed free-response room", async () => {
+    await expectTurn(await runInbound({
+      message: {
+        message: "@inlinebot over here",
+        mentioned: true,
+        entities: { entities: [mention(0, 10, BOT)] },
+      },
+      dialogFollowMode: 2,
+      account: { requireMention: false },
+    }))
+    const reply = await runInbound({
+      message: { message: "what did you find?", replyToMsgId: history.bot.id },
+      dialogFollowMode: 2,
+      account: { requireMention: false },
+    })
+    await waitFor(() => expect(reply.harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+      expect.objectContaining({ ImplicitMentionKinds: ["reply_to_bot"] }),
+    ))
+    await expectTurn(reply)
+  })
+
+  it("keeps another bot's unmentioned reply to this bot as context", async () => {
+    await expectNoTurn(await runInbound({
+      message: { message: "done, results attached", replyToMsgId: history.bot.id },
+      account: { requireMention: false },
+      participants: [{ id: SENDER, firstName: "Worker Bot", bot: true }],
+    }), "inline: observe ambient bot message")
+  })
+
+  it("ignores a command the app attached to another bot", async () => {
+    await expectNoTurn(await runInbound({
+      message: { message: "/stop", entities: { entities: [botCommand(5, 999n)] } },
+      dialogFollowMode: 1,
+      account: { requireMention: false },
+    }), `inline: drop command targeted at another bot chat=${String(ROOM)}`)
+  })
+
+  it("does not run a bare command sent as a reply to another person", async () => {
+    await expectNoTurn(await runInbound({
+      message: { message: "/new", replyToMsgId: history.otherPerson.id },
+      account: { requireMention: false, groupAllowFrom: [String(SENDER)], debounceMs: 0 },
+    }))
+  })
+
+  it("ends the leading run at words other than commas", async () => {
+    await expectNoTurn(await runInbound({
+      message: {
+        message: "@Ada and @inlinebot compare",
+        mentioned: true,
+        entities: { entities: [mention(0, 4, 42n), mention(9, 10, BOT)] },
+      },
+      account: { requireMention: true },
+    }))
+  })
+
+  it("wakes directly for a command the app attached to this bot", async () => {
+    await expectTurn(await runInbound({
+      message: { message: "/summarize the thread", entities: { entities: [botCommand(10, BOT)] } },
+      account: { requireMention: true, groupAllowFrom: [String(SENDER)], debounceMs: 0 },
+    }))
+  })
+
+  it("refetches follow state after a tool changes it outside the monitor", async () => {
+    const { markInlineFollowModeChanged } = await import("./follow-command")
+    const runtime = { log: vi.fn(), error: vi.fn() }
+    const chats: Record<string, { kind: "group"; title: string; dialogFollowMode: number }> = {
+      "9601": { kind: "group", title: "Follow change room", dialogFollowMode: 1 },
+    }
+    const harness = await setupMonitorHarness({
+      me: { userId: BOT, username: "inlinebot" },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 9601n,
+          message: { id: 610n, date: 1_700_000_610n, fromId: SENDER, message: "please unfollow this chat", mentioned: false },
+        },
+        {
+          kind: "message.new",
+          chatId: 9601n,
+          message: { id: 611n, date: 1_700_000_611n, fromId: SENDER, message: "still chatting here", mentioned: false },
+        },
+      ],
+      chats,
+      dispatchReplyPayload: { text: "Unfollowed." },
+      dispatchReplyBlocker: () => {
+        chats["9601"]!.dialogFollowMode = 2
+        markInlineFollowModeChanged({ accountId: "default", chatId: 9601n })
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: true, debounceMs: 0 }),
+      runtime: runtime as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(runtime.log).toHaveBeenCalledWith(
+        expect.stringContaining("inline: drop group chat 9601 (no mention)"),
+      ))
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+    } finally {
+      await handle.stop()
+    }
+  })
 })

@@ -92,10 +92,10 @@ import {
   type MessageActions,
   type MessageActionResponseUi,
   type User,
-  type UpdateComposeAction_ComposeAction,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { resolveInlineMessageActionsParam } from "./actions.js"
+import { sendInlineWorkingAction } from "./compose-action.js"
 import {
   INLINE_DEFAULT_GROUP_POLICY,
   INLINE_DEFAULT_REQUIRE_MENTION,
@@ -195,6 +195,7 @@ import {
   listInlineFollowCommandSpecs,
   parseInlineFollowCommandBody,
   summarizeInlineFollowCommandError,
+  takeInlineFollowModeChanged,
   updateInlineFollowMode,
 } from "./follow-command.js"
 import { listInlineMaintenanceCommandSpecs } from "./maintenance-command-specs.js"
@@ -512,9 +513,8 @@ function buildInlineTypingDispatcherOptions(typingCallbacks?: InlineTypingCallba
 }
 
 async function sendInlineTypingToChats(params: {
-  client: Pick<InlineSdkClient, "invokeRaw" | "sendTyping">
+  client: Pick<InlineSdkClient, "invokeRaw">
   chatIds: bigint[]
-  agentActivityEnabled?: boolean
   typing: boolean
   onPartialError?: (chatId: bigint, error: unknown) => void
 }): Promise<void> {
@@ -524,18 +524,7 @@ async function sendInlineTypingToChats(params: {
   await Promise.all(
     params.chatIds.map(async (chatId) => {
       try {
-        if (!params.agentActivityEnabled) {
-          await params.client.sendTyping({ chatId, typing: params.typing })
-          return
-        }
-        // WORKING = 6; only explicitly opted-in accounts emit this signal.
-        await params.client.invokeRaw(Method.SEND_COMPOSE_ACTION, {
-          oneofKind: "sendComposeAction",
-          sendComposeAction: {
-            peerId: buildChatPeer(chatId),
-            ...(params.typing ? { action: 6 as UpdateComposeAction_ComposeAction } : {}),
-          },
-        })
+        await sendInlineWorkingAction(params.client, { chatId, working: params.typing })
       } catch (error) {
         failures.push({ chatId, error })
       }
@@ -649,9 +638,8 @@ async function sendInlineBotPresenceToChats(params: {
 }
 
 async function sendInlineTypingAndBotPresenceToChats(params: {
-  client: Pick<InlineSdkClient, "invokeRaw" | "sendTyping">
+  client: Pick<InlineSdkClient, "invokeRaw">
   chatIds: bigint[]
-  agentActivityEnabled?: boolean
   typing: boolean
   presenceKind: InlineBotPresenceKind
   onTypingPartialError?: (chatId: bigint, error: unknown) => void
@@ -664,7 +652,6 @@ async function sendInlineTypingAndBotPresenceToChats(params: {
       client: params.client,
       chatIds: params.chatIds,
       typing: params.typing,
-      agentActivityEnabled: params.agentActivityEnabled === true,
       ...(params.onTypingPartialError ? { onPartialError: params.onTypingPartialError } : {}),
     }).catch((error) => {
       typingError = error
@@ -1376,8 +1363,29 @@ function normalizeInlineCommandBody(raw: string, botUsername: string | undefined
   return resolveInlineCommandTarget(raw, botUsername).body
 }
 
-function isInlineAbortRequestMessage(msg: Message, botUsername: string | undefined): boolean {
+// The app attaches the bot a command was picked for to a leading command
+// entity. Returns that bot's user id, or null when the command names none.
+function leadingInlineBotCommandTargetUserId(msg: Message): string | null {
   const text = typeof msg.message === "string" ? msg.message : ""
+  for (const entity of msg.entities?.entities ?? []) {
+    if (entity.entity.oneofKind !== "botCommand") continue
+    const offset = Number(entity.offset)
+    if (!Number.isInteger(offset) || offset < 0) continue
+    if (text.slice(0, offset).trim()) continue
+    const botUserId = entity.entity.botCommand.botUserId
+    return botUserId > 0n ? String(botUserId) : null
+  }
+  return null
+}
+
+function isInlineBotCommandForOtherBot(msg: Message, meId: bigint): boolean {
+  const target = leadingInlineBotCommandTargetUserId(msg)
+  return target != null && target !== String(meId)
+}
+
+function isInlineAbortRequestMessage(msg: Message, botUsername: string | undefined, meId: bigint): boolean {
+  const text = typeof msg.message === "string" ? msg.message : ""
+  if (isInlineBotCommandForOtherBot(msg, meId)) return false
   return isAbortRequestText(text, botUsername ? { botUsername } : undefined)
 }
 
@@ -1506,23 +1514,32 @@ function collectInlineMentionedUserIds(
   return [...ids]
 }
 
-function startsWithInlineMentionOfOtherUser(params: {
+// User ids in the run of mentions a message starts with, in order. That run
+// names who the message is for ("@alice @bot compare").
+function leadingInlineMentionUserIds(params: {
   content: ReturnType<typeof summarizeInlineMessageContent> | null
   messageText: string | undefined
-  meId: bigint
-}): boolean {
-  const firstEntity = params.content?.entities.reduce<InlineMessageEntitySummary | null>(
-    (first, entity) => {
-      if (!Number.isInteger(entity.offset) || entity.offset < 0) return first
-      if (!first || entity.offset < first.offset) return entity
-      return first
-    },
-    null,
-  )
-  if (firstEntity?.type !== "mention" || !firstEntity.userId) return false
-  if (firstEntity.userId === String(params.meId)) return false
+}): string[] {
+  const mentions = (params.content?.entities ?? [])
+    .filter((entity): entity is InlineMessageEntitySummary & { userId: string } =>
+      entity.type === "mention" &&
+      Boolean(entity.userId) &&
+      Number.isInteger(entity.offset) &&
+      entity.offset >= 0 &&
+      Number.isInteger(entity.length) &&
+      entity.length > 0)
+    .sort((a, b) => a.offset - b.offset)
   // Inline entity offsets use UTF-16 code units, which matches JavaScript slice.
-  return (params.messageText ?? "").slice(0, firstEntity.offset).trim().length === 0
+  const text = params.messageText ?? ""
+  const leading: string[] = []
+  let cursor = 0
+  for (const mention of mentions) {
+    if (mention.offset < cursor) break
+    if (text.slice(cursor, mention.offset).replace(/,/g, "").trim()) break
+    leading.push(mention.userId)
+    cursor = mention.offset + mention.length
+  }
+  return leading
 }
 
 function isInlineDialogFollowing(followMode: unknown): boolean {
@@ -3955,6 +3972,7 @@ export async function monitorInlineProvider(params: {
     let currentAttachmentText: string | null = null
     let currentEntityText: string | null = null
     let commandTarget = { body: "", targeted: false, addressedToMe: false }
+    let commandAddressedToMe = false
 
     if (!callbackActionEvent) {
       if (rawBodyOverride != null) {
@@ -3967,10 +3985,16 @@ export async function monitorInlineProvider(params: {
       }
       if (!rawBody && !currentContent?.media && !currentContent?.attachments.length) return
       commandTarget = resolveInlineCommandTarget(rawBody, botUsername)
-      if (commandTarget.targeted && !commandTarget.addressedToMe) {
+      const structuredCommandTarget = leadingInlineBotCommandTargetUserId(msg)
+      if (
+        (commandTarget.targeted && !commandTarget.addressedToMe) ||
+        (structuredCommandTarget != null && structuredCommandTarget !== String(meId))
+      ) {
         runtime.log?.(`inline: drop command targeted at another bot chat=${String(chatId)}`)
         return
       }
+      // A command picked for this bot addresses it directly, like a mention.
+      commandAddressedToMe = commandTarget.addressedToMe || structuredCommandTarget === String(meId)
     }
 
     const inboundAt = Date.now()
@@ -3980,6 +4004,9 @@ export async function monitorInlineProvider(params: {
       ...createTransportActivityStatusPatch(inboundAt),
     })
 
+    if (takeInlineFollowModeChanged({ accountId: account.accountId, chatId })) {
+      chatCache.delete(chatId)
+    }
     let chatInfo: CachedChatInfo
     try {
       chatInfo = await resolveChatInfo(client, chatCache, chatId)
@@ -4358,7 +4385,15 @@ export async function monitorInlineProvider(params: {
       return
     }
 
-    const wasMentioned = nativeMentioned
+    // The run of mentions a group message starts with names who it is for. If
+    // that run names someone else, a later mention of this bot does not count.
+    const leadingMentionUserIds = isGroup && callbackActionEvent == null
+      ? leadingInlineMentionUserIds({ content: currentContent, messageText: msg.message })
+      : []
+    const addressedElsewhere =
+      leadingMentionUserIds.length > 0 && !leadingMentionUserIds.includes(String(meId))
+    const explicitlyMentioned = nativeMentioned && !addressedElsewhere
+    const wasMentioned = explicitlyMentioned || commandAddressedToMe
     const messageTimestamp = Number(msg.date) * 1000
     const pendingReplyThreadContext = replyThreadContext
     const pendingGroupHistoryKey = isGroup
@@ -4429,29 +4464,7 @@ export async function monitorInlineProvider(params: {
           threadId: replyThreadContext.childChatId,
         }))
     const replyThreadImplicitMention = followModeImplicitMention || historyReplyThreadImplicitMention
-    const replyToBotImplicitMention =
-      isGroup &&
-      !explicitlyUnfollowed &&
-      (account.config.replyToBotWithoutMention ?? false) &&
-      msg.replyToMsgId != null &&
-      effectiveHistoryContext.repliedToBot
-    const inferredThreadAttention = replyThreadImplicitMention || replyToBotImplicitMention
-    const leadingOtherUserAddress =
-      !wasMentioned &&
-      inferredThreadAttention &&
-      startsWithInlineMentionOfOtherUser({
-        content: currentContent,
-        messageText: msg.message,
-        meId,
-      })
-    // A leading explicit address to another person overwhelmingly means the
-    // turn is for them, so it intentionally overrides inferred follow/reply
-    // attention. Explicitly addressing this bot still wins.
-    const implicitMention =
-      (callbackActionEvent != null && isGroup) ||
-      (!leadingOtherUserAddress && inferredThreadAttention)
-
-    const requireMention = isGroup
+    const configuredRequireMention = isGroup
       ? resolveInlineGroupRequireMention({
           cfg,
           groupId: String(effectiveChatId),
@@ -4459,12 +4472,41 @@ export async function monitorInlineProvider(params: {
           requireMentionDefault: account.config.requireMention ?? INLINE_DEFAULT_REQUIRE_MENTION,
         })
       : false
+    // An explicit unfollow beats free response: only mentions and replies to
+    // this bot reach it, as they would in a mention-only room.
+    const unfollowedFreeResponse = isGroup && explicitlyUnfollowed && !configuredRequireMention
+    const replyToBotImplicitMention =
+      isGroup &&
+      ((account.config.replyToBotWithoutMention ?? false) || unfollowedFreeResponse) &&
+      msg.replyToMsgId != null &&
+      effectiveHistoryContext.repliedToBot
+    const inferredThreadAttention = replyThreadImplicitMention || replyToBotImplicitMention
+    // A reply is addressed to its author. Replies to other people or bots stay
+    // theirs unless they mention this bot; replying to yourself is not one.
+    const repliedToSomeoneElse =
+      isGroup &&
+      callbackActionEvent == null &&
+      msg.replyToMsgId != null &&
+      !effectiveHistoryContext.repliedToBot &&
+      effectiveHistoryContext.replyToSenderId != null &&
+      effectiveHistoryContext.replyToSenderId !== String(meId) &&
+      effectiveHistoryContext.replyToSenderId !== senderId
+    const addressedToOthers = addressedElsewhere || (repliedToSomeoneElse && !wasMentioned)
+    // Messages addressed to someone else never start a turn here, whether the
+    // room is followed, free-response, or a thread this bot replied in.
+    const implicitMention =
+      (callbackActionEvent != null && isGroup) ||
+      (!addressedToOthers && inferredThreadAttention)
+
+    const requireMention = configuredRequireMention || unfollowedFreeResponse || addressedToOthers
     const mentionGate = resolveMentionGatingWithBypass({
       isGroup,
       requireMention,
       canDetectMention: typeof msg.mentioned === "boolean",
       wasMentioned,
       implicitMention,
+      // A bare command addressed to someone else (a reply to them) is theirs too.
+      hasAnyMention: addressedToOthers,
       allowTextCommands,
       hasControlCommand,
       commandAuthorized,
@@ -4481,7 +4523,7 @@ export async function monitorInlineProvider(params: {
     const mentionedUserIds = isGroup ? collectInlineMentionedUserIds(currentContent) : []
     const mentionSource = isGroup
       ? resolveInlineMentionSource({
-          nativeMentioned,
+          nativeMentioned: wasMentioned,
           implicitMention,
           shouldBypassMention: mentionGate.shouldBypassMention,
         })
@@ -4903,7 +4945,6 @@ export async function monitorInlineProvider(params: {
       parentThreadCreationTyping = typing
       await sendInlineTypingAndBotPresenceToChats({
         client,
-        agentActivityEnabled: account.config.experimentalAgentActivity === true,
         chatIds: [effectiveChatId],
         typing,
         presenceKind: typing ? "running" : "idle",
@@ -5059,7 +5100,6 @@ export async function monitorInlineProvider(params: {
         .catch(() => {})
         .then(() => sendInlineTypingToChats({
           client,
-          agentActivityEnabled: account.config.experimentalAgentActivity === true,
           chatIds: [targetChatId],
           typing,
           onPartialError: (failedChatId, error) =>
@@ -5243,7 +5283,7 @@ export async function monitorInlineProvider(params: {
       ...(isGroup ? { WasMentioned: mentionGate.effectiveWasMentioned } : {}),
       ...(isGroup
         ? {
-            ExplicitlyMentionedBot: nativeMentioned,
+            ExplicitlyMentionedBot: explicitlyMentioned,
             ...(mentionedUserIds.length > 0 ? { MentionedUserIds: mentionedUserIds } : {}),
             ...(implicitMentionKinds.length > 0 ? { ImplicitMentionKinds: implicitMentionKinds } : {}),
             MentionSource: mentionSource,
@@ -7050,7 +7090,7 @@ export async function monitorInlineProvider(params: {
   }
 
   const isAuthorizedInlineAbortMessage = async (entry: InlineDebounceEntry): Promise<boolean> => {
-    if (!isInlineAbortRequestMessage(entry.msg, botUsername) || entry.msg.fromId == null) return false
+    if (!isInlineAbortRequestMessage(entry.msg, botUsername, meId) || entry.msg.fromId == null) return false
     return await isAuthorizedInlineControlActor({
       chatId: entry.chatId,
       actorUserId: entry.msg.fromId,
@@ -7726,7 +7766,7 @@ export async function monitorInlineProvider(params: {
     clearTimeout(pending.timeout)
     const msg = params.msg ?? pending.msg
     if (
-      isInlineAbortRequestMessage(msg, botUsername) &&
+      isInlineAbortRequestMessage(msg, botUsername, meId) &&
       await isAuthorizedInlineAbortMessage({ chatId: pending.chatId, msg })
     ) {
       cancelPendingInlineDebounce({ chatId: pending.chatId, msg })
@@ -7867,7 +7907,7 @@ export async function monitorInlineProvider(params: {
             message: msg,
           })) return
           if (
-            isInlineAbortRequestMessage(msg, botUsername) &&
+            isInlineAbortRequestMessage(msg, botUsername, meId) &&
             await isAuthorizedInlineAbortMessage({ chatId: event.chatId, msg })
           ) {
             cancelPendingInlineDebounce({ chatId: event.chatId, msg })

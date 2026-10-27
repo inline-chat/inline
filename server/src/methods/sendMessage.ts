@@ -449,6 +449,8 @@ const sendPushNotificationToUser = async ({
       const notification = new APN.Notification()
       notification.payload = {
         userId: currentUserId,
+        // The iOS notification extension shows content only to the signed-in recipient.
+        recipientUserId: String(userId),
 
         from: {
           firstName: projectedFirstName,

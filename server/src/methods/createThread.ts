@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import { chats } from "@in/server/db/schema"
@@ -48,7 +49,7 @@ export const handler = async (
     const chat = await db.transaction(async (tx) => {
       const threadNumber = await allocateThreadNumber(tx, { type: "space", id: spaceId })
 
-      return tx
+      const created = await tx
         .insert(chats)
         .values({
           type: "thread",
@@ -61,6 +62,8 @@ export const handler = async (
           createdBy: context.currentUserId,
         })
         .returning()
+      if (created[0]) await syncChatAccess(tx, { kind: "chats", chatIds: [created[0].id] })
+      return created
     })
 
     if (!chat[0]) {

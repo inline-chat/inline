@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import {
@@ -180,6 +181,7 @@ export const joinSpaceByResolvedLink = async ({
       .innerJoin(users, eq(users.id, members.userId))
       .where(and(eq(members.spaceId, space.id), userNotDeleted()))
       .orderBy(members.userId)
+    await syncChatAccess(tx, { kind: "spaces", spaceIds: [space.id], userIds: [currentUserId] })
 
     return {
       space: updatedSpace,

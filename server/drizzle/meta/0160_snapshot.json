@@ -1,5 +1,5 @@
 {
-  "id": "3700e1a2-e051-4f16-909f-ed818c52c56c",
+  "id": "676b0833-bd22-48b5-a73c-ea0610a31ac0",
   "prevId": "5289272b-822a-4169-9bd6-e11e89173752",
   "version": "7",
   "dialect": "postgresql",
@@ -12863,71 +12863,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "parent_session_id": {
-          "name": "parent_session_id",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "relation": {
-          "name": "relation",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "workspace_label_encrypted": {
-          "name": "workspace_label_encrypted",
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "run_state": {
-          "name": "run_state",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "attention_kind": {
-          "name": "attention_kind",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "attention_user_ids": {
-          "name": "attention_user_ids",
-          "type": "integer[]",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "held_by": {
-          "name": "held_by",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "state_revision": {
-          "name": "state_revision",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "0"
-        },
-        "state_encrypted": {
-          "name": "state_encrypted",
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "state_updated_at": {
-          "name": "state_updated_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp (3)",
@@ -12988,38 +12923,6 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_sessions_active_state_idx": {
-          "name": "agent_sessions_active_state_idx",
-          "columns": [
-            {
-              "expression": "chat_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"agent_sessions\".\"run_state\" not in (0, 1)",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_sessions_parent_idx": {
-          "name": "agent_sessions_parent_idx",
-          "columns": [
-            {
-              "expression": "parent_session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"agent_sessions\".\"parent_session_id\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -13107,432 +13010,6 @@
             "global_id"
           ],
           "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "agent_sessions_parent_session_id_agent_sessions_id_fk": {
-          "name": "agent_sessions_parent_session_id_agent_sessions_id_fk",
-          "tableFrom": "agent_sessions",
-          "tableTo": "agent_sessions",
-          "columnsFrom": [
-            "parent_session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.agent_grants": {
-      "name": "agent_grants",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "bigserial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "bot_user_id": {
-          "name": "bot_user_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "subject_user_id": {
-          "name": "subject_user_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "operations": {
-          "name": "operations",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revision": {
-          "name": "revision",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "granted_by": {
-          "name": "granted_by",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revoked_at": {
-          "name": "revoked_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "agent_grants_bot_subject_unique": {
-          "name": "agent_grants_bot_subject_unique",
-          "columns": [
-            {
-              "expression": "bot_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "subject_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_grants_subject_idx": {
-          "name": "agent_grants_subject_idx",
-          "columns": [
-            {
-              "expression": "subject_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "agent_grants_bot_user_id_users_id_fk": {
-          "name": "agent_grants_bot_user_id_users_id_fk",
-          "tableFrom": "agent_grants",
-          "tableTo": "users",
-          "columnsFrom": [
-            "bot_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "agent_grants_subject_user_id_users_id_fk": {
-          "name": "agent_grants_subject_user_id_users_id_fk",
-          "tableFrom": "agent_grants",
-          "tableTo": "users",
-          "columnsFrom": [
-            "subject_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "agent_grants_granted_by_users_id_fk": {
-          "name": "agent_grants_granted_by_users_id_fk",
-          "tableFrom": "agent_grants",
-          "tableTo": "users",
-          "columnsFrom": [
-            "granted_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.agent_participations": {
-      "name": "agent_participations",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "bigserial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "chat_id": {
-          "name": "chat_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bot_user_id": {
-          "name": "bot_user_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mode": {
-          "name": "mode",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "output_mode": {
-          "name": "output_mode",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "joined_by": {
-          "name": "joined_by",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "revision": {
-          "name": "revision",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "1"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "agent_participations_chat_bot_unique": {
-          "name": "agent_participations_chat_bot_unique",
-          "columns": [
-            {
-              "expression": "chat_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "bot_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "agent_participations_bot_idx": {
-          "name": "agent_participations_bot_idx",
-          "columns": [
-            {
-              "expression": "bot_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "agent_participations_chat_id_chats_id_fk": {
-          "name": "agent_participations_chat_id_chats_id_fk",
-          "tableFrom": "agent_participations",
-          "tableTo": "chats",
-          "columnsFrom": [
-            "chat_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "agent_participations_bot_user_id_users_id_fk": {
-          "name": "agent_participations_bot_user_id_users_id_fk",
-          "tableFrom": "agent_participations",
-          "tableTo": "users",
-          "columnsFrom": [
-            "bot_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "agent_participations_joined_by_users_id_fk": {
-          "name": "agent_participations_joined_by_users_id_fk",
-          "tableFrom": "agent_participations",
-          "tableTo": "users",
-          "columnsFrom": [
-            "joined_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.agent_runtimes": {
-      "name": "agent_runtimes",
-      "schema": "",
-      "columns": {
-        "bot_user_id": {
-          "name": "bot_user_id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "provider": {
-          "name": "provider",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "setup_reason": {
-          "name": "setup_reason",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "setup_text": {
-          "name": "setup_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "setup_min_version": {
-          "name": "setup_min_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "machine_label": {
-          "name": "machine_label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "executable_path_encrypted": {
-          "name": "executable_path_encrypted",
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "executable_version": {
-          "name": "executable_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "manifest_hash": {
-          "name": "manifest_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "bridge_version": {
-          "name": "bridge_version",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "default_output_mode": {
-          "name": "default_output_mode",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "last_seen_at": {
-          "name": "last_seen_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp (3)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "agent_runtimes_bot_user_id_users_id_fk": {
-          "name": "agent_runtimes_bot_user_id_users_id_fk",
-          "tableFrom": "agent_runtimes",
-          "tableTo": "users",
-          "columnsFrom": [
-            "bot_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -13667,6 +13144,92 @@
         }
       },
       "isRLSEnabled": false
+    },
+    "public.chat_access": {
+      "name": "chat_access",
+      "schema": "",
+      "columns": {
+        "chat_id": {
+          "name": "chat_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "chat_access_user_chat_idx": {
+          "name": "chat_access_user_chat_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "chat_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "chat_access_chat_id_user_id_pk": {
+          "name": "chat_access_chat_id_user_id_pk",
+          "columns": [
+            "chat_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.chat_access_state": {
+      "name": "chat_access_state",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "smallint",
+          "primaryKey": true,
+          "notNull": true,
+          "default": 1
+        },
+        "backfilled_at": {
+          "name": "backfilled_at",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "chat_access_state_singleton": {
+          "name": "chat_access_state_singleton",
+          "value": "\"chat_access_state\".\"id\" = 1"
+        }
+      },
+      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -13756,16 +13319,6 @@
       "minValue": "1000",
       "maxValue": "9223372036854775807",
       "cache": "100",
-      "cycle": false
-    },
-    "public.agent_grant_revision": {
-      "name": "agent_grant_revision",
-      "schema": "public",
-      "increment": "1",
-      "startWith": "1",
-      "minValue": "1",
-      "maxValue": "9223372036854775807",
-      "cache": "1",
       "cycle": false
     }
   },

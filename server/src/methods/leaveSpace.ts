@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import { and, eq } from "drizzle-orm"
 import { members, spaces, users, type DbMember } from "@in/server/db/schema"
@@ -79,6 +80,7 @@ const leaveSpace = async (spaceId: number, currentUserId: number): Promise<DbMem
       .where(eq(members.id, lockedMember.id))
       .returning()
     if (!member) throw new InlineError(InlineError.ApiError.USER_NOT_PARTICIPANT)
+    await syncChatAccess(tx, { kind: "spaces", spaceIds: [spaceId], userIds: [currentUserId] })
 
     const persisted = await persistLeaveUpdates(tx, space, currentUserId, member.id)
     const remainingMemberRows = await tx

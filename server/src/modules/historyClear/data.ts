@@ -1,3 +1,4 @@
+import { chatSubtreeIds, syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { chatParticipants, chats, dialogs, messages, translations } from "@in/server/db/schema"
 import type { DbChat } from "@in/server/db/schema"
 import type { Transaction } from "@in/server/db/types"
@@ -414,14 +415,19 @@ async function getSpaceReplyThreadDepths(
 }
 
 async function deleteChatsByDepth(tx: Transaction, depths: ThreadDepth[]): Promise<void> {
+  // Every deleted thread's rows go; re-parented survivors are in the subtree too.
+  await syncChatAccess(tx, { kind: "chats", chatIds: await chatSubtreeIds(tx, depths.map((depth) => depth.chatId)) })
   for (const { chatId } of depths) {
-    await tx
+    const reparented = await tx
       .update(chats)
       .set({
         parentChatId: null,
         parentMessageId: null,
       })
       .where(eq(chats.parentChatId, chatId))
+      .returning({ id: chats.id })
+    // A child committed after the subtree read is still re-scoped here.
+    if (reparented.length > 0) await syncChatAccess(tx, { kind: "chats", chatIds: reparented.map((chat) => chat.id) })
     await tx.delete(translations).where(eq(translations.chatId, chatId))
     await tx.delete(chatParticipants).where(eq(chatParticipants.chatId, chatId))
     await tx.delete(dialogs).where(eq(dialogs.chatId, chatId))
@@ -576,6 +582,8 @@ async function detachExternalReplyThreadsForClearedSpaceMessages(
       parentMessageId: null,
     })
     .where(inArray(chats.id, chatIds))
+  // Detached threads become roots and stop inheriting the old parent's access.
+  await syncChatAccess(tx, { kind: "chats", chatIds })
 
   const afterAccess = await getChatAccessMap(tx, chatIds)
 
@@ -604,6 +612,8 @@ async function detachExternalReplyThreadsForDeletedSpaceChats(
       parentMessageId: null,
     })
     .where(inArray(chats.id, chatIds))
+  // Detached threads become roots and stop inheriting the old parent's access.
+  await syncChatAccess(tx, { kind: "chats", chatIds })
 
   const afterAccess = await getChatAccessMap(tx, chatIds)
 

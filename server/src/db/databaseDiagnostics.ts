@@ -3,7 +3,7 @@ import { ReplayProgress, type ReplayProgressOperation } from "./replayProgress"
 
 export const accessQuerySources = [
   "authorization", "sync.replay", "sync.sidecars", "repair.chat",
-  "chats.list", "messages.send", "realtime.delivery",
+  "chats.list", "messages.send", "realtime.delivery", "access.sync", "access.verify",
 ] as const
 export type AccessQuerySource = typeof accessQuerySources[number]
 

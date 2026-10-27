@@ -52,3 +52,4 @@ export * from "./agents"
 
 export * from "./authDeliveryBudgets"
 export * from "./recentRealtimeBuckets"
+export * from "./chatAccess"

@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { members, spaces, spaceJoinBlocks, userNotDeleted, users } from "@in/server/db/schema"
 import { chatParticipants, chats } from "@in/server/db/schema/chats"
 import { dialogs } from "@in/server/db/schema/dialogs"
@@ -261,6 +262,7 @@ async function removeMemberAndGridPresence(
     const remainingMemberUserIds = remainingMemberRows
       .map((member) => member.userId)
       .filter((remainingUserId) => remainingUserId !== userId)
+    await syncChatAccess(tx, { kind: "spaces", spaceIds: [spaceId], userIds: [userId] })
     return { gridRemovalState, persisted, accessUpdates, remainingMemberUserIds, removedMemberId: removedMember.id }
   })
 }

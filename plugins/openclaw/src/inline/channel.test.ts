@@ -157,6 +157,7 @@ describe("inline/channel", () => {
     expect(messageToolHints).toContain("inline_bot_avatar")
     expect(messageToolHints).toContain("inline_bot_commands")
     expect(messageToolHints).toContain("inline_bot_presence")
+    expect(messageToolHints).toContain("inline_follow")
     expect(inlineChannelPlugin.commands?.buildModelsMenuChannelData?.({
       providers: [{ id: "openai", count: 2 }],
     })).toEqual({
@@ -603,7 +604,7 @@ describe("inline/channel", () => {
     expect(childContext?.currentMessageId).toBe("456")
   })
 
-  it("sends heartbeat typing for Inline chat and reply-thread targets", async () => {
+  it("sends heartbeat Working for Inline chat and reply-thread targets", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
@@ -650,10 +651,17 @@ describe("inline/channel", () => {
       accountId: "default",
     })
 
-    expect(sendTyping).toHaveBeenNthCalledWith(1, { chatId: 8n, typing: true })
-    expect(sendTyping).toHaveBeenNthCalledWith(2, { chatId: 8n, typing: false })
-    expect(sendTyping).toHaveBeenCalledTimes(2)
-    expect(invokeRaw).not.toHaveBeenCalled()
+    const peerId = { type: { oneofKind: "chat", chat: { chatId: 8n } } }
+    expect(invokeRaw).toHaveBeenNthCalledWith(1, 20, {
+      oneofKind: "sendComposeAction",
+      sendComposeAction: { peerId, action: 6 },
+    })
+    expect(invokeRaw).toHaveBeenNthCalledWith(2, 20, {
+      oneofKind: "sendComposeAction",
+      sendComposeAction: { peerId },
+    })
+    expect(invokeRaw).toHaveBeenCalledTimes(2)
+    expect(sendTyping).not.toHaveBeenCalled()
     expect(connect).toHaveBeenCalledTimes(2)
     expect(close).toHaveBeenCalledTimes(2)
   })

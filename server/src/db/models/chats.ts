@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import { eq, and, desc, gte, isNull } from "drizzle-orm"
 import {
@@ -94,6 +95,7 @@ async function createUserChatAndDialog(input: {
 
       chat = insertedChat
       createdChat = insertedChat !== undefined
+      if (insertedChat) await syncChatAccess(tx, { kind: "chats", chatIds: [insertedChat.id] })
     }
 
     if (!chat) {
