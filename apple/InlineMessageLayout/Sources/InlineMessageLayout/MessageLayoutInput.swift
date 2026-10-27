@@ -14,6 +14,8 @@ public struct MessageLayoutInput: Hashable, Sendable {
     case text(MessageText)
     /// One to three emoji drawn large without a bubble.
     case emoji(MessageText)
+    /// Paragraphs, lists, quotes, code, tables and more, laid out by `RichLayoutPlanner`.
+    case rich([RichBlock])
   }
 
   public struct Footer: Hashable, Sendable {
@@ -108,6 +110,10 @@ public struct MessageLayoutInput: Hashable, Sendable {
   /// Acknowledgement pill shown before the time.
   public var acknowledgementSize: CGSize?
   public var metrics: MessageLayoutMetrics
+  public var richMetrics = RichLayoutMetrics()
+  /// While a message streams, how many characters of a text body are revealed. The body is
+  /// sized by the lines holding them, so the bubble grows a line at a time; nil shows all.
+  public var revealedLength: Int?
 
   public init(
     rowWidth: CGFloat,

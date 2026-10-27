@@ -46,6 +46,10 @@ public struct MessageLayout: Sendable {
   public var hiddenNodes: Set<MessageLayoutNode>
   /// Body text, aligned to its frame's width.
   public var text: TextLayout?
+  /// Rich body, in the `.text` frame's coordinates.
+  public var rich: RichLayout?
+  /// Characters of `text` to draw while a message streams; nil draws all of it.
+  public var revealedLength: Int?
   public var name: TextLayout?
   public var time: TextLayout
   public var timePlacement: MessageTimePlacement
