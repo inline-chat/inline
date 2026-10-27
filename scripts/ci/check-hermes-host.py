@@ -133,6 +133,10 @@ asyncio.run(exercise())
 
 
 async def exercise_restarted_thread_reply():
+    # Published 0.0.x adapters keep the physical chat as their session chat.
+    if not hasattr(sys.modules[type(adapter).__module__], "_session_chat_id"):
+        return
+
     def new_adapter():
         instance = platform_registry.create_adapter("inline", PlatformConfig(
             enabled=True, token="offline-test-token", extra={
