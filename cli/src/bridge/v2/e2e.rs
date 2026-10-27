@@ -105,6 +105,8 @@ impl FakeModel {
                 "request": request_line.trim(),
                 "model": body.get("model"),
                 "last_input": body.get("input").and_then(Value::as_array).and_then(|input| input.last().cloned()),
+                // Everything the request carried, for context checks.
+                "input_text": body.get("input").map(Value::to_string),
                 "ask_tool": std::env::var_os("INLINE_V2_E2E_DUMP_TOOLS").and_then(|_| {
                     body.get("tools")?.as_array()?.iter().find(|tool| tool.get("name") == Some(&json!("request_user_input"))).cloned()
                 }),
@@ -368,6 +370,12 @@ async fn codex_round_trip_through_inline() {
             "content": [{"type": "output_text", "text": "E2E_SUB_DONE"}]}),
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_SUB_REPLY"}]}),
+        // A second group thread: a mention, then (mentions-only) a plain
+        // message the agent observes, then a mention that sees it.
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_G2_ONE"}]}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_G2_TWO"}]}),
     ])
     .await;
     let codex_home = dir.path().join("codex-home");
@@ -858,6 +866,86 @@ async fn codex_round_trip_through_inline() {
         |texts| texts.iter().any(|(_, text)| text.contains("E2E_SUB_REPLY")),
     )
     .await;
+
+    // 8. Passive context: in a mentions-only group thread a plain message
+    // does not wake the agent, and reaches it with its next mention as
+    // untrusted context.
+    let group_two = owner
+        .create_thread(CreateThreadRequest {
+            title: Some("E2E group two".to_owned()),
+            space_id: None,
+            description: None,
+            emoji: None,
+            is_public: false,
+            participants: vec![
+                ChatCreateParticipant::from(InlineId::new(owner_user_id)),
+                ChatCreateParticipant::from(InlineId::new(bot_user_id)),
+            ],
+        })
+        .await
+        .unwrap()
+        .chat_id
+        .get();
+    let mention = |text: &str| {
+        let mut request = SendTextRequest::new(
+            PeerRef::Chat {
+                chat_id: InlineId::new(group_two),
+            },
+            format!("[@Codex](inline://user?id={bot_user_id}) {text}"),
+        );
+        request.parse_markdown = true;
+        request
+    };
+    owner.send_text(mention("hello there")).await.unwrap();
+    wait_for(
+        &model,
+        &owner,
+        group_two,
+        bot_user_id,
+        "the first group answer",
+        |texts| texts.iter().any(|(_, text)| text.contains("E2E_G2_ONE")),
+    )
+    .await;
+    owner
+        .invoke_rpc(
+            proto::Method::SetAgentParticipation,
+            proto::rpc_call::Input::SetAgentParticipation(proto::SetAgentParticipationInput {
+                peer_id: Some(super::api::chat_peer(group_two)),
+                bot_user_id,
+                mode: proto::AgentParticipationMode::MentionsOnly as i32,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+    let requests_before = model.request_count();
+    send(&owner, group_two, "E2E_PASSIVE_LINE for whoever reads this").await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        model.request_count(),
+        requests_before,
+        "an unaddressed message in a mentions-only thread woke the agent"
+    );
+    owner
+        .send_text(mention("what did I just say?"))
+        .await
+        .unwrap();
+    wait_for(
+        &model,
+        &owner,
+        group_two,
+        bot_user_id,
+        "the second group answer",
+        |texts| texts.iter().any(|(_, text)| text.contains("E2E_G2_TWO")),
+    )
+    .await;
+    let last = model.requests.lock().unwrap().last().cloned().unwrap();
+    assert!(
+        last.get("input_text")
+            .and_then(Value::as_str)
+            .is_some_and(|input| input.contains("E2E_PASSIVE_LINE")),
+        "the observed message reached the agent as context"
+    );
 
     let _ = stop.send(());
     let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
