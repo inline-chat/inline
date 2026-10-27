@@ -2788,6 +2788,12 @@ private extension MessagesCollectionView {
           return makeMessageActionsMenu(for: currentMessage, cell: cell, includeReactionsAction: true)
         }
         cell.updateMessageHoldAction(INUserSettings.current.messageGestures.holdAction)
+        cell.onNextContentStateChange = { [weak self] message in
+          self?.applyUpdatedMessages([message.id], animated: true)
+        }
+        cell.onNextRevealLine = { [weak self] message in
+          self?.applyNextRevealLine(message)
+        }
         cell.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
           self?.presentPhotoGallery(
             for: message,
@@ -3641,7 +3647,17 @@ private extension MessagesCollectionView {
 
     /// Applies new message versions to visible next-view rows in one animation: each view moves
     /// its nodes and the collection resizes the rows on the same curve. Returns the items handled.
-    private func applyNextMessageUpdates(_ items: [MessageListItem]) -> Set<MessageListItem> {
+    /// A streaming row revealed a new line or finished: replan it with the short line motion.
+    private func applyNextRevealLine(_ message: FullMessage) {
+      let items = [MessageListItem.message(id: message.id), MessageListItem.threadAnchor(id: message.id)]
+        .filter { dataSource.indexPath(for: $0) != nil }
+      _ = applyNextMessageUpdates(items, motion: .streamingLine)
+    }
+
+    private func applyNextMessageUpdates(
+      _ items: [MessageListItem],
+      motion requested: MessageMotion = .standard
+    ) -> Set<MessageListItem> {
       guard let collectionView = currentCollectionView else { return [] }
       // While a context menu is up or flying back, UIKit owns a preview of the source bubble.
       // Changing the bubble under it tears the preview, so replay these once the menu ends.
@@ -3661,12 +3677,14 @@ private extension MessagesCollectionView {
               cell.displayMode == displayMode,
               MessageViewContent.supports(message, displayMode: displayMode)
         else { continue }
+        // An edit that extends the shown text streams: the pacer reveals it over the next frames.
+        MessageStreamPacer.shared.messageChanged(message.id, from: cell.message?.displayText, to: message.displayText)
         updates.append((cell, message))
         handled.insert(item)
       }
       guard !updates.isEmpty else { return [] }
 
-      let motion = MessageMotion.standard.resolved(reduceMotion: UIAccessibility.isReduceMotionEnabled)
+      let motion = requested.resolved(reduceMotion: UIAccessibility.isReduceMotionEnabled)
       motion.animate {
         for update in updates {
           update.cell.applyNextUpdate(update.message, motion: motion)

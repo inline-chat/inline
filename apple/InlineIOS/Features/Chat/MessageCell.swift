@@ -57,6 +57,11 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   }
   private(set) var messageHoldAction = MessageGestureAction.defaultHold
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
+  /// The next view's local state changed its layout; the list replans the row in one animation.
+  var onNextContentStateChange: ((FullMessage) -> Void)?
+  /// A streaming message revealed a new line or finished; the list replans the row with the
+  /// short line motion.
+  var onNextRevealLine: ((FullMessage) -> Void)?
   var grabOverlappingAvatar: ((UIView) -> UIView?)?
   private var panGesture: UIPanGestureRecognizer!
   private var swipeActive = false
@@ -746,6 +751,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     // Reset delegate
     delegate = nil
     onPhotoTap = nil
+    onNextContentStateChange = nil
+    onNextRevealLine = nil
     onReactionsMenu = nil
     messageActionsMenuProvider = nil
     allowsMessageActions = false
@@ -908,6 +915,12 @@ extension MessageCollectionViewCell {
     guard gestureRecognizer == panGesture else { return true }
 
     guard !isMessageActionsButton(at: gestureRecognizer.location(in: self)) else { return false }
+    // Code blocks and tables scroll sideways under the finger.
+    if showsNextMessageView, let nextMessageView,
+       nextMessageView.scrollsHorizontally(at: gestureRecognizer.location(in: nextMessageView))
+    {
+      return false
+    }
 
     // Do not begin swipe-to-reply if replying is not allowed
     if !canReply { return false }
@@ -1543,15 +1556,22 @@ extension MessageCollectionViewCell {
     guard let theme, width > 0 else { return nil }
     let threadIncoming = usesThreadLayout && !outgoing
     let avatar: MessageLayoutInput.Avatar = threadIncoming ? (showsCellAvatar ? .visible : .reserved) : .none
-    return MessageViewContent.make(message, context: MessageRowContext(
-      rowWidth: width,
-      isFirstInGroup: firstInGroup,
-      isLastInGroup: lastInGroup,
-      showsName: threadIncoming && firstInGroup,
-      avatar: avatar,
-      theme: theme,
-      traits: traitCollection
-    ))
+    // A streaming message keeps its time hidden and grows by revealed lines.
+    let pacer = MessageStreamPacer.shared
+    return MessageViewContent.make(
+      message,
+      context: MessageRowContext(
+        rowWidth: width,
+        isFirstInGroup: firstInGroup,
+        isLastInGroup: lastInGroup,
+        showsName: threadIncoming && firstInGroup,
+        avatar: avatar,
+        theme: theme,
+        traits: traitCollection
+      ),
+      footer: pacer.isStreaming(message.id) ? .reserved : .visible,
+      revealedLength: pacer.revealedLength(for: message.id)
+    )
   }
 
   fileprivate func nextSendAnimationGeometryInWindow() -> SendMessageAnimationTargetGeometry? {
@@ -1587,6 +1607,12 @@ extension MessageCollectionViewCell {
     }
     view.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
       self?.onPhotoTap?(message, sourceView, sourceImage, url)
+    }
+    view.onContentStateChange = { [weak self] message in
+      self?.onNextContentStateChange?(message)
+    }
+    view.onRevealLineChange = { [weak self] message in
+      self?.onNextRevealLine?(message)
     }
     contentView.insertSubview(view, at: 0)
     nextMessageView = view

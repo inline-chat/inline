@@ -11,6 +11,19 @@ import struct InlineProtocol.MessageActionCallback
 import struct InlineProtocol.MessageActionRow
 import struct InlineProtocol.MessageActions
 import struct InlineProtocol.MessageReplies
+import struct InlineProtocol.Block
+import struct InlineProtocol.BlockCode
+import struct InlineProtocol.BlockContent
+import struct InlineProtocol.BlockDisclosure
+import struct InlineProtocol.BlockHeading
+import struct InlineProtocol.BlockList
+import struct InlineProtocol.BlockListItem
+import struct InlineProtocol.BlockQuote
+import struct InlineProtocol.BlockTable
+import struct InlineProtocol.BlockTableRow
+import struct InlineProtocol.BlockText
+import struct InlineProtocol.MessageEntities
+import struct InlineProtocol.MessageEntity
 import SwiftUI
 import Testing
 import UIKit
@@ -728,6 +741,181 @@ struct NextMessageViewDeviceTests {
     }
   }
 
+  @Test("Rich messages draw every node where the rich plan says, with no clipped ink")
+  func richLab() async throws {
+    let stage = try Stage()
+    defer { stage.close() }
+    var failures: [String] = []
+    var nodes = 0
+    for outgoing in [false, true] {
+      for expanded in [false, true] {
+        for (name, message) in Self.richKinds(outgoing: outgoing, expanded: expanded) {
+          for width in [320, 375] as [CGFloat] {
+            for category in [UIContentSizeCategory.large, .accessibilityLarge] {
+              let label = "\(name) \(outgoing ? "out" : "in") open=\(expanded) \(Int(width)) \(category.rawValue.suffix(6))"
+              let (view, layout) = stage.render(message, width: width, category: category)
+              defer { view.removeFromSuperview() }
+              guard let rich = layout.rich, let richView = view.subviews(of: MessageRichView.self).first else {
+                failures.append("\(label): no rich layout")
+                continue
+              }
+              failures += Self.placementProblems(view, layout).map { "\(label): \($0)" }
+              if let frame = layout.frame(.text), abs(richView.frame.minY - (frame.minY - layout.bubble.frame.minY)) > 0.5 {
+                failures.append("\(label): rich view at \(richView.frame), planned \(frame)")
+              }
+              for placed in rich.nodes {
+                nodes += 1
+                guard let node = richView.nodeView(at: placed.path) else {
+                  failures.append("\(label): node \(placed.path) not drawn")
+                  continue
+                }
+                let actual = (node as? MessageTextView)?.textFrame ?? node.frame
+                if abs(actual.minX - placed.frame.minX) > 0.5 || abs(actual.minY - placed.frame.minY) > 0.5
+                  || abs(actual.width - placed.frame.width) > 0.5 || abs(actual.height - placed.frame.height) > 0.5
+                {
+                  failures.append("\(label): node \(placed.path) at \(actual), planned \(placed.frame)")
+                }
+                if let textView = node as? MessageTextView {
+                  failures += Self.inkProblems(textView, expectsInk: true).map { "\(label) node \(placed.path): \($0)" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    Attachment.record("checked \(nodes) rich nodes", named: "rich-lab.txt")
+    #expect(nodes > 200)
+    #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
+  }
+
+  @Test("Catalog of rich messages for review", arguments: [UIUserInterfaceStyle.light, .dark])
+  func richCatalog(style: UIUserInterfaceStyle) async throws {
+    let stage = try Stage(style: style)
+    defer { stage.close() }
+    let width = stage.window.bounds.width
+    stage.root.backgroundColor = style == .dark ? .black : .white
+    var rows: [UIImage] = []
+    let entries = Self.richKinds(outgoing: false, expanded: true) + Self.richKinds(outgoing: true)
+    for (index, entry) in entries.enumerated() {
+      let view = MessageView()
+      stage.root.addSubview(view)
+      var message = entry.1
+      message.message.messageId += Int64(index) * 1_000
+      let layout = stage.apply(message, to: view, width: width, motion: .immediate)
+      view.frame = CGRect(x: 0, y: 20, width: width, height: layout.size.height)
+      view.layoutIfNeeded()
+      // Syntax colors arrive from the shared highlighter after the first frame.
+      try await Task.sleep(for: .milliseconds(500))
+      rows.append(UIGraphicsImageRenderer(bounds: view.bounds).image { _ in
+        view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
+      })
+      view.removeFromSuperview()
+    }
+    let height = rows.reduce(0) { $0 + $1.size.height } + 16
+    let sheet = UIGraphicsImageRenderer(size: CGSize(width: width, height: height)).image { context in
+      (style == .dark ? UIColor.black : UIColor.white).setFill()
+      context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+      var y: CGFloat = 8
+      for row in rows {
+        row.draw(at: CGPoint(x: 0, y: y))
+        y += row.size.height
+      }
+    }
+    Attachment.record(Array(try #require(sheet.pngData())), named: "rich-\(style == .dark ? "dark" : "light").png")
+  }
+
+  @Test("Opening a disclosure grows the row and its bubble on one curve")
+  func disclosureToggle() async throws {
+    let rich = Self.richKinds(outgoing: false)[0].1
+    let fixture = try await ListFixture(count: 3) { index, message in
+      guard index == 1 else { return }
+      let identity = message.message
+      message = rich
+      message.message.messageId = identity.messageId
+      message.message.globalId = identity.globalId
+      message.message.chatId = identity.chatId
+      message.message.peerUserId = identity.peerUserId
+      message.message.date = identity.date
+    }
+    defer { fixture.close() }
+    try await fixture.settle()
+    let cell = try #require(fixture.visibleCells.first { $0.nextMessageView?.layout?.rich != nil })
+    let view = try #require(cell.nextMessageView)
+    let richView = try #require(view.subviews(of: MessageRichView.self).first)
+    let toggle = try #require(richView.subviews.compactMap { $0 as? UIControl }.first)
+    let oldRow = cell.bounds.height
+    let oldBubble = view.bubbleContentView.frame.height
+    let oldNodes = view.layout?.rich?.nodes.count ?? 0
+    toggle.sendActions(for: .touchUpInside)
+    try await Task.sleep(for: .milliseconds(110))
+    let presentedRow = try #require(cell.layer.presentation()).bounds.height
+    let presentedBubble = try #require(view.bubbleContentView.layer.presentation()).bounds.height
+    try await fixture.settle(milliseconds: 700)
+    let newRow = cell.bounds.height
+    let newBubble = view.bubbleContentView.frame.height
+    #expect((view.layout?.rich?.nodes.count ?? 0) > oldNodes, "the disclosure's children did not appear")
+    #expect(newRow > oldRow)
+    let rowProgress = progress(presentedRow, from: oldRow, to: newRow)
+    let bubbleProgress = progress(presentedBubble, from: oldBubble, to: newBubble)
+    Attachment.record("row \(oldRow)→\(newRow) p=\(rowProgress.map { String($0) } ?? "-"); bubble \(oldBubble)→\(newBubble) p=\(bubbleProgress.map { String($0) } ?? "-")", named: "disclosure-toggle.txt")
+    if let rowProgress, let bubbleProgress {
+      #expect(rowProgress > 0.02 && rowProgress < 0.98, "row did not animate: \(rowProgress)")
+      #expect(abs(rowProgress - bubbleProgress) < 0.15)
+    }
+    if let layout = view.layout {
+      let problems = Self.placementProblems(view, layout)
+      #expect(problems.isEmpty, "\(problems.joined(separator: "\n"))")
+    }
+  }
+
+  @Test("Streaming edits reveal at a paced rate, grow the row a line at a time, and show the time when idle")
+  func streamingReveal() async throws {
+    let fixture = try await ListFixture(count: 4)
+    defer { fixture.close() }
+    try await fixture.settle()
+    let cell = try #require(fixture.visibleCells.first { $0.showsNextMessageView && $0.message?.message.out == false })
+    var message = try #require(cell.message)
+    let words = "This answer streams in word by word, the way a bot edits its message while it works through a long reply about the release."
+      .split(separator: " ").map(String.init)
+    // Start from the first word, then stream the rest as appends.
+    var text = words[0]
+    message.message.text = text
+    fixture.publisher.publisher.send(.update(.init(message: message, animated: true, peer: fixture.peer)))
+    try await fixture.settle(milliseconds: 600)
+
+    var heights: [CGFloat] = []
+    var timeShown = false
+    var partialFrames = 0
+    for word in words.dropFirst() {
+      text += " " + word
+      message.message.text = text
+      fixture.publisher.publisher.send(.update(.init(message: message, animated: true, peer: fixture.peer)))
+      for _ in 0 ..< 4 {
+        try await Task.sleep(for: .milliseconds(20))
+        heights.append(cell.bounds.height)
+        guard let view = cell.nextMessageView else { continue }
+        if view.timeView.alpha > 0.5 { timeShown = true }
+        if let revealed = view.textView.revealedLength, revealed < (text as NSString).length { partialFrames += 1 }
+      }
+    }
+    Attachment.record("heights \(heights)\npartial frames \(partialFrames)", named: "streaming.txt")
+    #expect(!timeShown, "the time showed while the message streamed")
+    #expect(heights == heights.sorted(), "the row shrank while streaming")
+    #expect(Set(heights).count > 1, "the row never grew")
+    #expect(partialFrames > 0, "text never revealed partially")
+
+    try await Task.sleep(for: .milliseconds(2_500))
+    let view = try #require(cell.nextMessageView)
+    #expect(view.textView.revealedLength == nil, "the stream never finished")
+    #expect(view.timeView.alpha > 0.99, "the time did not return")
+    #expect(abs(cell.bounds.height - (view.layout?.size.height ?? 0)) <= 0.5)
+    if let layout = view.layout {
+      let problems = Self.placementProblems(view, layout)
+      #expect(problems.isEmpty, "\(problems.joined(separator: "\n"))")
+    }
+  }
+
   @Test("Scrolling through hundreds of rows never shows another message's content")
   func reuse() async throws {
     let fixture = try await ListFixture(count: 200)
@@ -923,7 +1111,13 @@ struct NextMessageViewDeviceTests {
     }
     let container = view.bubbleContentView
     check("container", container.frame, layout.bubble.frame)
-    check("text", container.convert(view.textView.textFrame, to: view), layout.frame(.text))
+    if layout.rich == nil {
+      check("text", container.convert(view.textView.textFrame, to: view), layout.frame(.text))
+    } else if let rich = view.subviews(of: MessageRichView.self).first {
+      check("rich", container.convert(rich.frame, to: view), layout.frame(.text))
+    } else {
+      problems.append("rich layout without a rich view")
+    }
     check("time", container.convert(view.timeView.frame, to: view), layout.frame(.time))
     if layout.bubble.isVisible { check("bubble", container.convert(view.bubbleView.frame, to: view), layout.bubble.frame) }
     for id in layout.reactionOrder {
@@ -1065,6 +1259,76 @@ struct NextMessageViewDeviceTests {
     )
     full.reactions = Self.reactions(reactions, on: full)
     return full
+  }
+
+  /// Codex-style rich messages: block content with every block kind, and a plain message with
+  /// a code fence.
+  static func richKinds(outgoing: Bool, expanded: Bool = false) -> [(String, FullMessage)] {
+    var text = ""
+    func add(_ string: String) -> BlockText {
+      let start = (text as NSString).length
+      text += string + "\n"
+      var range = BlockText()
+      range.offset = Int64(start)
+      range.length = Int64((string as NSString).length)
+      return range
+    }
+    func block(_ kind: Block.OneOf_Kind) -> Block {
+      var block = Block()
+      block.kind = kind
+      return block
+    }
+    var heading = BlockHeading()
+    heading.level = 2
+    heading.text = add("Plan for the release")
+    let intro = add("Here's what changed since yesterday, and what's left before we ship it.")
+    var list = BlockList()
+    list.kind = .ordered
+    for item in ["Fix the reaction pills", "Profile the list against the current view", "Port rich blocks"] {
+      var listItem = BlockListItem()
+      listItem.children = [block(.paragraph(add(item)))]
+      list.items.append(listItem)
+    }
+    var code = BlockCode()
+    code.language = "swift"
+    code.text = add("let layout = MessageLayoutPlanner.layout(input, cache: cache)\nview.apply(content, layout: layout, motion: .standard)")
+    var table = BlockTable()
+    for row in [["Step", "Status"], ["Planner", "Done"], ["Views", "In progress"]] {
+      var tableRow = BlockTableRow()
+      tableRow.cells = row.map(add)
+      table.rows.append(tableRow)
+    }
+    var quote = BlockQuote()
+    quote.children = [block(.paragraph(add("Layout stability beats tail animation.")))]
+    var disclosure = BlockDisclosure()
+    disclosure.summary = add("Worked for 2m 14s")
+    disclosure.kind = .progress
+    disclosure.activityKind = .read
+    disclosure.initiallyOpen = expanded
+    disclosure.children = [block(.paragraph(add("Read 3 files and ran the package tests.")))]
+    let closing = add("Shipping today.")
+    var content = BlockContent()
+    content.blocks = [
+      block(.heading(heading)), block(.paragraph(intro)), block(.list(list)), block(.code(code)),
+      block(.table(table)), block(.quote(quote)), block(.disclosure(disclosure)), block(.paragraph(closing)),
+    ]
+    var rich = Self.message(outgoing ? 7_101 : 7_102, text, outgoing: outgoing, reactions: 0)
+    rich.message.blockContentPayload = BlockContentPayload(content)
+
+    let fenceText = "Run this before you push:\nbun run typecheck && bun test\nThen ping me."
+    let fence = (fenceText as NSString).range(of: "bun run typecheck && bun test")
+    var entity = MessageEntity()
+    entity.type = .pre
+    entity.offset = Int64(fence.location)
+    entity.length = Int64(fence.length)
+    var pre = MessageEntity.MessageEntityPre()
+    pre.language = "bash"
+    entity.entity = .pre(pre)
+    var entities = MessageEntities()
+    entities.entities = [entity]
+    var fenced = Self.message(outgoing ? 7_103 : 7_104, fenceText, outgoing: outgoing, reactions: 0)
+    fenced.message.entities = entities
+    return [("rich", rich), ("code fence", fenced)]
   }
 
   /// One message of each kind the next view draws beside plain text.
@@ -1349,4 +1613,10 @@ private func progress(_ value: CGFloat, from: CGFloat, to: CGFloat) -> Double? {
 private func close(_ a: CGRect, _ b: CGRect, tolerance: CGFloat) -> Bool {
   abs(a.minX - b.minX) <= tolerance && abs(a.minY - b.minY) <= tolerance
     && abs(a.width - b.width) <= tolerance && abs(a.height - b.height) <= tolerance
+}
+
+private extension UIView {
+  func subviews<View: UIView>(of type: View.Type) -> [View] {
+    subviews.flatMap { ($0 as? View).map { [$0] } ?? [] } + subviews.flatMap { $0.subviews(of: type) }
+  }
 }

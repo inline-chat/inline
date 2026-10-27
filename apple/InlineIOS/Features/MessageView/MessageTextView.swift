@@ -9,6 +9,13 @@ final class MessageTextView: UIView {
   static let minimumBleed: CGFloat = 4
 
   private(set) var layout: TextLayout = .empty
+  /// Characters drawn while a message streams; nil draws everything. The newest characters
+  /// fade in over `revealFadeWidth`.
+  var revealedLength: Int? {
+    didSet { if revealedLength != oldValue { setNeedsDisplay() } }
+  }
+
+  static let revealFadeWidth: CGFloat = 24
   /// Room around the line boxes for ink that overhangs them: italics, tall emoji, stacked
   /// marks. Sized from the layout's glyph bounds, never less than `minimumBleed`.
   private(set) var bleed = UIEdgeInsets(top: minimumBleed, left: minimumBleed, bottom: minimumBleed, right: minimumBleed)
@@ -61,6 +68,67 @@ final class MessageTextView: UIView {
     )
   }
 
+  private func draw(_ line: TextLayout.Line, in context: CGContext) {
+    context.saveGState()
+    context.translateBy(x: line.frame.minX, y: line.baseline)
+    context.scaleBy(x: 1, y: -1)
+    context.textPosition = .zero
+    CTLineDraw(line.ctLine, context)
+    context.restoreGState()
+  }
+
+  /// The line holding the reveal frontier: solid up to just before it, then a short fade.
+  private func drawFrontier(_ line: TextLayout.Line, revealed: Int, in context: CGContext) {
+    let offset = CTLineGetOffsetForStringIndex(line.ctLine, revealed, nil)
+    let fade = Self.revealFadeWidth
+    let top = line.frame.minY - bleed.top
+    let height = line.frame.height + bleed.top + bleed.bottom
+    let isRightToLeft = line.direction == .rightToLeft
+    // Text coordinates of the frontier; right-to-left lines reveal leftward.
+    let edge = line.frame.minX + offset
+    let solid = isRightToLeft
+      ? CGRect(x: edge + fade, y: top, width: max(0, line.frame.maxX + bleed.right - edge - fade), height: height)
+      : CGRect(x: line.frame.minX - bleed.left, y: top, width: max(0, edge - fade - line.frame.minX + bleed.left), height: height)
+    if solid.width > 0 {
+      context.saveGState()
+      context.clip(to: solid)
+      draw(line, in: context)
+      context.restoreGState()
+    }
+    let ramp = CGRect(x: isRightToLeft ? edge : edge - fade, y: top, width: fade, height: height)
+    if let mask = isRightToLeft ? Self.risingMask : Self.fallingMask {
+      context.saveGState()
+      context.clip(to: ramp, mask: mask)
+      draw(line, in: context)
+      context.restoreGState()
+    }
+  }
+
+  /// One-pixel-tall gray ramps for `clip(to:mask:)`: white shows, black hides.
+  private static let fallingMask = ramp(from: 255, to: 0)
+  private static let risingMask = ramp(from: 0, to: 255)
+
+  private static func ramp(from start: UInt8, to end: UInt8) -> CGImage? {
+    let width = 32
+    let pixels = (0 ..< width).map { index in
+      UInt8(Double(start) + (Double(end) - Double(start)) * Double(index) / Double(width - 1))
+    }
+    guard let provider = CGDataProvider(data: Data(pixels) as CFData) else { return nil }
+    return CGImage(
+      width: width,
+      height: 1,
+      bitsPerComponent: 8,
+      bitsPerPixel: 8,
+      bytesPerRow: width,
+      space: CGColorSpaceCreateDeviceGray(),
+      bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+      provider: provider,
+      decode: nil,
+      shouldInterpolate: true,
+      intent: .defaultIntent
+    )
+  }
+
   /// Character under a point in this view's coordinates.
   func characterIndex(at point: CGPoint) -> Int? {
     layout.characterIndex(at: CGPoint(x: point.x - bleed.left, y: point.y - bleed.top))
@@ -84,12 +152,14 @@ final class MessageTextView: UIView {
     context.saveGState()
     context.textMatrix = .identity
     for line in layout.lines where line.frame.intersects(rect) {
-      context.saveGState()
-      context.translateBy(x: line.frame.minX, y: line.baseline)
-      context.scaleBy(x: 1, y: -1)
-      context.textPosition = .zero
-      CTLineDraw(line.ctLine, context)
-      context.restoreGState()
+      if let revealed = revealedLength {
+        if line.range.location >= revealed { continue }
+        if NSMaxRange(line.range) > revealed {
+          drawFrontier(line, revealed: revealed, in: context)
+          continue
+        }
+      }
+      draw(line, in: context)
     }
     context.restoreGState()
 
