@@ -72,6 +72,8 @@ struct ExperimentalRootView: View {
         ExperimentalAuthedRootView()
       case .onboarding:
         OnboardingView()
+          // New accounts start with nothing to catch up on.
+          .onAppear { WhatsNewStore.shared.markSeen() }
       case .loading:
         IOSStartupLoadingView(router: mainViewRouter)
       }
@@ -249,6 +251,21 @@ private struct ExperimentalAuthedRootView: View {
       .onDisappear {
         translationCoordinator.cancel()
       }
+      .task {
+        await presentWhatsNewIfNeeded()
+      }
+  }
+
+  /// Shows the bundled announcement once, after launch settles, only from the chat list.
+  private func presentWhatsNewIfNeeded() async {
+    guard WhatsNewStore.shared.pending != nil else { return }
+    try? await Task.sleep(for: .seconds(1))
+    guard !Task.isCancelled,
+          WhatsNewStore.shared.pending != nil,
+          router.presentedSheet == nil,
+          router.selectedTabPath.isEmpty
+    else { return }
+    router.presentSheet(.whatsNew)
   }
 
   private var rootNavigation: some View {

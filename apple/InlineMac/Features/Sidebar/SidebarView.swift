@@ -55,6 +55,7 @@ struct SidebarView: View {
   @State private var isHomeHovering = false
   @State private var isLocationHovering = false
   @State private var isArchiveVisible = false
+  @State private var isWhatsNewPresented = false
   @State private var showConnectedState = false
   @State private var hideConnectedTask: Task<Void, Never>?
   @State private var pendingSpaceAction: SidebarSpacePendingAction?
@@ -1476,6 +1477,12 @@ struct SidebarView: View {
 #if SPARKLE
     .animation(.smoothSnappy, value: updates.showsSidebarAction)
 #endif
+    .animation(.smoothSnappy, value: showsWhatsNewPill)
+    .sheet(isPresented: $isWhatsNewPresented) {
+      if let announcement = WhatsNewStore.shared.announcement {
+        WhatsNewView(announcement: announcement, onContinue: { isWhatsNewPresented = false })
+      }
+    }
   }
 
   /// Ordered so the controls people keep reaching for (stop transcription,
@@ -1490,6 +1497,14 @@ struct SidebarView: View {
           .transition(.opacity)
       }
 #endif
+
+      if showsWhatsNewPill {
+        SidebarWhatsNewPill(
+          onOpen: { isWhatsNewPresented = true },
+          onDismiss: { WhatsNewStore.shared.markSeen() }
+        )
+        .transition(.opacity)
+      }
 
       if let room = gridStore.activeTranscriptionRoom {
         GridTranscriptionSidebarIndicator(
@@ -1522,7 +1537,15 @@ struct SidebarView: View {
 #if SPARKLE
     if updates.showsSidebarAction { return true }
 #endif
-    return gridStore.activeTranscriptionRoom != nil || audioPlayer.item != nil
+    return showsWhatsNewPill || gridStore.activeTranscriptionRoom != nil || audioPlayer.item != nil
+  }
+
+  /// A waiting update takes the slot; the pill comes back once it's installed.
+  private var showsWhatsNewPill: Bool {
+#if SPARKLE
+    if updates.showsSidebarAction { return false }
+#endif
+    return WhatsNewStore.shared.pending != nil
   }
 
   @ViewBuilder

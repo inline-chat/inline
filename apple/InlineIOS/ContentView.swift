@@ -239,6 +239,11 @@ private struct AuthedAppRoot: View {
         ChatInfoView(chatItem: chatItem)
       }
       .presentationDetents([.medium, .large])
+
+    case .whatsNew:
+      if let announcement = WhatsNewStore.shared.announcement {
+        WhatsNewView(announcement: announcement, onContinue: { router.dismissSheet() })
+      }
     }
   }
 

@@ -1,6 +1,7 @@
 import AppKit
 import Auth
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct Onboarding: View {
@@ -89,6 +90,8 @@ struct Onboarding: View {
     .environment(profileSetup)
     .task {
       viewModel.setMainWindowViewModel(windowViewModel)
+      // New accounts start with nothing to catch up on.
+      WhatsNewStore.shared.markSeen()
     }
     .onChange(of: providerSignIn.completion?.id, initial: true) { _, completionID in
       guard let completionID,
