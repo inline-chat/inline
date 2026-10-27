@@ -165,6 +165,8 @@ impl OwnerCalls for OwnerConnection {
 
 pub(crate) struct Runtime {
     config: V2Config,
+    /// Keep v1's durable receipts authoritative after opting in.
+    legacy_store: Option<Arc<inline_agent_bridge::BridgeStore>>,
     agent: Arc<Agent>,
     access: Arc<Access>,
     works: HashMap<i64, WorkHandle>,
@@ -245,6 +247,7 @@ impl Runtime {
         });
         Ok(Self {
             config,
+            legacy_store: None,
             agent,
             access,
             works: HashMap::new(),
@@ -262,6 +265,14 @@ impl Runtime {
             loop_guards: LoopGuards::default(),
             loop_roots: HashMap::new(),
         })
+    }
+
+    pub(crate) fn with_legacy_store(
+        mut self,
+        store: Arc<inline_agent_bridge::BridgeStore>,
+    ) -> Self {
+        self.legacy_store = Some(store);
+        self
     }
 
     /// Serves Inline events until `shutdown` resolves or the stream ends.
@@ -1322,6 +1333,17 @@ impl Runtime {
         &mut self,
         message: &MessageRecord,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        // Message updates and reconnect catch-up can redeliver old input.
+        // v2 has its own ledger, but work already accepted by v1 must never
+        // run again after enabling v2. Read its receipt without changing it.
+        if let Some(store) = &self.legacy_store
+            && store.event_processed(&format!(
+                "inline-message-{}-{}",
+                message.chat_id, message.message_id
+            ))?
+        {
+            return Ok(());
+        }
         if message.is_outgoing
             || message.timestamp < self.config.accept_messages_after
             || message.metadata.agent_session.is_some()

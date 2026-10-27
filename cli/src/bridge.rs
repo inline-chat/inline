@@ -2006,6 +2006,7 @@ async fn run_provider_installation(
     if v2_enabled_for(&installation.provider_id) {
         return run_v2_provider(V2Launch {
             installation: &installation,
+            legacy_store: bridge_store.clone(),
             owner_user_id: account.owner_user_id,
             dm_chat_id: dm_chat_id.get(),
             workspace,
@@ -3114,6 +3115,7 @@ fn v2_enabled_in(setting: Option<&str>, provider_id: &str) -> bool {
 
 struct V2Launch<'a> {
     installation: &'a ProviderInstallationConfig,
+    legacy_store: Arc<BridgeStore>,
     owner_user_id: i64,
     dm_chat_id: i64,
     workspace: PathBuf,
@@ -3132,6 +3134,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
     use inline_agent_bridge::harness::{ExecutableSource, HarnessDriver};
     let V2Launch {
         installation,
+        legacy_store,
         owner_user_id,
         dm_chat_id,
         workspace,
@@ -3230,7 +3233,8 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         )?)),
         harness,
         Some(tools),
-    )?;
+    )?
+    .with_legacy_store(legacy_store);
     if let Some(readiness) = readiness {
         readiness.mark_ready(&installation.installation_id);
     }

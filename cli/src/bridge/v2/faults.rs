@@ -275,6 +275,51 @@ fn spawn_work(runtime: &Runtime, cleanup: &mut Cleanup) -> mpsc::Sender<Command>
 }
 
 #[tokio::test]
+async fn v1_receipts_prevent_replayed_work_after_v2_cutover_and_restart() {
+    let (first, harness, mut cleanup) = fixture(false);
+    let path = cleanup.dir.join("bridge.sqlite");
+    let legacy = Arc::new(inline_agent_bridge::BridgeStore::open(&path).unwrap());
+    legacy.claim_event("inline-message-9-35", 1).unwrap();
+    let message = MessageRecord {
+        chat_id: InlineId::new(9),
+        message_id: InlineId::new(35),
+        sender_id: InlineId::new(1),
+        timestamp: 1,
+        is_outgoing: false,
+        content: inline_client::MessageContent::Text {
+            text: "old work".into(),
+        },
+        reply_to_message_id: None,
+        metadata: Default::default(),
+        transaction: None,
+    };
+    let mut first = first.with_legacy_store(legacy);
+    let mut second = runtime(&mut cleanup, harness.clone()).with_legacy_store(Arc::new(
+        inline_agent_bridge::BridgeStore::open(&path).unwrap(),
+    ));
+    for runtime in [&mut first, &mut second] {
+        tokio::time::timeout(Duration::from_millis(200), runtime.on_message(&message))
+            .await
+            .expect("old input must be skipped before any native or network call")
+            .unwrap();
+        assert!(
+            runtime
+                .agent
+                .ledger
+                .get(&input_id(2, 9, 35, "direct"))
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert!(harness.opened.lock().unwrap().is_empty());
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 0);
+    let legacy = inline_agent_bridge::BridgeStore::open(path).unwrap();
+    assert!(legacy.event_processed("inline-message-9-35").unwrap());
+    assert!(!legacy.event_processed("inline-message-10-35").unwrap());
+    assert!(!legacy.event_processed("inline-message-9-36").unwrap());
+}
+
+#[tokio::test]
 async fn an_input_the_ledger_cannot_record_is_never_sent() {
     let (runtime, harness, mut cleanup) = fixture(false);
     let (id, command) = input(&runtime, 12);
