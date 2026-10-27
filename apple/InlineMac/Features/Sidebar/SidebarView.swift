@@ -3240,7 +3240,11 @@ struct SidebarView: View {
   }
 
   private func openWhatsNew() {
-    openExternalURL("https://inline.chat/docs/changelog")
+    if WhatsNewStore.shared.announcement != nil {
+      isWhatsNewPresented = true
+    } else {
+      openExternalURL(WhatsNewAnnouncement.changelogURL.absoluteString)
+    }
   }
 
   private func openStatus() {

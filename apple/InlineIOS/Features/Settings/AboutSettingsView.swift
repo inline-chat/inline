@@ -1,5 +1,6 @@
 import Foundation
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct HelpSettingsView: View {
@@ -136,11 +137,7 @@ private struct HelpResourcesSection: View {
         systemImage: "book.closed",
         url: "https://inline.chat/docs"
       )
-      HelpLinkRow(
-        title: "What’s New",
-        systemImage: "sparkles",
-        url: "https://inline.chat/docs/changelog"
-      )
+      HelpWhatsNewRow()
       HelpLinkRow(
         title: "Website",
         trailingValue: "inline.chat",
@@ -206,6 +203,30 @@ struct SettingsReleaseSummary: View {
       .font(.caption2)
       .monospacedDigit()
       .foregroundStyle(.tertiary)
+  }
+}
+
+/// Opens the bundled What's New sheet, or the web changelog when this build has none.
+private struct HelpWhatsNewRow: View {
+  @State private var isPresented = false
+
+  var body: some View {
+    if let announcement = WhatsNewStore.shared.announcement {
+      Button {
+        isPresented = true
+      } label: {
+        HelpDetailRow(title: "What’s New", systemImage: "sparkles")
+      }
+      .sheet(isPresented: $isPresented) {
+        WhatsNewView(announcement: announcement, onContinue: { isPresented = false })
+      }
+    } else {
+      HelpLinkRow(
+        title: "What’s New",
+        systemImage: "sparkles",
+        url: WhatsNewAnnouncement.changelogURL.absoluteString
+      )
+    }
   }
 }
 

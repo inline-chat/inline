@@ -2,9 +2,11 @@ import AppKit
 import Auth
 import InlineCLIInstaller
 import InlineKit
+import InlineUI
 import MacDevtools
 import MacTheme
 import Observation
+import SwiftUI
 
 extension Notification.Name {
   static let toggleSidebar = Notification.Name("toggleSidebar")
@@ -996,7 +998,25 @@ final class AppMenu: NSObject {
   }
 
   @objc private func openWhatsNew(_ sender: Any?) {
-    openURL("https://inline.chat/docs/changelog")
+    guard let announcement = WhatsNewStore.shared.announcement, let parent = activeWindow() else {
+      openURL(WhatsNewAnnouncement.changelogURL.absoluteString)
+      return
+    }
+    // Another sheet (possibly this one, opened from the sidebar) already owns the window.
+    guard parent.attachedSheet == nil else { return }
+
+    let sheet = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+    sheet.isReleasedWhenClosed = false
+    let hostingController = NSHostingController(
+      rootView: WhatsNewView(announcement: announcement, onContinue: { [weak parent, weak sheet] in
+        guard let sheet else { return }
+        parent?.endSheet(sheet)
+      })
+    )
+    hostingController.sizingOptions = [.preferredContentSize]
+    sheet.contentViewController = hostingController
+    sheet.setContentSize(hostingController.view.fittingSize)
+    parent.beginSheet(sheet)
   }
 
   @objc private func openPreviousVersions(_ sender: Any?) {
