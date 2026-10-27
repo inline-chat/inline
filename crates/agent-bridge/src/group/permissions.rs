@@ -169,7 +169,6 @@ mod tests {
             allowed(configure),
             [Operation::Answer, Operation::Configure]
         );
-
     }
 
     #[test]
