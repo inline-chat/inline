@@ -13,12 +13,13 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use inline_agent_bridge::group::{
-    ConsiderOutcome, ConsiderQueue, DailySpeakGateBudget, DayKey, GateAdmission, GateAvailability,
-    Grants, GuideFacts, HandoffInstruction, HandoffProvider, HandoffTarget, HoldEffect, HoldEvent,
-    HoldMachine, HoldState, IdleRelease, Operation, ParticipationMode, PendingInput, Publication,
-    PublicationEffect, PublicationEvent, ReleaseCause, ReleaseReceipt, ReleaseRequest, ReleaseStep,
+    ConsiderOutcome, ConsiderQueue, ContextBudget, ContextMessage, DailySpeakGateBudget, DayKey,
+    GateAdmission, GateAvailability, Grants, GuideFacts, HandoffInstruction, HandoffProvider,
+    HandoffTarget, HoldEffect, HoldEvent, HoldMachine, HoldState, IdleRelease, Operation,
+    ParticipationMode, PassiveBatch, PendingInput, Publication, PublicationEffect,
+    PublicationEvent, ReleaseCause, ReleaseReceipt, ReleaseRequest, ReleaseStep,
     ReleaseStepOutcome, SpeakGateError, SpeakVerdict, WorkPhase, gate_admission,
-    handoff_instruction, release_event, run_state_event, trusted_guide,
+    handoff_instruction, passive_input, release_event, run_state_event, trusted_guide,
 };
 use inline_agent_bridge::harness::ChatId;
 use inline_agent_bridge::harness::{
@@ -27,7 +28,7 @@ use inline_agent_bridge::harness::{
     OpenError, OpenMode, OpenSpec, OutputMode, QuestionForm, QueueOp, RunState, SendError, Session,
     SteerPriority, TurnPhase, UserId, WaitingOn,
 };
-use inline_agent_bridge::{HostToolResult, ProviderSessionId, TurnId};
+use inline_agent_bridge::{HostToolResult, MAX_SESSION_TITLE_CHARS, ProviderSessionId, TurnId};
 use inline_client::{
     CreateReplyThreadRequest, DeleteMessageRequest, FormFieldValue, FormValue, InlineClient,
     InlineId,
@@ -57,6 +58,8 @@ const MAX_FULL_DETAILS: usize = 32;
 const MAX_FULL_DETAIL_BYTES: usize = 4 * 1024 * 1024;
 /// Tries at a subthread move whose outcome is unknown.
 const MOVE_ATTEMPTS: u32 = 3;
+/// Bound on the observed messages delivered before the next input.
+const PASSIVE_CONTEXT_BYTES: usize = 16 * 1024;
 
 /// Owner-authenticated calls a work needs: connect and look up its session.
 pub(crate) trait OwnerCalls: Send + Sync {
@@ -95,6 +98,7 @@ pub(crate) struct Agent {
     pub tools: Option<Arc<Tools>>,
     /// A work that moved into a subthread tells the main loop (from, to).
     pub moves: mpsc::UnboundedSender<(i64, i64)>,
+    pub names: Arc<api::Names>,
 }
 
 impl Agent {
@@ -154,9 +158,10 @@ pub(crate) enum Command {
         pending: PendingInput,
         message_id: i64,
     },
-    /// Context the agent observes without a turn.
+    /// A message the agent observes without a turn; batched until the next
+    /// native boundary.
     Passive {
-        input: Box<Input>,
+        message: ContextMessage,
     },
     /// An unaddressed message the speak gate may answer (active participation).
     Consider {
@@ -181,6 +186,8 @@ pub(crate) enum Command {
         reply: oneshot::Sender<Option<String>>,
     },
     SetMode(OutputMode),
+    /// The Inline thread's title changed (spec §15.7: Inline → harness).
+    Title(String),
     /// A tool that acts through the work (spec §4.8).
     Tool {
         tool: WorkTool,
@@ -259,6 +266,9 @@ pub(crate) fn spawn(
         reported: None,
         phase: phase_tx,
         started_ms: now_ms(),
+        passive: PassiveBatch::new(chat_id),
+        title: None,
+        rename_pending: false,
         consider: ConsiderQueue::default(),
         consider_lines: HashMap::new(),
         gate_budget: DailySpeakGateBudget::default(),
@@ -331,6 +341,12 @@ struct Actor {
     reported: Option<(i32, i32, Option<String>)>,
     phase: watch::Sender<WorkPhase>,
     started_ms: u64,
+    /// Messages observed since the agent last took input (spec §5.1).
+    passive: PassiveBatch,
+    /// The Inline thread's title, once known.
+    title: Option<String>,
+    /// The native session still needs `title`.
+    rename_pending: bool,
     /// Unaddressed messages waiting for a quiet, idle moment (spec §5.4).
     consider: ConsiderQueue,
     consider_lines: HashMap<i64, String>,
@@ -391,12 +407,7 @@ impl Actor {
                 })
                 .await;
             }
-            Command::Passive { input } => {
-                // Best effort: context only reaches a session this bridge holds.
-                if let Some(session) = self.held_session() {
-                    let _ = session.send(*input).await;
-                }
-            }
+            Command::Passive { message } => self.passive.push(message),
             Command::Control {
                 control,
                 actor,
@@ -428,6 +439,13 @@ impl Actor {
                 self.consider_lines.insert(message_id, line);
             }
             Command::SetMode(mode) => self.renderer.set_mode(mode),
+            Command::Title(title) => {
+                if self.title.as_deref() != Some(title.as_str()) {
+                    self.title = Some(title);
+                    self.rename_pending = true;
+                    self.sync_title().await;
+                }
+            }
             Command::Tool { tool, reply } => {
                 let result = self.work_tool(tool).await;
                 let _ = reply.send(result);
@@ -788,6 +806,9 @@ impl Actor {
         actor: i64,
     ) -> Option<String> {
         let session = self.held_session()?;
+        // The card's resolution names who answered.
+        let name = self.agent.names.of(actor).await;
+        self.renderer.name_user(actor, name);
         match session
             .control(Op::Answer {
                 interaction,
@@ -1089,6 +1110,23 @@ impl Actor {
         if let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) {
             tools.bind(native, self.chat_id, self.commands.clone());
         }
+        // A new session takes the thread's title; a rename made while the
+        // session was let go reaches it now.
+        if fresh && self.title.is_none() {
+            self.title = self
+                .agent
+                .bot
+                .chat_state(InlineId::new(self.chat_id))
+                .await
+                .ok()
+                .and_then(|state| state.dialog)
+                // A DM's title is the person, not the work.
+                .filter(|dialog| dialog.peer_user_id.is_none())
+                .and_then(|dialog| dialog.title)
+                .filter(|title| !title.trim().is_empty());
+            self.rename_pending = self.title.is_some();
+        }
+        self.sync_title().await;
         Ok(())
     }
 
@@ -1176,6 +1214,16 @@ impl Actor {
             self.retained.push(pending);
             return;
         };
+        // What the thread said since the agent last took input comes first,
+        // as context only.
+        if let Some(context) = self
+            .passive
+            .drain(ContextBudget::bytes(PASSIVE_CONTEXT_BYTES))
+            && let Ok(id) = InputId::new(uuid::Uuid::new_v4().to_string())
+            && let Err(error) = session.send(passive_input(context, id)).await
+        {
+            log::warn!(target: "inline::bridge::v2", "passive context not delivered: {error}");
+        }
         if !matches!(input.delivery, Delivery::Queue | Delivery::Passive) {
             input.delivery = match live_turn(&session) {
                 Some(turn) => Delivery::Steer {
@@ -1404,6 +1452,28 @@ impl Actor {
     // ---------------------------------------------------------------
     // Tools that act through the work
     // ---------------------------------------------------------------
+
+    /// Names the native session after the Inline thread (Codex
+    /// `thread/name/set`, Claude `renameSession`), where the harness can.
+    async fn sync_title(&mut self) {
+        if !self.rename_pending {
+            return;
+        }
+        let (Some(title), Some(session)) = (self.title.clone(), self.session.clone()) else {
+            return;
+        };
+        if !session.availability().op(OpKind::Rename).is_supported() {
+            self.rename_pending = false;
+            return;
+        }
+        let title: String = title.chars().take(MAX_SESSION_TITLE_CHARS).collect();
+        match session.control(Op::Rename { title }).await {
+            Ok(_) => self.rename_pending = false,
+            Err(error) => {
+                log::debug!(target: "inline::bridge::v2", "rename not applied: {error}");
+            }
+        }
+    }
 
     fn unbind_tools(&self) {
         if let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) {

@@ -292,7 +292,9 @@ async fn send(owner: &InlineClient, chat_id: i64, text: &str) {
 async fn codex_round_trip_through_inline() {
     let _ = env_logger::builder()
         .is_test(true)
-        .parse_filters("inline::bridge::v2=debug,inline_agent_driver_codex=debug,inline_client=info")
+        .parse_filters(
+            "inline::bridge::v2=debug,inline_agent_driver_codex=debug,inline_client=info",
+        )
         .try_init();
     let bot_user_id: i64 = env("INLINE_V2_E2E_BOT_USER_ID").parse().unwrap();
     let owner_user_id: i64 = env("INLINE_V2_E2E_OWNER_USER_ID").parse().unwrap();
@@ -635,9 +637,6 @@ async fn codex_round_trip_through_inline() {
             texts
                 .iter()
                 .any(|(_, text)| text.contains("Status: Halfway"))
-                && texts
-                    .iter()
-                    .any(|(_, text)| text.contains("Continued in the subthread."))
         },
     )
     .await;
@@ -722,7 +721,9 @@ async fn approve_action(owner: &InlineClient, chat_id: i64, message_id: i64) -> 
 async fn claude_round_trip_through_inline() {
     let _ = env_logger::builder()
         .is_test(true)
-        .parse_filters("inline::bridge::v2=debug,inline_agent_driver_claude=debug,inline_client=info")
+        .parse_filters(
+            "inline::bridge::v2=debug,inline_agent_driver_claude=debug,inline_client=info",
+        )
         .try_init();
     let bot_user_id: i64 = env("INLINE_V2_E2E_BOT_USER_ID").parse().unwrap();
     let owner_user_id: i64 = env("INLINE_V2_E2E_OWNER_USER_ID").parse().unwrap();

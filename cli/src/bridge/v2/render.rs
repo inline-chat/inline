@@ -125,6 +125,8 @@ pub(crate) struct Renderer {
     pending_text: Option<(String, String)>,
     final_answer: Option<String>,
     interactions: HashMap<InteractionId, Interaction>,
+    /// People who answered cards, by user ID.
+    names: HashMap<i64, String>,
 }
 
 impl Renderer {
@@ -142,6 +144,7 @@ impl Renderer {
             pending_text: None,
             final_answer: None,
             interactions: HashMap::new(),
+            names: HashMap::new(),
         }
     }
 
@@ -151,6 +154,11 @@ impl Renderer {
 
     pub(crate) fn set_mode(&mut self, mode: OutputMode) {
         self.mode = mode;
+    }
+
+    /// Names a person who answers a card, for its resolution line.
+    pub(crate) fn name_user(&mut self, user_id: i64, name: String) {
+        self.names.insert(user_id, name);
     }
 
     pub(crate) fn apply(&mut self, envelope: &Envelope) -> Vec<RenderOp> {
@@ -193,7 +201,7 @@ impl Renderer {
                 if let Some(interaction) = self.interactions.remove(id) {
                     ops.push(RenderOp::CardClosed {
                         interaction: id.clone(),
-                        doc: closed_card(&interaction, by),
+                        doc: closed_card(&interaction, by, &self.names),
                     });
                 }
                 self.mark_rows_waiting(None);
@@ -1028,7 +1036,7 @@ fn question_card(agent: &str, form: &QuestionForm) -> Doc {
     builder.finish()
 }
 
-fn closed_card(interaction: &Interaction, by: &ClosedBy) -> Doc {
+fn closed_card(interaction: &Interaction, by: &ClosedBy, names: &HashMap<i64, String>) -> Doc {
     let mut builder = DocBuilder::new();
     let resolution = match by {
         ClosedBy::Inline { user, decision } => {
@@ -1041,9 +1049,13 @@ fn closed_card(interaction: &Interaction, by: &ClosedBy) -> Doc {
                         .map(|candidate| candidate.label.clone()),
                     _ => None,
                 });
+            let name = names
+                .get(&user.0)
+                .cloned()
+                .unwrap_or_else(|| format!("user {}", user.0));
             match label {
-                Some(label) => format!("{label} (answered by user {})", user.0),
-                None => format!("Answered by user {}", user.0),
+                Some(label) => format!("{label} (answered by {name})"),
+                None => format!("Answered by {name}"),
             }
         }
         ClosedBy::External => "Answered outside Inline".to_owned(),

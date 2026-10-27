@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use inline_agent_bridge::ProviderSessionId;
 use inline_agent_bridge::group::{
-    Conversation, Grants, GroupMessage, IntakeDecision, IntakeFacts, LoopGuards, Operation,
-    ParticipationMode, PassiveContext, PendingInput, ReleaseCause, WorkPhase, decide_intake,
-    direct_input, origin_of, passive_input,
+    ContextAuthorRole, ContextMessage, Conversation, Grants, GroupMessage, IntakeDecision,
+    IntakeFacts, LoopGuards, Operation, ParticipationMode, PendingInput, ReleaseCause, WorkPhase,
+    decide_intake, direct_input, origin_of,
 };
 use inline_agent_bridge::harness::{
     Delivery, HarnessDriver, Input, InputContent, InputId, OutputMode, UserId,
@@ -171,6 +171,7 @@ impl Runtime {
             owner_user_id: config.owner_user_id,
             cache: tokio::sync::Mutex::new(None),
         });
+        let names = Arc::new(api::Names::new(bot.clone()));
         let agent = Arc::new(Agent {
             bot,
             owner,
@@ -190,6 +191,7 @@ impl Runtime {
             ),
             tools,
             moves: moves_tx,
+            names,
         });
         Ok(Self {
             config,
@@ -420,6 +422,20 @@ impl Runtime {
                 self.answer(*interaction_id, toast).await;
                 Ok(())
             }
+            // A work thread renamed in Inline renames its native session.
+            ClientEvent::ChatUpserted { chat_id } => {
+                if let Some(work) = self.works.get(&chat_id.get())
+                    && let Ok(state) = self.agent.bot.chat_state(*chat_id).await
+                    && let Some(title) = state
+                        .dialog
+                        .filter(|dialog| dialog.peer_user_id.is_none())
+                        .and_then(|dialog| dialog.title)
+                        .filter(|title| !title.trim().is_empty())
+                {
+                    let _ = work.tx.send(Command::Title(title)).await;
+                }
+                Ok(())
+            }
             ClientEvent::AgentAccessChanged { chat_id, .. } => {
                 self.access.invalidate().await;
                 match chat_id {
@@ -631,7 +647,7 @@ impl Runtime {
                 bot_username: &self.config.bot_username,
                 conversation,
                 reply_author,
-                author_name: format!("user {}", message.sender_id.get()),
+                author_name: self.agent.names.of(message.sender_id.get()).await,
             },
         );
         let grants = self.access.grants(group.author.user_id).await;
@@ -681,27 +697,26 @@ impl Runtime {
                     .await
             }
             IntakeDecision::Observe { consider, .. } => {
-                if let Some(work) = self.works.get(&chat_id)
-                    && let Ok(id) = InputId::new(input_id(
-                        self.config.bot_user_id,
-                        chat_id,
-                        group.message_id,
-                        "passive",
-                    ))
-                {
-                    let input = passive_input(
-                        PassiveContext {
-                            chat_id,
-                            text: format!("{}: {}", group.author.display_name, group.text),
-                            included_message_ids: vec![group.message_id],
-                            omitted: 0,
-                        },
-                        id,
-                    );
+                if let Some(work) = self.works.get(&chat_id) {
+                    // Batched in the work and delivered at its next native
+                    // boundary (spec §5.1).
+                    let role = if group.author.user_id == self.config.owner_user_id {
+                        ContextAuthorRole::Owner
+                    } else if group.author.kind.is_agent() {
+                        ContextAuthorRole::Agent
+                    } else {
+                        ContextAuthorRole::Teammate
+                    };
                     let _ = work
                         .tx
                         .send(Command::Passive {
-                            input: Box::new(input),
+                            message: ContextMessage {
+                                message_id: group.message_id,
+                                author_name: group.author.display_name.clone(),
+                                role,
+                                reply_to: message.reply_to_message_id.map(InlineId::get),
+                                text: group.text.clone(),
+                            },
                         })
                         .await;
                     if consider {
@@ -846,19 +861,19 @@ impl Runtime {
             })
             .await
             .ok()?;
-        let names: HashMap<i64, String> = page
-            .users
-            .iter()
-            .map(|user| {
-                let name = user
-                    .display_name
-                    .clone()
-                    .or_else(|| user.first_name.clone())
-                    .or_else(|| user.username.clone())
-                    .unwrap_or_else(|| format!("user {}", user.user_id.get()));
-                (user.user_id.get(), name)
-            })
-            .collect();
+        let mut names: HashMap<i64, String> = HashMap::new();
+        for user in &page.users {
+            let id = user.user_id.get();
+            let name = user
+                .display_name
+                .clone()
+                .or_else(|| user.first_name.clone())
+                .or_else(|| user.username.clone());
+            if let Some(name) = name {
+                self.agent.names.remember(id, name.clone()).await;
+                names.insert(id, name);
+            }
+        }
         let mut recent: Vec<ContextMessage> = page
             .messages
             .iter()

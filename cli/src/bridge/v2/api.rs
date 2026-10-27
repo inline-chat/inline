@@ -297,3 +297,54 @@ pub(crate) async fn edit_markdown(
     )?;
     Ok(())
 }
+
+/// Display names of Inline users, as this bot sees them, cached for the run.
+pub(crate) struct Names {
+    bot: InlineClient,
+    cache: tokio::sync::Mutex<std::collections::HashMap<i64, String>>,
+}
+
+impl Names {
+    pub(crate) fn new(bot: InlineClient) -> Self {
+        Self {
+            bot,
+            cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    pub(crate) async fn remember(&self, user_id: i64, name: String) {
+        self.cache.lock().await.entry(user_id).or_insert(name);
+    }
+
+    /// The user's name, or "user N" when Inline does not say.
+    pub(crate) async fn of(&self, user_id: i64) -> String {
+        if let Some(name) = self.cache.lock().await.get(&user_id) {
+            return name.clone();
+        }
+        let found = get_users(&self.bot, vec![user_id])
+            .await
+            .ok()
+            .and_then(|users| users.into_iter().find(|user| user.id == user_id))
+            .and_then(|user| display_name(&user));
+        match found {
+            Some(name) => {
+                self.remember(user_id, name.clone()).await;
+                name
+            }
+            None => format!("user {user_id}"),
+        }
+    }
+}
+
+fn display_name(user: &proto::User) -> Option<String> {
+    let full = [user.first_name.as_deref(), user.last_name.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!full.is_empty())
+        .then_some(full)
+        .or_else(|| user.username.clone().filter(|name| !name.trim().is_empty()))
+}
