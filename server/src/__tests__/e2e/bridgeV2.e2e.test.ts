@@ -35,7 +35,8 @@ describe("bridge v2 end to end", () => {
     const suffix = crypto.randomUUID()
     const owner = await testUtils.createUser(`bridge-v2-owner-${suffix}@example.test`)
     const bot = await testUtils.createUser(`bridge-v2-bot-${suffix}@example.test`)
-    if (!owner || !bot) throw new Error("users missing")
+    const teammate = await testUtils.createUser(`bridge-v2-teammate-${suffix}@example.test`)
+    if (!owner || !bot || !teammate) throw new Error("users missing")
     await db.update(users).set({ bot: true, botCreatorId: owner.id }).where(eq(users.id, bot.id))
     const { chat: dm } = await testUtils.createPrivateChatWithOptionalDialog({
       userA: owner,
@@ -45,6 +46,7 @@ describe("bridge v2 end to end", () => {
     })
     const { token: ownerToken } = await testUtils.createSessionForUser(owner.id, { clientType: "cli" })
     const { token: botToken } = await testUtils.createSessionForUser(bot.id, { clientType: "api" })
+    const { token: teammateToken } = await testUtils.createSessionForUser(teammate.id, { clientType: "cli" })
 
     const origin = `127.0.0.1:${app.server.port}`
     const repo = path.resolve(import.meta.dir, "../../../..")
@@ -63,6 +65,8 @@ describe("bridge v2 end to end", () => {
           INLINE_V2_E2E_BOT_USER_ID: String(bot.id),
           INLINE_V2_E2E_OWNER_USER_ID: String(owner.id),
           INLINE_V2_E2E_DM_CHAT_ID: String(dm.id),
+          INLINE_V2_E2E_TEAMMATE_TOKEN: teammateToken,
+          INLINE_V2_E2E_TEAMMATE_USER_ID: String(teammate.id),
         },
         stdout: "inherit",
         stderr: "inherit",

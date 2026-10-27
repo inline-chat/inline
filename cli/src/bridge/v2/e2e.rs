@@ -379,6 +379,17 @@ async fn codex_round_trip_through_inline() {
         // A plain reply to the agent's answer addresses it.
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_G2_REPLY"}]}),
+        // A teammate with access: an answer, then a command only the owner
+        // may approve.
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_TEAMMATE_OK"}]}),
+        json!({"type": "function_call", "call_id": "call-team", "name": "exec_command",
+            "arguments": json!({"cmd": "echo TEAM > team.txt",
+                "sandbox_permissions": "require_escalated",
+                "justification": "Write the teammate marker",
+                "workdir": folder.display().to_string()}).to_string()}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_TEAMMATE_RAN"}]}),
     ])
     .await;
     let codex_home = dir.path().join("codex-home");
@@ -974,6 +985,118 @@ async fn codex_round_trip_through_inline() {
     )
     .await;
 
+    // 9. A teammate: no access until the owner grants it, and never the
+    // owner's approvals.
+    let teammate_id: i64 = env("INLINE_V2_E2E_TEAMMATE_USER_ID").parse().unwrap();
+    let teammate = client(dir.path(), "teammate", &env("INLINE_V2_E2E_TEAMMATE_TOKEN")).await;
+    let group_three = owner
+        .create_thread(CreateThreadRequest {
+            title: Some("E2E team".to_owned()),
+            space_id: None,
+            description: None,
+            emoji: None,
+            is_public: false,
+            participants: vec![
+                ChatCreateParticipant::from(InlineId::new(owner_user_id)),
+                ChatCreateParticipant::from(InlineId::new(bot_user_id)),
+                ChatCreateParticipant::from(InlineId::new(teammate_id)),
+            ],
+        })
+        .await
+        .unwrap()
+        .chat_id
+        .get();
+    let teammate_mention = |text: &str| {
+        let mut request = SendTextRequest::new(
+            PeerRef::Chat {
+                chat_id: InlineId::new(group_three),
+            },
+            format!("[@Codex](inline://user?id={bot_user_id}) {text}"),
+        );
+        request.parse_markdown = true;
+        request
+    };
+    let requests_before = model.request_count();
+    teammate
+        .send_text(teammate_mention("can you help?"))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        model.request_count(),
+        requests_before,
+        "a teammate without access reached the agent"
+    );
+    owner
+        .invoke_rpc(
+            proto::Method::SetAgentGrant,
+            proto::rpc_call::Input::SetAgentGrant(proto::SetAgentGrantInput {
+                bot_user_id,
+                user_id: teammate_id,
+                operations: vec![
+                    proto::AgentGrantOperation::Invoke as i32,
+                    proto::AgentGrantOperation::Steer as i32,
+                ],
+            }),
+        )
+        .await
+        .unwrap();
+    teammate
+        .send_text(teammate_mention("now can you help?"))
+        .await
+        .unwrap();
+    wait_for(
+        &model,
+        &owner,
+        group_three,
+        bot_user_id,
+        "the answer to the teammate",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_TEAMMATE_OK"))
+        },
+    )
+    .await;
+    teammate
+        .send_text(teammate_mention("run the team check"))
+        .await
+        .unwrap();
+    let (card, action) =
+        wait_card(&model, &owner, group_three, "echo TEAM", CardKind::Buttons).await;
+    assert!(
+        invoke_action(&teammate, group_three, card, &action)
+            .await
+            .is_err(),
+        "a teammate without APPROVE answered the owner's approval"
+    );
+    assert!(
+        !folder.join("team.txt").exists(),
+        "the command ran before the owner approved"
+    );
+    invoke_action(&owner, group_three, card, &action)
+        .await
+        .unwrap();
+    wait_for(
+        &model,
+        &owner,
+        group_three,
+        bot_user_id,
+        "the answer after the owner approved",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_TEAMMATE_RAN"))
+        },
+    )
+    .await;
+    assert_eq!(
+        std::fs::read_to_string(folder.join("team.txt"))
+            .unwrap()
+            .trim(),
+        "TEAM"
+    );
+
     let _ = stop.send(());
     let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
     assert!(
@@ -1059,6 +1182,26 @@ impl CodexBridge {
         });
         (stop, running, bot)
     }
+}
+
+/// Presses a card's button as `client`.
+async fn invoke_action(
+    client: &InlineClient,
+    chat_id: i64,
+    message_id: i64,
+    action_id: &str,
+) -> Result<proto::rpc_result::Result, inline_client::ClientRequestError> {
+    client
+        .invoke_rpc(
+            proto::Method::InvokeMessageAction,
+            proto::rpc_call::Input::InvokeMessageAction(proto::InvokeMessageActionInput {
+                peer_id: Some(super::api::chat_peer(chat_id)),
+                message_id,
+                action_id: action_id.to_owned(),
+                ..Default::default()
+            }),
+        )
+        .await
 }
 
 /// Waits until the server reports the work idle.
