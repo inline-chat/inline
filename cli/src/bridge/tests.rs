@@ -1288,3 +1288,14 @@ fn a_suspect_owner_end_with_a_valid_probe_restarts_the_owner_connection() {
     assert!(lost.downcast_ref::<BridgeSetupRequired>().is_none());
     assert_eq!(classify_failure(lost.as_ref()), FailureClass::Transient);
 }
+
+#[test]
+fn bridge_v2_flag_leaves_providers_without_a_v2_driver_on_v1() {
+    assert!(v2_enabled_in(Some("all"), "codex"));
+    assert!(v2_enabled_in(Some("codex, claude"), "claude"));
+    assert!(!v2_enabled_in(Some("codex"), "claude"));
+    assert!(!v2_enabled_in(None, "codex"));
+    // OpenCode and other ACP agents keep running on v1.
+    assert!(!v2_enabled_in(Some("all"), "opencode"));
+    assert!(!v2_enabled_in(Some("opencode"), "opencode"));
+}

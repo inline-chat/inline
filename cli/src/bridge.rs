@@ -3093,14 +3093,23 @@ async fn run_provider_installation(
     Ok(())
 }
 
+/// Providers with a v2 driver. Every other provider (ACP agents such as
+/// OpenCode) keeps running on v1, whatever `INLINE_BRIDGE_V2` says.
+const V2_PROVIDERS: &[&str] = &["codex", "claude"];
+
 /// Bridge v2 per provider while it is staged: `INLINE_BRIDGE_V2=codex,claude`
-/// (or `all`). v1 stays the default.
+/// (or `all`, meaning every provider v2 supports). v1 stays the default.
 fn v2_enabled_for(provider_id: &str) -> bool {
-    env::var("INLINE_BRIDGE_V2").is_ok_and(|value| {
-        value.split(',').map(str::trim).any(|entry| {
-            entry.eq_ignore_ascii_case("all") || entry.eq_ignore_ascii_case(provider_id)
+    v2_enabled_in(env::var("INLINE_BRIDGE_V2").ok().as_deref(), provider_id)
+}
+
+fn v2_enabled_in(setting: Option<&str>, provider_id: &str) -> bool {
+    V2_PROVIDERS.contains(&provider_id)
+        && setting.is_some_and(|value| {
+            value.split(',').map(str::trim).any(|entry| {
+                entry.eq_ignore_ascii_case("all") || entry.eq_ignore_ascii_case(provider_id)
+            })
         })
-    })
 }
 
 struct V2Launch<'a> {
