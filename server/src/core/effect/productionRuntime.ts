@@ -9,6 +9,7 @@ import {
   BotWebhookDeliveryProcessLive,
 } from "../../modules/botUpdates/delivery.effect"
 import { McpEventsProcessLive } from "../../modules/mcpEvents/worker.effect"
+import { ChatAccessVerifierProcessLive } from "../../modules/authorization/chatAccessVerifier.effect"
 import {
   GridProviderEffectsProcessLive,
 } from "../../modules/grid/providerEffects.effect"
@@ -46,6 +47,7 @@ const OwnedProcessServicesLive =
         BlockContentImageProcessLive,
         BotWebhookDeliveryProcessLive,
         McpEventsProcessLive,
+        ChatAccessVerifierProcessLive,
         DatabaseHealthMonitorProcessLive,
         GridProviderEffectsProcessLive,
         NativeUploadProcessLive,
