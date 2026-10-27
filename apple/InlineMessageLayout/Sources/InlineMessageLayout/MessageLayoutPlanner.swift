@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// Turns a message into exact row geometry. Pure and thread-safe; call it off the main thread.
 public enum MessageLayoutPlanner {
@@ -7,6 +8,7 @@ public enum MessageLayoutPlanner {
     let grid = input.grid
     let isEmoji: Bool
     let bodyText: MessageText
+    var richBlocks: [RichBlock]?
     switch input.body {
     case let .text(text):
       isEmoji = false
@@ -14,6 +16,10 @@ public enum MessageLayoutPlanner {
     case let .emoji(text):
       isEmoji = true
       bodyText = text
+    case let .rich(blocks):
+      isEmoji = false
+      bodyText = MessageText(NSAttributedString())
+      richBlocks = blocks
     }
     let hasBubble = !isEmoji
     let insets = isEmoji ? m.emojiInsets : m.bubbleInsets
@@ -52,6 +58,28 @@ public enum MessageLayoutPlanner {
       return TextLayouter.layout(text, style: style, maximumWidth: width, grid: grid)
     }
     let text = bodyText.isEmpty ? TextLayout.empty : typeset(bodyText, width: maximumContentWidth)
+    let rich = richBlocks.flatMap {
+      RichLayoutPlanner.layout(
+        $0,
+        maximumWidth: maximumContentWidth,
+        grid: grid,
+        layoutDirection: input.layoutDirection,
+        metrics: input.richMetrics,
+        cache: cache
+      )
+    }
+    // The body's measurements, whichever kind it is.
+    // While a text body streams, only the lines up to the one holding the last revealed
+    // character count: they set the body's width and height.
+    let revealedLines: ArraySlice<TextLayout.Line>? = input.revealedLength.flatMap { revealed in
+      guard rich == nil, !isEmoji, text.lineCount > 0, revealed < text.length else { return nil }
+      let frontier = text.lines.firstIndex { NSMaxRange($0.range) > max(0, revealed) } ?? text.lineCount - 1
+      return text.lines[...frontier]
+    }
+    let bodySize = rich?.size ?? revealedLines.map {
+      CGSize(width: $0.map(\.width).max() ?? 0, height: $0.last?.frame.maxY ?? 0)
+    } ?? text.size
+    let hasBody = rich != nil || text.lineCount > 0
     let time = typeset(input.footer.time, width: .greatestFiniteMagnitude)
     let name = input.name.map { typeset($0, width: maximumBodyWidth) }
 
@@ -62,7 +90,7 @@ public enum MessageLayoutPlanner {
       rowSpacing: m.reactionRowSpacing
     )
     // Media with nothing under it carries the time over its bottom-trailing corner.
-    let overlaysMedia = edgeIndex != nil && edgeIndex == above.last && text.lineCount == 0
+    let overlaysMedia = edgeIndex != nil && edgeIndex == above.last && !hasBody
       && below.isEmpty && flow.isEmpty
 
     let statusSize = input.footer.statusSize ?? .zero
@@ -78,7 +106,7 @@ public enum MessageLayoutPlanner {
     // A fixed-width block with nothing under it, such as a file, takes the time beside its
     // bottom edge when there is room, instead of a row of its own.
     let besideBlock: Int? = {
-      guard !isEmoji, text.lineCount == 0, below.isEmpty, flow.isEmpty,
+      guard !isEmoji, !hasBody, below.isEmpty, flow.isEmpty,
             let last = above.last, last != edgeIndex,
             case let .fixed(width) = blocks[last].width,
             min(width, maximumContentWidth) + m.inlineTimeSpacing + footerWidth <= maximumContentWidth
@@ -89,14 +117,30 @@ public enum MessageLayoutPlanner {
     // The region under the above-text blocks: text, then below-text blocks, then reactions and
     // the footer. Offsets are from the region's top.
     var belowOffsets: [CGFloat] = []
-    var regionHeight = text.size.height
+    var regionHeight = bodySize.height
     for index in below {
       if regionHeight > 0 { regionHeight += m.blockSpacing }
       belowOffsets.append(regionHeight)
       regionHeight += blocks[index].height
     }
     // The time can follow the last line only when nothing sits under the text.
-    let lastLine = below.isEmpty ? text.lastLine : nil
+    struct TrailingLine {
+      var width: CGFloat
+      var baseline: CGFloat
+      var direction: TextDirection
+      var isOnlyLine: Bool
+    }
+    let lastLine: TrailingLine? = if !below.isEmpty {
+      nil
+    } else if let rich {
+      rich.trailingLine.map { TrailingLine(width: $0.maxX, baseline: $0.baseline, direction: $0.direction, isOnlyLine: false) }
+    } else if let revealedLines, let frontier = revealedLines.last {
+      TrailingLine(width: frontier.width, baseline: frontier.baseline, direction: frontier.direction, isOnlyLine: revealedLines.count == 1)
+    } else {
+      text.lastLine.map {
+        TrailingLine(width: $0.width, baseline: text.lastBaseline, direction: $0.direction, isOnlyLine: text.lineCount == 1)
+      }
+    }
 
     // Place the footer: beside the reactions, inline after the last line, or on its own row.
     let placement: MessageTimePlacement
@@ -130,35 +174,35 @@ public enum MessageLayoutPlanner {
       let lastRow = flow.rows[flow.rows.count - 1]
       if lastRow.width + m.reactionTimeSpacing + footerWidth <= maximumContentWidth {
         placement = .reactionsRow
-        contentWidth = max(text.size.width, flow.size.width, lastRow.width + m.reactionTimeSpacing + footerWidth)
+        contentWidth = max(bodySize.width, flow.size.width, lastRow.width + m.reactionTimeSpacing + footerWidth)
         footerTop = reactionsTop + lastRow.midY - footerHeight / 2
         contentHeight = reactionsTop + flow.size.height
       } else {
         placement = .below
-        contentWidth = max(text.size.width, flow.size.width, footerWidth)
+        contentWidth = max(bodySize.width, flow.size.width, footerWidth)
         footerTop = reactionsTop + flow.size.height + m.timeRowSpacing
         contentHeight = footerTop + footerHeight
       }
       contentWidth = grid.ceil(contentWidth)
       alignedText = text.aligned(toWidth: contentWidth)
     } else if let lastLine,
-              text.lineCount == 1 || lastLine.direction == input.layoutDirection,
+              lastLine.isOnlyLine || lastLine.direction == input.layoutDirection,
               lastLine.width + m.inlineTimeSpacing + footerWidth <= maximumContentWidth
     {
       // A last line written against the interface direction hugs the trailing edge, where the
       // time goes, unless it is the only line and can sit at the leading edge.
       placement = .inline
-      contentWidth = grid.ceil(max(text.size.width, lastLine.width + m.inlineTimeSpacing + footerWidth))
+      contentWidth = grid.ceil(max(bodySize.width, lastLine.width + m.inlineTimeSpacing + footerWidth))
       // Share the last line's baseline. The time text is centered in its frame and the frame in
       // the footer row, so start the row that much higher.
-      let timeTextTop = text.lastBaseline - (time.lines.first?.baseline ?? time.size.height)
+      let timeTextTop = lastLine.baseline - (time.lines.first?.baseline ?? time.size.height)
       let centering = (timeHeight - time.size.height) / 2 + (footerHeight - timeHeight) / 2
       footerTop = grid.round(max(0, timeTextTop - centering))
-      contentHeight = max(text.size.height, footerTop + footerHeight)
+      contentHeight = max(bodySize.height, footerTop + footerHeight)
       alignedText = text.lineCount == 1 ? text : text.aligned(toWidth: contentWidth)
     } else {
       placement = .below
-      contentWidth = grid.ceil(max(text.size.width, footerWidth))
+      contentWidth = grid.ceil(max(bodySize.width, footerWidth))
       footerTop = regionHeight > 0 ? regionHeight + m.timeRowSpacing : 0
       contentHeight = footerTop + footerHeight
       alignedText = text.aligned(toWidth: contentWidth)
@@ -276,13 +320,15 @@ public enum MessageLayoutPlanner {
       )
       outsideBottom += block.height
     }
-    if text.lineCount > 0 {
+    if let rich {
+      frames[.text] = CGRect(origin: contentOrigin, size: rich.size)
+    } else if text.lineCount > 0 {
       let emojiOffset = isEmoji && input.isOutgoing ? contentWidth - alignedText.size.width : 0
       frames[.text] = CGRect(
         x: contentOrigin.x + emojiOffset,
         y: contentOrigin.y,
-        width: alignedText.size.width,
-        height: alignedText.size.height
+        width: revealedLines == nil ? alignedText.size.width : min(alignedText.size.width, contentWidth),
+        height: revealedLines == nil ? alignedText.size.height : bodySize.height
       )
     }
     for (index, reaction) in input.reactions.enumerated() {
@@ -350,6 +396,8 @@ public enum MessageLayoutPlanner {
       frames: frames,
       hiddenNodes: input.footer.visibility == .reserved ? [.time] : [],
       text: text.lineCount > 0 ? alignedText : nil,
+      rich: rich,
+      revealedLength: revealedLines == nil ? nil : input.revealedLength,
       name: name,
       time: time,
       timePlacement: placement,
