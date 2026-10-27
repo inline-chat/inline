@@ -159,6 +159,8 @@ pub(crate) struct Runtime {
     /// reach it. Messages there never do: the parent may start its own work.
     moved: HashMap<i64, i64>,
     moves: Option<mpsc::UnboundedReceiver<(i64, i64)>>,
+    /// Chat → whether this agent created it, so it is the agent's own thread.
+    own_threads: HashMap<i64, bool>,
     reconnect: Reconnect,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
@@ -209,6 +211,7 @@ impl Runtime {
             works: HashMap::new(),
             moved: HashMap::new(),
             moves: Some(moves),
+            own_threads: HashMap::new(),
             reconnect: Reconnect::default(),
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
@@ -533,8 +536,30 @@ impl Runtime {
         }
     }
 
+    /// Whether this agent created the chat (cached; a failed lookup is not).
+    async fn is_own_thread(&mut self, chat_id: i64) -> bool {
+        if let Some(own) = self.own_threads.get(&chat_id) {
+            return *own;
+        }
+        match api::get_chat(&self.agent.bot, chat_id).await {
+            Ok(result) => {
+                let own = result
+                    .chat
+                    .and_then(|chat| chat.created_by)
+                    .is_some_and(|creator| creator == self.config.bot_user_id);
+                self.own_threads.insert(chat_id, own);
+                own
+            }
+            Err(error) => {
+                log::debug!(target: "inline::bridge::v2", "chat={chat_id} lookup failed: {error}");
+                false
+            }
+        }
+    }
+
     /// A work moved into a subthread: it is that chat's work from now on.
     fn moved_work(&mut self, from: i64, to: i64) {
+        self.own_threads.insert(to, true);
         if let Some(work) = self.works.remove(&from) {
             self.works.insert(to, work);
         }
@@ -649,9 +674,12 @@ impl Runtime {
             return Ok(());
         }
         let chat_id = message.chat_id.get();
+        // The agent's own threads are the ones it made (`/new`, a moved work's
+        // subthread, `create_chat`). A shared thread it was mentioned in stays
+        // a group thread, where only addressed messages reach it.
         let conversation = if chat_id == self.config.dm_chat_id {
             Conversation::Dm
-        } else if self.works.contains_key(&chat_id) {
+        } else if self.is_own_thread(chat_id).await {
             Conversation::WorkThread
         } else {
             Conversation::Group
@@ -1034,6 +1062,7 @@ impl Runtime {
             })
             .await?;
         let chat_id = created.chat_id.get();
+        self.own_threads.insert(chat_id, true);
         let mode = self.effective_mode(participation.as_ref());
         self.works.insert(
             chat_id,
