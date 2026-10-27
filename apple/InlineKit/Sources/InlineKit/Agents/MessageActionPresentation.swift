@@ -93,8 +93,6 @@ public struct MessageActionPresentation: Equatable, Sendable {
       String(localized: "Ask \(owner) for access to \(agent)")
     case .steer:
       String(localized: "Only \(owner) and people they allow can steer \(agent)")
-    case .view:
-      String(localized: "Ask \(owner) for access to \(agent)’s work")
     case .configure, .owner:
       String(localized: "Only \(owner) can change this")
     case .none, .UNRECOGNIZED:
