@@ -1,5 +1,5 @@
 {
-  "id": "2b7d9cf2-d222-44e6-bbf3-d3d026e5fb54",
+  "id": "676b0833-bd22-48b5-a73c-ea0610a31ac0",
   "prevId": "5289272b-822a-4169-9bd6-e11e89173752",
   "version": "7",
   "dialect": "postgresql",
@@ -1706,13 +1706,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
-        },
-        "conversation_started": {
-          "name": "conversation_started",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "space_id": {
           "name": "space_id",
@@ -13148,6 +13141,92 @@
         "recent_realtime_buckets_seq_positive": {
           "name": "recent_realtime_buckets_seq_positive",
           "value": "\"recent_realtime_buckets\".\"seq\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.chat_access": {
+      "name": "chat_access",
+      "schema": "",
+      "columns": {
+        "chat_id": {
+          "name": "chat_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "chat_access_user_chat_idx": {
+          "name": "chat_access_user_chat_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "chat_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "chat_access_chat_id_user_id_pk": {
+          "name": "chat_access_chat_id_user_id_pk",
+          "columns": [
+            "chat_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.chat_access_state": {
+      "name": "chat_access_state",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "smallint",
+          "primaryKey": true,
+          "notNull": true,
+          "default": 1
+        },
+        "backfilled_at": {
+          "name": "backfilled_at",
+          "type": "timestamp (3) with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "chat_access_state_singleton": {
+          "name": "chat_access_state_singleton",
+          "value": "\"chat_access_state\".\"id\" = 1"
         }
       },
       "isRLSEnabled": false

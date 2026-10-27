@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { chatTitleFields, chatTitleMatches } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
@@ -238,6 +239,7 @@ export async function createChat(
       if (!chat) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat", 500)
       }
+      await syncChatAccess(tx, { kind: "chats", chatIds: [chat.id] })
 
       let participants: InitialParticipant[] = []
       let accessUpdates: InitialAccessUpdate[] = []
@@ -333,6 +335,7 @@ export async function createChat(
       if (!chat) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat", 500)
       }
+      await syncChatAccess(tx, { kind: "chats", chatIds: [chat.id] })
 
       let participants: InitialParticipant[] = []
       let accessUpdates: InitialAccessUpdate[] = []

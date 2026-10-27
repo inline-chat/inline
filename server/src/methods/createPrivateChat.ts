@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import { chats, dialogs, type DbChat, type DbDialog, type DbUserWithProfile } from "@in/server/db/schema"
@@ -62,17 +63,21 @@ export const handler = async (
   const title = isSelfChat ? `${currentUserName} (You)` : null
 
   // Insert first so concurrent requests agree on which call created the chat.
-  const [insertedChat] = await db
-    .insert(chats)
-    .values({
-      ...chatTitleFields(title, { spaceId: null }),
-      type: "private",
-      date: new Date(),
-      minUserId,
-      maxUserId,
-    })
-    .onConflictDoNothing()
-    .returning()
+  const [insertedChat] = await db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(chats)
+      .values({
+        ...chatTitleFields(title, { spaceId: null }),
+        type: "private",
+        date: new Date(),
+        minUserId,
+        maxUserId,
+      })
+      .onConflictDoNothing()
+      .returning()
+    if (inserted[0]) await syncChatAccess(tx, { kind: "chats", chatIds: [inserted[0].id] })
+    return inserted
+  })
 
   const createdChat = insertedChat !== undefined
   const [chat] = insertedChat

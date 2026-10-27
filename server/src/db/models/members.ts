@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 // Note:Mostly AI generated
 
 import { eq, and } from "drizzle-orm"
@@ -6,7 +7,6 @@ import { members, type DbMember, type DbMemberRole } from "@in/server/db/schema"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { SpaceModel } from "./spaces"
-import { deleteMemberEffect } from "@in/server/db/models/members/deleteMember"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 
 const log = new Log("MembersModel")
@@ -19,7 +19,6 @@ export const MembersModel = {
   isUserMemberOfSpace,
   getAllMembersOfSpace,
   removeMemberFromSpace,
-  deleteMemberEffect,
 }
 
 /**
@@ -59,16 +58,20 @@ async function createMember(
   role: DbMemberRole,
   moreInput: { invitedBy?: number; canAccessPublicChats?: boolean } = { canAccessPublicChats: true },
 ): Promise<DbMember> {
-  const newMember = await db
-    .insert(members)
-    .values({
-      spaceId,
-      userId,
-      role,
-      invitedBy: moreInput.invitedBy,
-      canAccessPublicChats: moreInput.canAccessPublicChats ?? true,
-    })
-    .returning()
+  const newMember = await db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(members)
+      .values({
+        spaceId,
+        userId,
+        role,
+        invitedBy: moreInput.invitedBy,
+        canAccessPublicChats: moreInput.canAccessPublicChats ?? true,
+      })
+      .returning()
+    await syncChatAccess(tx, { kind: "spaces", spaceIds: [spaceId], userIds: [userId] })
+    return inserted
+  })
 
   if (!newMember[0]) {
     throw new Error("Failed to create member")
@@ -166,10 +169,14 @@ async function getAllMembersOfSpace(spaceId: number): Promise<DbMember[]> {
  * @returns True if member was removed, false if they weren't a member
  */
 async function removeMemberFromSpace(spaceId: number, userId: number): Promise<boolean> {
-  const result = await db
-    .delete(members)
-    .where(and(eq(members.spaceId, spaceId), eq(members.userId, userId)))
-    .returning()
+  const result = await db.transaction(async (tx) => {
+    const deleted = await tx
+      .delete(members)
+      .where(and(eq(members.spaceId, spaceId), eq(members.userId, userId)))
+      .returning()
+    if (deleted.length > 0) await syncChatAccess(tx, { kind: "spaces", spaceIds: [spaceId], userIds: [userId] })
+    return deleted
+  })
 
   const removed = result.length > 0
 

@@ -28,6 +28,8 @@ struct MacGridWebRTCAudioBridgeTests {
     }
     #expect(physicalCallbackFinished.wait(timeout: .now() + 1) == .success)
     #expect(upstream.waitForCapture(count: 2))
+    // The worker records delivery after the upstream call returns.
+    #expect(waitUntil { bridge.snapshot().capturedPacketCount == 2 })
 
     let workerThreads = upstream.captureThreadIDs
     #expect(workerThreads.count == 2)
@@ -63,6 +65,7 @@ struct MacGridWebRTCAudioBridgeTests {
       }
 
       #expect(upstream.waitForCapture(count: 4))
+      #expect(waitUntil { bridge.snapshot().capturedPacketCount == 4 })
       let snapshot = bridge.snapshot()
       #expect(snapshot.captureNativeSampleRate == nativeSampleRate)
       #expect(snapshot.captureHasDeliveredForCurrentActivation)
@@ -153,6 +156,8 @@ struct MacGridWebRTCAudioBridgeTests {
     #expect(firstPull.flags.contains(.unitRenderAction_OutputIsSilence))
     #expect(firstOutput.allSatisfy { $0 == 0 })
     #expect(upstream.waitForPlayout(count: 1))
+    // The worker queues each packet after the upstream call returns.
+    #expect(waitForQueuedPlayoutTarget(bridge))
 
     var secondOutput = [Int16](repeating: 0, count: 480 * 2)
     let secondPull = pullPlayout(
@@ -218,6 +223,7 @@ struct MacGridWebRTCAudioBridgeTests {
     )
     #expect(primingPull.flags.contains(.unitRenderAction_OutputIsSilence))
     #expect(upstream.waitForPlayout(count: 3))
+    #expect(waitForQueuedPlayoutTarget(bridge))
 
     var partialOutput = [Int16](repeating: -1, count: 1_920 * 2)
     let partialPull = pullPlayout(
@@ -727,6 +733,13 @@ private func waitUntil(
     usleep(1_000)
   }
   return true
+}
+
+private func waitForQueuedPlayoutTarget(_ bridge: MacGridWebRTCAudioBridge) -> Bool {
+  waitUntil {
+    let snapshot = bridge.snapshot()
+    return snapshot.playoutQueuedFrames >= snapshot.playoutTargetFrames
+  }
 }
 
 private final class BridgeDelegate: CustomAudioDeviceDelegate, @unchecked Sendable {

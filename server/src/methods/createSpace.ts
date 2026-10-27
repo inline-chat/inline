@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { db } from "@in/server/db"
@@ -127,6 +128,7 @@ export const handler = async (
       if (!mainChat) {
         throw new InlineError(InlineError.ApiError.INTERNAL)
       }
+      await syncChatAccess(tx, { kind: "spaces", spaceIds: [space.id] })
 
       const joinUpdate = await UserBucketUpdates.enqueue(
         {

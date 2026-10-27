@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import { eq, inArray } from "drizzle-orm"
 import { chats, members, spaces, users } from "@in/server/db/schema"
@@ -111,6 +112,7 @@ const deleteSpace = async (spaceId: number, currentUserId: number) => {
           { tx },
         )
         await tx.delete(members).where(eq(members.spaceId, spaceId))
+        await syncChatAccess(tx, { kind: "spaces", spaceIds: [spaceId] })
         await tx
           .update(spaces)
           .set({

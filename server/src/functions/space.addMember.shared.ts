@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { db } from "@in/server/db"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import {
@@ -250,6 +251,7 @@ async function persistMemberAdd(tx: Transaction, input: AddSpaceMemberInput): Pr
     .innerJoin(users, eq(users.id, members.userId))
     .where(and(eq(members.spaceId, input.spaceId), userNotDeleted()))
     .orderBy(members.userId)
+  await syncChatAccess(tx, { kind: "spaces", spaceIds: [input.spaceId], userIds: [user.id] })
 
   return {
     space: updatedSpace,

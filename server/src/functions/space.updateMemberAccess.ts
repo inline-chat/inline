@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import type { Update, UpdateMemberAccessInput, UpdateMemberAccessResult } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -195,6 +196,7 @@ export const updateMemberAccess = async (
         ),
       )
       .orderBy(members.userId)
+    await syncChatAccess(tx, { kind: "spaces", spaceIds: [spaceId], userIds: [userId] })
 
     return {
       updatedMember: updated,

@@ -1,3 +1,4 @@
+import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import { chats, chatParticipants, userNotDeleted, users, type DbChat, type DbDialog } from "@in/server/db/schema"
@@ -313,6 +314,7 @@ async function createSubthreadChat(input: {
       if (!chat) {
         throw RealtimeRpcError.InternalError()
       }
+      await syncChatAccess(tx, { kind: "chats", chatIds: [chat.id] })
 
       let participants: InitialParticipant[] = []
       if (input.directParticipantUserIds.length > 0) {
