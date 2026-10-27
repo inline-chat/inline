@@ -3279,7 +3279,7 @@ pub(crate) mod recovery_tests {
                 }
             })
             .collect();
-        let actor = Actor {
+        Actor {
             hold: HoldMachine::new(agent.idle_release()),
             renderer: Renderer::new(output_mode, agent.vocabulary, agent.agent_name.clone()),
             agent,
@@ -3326,8 +3326,7 @@ pub(crate) mod recovery_tests {
             uncertain: HashMap::new(),
             outbox,
             rendering_turn: None,
-        };
-        actor
+        }
     }
 
     pub(crate) async fn pending_output_survives_restart(agent: Arc<Agent>) {

@@ -25,8 +25,6 @@ use serde_json::{Map, Value, json};
 use super::decisions;
 use crate::protocol::normalize_usage_limits;
 
-/// Recent turns a resumed thread's consumed inputs are read from.
-
 /// Prefix of `clientUserMessageId` values that carry an Inline input id.
 pub(crate) const CLIENT_MESSAGE_PREFIX: &str = "inline-agent-bridge:v2:";
 

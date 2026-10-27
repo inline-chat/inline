@@ -44,7 +44,6 @@ use crate::options::{LaunchOptions, ProcessHost, SessionStart};
 use crate::sessions::SessionStore;
 use crate::version::{ClaudeVersion, PASSIVE_MIN, capability, probe};
 
-/// Recent transcript inputs a resumed session reports as already consumed.
 const PROVIDER: &str = "claude";
 const CATALOG_TTL: Duration = Duration::from_secs(300);
 const SESSION_PAGE_SIZE: usize = 50;
