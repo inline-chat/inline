@@ -2700,8 +2700,11 @@ final class SyncTests {
 
     let signal = makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 6)
     await sync.process(updates: [signal])
+    // The bucket saves its state after applying, so wait for both.
     _ = await waitForCondition {
-      await apply.appliedUpdates.count == 1
+      let applied = await apply.appliedUpdates.count == 1
+      let saved = await storage.getBucketState(for: .chat(peer: peer)).seq == 6
+      return applied && saved
     }
 
     let applied = await apply.appliedUpdates
