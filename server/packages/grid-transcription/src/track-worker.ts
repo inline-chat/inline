@@ -303,6 +303,9 @@ export class TrackWorker {
   /** Leave a spooled turn to batch recovery; its late final arrives after later live turns. */
   private handOff(turn: Turn): void {
     if (this.turns[0] !== turn || this.committed !== 0) throw new TranscriptionError("protocol")
+    // A replay can cross the batch threshold after sending a prefix. Drop that socket
+    // so the provider cannot include the abandoned prefix in the next live turn.
+    this.closeConnection()
     this.turns.shift()
     this.backlogSamples -= turn.samples
     this.streaming = undefined

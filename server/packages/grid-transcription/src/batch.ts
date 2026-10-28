@@ -15,12 +15,16 @@ export function batchTranscriber(options: BatchOptions = {}): BatchTranscriber {
   const deadlineMs = options.deadlineMs ?? 5 * 60 * 1000
   return async (model, apiKey, samples, sampleRate) => {
     if (samples.length === 0) return ""
+    // Bound the whole request, including upload and response bodies, rather than only
+    // checking the deadline between completed status polls.
+    const signal = AbortSignal.timeout(deadlineMs)
+    const boundedRequest: typeof fetch = (input, init) => request(input, { ...init, signal })
     const audio = new Blob([wav(samples, sampleRate)], { type: "audio/wav" })
     if (model === "standard") {
       const form = new FormData()
       form.append("model", OPENAI_BATCH_MODEL)
       form.append("file", audio, "turn.wav")
-      const body = await json(await request(OPENAI_TRANSCRIPTIONS, {
+      const body = await json(await boundedRequest(OPENAI_TRANSCRIPTIONS, {
         method: "POST", headers: { Authorization: `Bearer ${apiKey}` }, body: form,
       }))
       return typeof body.text === "string" ? body.text.trim() : ""
@@ -28,31 +32,32 @@ export function batchTranscriber(options: BatchOptions = {}): BatchTranscriber {
     const headers = { Authorization: `Bearer ${apiKey}` }
     const form = new FormData()
     form.append("file", audio, "turn.wav")
-    const file = await json(await request(`${SONIOX_API}/files`, { method: "POST", headers, body: form }))
+    const file = await json(await boundedRequest(`${SONIOX_API}/files`, { method: "POST", headers, body: form }))
     const fileId = stringField(file, "id")
     let transcriptionId: string | undefined
     try {
-      const created = await json(await request(`${SONIOX_API}/transcriptions`, {
+      const created = await json(await boundedRequest(`${SONIOX_API}/transcriptions`, {
         method: "POST", headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({ model: SONIOX_ASYNC_MODEL, file_id: fileId }),
       }))
       transcriptionId = stringField(created, "id")
       for (const started = Date.now(); ;) {
-        const status = await json(await request(`${SONIOX_API}/transcriptions/${transcriptionId}`, { headers }))
+        const status = await json(await boundedRequest(`${SONIOX_API}/transcriptions/${transcriptionId}`, { headers }))
         if (status.status === "completed") break
         if (status.status === "error") throw new TranscriptionError("provider")
         if (Date.now() - started > deadlineMs) throw new TranscriptionError("provider")
         await new Promise((resolve) => setTimeout(resolve, pollMs))
       }
-      const transcript = await json(await request(`${SONIOX_API}/transcriptions/${transcriptionId}/transcript`, { headers }))
+      const transcript = await json(await boundedRequest(`${SONIOX_API}/transcriptions/${transcriptionId}/transcript`, { headers }))
       const tokens = Array.isArray(transcript.tokens) ? transcript.tokens : []
       return tokens.map((token: unknown) =>
         token && typeof token === "object" && typeof (token as { text?: unknown }).text === "string"
           ? (token as { text: string }).text : "").join("").trim()
     } finally {
-      // Provider copies are deleted whether or not transcription succeeded.
-      if (transcriptionId) await request(`${SONIOX_API}/transcriptions/${transcriptionId}`, { method: "DELETE", headers }).catch(() => undefined)
-      await request(`${SONIOX_API}/files/${fileId}`, { method: "DELETE", headers }).catch(() => undefined)
+      // Cleanup gets its own short deadline even when transcription timed out.
+      const cleanupSignal = AbortSignal.timeout(10_000)
+      if (transcriptionId) await request(`${SONIOX_API}/transcriptions/${transcriptionId}`, { method: "DELETE", headers, signal: cleanupSignal }).catch(() => undefined)
+      await request(`${SONIOX_API}/files/${fileId}`, { method: "DELETE", headers, signal: cleanupSignal }).catch(() => undefined)
     }
   }
 }

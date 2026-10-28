@@ -33,7 +33,7 @@ import { deleteChat } from "@in/server/functions/messages.deleteChat"
 import { handler as leaveSpace } from "@in/server/methods/leaveSpace"
 import { revokeSession } from "@in/server/modules/sessions/revokeSession"
 import { ensureGridRoomThread, insertGridTranscriptContinuationLink } from "./threads"
-import { invalidateGridTranscriptionForHistory, nextGridTranscriptionDeadline } from "./state"
+import { invalidateGridTranscriptionForHistory, nextGridTranscriptionDeadline, retireUnclaimedGridTranscriptions } from "./state"
 import { handleGridTranscriptionWorkerRequest } from "./worker"
 
 setupTestLifecycle()
@@ -497,6 +497,22 @@ describe("Grid transcription control and worker authorization", () => {
     expect(await late(departed, "A speaker who left is not published.")).toBeNull()
     expect((await segment(departed)).state).toBe("discarded")
     expect((await api("late", { workerId: "control-test", segmentId: pending, text: "x" }, "wrong-secret-0123456789012345678901")).status).toBe(401)
+  })
+
+  test("expired worker leases preserve admitted speech for spool recovery", async () => {
+    const f = await fixture("late-after-lease")
+    await f.control(true)
+    const claim = await f.claim()
+    const speaker = claim.participants.find((participant) => participant.userId === f.users[1].id)!
+    const admitted = await api("admit", { participantIdentity: speaker.identity, trackSid: "TR-expiry", sourceTurnKey: "expiry-turn" }, claim.runToken)
+    const { segmentId } = await admitted.json() as { segmentId: string }
+    await db.update(gridTranscriptionRuns).set({ leaseExpiresAt: new Date(Date.now() - 1_000) }).where(eq(gridTranscriptionRuns.id, claim.runId))
+    await db.transaction((tx) => retireUnclaimedGridTranscriptions(tx))
+    const [run] = await db.select().from(gridTranscriptionRuns).where(eq(gridTranscriptionRuns.id, claim.runId))
+    expect(run?.state).toBe("stopping")
+    const late = await api("late", { workerId: "control-test", segmentId, text: "Recovered after a worker restart." })
+    expect(late.status).toBe(200)
+    expect((await late.json() as { messageId: number | null }).messageId).not.toBeNull()
   })
 
   test("picker counts distinct transcripts and retains an intact origin after a newer cross-room link is retired", async () => {

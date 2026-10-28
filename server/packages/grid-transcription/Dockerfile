@@ -22,6 +22,7 @@ RUN bun --no-env-file install --frozen-lockfile --filter @inline-chat/grid-trans
 COPY --from=build /app/out/full/ ./
 RUN cd server/packages/grid-transcription && bun --no-env-file run build
 ENV NODE_ENV=production
+RUN mkdir -p /data && chown node:node /data
 USER node
 STOPSIGNAL SIGTERM
 CMD ["node", "server/packages/grid-transcription/dist/daemon.js"]

@@ -18,6 +18,21 @@ function provider(responses: Record<string, unknown[]>) {
 }
 
 describe("batch transcription", () => {
+  for (const model of ["meeting", "standard"] as const) {
+    test(`${model} aborts a stalled response within the batch deadline`, async () => {
+      const server = Bun.serve({ hostname: "127.0.0.1", port: 0,
+        fetch: () => new Response(new ReadableStream({
+          start(controller) { controller.enqueue(new TextEncoder().encode("{")) },
+        }), { headers: { "Content-Type": "application/json" } }),
+      })
+      try {
+        const request = ((_: string | URL | Request, init?: RequestInit) => fetch(server.url, init)) as typeof fetch
+        await expect(batchTranscriber({ fetch: request, deadlineMs: 50 })(model, "test-key", new Int16Array(320), 16_000))
+          .rejects.toThrow()
+      } finally { await server.stop(true) }
+    })
+  }
+
   test("wraps PCM in a canonical mono 16-bit WAV header", () => {
     const file = Buffer.from(wav(new Int16Array([1, -1]), 16_000))
     expect(file.subarray(0, 4).toString()).toBe("RIFF")

@@ -169,6 +169,39 @@ describe("per microphone finite turn owner", () => {
     await value.worker.stop(false)
     expect(spooled.has("segment-2")).toBe(true)
   })
+  test("batch handoff resets a partially replayed socket before the next live turn", async () => {
+    let clock = 0
+    const gate = deferred<void>()
+    const handed: string[] = []
+    const value = fixture({ now: () => clock, spool: {
+      open() { return true }, append() { return true }, close() {}, touch() {}, remove() {},
+      handoff(id) { handed.push(id) },
+    }, connect: async (options) => {
+      await gate.promise
+      value.options = options
+      value.events.push("connect")
+      return value.connection
+    } })
+    for (let batch = 0; batch < 3; batch++) {
+      for (let index = 0; index < 50; index++) value.worker.push(frame(true))
+      await tick()
+    }
+    for (let index = 0; index < 28; index++) value.worker.push(frame(false))
+    await tick()
+    clock = 59_000
+    gate.resolve()
+    await eventually(() => value.audio.length > 0)
+    expect(value.commits).toEqual([])
+    clock = 61_000
+    await eventually(() => handed.length > 0)
+    expect(handed).toEqual(["segment-1"])
+    expect(value.events).toContain("close")
+    await utterance(value)
+    expect(value.events.filter((event) => event === "connect")).toHaveLength(2)
+    expect(value.commits).toEqual(["segment-2"])
+    await value.worker.stop(false)
+  })
+
   test("back-to-back turns inside the idle window reuse one socket", async () => {
     const value = fixture({ idleCloseMs: 1_000 })
     await utterance(value)
