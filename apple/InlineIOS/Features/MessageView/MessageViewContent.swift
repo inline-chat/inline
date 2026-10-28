@@ -87,7 +87,7 @@ struct MessageViewContent {
     else { return false }
     let hasText = message.displayText?.isEmpty == false
     let hasContent = message.photoInfo != nil || message.videoInfo != nil || message.documentInfo != nil
-      || model.hasVoice || model.displayBlockContentPayload != nil
+      || model.hasVoice || model.blockContentPayload != nil
     return hasText || hasContent
   }
 
