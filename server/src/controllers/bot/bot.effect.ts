@@ -1175,8 +1175,9 @@ export const BotApiGroup = HttpApiGroup.make("bot")
 const json = (
   status: number,
   body: unknown,
+  headers?: Record<string, string>,
 ): HttpServerResponse.HttpServerResponse =>
-  HttpServerResponse.jsonUnsafe(body, { status })
+  HttpServerResponse.jsonUnsafe(body, headers ? { status, headers } : { status })
 
 const noteApiError = Effect.sync(() => {
   try {
@@ -1190,13 +1191,15 @@ const publicErrorResponse = (error: {
   readonly error: string
   readonly errorCode: number
   readonly description: string | undefined
+  readonly retryAfterSeconds?: number | undefined
 }) =>
   json(error.errorCode, {
     ok: false,
     error: error.error,
     error_code: error.errorCode,
     description: error.description ?? "Unauthorized",
-  })
+    ...(error.retryAfterSeconds ? { parameters: { retry_after: error.retryAfterSeconds } } : {}),
+  }, error.retryAfterSeconds ? { "retry-after": String(error.retryAfterSeconds) } : undefined)
 
 const invalidArgsResponse = () =>
   json(400, {

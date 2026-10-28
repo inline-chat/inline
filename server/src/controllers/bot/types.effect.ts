@@ -1654,6 +1654,17 @@ export const botApiErrors = [
     },
   ),
   botApiErrorAt(
+    429,
+    "BotFloodError",
+    "The bot is sending faster than its pacing budget. Wait `parameters.retry_after` seconds, also sent as `Retry-After`.",
+    {
+      ok: false,
+      error: "FLOOD",
+      error_code: 429,
+      description: "Too Many Requests: retry after 3",
+    },
+  ),
+  botApiErrorAt(
     500,
     "BotInternalServerError",
     "The server could not complete the request.",

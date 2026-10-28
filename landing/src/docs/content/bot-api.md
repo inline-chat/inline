@@ -202,6 +202,7 @@ Check `ok` before reading `result`. The TypeScript client does not retry automat
 | Authentication error | Verify the token with `getMe` and update the configured credential. |
 | Invalid request or inaccessible destination | Correct the fields or the bot's access before retrying. |
 | `MEDIA_NOT_OWNED` | Send a `file_id` from your own `uploadFile`, or forward the source message with `copy: true`. |
+| `FLOOD` (429) | The bot is sending into one conversation faster than its pacing budget. Wait `parameters.retry_after` seconds (also sent as `Retry-After`), then send again. The message was not created. |
 | Failed read request | Retry when appropriate for the failure. A poll carrying an offset also acknowledges earlier updates; retain your saved offset. |
 | Lost response to a mutation | Check the resulting state before retrying. A timeout does not prove that a send, edit, or thread creation failed. |
 
