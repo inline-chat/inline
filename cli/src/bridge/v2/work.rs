@@ -26,13 +26,10 @@ use inline_agent_bridge::harness::{
     Acceptance, Delivery, Event, EventStream, FieldAnswer, FieldId, FieldInput, HarnessDriver,
     HeldBy, Input, InputDisposition, InputFact, InputId, InteractionId, InteractionResponse, Op,
     OpError, OpKind, OpenError, OpenMode, OpenSpec, OutputMode, QuestionForm, QueueOp, RunState,
-    SendError, Session, SettingsChange, SteerPriority, TurnPhase, UserId, WaitingOn,
+    SendError, Session, SettingsChange, SteerPriority, TurnPhase, UsageUpdate, UserId, WaitingOn,
 };
 use inline_agent_bridge::{HostToolResult, MAX_SESSION_TITLE_CHARS, ProviderSessionId, TurnId};
-use inline_client::{
-    CreateReplyThreadRequest, DeleteMessageRequest, FormFieldValue, FormValue, InlineClient,
-    InlineId,
-};
+use inline_client::{CreateReplyThreadRequest, FormFieldValue, FormValue, InlineClient, InlineId};
 use inline_protocol::proto;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -47,6 +44,9 @@ use super::tools::{Tools, WorkTool};
 /// Progress edits are coalesced to at most one per slot in this window.
 const EDIT_INTERVAL: Duration = Duration::from_millis(1200);
 const TICK: Duration = Duration::from_secs(15);
+/// The apps drop a compose action after 6 s without a repeat.
+const WORKING_HEARTBEAT: Duration = Duration::from_secs(3);
+const WORKING_SEND_TIMEOUT: Duration = Duration::from_secs(2);
 /// Waits before each attempt to post an answer or card; after the last one
 /// it waits for the next tick.
 const PUBLISH_RETRIES: [Duration; 3] = [
@@ -111,9 +111,44 @@ pub(crate) struct Agent {
     pub dm_chat_id: i64,
     /// The speak gate's daily budget, shared by every work of this agent.
     pub gate_budget: std::sync::Mutex<DailySpeakGateBudget>,
+    /// The account's latest usage windows, from any of its sessions, for
+    /// the usage button in Compose.
+    pub usage: std::sync::Mutex<Vec<inline_agent_bridge::DriverUsageWindow>>,
+    /// Chat → how full its session's context window is.
+    pub context: std::sync::Mutex<HashMap<i64, settings::ContextUsage>>,
 }
 
 impl Agent {
+    /// Keeps the latest usage a session reported. Windows merge by name and
+    /// length: Claude reports its 5-hour and weekly limits one at a time.
+    fn record_usage(&self, chat_id: i64, usage: &UsageUpdate) {
+        if !usage.limits.is_empty()
+            && let Ok(mut windows) = self.usage.lock()
+        {
+            for window in &usage.limits {
+                match windows.iter().position(|known| {
+                    known.label == window.label && known.window_minutes == window.window_minutes
+                }) {
+                    Some(index) => windows[index] = window.clone(),
+                    None if windows.len() < 8 => windows.push(window.clone()),
+                    None => {}
+                }
+            }
+        }
+        let used = usage.last.map(|last| last.total);
+        if (used.is_some() || usage.context_window.is_some())
+            && let Ok(mut contexts) = self.context.lock()
+        {
+            let context = contexts.entry(chat_id).or_default();
+            if let Some(used) = used {
+                context.used = used;
+            }
+            if let Some(window) = usage.context_window {
+                context.window = window;
+            }
+        }
+    }
+
     fn handoff_provider(&self) -> HandoffProvider {
         match self.vocabulary {
             Vocabulary::Codex => HandoffProvider::Codex,
@@ -297,7 +332,6 @@ pub(crate) fn spawn(
         agent,
         chat_id,
         commands,
-        detail: None,
         publication: Publication::new(ChatId(chat_id)),
         parent_card: None,
         parent_card_text: None,
@@ -323,6 +357,7 @@ pub(crate) fn spawn(
         edits: HashMap::new(),
         full: VecDeque::new(),
         reported: None,
+        working_due: None,
         phase: phase_tx,
         started_ms: now_ms(),
         passive: PassiveBatch::new(chat_id),
@@ -399,8 +434,6 @@ struct Actor {
     chat_id: i64,
     /// This actor's own command channel, for tool bindings.
     commands: mpsc::WeakSender<Command>,
-    /// Status the agent reported for its chip (`report_status`).
-    detail: Option<String>,
     /// Where output goes; moves into a subthread (spec §5.2).
     publication: Publication,
     /// The status card left in the parent after a move: (chat, message).
@@ -439,6 +472,9 @@ struct Actor {
     /// The state last published, without its revision and time, so any
     /// published change (queue count, attention) is sent again.
     reported: Option<proto::AgentSessionState>,
+    /// When the "working" compose action is next repeated; `None` while it
+    /// is not shown.
+    working_due: Option<tokio::time::Instant>,
     phase: watch::Sender<WorkPhase>,
     started_ms: u64,
     /// Messages observed since the agent last took input (spec §5.1).
@@ -476,6 +512,7 @@ impl Actor {
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let next_edit = self.edits.values().map(|edit| edit.due).min();
+            let next_working = self.working_due;
             tokio::select! {
                 command = rx.recv() => {
                     let Some(command) = command else { break };
@@ -497,8 +534,10 @@ impl Actor {
                     self.consider_now().await;
                 }
                 _ = sleep_until(next_edit) => self.flush_edits(false).await,
+                _ = sleep_until(next_working) => {}
             }
             self.publish_phase();
+            self.sync_working().await;
         }
         log::debug!(target: "inline::bridge::v2", "chat={} work stopped", self.chat_id);
     }
@@ -1903,18 +1942,6 @@ impl Actor {
 
     async fn work_tool(&mut self, tool: WorkTool) -> HostToolResult {
         match tool {
-            WorkTool::ReportStatus { text } => {
-                self.detail = text;
-                self.report().await;
-                if let Some(text) = self.detail.clone() {
-                    let effects = self.publication.handle(PublicationEvent::Summary { text });
-                    self.publication_effects(effects, None).await;
-                }
-                HostToolResult::success(match &self.detail {
-                    Some(_) => "Status updated.",
-                    None => "Status cleared.",
-                })
-            }
             WorkTool::StartSubthread {
                 title,
                 summary,
@@ -2186,6 +2213,7 @@ impl Actor {
                     }
                 }
             },
+            Event::Usage { usage } => self.agent.record_usage(self.chat_id, usage),
             Event::Input { id, fact } => match fact {
                 InputFact::Consumed { .. } => {
                     self.mark(id, InputState::Consumed);
@@ -2464,12 +2492,6 @@ impl Actor {
                         self.keep_full(message_id, full);
                     }
                 }
-                RenderOp::DropProgress { slot } => {
-                    self.edits.remove(&slot);
-                    if let Some(message_id) = self.slots.remove(&slot) {
-                        self.delete(message_id).await;
-                    }
-                }
                 RenderOp::Update { doc } => {
                     self.send(&doc, None, Notify::Silent).await;
                 }
@@ -2675,21 +2697,6 @@ impl Actor {
         }
     }
 
-    async fn delete(&self, message_id: i64) {
-        if let Err(error) = self
-            .agent
-            .bot
-            .delete_message(DeleteMessageRequest {
-                chat_id: InlineId::new(self.chat_id),
-                message_id: InlineId::new(message_id),
-                external_id: None,
-            })
-            .await
-        {
-            log::warn!(target: "inline::bridge::v2", "delete failed: {error}");
-        }
-    }
-
     async fn notice(&self, text: &str) -> Option<i64> {
         self.send(&paragraph(text), None, Notify::Normal).await
     }
@@ -2764,6 +2771,30 @@ impl Actor {
         });
     }
 
+    /// Shows "working" where typing shows while a turn runs, and clears it
+    /// when the turn ends or waits on someone. Best effort, like typing.
+    async fn sync_working(&mut self) {
+        let working = self.turn.is_some() && self.waiting.is_none() && !self.stopping;
+        let now = tokio::time::Instant::now();
+        let send = match (working, self.working_due) {
+            (true, Some(due)) if due > now => return,
+            (true, _) => {
+                self.working_due = Some(now + WORKING_HEARTBEAT);
+                true
+            }
+            (false, Some(_)) => {
+                self.working_due = None;
+                false
+            }
+            (false, None) => return,
+        };
+        let _ = tokio::time::timeout(
+            WORKING_SEND_TIMEOUT,
+            api::send_working(&self.agent.bot, self.chat_id, send),
+        )
+        .await;
+    }
+
     /// Reports the run state to Inline when it changes (spec §7).
     async fn report(&mut self) {
         self.publish_phase();
@@ -2776,12 +2807,18 @@ impl Actor {
             revision: revision(self.started_ms),
             ..Default::default()
         };
-        let run_state = match self.hold.state() {
-            HoldState::HeldElsewhere { .. } => proto::AgentRunState::HeldElsewhere,
+        // The idle rule detaches silently (Codex right after each turn, then
+        // up to its unload delay): only an explicit release shows releasing.
+        let releasing = match self.hold.state() {
+            HoldState::Detaching { request, .. } => request.cause.is_explicit(),
             HoldState::ConfirmingRelease { .. }
             | HoldState::Releasing { .. }
-            | HoldState::ReleaseFenced { .. }
-            | HoldState::Detaching { .. } => proto::AgentRunState::Releasing,
+            | HoldState::ReleaseFenced { .. } => true,
+            _ => false,
+        };
+        let run_state = match self.hold.state() {
+            HoldState::HeldElsewhere { .. } => proto::AgentRunState::HeldElsewhere,
+            _ if releasing => proto::AgentRunState::Releasing,
             _ if self.stopping => proto::AgentRunState::Stopping,
             _ if self.waiting.is_some() => {
                 let (reason, card) = self.waiting.expect("waiting");
@@ -2811,7 +2848,6 @@ impl Actor {
         };
         state.run_state = run_state as i32;
         state.queued_count = self.live.queued.len() as u32;
-        state.detail = self.detail.clone();
         let key = proto::AgentSessionState {
             revision: 0,
             updated_at: 0,
@@ -2949,7 +2985,6 @@ fn render_kind(op: &RenderOp) -> &'static str {
         RenderOp::EndProgress { .. } => "end_progress",
         RenderOp::Update { .. } => "update",
         RenderOp::Final { .. } => "final",
-        RenderOp::DropProgress { .. } => "drop_progress",
         RenderOp::Card { .. } => "card",
         RenderOp::CardClosed { .. } => "card_closed",
         RenderOp::Notice { .. } => "notice",
@@ -3285,7 +3320,6 @@ pub(crate) mod recovery_tests {
             agent,
             chat_id,
             commands,
-            detail: None,
             publication: Publication::new(ChatId(chat_id)),
             parent_card: None,
             parent_card_text: None,
@@ -3311,6 +3345,7 @@ pub(crate) mod recovery_tests {
             edits: HashMap::new(),
             full: VecDeque::new(),
             reported: None,
+            working_due: None,
             phase: phase_tx,
             started_ms: now_ms(),
             passive: PassiveBatch::new(chat_id),

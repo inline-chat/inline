@@ -45,8 +45,6 @@ pub(crate) enum RenderOp {
         doc: Doc,
         full: Vec<FullDetail>,
     },
-    /// Progress message `slot` only showed the answer streaming; remove it.
-    DropProgress { slot: u32 },
     /// A short Friendly update message.
     Update { doc: Doc },
     /// The final answer: a separate message that notifies.
@@ -107,8 +105,6 @@ struct Slot {
     id: u32,
     started_ms: u64,
     rows: Vec<Row>,
-    /// A progress message exists for this slot.
-    shown: bool,
 }
 
 /// Renders one session's stream.
@@ -173,6 +169,12 @@ impl Renderer {
                     self.turn_inputs = inputs.clone();
                     self.final_answer = None;
                     self.pending_text = None;
+                    // Detailed shows "Working" from the start, as v1 did,
+                    // even for a turn that only answers.
+                    if self.mode == OutputMode::Detailed {
+                        self.open_slot(now);
+                        self.push_progress(&mut ops);
+                    }
                 }
                 TurnPhase::Completed {
                     outcome,
@@ -253,16 +255,7 @@ impl Renderer {
         if !is_message {
             self.flush_pending_update(ops);
         }
-        if self.slot.is_none() {
-            self.slot = Some(Slot {
-                id: self.next_slot,
-                started_ms: now,
-                rows: Vec::new(),
-                shown: false,
-            });
-            self.next_slot += 1;
-            self.turn_slots += 1;
-        }
+        self.open_slot(now);
         let slot = self.slot.as_mut().expect("slot");
         let parent = item
             .parent
@@ -313,12 +306,28 @@ impl Renderer {
                 self.pending_text = Some((id.clone(), text.clone()));
             }
         }
-        let doc = self.progress_doc();
-        if let Some(slot) = &mut self.slot
-            && !doc.is_empty()
-        {
-            slot.shown = true;
-            ops.push(RenderOp::Progress { slot: slot.id, doc });
+        self.push_progress(ops);
+    }
+
+    fn open_slot(&mut self, now: u64) {
+        if self.slot.is_none() {
+            self.slot = Some(Slot {
+                id: self.next_slot,
+                started_ms: now,
+                rows: Vec::new(),
+            });
+            self.next_slot += 1;
+            self.turn_slots += 1;
+        }
+    }
+
+    /// Creates or edits the open progress message.
+    fn push_progress(&mut self, ops: &mut Vec<RenderOp>) {
+        if let Some(slot) = &self.slot {
+            ops.push(RenderOp::Progress {
+                slot: slot.id,
+                doc: self.progress_doc(),
+            });
         }
     }
 
@@ -387,13 +396,7 @@ impl Renderer {
                     .insert(interaction.id.clone(), interaction.clone());
             }
         }
-        let doc = self.progress_doc();
-        if let Some(slot) = &mut self.slot
-            && !doc.is_empty()
-        {
-            slot.shown = true;
-            ops.push(RenderOp::Progress { slot: slot.id, doc });
-        }
+        self.push_progress(ops);
     }
 
     fn mark_rows_waiting(&mut self, item: Option<String>) {
@@ -412,17 +415,17 @@ impl Renderer {
         let Some(id) = self.slot.as_ref().map(|slot| slot.id) else {
             return;
         };
+        let summary = format!("{verb} {}", elapsed_text(elapsed_ms));
+        let mut rows = DocBuilder::new();
+        self.write_rows(&mut rows);
         let mut builder = DocBuilder::new();
-        self.write_rows(&mut builder);
-        if builder.is_empty() {
-            // Nothing but the final answer happened: no progress message. One
-            // that showed the answer streaming goes away; the answer follows.
-            if self.slot.take().is_some_and(|slot| slot.shown) {
-                ops.push(RenderOp::DropProgress { slot: id });
-            }
-            return;
+        if rows.is_empty() {
+            // Nothing but the answer happened: a quiet "Worked for 2s" line,
+            // as v1 left it, and the answer follows.
+            builder.footer(&summary);
+        } else {
+            builder.progress(&summary, false, |inner| self.write_rows(inner));
         }
-        builder.footer(&format!("{verb} {}", elapsed_text(elapsed_ms)));
         let full = self
             .slot
             .as_ref()
@@ -511,7 +514,7 @@ impl Renderer {
 
     fn progress_doc(&self) -> Doc {
         let mut builder = DocBuilder::new();
-        self.write_rows(&mut builder);
+        builder.progress("Working", true, |inner| self.write_rows(inner));
         builder.finish()
     }
 
@@ -1182,7 +1185,7 @@ mod tests {
             .collect();
         assert_eq!(ended.len(), 2);
         assert_eq!(ended[0].0, 1);
-        assert!(ended[0].1.ends_with("Worked for 47s"), "{}", ended[0].1);
+        assert!(ended[0].1.starts_with("Worked for 48s"), "{}", ended[0].1);
         assert_eq!(ended[1].0, 2);
         assert!(ended[1].1.contains("Ran cargo test"));
         assert!(
@@ -1190,6 +1193,67 @@ mod tests {
             "the final answer is its own message"
         );
         assert!(matches!(ops.last(), Some(RenderOp::Final { doc }) if doc.text == "Done."));
+    }
+
+    fn outer(doc: &Doc) -> &inline_protocol::proto::BlockDisclosure {
+        match doc.blocks[0].kind.as_ref() {
+            Some(inline_protocol::proto::block::Kind::Disclosure(disclosure)) => disclosure,
+            other => panic!("expected the progress row, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn progress_opens_as_working_at_the_turn_start_and_closes_to_its_time() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (1_000, command("c1")),
+                (
+                    8_000,
+                    turn(TurnPhase::Completed {
+                        outcome: TurnOutcome::Completed,
+                        inputs_consumed: vec![],
+                        error: None,
+                        duration_ms: Some(8_000),
+                    }),
+                ),
+            ],
+        );
+        let RenderOp::Progress { slot: 1, doc } = &ops[0] else {
+            panic!("the turn start posts Working: {ops:?}");
+        };
+        assert_eq!(doc.text, "Working");
+        let working = outer(doc);
+        assert_eq!(
+            working.kind,
+            inline_protocol::proto::block_disclosure::Kind::Progress as i32
+        );
+        assert_eq!(working.initially_open, Some(true));
+        let RenderOp::Progress { doc, .. } = &ops[1] else {
+            panic!("rows edit the same message");
+        };
+        assert!(
+            doc.text.starts_with(
+                "Working
+Ran cargo test"
+            ),
+            "{}",
+            doc.text
+        );
+        assert_eq!(outer(doc).children.len(), 1);
+        let RenderOp::EndProgress { slot: 1, doc, .. } = &ops[2] else {
+            panic!("the turn end closes it: {ops:?}");
+        };
+        assert!(doc.text.starts_with("Worked for 8s"), "{}", doc.text);
+        let done = outer(doc);
+        assert_eq!(
+            done.kind,
+            inline_protocol::proto::block_disclosure::Kind::Default as i32
+        );
+        assert_eq!(done.initially_open, Some(false));
+        assert_eq!(done.children.len(), 1);
     }
 
     #[test]
@@ -1339,7 +1403,7 @@ mod tests {
     }
 
     #[test]
-    fn an_answer_that_streamed_into_progress_leaves_only_the_answer() {
+    fn an_answer_that_streamed_into_progress_leaves_its_time_and_the_answer() {
         // Claude names no final phase: the text streams into progress, then
         // turns out to be the answer.
         let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
@@ -1380,13 +1444,11 @@ mod tests {
             Some(RenderOp::Progress { slot: 1, .. })
         ));
         assert!(
-            ops.iter()
-                .any(|op| matches!(op, RenderOp::DropProgress { slot: 1 })),
+            ops.iter().any(|op| matches!(
+                op,
+                RenderOp::EndProgress { slot: 1, doc, .. } if doc.text == "Worked for 1s"
+            )),
             "{ops:?}"
-        );
-        assert!(
-            !ops.iter()
-                .any(|op| matches!(op, RenderOp::EndProgress { .. }))
         );
         assert!(matches!(ops.last(), Some(RenderOp::Final { doc }) if doc.text == "Hello"));
     }

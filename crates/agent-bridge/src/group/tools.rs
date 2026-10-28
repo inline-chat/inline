@@ -81,7 +81,6 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     write("create_chat", ToolTarget::None, true),
     write("start_subthread", ToolTarget::CurrentWork, false),
     write("return_attachment", ToolTarget::CurrentWork, true),
-    write("report_status", ToolTarget::CurrentWork, false),
     // Ask a teammate (a question mention in the current work).
     write("ask_teammate", ToolTarget::CurrentWork, false),
 ];
@@ -223,7 +222,6 @@ mod tests {
             "create_chat",
             "start_subthread",
             "return_attachment",
-            "report_status",
             "ask_teammate",
         ] {
             assert!(tool(name).is_some(), "{name}");
@@ -283,7 +281,7 @@ mod tests {
         );
         // Current-work tools never leave the work's chat.
         assert_eq!(
-            call("report_status", Some(ChatId(77)), false, &|_| true),
+            call("start_subthread", Some(ChatId(77)), false, &|_| true),
             Err(ToolRejection::TargetNotAccessible { chat: ChatId(77) })
         );
     }

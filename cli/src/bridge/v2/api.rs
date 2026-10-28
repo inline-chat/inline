@@ -152,6 +152,20 @@ pub(crate) async fn update_session_state(
     Ok(())
 }
 
+/// The "working" compose action, shown like typing (spinner instead of dots).
+/// It expires on its own in the apps, so it is repeated while working.
+pub(crate) async fn send_working(bot: &InlineClient, chat_id: i64, working: bool) -> ApiResult<()> {
+    call!(
+        bot,
+        SendComposeAction,
+        proto::SendComposeActionInput {
+            peer_id: Some(chat_peer(chat_id)),
+            action: working.then_some(proto::update_compose_action::ComposeAction::Working as i32),
+        }
+    )?;
+    Ok(())
+}
+
 pub(crate) async fn list_grants(bot: &InlineClient) -> ApiResult<proto::ListAgentGrantsResult> {
     call!(
         bot,
