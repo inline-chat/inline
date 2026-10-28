@@ -494,15 +494,17 @@ extension UIMessageView {
 
     // Propose the standalone width without preventing the parent stack from
     // stretching the voice surface to match a wider text or preview child.
-    // Above the hosting view's hugging: at a tie the row first lays out at 240,
-    // then collapses to the minimum once SwiftUI reports its own narrow ideal width.
-    let preferredWidth = controller.view.widthAnchor.constraint(equalToConstant: 240)
+    // Above the hosting view's hugging: at a tie the row first lays out at the preferred
+    // width, then collapses to the minimum once SwiftUI reports its own narrow ideal width.
+    let preferredWidth = controller.view.widthAnchor.constraint(
+      equalToConstant: VoiceMessageBubble.preferredBubbleWidth(duration: fullMessage.message.voiceContent?.duration ?? 0)
+    )
     preferredWidth.priority = .defaultHigh
 
     NSLayoutConstraint.activate([
       controller.view.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
       preferredWidth,
-      controller.view.heightAnchor.constraint(equalToConstant: 54),
+      controller.view.heightAnchor.constraint(equalToConstant: VoiceMessageBubble.bubbleHeight),
     ])
     return controller
   }

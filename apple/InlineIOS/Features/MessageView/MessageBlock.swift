@@ -37,8 +37,6 @@ struct MessageBlock {
 }
 
 extension MessageBlock {
-  static let voiceHeight: CGFloat = 54
-
   /// Blocks for `message`, measured for its row. `maximumContentWidth` is the widest a block
   /// inside the bubble's padding can be.
   @MainActor
@@ -108,8 +106,11 @@ extension MessageBlock {
       blocks.append(MessageBlock(kind: .voice, input: .init(
         id: "voice",
         position: .aboveText,
-        width: .flexible(preferred: 240, minimum: 120),
-        height: voiceHeight
+        width: .flexible(
+          preferred: VoiceMessageBubble.preferredBubbleWidth(duration: model.voiceContent?.duration ?? 0),
+          minimum: 120
+        ),
+        height: VoiceMessageBubble.bubbleHeight
       )))
     }
 

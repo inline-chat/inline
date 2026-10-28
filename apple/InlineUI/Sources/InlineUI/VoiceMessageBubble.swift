@@ -7,9 +7,19 @@ import SwiftUI
 @MainActor
 public struct VoiceMessageBubble: View {
   public enum Mode {
+    /// A single Messages-style row (glyph, centered waveform, duration) drawn straight on the
+    /// message bubble.
     case bubble
     case embeddedBubble
     case minimal
+  }
+
+  /// Height of the `.bubble` row.
+  public static let bubbleHeight: CGFloat = 28
+
+  /// Width of the `.bubble` row, growing with the memo's length like Messages does.
+  public static func preferredBubbleWidth(duration: Int32) -> CGFloat {
+    min(132 + CGFloat(max(duration, 0)) * 6, 240)
   }
 
   public let message: InlineKit.Message
@@ -67,24 +77,29 @@ public struct VoiceMessageBubble: View {
     }
   }
 
-  private var innerBackground: Color {
-    outgoing ? .white.opacity(0.16) : .primary.opacity(0.06)
-  }
-
   private var usesBubbleMetrics: Bool {
     mode != .minimal
   }
 
   private var primaryTint: Color {
-    outgoing ? .white : accentColor
+    if mode == .bubble {
+      return outgoing ? .white : .primary
+    }
+    return outgoing ? .white : accentColor
   }
 
   private var secondaryTint: Color {
-    outgoing ? .white.opacity(0.36) : .secondary.opacity(0.35)
+    if mode == .bubble {
+      return outgoing ? .white.opacity(0.45) : .secondary.opacity(0.4)
+    }
+    return outgoing ? .white.opacity(0.36) : .secondary.opacity(0.35)
   }
 
   private var timeTint: Color {
-    outgoing ? .white.opacity(0.56) : .secondary.opacity(0.72)
+    if mode == .bubble {
+      return outgoing ? .white.opacity(0.9) : .secondary
+    }
+    return outgoing ? .white.opacity(0.56) : .secondary.opacity(0.72)
   }
 
   private var horizontalPadding: CGFloat {
@@ -186,7 +201,43 @@ public struct VoiceMessageBubble: View {
     content
   }
 
-  private var content: some View {
+  @ViewBuilder
+  private var layout: some View {
+    if mode == .bubble {
+      bubbleLayout
+    } else {
+      compactLayout
+    }
+  }
+
+  private var bubbleLayout: some View {
+    HStack(spacing: 10) {
+      bubbleGlyph
+
+      AudioWaveformView(
+        waveform: voice?.waveform ?? Data(),
+        progress: playbackProgress,
+        foreground: primaryTint,
+        background: secondaryTint,
+        targetBarCount: 64,
+        barWidth: 2.5,
+        barSpacing: 2,
+        minBarHeight: 2.5,
+        verticalAlignment: .center,
+        onSeek: handleSeek
+      )
+      .frame(height: 22)
+
+      Text(timeLabel)
+        .font(.footnote.monospacedDigit())
+        .foregroundStyle(timeTint)
+        .fixedSize()
+    }
+    .frame(height: Self.bubbleHeight)
+    .frame(maxWidth: maxWidth, alignment: .leading)
+  }
+
+  private var compactLayout: some View {
     HStack(spacing: controlSpacing) {
       primaryButton
 
@@ -214,12 +265,10 @@ public struct VoiceMessageBubble: View {
     .padding(.horizontal, horizontalPadding)
     .padding(.vertical, verticalPadding)
     .frame(maxWidth: maxWidth, alignment: .leading)
-    .background {
-      if mode == .bubble {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-          .fill(innerBackground)
-      }
-    }
+  }
+
+  private var content: some View {
+    layout
     .frame(maxWidth: .infinity, alignment: .leading)
     .environment(\.layoutDirection, .leftToRight)
     .onAppear {
@@ -275,6 +324,40 @@ public struct VoiceMessageBubble: View {
       }
     }
     .contentShape(Circle())
+    .onTapGesture(perform: handlePrimaryAction)
+    .help(buttonActionLabel)
+    .accessibilityLabel(buttonActionLabel)
+    .accessibilityAddTraits(.isButton)
+  }
+
+  /// A bare glyph with no button chrome, as in Messages.
+  @ViewBuilder
+  private var bubbleGlyph: some View {
+    ZStack {
+      if let downloadProgress = visibleDownloadProgress {
+        Circle()
+          .stroke(secondaryTint, lineWidth: 2)
+          .frame(width: 20, height: 20)
+
+        Circle()
+          .trim(from: 0, to: max(0.04, downloadProgress.progress))
+          .stroke(primaryTint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+          .rotationEffect(.degrees(-90))
+          .frame(width: 20, height: 20)
+
+        Image(systemName: "xmark")
+          .font(.system(size: 8, weight: .bold))
+          .foregroundStyle(primaryTint)
+      } else {
+        Image(systemName: buttonIconName)
+          .font(.system(size: 17, weight: .semibold))
+          .foregroundStyle(primaryTint)
+          .contentTransition(.symbolEffect(.replace))
+      }
+    }
+    .frame(width: 22, height: Self.bubbleHeight)
+    // The glyph is small; reach into the bubble padding so it's still easy to hit.
+    .contentShape(Rectangle().inset(by: -8))
     .onTapGesture(perform: handlePrimaryAction)
     .help(buttonActionLabel)
     .accessibilityLabel(buttonActionLabel)

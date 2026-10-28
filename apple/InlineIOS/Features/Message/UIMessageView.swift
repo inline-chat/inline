@@ -169,6 +169,11 @@ class UIMessageView: UIView {
     message.hasVoice
   }
 
+  /// The voice row is the bubble's last line, with no metadata footer below it.
+  private var isVoiceOnlyMessage: Bool {
+    shouldShowVoiceMessage && !message.hasText && !shouldShowReactionsInsideBubble
+  }
+
   private var isMediaOnlyMessage: Bool {
     hasMedia && !message.hasText
   }
@@ -2313,7 +2318,7 @@ class UIMessageView: UIView {
     let bottomPadding: CGFloat
     if isEmojiOnlyMessage {
       bottomPadding = 6
-    } else if usesPlainTextMultilineLayout {
+    } else if usesPlainTextMultilineLayout || isVoiceOnlyMessage {
       bottomPadding = StackPadding.bottom
     } else if isMultiline {
       bottomPadding = 14
