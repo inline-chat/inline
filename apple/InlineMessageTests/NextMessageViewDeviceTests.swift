@@ -3,6 +3,7 @@ import Auth
 @testable import InlineKit
 import InlineIOSUI
 import InlineUI
+import InlineTheme
 import InlineMessageLayout
 import struct InlineProtocol.Client_MessageContentPayload
 import struct InlineProtocol.Client_MessageVoiceContent
@@ -1100,6 +1101,478 @@ struct NextMessageViewDeviceTests {
 
   // MARK: - Checks
 
+  // MARK: - Every kind × interaction
+
+  @Test("A real context menu over every kind closes without leaving a preview, a hidden bubble or a moved row")
+  func realContextMenu() async throws {
+    let present = NSSelectorFromString("_presentMenuAtLocation:")
+    typealias Present = @convention(c) (AnyObject, Selector, CGPoint) -> Void
+    let entries = Self.everyKind()
+    var failures: [String] = []
+    var report: [String] = []
+    var rows = 0
+    // UIKit's own timing: the same open and dismiss on a plain view with a stock menu.
+    let plainDismissal: Int
+    do {
+      let stage = try Stage()
+      defer { stage.close() }
+      let target = UIView(frame: CGRect(x: 40, y: 200, width: 200, height: 44))
+      target.backgroundColor = .systemGray5
+      stage.root.addSubview(target)
+      let delegate = PlainMenuDelegate()
+      let plain = UIContextMenuInteraction(delegate: delegate)
+      target.addInteraction(plain)
+      let open = unsafeBitCast(plain.method(for: present), to: Present.self)
+      var samples: [Int] = []
+      for _ in 0 ..< 3 {
+        open(plain, present, CGPoint(x: 100, y: 22))
+        try await Task.sleep(for: .milliseconds(700))
+        plain.dismissMenu()
+        if let gone = try await Self.menuDismissal(baseline: 0, isActive: { false }) { samples.append(gone) }
+        try await Task.sleep(for: .milliseconds(200))
+      }
+      plainDismissal = samples.max() ?? 600
+      report.append("plain UIKit menu gone after \(samples) ms")
+    }
+    for chunk in Self.chunks(entries, 3) {
+      let fixture = try await ListFixture(rows: chunk.map(\.1))
+      defer { fixture.close() }
+      try await fixture.settle(milliseconds: 400)
+      let list = fixture.list
+      let interaction = try #require(list.interactions.compactMap { $0 as? UIContextMenuInteraction }.first)
+      try #require(interaction.responds(to: present), "UIKit has no menu presentation hook")
+      let open = unsafeBitCast(interaction.method(for: present), to: Present.self)
+      try await fixture.eachRow { cell in
+        guard let id = cell.message?.message.messageId, let view = cell.nextMessageView, cell.showsNextMessageView else {
+          failures.append("\(cell.message?.id ?? 0): not drawn by the next view")
+          return
+        }
+        let name = chunk[Int(id) - 1].0
+        let variant = ["plain", "reaction under the menu", "quick close", "reopen while closing"][rows % 4]
+        rows += 1
+        let label = "\(name) (\(variant))"
+        let container = view.bubbleContentView
+        // Hold the first word, like a person would: links and blocks such as the thread summary
+        // own their own menus.
+        let point: CGPoint
+        if let text = view.layout?.frame(.text) {
+          point = view.convert(CGPoint(x: text.minX + 8, y: text.minY + 8), to: list)
+        } else {
+          point = container.convert(CGPoint(x: container.bounds.midX, y: container.bounds.midY), to: list)
+        }
+        let baseline = Self.menuArtifacts().count
+        let rowBefore = cell.convert(cell.bounds, to: fixture.window)
+
+        open(interaction, present, point)
+        try await Task.sleep(for: .milliseconds(variant == "quick close" ? 60 : 700))
+        let during = Self.menuArtifacts().count
+        if variant != "quick close", during <= baseline || !list.isContextMenuInteractionActive {
+          failures.append("\(label): the menu never opened (\(during) menu views, active \(list.isContextMenuInteractionActive))")
+        }
+        if variant == "reaction under the menu", var message = cell.message {
+          message.reactions = Self.reactions(1, on: message)
+          fixture.publisher.publisher.send(.update(.init(message: message, animated: true, peer: fixture.peer)))
+          try await Task.sleep(for: .milliseconds(200))
+        }
+        interaction.dismissMenu()
+        if variant == "reopen while closing" {
+          try await Task.sleep(for: .milliseconds(80))
+          open(interaction, present, point)
+          try await Task.sleep(for: .milliseconds(700))
+          interaction.dismissMenu()
+        }
+        let gone = try await Self.menuDismissal(baseline: baseline) { list.isContextMenuInteractionActive }
+        try await Task.sleep(for: .milliseconds(100))
+        list.layoutIfNeeded()
+
+        let left = Self.menuArtifacts()
+        report.append("\(label): menu views \(baseline) → \(during) → \(left.count), gone after \(gone.map { "\($0) ms" } ?? "never")")
+        if let gone, gone > plainDismissal + 250 {
+          failures.append("\(label): the preview stayed \(gone) ms after dismissal; a plain UIKit menu leaves in \(plainDismissal) ms")
+        }
+        if left.count > baseline { failures.append("\(label): menu left \(left.count - baseline) views on screen: \(left)") }
+        if list.isContextMenuInteractionActive { failures.append("\(label): the list still thinks a menu is open") }
+        for other in fixture.visibleCells {
+          if other.nextMessageView?.bubbleContentView.isHidden == true || other.messageView?.bubbleView.isHidden == true {
+            failures.append("\(label): row \(other.message?.id ?? 0) stayed hidden after the menu")
+          }
+        }
+        guard let current = cell.nextMessageView, let layout = current.layout else {
+          failures.append("\(label): the row lost its view")
+          return
+        }
+        if current.bubbleContentView.alpha < 1 || current.bubbleContentView.transform != .identity
+          || current.bubbleContentView.superview !== current
+        {
+          failures.append("\(label): bubble left lifted (alpha \(current.bubbleContentView.alpha), transform \(current.bubbleContentView.transform))")
+        }
+        if variant == "reaction under the menu", current.reactionViews.isEmpty {
+          failures.append("\(label): the reaction never arrived after the menu")
+        }
+        let rowAfter = cell.convert(cell.bounds, to: fixture.window)
+        if variant != "reaction under the menu", !close(rowBefore, rowAfter, tolerance: 0.5) {
+          failures.append("\(label): row moved \(rowBefore) → \(rowAfter)")
+        }
+        if abs(cell.bounds.height - layout.size.height) > 0.5 {
+          failures.append("\(label): row \(cell.bounds.height) vs plan \(layout.size.height)")
+        }
+        failures += Self.placementProblems(current, layout).map { "\(label): \($0)" }
+      }
+    }
+    Attachment.record(report.joined(separator: "\n"), named: "real-context-menu.txt")
+    #expect(rows == entries.count, "checked \(rows) of \(entries.count) rows")
+    #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
+  }
+
+  @Test("Rows own their layout: no stack views or constraints outside hosted blocks, and layout passes move nothing")
+  func layoutOwnership() async throws {
+    let entries = Self.everyKind()
+    var failures: [String] = []
+    var rows = 0
+    var views = 0
+    for chunk in Self.chunks(entries, 3) {
+      let fixture = try await ListFixture(rows: chunk.map(\.1))
+      defer { fixture.close() }
+      try await fixture.settle(milliseconds: 500)
+      try await fixture.eachRow { cell in
+        guard let id = cell.message?.message.messageId, let view = cell.nextMessageView, let layout = view.layout,
+              cell.showsNextMessageView
+        else {
+          failures.append("\(cell.message?.id ?? 0): not drawn by the next view")
+          return
+        }
+        rows += 1
+        let name = chunk[Int(id) - 1].0
+        for owned in Self.ownedViews(of: view) {
+          views += 1
+          let kind = String(describing: type(of: owned))
+          if owned is UIStackView { failures.append("\(name): stack view \(kind)") }
+          let constraints = owned.constraints.filter { type(of: $0) == NSLayoutConstraint.self }
+          if !constraints.isEmpty { failures.append("\(name): \(kind) carries \(constraints.count) constraints") }
+          if !owned.translatesAutoresizingMaskIntoConstraints { failures.append("\(name): \(kind) is laid out by Auto Layout") }
+        }
+        // Hosted block content may use Auto Layout inside its planned frame, but never ambiguously.
+        for host in view.blockViews.values {
+          for inner in host.subviews(of: UIView.self) where inner.hasAmbiguousLayout && Self.isOnScreen(inner) {
+            failures.append("\(name): \(type(of: inner)) inside the \(host.kind) block is ambiguous")
+          }
+        }
+
+        // Layout passes, intrinsic-size invalidation and a self-sizing query must not move anything.
+        let before = Self.frames(in: cell)
+        for _ in 0 ..< 3 {
+          cell.setNeedsLayout()
+          cell.layoutIfNeeded()
+        }
+        for inner in cell.subviews(of: UIView.self) {
+          inner.invalidateIntrinsicContentSize()
+          inner.setNeedsLayout()
+        }
+        cell.layoutIfNeeded()
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: IndexPath(item: 0, section: 0))
+        attributes.frame = cell.frame
+        let fitted = cell.preferredLayoutAttributesFitting(attributes)
+        if abs(fitted.frame.height - layout.size.height) > 0.5 {
+          failures.append("\(name): self-sizing reports \(fitted.frame.height), plan \(layout.size.height)")
+        }
+        try await Task.sleep(for: .milliseconds(120))
+        cell.layoutIfNeeded()
+        let after = Self.frames(in: cell)
+        for (key, old) in before {
+          guard let new = after[key] else { continue }
+          if !close(old.frame, new.frame, tolerance: 0.01) {
+            failures.append("\(name): \(old.kind) moved \(old.frame) → \(new.frame) after a layout pass")
+          }
+        }
+        failures += Self.placementProblems(view, layout).map { "\(name): \($0)" }
+      }
+      // Re-running the list layout keeps every row where it was.
+      let rowFrames = Dictionary(fixture.visibleCells.map { ($0.message?.id ?? 0, $0.frame) }, uniquingKeysWith: { a, _ in a })
+      fixture.list.collectionViewLayout.invalidateLayout()
+      try await fixture.settle(milliseconds: 300)
+      for cell in fixture.visibleCells {
+        if let old = rowFrames[cell.message?.id ?? 0], !close(old, cell.frame, tolerance: 0.5) {
+          failures.append("row \(cell.message?.id ?? 0) moved \(old) → \(cell.frame) after the list re-laid out")
+        }
+      }
+    }
+    Attachment.record("checked \(views) views in \(rows) rows", named: "layout-ownership.txt")
+    #expect(rows == entries.count, "checked \(rows) of \(entries.count) rows")
+    #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
+  }
+
+  @Test("Adding and removing a reaction animates the row, the bubble and the pill together on every kind")
+  func reactionEveryKind() async throws {
+    var failures: [String] = []
+    var report: [String] = []
+    let me = Auth.shared.getCurrentUserId() ?? 0
+    for (name, entry) in Self.everyKind() {
+      let fixture = try await ListFixture(rows: [entry])
+      defer { fixture.close() }
+      try await fixture.settle(milliseconds: 400)
+      guard let cell = fixture.visibleCells.first, cell.showsNextMessageView, let view = cell.nextMessageView,
+            var message = cell.message
+      else {
+        failures.append("\(name): not drawn by the next view")
+        continue
+      }
+      let original = message
+      message.reactions.append(FullReaction(
+        reaction: Reaction(messageId: message.message.messageId, userId: me, emoji: "🫡", date: message.message.date, chatId: message.message.chatId),
+        userInfo: UserInfo(user: Self.sender)
+      ))
+
+      for (step, next) in [("add", message), ("remove", original)] {
+        let oldRow = cell.bounds.height
+        let oldBubble = view.bubbleContentView.frame
+        fixture.publisher.publisher.send(.update(.init(message: next, animated: true, peer: fixture.peer)))
+        try await Task.sleep(for: .milliseconds(110))
+        let presentedRow = cell.layer.presentation()?.bounds.height ?? cell.bounds.height
+        let presentedBubble = view.bubbleContentView.layer.presentation()?.frame ?? view.bubbleContentView.frame
+        let pill = view.reactionViews["🫡"]?.layer.presentation()
+        try await fixture.settle(milliseconds: 700)
+        let newRow = cell.bounds.height
+        let newBubble = view.bubbleContentView.frame
+        let samples = [
+          ("row", progress(presentedRow, from: oldRow, to: newRow)),
+          ("bubble height", progress(presentedBubble.height, from: oldBubble.height, to: newBubble.height)),
+          ("bubble width", progress(presentedBubble.width, from: oldBubble.width, to: newBubble.width)),
+        ].compactMap { label, value in value.map { (label, $0) } }
+        report.append("\(name) \(step): " + samples.map { "\($0.0) \(String(format: "%.2f", $0.1))" }.joined(separator: ", ")
+          + (pill.map { ", pill opacity \(String(format: "%.2f", $0.opacity))" } ?? ""))
+        let label = "\(name) \(step)"
+        if samples.isEmpty, step == "add", pill == nil { failures.append("\(label): nothing changed and no pill appeared") }
+        for (part, value) in samples where !(0.02 ... 0.98).contains(value) {
+          failures.append("\(label): \(part) did not animate (\(String(format: "%.2f", value)))")
+        }
+        if let low = samples.map(\.1).min(), let high = samples.map(\.1).max(), high - low > 0.15 {
+          failures.append("\(label): parts on different clocks \(samples)")
+        }
+        if step == "add", let pill, !(0.02 ... 0.98).contains(Double(pill.opacity)) {
+          failures.append("\(label): the pill did not fade in (opacity \(pill.opacity))")
+        }
+        let pills = view.bubbleContentView.subviews.filter { $0 is MessageReactionPillView }
+        if pills.count != (view.layout?.reactionOrder.count ?? 0) {
+          failures.append("\(label): \(pills.count) pill views for \(view.layout?.reactionOrder.count ?? 0) reactions")
+        }
+        if let layout = view.layout {
+          if abs(cell.bounds.height - layout.size.height) > 0.5 { failures.append("\(label): row \(cell.bounds.height) vs plan \(layout.size.height)") }
+          failures += Self.placementProblems(view, layout).map { "\(label): \($0)" }
+        }
+      }
+    }
+    Attachment.record(report.joined(separator: "\n"), named: "reaction-every-kind.txt")
+    #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
+  }
+
+  @Test("Switching between light and dark recolors every row in place without moving anything")
+  func themeSwitch() async throws {
+    var failures: [String] = []
+    var sheets = 0
+    for chunk in Self.chunks(Self.everyKind(), 4) {
+      let fixture = try await ListFixture(rows: chunk.map(\.1))
+      defer { fixture.close() }
+      try await fixture.settle(milliseconds: 600)
+      func state() -> [Int64: [ObjectIdentifier: (kind: String, frame: CGRect)]] {
+        Dictionary(fixture.visibleCells.map { ($0.message?.id ?? 0, Self.frames(in: $0)) }, uniquingKeysWith: { a, _ in a })
+      }
+      func image() -> UIImage {
+        UIGraphicsImageRenderer(bounds: fixture.window.bounds).image { _ in
+          fixture.window.drawHierarchy(in: fixture.window.bounds, afterScreenUpdates: true)
+        }
+      }
+      let light = state()
+      let lightImage = image()
+      let lightBubbles = Dictionary(fixture.visibleCells.compactMap { cell in
+        cell.nextMessageView?.content.map { (cell.message?.id ?? 0, $0.bubbleColor) }
+      }, uniquingKeysWith: { a, _ in a })
+      for (style, variant) in [(UIUserInterfaceStyle.dark, ThemeAppearanceVariant.dark), (.light, .light)] {
+        fixture.window.overrideUserInterfaceStyle = style
+        fixture.list.applyTheme(ThemeManager.shared.snapshot(variant: variant))
+        try await fixture.settle(milliseconds: 600)
+        let now = state()
+        for (id, frames) in light {
+          for (key, old) in frames {
+            guard let new = now[id]?[key] else { continue }
+            if !close(old.frame, new.frame, tolerance: 0.01) {
+              failures.append("\(style == .dark ? "dark" : "light again") row \(id): \(old.kind) moved \(old.frame) → \(new.frame)")
+            }
+          }
+        }
+        for cell in fixture.visibleCells where cell.showsNextMessageView {
+          if cell.nextMessageView?.content?.context.theme != ThemeManager.shared.snapshot(variant: variant) {
+            failures.append("row \(cell.message?.id ?? 0) kept the old theme")
+          }
+        }
+        let current = image()
+        let difference = Self.meanDifference(lightImage, current)
+        for cell in fixture.visibleCells where cell.message?.message.out != true {
+          guard let color = cell.nextMessageView?.content?.bubbleColor, let id = cell.message?.id else { continue }
+          if let old = lightBubbles[id], style == .dark, old == color, old.cgColor.alpha > 0 {
+            failures.append("row \(id): incoming bubble kept its light color")
+          }
+        }
+        if style == .dark {
+          Attachment.record(Array(try #require(current.pngData())), named: "theme-dark-\(sheets).png")
+        } else if difference > 0.02 {
+          Attachment.record(Array(try #require(current.pngData())), named: "theme-light-again-\(sheets).png")
+          failures.append("light after dark differs from the first light frame (difference \(difference))")
+        }
+      }
+      sheets += 1
+    }
+    #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
+  }
+
+  @Test("Every kind combines with replies, forwards, reactions, names, avatars and status in both themes")
+  func combinationsLab() async throws {
+    var failures: [String] = []
+    var checked = 0
+    for style in [UIUserInterfaceStyle.light, .dark] {
+      let stage = try Stage(style: style)
+      defer { stage.close() }
+      for (name, base) in Self.everyKind() {
+        for variant in 0 ..< 8 {
+          var message = base
+          var parts: [String] = []
+          if variant & 1 != 0, message.repliedToMessage == nil {
+            message.message.repliedToMessageId = 99
+            message.repliedToMessage = EmbeddedMessage(
+              message: Self.message(99, "The message being answered, long enough to truncate inside the quote", outgoing: false, reactions: 0).message,
+              senderInfo: UserInfo(user: Self.reactor)
+            )
+            parts.append("reply")
+          }
+          if variant & 2 != 0, message.forwardFromUserInfo == nil {
+            message.message.forwardFromUserId = Self.reactor.id
+            message.message.forwardFromPeerUserId = Self.reactor.id
+            message.message.forwardFromMessageId = 12
+            message.forwardFromUserInfo = UserInfo(user: Self.reactor)
+            parts.append("forward")
+          }
+          if variant & 4 != 0 {
+            message.reactions = Self.reactions(1 + variant % 5, on: message)
+            parts.append("\(message.reactions.count) reactions")
+          }
+          if message.message.out == true {
+            message.message.status = [MessageSendingStatus.sent, .sending, .failed][variant % 3]
+            parts.append("\(message.message.status.map { "\($0)" } ?? "")")
+          }
+          let category: UIContentSizeCategory = variant.isMultiple(of: 3) ? .accessibilityLarge : .large
+          let groups: [(Bool, MessageLayoutInput.Avatar)] = message.message.out == true ? [(false, .none)] : [(false, .none), (true, .visible), (false, .reserved)]
+          for (showsName, avatar) in groups {
+            for width in [320, 375] as [CGFloat] {
+              let label = "\(style == .dark ? "dark" : "light") \(name) [\(parts.joined(separator: ", "))] name=\(showsName) avatar=\(avatar) \(Int(width)) \(category.rawValue.suffix(6))"
+              let view = MessageView()
+              stage.root.addSubview(view)
+              defer { view.removeFromSuperview() }
+              let layout = stage.apply(message, to: view, width: width, motion: .immediate, category: category, showsName: showsName, avatar: avatar)
+              view.layoutIfNeeded()
+              checked += 1
+              failures += Self.placementProblems(view, layout).map { "\(label): \($0)" }
+              if !CGRect(origin: .zero, size: layout.size).insetBy(dx: -0.5, dy: -0.5).contains(layout.bubble.frame) {
+                failures.append("\(label): bubble \(layout.bubble.frame) outside the row \(layout.size)")
+              }
+              if showsName, let nameFrame = layout.frame(.name), nameFrame.intersects(layout.bubble.frame.insetBy(dx: 0, dy: 0.5)) {
+                failures.append("\(label): name \(nameFrame) overlaps the bubble \(layout.bubble.frame)")
+              }
+              if layout.rich == nil, !(message.message.text ?? "").isEmpty, layout.frame(.text) != nil {
+                failures += Self.inkProblems(view.textView, expectsInk: true).map { "\(label): \($0)" }
+              }
+            }
+          }
+        }
+      }
+    }
+    Attachment.record("checked \(checked) combinations", named: "combinations.txt")
+    #expect(checked > 1_000)
+    #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
+  }
+
+  /// Every kind on both sides, plus rich messages and plain text.
+  static func everyKind() -> [(String, FullMessage)] {
+    var entries: [(String, FullMessage)] = []
+    for outgoing in [false, true] {
+      let side = outgoing ? "out" : "in"
+      entries += (kinds(outgoing: outgoing) + richKinds(outgoing: outgoing)).map { ("\($0.0) \(side)", $0.1) }
+      entries.append(("text \(side)", message(outgoing ? 7_201 : 7_200, "Sounds good, see you tomorrow", outgoing: outgoing, reactions: 0)))
+    }
+    return entries
+  }
+
+  static func chunks<Element>(_ elements: [Element], _ size: Int) -> [[Element]] {
+    stride(from: 0, to: elements.count, by: size).map { Array(elements[$0 ..< min($0 + size, elements.count)]) }
+  }
+
+  /// Views the next view lays out itself. Block hosts (which pin their hosted content), controls
+  /// and UIKit's private views are skipped; placement checks cover their frames.
+  static func ownedViews(of view: UIView) -> [UIView] {
+    var result: [UIView] = [view]
+    for sub in view.subviews where !String(describing: type(of: sub)).hasPrefix("_") {
+      if sub is MessageBlockHostView || sub is UIControl { continue }
+      result += ownedViews(of: sub)
+    }
+    return result
+  }
+
+  static func isOnScreen(_ view: UIView) -> Bool {
+    var current: UIView? = view
+    while let next = current {
+      if next.isHidden || next.alpha < 0.01 { return false }
+      current = next.superview
+    }
+    return view.window != nil
+  }
+
+  /// Every view's frame in the cell's space, keyed by identity.
+  static func frames(in cell: UIView) -> [ObjectIdentifier: (kind: String, frame: CGRect)] {
+    var result: [ObjectIdentifier: (kind: String, frame: CGRect)] = [:]
+    for view in cell.subviews(of: UIView.self) where view.window != nil && !view.isHidden {
+      // UIKit's own pieces, such as scroll indicators, come and go on their own schedule.
+      let ancestors = sequence(first: view, next: \.superview).prefix(while: { $0 !== cell })
+      if ancestors.contains(where: { String(describing: type(of: $0)).hasPrefix("_") }) { continue }
+      var chain: [String] = []
+      var current: UIView? = view
+      while let next = current, next !== cell, chain.count < 4 {
+        chain.append(String(describing: type(of: next)))
+        current = next.superview
+      }
+      result[ObjectIdentifier(view)] = (chain.joined(separator: " < "), view.convert(view.bounds, to: cell))
+    }
+    return result
+  }
+
+  /// Milliseconds until the menu's views leave the screen and `isActive` turns false, or nil after 3 s.
+  static func menuDismissal(baseline: Int, isActive: () -> Bool) async throws -> Int? {
+    let start = ContinuousClock.now
+    while ContinuousClock.now - start < .seconds(3) {
+      if menuArtifacts().count <= baseline, !isActive() {
+        let elapsed = ContinuousClock.now - start
+        return Int(elapsed.components.seconds * 1_000 + elapsed.components.attoseconds / 1_000_000_000_000_000)
+      }
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    return nil
+  }
+
+  /// Visible views UIKit adds for a context menu: its container, platters, portals and previews.
+  static func menuArtifacts() -> [String] {
+    var found: [String] = []
+    func visit(_ view: UIView, visible: Bool) {
+      let shown = visible && !view.isHidden && view.alpha > 0.01
+      let kind = String(describing: type(of: view))
+      if shown, kind.hasPrefix("_UI") || kind == "MessageContextMenuPreviewView",
+         ["ContextMenu", "Platter", "Portal", "PreviewView"].contains(where: kind.contains)
+      {
+        found.append(kind)
+      }
+      view.subviews.forEach { visit($0, visible: shown) }
+    }
+    let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+    windows.filter { !$0.isHidden }.forEach { visit($0, visible: true) }
+    return found
+  }
+
   static func placementProblems(_ view: MessageView, _ layout: MessageLayout) -> [String] {
     var problems: [String] = []
     func check(_ name: String, _ actual: CGRect?, _ expected: CGRect?) {
@@ -1485,7 +1958,9 @@ struct NextMessageViewDeviceTests {
       to view: MessageView,
       width: CGFloat,
       motion: MessageMotion,
-      category: UIContentSizeCategory = .large
+      category: UIContentSizeCategory = .large,
+      showsName: Bool = false,
+      avatar: MessageLayoutInput.Avatar = .none
     ) -> MessageLayout {
       let traits = root.traitCollection.modifyingTraits { $0.preferredContentSizeCategory = category }
       let theme = ThemeManager.shared.snapshot(variant: style == .dark ? .dark : .light)
@@ -1493,8 +1968,8 @@ struct NextMessageViewDeviceTests {
         rowWidth: width,
         isFirstInGroup: true,
         isLastInGroup: true,
-        showsName: false,
-        avatar: .none,
+        showsName: showsName,
+        avatar: avatar,
         theme: theme,
         traits: traits
       )
@@ -1532,6 +2007,7 @@ struct NextMessageViewDeviceTests {
       window = UIWindow(windowScene: scene)
       let controller = UIViewController()
       window.rootViewController = controller
+      controller.view.backgroundColor = .systemBackground
       window.isHidden = false
       let database = AppDatabase.empty()
       publisher = MessagesPublisher(database: database)
@@ -1566,8 +2042,41 @@ struct NextMessageViewDeviceTests {
       list.frame = controller.view.bounds
     }
 
+    /// A list of exactly `rows`, oldest first, each keeping a fresh list identity (message id = position).
+    convenience init(rows: [FullMessage]) async throws {
+      try await self.init(count: rows.count) { index, message in
+        let identity = message.message
+        message = rows[index - 1]
+        message.message.messageId = identity.messageId
+        message.message.globalId = identity.globalId
+        message.message.chatId = identity.chatId
+        message.message.peerUserId = identity.peerUserId
+        message.message.date = identity.date
+        message.reactions = message.reactions.map {
+          var reaction = $0
+          reaction.reaction.messageId = identity.messageId
+          reaction.reaction.chatId = identity.chatId
+          return reaction
+        }
+      }
+    }
+
     var visibleCells: [MessageCollectionViewCell] {
       list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }
+    }
+
+    /// Scrolls each message row to the middle in turn and hands over its cell.
+    func eachRow(_ body: (MessageCollectionViewCell) async throws -> Void) async throws {
+      for section in 0 ..< list.numberOfSections {
+        for item in 0 ..< list.numberOfItems(inSection: section) {
+          let path = IndexPath(item: item, section: section)
+          list.scrollToItem(at: path, at: .centeredVertically, animated: false)
+          list.layoutIfNeeded()
+          try await Task.sleep(for: .milliseconds(80))
+          guard let cell = list.cellForItem(at: path) as? MessageCollectionViewCell, cell.message != nil else { continue }
+          try await body(cell)
+        }
+      }
     }
 
     func settle(milliseconds: Int = 250) async throws {
@@ -1579,6 +2088,12 @@ struct NextMessageViewDeviceTests {
       window.isHidden = true
       model.dispose()
     }
+  }
+}
+
+@MainActor private final class PlainMenuDelegate: NSObject, UIContextMenuInteractionDelegate {
+  func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+    UIContextMenuConfiguration(actionProvider: { _ in UIMenu(children: [UIAction(title: "Copy") { _ in }]) })
   }
 }
 
