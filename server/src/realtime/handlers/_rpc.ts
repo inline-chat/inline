@@ -68,6 +68,7 @@ import { forwardMessagesHandler } from "@in/server/realtime/handlers/messages.fo
 import { updateChatVisibilityHandler } from "@in/server/realtime/handlers/messages.updateChatVisibility"
 import { updateChatInfoHandler } from "@in/server/realtime/handlers/messages.updateChatInfo"
 import { pinMessageHandler } from "@in/server/realtime/handlers/messages.pinMessage"
+import { unpinAllMessagesHandler } from "@in/server/realtime/handlers/messages.unpinAllMessages"
 import { moveThreadHandler } from "@in/server/realtime/handlers/messages.moveThread"
 import { updateDialogNotificationSettings } from "@in/server/realtime/handlers/messages.updateDialogNotificationSettings"
 import { updateDialogFollowMode } from "@in/server/realtime/handlers/messages.updateDialogFollowMode"
@@ -970,6 +971,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await pinMessageHandler(call.input.pinMessage, handlerContext)
       return { oneofKind: "pinMessage", pinMessage: result }
+    }
+
+    case Method.UNPIN_ALL_MESSAGES: {
+      if (call.input.oneofKind !== "unpinAllMessages") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await unpinAllMessagesHandler(call.input.unpinAllMessages, handlerContext)
+      return { oneofKind: "unpinAllMessages", unpinAllMessages: result }
     }
 
     case Method.UPDATE_DIALOG_NOTIFICATION_SETTINGS: {

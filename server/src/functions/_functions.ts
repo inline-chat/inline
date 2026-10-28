@@ -35,6 +35,7 @@ import { updateChatVisibility } from "./messages.updateChatVisibility"
 import { updateChatInfo } from "./messages.updateChatInfo"
 import { moveThread } from "./messages.moveThread"
 import { pinMessage } from "./messages.pinMessage"
+import { unpinAllMessages } from "./messages.unpinAllMessages"
 import { updateDialogNotificationSettings } from "./messages.updateDialogNotificationSettings"
 import { updateDialogFollowMode } from "./messages.updateDialogFollowMode"
 import { updateDialogTranslation } from "./messages.updateDialogTranslation"
@@ -120,6 +121,7 @@ export const Functions = {
     updateChatInfo: updateChatInfo,
     moveThread: moveThread,
     pinMessage: pinMessage,
+    unpinAllMessages: unpinAllMessages,
     updateDialogNotificationSettings: updateDialogNotificationSettings,
     updateDialogFollowMode: updateDialogFollowMode,
     updateDialogTranslation,
