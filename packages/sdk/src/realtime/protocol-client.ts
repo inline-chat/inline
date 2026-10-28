@@ -473,7 +473,11 @@ export class ProtocolClient {
   }
 
   private completeRpcError(msgId: bigint, rpcError: RpcError) {
-    const error = new ProtocolClientError("rpc-error", { code: rpcError.code, message: rpcError.message })
+    const error = new ProtocolClientError("rpc-error", {
+      code: rpcError.code,
+      message: rpcError.message,
+      retryAfterSeconds: rpcError.retryAfterSeconds,
+    })
     const pending = this.getAndRemovePendingRpcRequest(msgId)
     pending?.reject(error)
   }
@@ -604,6 +608,8 @@ const normalizeRpcTimeoutMs = (timeoutMs: number | null | undefined, fallback: n
 
 export class ProtocolClientError extends Error {
   readonly rpcCode?: number
+  /** Server's FLOOD_WAIT-style hint from `RpcError.retry_after_seconds`; absent when not sent. */
+  readonly retryAfterSeconds?: number
   constructor(
     readonly code:
       | "not-authorized"
@@ -614,11 +620,14 @@ export class ProtocolClientError extends Error {
       | "commit-outcome-unknown"
       | "capacity-exceeded"
       | "invalid-rpc-method",
-    details?: { code?: number; message?: string },
+    details?: { code?: number; message?: string; retryAfterSeconds?: number },
   ) {
     super(details?.message ?? code)
     this.name = `ProtocolClientError:${code}`
     this.rpcCode = details?.code
+    if (details?.retryAfterSeconds !== undefined && details.retryAfterSeconds > 0) {
+      this.retryAfterSeconds = details.retryAfterSeconds
+    }
   }
 }
 
