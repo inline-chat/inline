@@ -126,7 +126,7 @@ export const pinMessage = async (input: Input, context: FunctionContext): Promis
     }
   }
 
-  const { selfUpdates } = await pushUpdates({
+  const { selfUpdates } = await pushPinnedMessagesUpdates({
     inputPeer: input.peer,
     currentUserId: context.currentUserId,
     update,
@@ -140,7 +140,8 @@ export const pinMessage = async (input: Input, context: FunctionContext): Promis
 // Updates
 // ------------------------------------------------------------
 
-const pushUpdates = async ({
+/** Sends the chat's current pin list to every participant; shared with unpinAllMessages. */
+export const pushPinnedMessagesUpdates = async ({
   inputPeer,
   currentUserId,
   update,

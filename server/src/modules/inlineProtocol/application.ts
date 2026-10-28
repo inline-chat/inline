@@ -130,6 +130,7 @@ export const inlineProtocolRpcExecutionLane = (rpc: RpcCall): string | undefined
     case "addReaction": return peerLane(rpc.input.addReaction.peerId)
     case "deleteReaction": return peerLane(rpc.input.deleteReaction.peerId)
     case "pinMessage": return peerLane(rpc.input.pinMessage.peerId)
+    case "unpinAllMessages": return peerLane(rpc.input.unpinAllMessages.peerId)
     case "deleteChat": return peerLane(rpc.input.deleteChat.peerId)
     case "markAsUnread": return peerLane(rpc.input.markAsUnread.peerId)
     case "acknowledgeMessages": return peerLane(rpc.input.acknowledgeMessages.peerId)
