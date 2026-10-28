@@ -450,6 +450,55 @@ describe("Grid transcription control and worker authorization", () => {
     expect((await second.current()).transcription?.state).toBe(GridTranscriptionState.GRID_TRANSCRIPTION_STARTING)
   })
 
+  test("speech pending at Stop lands later through the late path, dated when it was spoken", async () => {
+    const f = await fixture("late-final")
+    await f.control(true)
+    const claim = await f.claim()
+    const speaker = claim.participants.find((participant) => participant.userId === f.users[1].id)!
+    const admit = async (key: string) => {
+      const response = await api("admit", { participantIdentity: speaker.identity, trackSid: "TR-late", sourceTurnKey: key }, claim.runToken)
+      expect(response.status).toBe(200)
+      return ((await response.json()) as { segmentId: string }).segmentId
+    }
+    const pending = await admit("late-1")
+    const departed = await admit("late-2")
+    const expired = await admit("late-3")
+    await f.control(false)
+    expect((await api("stopped", {}, claim.runToken)).status).toBe(200)
+    // The live path refuses an ended run without discarding, so the spool can still deliver it.
+    expect((await api("final", { segmentId: pending, text: "Too late for live." }, claim.runToken)).status).toBe(409)
+    const segment = async (id: string) =>
+      (await db.select().from(gridTranscriptionSegments).where(eq(gridTranscriptionSegments.id, id)))[0]!
+    expect((await segment(pending)).state).toBe("admitted")
+    const late = async (segmentId: string, text: string) => {
+      const response = await api("late", { workerId: "control-test", segmentId, text })
+      expect(response.status).toBe(200)
+      return ((await response.json()) as { messageId: number | null }).messageId
+    }
+    const messageId = await late(pending, "Said right before Stop.")
+    expect(messageId).not.toBeNull()
+    expect(await late(pending, "A replay never adds a second line.")).toBe(messageId)
+    const saved = (await segment(pending))
+    expect(saved.state).toBe("finalized")
+    const [run] = await db.select().from(gridTranscriptionRuns).where(eq(gridTranscriptionRuns.id, claim.runId))
+    const [row] = await db
+      .select()
+      .from(messages)
+      .where(and(eq(messages.chatId, run!.transcriptChatId), eq(messages.messageId, messageId!)))
+    expect(row?.date?.getTime()).toBe(saved.admittedAt.getTime())
+    expect(row?.fromId).toBe(f.users[1].id)
+    await db
+      .update(gridTranscriptionSegments)
+      .set({ admittedAt: new Date(Date.now() - 25 * 60 * 60 * 1000) })
+      .where(eq(gridTranscriptionSegments.id, expired))
+    expect(await late(expired, "A day is the limit.")).toBeNull()
+    expect((await segment(expired)).state).toBe("discarded")
+    await db.delete(members).where(and(eq(members.spaceId, f.space.id), eq(members.userId, f.users[1].id)))
+    expect(await late(departed, "A speaker who left is not published.")).toBeNull()
+    expect((await segment(departed)).state).toBe("discarded")
+    expect((await api("late", { workerId: "control-test", segmentId: pending, text: "x" }, "wrong-secret-0123456789012345678901")).status).toBe(401)
+  })
+
   test("picker counts distinct transcripts and retains an intact origin after a newer cross-room link is retired", async () => {
     const f = await fixture("picker-distinct")
     await f.control(true)
