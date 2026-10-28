@@ -116,6 +116,9 @@ pub(crate) struct Agent {
     pub usage: std::sync::Mutex<Vec<inline_agent_bridge::DriverUsageWindow>>,
     /// Chat → how full its session's context window is.
     pub context: std::sync::Mutex<HashMap<i64, settings::ContextUsage>>,
+    /// Bound chat → the project its owner chose. Inline pins a bound
+    /// thread's sessions to it, so connecting names it.
+    pub bound_projects: std::sync::Mutex<HashMap<i64, String>>,
 }
 
 impl Agent {
@@ -1528,6 +1531,12 @@ impl Actor {
                     .folder()
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned()),
+                project_ref: self
+                    .agent
+                    .bound_projects
+                    .lock()
+                    .ok()
+                    .and_then(|projects| projects.get(&self.chat_id).cloned()),
                 ..Default::default()
             })
             .await?;
