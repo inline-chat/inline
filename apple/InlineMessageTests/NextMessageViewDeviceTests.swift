@@ -1224,6 +1224,125 @@ struct NextMessageViewDeviceTests {
     #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
   }
 
+  @Test("A reaction pill pops in, slides its avatars, rolls its count and recolors on the row's curve")
+  func reactionPillMotion() async throws {
+    let stage = try Stage()
+    defer { stage.close() }
+    let width = stage.window.bounds.width
+    let me = Auth.shared.getCurrentUserId() ?? 0
+    let people = (0 ..< 5).map { User(id: 8_200 + Int64($0), email: "p\($0)@example.com", firstName: "P\($0)", lastName: "Lane") }
+    var message = Self.message(9_100, "Sounds good, see you tomorrow", outgoing: false, reactions: 0)
+    func react(_ users: [(Int64, User)]) {
+      message.reactions = users.enumerated().map { index, entry in
+        FullReaction(
+          reaction: Reaction(
+            messageId: message.message.messageId, userId: entry.0, emoji: "👍",
+            date: message.message.date.addingTimeInterval(Double(index)), chatId: message.message.chatId
+          ),
+          userInfo: UserInfo(user: entry.1)
+        )
+      }
+    }
+    func others(_ indices: Range<Int>) -> [(Int64, User)] { indices.map { (people[$0].id, people[$0]) } }
+    let view = MessageView()
+    stage.root.addSubview(view)
+    var failures: [String] = []
+    var report: [String] = []
+    func settle() async throws {
+      try await Task.sleep(for: .milliseconds(900))
+      if let layout = view.layout { failures += Self.placementProblems(view, layout) }
+    }
+
+    // A new pill overshoots, then settles at full size.
+    stage.apply(message, to: view, width: width, motion: .immediate)
+    view.layoutIfNeeded()
+    CATransaction.flush()
+    try await Task.sleep(for: .milliseconds(50))
+    react(others(0 ..< 1))
+    stage.apply(message, to: view, width: width, motion: .standard)
+    let pill = try #require(view.reactionViews["👍"])
+    var scales: [CGFloat] = []
+    for _ in 0 ..< 30 {
+      try await Task.sleep(for: .milliseconds(16))
+      if let transform = pill.layer.presentation()?.transform { scales.append(transform.m11) }
+    }
+    report.append("pop scales \(scales.map { String(format: "%.2f", $0) }.joined(separator: " "))")
+    if (scales.max() ?? 0) < 1.02 { failures.append("the new pill never overshot (max \(scales.max() ?? 0))") }
+    try await settle()
+
+    // A second reactor: the first avatar slides over on the pill's curve while the new one pops in.
+    let first = try #require(pill.avatarViews[people[0].id])
+    let firstFrom = first.center.x
+    let pillFrom = pill.bounds.width
+    react(others(0 ..< 2))
+    stage.apply(message, to: view, width: width, motion: .standard)
+    let second = try #require(pill.avatarViews[people[1].id])
+    try await Task.sleep(for: .milliseconds(90))
+    let slide = progress(first.layer.presentation()?.position.x ?? 0, from: firstFrom, to: first.center.x)
+    let grow = progress(pill.layer.presentation()?.bounds.width ?? 0, from: pillFrom, to: pill.bounds.width)
+    let secondOpacity = second.layer.presentation()?.opacity ?? 1
+    let secondScale = second.layer.presentation()?.transform.m11 ?? 1
+    report.append("second reactor: slide \(slide ?? -1), pill width \(grow ?? -1), new avatar opacity \(secondOpacity) scale \(secondScale)")
+    if let slide, let grow {
+      if !(0.02 ... 0.98).contains(slide) { failures.append("the first avatar did not slide (\(slide))") }
+      if abs(slide - grow) > 0.15 { failures.append("avatar \(slide) and pill width \(grow) on different clocks") }
+    } else {
+      failures.append("no measurable slide or growth")
+    }
+    if !(0.02 ... 0.98).contains(Double(secondOpacity)) || secondScale >= 0.999 {
+      failures.append("the new avatar did not pop in (opacity \(secondOpacity), scale \(secondScale))")
+    }
+    try await settle()
+    if second.transform != .identity || second.alpha < 1 { failures.append("the new avatar settled at \(second.transform), alpha \(second.alpha)") }
+
+    // Removing the first reactor keeps the second reactor's avatar and slides it back.
+    react(others(1 ..< 2))
+    stage.apply(message, to: view, width: width, motion: .standard)
+    if pill.avatarViews[people[1].id] !== second { failures.append("the remaining reactor's avatar was replaced") }
+    try await Task.sleep(for: .milliseconds(90))
+    let leavingOpacity = first.layer.presentation()?.opacity ?? 0
+    if !(0.02 ... 0.98).contains(Double(leavingOpacity)) { failures.append("the leaving avatar did not fade (\(leavingOpacity))") }
+    try await settle()
+    let avatarsLeft = pill.subviews.filter { $0 is UserAvatarLayerView }.count
+    if avatarsLeft != 1 { failures.append("\(avatarsLeft) avatar views left for one reactor") }
+
+    // Four reactors show a count; a fifth rolls it up.
+    react(others(0 ..< 4))
+    stage.apply(message, to: view, width: width, motion: .immediate)
+    view.layoutIfNeeded()
+    CATransaction.flush()
+    try await Task.sleep(for: .milliseconds(50))
+    if !pill.avatarViews.isEmpty { failures.append("four reactors still show avatars") }
+    let oldY = pill.countView.center.y
+    react(others(0 ..< 5))
+    stage.apply(message, to: view, width: width, motion: .standard)
+    try await Task.sleep(for: .milliseconds(90))
+    let leaving = pill.leavingCountViews.last?.view.layer.presentation()
+    let arriving = pill.countView.layer.presentation()
+    let rollOut = leaving.map { (oldY - $0.position.y) / MessageReactionPillView.Metrics.rollDistance } ?? 0
+    report.append("count roll: old \(leaving?.opacity ?? -1) moved \(rollOut), new \(arriving?.opacity ?? -1)")
+    if !(0.02 ... 0.98).contains(Double(leaving?.opacity ?? 0)) || !(0.02 ... 0.98).contains(Double(arriving?.opacity ?? 0)) {
+      failures.append("the count did not crossfade (old \(leaving?.opacity ?? -1), new \(arriving?.opacity ?? -1))")
+    }
+    if !(0.02 ... 0.98).contains(Double(rollOut)) { failures.append("the old count did not roll up (\(rollOut))") }
+    try await settle()
+    if pill.countView.layout.text.string != "5" { failures.append("count shows \(pill.countView.layout.text.string)") }
+    if !pill.leavingCountViews.isEmpty { failures.append("\(pill.leavingCountViews.count) old counts left behind") }
+
+    // Your own reaction recolors the pill on the row's curve instead of snapping.
+    react(others(0 ..< 1) + [(me, Self.sender)])
+    stage.apply(message, to: view, width: width, motion: .immediate)
+    try await Task.sleep(for: .milliseconds(50))
+    react(others(0 ..< 1))
+    stage.apply(message, to: view, width: width, motion: .standard)
+    let recolors = pill.subviews.contains { $0.layer.animationKeys()?.contains("backgroundColor") == true }
+    if !recolors { failures.append("the pill's color snapped") }
+    try await settle()
+
+    Attachment.record(report.joined(separator: "\n"), named: "reaction-pill-motion.txt")
+    #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
+  }
+
   @Test("Rows own their layout: no stack views or constraints outside hosted blocks, and layout passes move nothing")
   func layoutOwnership() async throws {
     let entries = Self.everyKind()

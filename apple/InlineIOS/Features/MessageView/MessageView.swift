@@ -150,11 +150,12 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
           view.untransformedFrame = frame
           if animated {
             view.alpha = 0
-            view.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
+            let scale = MessageReactionPillView.Metrics.popScale
+            view.transform = CGAffineTransform(scaleX: scale, y: scale)
           }
           appearing.append(view)
         }
-        view.configure(model)
+        view.configure(model, animated: animated)
       }
       for (id, view) in reactionViews where layout.frame(.reaction(id)) == nil {
         reactionViews[id] = nil
@@ -222,6 +223,8 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
 
     let appearingViews = appearing
     let leavingViews = leaving
+    // New pills keep their starting scale on the row's curve and settle with the pop's bounce.
+    let poppingPills = animated ? appearing.compactMap { $0 as? MessageReactionPillView } : []
     motion.animate({ [self] in
       bubbleContentView.frame = layout.bubble.frame
       bubbleView.frame = bubbleContentView.bounds
@@ -245,7 +248,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         }
         view.layoutIfNeeded()
         view.alpha = 1
-        view.transform = .identity
+        if !poppingPills.contains(view) { view.transform = .identity }
       }
       for (id, view) in blockViews {
         let frame = view.superview === self ? layout.frame(.block(id)) : local(layout.frame(.block(id)))
@@ -274,7 +277,21 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         leavingReactionViews[id] = nil
         view.removeFromSuperview()
       }
+      for view in reactionViews.values {
+        view.removeFinishedTransitions()
+      }
     })
+    if animated {
+      let pills = Array(reactionViews.values)
+      MessageReactionPillView.pop {
+        for pill in poppingPills {
+          pill.transform = .identity
+        }
+        for pill in pills {
+          pill.popAppearing()
+        }
+      }
+    }
   }
 
   /// Media drawn to the bubble's edges takes the bubble's corners where it touches them.
