@@ -670,16 +670,19 @@ impl HoldMachine {
                 if live.is_idle() {
                     return self.detach(request, Vec::new(), Vec::new(), now, effects);
                 }
-                effects.push(HoldEffect::ConfirmRelease {
+                // Explicit release wins without a confirmation: one person
+                // rarely drives a thread from two places at once (Mo, Oct 28).
+                let steps = release_steps(&live, request.wakeups);
+                self.next_step(
                     request,
-                    live: live.clone(),
-                });
-                S::ConfirmingRelease {
-                    request,
+                    steps,
+                    Vec::new(),
+                    Vec::new(),
                     live,
                     last_activity_ms,
-                    pending: Vec::new(),
-                }
+                    now,
+                    effects,
+                )
             }
             (S::Held { .. }, E::Detached) => {
                 effects.push(HoldEffect::Lost);
@@ -812,20 +815,9 @@ impl HoldMachine {
                         last_activity_ms,
                     };
                 }
-                let receipt = ReleaseReceipt { step, outcome };
-                if receipt.outcome != ReleaseStepOutcome::Done {
-                    return fence(
-                        request,
-                        receipt,
-                        remaining,
-                        receipts,
-                        pending,
-                        live,
-                        last_activity_ms,
-                        effects,
-                    );
-                }
-                receipts.push(receipt);
+                // A step that failed is noted in the receipts and the release
+                // goes on: a fence that waits on the owner can get stuck.
+                receipts.push(ReleaseReceipt { step, outcome });
                 self.next_step(
                     request,
                     remaining,
@@ -849,21 +841,25 @@ impl HoldMachine {
                     last_activity_ms,
                 },
                 E::Tick,
-            ) if now >= deadline_ms => fence(
-                request,
-                ReleaseReceipt {
+            ) if now >= deadline_ms => {
+                let mut receipts = receipts;
+                receipts.push(ReleaseReceipt {
                     step: current,
                     outcome: ReleaseStepOutcome::Unknown {
                         reason: "no receipt from the harness".to_string(),
                     },
-                },
-                remaining,
-                receipts,
-                pending,
-                live,
-                last_activity_ms,
-                effects,
-            ),
+                });
+                self.next_step(
+                    request,
+                    remaining,
+                    receipts,
+                    pending,
+                    live,
+                    last_activity_ms,
+                    now,
+                    effects,
+                )
+            }
             (
                 S::Releasing {
                     request,
@@ -1271,32 +1267,6 @@ impl HoldMachine {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn fence(
-    request: ReleaseRequest,
-    failed: ReleaseReceipt,
-    remaining: Vec<ReleaseStep>,
-    receipts: Vec<ReleaseReceipt>,
-    pending: Vec<PendingInput>,
-    live: LiveWork,
-    last_activity_ms: u64,
-    effects: &mut Vec<HoldEffect>,
-) -> HoldState {
-    effects.push(HoldEffect::ReleaseFenced {
-        failed: failed.clone(),
-        receipts: receipts.clone(),
-    });
-    HoldState::ReleaseFenced {
-        request,
-        failed,
-        remaining,
-        receipts,
-        pending,
-        live,
-        last_activity_ms,
-    }
-}
-
 fn resume_admission(
     live: LiveWork,
     last_activity_ms: u64,
@@ -1432,6 +1402,14 @@ mod tests {
         match effects {
             [HoldEffect::Step(step)] => step.clone(),
             other => panic!("expected one step, got {other:?}"),
+        }
+    }
+
+    /// The first step an explicit release with live work starts at once.
+    fn started_step(effects: &[HoldEffect]) -> ReleaseStep {
+        match effects {
+            [HoldEffect::ReleaseStarted { .. }, HoldEffect::Step(step)] => step.clone(),
+            other => panic!("expected the release to start a step, got {other:?}"),
         }
     }
 
@@ -1720,18 +1698,10 @@ mod tests {
         held(&mut machine, 0);
         machine.handle(HoldEvent::Activity { live: busy() }, 0);
         let request = ReleaseRequest::new(ReleaseCause::ContinueInTerminal, Some(UserId(7)));
-        assert_eq!(
-            machine.handle(HoldEvent::ReleaseRequested { request }, 1_000),
-            [
-                HoldEffect::ReleaseStarted {
-                    cause: ReleaseCause::ContinueInTerminal
-                },
-                HoldEffect::ConfirmRelease {
-                    request,
-                    live: busy()
-                }
-            ]
-        );
+        // No confirmation: the release starts with the queue step, and the
+        // interrupt that could drain the queue waits for its receipt.
+        let first = started_step(&machine.handle(HoldEvent::ReleaseRequested { request }, 1_000));
+        assert_eq!(first, ReleaseStep::KeepQueuedPending { queued: queued() });
         assert!(
             machine
                 .handle(
@@ -1742,11 +1712,6 @@ mod tests {
                 )
                 .is_empty()
         );
-
-        // Only the queue step goes out first; the interrupt that could drain
-        // the queue waits for its receipt.
-        let first = step_of(&machine.handle(HoldEvent::ReleaseConfirmed, 3_000));
-        assert_eq!(first, ReleaseStep::KeepQueuedPending { queued: queued() });
         let second = step_of(&machine.handle(done(first), 4_000));
         assert!(matches!(second, ReleaseStep::CancelInteraction { .. }));
         let third = step_of(&machine.handle(done(second), 5_000));
@@ -1787,45 +1752,26 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_queue_step_fences_the_release_and_never_interrupts() {
+    fn a_failed_step_is_noted_and_the_release_goes_on() {
         let mut machine = codex();
         held(&mut machine, 0);
         machine.handle(HoldEvent::Activity { live: busy() }, 0);
-        machine.handle(release(ReleaseCause::Command), 0);
-        let first = step_of(&machine.handle(HoldEvent::ReleaseConfirmed, 0));
-        let failed = ReleaseReceipt {
-            step: first.clone(),
-            outcome: ReleaseStepOutcome::Failed {
-                reason: "thread/queue/delete failed".into(),
-            },
-        };
-        assert_eq!(
-            machine.handle(
-                HoldEvent::StepFinished {
-                    step: first.clone(),
-                    outcome: failed.outcome.clone()
+        let first = started_step(&machine.handle(release(ReleaseCause::Command), 0));
+        let next = step_of(&machine.handle(
+            HoldEvent::StepFinished {
+                step: first,
+                outcome: ReleaseStepOutcome::Failed {
+                    reason: "thread/queue/delete failed".into(),
                 },
-                1_000
-            ),
-            [HoldEffect::ReleaseFenced {
-                failed,
-                receipts: Vec::new()
-            }]
-        );
-        assert!(!machine.admits());
-        // Fenced means fenced: no interrupt, no unsubscribe, however long.
-        assert!(machine.handle(HoldEvent::Tick, 24 * 60 * MIN).is_empty());
-        // Retrying re-runs exactly the failed step.
-        assert_eq!(
-            step_of(&machine.handle(HoldEvent::ReleaseRetry, 24 * 60 * MIN)),
-            first
-        );
-        let next = step_of(&machine.handle(done(first), 24 * 60 * MIN + 1));
+            },
+            1_000,
+        ));
         assert!(matches!(next, ReleaseStep::CancelInteraction { .. }));
+        assert!(!machine.admits());
     }
 
     #[test]
-    fn a_step_without_a_receipt_becomes_unknown_and_fenced() {
+    fn a_step_without_a_receipt_is_noted_unknown_and_the_release_goes_on() {
         let mut machine = codex();
         held(&mut machine, 0);
         machine.handle(
@@ -1838,22 +1784,9 @@ mod tests {
             },
             0,
         );
-        machine.handle(release(ReleaseCause::Command), 0);
-        let stop = step_of(&machine.handle(HoldEvent::ReleaseConfirmed, 0));
+        started_step(&machine.handle(release(ReleaseCause::Command), 0));
         assert!(machine.handle(HoldEvent::Tick, 14_000).is_empty());
-        let effects = machine.handle(HoldEvent::Tick, 15_000);
-        assert!(matches!(
-            effects.as_slice(),
-            [HoldEffect::ReleaseFenced {
-                failed: ReleaseReceipt {
-                    outcome: ReleaseStepOutcome::Unknown { .. },
-                    ..
-                },
-                ..
-            }]
-        ));
-        // A late success resolves it, and `/release` cancels the wakeup.
-        let cancel_wakeup = step_of(&machine.handle(done(stop), 20_000));
+        let cancel_wakeup = step_of(&machine.handle(HoldEvent::Tick, 15_000));
         assert_eq!(
             cancel_wakeup,
             ReleaseStep::CancelWakeup {
@@ -1864,7 +1797,14 @@ mod tests {
             machine.handle(done(cancel_wakeup), 21_000),
             [HoldEffect::Unsubscribe]
         );
-        assert!(matches!(machine.state(), HoldState::Detaching { .. }));
+        let effects = machine.handle(HoldEvent::NativeReleased, 22_000);
+        let [HoldEffect::Released { receipts, .. }] = effects.as_slice() else {
+            panic!("unexpected {effects:?}");
+        };
+        assert!(matches!(
+            receipts[0].outcome,
+            ReleaseStepOutcome::Unknown { .. }
+        ));
     }
 
     #[test]
@@ -1873,7 +1813,6 @@ mod tests {
         held(&mut machine, 0);
         machine.handle(HoldEvent::Activity { live: busy() }, 0);
         machine.handle(release(ReleaseCause::Command), 0);
-        machine.handle(HoldEvent::ReleaseConfirmed, 0);
         assert!(
             machine
                 .handle(
@@ -1894,68 +1833,11 @@ mod tests {
     }
 
     #[test]
-    fn cancelling_a_confirmation_or_a_fenced_release_resumes_admission() {
-        let mut machine = codex();
-        held(&mut machine, 0);
-        machine.handle(HoldEvent::Activity { live: busy() }, 0);
-        machine.handle(release(ReleaseCause::Command), 0);
-        machine.handle(
-            HoldEvent::AcquireRequested {
-                input: Some(input("meanwhile")),
-            },
-            1,
-        );
-        assert_eq!(
-            machine.handle(HoldEvent::ReleaseCancelled, 2),
-            [
-                HoldEffect::ReleaseAbandoned,
-                HoldEffect::Deliver {
-                    inputs: vec![input("meanwhile")]
-                }
-            ]
-        );
-        assert!(machine.admits());
-
-        machine.handle(release(ReleaseCause::Command), 3);
-        let first = step_of(&machine.handle(HoldEvent::ReleaseConfirmed, 3));
-        machine.handle(
-            HoldEvent::StepFinished {
-                step: first,
-                outcome: ReleaseStepOutcome::Failed { reason: "x".into() },
-            },
-            4,
-        );
-        assert_eq!(
-            machine.handle(HoldEvent::ReleaseCancelled, 5),
-            [HoldEffect::ReleaseAbandoned]
-        );
-        assert!(machine.admits());
-    }
-
-    #[test]
-    fn work_ending_during_confirmation_detaches_without_steps() {
-        let mut machine = codex();
-        held(&mut machine, 0);
-        machine.handle(HoldEvent::Activity { live: busy() }, 0);
-        machine.handle(release(ReleaseCause::OpenInApp), 1);
-        assert_eq!(
-            machine.handle(
-                HoldEvent::Activity {
-                    live: LiveWork::default()
-                },
-                2
-            ),
-            [HoldEffect::Unsubscribe]
-        );
-    }
-
-    #[test]
     fn exit_mid_release_reports_unconfirmed_steps_as_unknown() {
         let mut machine = claude();
         held(&mut machine, 0);
         machine.handle(HoldEvent::Activity { live: busy() }, 0);
-        machine.handle(release(ReleaseCause::Command), 0);
-        let first = step_of(&machine.handle(HoldEvent::ReleaseConfirmed, 0));
+        let first = started_step(&machine.handle(release(ReleaseCause::Command), 0));
         machine.handle(done(first), 1);
         let effects = machine.handle(HoldEvent::Detached, 2);
         let [HoldEffect::Lost, HoldEffect::Released { receipts, .. }] = effects.as_slice() else {
