@@ -5302,6 +5302,9 @@ async fn run_agents_setup_command(
     json: bool,
     json_format: output::JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let mut args = args;
+    // Plugins install from the release channel this CLI updates from.
+    args.channel = update::select_channel(local_db, None).ok();
     let resolved = match agents::resolve_setup(args.clone(), json) {
         Ok(resolved) => resolved,
         Err(error) => {

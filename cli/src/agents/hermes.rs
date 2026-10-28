@@ -10,13 +10,14 @@ use super::{
     AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome, SetupProgressReporter,
     cli_error,
 };
+use crate::update::UpdateChannel;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 const MACHINE_SETUP_PROTOCOL_VERSION: u64 = 1;
 // Install and verify the published Hermes adapter.
 const MINIMUM_HERMES_PLUGIN_VERSION: &str = "0.0.22";
-const HERMES_PLUGIN_PACKAGE_SPEC: &str = "@inline-chat/hermes-agent-adapter@1.0.0-alpha.2";
+const HERMES_PLUGIN_PACKAGE_SPEC: &str = "@inline-chat/hermes-agent-adapter";
 
 struct HermesProfile {
     home: Option<PathBuf>,
@@ -128,6 +129,7 @@ pub(super) async fn setup(
         installer.as_deref(),
         args.no_install,
         profile.home.as_deref(),
+        args.channel,
     )
     .await?;
     require_success_with_environment(
@@ -334,6 +336,7 @@ async fn ensure_plugin(
     installer: Option<&Path>,
     no_install: bool,
     hermes_home: Option<&Path>,
+    channel: Option<UpdateChannel>,
 ) -> Result<PluginSetup, Box<dyn std::error::Error>> {
     if let Some(machine) = current_machine {
         return Ok(PluginSetup {
@@ -357,7 +360,7 @@ async fn ensure_plugin(
         )
         .into());
     }
-    let version = install_latest_plugin(hermes_home).await?;
+    let version = install_plugin(hermes_home, channel).await?;
     Ok(PluginSetup {
         action: if installer.is_some() {
             "repaired"
@@ -368,8 +371,9 @@ async fn ensure_plugin(
     })
 }
 
-async fn install_latest_plugin(
+async fn install_plugin(
     hermes_home: Option<&Path>,
+    channel: Option<UpdateChannel>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let npm = find_executable("npm").ok_or_else(|| {
         io::Error::new(
@@ -377,13 +381,14 @@ async fn install_latest_plugin(
             "npm is required to install the Inline Hermes plugin",
         )
     })?;
-    let install_args = latest_plugin_install_args(hermes_home);
+    let spec = super::plugin_install_spec(HERMES_PLUGIN_PACKAGE_SPEC, channel).await;
+    let install_args = plugin_install_args(hermes_home, &spec);
     let install_refs = install_args.iter().map(String::as_str).collect::<Vec<_>>();
     let output = require_success(&npm, &[], &install_refs, None, INSTALL_TIMEOUT).await?;
     let installed_version = plugin_package_version(&output).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            "the latest Inline Hermes installer returned no package version",
+            "the Inline Hermes installer returned no package version",
         )
     })?;
     if semver::Version::parse(&installed_version).is_err() {
@@ -396,11 +401,11 @@ async fn install_latest_plugin(
     Ok(installed_version)
 }
 
-fn latest_plugin_install_args(hermes_home: Option<&Path>) -> Vec<String> {
+fn plugin_install_args(hermes_home: Option<&Path>, spec: &str) -> Vec<String> {
     let mut install_args = vec![
         "exec".to_string(),
         "--yes".to_string(),
-        format!("--package={HERMES_PLUGIN_PACKAGE_SPEC}"),
+        format!("--package={spec}"),
         "--".to_string(),
         "inline-hermes".to_string(),
     ];
@@ -847,11 +852,14 @@ mod tests {
             r#"{"ok":true,"packageVersion":"0.0.17"}"#
         ));
         assert_eq!(
-            latest_plugin_install_args(Some(Path::new("/tmp/hermes-profile"))),
+            plugin_install_args(
+                Some(Path::new("/tmp/hermes-profile")),
+                HERMES_PLUGIN_PACKAGE_SPEC
+            ),
             vec![
                 "exec",
                 "--yes",
-                "--package=@inline-chat/hermes-agent-adapter@1.0.0-alpha.2",
+                "--package=@inline-chat/hermes-agent-adapter",
                 "--",
                 "inline-hermes",
                 "install",

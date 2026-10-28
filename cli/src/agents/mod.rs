@@ -8,6 +8,7 @@ mod process;
 use std::cell::{Cell, RefCell};
 use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::{Args, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Select};
@@ -16,6 +17,7 @@ use crate::bridge;
 use crate::config::Config;
 use crate::errors::{CliError, JsonCliError, ReportedCliFailure};
 use crate::output::JsonFormat;
+use crate::update::UpdateChannel;
 
 pub(crate) use catalog::AgentTarget;
 use catalog::TargetFamily;
@@ -206,6 +208,40 @@ pub(crate) struct AgentsSetupArgs {
     /// Emit versioned NDJSON setup events for a native app host.
     #[arg(long, value_name = "VERSION", hide = true)]
     pub(crate) app_protocol: Option<u32>,
+    /// The CLI's own release channel; plugin installs follow it.
+    #[arg(skip)]
+    pub(crate) channel: Option<UpdateChannel>,
+}
+
+const NPM_VIEW_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// npm spec for an Inline plugin on the CLI's release channel. Stable installs
+/// npm `latest`; alpha installs the newer of `alpha` and `latest`, the same rule
+/// the CLI's alpha channel follows. An unreachable registry falls back to `latest`.
+async fn plugin_install_spec(package: &str, channel: Option<UpdateChannel>) -> String {
+    if channel != Some(UpdateChannel::Alpha) {
+        return package.to_string();
+    }
+    let Some(npm) = discovery::find_executable("npm") else {
+        return package.to_string();
+    };
+    let args = ["view", package, "dist-tags", "--json"];
+    match process::run(&npm, &[], &args, None, NPM_VIEW_TIMEOUT).await {
+        Ok(output) if output.success => newest_channel_version(&output.stdout).map_or_else(
+            || package.to_string(),
+            |version| format!("{package}@{version}"),
+        ),
+        _ => package.to_string(),
+    }
+}
+
+fn newest_channel_version(dist_tags: &str) -> Option<semver::Version> {
+    let tags = serde_json::from_str::<serde_json::Value>(dist_tags).ok()?;
+    ["alpha", "latest"]
+        .into_iter()
+        .filter_map(|tag| tags.get(tag)?.as_str())
+        .filter_map(|version| semver::Version::parse(version).ok())
+        .max()
 }
 
 pub(crate) struct ResolvedSetup {
@@ -1147,6 +1183,21 @@ fn print_dry_run(
 mod app_protocol_tests {
     use super::*;
     use clap::Parser;
+
+    #[test]
+    fn alpha_channel_installs_the_newest_of_alpha_and_latest() {
+        let version = |tags: &str| newest_channel_version(tags).map(|version| version.to_string());
+        assert_eq!(
+            version(r#"{"latest":"0.0.22","alpha":"1.0.0-alpha.2"}"#).as_deref(),
+            Some("1.0.0-alpha.2")
+        );
+        assert_eq!(
+            version(r#"{"latest":"1.0.0","alpha":"1.0.0-alpha.2"}"#).as_deref(),
+            Some("1.0.0")
+        );
+        assert_eq!(version(r#"{"latest":"0.0.72"}"#).as_deref(), Some("0.0.72"));
+        assert_eq!(version("not json"), None);
+    }
 
     #[test]
     fn verification_that_needs_action_is_not_reported_as_ready() {

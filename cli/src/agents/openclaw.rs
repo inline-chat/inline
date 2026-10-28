@@ -11,6 +11,7 @@ use super::{
     AccessMode, AgentsSetupArgs, GatewayPreflight, GatewaySetupOutcome, SetupProgressReporter,
     cli_error,
 };
+use crate::update::UpdateChannel;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
@@ -31,11 +32,20 @@ struct SetupPluginCompatibility {
 }
 
 impl SetupPluginCompatibility {
-    fn install_args(self) -> Vec<String> {
+    /// Current hosts follow the CLI's release channel; legacy hosts keep their pinned package.
+    async fn channel_install_spec(self, channel: Option<UpdateChannel>) -> String {
+        if self.install_spec == SETUP_PLUGIN_SPEC {
+            super::plugin_install_spec(SETUP_PLUGIN_SPEC, channel).await
+        } else {
+            self.install_spec.to_string()
+        }
+    }
+
+    fn install_args(self, spec: &str) -> Vec<String> {
         let mut args = vec![
             "plugins".to_string(),
             "install".to_string(),
-            self.install_spec.to_string(),
+            spec.to_string(),
             "--force".to_string(),
         ];
         if self.accept_capabilities {
@@ -265,22 +275,25 @@ pub(super) async fn setup(
     )
     .await?;
     let plugin_state = inspect_plugin(&inspected, compatibility)?;
-    let (integration_action, verify_install) = match plugin_state {
-        PluginState::Healthy { .. } => ("kept", false),
+    let (integration_action, installed_spec) = match plugin_state {
+        PluginState::Healthy { .. } => ("kept", None),
         PluginState::Outdated => {
             require_plugin_install_allowed(args, "must be updated for unified setup")?;
-            install_setup_plugin(installed, &prefix, compatibility).await?;
-            ("updated", true)
+            let spec =
+                install_setup_plugin(installed, &prefix, compatibility, args.channel).await?;
+            ("updated", Some(spec))
         }
         PluginState::Missing => {
             require_plugin_install_allowed(args, "is not installed")?;
-            install_setup_plugin(installed, &prefix, compatibility).await?;
-            ("installed", true)
+            let spec =
+                install_setup_plugin(installed, &prefix, compatibility, args.channel).await?;
+            ("installed", Some(spec))
         }
         PluginState::ManagedBroken => {
             require_plugin_install_allowed(args, "is installed but unusable")?;
-            install_setup_plugin(installed, &prefix, compatibility).await?;
-            ("repaired", true)
+            let spec =
+                install_setup_plugin(installed, &prefix, compatibility, args.channel).await?;
+            ("repaired", Some(spec))
         }
         PluginState::Foreign => {
             require_plugin_install_allowed(args, "uses an unrecognized source")?;
@@ -291,8 +304,9 @@ pub(super) async fn setup(
                 )
                 .into());
             }
-            install_setup_plugin(installed, &prefix, compatibility).await?;
-            ("replaced", true)
+            let spec =
+                install_setup_plugin(installed, &prefix, compatibility, args.channel).await?;
+            ("replaced", Some(spec))
         }
     };
     let plugin = require_success(
@@ -303,8 +317,8 @@ pub(super) async fn setup(
         COMMAND_TIMEOUT,
     )
     .await?;
-    let version = if verify_install {
-        verify_managed_plugin_install(&plugin, compatibility)?
+    let version = if let Some(spec) = &installed_spec {
+        verify_managed_plugin_install(&plugin, compatibility, spec)?
     } else {
         let PluginState::Healthy { version } = inspect_plugin_json(&plugin, compatibility) else {
             return Err(io::Error::new(
@@ -471,11 +485,13 @@ async fn install_setup_plugin(
     installed: &InstalledTarget,
     prefix: &[OsString],
     compatibility: SetupPluginCompatibility,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let args = compatibility.install_args();
+    channel: Option<UpdateChannel>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let spec = compatibility.channel_install_spec(channel).await;
+    let args = compatibility.install_args(&spec);
     let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
     require_success(&installed.executable, prefix, &refs, None, INSTALL_TIMEOUT).await?;
-    Ok(())
+    Ok(spec)
 }
 
 fn inspect_plugin(
@@ -572,6 +588,7 @@ fn inspect_plugin_json(output: &str, compatibility: SetupPluginCompatibility) ->
 fn verify_managed_plugin_install(
     output: &str,
     compatibility: SetupPluginCompatibility,
+    install_spec: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let value: serde_json::Value = serde_json::from_str(output).map_err(|_| {
         io::Error::new(
@@ -603,7 +620,7 @@ fn verify_managed_plugin_install(
         && install
             .and_then(|value| value.get("spec"))
             .and_then(serde_json::Value::as_str)
-            == Some(compatibility.install_spec)
+            == Some(install_spec)
         && install
             .and_then(|value| value.get("resolvedSpec"))
             .and_then(serde_json::Value::as_str)
@@ -613,7 +630,7 @@ fn verify_managed_plugin_install(
             io::ErrorKind::InvalidData,
             format!(
                 "OpenClaw did not record the expected managed Inline plugin install from {}",
-                compatibility.install_spec
+                install_spec
             ),
         )
         .into());
@@ -1258,7 +1275,7 @@ mod tests {
             }
         }"#;
         assert_eq!(
-            verify_managed_plugin_install(inspected, compatibility).unwrap(),
+            verify_managed_plugin_install(inspected, compatibility, SETUP_PLUGIN_SPEC).unwrap(),
             "0.0.71"
         );
 
@@ -1266,7 +1283,10 @@ mod tests {
             "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.71\"",
             "\"resolvedSpec\": \"@inline-openclaw/inline@0.0.70\"",
         );
-        assert!(verify_managed_plugin_install(&mismatched_resolution, compatibility).is_err());
+        assert!(
+            verify_managed_plugin_install(&mismatched_resolution, compatibility, SETUP_PLUGIN_SPEC)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1274,7 +1294,7 @@ mod tests {
         let current = setup_plugin_compatibility("OpenClaw 2026.8.2 (0965053)");
         assert_eq!(current.minimum_plugin_version, "0.0.71");
         assert_eq!(
-            current.install_args(),
+            current.install_args(current.install_spec),
             [
                 "plugins",
                 "install",
@@ -1292,7 +1312,7 @@ mod tests {
             let legacy = setup_plugin_compatibility(output);
             assert_eq!(legacy.minimum_plugin_version, "0.0.63");
             assert_eq!(
-                legacy.install_args(),
+                legacy.install_args(legacy.install_spec),
                 [
                     "plugins",
                     "install",

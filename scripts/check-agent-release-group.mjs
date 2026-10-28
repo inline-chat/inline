@@ -72,8 +72,9 @@ for (const entry of packages) {
     entry.directory === "plugins/openclaw"
       ? manifest.openclaw.install.npmSpec
       : manifest.inlineHermes.install.npmSpec
-  const prerelease = manifest.version.includes("-")
-  const expectedInstallSpec = prerelease ? `${npmSpec}@${manifest.version}` : npmSpec
+  // The CLI resolves the version from its own release channel: stable installs
+  // npm latest, alpha the newer of the alpha and latest dist-tags.
+  const expectedInstallSpec = npmSpec
   if (specMatch?.[1] !== expectedInstallSpec) {
     throw new Error(
       `${entry.rustPackageSpecConstant} must request ${expectedInstallSpec}, found ${specMatch?.[1] ?? "missing"}`,
@@ -115,20 +116,18 @@ for (const entry of packages) {
       throw new Error(`${expectedInstallSpec} is below CLI minimum ${minimumVersion}`)
     }
 
-    if (!prerelease) {
-      const publishedLatest = JSON.parse(
-        execFileSync("npm", ["view", `${npmSpec}@latest`, "--json"], {
-          cwd: root,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "pipe"],
-        }),
+    const publishedLatest = JSON.parse(
+      execFileSync("npm", ["view", `${npmSpec}@latest`, "--json"], {
+        cwd: root,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    )
+    entry.validate(publishedLatest)
+    if (!semverAtLeast(publishedLatest.version, minimumVersion)) {
+      throw new Error(
+        `${npmSpec}@latest is ${publishedLatest.version}, below CLI minimum ${minimumVersion}`,
       )
-      entry.validate(publishedLatest)
-      if (!semverAtLeast(publishedLatest.version, minimumVersion)) {
-        throw new Error(
-          `${npmSpec}@latest is ${publishedLatest.version}, below CLI minimum ${minimumVersion}`,
-        )
-      }
     }
   }
 

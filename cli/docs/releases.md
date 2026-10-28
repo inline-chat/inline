@@ -114,7 +114,9 @@ Every release, prerelease or stable, also advances the alpha channel pointer
 never moves backwards. CLIs on the `alpha` channel (`inline update --channel
 alpha`, or any prerelease build without a saved choice) and the Mac app on its
 Tip channel install from it, so Tip gets CLI features as soon as an alpha
-publishes. Resuming an existing tag seeds the pointer if it is missing. The bundle contains the versioned manifest and matching archives.
+publishes. Agent setup follows the same channel for the Hermes and OpenClaw
+plugins: stable installs npm `latest`, alpha the newer of the `alpha` and
+`latest` dist-tags. Resuming an existing tag seeds the pointer if it is missing. The bundle contains the versioned manifest and matching archives.
 
 ```sh
 gh release view cli-vVERSION --repo inline-chat/inline --json assets
