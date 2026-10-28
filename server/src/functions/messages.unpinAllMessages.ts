@@ -5,7 +5,6 @@ import { ChatModel } from "@in/server/db/models/chats"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { chats, messages } from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
-import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { pushPinnedMessagesUpdates } from "@in/server/functions/messages.pinMessage"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -21,9 +20,7 @@ type Output = {
 
 /** Unpins every message in a chat with one update, so clients go straight to an empty pin list. */
 export const unpinAllMessages = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peer, context)
-
-  await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+  const chat = await ChatModel.getAuthorizedChatFromInputPeer(input.peer, context)
 
   const update = await db.transaction(async (tx) => {
     const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).for("update").limit(1)
