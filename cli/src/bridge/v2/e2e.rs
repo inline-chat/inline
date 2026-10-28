@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
+use super::projects::ProjectSource;
 use super::render::Vocabulary;
 use super::runtime::{Runtime, V2Config};
 use super::tools::{Tools, ToolsConfig};
@@ -378,6 +379,11 @@ async fn codex_round_trip_through_inline() {
     let folder = dir.path().join("project");
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("README.md"), "e2e project\n").unwrap();
+    // A second project, for a thread that picks it (step 10).
+    let other_project = std::fs::canonicalize(dir.path())
+        .unwrap()
+        .join("other-project");
+    std::fs::create_dir_all(&other_project).unwrap();
 
     // Turn 1 answers directly. Turn 2 uses Inline tools. Turn 3 runs a
     // command that needs approval, then answers. In a group thread, the agent
@@ -1481,7 +1487,12 @@ async fn codex_round_trip_through_inline() {
     );
 
     // 10. A thread the owner bound to the agent is the agent's own: a plain
-    // message reaches it, on the model and reasoning its composer chain set.
+    // message reaches it, in the project, on the model and reasoning its
+    // composer chain set.
+    let other_project_id = crate::bridge::workspace_id(&other_project)
+        .unwrap()
+        .as_str()
+        .to_owned();
     let bound = owner
         .invoke_rpc(
             proto::Method::CreateChat,
@@ -1501,7 +1512,7 @@ async fn codex_round_trip_through_inline() {
                     bot_user_id,
                     agent_id: None,
                     configuration: Some(proto::AgentThreadConfiguration {
-                        project_id: None,
+                        project_id: Some(other_project_id.clone()),
                         model_id: Some(chosen.clone()),
                         reasoning_effort_id: bound_effort.clone(),
                     }),
@@ -1558,6 +1569,30 @@ async fn codex_round_trip_through_inline() {
             used.get("reasoning")
         );
     }
+    // Its session opened in the chosen project, not the agent's folder.
+    assert!(
+        used.get("input_text")
+            .and_then(Value::as_str)
+            .is_some_and(|input| input.contains(&other_project.display().to_string())),
+        "Codex ran the bound thread in its project: {:?}",
+        used.get("input_text")
+    );
+    let bound_work = owner
+        .get_agent_session(proto::GetAgentSessionInput {
+            peer_id: Some(super::api::chat_peer(bound)),
+            bot_user_id,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .connection
+        .and_then(|connection| connection.agent_session)
+        .expect("the bound thread's work");
+    assert_eq!(
+        bound_work.workspace_label.as_deref(),
+        Some("other-project"),
+        "the work is recorded in its project"
+    );
 
     // 11. Out of usage: one notice says so and the owner's attention points
     // at it; the next turn that runs clears it.
@@ -1877,7 +1912,13 @@ impl CodexBridge {
             harness,
             Some(tools),
         )
-        .unwrap();
+        .unwrap()
+        // The agent's folder and a second project a thread can pick.
+        .with_projects(ProjectSource::listing(
+            &self.dir.join("bridge.sqlite"),
+            "e2e-installation",
+            &[&self.folder, &self.dir.join("other-project")],
+        ));
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let running = tokio::spawn(async move {
             runtime

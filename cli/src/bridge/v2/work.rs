@@ -249,6 +249,12 @@ pub(crate) enum Command {
         op: SessionOp,
         reply: oneshot::Sender<Option<String>>,
     },
+    /// The folder this work's session opens in. Refused once a session
+    /// exists: it keeps its folder.
+    Folder {
+        folder: PathBuf,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
     /// Inputs a previous run left unconfirmed (input, message): the session
     /// opens to settle them.
     Reconcile {
@@ -604,6 +610,9 @@ impl Actor {
             Command::Session { op, reply } => {
                 let toast = self.session_op(op).await;
                 let _ = reply.send(toast);
+            }
+            Command::Folder { folder, reply } => {
+                let _ = reply.send(self.set_folder(folder));
             }
             Command::Title(title) => {
                 if self.title.as_deref() != Some(title.as_str()) {
@@ -1374,7 +1383,7 @@ impl Actor {
         self.native = Some(native);
         self.attach(session);
         if let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) {
-            tools.bind(native, self.chat_id, self.commands.clone());
+            tools.bind(native, self.chat_id, self.commands.clone(), self.folder());
         }
         self.settle_uncertain(fresh).await;
         // A new session takes the thread's title; a rename made while the
@@ -1459,12 +1468,33 @@ impl Actor {
         }
     }
 
+    /// Where this work's session opens: the thread's folder, else the
+    /// agent's.
+    fn folder(&self) -> PathBuf {
+        self.settings
+            .folder
+            .clone()
+            .unwrap_or_else(|| self.agent.folder.clone())
+    }
+
+    fn set_folder(&mut self, folder: PathBuf) -> Result<(), String> {
+        if self.native.is_some() || self.session.is_some() {
+            let current = self.folder();
+            return Err(settings::folder_fixed(&current.file_name().map_or_else(
+                || current.display().to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            )));
+        }
+        self.settings.folder = Some(folder);
+        Ok(())
+    }
+
     async fn open_session(&self, mode: OpenMode) -> Result<Arc<dyn Session>, OpenFailure> {
         self.agent
             .harness
             .open(OpenSpec {
                 mode,
-                folder: self.agent.folder.clone(),
+                folder: self.folder(),
                 settings: settings::effective(&self.settings),
                 instructions: Some(trusted_guide(GuideFacts {
                     bot_user_id: self.agent.bot_user_id,
@@ -1495,8 +1525,7 @@ impl Actor {
                 instance_ref: self.agent.installation_id.clone(),
                 session_ref: native.to_string(),
                 workspace_label: self
-                    .agent
-                    .folder
+                    .folder()
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned()),
                 ..Default::default()
@@ -1817,7 +1846,7 @@ impl Actor {
                 self.agent.handoff_provider(),
                 HandoffTarget::Terminal,
                 native.as_str(),
-                Some(&self.agent.folder),
+                Some(&self.folder()),
             ) {
                 HandoffInstruction::Command { command } => {
                     builder.paragraph("Continue in a terminal:");

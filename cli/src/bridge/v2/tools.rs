@@ -69,6 +69,8 @@ pub(crate) struct Tools {
     bindings: Mutex<ToolBindings>,
     /// Session → its work's actor, for tools that act through the work.
     works: Mutex<HashMap<String, mpsc::WeakSender<Command>>>,
+    /// Session → the folder its work runs in.
+    folders: Mutex<HashMap<String, PathBuf>>,
     /// Messages this bot sent, so replies to them address it.
     sent: Arc<Mutex<HashSet<i64>>>,
 }
@@ -79,6 +81,7 @@ impl Tools {
             config,
             bindings: Mutex::new(ToolBindings::default()),
             works: Mutex::new(HashMap::new()),
+            folders: Mutex::new(HashMap::new()),
             sent: Arc::new(Mutex::new(HashSet::new())),
         })
     }
@@ -107,6 +110,7 @@ impl Tools {
         session: &ProviderSessionId,
         chat_id: i64,
         commands: mpsc::WeakSender<Command>,
+        folder: PathBuf,
     ) {
         self.bindings.lock().expect("tool bindings").bind(
             &self.key(session),
@@ -122,6 +126,10 @@ impl Tools {
             .lock()
             .expect("tool works")
             .insert(session.as_str().to_owned(), commands);
+        self.folders
+            .lock()
+            .expect("tool folders")
+            .insert(session.as_str().to_owned(), folder);
     }
 
     /// A native child session (a Codex sub-agent thread) acting for its
@@ -151,6 +159,10 @@ impl Tools {
         self.works
             .lock()
             .expect("tool works")
+            .remove(session.as_str());
+        self.folders
+            .lock()
+            .expect("tool folders")
             .remove(session.as_str());
     }
 
@@ -417,10 +429,14 @@ impl Tools {
                 .await
             }
             "return_attachment" => {
-                let roots = [
-                    self.config.folder.as_path(),
-                    self.config.attachments_dir.as_path(),
-                ];
+                let folder = self
+                    .folders
+                    .lock()
+                    .expect("tool folders")
+                    .get(work.session.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| self.config.folder.clone());
+                let roots = [folder.as_path(), self.config.attachments_dir.as_path()];
                 return_local_file(
                     &self.config.bot,
                     ReturnFile {
