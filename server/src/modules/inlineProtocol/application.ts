@@ -70,6 +70,7 @@ const unauthorizedResponse = (): Uint8Array => RealtimeV3Response.toBinary({
       errorCode: RpcError_Code.UNAUTHENTICATED,
       message: "Unauthenticated",
       code: 401,
+      retryAfterSeconds: 0,
     },
   },
 })
@@ -87,6 +88,7 @@ const errorResponse = (error: unknown): Uint8Array => {
         errorCode: rpc.code,
         message: rpc.message,
         code: rpc.codeNumber,
+        retryAfterSeconds: rpc.retryAfterSeconds ?? 0,
       },
     },
   })
@@ -100,6 +102,7 @@ const freshRequestIdRequiredResponse = (method: string): Uint8Array => RealtimeV
       errorCode: RpcError_Code.RATE_LIMIT,
       message: `Retry ${method} with a fresh request ID`,
       code: 429,
+      retryAfterSeconds: 0,
     },
   },
 })

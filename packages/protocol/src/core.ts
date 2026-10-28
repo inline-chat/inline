@@ -5115,6 +5115,13 @@ export interface RpcError {
      * @generated from protobuf field: int32 code = 4;
      */
     code: number;
+    /**
+     * Seconds the client should wait before retrying, Telegram FLOOD_WAIT-style.
+     * Zero means no hint; clients keep their own backoff.
+     *
+     * @generated from protobuf field: uint32 retry_after_seconds = 5;
+     */
+    retryAfterSeconds: number;
 }
 /**
  * Type of error
@@ -29718,7 +29725,8 @@ class RpcError$Type extends MessageType<RpcError> {
             { no: 1, name: "req_msg_id", kind: "scalar", T: 4 /*ScalarType.UINT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "error_code", kind: "enum", T: () => ["RpcError.Code", RpcError_Code] },
             { no: 3, name: "message", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "code", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 4, name: "code", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "retry_after_seconds", kind: "scalar", T: 13 /*ScalarType.UINT32*/ }
         ]);
     }
     create(value?: PartialMessage<RpcError>): RpcError {
@@ -29727,6 +29735,7 @@ class RpcError$Type extends MessageType<RpcError> {
         message.errorCode = 0;
         message.message = "";
         message.code = 0;
+        message.retryAfterSeconds = 0;
         if (value !== undefined)
             reflectionMergePartial<RpcError>(this, message, value);
         return message;
@@ -29747,6 +29756,9 @@ class RpcError$Type extends MessageType<RpcError> {
                     break;
                 case /* int32 code */ 4:
                     message.code = reader.int32();
+                    break;
+                case /* uint32 retry_after_seconds */ 5:
+                    message.retryAfterSeconds = reader.uint32();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -29772,6 +29784,9 @@ class RpcError$Type extends MessageType<RpcError> {
         /* int32 code = 4; */
         if (message.code !== 0)
             writer.tag(4, WireType.Varint).int32(message.code);
+        /* uint32 retry_after_seconds = 5; */
+        if (message.retryAfterSeconds !== 0)
+            writer.tag(5, WireType.Varint).uint32(message.retryAfterSeconds);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

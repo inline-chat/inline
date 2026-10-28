@@ -2110,6 +2110,9 @@ message RpcError {
   Code error_code = 2;
   string message = 3;
   int32 code = 4;
+  // Seconds the client should wait before retrying, Telegram FLOOD_WAIT-style.
+  // Zero means no hint; clients keep their own backoff.
+  uint32 retry_after_seconds = 5;
 
   // Type of error
   enum Code {

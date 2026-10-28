@@ -1,8 +1,17 @@
 import { RpcError_Code } from "@inline-chat/protocol/core"
 import { InlineError } from "@in/server/types/errors"
 
+/** Longest wait a server asks for; a larger value would read as an outage. */
+export const MAX_RETRY_AFTER_SECONDS = 3600
+
+/** Rounds a wait up to whole seconds within 1...MAX_RETRY_AFTER_SECONDS. */
+export const retryAfterSecondsFromMs = (ms: number): number =>
+  Math.min(MAX_RETRY_AFTER_SECONDS, Math.max(1, Math.ceil(ms / 1000)))
+
 export class RealtimeRpcError extends Error {
   public readonly codeName: string
+  /** Telegram FLOOD_WAIT-style hint copied to `RpcError.retry_after_seconds`. */
+  public retryAfterSeconds?: number
 
   constructor(public readonly code: RpcError_Code, message: string, public readonly codeNumber: number) {
     super(message)
@@ -61,8 +70,17 @@ export class RealtimeRpcError extends Error {
       RealtimeRpcError.InternalError,
     )
   }
-  public static RateLimit() {
-    return RealtimeRpcError.create(RpcError_Code.RATE_LIMIT, "Too many requests", 429, RealtimeRpcError.RateLimit)
+  public static RateLimit(retryAfterSeconds?: number) {
+    const wait = retryAfterSeconds !== undefined && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+      ? Math.min(MAX_RETRY_AFTER_SECONDS, Math.ceil(retryAfterSeconds))
+      : undefined
+    // Older plugin sidecars classify by message text ("rate" + "limit").
+    const message = wait === undefined
+      ? "Too many requests: rate limited"
+      : `Too many requests: rate limited, retry after ${wait} s`
+    const error = RealtimeRpcError.create(RpcError_Code.RATE_LIMIT, message, 429, RealtimeRpcError.RateLimit)
+    if (wait !== undefined) error.retryAfterSeconds = wait
+    return error
   }
   public static RequestTimeout(message = "Request timed out") {
     // Keep the existing wire pair until the protocol has a dedicated enum.
