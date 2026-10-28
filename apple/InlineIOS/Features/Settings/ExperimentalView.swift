@@ -14,6 +14,9 @@ struct ExperimentalView: View {
   @AppStorage(NextMessageViewFeature.preferenceKey)
   private var nextMessageViewEnabled = false
 
+  @AppStorage(MessageContextMenuFeature.preferenceKey)
+  private var customContextMenuEnabled = false
+
   var body: some View {
     List {
       // Use the same purpose-based groups as macOS; see AGENTS.md when adding experiments.
@@ -56,10 +59,18 @@ struct ExperimentalView: View {
             Toggle("Next Message View", isOn: $nextMessageViewEnabled)
               .labelsHidden()
           }
+          SettingsItem(
+            icon: "contextualmenu.and.cursorarrow",
+            iconColor: .indigo,
+            title: "Custom Context Menu"
+          ) {
+            Toggle("Custom Context Menu", isOn: $customContextMenuEnabled)
+              .labelsHidden()
+          }
         } header: {
           Text("Developer Tools")
         } footer: {
-          Text("Uses the next iOS message view as it is built. Until then, chats use the current view. Reopen the chat after changing this setting.")
+          Text("Next Message View uses the next iOS message view as it is built. Custom Context Menu opens Inline's own message menu: it scrolls with long messages and lets you select text in the preview, best with Next Message View. Reopen the chat after changing these settings.")
         }
       }
     }

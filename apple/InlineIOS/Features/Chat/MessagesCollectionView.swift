@@ -141,6 +141,10 @@ final class MessagesCollectionView: UICollectionView {
     let implementation = messageViewImplementation ?? NextMessageViewFeature.selectedImplementation(
       isExperimentAvailable: SettingsBuildAudience.showsDebugTools
     )
+    // Chat previews keep UIKit's menu; the custom one presents over the whole window.
+    let contextMenuImplementation = MessageContextMenuFeature.selectedImplementation(
+      isExperimentAvailable: SettingsBuildAudience.showsDebugTools && !isPreview
+    )
     let coordinator = Coordinator(
       peerId: peerId,
       chatId: chatId,
@@ -150,6 +154,7 @@ final class MessagesCollectionView: UICollectionView {
       sendAnimationCoordinator: sendAnimationCoordinator,
       theme: theme,
       messageViewImplementation: implementation,
+      contextMenuImplementation: contextMenuImplementation,
       viewModel: viewModel
     )
     self.coordinator = coordinator
@@ -227,6 +232,7 @@ final class MessagesCollectionView: UICollectionView {
     backgroundColor = .clear
     UIContextMenuInteraction.swizzle_delegate_getAccessoryViewsForConfigurationIfNeeded()
     delegate = coordinator
+    coordinator.installCustomContextMenu(on: self)
     autoresizingMask = [.flexibleHeight]
     alwaysBounceVertical = true
 
@@ -266,6 +272,7 @@ final class MessagesCollectionView: UICollectionView {
   override func didMoveToWindow() {
     super.didMoveToWindow()
     if window == nil {
+      coordinator.dismissCustomContextMenuImmediately()
       cancelContextMenuKeyboardRestoration()
       isKeyboardVisible = false
       keyboardHeight = 0
@@ -1344,7 +1351,25 @@ private extension MessagesCollectionView {
     private var theme: IOSThemeSnapshot
     /// `.next` draws supported message kinds with the next message view.
     private let messageViewImplementation: MessageViewImplementation
+    /// `.custom` opens `MessageContextMenuController` from a hold instead of UIKit's menu.
+    private let contextMenuImplementation: MessageContextMenuImplementation
     private weak var collectionContextMenu: UIContextMenuInteraction?
+    private var customContextMenu: MessageContextMenuController?
+    private weak var customContextMenuGesture: MessageContextMenuHoldGesture?
+    private var customContextMenuPress: CustomContextMenuPress?
+    private let customContextMenuFeedback = UIImpactFeedbackGenerator(style: .medium)
+
+    /// A hold on a message before the menu opens.
+    private struct CustomContextMenuPress {
+      let item: MessageListItem
+      weak var cell: MessageCollectionViewCell?
+      /// The bubble that shrinks under the finger; nil for a configured hold action.
+      weak var view: UIView?
+      /// The next view's bubble container is placed by frame, so it shrinks through its
+      /// sublayers; the current view's bubble takes a transform.
+      let shrinksSublayers: Bool
+      var scale: CGFloat = 1
+    }
     /// Focus highlight that must survive cell reconfiguration until it ends.
     private var focusHighlight: (messageID: Int64, endsAt: CFTimeInterval)?
     private var reactionPickerPresentation: ReactionEmojiPickerPresentation?
@@ -1668,6 +1693,314 @@ private extension MessagesCollectionView {
 
     private func dismissContextMenuIfNeeded() {
       collectionContextMenu?.dismissMenu()
+      customContextMenu?.dismiss()
+    }
+
+    // MARK: - Custom context menu
+
+    func installCustomContextMenu(on collectionView: MessagesCollectionView) {
+      guard contextMenuImplementation == .custom else { return }
+      let gesture = MessageContextMenuHoldGesture(target: self, action: #selector(handleCustomContextMenuHold(_:)))
+      gesture.acceptsTouch = { [weak self, weak collectionView] point in
+        guard let self, let collectionView, customContextMenu == nil,
+              !collectionView.isContextMenuInteractionActive else { return false }
+        return customContextMenuTarget(at: point, in: collectionView) != nil
+      }
+      gesture.onPressBegan = { [weak self] point in
+        self?.beginCustomContextMenuPress(at: point) ?? false
+      }
+      gesture.onPressProgress = { [weak self] progress in
+        self?.updateCustomContextMenuPress(progress: progress)
+      }
+      gesture.onPressCancelled = { [weak self] in
+        self?.endCustomContextMenuPress(animated: true)
+      }
+      collectionView.addGestureRecognizer(gesture)
+      customContextMenuGesture = gesture
+    }
+
+    /// The message under `point` when a hold there should open its menu. Mirrors UIKit's path:
+    /// links, inner menus and the actions button keep their own long press.
+    private func customContextMenuTarget(
+      at point: CGPoint,
+      in collectionView: UICollectionView
+    ) -> (item: MessageListItem, message: FullMessage, cell: MessageCollectionViewCell)? {
+      guard let indexPath = collectionView.indexPathForItem(at: point),
+            let item = item(at: indexPath),
+            !item.isThreadAnchor,
+            let message = message(for: item),
+            let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell
+      else { return nil }
+      if cell.showsNextMessageView, let nextMessageView = cell.nextMessageView,
+         nextMessageView.linkURL(at: collectionView.convert(point, to: nextMessageView)) != nil
+      {
+        return nil
+      }
+      if !cell.showsNextMessageView, let messageView = cell.messageView,
+         messageView.linkURL(atPointInMessageView: collectionView.convert(point, to: messageView)) != nil
+      {
+        return nil
+      }
+      // Reaction pills, link previews and attachments keep their own menus.
+      let host = cell.showsNextMessageView ? cell.nextMessageView as UIView? : cell.messageView as UIView?
+      if let host {
+        var view = host.hitTest(collectionView.convert(point, to: host), with: nil)
+        while let current = view, current !== host {
+          if current.interactions.contains(where: { $0 is UIContextMenuInteraction }) { return nil }
+          view = current.superview
+        }
+      }
+      if cell.isMessageActionsButton(at: collectionView.convert(point, to: cell)) { return nil }
+      return (item, message, cell)
+    }
+
+    /// The view that shrinks under the finger and lifts into the menu.
+    private func customContextMenuSourceView(for cell: MessageCollectionViewCell) -> (view: UIView, shrinksSublayers: Bool)? {
+      if cell.showsNextMessageView, let nextMessageView = cell.nextMessageView {
+        return (nextMessageView.bubbleContentView, true)
+      }
+      guard let messageView = cell.messageView else { return nil }
+      let view: UIView = messageView.fullMessage.message.isServiceMessage
+        ? messageView.serviceContainerView
+        : messageView.bubbleView
+      return (view, false)
+    }
+
+    private func beginCustomContextMenuPress(at point: CGPoint) -> Bool {
+      guard customContextMenu == nil,
+            let collectionView = currentCollectionView as? MessagesCollectionView,
+            !collectionView.isDragging,
+            let target = customContextMenuTarget(at: point, in: collectionView)
+      else { return false }
+      let source = target.cell.usesCustomHoldAction ? nil : customContextMenuSourceView(for: target.cell)
+      customContextMenuPress = CustomContextMenuPress(
+        item: target.item,
+        cell: target.cell,
+        view: source?.view,
+        shrinksSublayers: source?.shrinksSublayers ?? false
+      )
+      customContextMenuFeedback.prepare()
+      return true
+    }
+
+    private func updateCustomContextMenuPress(progress: CGFloat) {
+      guard var press = customContextMenuPress, let view = press.view else { return }
+      let pressedScale = MessageContextMenuMotion.pressedScale(forWidth: view.bounds.width)
+      press.scale = 1 - (1 - pressedScale) * progress
+      customContextMenuPress = press
+      setCustomContextMenuPressScale(press.scale, on: view, sublayers: press.shrinksSublayers)
+    }
+
+    private func setCustomContextMenuPressScale(_ scale: CGFloat, on view: UIView, sublayers: Bool) {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      if sublayers {
+        view.layer.sublayerTransform = CATransform3DMakeScale(scale, scale, 1)
+      } else {
+        view.transform = CGAffineTransform(scaleX: scale, y: scale)
+      }
+      CATransaction.commit()
+    }
+
+    /// Releases the press; an abandoned hold eases the bubble back to full size.
+    private func endCustomContextMenuPress(animated: Bool) {
+      guard let press = customContextMenuPress else { return }
+      customContextMenuPress = nil
+      guard let view = press.view else { return }
+      if press.shrinksSublayers {
+        let current = view.layer.presentation()?.sublayerTransform ?? view.layer.sublayerTransform
+        view.layer.sublayerTransform = CATransform3DIdentity
+        if animated {
+          let animation = CABasicAnimation(keyPath: "sublayerTransform")
+          animation.fromValue = NSValue(caTransform3D: current)
+          animation.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+          animation.duration = 0.2
+          animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+          view.layer.add(animation, forKey: "contextMenu.press")
+        }
+      } else if animated {
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut, .beginFromCurrentState, .allowUserInteraction]) {
+          view.transform = .identity
+        }
+      } else {
+        view.transform = .identity
+      }
+    }
+
+    @objc private func handleCustomContextMenuHold(_ gesture: MessageContextMenuHoldGesture) {
+      switch gesture.state {
+      case .began:
+        activateCustomContextMenu(gesture)
+      case .changed:
+        customContextMenu?.trackHold(at: gesture.location(in: nil))
+      case .ended:
+        customContextMenu?.endHold(at: gesture.location(in: nil))
+      default:
+        break
+      }
+    }
+
+    private func activateCustomContextMenu(_ gesture: MessageContextMenuHoldGesture) {
+      guard let press = customContextMenuPress,
+            let collectionView = currentCollectionView as? MessagesCollectionView,
+            let indexPath = dataSource.indexPath(for: press.item),
+            let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell,
+            cell === press.cell,
+            let fullMessage = message(for: press.item)
+      else {
+        endCustomContextMenuPress(animated: true)
+        return
+      }
+      cancelGestures(in: cell, except: gesture)
+      for recognizer in collectionView.gestureRecognizers ?? [] where recognizer !== gesture {
+        cancel(recognizer)
+      }
+      if cell.usesCustomHoldAction {
+        endCustomContextMenuPress(animated: false)
+        if cell.showsNextMessageView {
+          cell.nextMessageView?.performMessageGestureAction(cell.messageHoldAction)
+        } else {
+          cell.messageView?.performMessageGestureAction(cell.messageHoldAction)
+        }
+        return
+      }
+      let pressedScale = press.scale
+      // The frame and the bitmap are taken at full size.
+      endCustomContextMenuPress(animated: false)
+      guard presentCustomContextMenu(
+        item: press.item,
+        message: fullMessage,
+        cell: cell,
+        pressedScale: pressedScale,
+        in: collectionView
+      ) else { return }
+      customContextMenu?.beginHold(at: gesture.location(in: nil))
+      customContextMenuFeedback.impactOccurred()
+    }
+
+    /// Closes the custom menu without animation and drops a pending press, as when the chat
+    /// leaves the window: the overlay belongs to the window and would outlive the chat.
+    func dismissCustomContextMenuImmediately() {
+      endCustomContextMenuPress(animated: false)
+      customContextMenuGesture?.cancelPress()
+      customContextMenu?.dismiss(animated: false)
+    }
+
+    private func cancel(_ recognizer: UIGestureRecognizer) {
+      guard recognizer.isEnabled else { return }
+      recognizer.isEnabled = false
+      recognizer.isEnabled = true
+    }
+
+    private func cancelGestures(in view: UIView, except gesture: UIGestureRecognizer) {
+      for recognizer in view.gestureRecognizers ?? [] where recognizer !== gesture {
+        cancel(recognizer)
+      }
+      for subview in view.subviews {
+        cancelGestures(in: subview, except: gesture)
+      }
+    }
+
+    private func presentCustomContextMenu(
+      item: MessageListItem,
+      message fullMessage: FullMessage,
+      cell: MessageCollectionViewCell,
+      pressedScale: CGFloat,
+      in collectionView: MessagesCollectionView
+    ) -> Bool {
+      guard let window = collectionView.window,
+            let geometry = contextMenuPreviewGeometry(for: cell),
+            let preview = customContextMenuLivePreview(for: cell, extent: geometry.rect)
+            ?? customContextMenuSnapshot(of: geometry.view, in: geometry.rect)
+      else { return false }
+      let frame = geometry.view.convert(geometry.rect, to: window)
+      let message = fullMessage.message
+
+      let selectableText = cell.showsNextMessageView
+        ? cell.nextMessageView?.contextMenuSelectableText(
+          extent: geometry.rect,
+          colors: .forBubble(outgoing: message.out == true, tint: theme.primary.uiColor)
+        )
+        : nil
+
+      let controller = MessageContextMenuController(
+        source: MessageContextMenuController.Source(
+          preview: preview,
+          frame: frame,
+          pressedScale: pressedScale,
+          alignment: frame.midX > window.bounds.midX ? .right : .left,
+          selectableText: selectableText,
+          currentFrame: { [weak self, weak collectionView] in
+            guard let self, let collectionView, let window = collectionView.window,
+                  let indexPath = dataSource.indexPath(for: item),
+                  let cell = collectionView.cellForItem(at: indexPath) as? MessageCollectionViewCell,
+                  let geometry = contextMenuPreviewGeometry(for: cell)
+            else { return nil }
+            let frame = geometry.view.convert(geometry.rect, to: window)
+            return frame.intersects(collectionView.convert(collectionView.bounds, to: window)) ? frame : nil
+          },
+          setHidden: { [weak self, weak collectionView] hidden in
+            guard let self, let collectionView else { return }
+            contextMenuSourceItem = hidden ? item : nil
+            updateContextMenuSourceVisibility(in: collectionView)
+          }
+        ),
+        content: MessageContextMenuController.Content(
+          menu: { [weak self, weak cell] hasTextSelection in
+            guard let self else { return UIMenu(children: []) }
+            if message.isServiceMessage { return makeServiceMessageMenu(for: message) }
+            guard let cell else { return UIMenu(children: []) }
+            return makeMessageActionsMenu(for: fullMessage, cell: cell, includesTextCopy: !hasTextSelection)
+          },
+          accessory: message.isServiceMessage ? nil : createReactionPickerView(for: fullMessage)
+        )
+      )
+      controller.onWillDismiss = { [weak collectionView] in
+        collectionView?.contextMenuPhase = .dismissing
+      }
+      controller.onDidDismiss = { [weak self, weak collectionView, weak controller] in
+        guard let self, let collectionView, customContextMenu === controller else { return }
+        customContextMenu = nil
+        collectionView.contextMenuPhase = .idle
+        collectionView.updateContentInsetsAfterContextMenuIfNeeded()
+        collectionView.onContextMenuDidEnd?()
+        // The keyboard never moved for this menu, so there's no viewport to restore.
+        if collectionView.isKeyboardVisible, !collectionView.isReactionPickerPresented {
+          collectionView.cancelContextMenuKeyboardRestoration()
+        }
+        flushDeferredNextUpdates()
+      }
+
+      customContextMenu = controller
+      collectionView.cancelContextMenuKeyboardRestoration()
+      collectionView.contextMenuPhase = .presented
+      _ = collectionView.stopComposeInsetAnimationAtPresentation()
+      collectionView.onContextMenuWillDisplay?()
+      // The list measures the keyboard's overlap with itself; the menu needs its reach from the
+      // window's bottom.
+      let viewport = collectionView.convert(collectionView.bounds, to: window)
+      let keyboardHeight = collectionView.isKeyboardVisible
+        ? max(0, window.bounds.maxY - (viewport.maxY - collectionView.keyboardHeight))
+        : 0
+      controller.present(in: window, keyboardHeight: keyboardHeight)
+      return true
+    }
+
+    private func customContextMenuLivePreview(for cell: MessageCollectionViewCell, extent: CGRect) -> UIView? {
+      guard cell.showsNextMessageView else { return nil }
+      return cell.nextMessageView?.makeContextMenuPreview(extent: extent)
+    }
+
+    private func customContextMenuSnapshot(of view: UIView, in rect: CGRect) -> UIView? {
+      // A menu can reopen before the previous one finished returning its bubble.
+      let wasHidden = view.isHidden
+      view.isHidden = false
+      defer { view.isHidden = wasHidden }
+      guard let snapshot = view.sendAnimationLayerSnapshotView(in: rect),
+            let image = (snapshot as? UIImageView)?.image,
+            let sample = image.sendAnimationVisibleAlphaSample(), sample.visible > 0
+      else { return nil }
+      return snapshot
     }
 
     private var dataSource: UICollectionViewDiffableDataSource<MessageListSectionID, MessageListItem>!
@@ -2521,6 +2854,7 @@ private extension MessagesCollectionView {
       sendAnimationCoordinator: SendMessageAnimationCoordinator? = nil,
       theme: IOSThemeSnapshot,
       messageViewImplementation: MessageViewImplementation,
+      contextMenuImplementation: MessageContextMenuImplementation = .system,
       viewModel: MessagesSectionedViewModel? = nil
     ) {
       self.peerId = peerId
@@ -2529,6 +2863,7 @@ private extension MessagesCollectionView {
       self.isPreview = isPreview
       self.theme = theme
       self.messageViewImplementation = messageViewImplementation
+      self.contextMenuImplementation = contextMenuImplementation
       self.sendAnimationCoordinator = sendAnimationCoordinator
       self.viewModel = viewModel ?? MessagesSectionedViewModel(
         peer: peerId,
@@ -4315,6 +4650,8 @@ private extension MessagesCollectionView {
       contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
       point: CGPoint
     ) -> UIContextMenuConfiguration? {
+      // The custom menu opens from its own hold gesture.
+      guard contextMenuImplementation == .system else { return nil }
       guard let indexPath = indexPaths.first,
             let item = item(at: indexPath),
             !item.isThreadAnchor,
@@ -4369,22 +4706,8 @@ private extension MessagesCollectionView {
       }
 
       if message.isServiceMessage {
-        let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
-          ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
-        }
-        let deleteAction = UIAction(
-          title: "Delete",
-          image: UIImage(systemName: "trash"),
-          attributes: .destructive
-        ) { [weak self] _ in
-          self?.showDeleteConfirmation(
-            messageId: message.messageId,
-            peerId: message.peerId,
-            chatId: message.chatId
-          )
-        }
         return makeContextMenuConfiguration(
-          at: indexPath, identifier: nil, menu: UIMenu(children: [replyAction, deleteAction])
+          at: indexPath, identifier: nil, menu: makeServiceMessageMenu(for: message)
         )
       }
 
@@ -4443,10 +4766,30 @@ private extension MessagesCollectionView {
       return configuration
     }
 
+    private func makeServiceMessageMenu(for message: Message) -> UIMenu {
+      let replyAction = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) { _ in
+        ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
+      }
+      let deleteAction = UIAction(
+        title: "Delete",
+        image: UIImage(systemName: "trash"),
+        attributes: .destructive
+      ) { [weak self] _ in
+        self?.showDeleteConfirmation(
+          messageId: message.messageId,
+          peerId: message.peerId,
+          chatId: message.chatId
+        )
+      }
+      return UIMenu(children: [replyAction, deleteAction])
+    }
+
+    /// `includesTextCopy` is false while the custom menu offers a copy of selected text instead.
     private func makeMessageActionsMenu(
       for fullMessage: FullMessage,
       cell: MessageCollectionViewCell,
-      includeReactionsAction: Bool = false
+      includeReactionsAction: Bool = false,
+      includesTextCopy: Bool = true
     ) -> UIMenu {
       let message = fullMessage.message
       let isMessageSending = message.status == .sending
@@ -4454,7 +4797,7 @@ private extension MessagesCollectionView {
 
       var actions: [UIAction] = []
 
-      if message.hasText {
+      if message.hasText, includesTextCopy {
         let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "square.on.square")) { _ in
           guard ExperimentalFeatureFlags.richMessageCopyEditingEnabled, let text = fullMessage.displayText else {
             UIPasteboard.general.string = message.text
@@ -5012,6 +5355,7 @@ private extension MessagesCollectionView {
     private var hasUnreadSinceScroll = false
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+      customContextMenuGesture?.cancelPress()
       (scrollView as? MessagesCollectionView)?.cancelContextMenuKeyboardRestoration()
       (scrollView as? MessagesCollectionView)?.cancelMessageFocusAwaitingArrival()
       olderHistoryPagination.beginGesture()

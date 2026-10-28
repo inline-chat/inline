@@ -9,6 +9,8 @@ final class MessageBubbleNodeView: UIView {
   private var fillColor: UIColor = .clear
   private var lighting: (top: CGFloat, bottom: CGFloat)?
   private var lightingVector: (startY: CGFloat, endY: CGFloat) = (0, 1)
+  /// Where the gradient sits now, so a copy of this bubble (the context menu's) matches it.
+  var currentLightingVector: (startY: CGFloat, endY: CGFloat) { lightingVector }
 
   override init(frame: CGRect) {
     super.init(frame: frame)
