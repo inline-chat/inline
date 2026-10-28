@@ -84,6 +84,16 @@ const defaultVideoHeight = 720
 const defaultVideoDuration = 1
 const defaultCatchUpPageLimit = 100
 const defaultCatchUpTotalLimit = 10_000
+// A bucket this client never had a cursor for is not owed its history: like
+// Telegram's channel difference limit and the Apple catalog seed, fetch at most
+// the tail before the update that introduced it.
+const unknownCursorBackfillLimit = 100
+// Telegram catches up channels one difference at a time. Bounding concurrent
+// bucket catch-ups keeps a reconnect with many hinted chats under the server's
+// per-socket pending limit instead of tripping its capacity close.
+const maxConcurrentBucketCatchUps = 4
+const unknownCursorStartSeq = (targetSeq?: number): number =>
+  targetSeq != null && targetSeq > unknownCursorBackfillLimit ? targetSeq - unknownCursorBackfillLimit : 0
 const maxDatabaseUpdateSequence = 2_147_483_647
 const inboundEventCapacity = 256
 const inboundEventCapacityBytes = 8 * 1024 * 1024
@@ -268,6 +278,8 @@ export class InlineSdkClient {
 
   private started = false
   private closed = false
+  private bucketCatchUpsRunning = 0
+  private bucketCatchUpWaiters: Array<() => void> = []
   private openPromise: Promise<void> | null = null
   private openResolver: (() => void) | null = null
   private openRejecter: ((error: Error) => void) | null = null
@@ -2264,7 +2276,7 @@ export class InlineSdkClient {
     if (this.recoveryRetries.get(`chat:${params.chatId}`)?.timer) return Promise.resolve()
 
     const initialDemand = this.catchUpRequestedByChatId.get(params.chatId)
-    const task = this.drainCatchUpChat(params.chatId)
+    const task = this.withBucketCatchUpSlot(() => this.drainCatchUpChat(params.chatId))
       .catch((error) => {
         this.recordCatchUpFailure({ kind: "chat", chatId: params.chatId, peer: params.peer }, error, this.catchUpRequestedByChatId.get(params.chatId) !== initialDemand)
         this.log.warn?.("GET_UPDATES chat catch-up failed; bucket remains degraded", {
@@ -2280,6 +2292,22 @@ export class InlineSdkClient {
     return task
   }
 
+  private async withBucketCatchUpSlot(drain: () => Promise<void>): Promise<void> {
+    if (this.bucketCatchUpsRunning >= maxConcurrentBucketCatchUps) {
+      // A finishing drain hands its slot straight to the next waiter.
+      await new Promise<void>((resolve) => this.bucketCatchUpWaiters.push(resolve))
+    } else {
+      this.bucketCatchUpsRunning += 1
+    }
+    try {
+      await drain()
+    } finally {
+      const next = this.bucketCatchUpWaiters.shift()
+      if (next) next()
+      else this.bucketCatchUpsRunning -= 1
+    }
+  }
+
   private async drainCatchUpChat(chatId: bigint) {
     const key = chatId.toString()
 
@@ -2289,7 +2317,7 @@ export class InlineSdkClient {
 
       const lastSeq = this.state.lastSeqByChatId?.[key]
       const endSeq = request.toLatest ? undefined : request.endSeq
-      const startSeq = lastSeq ?? 0
+      const startSeq = lastSeq ?? unknownCursorStartSeq(request.endSeq)
       if (endSeq != null && endSeq <= startSeq) {
         this.satisfyDiscoveryThroughCursor({ kind: "chat", chatId }, startSeq)
         this.clearUpdateBucketDegraded({ kind: "chat", chatId, peer: request.peer })
@@ -2437,7 +2465,7 @@ export class InlineSdkClient {
     if (this.recoveryRetries.get(`space:${params.spaceId}`)?.timer) return Promise.resolve()
 
     const initialDemand = this.catchUpRequestedBySpaceId.get(params.spaceId)
-    const task = this.drainCatchUpSpace(params.spaceId)
+    const task = this.withBucketCatchUpSlot(() => this.drainCatchUpSpace(params.spaceId))
       .catch((error) => {
         this.recordCatchUpFailure({ kind: "space", spaceId: params.spaceId }, error, this.catchUpRequestedBySpaceId.get(params.spaceId) !== initialDemand)
         this.log.warn?.("GET_UPDATES space catch-up failed; bucket remains degraded", {
@@ -2462,7 +2490,7 @@ export class InlineSdkClient {
 
       const lastSeq = this.state.lastSeqBySpaceId?.[key]
       const endSeq = request.toLatest ? undefined : request.endSeq
-      const startSeq = lastSeq ?? 0
+      const startSeq = lastSeq ?? unknownCursorStartSeq(request.endSeq)
       if (endSeq != null && endSeq <= startSeq) {
         this.satisfyDiscoveryThroughCursor({ kind: "space", spaceId }, startSeq)
         this.clearUpdateBucketDegraded({ kind: "space", spaceId })

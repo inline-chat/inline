@@ -3385,6 +3385,100 @@ describe("InlineSdkClient", () => {
     await next
   })
 
+  const chatHint = (seq: number, chatId: bigint, updateSeq: number) => Update.create({
+    seq,
+    date: 101n,
+    update: {
+      oneofKind: "chatHasNewUpdates",
+      chatHasNewUpdates: { chatId, updateSeq, peerId: { type: { oneofKind: "chat", chat: { chatId } } } },
+    },
+  })
+  const chatCatchUps = (transport: MockTransport) => transport.sent.filter((m) =>
+    m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES &&
+    m.body.rpcCall.input.oneofKind === "getUpdates" &&
+    m.body.rpcCall.input.getUpdates.bucket?.type.oneofKind === "chat")
+  const emitUpdates = (transport: MockTransport, id: bigint, updates: Update[]) => transport.emitMessage(
+    ServerProtocolMessage.create({
+      id,
+      body: { oneofKind: "message", message: { payload: { oneofKind: "update", update: { updates } } } },
+    }),
+  )
+  const emitEmptyFinalPage = (transport: MockTransport, id: bigint, reqMsgId: bigint, after: number, through: number) =>
+    transport.emitMessage(ServerProtocolMessage.create({
+      id,
+      body: {
+        oneofKind: "rpcResult",
+        rpcResult: {
+          reqMsgId,
+          result: {
+            oneofKind: "getUpdates",
+            getUpdates: {
+              updates: [],
+              seq: BigInt(through),
+              date: 102n,
+              resultType: GetUpdatesResult_ResultType.SLICE,
+              final: true,
+              skippedSequences: irrelevantSkippedSequences(after, through),
+            },
+          },
+        },
+      },
+    }))
+
+  it("fetches only a bounded tail for a chat without stored seq", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({ version: 1 }),
+    })
+    await connectAndOpen(client, transport)
+
+    await emitUpdates(transport, 21n, [chatHint(3, 10n, 1002)])
+    await waitFor(() => chatCatchUps(transport).length === 1)
+    const rpc = chatCatchUps(transport)[0]
+    if (!rpc || rpc.body.oneofKind !== "rpcCall" || rpc.body.rpcCall.input.oneofKind !== "getUpdates") {
+      throw new Error("missing chat getUpdates rpc")
+    }
+    // Like the Apple catalog seed, a bucket never seen is not owed its 1,000-update history.
+    expect(rpc.body.rpcCall.input.getUpdates.startSeq).toBe(902n)
+
+    await emitEmptyFinalPage(transport, 22n, rpc.id, 902, 1002)
+    await waitFor(() => client.exportState().lastSeqByChatId?.["10"] === 1002)
+    expect(chatCatchUps(transport)).toHaveLength(1)
+    await client.close()
+  })
+
+  it("runs at most four bucket catch-ups at once", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({ version: 1 }),
+    })
+    await connectAndOpen(client, transport)
+
+    // A reconnect that hints six chats must stay well under the server's pending limit.
+    await emitUpdates(transport, 21n, [10n, 11n, 12n, 13n, 14n, 15n].map((chatId, index) => chatHint(3 + index, chatId, 3)))
+    await waitFor(() => chatCatchUps(transport).length === 4)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(chatCatchUps(transport)).toHaveLength(4)
+
+    const first = chatCatchUps(transport)[0]
+    if (!first) throw new Error("missing chat getUpdates rpc")
+    await emitEmptyFinalPage(transport, 22n, first.id, 0, 3)
+    await waitFor(() => chatCatchUps(transport).length === 5)
+
+    let reply = 23n
+    for (const rpc of chatCatchUps(transport).slice(1)) await emitEmptyFinalPage(transport, reply++, rpc.id, 0, 3)
+    await waitFor(() => chatCatchUps(transport).length === 6)
+    await emitEmptyFinalPage(transport, reply++, chatCatchUps(transport)[5]!.id, 0, 3)
+    await waitFor(() => ["10", "11", "12", "13", "14", "15"].every((chat) => client.exportState().lastSeqByChatId?.[chat] === 3))
+    await client.close()
+  })
+
   it("does not stall live delivery behind chat catch-up", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
