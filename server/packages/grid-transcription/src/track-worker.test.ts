@@ -13,6 +13,16 @@ async function until(predicate: () => boolean): Promise<void> {
   for (let count = 0; count < 100; count++) { if (predicate()) return; await tick() }
   throw new Error("test event did not occur")
 }
+async function eventually(predicate: () => boolean): Promise<void> {
+  for (let waited = 0; waited < 3_000; waited += 5) { if (predicate()) return; await new Promise((resolve) => setTimeout(resolve, 5)) }
+  throw new Error("test event did not occur")
+}
+async function spokenTurn(value: ReturnType<typeof fixture>): Promise<void> {
+  const committedBefore = value.commits.length
+  value.worker.push(frame(true))
+  for (let index = 0; index < 28; index++) value.worker.push(frame(false))
+  await eventually(() => value.commits.length > committedBefore || value.failures.length > 0)
+}
 function fixture(overrides: Partial<TrackWorkerOptions> = {}) {
   let microphone = true
   let authority = true
@@ -36,9 +46,12 @@ function fixture(overrides: Partial<TrackWorkerOptions> = {}) {
     onFailure(error) { failures.push(error) },
     async connect(value) { options = value; events.push("connect"); return connection }, ...overrides,
   })
-  return { worker, connection, events, audio, commits, finals, failures,
+  const value = { worker, connection, events, audio, commits, finals, failures,
+    get options() { return options }, set options(next: ProviderOptions | undefined) { options = next },
     final(turnId: string, text: string) { options?.onFinal({ turnId, text }) },
+    dropSocket() { options?.onFailure(new TranscriptionError("provider")) },
     revokeMicrophone() { microphone = false }, revokeRun() { authority = false } }
+  return value
 }
 function frame(speech: boolean): Int16Array { const data = new Int16Array(320); data[0] = speech ? 1 : 0; return data }
 async function utterance(value: ReturnType<typeof fixture>): Promise<void> {
@@ -56,10 +69,11 @@ describe("per microphone finite turn owner", () => {
     await utterance(value)
     clock = 9 * 60 * 1000
     value.final("segment-1", "First completed turn.")
-    await until(() => value.events.includes("close"))
+    await until(() => value.finals.length === 1)
     await utterance(value)
     await until(() => value.commits.length === 2)
     expect(value.events.filter((event) => event === "connect")).toHaveLength(2)
+    expect(value.events.indexOf("close")).toBeLessThan(value.events.lastIndexOf("connect"))
     expect(value.commits).toEqual(["segment-1", "segment-2"])
     await value.worker.stop(false)
   })
@@ -77,22 +91,52 @@ describe("per microphone finite turn owner", () => {
     expect(value.events.lastIndexOf("connect")).toBeLessThan(value.events.lastIndexOf("audio"))
     await value.worker.stop(false)
   })
-  test("one transient provider refusal retries, a second interrupts", async () => {
-    for (const refusals of [1, 2]) {
-      let attempts = 0
-      const connection: SpeechConnection = { appendAudio() {}, commitTurn() {}, close() {} }
-      const value = fixture({ async connect() {
-        if (++attempts <= refusals) throw new TranscriptionError("provider")
-        return connection
-      } })
-      value.worker.push(frame(true))
-      for (let index = 0; index < 28; index++) value.worker.push(frame(false))
-      for (let waited = 0; waited < 2_000 && attempts < 2; waited += 20) await new Promise((resolve) => setTimeout(resolve, 20))
-      await new Promise((resolve) => setTimeout(resolve, 50))
-      expect(attempts).toBe(2)
-      expect(value.failures.map((error) => error.code)).toEqual(refusals === 1 ? [] : ["provider"])
-      await value.worker.stop(false)
+  test("provider refusals retry with backoff until a socket opens, without losing the turn", async () => {
+    let attempts = 0
+    const value = fixture({ retryBaseMs: 5, connect: async (options) => {
+      if (++attempts <= 4) throw new TranscriptionError("provider")
+      value.events.push("connect")
+      value.options = options
+      return value.connection
+    } })
+    await spokenTurn(value)
+    expect(attempts).toBe(5)
+    expect(value.commits).toEqual(["segment-1"])
+    value.final("segment-1", "Survived the outage.")
+    await eventually(() => value.finals.length === 1)
+    expect(value.failures).toEqual([])
+    await value.worker.stop(false)
+  })
+  test("a dropped socket resends every unfinished turn on a fresh one", async () => {
+    const value = fixture({ retryBaseMs: 5 })
+    await spokenTurn(value)
+    await spokenTurn(value)
+    expect(value.commits).toEqual(["segment-1", "segment-2"])
+    value.dropSocket()
+    await eventually(() => value.commits.length === 4)
+    expect(value.commits).toEqual(["segment-1", "segment-2", "segment-1", "segment-2"])
+    value.final("segment-1", "First.")
+    value.final("segment-2", "Second.")
+    await eventually(() => value.finals.length === 2)
+    expect(value.finals.map((turn) => turn.turnId)).toEqual(["segment-1", "segment-2"])
+    expect(value.failures).toEqual([])
+    await value.worker.stop(false)
+  })
+  test("a turn the provider keeps failing is retired empty and the speaker continues", async () => {
+    const value = fixture({ retryBaseMs: 1 })
+    await spokenTurn(value)
+    for (let drop = 0; drop < 5; drop++) {
+      const before = value.commits.length
+      value.dropSocket()
+      if (drop < 4) await eventually(() => value.commits.length > before)
     }
+    await eventually(() => value.finals.length === 1)
+    expect(value.finals).toEqual([{ turnId: "segment-1", text: "" }])
+    await spokenTurn(value)
+    value.final("segment-2", "Next turn still lands.")
+    await eventually(() => value.finals.length === 2)
+    expect(value.failures).toEqual([])
+    await value.worker.stop(false)
   })
   test("back-to-back turns inside the idle window reuse one socket", async () => {
     const value = fixture({ idleCloseMs: 1_000 })
@@ -373,31 +417,33 @@ describe("per microphone finite turn owner", () => {
     await value.worker.stop(false)
   })
 
-  test("a slow provider cannot create an unbounded native PCM queue", async () => {
+  test("a slow provider buffers speech without blocking capture, up to the backlog bound", async () => {
     const connected = deferred<SpeechConnection>()
     let started = false
-    const value = fixture({ connect() { started = true; return connected.promise } })
+    const value = fixture({ maxBacklogMs: 1_000, connect() { started = true; return connected.promise } })
     value.worker.push(frame(true))
     await until(() => started)
     for (let index = 0; index < 100; index++) value.worker.push(frame(true))
-    expect(() => value.worker.push(frame(true))).toThrow("overflow")
+    await until(() => value.failures.length > 0)
+    expect(value.failures[0]?.code).toBe("overflow")
     connected.resolve(value.connection)
     await tick(); await tick()
-    expect(value.failures[0]?.code).toBe("overflow")
     expect(value.audio).toHaveLength(0)
   })
 
-  test("two unresolved commits bound provider and server admission backlog", async () => {
+  test("two unresolved commits bound the provider while later turns wait admitted", async () => {
     const value = fixture()
     await utterance(value)
-    const before = value.commits.length
+    await utterance(value)
     value.worker.push(frame(true))
     for (let index = 0; index < 28; index++) value.worker.push(frame(false))
-    await until(() => value.commits.length > before)
-    value.worker.push(frame(true))
-    await until(() => value.failures.length > 0)
+    await until(() => value.events.filter((event) => event === "admit").length === 3)
+    await tick(); await tick()
     expect(value.commits).toEqual(["segment-1", "segment-2"])
-    expect(value.events.filter((event) => event === "admit")).toHaveLength(2)
-    expect(value.failures[0]?.code).toBe("overflow")
+    value.final("segment-1", "First.")
+    await until(() => value.commits.length === 3)
+    expect(value.commits).toEqual(["segment-1", "segment-2", "segment-3"])
+    expect(value.failures).toEqual([])
+    await value.worker.stop(false)
   })
 })

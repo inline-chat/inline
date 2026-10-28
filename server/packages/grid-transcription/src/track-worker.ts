@@ -19,35 +19,60 @@ export type TrackWorkerOptions = Readonly<{
   connect?: (options: ProviderOptions) => Promise<SpeechConnection>;
   now?: () => number;
   idleCloseMs?: number;
+  retryBaseMs?: number;
+  maxBacklogMs?: number;
 }>
-type PendingTurn = { timer: NodeJS.Timeout; posting: boolean }
+type Turn = { id: string; frames: Int16Array[]; samples: number; closed: boolean; failures: number; capturedAt: number }
 const FINAL_TIMEOUT_MS = 5_000
+const DRAIN_TIMEOUT_MS = 5_000
 const SOCKET_MAX_AGE_MS = 9 * 60 * 1000
 const SOCKET_MAX_TURNS = 900
 // Providers bill open stream time, so a speaker's socket lives only while they talk. A quiet
-// stretch closes it; their next turn reconnects while the PCM queue holds the opening audio.
+// stretch closes it; their next turn reconnects while capture keeps buffering.
 const SOCKET_IDLE_MS = 15_000
-// Reconnecting per burst makes a transient refusal likelier; one quick retry fits inside the PCM queue.
-const CONNECT_RETRY_MS = 300
+// Provider loss never stops capture. Reconnect with capped, jittered exponential backoff
+// for as long as the run lasts, and resend the unfinished turn from its first sample.
+const RETRY_BASE_MS = 500
+const RETRY_MAX_MS = 30_000
+// A turn the provider keeps failing on is retired empty rather than blocking the speaker.
+const MAX_TURN_FAILURES = 5
+// Speech buffered while the provider is unreachable (16 kHz mono: ~9.6 MB per speaker).
+const MAX_BACKLOG_MS = 5 * 60 * 1000
+// Real-time providers expect near real-time audio. Live speech already arrives at that pace;
+// a turn sent more than a second after capture began (a resend or backlog) is paced, not burst.
+const REPLAY_AFTER_MS = 1_000
+const REPLAY_SPEED = 1.25
+const REPLAY_HEADROOM_MS = 500
 
-// Exactly one consumer owns each speaker's VAD, admission and provider commit order.
-// Native RTC readers only push owned copies and never wait for inference or network I/O.
+// Exactly one consumer owns each speaker's VAD and admission order; one sender owns provider
+// order. Native RTC readers only push owned copies and never wait for inference or network I/O.
 export class TrackWorker {
   readonly sampleRate: number
   private readonly queue: BoundedPcmQueue
   private readonly segmenter: SpeechSegmenter
   private readonly now: () => number
   private readonly consumer: Promise<void>
+  private readonly sender: Promise<void>
   private accepting = true
   private closed = false
   private graceful = false
+  private draining = false
+  /** Admitted turns without a provider final, oldest first. The last one may still be capturing. */
+  private readonly turns: Turn[] = []
+  private backlogSamples = 0
   private connection: SpeechConnection | undefined
+  private generation = 0
   private connectionStartedAt = 0
   private socketTurns = 0
-  private rotationTimer: NodeJS.Timeout | undefined
+  /** Leading turns committed on the current socket, awaiting finals in commit order. */
+  private committed = 0
+  /** The turn after the committed ones, partly streamed on the current socket. */
+  private streaming: { sent: number; startedAt: number } | undefined
+  private finalTimer: NodeJS.Timeout | undefined
   private idleTimer: NodeJS.Timeout | undefined
-  private current: { id: string; samples: number } | undefined
-  private readonly pending = new Map<string, PendingTurn>()
+  private retryAttempt = 0
+  private wake: (() => void) | undefined
+  private endDelay: (() => void) | undefined
   private readonly posting = new Set<Promise<void>>()
   private closePromise: Promise<void> | undefined
   private drainResolve: (() => void) | undefined
@@ -64,6 +89,7 @@ export class TrackWorker {
     this.consumer = this.consume().catch((error: unknown) => {
       if (this.accepting) this.fail(error)
     })
+    this.sender = this.send().catch((error: unknown) => this.fail(error))
   }
 
   push(samples: Int16Array): void {
@@ -94,16 +120,19 @@ export class TrackWorker {
         if (!this.accepting) return
         if (action.kind === "start") await this.startTurn(action.frames)
         else if (action.kind === "audio") this.append(action.frame)
-        else this.commit()
+        else this.closeTurn()
       }
       } finally { clearTimeout(this.processingTimer); this.processingTimer = undefined }
     }
   }
 
+  private get capturing(): Turn | undefined {
+    const last = this.turns.at(-1)
+    return last && !last.closed ? last : undefined
+  }
+
   private async startTurn(frames: readonly Int16Array[]): Promise<void> {
-    if (this.current || this.pending.size >= MAX_PENDING_TURNS) throw new TranscriptionError("overflow")
-    clearTimeout(this.idleTimer)
-    this.idleTimer = undefined
+    if (this.capturing) throw new TranscriptionError("overflow")
     this.options.assertRunAuthority()
     this.options.assertMicrophone()
     const id = await this.options.api.admit(this.options.participantIdentity, this.options.trackSid, randomUUID())
@@ -114,66 +143,139 @@ export class TrackWorker {
     }
     this.options.assertRunAuthority()
     this.options.assertMicrophone()
-    this.current = { id, samples: 0 }
-    if (this.connection && (this.now() - this.connectionStartedAt >= SOCKET_MAX_AGE_MS || this.socketTurns >= SOCKET_MAX_TURNS)) {
-      // No unbounded completion history: rotate only with every old commit acknowledged.
-      if (this.pending.size !== 0) throw new TranscriptionError("overflow")
-      this.closeConnection()
-    }
-    if (!this.connection) {
-      const connection = await this.connectProvider()
-      if (!this.accepting || this.closed) { connection.close(); return }
-      this.options.assertRunAuthority()
-      this.options.assertMicrophone()
-      this.connection = connection
-      this.connectionStartedAt = this.now()
-      this.socketTurns = 0
-      this.rotationTimer = setTimeout(() => this.rotateIfIdle(), SOCKET_MAX_AGE_MS)
-    }
+    this.turns.push({ id, frames: [], samples: 0, closed: false, failures: 0, capturedAt: this.now() })
     for (const frame of frames) this.append(frame)
-  }
-
-  private async connectProvider(): Promise<SpeechConnection> {
-    const connect = this.options.connect ?? ProviderConnection.connect
-    const options: ProviderOptions = {
-      model: this.options.model, apiKey: this.options.apiKey,
-      assertAuthority: () => this.assertFinalAuthority(),
-      onFinal: (turn) => this.receiveFinal(turn),
-      onFailure: (error) => this.fail(error),
-    }
-    try { return await connect(options) } catch (error) {
-      if (!(error instanceof TranscriptionError) || error.code !== "provider" || !this.accepting) throw error
-      await new Promise((resolve) => setTimeout(resolve, CONNECT_RETRY_MS))
-      if (!this.accepting || this.closed) throw new TranscriptionError("stopped")
-      return connect(options)
-    }
+    this.notify()
   }
 
   private append(frame: Int16Array): void {
-    if (!this.accepting || this.closed || !this.current || !this.connection) throw new TranscriptionError("stopped")
+    const turn = this.capturing
+    if (!this.accepting || this.closed || !turn) throw new TranscriptionError("stopped")
     this.options.assertRunAuthority()
     this.options.assertMicrophone()
-    this.connection.appendAudio(frame)
-    this.current.samples += frame.length
+    if ((this.backlogSamples + frame.length) * 1000 > (this.options.maxBacklogMs ?? MAX_BACKLOG_MS) * this.sampleRate)
+      throw new TranscriptionError("overflow")
+    turn.frames.push(frame)
+    turn.samples += frame.length
+    this.backlogSamples += frame.length
+    this.notify()
   }
 
-  private commit(): void {
-    const current = this.current
-    this.current = undefined
-    if (!current) return
+  private closeTurn(): void {
+    const turn = this.capturing
+    if (!turn) return
     this.assertFinalAuthority()
-    if (!this.connection || current.samples === 0) {
-      this.trackPost(() => this.postEmpty(current.id))
-      return
+    turn.closed = true
+    this.notify()
+  }
+
+  /** The only provider writer: turns in admission order, at most two awaiting finals, across reconnects. */
+  private async send(): Promise<void> {
+    while (!this.closed) {
+      const turn = this.turns[this.committed]
+      if (!turn || this.committed >= MAX_PENDING_TURNS || (!this.accepting && !this.draining)) {
+        if (!this.accepting && !this.draining && !this.turns.length) return
+        await this.sleep()
+        continue
+      }
+      clearTimeout(this.idleTimer)
+      this.idleTimer = undefined
+      if (turn.closed && turn.samples === 0) {
+        // Finals retire in order, so an empty turn waits behind committed predecessors.
+        if (this.committed === 0) this.retire(turn, "")
+        else await this.sleep()
+        continue
+      }
+      if (!this.connection) {
+        if (this.retryAttempt > 0) await this.delay(this.backoff())
+        if (!this.closed) await this.connect()
+        continue
+      }
+      if (!this.streaming) {
+        if (this.committed === 0
+          && (this.now() - this.connectionStartedAt >= SOCKET_MAX_AGE_MS || this.socketTurns >= SOCKET_MAX_TURNS)) {
+          // Rotate between turns, where nothing is committed on the old socket.
+          this.closeConnection()
+          continue
+        }
+        this.streaming = { sent: 0, startedAt: this.now() }
+      }
+      const streaming = this.streaming
+      try {
+        const replay = streaming.startedAt - turn.capturedAt > REPLAY_AFTER_MS
+        const allowed = replay
+          ? ((this.now() - streaming.startedAt) * REPLAY_SPEED + REPLAY_HEADROOM_MS) * this.sampleRate / 1000
+          : Number.POSITIVE_INFINITY
+        let delivered = turn.frames.slice(0, streaming.sent).reduce((sum, frame) => sum + frame.length, 0)
+        while (streaming.sent < turn.frames.length && delivered < allowed) {
+          this.assertFinalAuthority()
+          const frame = turn.frames[streaming.sent]!
+          this.connection.appendAudio(frame)
+          delivered += frame.length
+          streaming.sent++
+        }
+        if (streaming.sent < turn.frames.length) {
+          await this.sleep(20)
+          continue
+        }
+        if (!turn.closed) { await this.sleep(); continue }
+        // Manual finalize works best with real trailing silence; hard speech boundaries and
+        // manual Stop add a finite 200ms zero tail, never more captured room audio.
+        this.connection.appendAudio(new Int16Array(this.sampleRate / 5))
+        this.streaming = undefined
+        this.committed++
+        this.socketTurns++
+        if (this.committed === 1) this.armFinalTimer()
+        this.connection.commitTurn(turn.id)
+      } catch (error) {
+        if (!retryable(error)) throw error
+        this.providerFailed(this.generation)
+      }
     }
-    if (this.pending.size >= MAX_PENDING_TURNS) throw new TranscriptionError("overflow")
-    // Manual finalize works best with real trailing silence; hard speech boundaries and
-    // manual Stop add a finite 200ms zero tail, never more captured room audio.
-    this.connection.appendAudio(new Int16Array(this.sampleRate / 5))
-    const timer = setTimeout(() => this.fail(new TranscriptionError("provider")), FINAL_TIMEOUT_MS)
-    this.pending.set(current.id, { timer, posting: false })
-    this.socketTurns++
-    this.connection.commitTurn(current.id)
+  }
+
+  /** A final that never arrives is a provider failure: reconnect and resend. */
+  private armFinalTimer(): void {
+    clearTimeout(this.finalTimer)
+    const generation = this.generation
+    this.finalTimer = setTimeout(() => this.providerFailed(generation), FINAL_TIMEOUT_MS)
+  }
+
+  private async connect(): Promise<boolean> {
+    const generation = ++this.generation
+    try {
+      const connection = await (this.options.connect ?? ProviderConnection.connect)({
+        model: this.options.model, apiKey: this.options.apiKey,
+        assertAuthority: () => this.assertFinalAuthority(),
+        onFinal: (turn) => this.receiveFinal(turn, generation),
+        onFailure: (error) => { if (retryable(error)) this.providerFailed(generation); else this.fail(error) },
+      })
+      if (this.closed || generation !== this.generation) { connection.close(); return false }
+      try { this.assertFinalAuthority() } catch (error) { connection.close(); throw error }
+      this.connection = connection
+      this.connectionStartedAt = this.now()
+      this.socketTurns = 0
+      return true
+    } catch (error) {
+      if (!retryable(error)) throw error
+      this.retryAttempt++
+      return false
+    }
+  }
+
+  /** Drop the socket and resend every unfinished turn on a fresh one. Capture is unaffected. */
+  private providerFailed(generation: number): void {
+    if (this.closed || generation !== this.generation) return
+    this.closeConnection()
+    this.retryAttempt++
+    const oldest = this.turns[0]
+    if (oldest && ++oldest.failures >= MAX_TURN_FAILURES && oldest.closed) this.retire(oldest, "")
+    this.notify()
+  }
+
+  private backoff(): number {
+    const ceiling = Math.min(RETRY_MAX_MS, (this.options.retryBaseMs ?? RETRY_BASE_MS) * 2 ** Math.min(this.retryAttempt, 16))
+    return ceiling / 2 + Math.random() * ceiling / 2
   }
 
   private assertFinalAuthority(): void {
@@ -183,16 +285,27 @@ export class TrackWorker {
     // The API independently fences current Space, destination and admitted attribution.
   }
 
-  private receiveFinal(turn: FinalTurn): void {
+  private receiveFinal(final: FinalTurn, generation: number): void {
     this.assertFinalAuthority()
-    const pending = this.pending.get(turn.turnId)
-    if (!pending || pending.posting) throw new TranscriptionError("protocol")
-    pending.posting = true
-    clearTimeout(pending.timer)
-    this.trackPost(() => this.postFinal(turn).finally(() => {
-      this.pending.delete(turn.turnId)
-      this.maybeDrained()
-    }))
+    if (generation !== this.generation) return
+    const turn = this.turns[0]
+    if (!this.committed || turn?.id !== final.turnId) throw new TranscriptionError("protocol")
+    this.retryAttempt = 0
+    this.retire(turn, final.text)
+  }
+
+  private retire(turn: Turn, text: string): void {
+    if (this.turns[0] !== turn) throw new TranscriptionError("protocol")
+    this.turns.shift()
+    this.backlogSamples -= turn.samples
+    clearTimeout(this.finalTimer)
+    this.finalTimer = undefined
+    if (this.committed > 0) {
+      this.committed--
+      if (this.committed > 0) this.armFinalTimer()
+    }
+    this.trackPost(() => this.postFinal({ turnId: turn.id, text }))
+    this.notify()
   }
 
   private async postFinal(turn: FinalTurn): Promise<void> {
@@ -210,7 +323,7 @@ export class TrackWorker {
   }
   private async postEmpty(id: string): Promise<void> { await this.postFinal({ turnId: id, text: "" }) }
   private trackPost(post: () => Promise<void>): void {
-    // Provider finals arrive in commit order. Retain that order through API retries
+    // Finals retire in admission order. Retain that order through API retries
     // using the existing bounded posting ownership, while capture keeps consuming.
     const predecessor = [...this.posting].at(-1)
     const operation = predecessor ? predecessor.then(post) : post()
@@ -221,29 +334,48 @@ export class TrackWorker {
     })
   }
   private maybeDrained(): void {
-    this.rotateIfIdle()
-    if (!this.accepting && !this.current && this.pending.size === 0 && this.posting.size === 0) this.drainResolve?.()
+    this.scheduleIdleClose()
+    if (!this.accepting && this.turns.length === 0 && this.posting.size === 0) this.drainResolve?.()
   }
-  private connectionIdle(): boolean {
-    return this.accepting && !!this.connection && !this.current && !this.pending.size && !this.posting.size
-  }
-  private rotateIfIdle(): void {
-    if (!this.connectionIdle()) return
-    if (this.now() - this.connectionStartedAt >= SOCKET_MAX_AGE_MS || this.socketTurns >= SOCKET_MAX_TURNS) {
-      this.closeConnection()
-      return
-    }
+  private scheduleIdleClose(): void {
+    if (!this.accepting || !this.connection || this.turns.length || this.posting.size) return
     clearTimeout(this.idleTimer)
-    this.idleTimer = setTimeout(() => { if (this.connectionIdle()) this.closeConnection() },
-      this.options.idleCloseMs ?? SOCKET_IDLE_MS)
+    this.idleTimer = setTimeout(() => {
+      if (this.accepting && !this.turns.length && !this.posting.size) this.closeConnection()
+    }, this.options.idleCloseMs ?? SOCKET_IDLE_MS)
   }
   private closeConnection(): void {
     this.connection?.close()
     this.connection = undefined
-    clearTimeout(this.rotationTimer)
-    this.rotationTimer = undefined
+    this.generation++
+    this.committed = 0
+    this.streaming = undefined
+    clearTimeout(this.finalTimer)
+    this.finalTimer = undefined
     clearTimeout(this.idleTimer)
     this.idleTimer = undefined
+  }
+
+  private notify(): void {
+    const wake = this.wake
+    this.wake = undefined
+    wake?.()
+    if (!this.turns.length) this.maybeDrained()
+  }
+  private sleep(ms?: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = ms === undefined ? undefined : setTimeout(() => { if (this.wake === done) this.wake = undefined; resolve() }, ms)
+      const done = () => { clearTimeout(timer); resolve() }
+      this.wake = done
+    })
+  }
+  /** Backoff ignores new audio; only teardown ends it early. */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(done, ms)
+      function done() { clearTimeout(timer); resolve() }
+      this.endDelay = done
+    })
   }
   private safe(error: unknown): TranscriptionError {
     return error instanceof TranscriptionError ? error : new TranscriptionError("provider")
@@ -272,32 +404,40 @@ export class TrackWorker {
     // Inference/admit/connect can be pending; late results are checked before all writes.
     await this.consumer
     if (this.closed) return
-    this.commit()
-    if (this.pending.size || this.posting.size) {
+    const capturing = this.turns.at(-1)
+    if (capturing) capturing.closed = true
+    this.draining = true
+    this.notify()
+    if (this.turns.length || this.posting.size) {
       await new Promise<void>((resolve) => {
         this.drainResolve = resolve
-        this.drainTimer = setTimeout(resolve, FINAL_TIMEOUT_MS)
+        this.drainTimer = setTimeout(resolve, DRAIN_TIMEOUT_MS)
         this.maybeDrained()
       })
     }
     this.discard()
+    await this.sender
   }
   private discard(): void {
     if (this.closed) return
     this.closed = true
     this.accepting = false
+    this.draining = false
     this.queue.close()
     this.segmenter.stop()
-    this.connection?.close()
-    this.connection = undefined
-    this.current = undefined
-    for (const pending of this.pending.values()) clearTimeout(pending.timer)
-    this.pending.clear()
+    this.closeConnection()
+    this.turns.length = 0
+    this.backlogSamples = 0
     clearTimeout(this.drainTimer)
     clearTimeout(this.processingTimer)
-    clearTimeout(this.rotationTimer)
-    clearTimeout(this.idleTimer)
     this.options.detector.close()
     this.drainResolve?.()
+    this.wake?.()
+    this.endDelay?.()
   }
+}
+
+/** Socket loss, refusal, timeouts and send backpressure are provider weather, not run failures. */
+function retryable(error: unknown): boolean {
+  return error instanceof TranscriptionError && (error.code === "provider" || error.code === "overflow")
 }
