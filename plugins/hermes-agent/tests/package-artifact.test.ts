@@ -28,8 +28,10 @@ type PackEntry = {
 }
 
 describe("packed artifact", () => {
+  // pretest builds the runtime files. Packing must not rebuild them while
+  // parallel installer tests copy and verify the same sidecar bundle.
   it("ships only runtime files and license text needed by the external Hermes plugin", async () => {
-    const raw = execFileSync("npm", ["pack", "--dry-run", "--json", "--silent"], {
+    const raw = execFileSync("npm", ["pack", "--ignore-scripts", "--dry-run", "--json", "--silent"], {
       cwd: packageRoot,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -127,7 +129,7 @@ describe("packed artifact", () => {
       await mkdir(path.join(prefix, "bin"), { recursive: true })
       await mkdir(path.join(prefix, "lib"), { recursive: true })
 
-      const raw = execFileSync("npm", ["pack", "--pack-destination", packDir, "--json", "--silent"], {
+      const raw = execFileSync("npm", ["pack", "--ignore-scripts", "--pack-destination", packDir, "--json", "--silent"], {
         cwd: packageRoot,
         encoding: "utf8",
         env: realNpmEnv,
