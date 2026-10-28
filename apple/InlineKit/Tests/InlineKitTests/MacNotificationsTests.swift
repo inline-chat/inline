@@ -179,17 +179,23 @@ struct MacNotificationsTests {
     }
   }
 
-  @Test("reply context counts as a personal address")
+  @Test("reply context counts as a personal address except in only mentions")
   func replyContextCountsAsPersonalAddress() {
     let ordinaryThread = makeMessage()
+    let mentionedThread = makeMessage(mentioned: true)
 
     #expect(shouldSchedule(
       ordinaryThread,
       mode: .mentions,
       isPersonallyAddressed: true
     ))
-    #expect(shouldSchedule(
+    #expect(!shouldSchedule(
       ordinaryThread,
+      mode: .onlyMentions,
+      isPersonallyAddressed: true
+    ))
+    #expect(shouldSchedule(
+      mentionedThread,
       mode: .onlyMentions,
       isPersonallyAddressed: true
     ))

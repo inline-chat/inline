@@ -260,7 +260,8 @@ public actor MacNotifications {
     case .mentions, .importantOnly:
       return isDirectMessage || isAddressedToCurrentUser || isNudge
     case .onlyMentions:
-      return isAddressedToCurrentUser || isNudge
+      // Replies and reply-thread activity don't count here; only explicit mentions.
+      return message.mentioned || isNudge
     }
   }
 
