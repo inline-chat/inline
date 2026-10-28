@@ -604,7 +604,7 @@ final class PinnedMessageHeaderView: NSView {
 
   @objc private func unpinShown() {
     guard let messageId = currentMessageId else { return }
-    unpin([messageId])
+    unpin(messageId)
   }
 
   @objc private func confirmUnpinAll() {
@@ -617,7 +617,7 @@ final class PinnedMessageHeaderView: NSView {
     alert.addButton(withTitle: "Cancel")
     let unpinAll: (NSApplication.ModalResponse) -> Void = { [weak self] response in
       guard response == .alertFirstButtonReturn else { return }
-      self?.unpin(messageIds)
+      self?.unpinAll()
     }
     if let window {
       alert.beginSheetModal(for: window, completionHandler: unpinAll)
@@ -626,14 +626,23 @@ final class PinnedMessageHeaderView: NSView {
     }
   }
 
-  private func unpin(_ messageIds: [Int64]) {
-    for messageId in messageIds {
-      Task { @MainActor [dependencies, peerId] in
-        do {
-          _ = try await dependencies.realtimeV2.send(.pinMessage(peer: peerId, messageId: messageId, unpin: true))
-        } catch {
-          Log.shared.error("Failed to unpin message", error: error)
-        }
+  private func unpin(_ messageId: Int64) {
+    Task { @MainActor [dependencies, peerId] in
+      do {
+        _ = try await dependencies.realtimeV2.send(.pinMessage(peer: peerId, messageId: messageId, unpin: true))
+      } catch {
+        Log.shared.error("Failed to unpin message", error: error)
+      }
+    }
+  }
+
+  /// One request for the whole chat, so the header clears at once instead of counting down.
+  private func unpinAll() {
+    Task { @MainActor [dependencies, peerId] in
+      do {
+        _ = try await dependencies.realtimeV2.send(.unpinAllMessages(peer: peerId))
+      } catch {
+        Log.shared.error("Failed to unpin all messages", error: error)
       }
     }
   }

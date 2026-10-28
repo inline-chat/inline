@@ -575,7 +575,7 @@ final class PinnedMessageHeaderView: UIView {
 
   @objc private func closeTapped() {
     guard !closeButton.showsMenuAsPrimaryAction, let messageId = currentMessageId else { return }
-    unpin([messageId])
+    unpin(messageId)
   }
 
   private func openPin(_ messageId: Int64) {
@@ -586,14 +586,23 @@ final class PinnedMessageHeaderView: UIView {
     onOpenMessage?(target)
   }
 
-  private func unpin(_ messageIds: [Int64]) {
-    for messageId in messageIds {
-      Task { @MainActor [peerId] in
-        do {
-          _ = try await Api.realtime.send(.pinMessage(peer: peerId, messageId: messageId, unpin: true))
-        } catch {
-          Log.shared.error("Failed to unpin message", error: error)
-        }
+  private func unpin(_ messageId: Int64) {
+    Task { @MainActor [peerId] in
+      do {
+        _ = try await Api.realtime.send(.pinMessage(peer: peerId, messageId: messageId, unpin: true))
+      } catch {
+        Log.shared.error("Failed to unpin message", error: error)
+      }
+    }
+  }
+
+  /// One request for the whole chat, so the header clears at once instead of counting down.
+  private func unpinAll() {
+    Task { @MainActor [peerId] in
+      do {
+        _ = try await Api.realtime.send(.unpinAllMessages(peer: peerId))
+      } catch {
+        Log.shared.error("Failed to unpin all messages", error: error)
       }
     }
   }
@@ -622,7 +631,7 @@ final class PinnedMessageHeaderView: UIView {
 
     let unpinShown = UIAction(title: "Unpin", image: UIImage(systemName: "pin.slash")) { [weak self] _ in
       guard let messageId = self?.currentMessageId else { return }
-      self?.unpin([messageId])
+      self?.unpin(messageId)
     }
     let unpinAll = UIAction(
       title: "Unpin All \(messageIds.count) Messages",
@@ -648,7 +657,7 @@ final class PinnedMessageHeaderView: UIView {
     )
     alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
     alert.addAction(UIAlertAction(title: "Unpin All", style: .destructive) { [weak self] _ in
-      self?.unpin(messageIds)
+      self?.unpinAll()
     })
     controller.present(alert, animated: true)
   }
