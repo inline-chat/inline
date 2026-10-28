@@ -288,7 +288,7 @@
         {
           "type": "usage",
           "usage": {
-            "last": {"input": 1200, "cached_input": 30000, "output": 640, "reasoning": 0, "total": 31840},
+            "total": {"input": 1200, "cached_input": 30000, "output": 640, "reasoning": 0, "total": 31840},
             "context_window": 200000
           }
         },
