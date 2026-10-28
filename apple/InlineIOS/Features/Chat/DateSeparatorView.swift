@@ -10,6 +10,9 @@ final class DateSeparatorView: UICollectionReusableView {
   private var currentDateString: String = ""
   private var onTap: (() -> Void)?
   private var onInteractionChanged: ((Bool) -> Void)?
+  /// Glass appears only while the badge floats over messages; inline dates stay plain.
+  private var isFloating = false
+  private var hasResolvedFloating = false
 
   private let label: UILabel = {
     let label = UILabel()
@@ -24,9 +27,7 @@ final class DateSeparatorView: UICollectionReusableView {
   private let backgroundEffectView: UIVisualEffectView = {
     let effectView: UIVisualEffectView
     if #available(iOS 26.0, *) {
-      let glassEffect = UIGlassEffect(style: .regular)
-      glassEffect.isInteractive = true
-      effectView = UIVisualEffectView(effect: glassEffect)
+      effectView = UIVisualEffectView(effect: nil)
       effectView.cornerConfiguration = .capsule()
     } else {
       effectView = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
@@ -60,6 +61,7 @@ final class DateSeparatorView: UICollectionReusableView {
   }
 
   private func setupViews() {
+    applyFloatingAppearance()
     addSubview(backgroundEffectView)
     backgroundEffectView.contentView.addSubview(label)
     backgroundEffectView.contentView.addSubview(button)
@@ -140,6 +142,41 @@ final class DateSeparatorView: UICollectionReusableView {
     }
   }
 
+  func setFloating(_ floating: Bool, animated: Bool) {
+    guard #available(iOS 26.0, *) else { return }
+    guard floating != isFloating || !hasResolvedFloating else { return }
+
+    // The first state after dequeue snaps so reused badges never materialize on screen.
+    let shouldAnimate = animated && hasResolvedFloating
+    isFloating = floating
+    hasResolvedFloating = true
+
+    if shouldAnimate {
+      UIView.animate(
+        withDuration: 0.25,
+        delay: 0,
+        options: [.allowUserInteraction, .beginFromCurrentState]
+      ) {
+        self.applyFloatingAppearance()
+      }
+    } else {
+      applyFloatingAppearance()
+    }
+  }
+
+  private func applyFloatingAppearance() {
+    guard #available(iOS 26.0, *) else { return }
+    if isFloating {
+      let glassEffect = UIGlassEffect(style: .regular)
+      glassEffect.isInteractive = true
+      backgroundEffectView.effect = glassEffect
+      label.textColor = .label
+    } else {
+      backgroundEffectView.effect = nil
+      label.textColor = .secondaryLabel
+    }
+  }
+
   func setVisible(_ visible: Bool, animated: Bool) {
     guard visible || !button.isTracking else { return }
 
@@ -210,5 +247,8 @@ final class DateSeparatorView: UICollectionReusableView {
     button.accessibilityLabel = nil
     label.text = ""
     setVisible(true, animated: false)
+    isFloating = false
+    hasResolvedFloating = false
+    applyFloatingAppearance()
   }
 }

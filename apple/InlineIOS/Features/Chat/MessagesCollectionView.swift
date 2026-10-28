@@ -289,6 +289,7 @@ final class MessagesCollectionView: UICollectionView {
       resolvePendingMessageScroll()
     }
     coordinator.syncAvatarOverlay(animate: false)
+    coordinator.syncDateSeparatorFloating()
     reconcileScrollAffordance()
     syncVisibleBubbleGradients()
   }
@@ -5212,20 +5213,34 @@ private extension MessagesCollectionView {
     private func setDateSeparators(hidden: Bool, animated: Bool) {
       guard let collectionView = currentCollectionView else { return }
 
+      for (separator, pinOffset) in dateSeparatorPinOffsets(in: collectionView) {
+        // Detect if this footer is currently pinned to the bottom (sticky)
+        guard abs(pinOffset) < 1.0 else { continue }
+        separator.setVisible(!hidden, animated: animated)
+      }
+    }
+
+    /// Runs on every layout pass, so separators turn to glass exactly as messages slide beneath them.
+    func syncDateSeparatorFloating() {
+      guard let collectionView = currentCollectionView else { return }
+
+      // Pinned footers sit on the edge; the one being pushed out by the next day sits past it.
+      for (separator, pinOffset) in dateSeparatorPinOffsets(in: collectionView) {
+        separator.setFloating(pinOffset > -1.0, animated: true)
+      }
+    }
+
+    /// Each visible separator's distance past the visible edge where sticky footers pin.
+    private func dateSeparatorPinOffsets(in collectionView: UICollectionView) -> [(DateSeparatorView, CGFloat)] {
       let footers = collectionView.visibleSupplementaryViews(ofKind: UICollectionView.elementKindSectionFooter)
 
       // The physical bottom edge of the visible rect in the collection-view's coordinate space
       let visibleBottom = collectionView.contentOffset.y + collectionView.bounds.height - collectionView.contentInset
         .bottom
 
-      for view in footers {
-        guard let separator = view as? DateSeparatorView else { continue }
-
-        // Detect if this footer is currently pinned to the bottom (sticky)
-        let isPinned = abs(separator.frame.maxY - visibleBottom) < 1.0
-        guard isPinned else { continue }
-
-        separator.setVisible(!hidden, animated: animated)
+      return footers.compactMap { view in
+        guard let separator = view as? DateSeparatorView else { return nil }
+        return (separator, separator.frame.maxY - visibleBottom)
       }
     }
 
