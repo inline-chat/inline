@@ -31,7 +31,7 @@ const peer = (chatId: number) => ({ type: { oneofKind: "chat" as const, chat: { 
 const secret = "grid-transcript-test-secret-0123456789"
 const previousConfig = new Map<string, string | undefined>()
 function configureWorker() {
-  for (const [key, value] of Object.entries({ GRID_TRANSCRIPTION_ENABLED: "true", GRID_TRANSCRIPTION_WORKER_SECRET: secret, GRID_TRANSCRIPTION_MODEL: "meeting", GRID_TRANSCRIPTION_ALLOWED_CLIENT_VERSIONS: "grid-transcript-qualified-test" })) {
+  for (const [key, value] of Object.entries({ GRID_TRANSCRIPTION_ENABLED: "true", GRID_TRANSCRIPTION_WORKER_SECRET: secret, GRID_TRANSCRIPTION_MODEL: "meeting" })) {
     if (!previousConfig.has(key)) previousConfig.set(key, process.env[key])
     process.env[key] = value
   }
@@ -56,7 +56,7 @@ async function fixture(label: string) {
   await db.transaction((tx) => SpaceSettingsModel.updateGrid(space.id, true, tx))
   const speakerMembershipId = randomUUID()
   for (const user of [actor, speaker]) {
-    const { session } = await testUtils.createSessionForUser(user.id, { clientType: "macos", clientVersion: "grid-transcript-qualified-test" })
+    const { session } = await testUtils.createSessionForUser(user.id, { clientType: "macos", clientVersion: "5999" })
     await db.insert(gridPresence).values({ userId: user.id, roomId: room.id, ownerSessionId: session.id, mediaMembershipId: user.id === speaker.id ? speakerMembershipId : randomUUID(), microphoneEnabled: true, leaseExpiresAt: new Date(Date.now() + 60_000) })
   }
   const runId = randomUUID()

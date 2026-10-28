@@ -45,12 +45,11 @@ function configure() {
     GRID_TRANSCRIPTION_ENABLED: "true",
     GRID_TRANSCRIPTION_WORKER_SECRET: secret,
     GRID_TRANSCRIPTION_MODEL: "meeting",
-    GRID_TRANSCRIPTION_ALLOWED_CLIENT_VERSIONS: "qualified-test",
   })) {
     if (!original.has(key)) original.set(key, process.env[key])
     process.env[key] = value
   }
-  providerSpy = spyOn(livekit, "getLiveKitGridConfig").mockReturnValue({
+  providerSpy ??= spyOn(livekit, "getLiveKitGridConfig").mockReturnValue({
     serverUrl: "wss://local.test",
     apiKey: "local-test-key",
     apiSecret: "local-test-secret-0123456789",
@@ -92,13 +91,14 @@ async function fixture(label: string) {
     `${label}-peer@example.test`,
     `${label}-future@example.test`,
   ] as const)
+  await db.update(spaces).set({ isPro: true }).where(eq(spaces.id, space.id))
   await db
     .update(members)
     .set({ role: "owner" })
     .where(and(eq(members.spaceId, space.id), eq(members.userId, users[0].id)))
   const auth = await Promise.all(
     users.map((user) =>
-      testUtils.createSessionForUser(user.id, { clientType: "macos", clientVersion: "qualified-test" }),
+      testUtils.createSessionForUser(user.id, { clientType: "macos", clientVersion: "5999" }),
     ),
   )
   const contexts = users.map((user, i) =>
@@ -160,7 +160,7 @@ async function admittedReplacement(label: string) {
   const [oldPresence] = await db.select().from(gridPresence).where(eq(gridPresence.userId, f.users[1].id))
   const replacement = await testUtils.createSessionForUser(f.users[1].id, {
     clientType: "macos",
-    clientVersion: "qualified-test",
+    clientVersion: "5999",
   })
   const context = testUtils.functionContext({ userId: f.users[1].id, sessionId: replacement.session.id })
   await joinGridRoom({ roomId: f.roomId, microphoneEnabled: true }, context)
@@ -243,7 +243,7 @@ describe("Grid transcription control and worker authorization", () => {
     const { segmentId } = (await admitted.json()) as { segmentId: string }
     const replacement = await testUtils.createSessionForUser(f.users[1].id, {
       clientType: "macos",
-      clientVersion: "qualified-test",
+      clientVersion: "5999",
     })
     const context = testUtils.functionContext({ userId: f.users[1].id, sessionId: replacement.session.id })
     const joined = await joinGridRoom({ roomId: f.roomId, microphoneEnabled: true }, context)
@@ -402,6 +402,49 @@ describe("Grid transcription control and worker authorization", () => {
     expect((await f.current()).transcriptionAvailable).toBe(false)
     await expect(f.control(true)).rejects.toThrow()
     expect(await db.select().from(gridTranscriptionRuns)).toHaveLength(0)
+  })
+
+  test("only Pro Spaces with supported macOS builds can transcribe", async () => {
+    const f = await fixture("pro-gate")
+    expect((await f.current()).transcriptionAvailable).toBe(true)
+    await db.update(spaces).set({ isPro: false }).where(eq(spaces.id, f.space.id))
+    expect((await f.current()).transcriptionAvailable).toBe(false)
+    await expect(f.control(true)).rejects.toThrow()
+    await db.update(spaces).set({ isPro: true }).where(eq(spaces.id, f.space.id))
+    await db.update(sessions).set({ clientVersion: "5997" }).where(eq(sessions.id, f.auth[1]!.session.id))
+    expect((await f.current()).transcriptionAvailable).toBe(false)
+    await expect(f.control(true)).rejects.toThrow()
+    expect(await db.select().from(gridTranscriptionRuns)).toHaveLength(0)
+  })
+
+  test("an iPhone participant can be transcribed and joining from one keeps the run", async () => {
+    const f = await fixture("ios-participant")
+    await db.update(sessions).set({ clientType: "ios", clientVersion: "1380" }).where(eq(sessions.id, f.auth[1]!.session.id))
+    expect((await f.current()).transcriptionAvailable).toBe(true)
+    await f.control(true)
+    const phone = await testUtils.createSessionForUser(f.users[2].id, { clientType: "ios", clientVersion: "1380" })
+    await joinGridRoom(
+      { roomId: f.roomId, microphoneEnabled: true },
+      testUtils.functionContext({ userId: f.users[2].id, sessionId: phone.session.id }),
+    )
+    expect((await f.current()).transcription?.state).toBe(GridTranscriptionState.GRID_TRANSCRIPTION_STARTING)
+  })
+
+  test("two rooms transcribe at once on separate worker slots", async () => {
+    const first = await fixture("concurrent-first")
+    const second = await fixture("concurrent-second")
+    await api("heartbeat", { workerId: "control-test-slot-2", model: "meeting", ready: true, slot: 2 })
+    await first.control(true)
+    await second.control(true)
+    const claimedFirst = await first.claim()
+    const response = await api("claim", { workerId: "control-test-slot-2" })
+    expect(response.status).toBe(200)
+    const claimedSecond = (await response.json()) as Claimed
+    expect(new Set([claimedFirst.roomId, claimedSecond.roomId]).size).toBe(2)
+    expect((await api("claim", { workerId: "control-test" })).status).toBe(200)
+    expect((await api("claim", { workerId: "control-test-slot-2" })).status).toBe(200)
+    expect((await first.current()).transcription?.state).toBe(GridTranscriptionState.GRID_TRANSCRIPTION_STARTING)
+    expect((await second.current()).transcription?.state).toBe(GridTranscriptionState.GRID_TRANSCRIPTION_STARTING)
   })
 
   test("picker counts distinct transcripts and retains an intact origin after a newer cross-room link is retired", async () => {

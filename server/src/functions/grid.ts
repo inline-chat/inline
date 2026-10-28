@@ -1033,7 +1033,7 @@ async function buildGrid(spaceId: number, context: FunctionContext): Promise<Gri
           .where(eq(gridRooms.spaceId, spaceId))
           .orderBy(asc(gridRooms.createdAt), asc(gridRooms.id), asc(gridPresence.joinedAt))
       : []
-    const available = await transcriptionAvailable(tx)
+    const available = await transcriptionAvailable(tx, spaceId)
     const projected = new Map<
       number,
       {

@@ -8,6 +8,7 @@ import {
   gridTranscriptionSegments,
   members,
   messages,
+  spaces,
 } from "@in/server/db/schema"
 import { waitForPostCommitHooks } from "@in/server/db/commitHooks"
 import {
@@ -405,7 +406,6 @@ describe("Grid call transfer transcription authority", () => {
       GRID_TRANSCRIPTION_ENABLED: "true",
       GRID_TRANSCRIPTION_WORKER_SECRET: secret,
       GRID_TRANSCRIPTION_MODEL: "meeting",
-      GRID_TRANSCRIPTION_ALLOWED_CLIENT_VERSIONS: "qualified-transfer-test",
     })) {
       original.set(key, process.env[key])
       process.env[key] = value
@@ -442,7 +442,7 @@ describe("Grid call transfer transcription authority", () => {
           apiSecret: "transfer-test-secret-0123456789",
           provider,
         })
-        const { space, contexts } = await fixture(2, "qualified-transfer-test")
+        const { space, contexts } = await fixture(2, "5999")
         const owner = contexts[0]!
         const created = await createGridRoom(
           { spaceId: BigInt(space.id), expectedMembershipId: "", microphoneEnabled: true },
@@ -458,7 +458,7 @@ describe("Grid call transfer transcription authority", () => {
               sessionId: (
                 await testUtils.createSessionForUser(owner.currentUserId, {
                   clientType: "macos",
-                  clientVersion: "qualified-transfer-test",
+                  clientVersion: "5999",
                 })
               ).session.id,
             })
@@ -620,6 +620,7 @@ describe("Grid call transfer transcription authority", () => {
 async function fixture(count: number, clientVersion?: string) {
   const space = await testUtils.createSpace("Grid call transfer")
   if (!space) throw new Error("Expected fixture Space")
+  await db.update(spaces).set({ isPro: true }).where(eq(spaces.id, space.id))
   const users = await Promise.all(
     Array.from({ length: count }, () => testUtils.createUser(`${randomUUID()}@example.test`)),
   )

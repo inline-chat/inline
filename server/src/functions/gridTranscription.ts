@@ -307,7 +307,7 @@ export async function setGridTranscription(
     }
     if (
       !supportedGridTranscriptionSession(session) ||
-      !(await transcriptionAvailable(tx)) ||
+      !(await transcriptionAvailable(tx, room.spaceId)) ||
       !getLiveKitGridConfig() ||
       !room.connectionStartedAt ||
       room.connectionGeneration !== input.expectedGeneration
@@ -316,7 +316,9 @@ export async function setGridTranscription(
     const busy = await tx
       .select({ id: gridTranscriptionRuns.id })
       .from(gridTranscriptionRuns)
-      .where(inArray(gridTranscriptionRuns.state, [...captureStates]))
+      .where(
+        and(eq(gridTranscriptionRuns.sourceRoomId, room.id), inArray(gridTranscriptionRuns.state, [...captureStates])),
+      )
       .limit(1)
     if (busy.length) throw RealtimeRpcError.BadRequest()
     const roster = await occupants(tx, room.id)

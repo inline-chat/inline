@@ -5,6 +5,7 @@ import {
   gridTranscriptionWorker,
   chats,
   messages,
+  spaces,
   type DbGridTranscriptionRun,
 } from "@in/server/db/schema"
 import { getLiveKitGridConfig } from "@in/server/modules/grid/livekit"
@@ -25,13 +26,11 @@ export const captureStates = ["starting", "active", "stopping"] as const
 export const GRID_TRANSCRIPTION_LEASE_MS = 15_000
 export const GRID_TRANSCRIPTION_MAX_MS = 2 * 60 * 60_000
 export const GRID_TRANSCRIPTION_MAX_SPEAKERS = 8
+/** First macOS build that shows the transcription disclosure and refreshes its build on startup. */
+export const GRID_TRANSCRIPTION_MIN_MACOS_BUILD = 5998
 export function transcriptionConfig() {
   const secret = process.env["GRID_TRANSCRIPTION_WORKER_SECRET"]
   const model = process.env["GRID_TRANSCRIPTION_MODEL"] ?? "meeting"
-  const allowedClientVersions = (process.env["GRID_TRANSCRIPTION_ALLOWED_CLIENT_VERSIONS"] ?? "")
-    .split(",")
-    .map((v) => v.trim())
-    .filter(Boolean)
   return {
     enabled:
       process.env["GRID_TRANSCRIPTION_ENABLED"] === "true" &&
@@ -40,12 +39,13 @@ export function transcriptionConfig() {
       (model === "meeting" || model === "standard"),
     secret,
     model,
-    allowedClientVersions,
   }
 }
-export async function transcriptionAvailable(tx: Transaction) {
-  if (!transcriptionConfig().enabled || !transcriptionConfig().allowedClientVersions.length || !getLiveKitGridConfig())
-    return false
+/** Transcription is a Pro feature: the room's Space must be Pro and a worker must be ready. */
+export async function transcriptionAvailable(tx: Transaction, spaceId: number) {
+  if (!transcriptionConfig().enabled || !getLiveKitGridConfig()) return false
+  const [space] = await tx.select({ isPro: spaces.isPro }).from(spaces).where(eq(spaces.id, spaceId)).limit(1)
+  if (!space?.isPro) return false
   const [worker] = await tx
     .select()
     .from(gridTranscriptionWorker)
@@ -120,10 +120,13 @@ export function supportedGridTranscriptionSession(session: {
   clientType: string | null
   clientVersion: string | null
 }) {
+  // iPhones can be transcribed without their own disclosure yet; the room and transcript stay visible on Mac.
+  if (session.clientType === "ios") return true
   return (
     session.clientType === "macos" &&
     session.clientVersion !== null &&
-    transcriptionConfig().allowedClientVersions.includes(session.clientVersion)
+    /^\d+$/.test(session.clientVersion) &&
+    Number(session.clientVersion) >= GRID_TRANSCRIPTION_MIN_MACOS_BUILD
   )
 }
 const UNCLAIMED_START_TIMEOUT_MS = 30_000

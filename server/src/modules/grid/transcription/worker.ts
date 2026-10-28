@@ -41,6 +41,8 @@ const heartbeatSchema = Schema.Struct({
   workerId: boundedString(80),
   model: Schema.Literals(["meeting", "standard"]),
   ready: Schema.Boolean,
+  // Each concurrent room capacity in a worker process heartbeats its own row. Older workers omit it.
+  slot: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 64 }))),
 })
 const admissionSchema = Schema.Struct({
   participantIdentity: boundedString(128),
@@ -186,7 +188,7 @@ export async function handleGridTranscriptionWorkerRequest(request: Request): Pr
         const heartbeatAt = heartbeat.ready ? new Date() : new Date(0)
         await db
           .insert(gridTranscriptionWorker)
-          .values({ id: 1, workerId, model: heartbeat.model, heartbeatAt })
+          .values({ id: heartbeat.slot ?? 1, workerId, model: heartbeat.model, heartbeatAt })
           .onConflictDoUpdate({
             target: gridTranscriptionWorker.id,
             set: { workerId, model: heartbeat.model, heartbeatAt },
@@ -224,7 +226,6 @@ export async function handleGridTranscriptionWorkerRequest(request: Request): Pr
           .from(gridTranscriptionWorker)
           .where(
             and(
-              eq(gridTranscriptionWorker.id, 1),
               eq(gridTranscriptionWorker.workerId, workerId),
               eq(gridTranscriptionWorker.model, run.model),
               gt(gridTranscriptionWorker.heartbeatAt, new Date(Date.now() - GRID_TRANSCRIPTION_LEASE_MS)),
