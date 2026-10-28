@@ -1577,6 +1577,8 @@ const server = http.createServer((req, res) => {
       ok: false,
       error: err.message,
       errorKind: err.errorKind,
+      ...(err.outcomeUnknown ? { outcomeUnknown: true } : {}),
+      ...(err.retryAfterSeconds ? { retryAfterSeconds: err.retryAfterSeconds } : {}),
     })
   })
 })

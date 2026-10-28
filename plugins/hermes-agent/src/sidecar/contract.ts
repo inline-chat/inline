@@ -71,7 +71,7 @@ export function normalizeUploadKind(raw: string | undefined, filePath: string): 
 export function normalizeError(
   error: unknown,
   redact: (error: unknown) => string = defaultErrorText,
-): { status: number; errorKind: ErrorKind; message: string } {
+): { status: number; errorKind: ErrorKind; message: string; outcomeUnknown?: true; retryAfterSeconds?: number } {
   if (error instanceof SidecarError) {
     return {
       status: statusForErrorKind(error.errorKind),
@@ -80,9 +80,18 @@ export function normalizeError(
     }
   }
   const message = redact(error)
+  // The SDK reports a dispatched mutation whose result was lost by code, not text.
+  // Its message can still say "timeout" or "closed", which must not read as retry-safe.
+  if (errorCode(error) === "commit-outcome-unknown") {
+    return { status: 504, errorKind: "unknown", message, outcomeUnknown: true }
+  }
   const lower = message.toLowerCase()
-  if (lower.includes("rate") && lower.includes("limit")) {
-    return { status: 429, errorKind: "rate_limited", message }
+  if (isRateLimitCode(error) || (lower.includes("rate") && lower.includes("limit"))) {
+    // Hermes waits the server's FLOOD_WAIT-style hint instead of its own backoff.
+    const retryAfterSeconds = (error as { retryAfterSeconds?: unknown } | null)?.retryAfterSeconds
+    return typeof retryAfterSeconds === "number" && retryAfterSeconds > 0
+      ? { status: 429, errorKind: "rate_limited", message, retryAfterSeconds }
+      : { status: 429, errorKind: "rate_limited", message }
   }
   if (lower.includes("forbidden") || lower.includes("unauthorized")) {
     return { status: 403, errorKind: "forbidden", message }
@@ -94,6 +103,17 @@ export function normalizeError(
     return { status: 503, errorKind: "transient", message }
   }
   return { status: 500, errorKind: "unknown", message }
+}
+
+function errorCode(error: unknown): unknown {
+  return typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined
+}
+
+// Same check as the SDK's own recovery: RpcError_Code.RATE_LIMIT (3) or HTTP-style 429.
+function isRateLimitCode(error: unknown): boolean {
+  if (errorCode(error) !== "rpc-error") return false
+  const rpcCode = (error as { rpcCode?: unknown }).rpcCode
+  return rpcCode === 3 || rpcCode === 429
 }
 
 function statusForErrorKind(errorKind: ErrorKind): number {

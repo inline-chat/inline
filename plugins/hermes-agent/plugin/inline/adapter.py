@@ -5606,6 +5606,12 @@ class InlineAdapter(BasePlatformAdapter):
         if len(mapping) > limit:
             mapping.popitem(last=False)
 
+    def _send_retry_is_final(self, result: SendResult) -> bool:
+        # The request reached Inline but its result was lost. A retry or plain-text
+        # fallback would post the message twice; Hermes treats timeouts the same way.
+        raw = getattr(result, "raw_response", None)
+        return isinstance(raw, dict) and raw.get("outcomeUnknown") is True
+
     async def _send_sidecar(self, path: str, body: Dict[str, Any]) -> SendResult:
         try:
             data = await self._sidecar_call(path, body)
@@ -5621,12 +5627,15 @@ class InlineAdapter(BasePlatformAdapter):
         except InlineSidecarError as exc:
             if exc.error_kind == "unknown":
                 self._report_error("sidecar.send", exc)
+            raw = exc.raw if isinstance(exc.raw, dict) else {}
+            retry_after = _to_int(raw.get("retryAfterSeconds"))
             return _send_result(
                 success=False,
                 error=str(exc),
                 raw_response=exc.raw,
                 retryable=exc.retryable,
                 error_kind=exc.error_kind,
+                retry_after=float(retry_after) if retry_after and retry_after > 0 else None,
             )
         except Exception as exc:
             self._report_error("sidecar.send", exc)
@@ -5654,8 +5663,9 @@ class InlineAdapter(BasePlatformAdapter):
 
 def _send_result(**kwargs: Any) -> SendResult:
     fields = getattr(SendResult, "__dataclass_fields__", {})
-    if "error_kind" in kwargs and "error_kind" not in fields:
-        kwargs.pop("error_kind")
+    for optional in ("error_kind", "retry_after"):
+        if optional in kwargs and optional not in fields:
+            kwargs.pop(optional)
     return SendResult(**kwargs)
 
 
