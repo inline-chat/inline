@@ -257,6 +257,7 @@ impl Runtime {
             gate_budget: std::sync::Mutex::new(DailySpeakGateBudget::default()),
             usage: std::sync::Mutex::new(Vec::new()),
             context: std::sync::Mutex::new(HashMap::new()),
+            bound_projects: std::sync::Mutex::new(HashMap::new()),
         });
         Ok(Self {
             config,
@@ -1145,6 +1146,9 @@ impl Runtime {
             return;
         }
         self.bound_projects.insert(chat_id, project.clone());
+        if let Ok(mut projects) = self.agent.bound_projects.lock() {
+            projects.insert(chat_id, project.clone());
+        }
         let catalog = self.catalog().await;
         let Some(folder) = self
             .folders(&catalog)
