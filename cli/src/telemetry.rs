@@ -505,10 +505,43 @@ fn install_panic_hook() {
             event.tags.insert("surface".into(), "process".into());
             event.tags.insert("error_code".into(), "panic".into());
             event.tags.insert("phase".into(), "panic".into());
+            if let Some(location) = panic.location() {
+                event.tags.insert(
+                    "panic_location".into(),
+                    panic_location_code(location.file(), location.line()),
+                );
+            }
             sentry::capture_event(event);
             previous(panic);
         }));
     });
+}
+
+/// Names a panic site without the payload or the path above the crate: the
+/// crate directory, its `src` path and the line, e.g. `cli_src_main_rs_42`.
+/// Checkout and registry prefixes can name the user, so they are dropped.
+fn panic_location_code(file: &str, line: u32) -> String {
+    let parts: Vec<&str> = file
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty())
+        .collect();
+    let tail = match parts.iter().rposition(|part| *part == "src") {
+        Some(index) => &parts[index.saturating_sub(1)..],
+        None => &parts[parts.len().saturating_sub(1)..],
+    };
+    let mut code = String::new();
+    for ch in format!("{}_{line}", tail.join("_")).chars() {
+        let ch = ch.to_ascii_lowercase();
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            code.push(ch);
+        } else if !code.is_empty() && !code.ends_with('_') {
+            code.push('_');
+        }
+    }
+    // Deep paths keep their most specific end within the tag limit.
+    code[code.len().saturating_sub(80)..]
+        .trim_start_matches('_')
+        .to_owned()
 }
 
 fn safe_code(value: &str) -> String {
@@ -558,6 +591,7 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
         "attempt",
         "command",
         "limit_unit",
+        "panic_location",
     ] {
         if let Some(value) = event.tags.get(name) {
             safe.tags.insert(name.into(), safe_code(value));
@@ -583,7 +617,7 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
     safe.tags
         .insert("arch".into(), std::env::consts::ARCH.into());
     safe.fingerprint = if surface.is_some() {
-        vec![
+        let mut fingerprint = vec![
             "inline-cli".into(),
             safe.tags.get("surface").cloned().unwrap_or_default().into(),
             safe.tags
@@ -594,8 +628,11 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
             safe.tags.get("target").cloned().unwrap_or_default().into(),
             safe.tags.get("phase").cloned().unwrap_or_default().into(),
             safe.tags.get("failure").cloned().unwrap_or_default().into(),
-        ]
-        .into()
+        ];
+        if let Some(location) = safe.tags.get("panic_location") {
+            fingerprint.push(location.clone().into());
+        }
+        fingerprint.into()
     } else {
         let mut fingerprint = vec![
             "inline-cli".into(),
@@ -995,5 +1032,62 @@ mod tests {
         );
         assert!(!encoded.contains("private"));
         assert!(!encoded.contains("session_id"));
+    }
+
+    #[test]
+    fn panic_locations_keep_the_crate_path_and_drop_user_prefixes() {
+        assert_eq!(
+            panic_location_code("cli/src/main.rs", 42),
+            "cli_src_main_rs_42"
+        );
+        assert_eq!(
+            panic_location_code(
+                "/Users/private/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.47.1/src/runtime/park.rs",
+                7
+            ),
+            "tokio_1_47_1_src_runtime_park_rs_7"
+        );
+        assert_eq!(
+            panic_location_code(r"C:\Users\Private\inline\crates\bridge\src\Run.rs", 3),
+            "bridge_src_run_rs_3"
+        );
+        assert_eq!(panic_location_code("/private/build.rs", 9), "build_rs_9");
+        let deep = format!("cli/src/{}/leaf.rs", "nested/".repeat(20));
+        let code = panic_location_code(&deep, 123);
+        assert!(code.len() <= 80);
+        assert!(code.ends_with("leaf_rs_123"));
+        assert_eq!(safe_code(&code), code);
+    }
+
+    #[test]
+    fn panic_events_group_by_their_location() {
+        let mut event = sentry::protocol::Event {
+            level: sentry::Level::Fatal,
+            ..Default::default()
+        };
+        event.tags.insert("surface".into(), "process".into());
+        event.tags.insert("error_code".into(), "panic".into());
+        event.tags.insert("phase".into(), "panic".into());
+        event
+            .tags
+            .insert("panic_location".into(), "cli_src_main_rs_42".into());
+
+        let safe = allowlisted_event(event);
+        assert_eq!(
+            safe.tags.get("panic_location").map(String::as_str),
+            Some("cli_src_main_rs_42")
+        );
+        assert_eq!(
+            safe.fingerprint,
+            vec![
+                "inline-cli",
+                "process",
+                "panic",
+                "",
+                "panic",
+                "",
+                "cli_src_main_rs_42"
+            ]
+        );
     }
 }
