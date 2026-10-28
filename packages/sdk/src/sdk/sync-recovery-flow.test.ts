@@ -266,6 +266,33 @@ it.each([RpcError_Code.RATE_LIMIT, RpcError_Code.CHAT_ID_INVALID])(
   }
 )
 
+it.each([
+  [120, 120_000],
+  [3_600, 300_000],
+])("waits for a server retry-after of %ss before recovering (honored %sms)", async (retryAfterSeconds, honoredMs) => {
+  const { c, t } = await setup()
+  const consuming = c.consumeEvents(async () => {})
+  await emit(t, [message(10n, 3)])
+  await flush()
+  const first = updatesRpcs(t)[0]!
+  await t.emitMessage(
+    ServerProtocolMessage.create({
+      body: {
+        oneofKind: "rpcError",
+        rpcError: { reqMsgId: first.id, code: RpcError_Code.RATE_LIMIT, message: "paced", retryAfterSeconds },
+      },
+    })
+  )
+  await flush()
+  // Longer than the SDK's own rate-limit lane, so only the server hint holds it.
+  await vi.advanceTimersByTimeAsync(honoredMs - 1_000)
+  expect(updatesRpcs(t)).toHaveLength(1)
+  await vi.advanceTimersByTimeAsync(1_001)
+  expect(updatesRpcs(t)).toHaveLength(2)
+  await c.close()
+  await consuming
+})
+
 it("repeated incomplete pages retain one bounded retry owner and the newest target", async () => {
   const { c, t } = await setup()
   const consuming = c.consumeEvents(async () => {})

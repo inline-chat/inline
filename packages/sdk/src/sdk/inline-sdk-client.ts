@@ -241,6 +241,17 @@ function botPresenceStateKind(kind: InlineSdkSetBotPresenceStateParams["kind"]):
   }
 }
 
+/**
+ * A server wait hint in milliseconds. Sync honors at most five minutes: a
+ * longer block (the replay guard's can reach 30) clears on forward progress or
+ * on another origin, and each early rejection is cheap for the server.
+ */
+const MAX_HONORED_RETRY_AFTER_SECONDS = 300
+const retryAfterMsFromError = (error: unknown): number | undefined => {
+  if (!(error instanceof ProtocolClientError) || error.retryAfterSeconds === undefined) return undefined
+  return Math.min(error.retryAfterSeconds, MAX_HONORED_RETRY_AFTER_SECONDS) * 1_000
+}
+
 export class InlineSdkClient {
   private readonly options: InlineSdkClientOptions
   private readonly log: InlineSdkLogger
@@ -280,7 +291,14 @@ export class InlineSdkClient {
   private recoveryReconnectInFlight: Promise<void> | null = null
   private degradedUpdateBuckets = new Map<string, InlineSdkUpdateBucketRef>()
   private discoveryRetry: { attempt: number; reported: Set<string>; timer?: ReturnType<typeof setTimeout> } | null = null
-  private recoveryRetries = new Map<string, { attempt: number; failure: string; reported: Set<string>; timer?: ReturnType<typeof setTimeout> }>()
+  private recoveryRetries = new Map<string, {
+    attempt: number
+    failure: string
+    reported: Set<string>
+    timer?: ReturnType<typeof setTimeout>
+    /** Server-requested wait from the last failure; never shortens our own backoff. */
+    retryAfterMs?: number
+  }>()
   private liveCursorFences = new Set<string>()
   private liveAdmittedSeqByBucket = new Map<string, number>()
   private liveDeliveriesByBucket = new Map<string, Set<Promise<boolean>>>()
@@ -1124,7 +1142,7 @@ export class InlineSdkClient {
           error.rpcCode === RpcError_Code.INTERNAL_ERROR || error.rpcCode === 500 ||
           error.rpcCode === RpcError_Code.RATE_LIMIT || error.rpcCode === 429)) {
         this.scheduleDiscoveryRetry(error.rpcCode === RpcError_Code.RATE_LIMIT || error.rpcCode === 429
-          ? "rate_limited" : "discovery_failed")
+          ? "rate_limited" : "discovery_failed", retryAfterMsFromError(error))
       } else {
         this.log.error?.("Sync discovery unavailable", { reason: "request_rejected" })
       }
@@ -2897,14 +2915,16 @@ export class InlineSdkClient {
       return
     }
     this.markUpdateBucketDegraded(bucket, rpcCode === RpcError_Code.RATE_LIMIT || rpcCode === 429
-      ? "rate_limited" : error instanceof ProtocolClientError ? error.code : "request_failed")
+      ? "rate_limited" : error instanceof ProtocolClientError ? error.code : "request_failed",
+      retryAfterMsFromError(error))
   }
 
-  private markUpdateBucketDegraded(bucket: InlineSdkUpdateBucketRef, failure = "incomplete") {
+  private markUpdateBucketDegraded(bucket: InlineSdkUpdateBucketRef, failure = "incomplete", retryAfterMs?: number) {
     const key = this.updateBucketKey(bucket)
     this.degradedUpdateBuckets.set(key, bucket)
     const retry = this.recoveryRetries.get(key) ?? { attempt: 0, failure, reported: new Set<string>() }
     retry.failure = failure
+    retry.retryAfterMs = retryAfterMs
     this.recoveryRetries.set(key, retry)
     queueMicrotask(() => this.scheduleRecoveryRetry(bucket))
   }
@@ -2921,7 +2941,7 @@ export class InlineSdkClient {
     this.recoveryRetries.clear()
   }
 
-  private scheduleDiscoveryRetry(reason: string) {
+  private scheduleDiscoveryRetry(reason: string, retryAfterMs?: number) {
     if (!this.started || this.closed || this.protocol.getDiagnostics().state !== "open") return
     const retry = this.discoveryRetry ?? { attempt: 0, reported: new Set<string>() }
     if (retry.timer) return
@@ -2929,8 +2949,8 @@ export class InlineSdkClient {
       retry.reported.add(reason)
       this.log.error?.("Sync recovery scheduled", { bucketKind: "discovery", reason })
     }
-    const delayMs = reason === "rate_limited" ? 60_000
-      : Math.min(30_000, 1_000 * 2 ** Math.min(retry.attempt, 5))
+    const delayMs = Math.max(retryAfterMs ?? 0, reason === "rate_limited" ? 60_000
+      : Math.min(30_000, 1_000 * 2 ** Math.min(retry.attempt, 5)))
     retry.attempt++
     retry.timer = setTimeout(() => {
       retry.timer = undefined
@@ -2952,8 +2972,8 @@ export class InlineSdkClient {
     const retry = this.recoveryRetries.get(key) ?? { attempt: 0, failure: "incomplete", reported: new Set<string>() }
     if (retry.timer || this.protocol.getDiagnostics().state !== "open") return
     // Normal recovery stays responsive; repeated failures never form a hot loop.
-    const delayMs = retry.failure === "rate_limited" ? 60_000
-      : Math.min(5_000, 1_000 * 2 ** Math.min(retry.attempt, 3))
+    const delayMs = Math.max(retry.retryAfterMs ?? 0, retry.failure === "rate_limited" ? 60_000
+      : Math.min(5_000, 1_000 * 2 ** Math.min(retry.attempt, 3)))
     if (!retry.reported.has(retry.failure)) {
       retry.reported.add(retry.failure)
       this.log.error?.("Sync recovery scheduled", { bucketKind: bucket.kind, reason: retry.failure })
