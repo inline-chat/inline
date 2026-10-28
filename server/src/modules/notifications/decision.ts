@@ -44,8 +44,10 @@ export const decideNotification = (input: NotificationDecisionInput): Notificati
     }
   }
 
-  const countsDmAsMention = mode !== UserSettingsNotificationsMode.OnlyMentions
-  const isMentioned = isExplicitlyMentioned || isReplyToUser || (countsDmAsMention && isDM)
+  // "Only mentions" is strict: DMs, direct replies, and reply-thread activity
+  // only notify through an explicit mention or a nudge.
+  const countsReplyContextAsMention = mode !== UserSettingsNotificationsMode.OnlyMentions
+  const isMentioned = isExplicitlyMentioned || (countsReplyContextAsMention && (isReplyToUser || isDM))
   const requiresNotification = isNudge
 
   if (mode === UserSettingsNotificationsMode.Mentions || mode === UserSettingsNotificationsMode.OnlyMentions) {

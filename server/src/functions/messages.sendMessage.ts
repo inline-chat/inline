@@ -1294,7 +1294,8 @@ async function sendNotifications(input: SendPushForMsgInput) {
 
   // In linked reply threads (anchored by parentMessageId), each child message is
   // semantically a reply to the anchor message. We treat the anchor author as a
-  // reply/mention target so users in mention-based modes don't miss thread activity.
+  // reply target so users in "any message to you" mode don't miss thread activity.
+  // "Only mentions" ignores reply targets (see decideNotification).
   const replyThreadAnchorSenderId = await getReplyThreadAnchorSenderId(chat)
   const replyMentionUserIds = new Set<number>(
     [repliedToSenderId, replyThreadAnchorSenderId].filter(

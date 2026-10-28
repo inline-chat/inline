@@ -107,6 +107,38 @@ describe("notification decision", () => {
     expect(decision.needsExplicitMacNotification).toBe(true)
   })
 
+  test("only mentions ignores direct replies and reply-thread activity", () => {
+    const reply = decideNotification({
+      mode: UserSettingsNotificationsMode.OnlyMentions,
+      isUrgentNudge: false,
+      isNudge: false,
+      isDM: false,
+      isReplyToUser: true,
+      isExplicitlyMentioned: false,
+    })
+    expect(reply.shouldNotify).toBe(false)
+
+    const mentionedReply = decideNotification({
+      mode: UserSettingsNotificationsMode.OnlyMentions,
+      isUrgentNudge: false,
+      isNudge: false,
+      isDM: false,
+      isReplyToUser: true,
+      isExplicitlyMentioned: true,
+    })
+    expect(mentionedReply.shouldNotify).toBe(true)
+
+    const nudge = decideNotification({
+      mode: UserSettingsNotificationsMode.OnlyMentions,
+      isUrgentNudge: false,
+      isNudge: true,
+      isDM: false,
+      isReplyToUser: false,
+      isExplicitlyMentioned: false,
+    })
+    expect(nudge.shouldNotify).toBe(true)
+  })
+
   test("urgent nudge bypasses none mode through the standard message update", () => {
     const decision = decideNotification({
       mode: UserSettingsNotificationsMode.None,
