@@ -106,6 +106,7 @@ struct SidebarCollectionPinnedSpacerView: View {
 struct SidebarCollectionOpenSeparatorView: View {
   let onCleanUp: () -> Void
   let onCloseAll: () -> Void
+  var onMarkAllRead: (() -> Void)? = nil
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var isHovered = false
@@ -126,7 +127,8 @@ struct SidebarCollectionOpenSeparatorView: View {
 
       SidebarOpenChatsCleanupMenu(
         onCleanUp: onCleanUp,
-        onCloseAll: onCloseAll
+        onCloseAll: onCloseAll,
+        onMarkAllRead: onMarkAllRead
       )
       .opacity(isHovered ? 1 : 0)
       .allowsHitTesting(isHovered)
@@ -161,9 +163,18 @@ struct SidebarCollectionTimelineHeaderView: View {
 struct SidebarOpenChatsCleanupMenu: View {
   let onCleanUp: () -> Void
   let onCloseAll: () -> Void
+  var onMarkAllRead: (() -> Void)? = nil
 
   var body: some View {
     Menu {
+      if let onMarkAllRead {
+        Button(action: onMarkAllRead) {
+          Label("Mark All as Read", systemImage: "checkmark.message")
+        }
+
+        Divider()
+      }
+
       Button(action: onCleanUp) {
         Label {
           VStack(alignment: .leading, spacing: 1) {

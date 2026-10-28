@@ -920,7 +920,8 @@ struct SidebarView: View {
       topSpacing: isInertPresentation ? 0 : SidebarCollectionRow.sectionTopSpacing,
       onToggle: isInertPresentation ? nil : { toggleAppKitSection(section) },
       onCleanUp: presentsOpenSeparator ? cleanUpOpenChats : nil,
-      onCloseAll: presentsOpenSeparator ? closeAllOpenChats : nil
+      onCloseAll: presentsOpenSeparator ? closeAllOpenChats : nil,
+      onMarkAllRead: presentsOpenSeparator ? markAllOpenChatsRead : nil
     )
   }
 
@@ -1043,7 +1044,8 @@ struct SidebarView: View {
     if nativeSectionSupportsCleanup(section) {
       SidebarCollectionOpenSeparatorView(
         onCleanUp: cleanUpOpenChats,
-        onCloseAll: closeAllOpenChats
+        onCloseAll: closeAllOpenChats,
+        onMarkAllRead: markAllOpenChatsRead
       )
     } else if sectionUsesPinnedSpacer(section) {
       SidebarCollectionPinnedSpacerView()
@@ -2656,14 +2658,24 @@ struct SidebarView: View {
     }
   }
 
-  private func closeAllOpenChats() {
-    guard settings.sidebarAsInbox, let dependencies else { return }
+  private func openSectionItems() -> [SidebarViewModel.Item] {
     let tree = appKitSidebarTree
     var seenItemIDs = Set<ChatListItem.Identifier>()
-    let openItems = visibleNormalSourceItems.filter { item in
+    return visibleNormalSourceItems.filter { item in
       guard seenItemIDs.insert(item.id).inserted else { return false }
       return tree.snapshot.sectionID(containing: .chat(item.id)).flatMap { $0 } == .normal
     }
+  }
+
+  private func markAllOpenChatsRead() {
+    for item in openSectionItems() where item.unread {
+      UnreadManager.shared.readAll(item.peerId, chatId: item.chatId)
+    }
+  }
+
+  private func closeAllOpenChats() {
+    guard settings.sidebarAsInbox, let dependencies else { return }
+    let openItems = openSectionItems()
 
     // Preserve the existing temporary-row behavior. These rows are a local
     // navigation projection rather than dialog-open state, so Close All

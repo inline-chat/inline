@@ -97,6 +97,7 @@ struct SidebarNativeRowConfiguration {
     let onToggle: (() -> Void)?
     let onCleanUp: (() -> Void)?
     let onCloseAll: (() -> Void)?
+    var onMarkAllRead: (() -> Void)? = nil
   }
 
   struct PinDropGuide {
@@ -1327,6 +1328,14 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
           let onCloseAll = configuration.onCloseAll
     else { return }
     let menu = NSMenu(title: "Open Chats Cleanup")
+    if let onMarkAllRead = configuration.onMarkAllRead {
+      menu.addItem(SidebarNativeMenuItem(
+        title: "Mark All as Read",
+        systemImage: "checkmark.message",
+        action: onMarkAllRead
+      ))
+      menu.addItem(.separator())
+    }
     menu.addItem(SidebarNativeMenuItem(
       title: "Cleanup…",
       subtitle: "Closes inactive chats; deletes empty folders",
