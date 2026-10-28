@@ -93,6 +93,9 @@ pub struct ClaudeMapper {
     denied_tool_uses: HashSet<String>,
     /// `priority: later` inputs the CLI has not started yet.
     queue: Vec<QueuedInput>,
+    /// The latest top-level call's tokens: the context fill the turn's
+    /// result reports.
+    last_call_usage: Option<TokenUsage>,
 }
 
 impl ClaudeMapper {
@@ -437,6 +440,12 @@ impl ClaudeMapper {
                 effective: self.effective.clone(),
             });
         }
+        // The latest top-level call's usage is how full the context is.
+        if parent.is_none()
+            && let Some(last) = assistant.message.usage.as_ref().and_then(call_usage)
+        {
+            self.last_call_usage = Some(last);
+        }
         let message_id = assistant
             .message
             .id
@@ -731,7 +740,8 @@ impl ClaudeMapper {
 
     fn result(&mut self, result: &ResultMessage) -> Vec<Event> {
         let mut events = Vec::new();
-        if let Some(usage) = result_usage(result) {
+        if let Some(mut usage) = result_usage(result) {
+            usage.last = self.last_call_usage.take();
             events.push(Event::Usage { usage });
         }
         let consumed: Vec<InputId> = match &result.user_message_uuids {
@@ -1287,13 +1297,27 @@ fn result_text(content: &Value) -> String {
     }
 }
 
-fn result_usage(result: &ResultMessage) -> Option<UsageUpdate> {
-    let usage = result.usage.as_ref()?;
+/// One API call's tokens, from an assistant message's or a result's usage.
+fn call_usage(usage: &Value) -> Option<TokenUsage> {
+    usage.as_object()?;
     let number = |key: &str| usage[key].as_u64().unwrap_or(0);
     let input = number("input_tokens");
     let cached = number("cache_read_input_tokens");
     let created = number("cache_creation_input_tokens");
     let output = number("output_tokens");
+    Some(TokenUsage {
+        input: input + created,
+        cached_input: cached,
+        output,
+        reasoning: 0,
+        total: input + created + cached + output,
+    })
+}
+
+/// The turn's summed tokens and the model's context window. The sum covers
+/// every call of the turn, so it is the turn's total, not the context fill.
+fn result_usage(result: &ResultMessage) -> Option<UsageUpdate> {
+    let total = call_usage(result.usage.as_ref()?)?;
     let context_window = result
         .model_usage
         .as_ref()
@@ -1305,14 +1329,8 @@ fn result_usage(result: &ResultMessage) -> Option<UsageUpdate> {
                 .max()
         });
     Some(UsageUpdate {
-        last: Some(TokenUsage {
-            input: input + created,
-            cached_input: cached,
-            output,
-            reasoning: 0,
-            total: input + created + cached + output,
-        }),
-        total: None,
+        last: None,
+        total: Some(total),
         context_window,
         limits: Vec::new(),
     })
