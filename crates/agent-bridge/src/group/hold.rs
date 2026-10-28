@@ -7,15 +7,14 @@
 //! - **The idle timer never releases live work** ([`LiveWork::is_idle`]).
 //! - **Explicit release wins.** `/release`, "Continue in terminal" and "Open
 //!   in app" stop Inline's admission at once; new input stays pending in
-//!   Inline. With live work, the machine lists it for confirmation, then runs
-//!   one step at a time, each waiting on its receipt. Queued input is
-//!   confirmed kept or removed before the interrupt that could drain it.
-//! - **Release is confirmed, not assumed.** A failed or unknown step fences
-//!   the release and is reported; the owner retries or cancels. Nothing is
-//!   released anyway. The session counts as released only when the harness
-//!   confirms: Codex `thread/closed`, or the Claude process exiting. There is
-//!   no timer for that and no shorter global timeout, and the shared Codex
-//!   app-server is never killed.
+//!   Inline. With live work, the machine runs one step at a time, each waiting
+//!   on its receipt, with no confirmation: one person rarely drives a thread
+//!   from two places at once. Queued input is kept or removed before the
+//!   interrupt that could drain it.
+//! - **Nothing waits on the owner.** A step that fails or gets no receipt is
+//!   recorded and the release goes on; the notice names it. The session counts
+//!   as released only when the harness confirms: Codex `thread/closed`, or the
+//!   Claude process exiting, and the shared Codex app-server is never killed.
 //! - **Acquire** on direct input or `/resume`. A session held by another
 //!   client keeps the input pending and shows "continue there, or Fork here";
 //!   pending input runs once the session frees, if its sender still wants it.
@@ -47,7 +46,7 @@ pub const CODEX_DEFAULT_UNLOAD_DELAY: Duration = Duration::from_secs(1_800);
 /// closes before it is killed.
 pub const CLAUDE_EXIT_GRACE: Duration = Duration::from_secs(10);
 /// How long a release step may go without a receipt before its outcome is
-/// recorded as unknown, which fences the release.
+/// recorded as unknown and the release goes on.
 pub const RELEASE_STEP_TIMEOUT: Duration = Duration::from_secs(15);
 /// How often a session held elsewhere is probed while input waits for it.
 pub const HELD_ELSEWHERE_PROBE_INTERVAL: Duration = Duration::from_secs(60);
@@ -174,7 +173,7 @@ pub enum ReleaseStepOutcome {
         reason: String,
     },
     /// The harness may or may not have done it (a timeout or a lost reply).
-    /// Treated like a failure: fenced until reconciled.
+    /// Recorded, and named in the release notice.
     Unknown {
         reason: String,
     },
@@ -276,27 +275,10 @@ pub enum HoldState {
         last_activity_ms: u64,
         live: LiveWork,
     },
-    ConfirmingRelease {
-        request: ReleaseRequest,
-        live: LiveWork,
-        last_activity_ms: u64,
-        pending: Vec<PendingInput>,
-    },
     Releasing {
         request: ReleaseRequest,
         current: ReleaseStep,
         deadline_ms: u64,
-        remaining: Vec<ReleaseStep>,
-        receipts: Vec<ReleaseReceipt>,
-        pending: Vec<PendingInput>,
-        live: LiveWork,
-        last_activity_ms: u64,
-    },
-    /// A step failed or its outcome is unknown. Admission stays stopped until
-    /// the owner retries or cancels the release.
-    ReleaseFenced {
-        request: ReleaseRequest,
-        failed: ReleaseReceipt,
         remaining: Vec<ReleaseStep>,
         receipts: Vec<ReleaseReceipt>,
         pending: Vec<PendingInput>,
@@ -338,10 +320,6 @@ pub enum HoldEvent {
     ReleaseRequested {
         request: ReleaseRequest,
     },
-    ReleaseConfirmed,
-    ReleaseCancelled,
-    /// Run the fenced step again.
-    ReleaseRetry,
     StepFinished {
         step: ReleaseStep,
         outcome: ReleaseStepOutcome,
@@ -400,19 +378,7 @@ pub enum HoldEffect {
     ReleaseStarted {
         cause: ReleaseCause,
     },
-    /// The release was cancelled; admission resumes.
-    ReleaseAbandoned,
-    /// List live work and ask to confirm the release.
-    ConfirmRelease {
-        request: ReleaseRequest,
-        live: LiveWork,
-    },
     Step(ReleaseStep),
-    /// Report the failed or unknown step and offer retry or cancel.
-    ReleaseFenced {
-        failed: ReleaseReceipt,
-        receipts: Vec<ReleaseReceipt>,
-    },
     /// Codex: `Session::release` (unsubscribe). Its `Unsubscribed` receipt
     /// keeps the thread "releasing".
     Unsubscribe,
@@ -423,8 +389,7 @@ pub enum HoldEffect {
     /// Claude only: the process this bridge owns did not exit.
     Kill,
     /// The harness confirmed the session is free. Explicit causes post the
-    /// receipts and the handoff instruction. Receipts with an unknown outcome
-    /// stay fenced in the delivery ledger.
+    /// receipts and the handoff instruction.
     Released {
         cause: ReleaseCause,
         receipts: Vec<ReleaseReceipt>,
@@ -689,106 +654,6 @@ impl HoldMachine {
                 S::Released
             }
 
-            // Confirming: admission is stopped; only the answer, or the live
-            // work ending by itself, moves on.
-            (
-                S::ConfirmingRelease {
-                    request,
-                    live,
-                    last_activity_ms,
-                    mut pending,
-                },
-                E::AcquireRequested { input },
-            ) => {
-                pending.extend(input);
-                S::ConfirmingRelease {
-                    request,
-                    live,
-                    last_activity_ms,
-                    pending,
-                }
-            }
-            (
-                S::ConfirmingRelease {
-                    request,
-                    live: old,
-                    pending,
-                    ..
-                },
-                E::Activity { live },
-            ) => {
-                if live.is_idle() {
-                    return self.detach(request, Vec::new(), pending, now, effects);
-                }
-                if live != old {
-                    effects.push(HoldEffect::ConfirmRelease {
-                        request,
-                        live: live.clone(),
-                    });
-                }
-                S::ConfirmingRelease {
-                    request,
-                    live,
-                    last_activity_ms: now,
-                    pending,
-                }
-            }
-            (
-                S::ConfirmingRelease {
-                    live,
-                    last_activity_ms,
-                    pending,
-                    ..
-                },
-                E::ReleaseRequested { request },
-            ) if request.cause.is_explicit() => {
-                effects.push(HoldEffect::ConfirmRelease {
-                    request,
-                    live: live.clone(),
-                });
-                S::ConfirmingRelease {
-                    request,
-                    live,
-                    last_activity_ms,
-                    pending,
-                }
-            }
-            (
-                S::ConfirmingRelease {
-                    request,
-                    live,
-                    last_activity_ms,
-                    pending,
-                },
-                E::ReleaseConfirmed,
-            ) => {
-                let steps = release_steps(&live, request.wakeups);
-                self.next_step(
-                    request,
-                    steps,
-                    Vec::new(),
-                    pending,
-                    live,
-                    last_activity_ms,
-                    now,
-                    effects,
-                )
-            }
-            (
-                S::ConfirmingRelease {
-                    live,
-                    last_activity_ms,
-                    pending,
-                    ..
-                },
-                E::ReleaseCancelled,
-            ) => resume_admission(live, last_activity_ms, pending, effects),
-            (S::ConfirmingRelease { pending, .. }, E::Detached) => {
-                effects.push(HoldEffect::Lost);
-                push_inputs(effects, HoldEffect::PendingNotDelivered { inputs: pending });
-                S::Released
-            }
-
             // Releasing: one step at a time.
             (
                 S::Releasing {
@@ -878,90 +743,7 @@ impl HoldMachine {
                 effects,
             ),
 
-            // Fenced.
-            (
-                S::ReleaseFenced {
-                    request,
-                    failed,
-                    remaining,
-                    receipts,
-                    pending,
-                    live,
-                    last_activity_ms,
-                },
-                E::ReleaseRetry,
-            ) => {
-                effects.push(HoldEffect::Step(failed.step.clone()));
-                S::Releasing {
-                    request,
-                    current: failed.step,
-                    deadline_ms: now + millis(RELEASE_STEP_TIMEOUT),
-                    remaining,
-                    receipts,
-                    pending,
-                    live,
-                    last_activity_ms,
-                }
-            }
-            // A late receipt resolves the unknown step.
-            (
-                S::ReleaseFenced {
-                    request,
-                    failed,
-                    remaining,
-                    mut receipts,
-                    pending,
-                    live,
-                    last_activity_ms,
-                },
-                E::StepFinished {
-                    step,
-                    outcome: ReleaseStepOutcome::Done,
-                },
-            ) if step == failed.step => {
-                receipts.push(ReleaseReceipt {
-                    step,
-                    outcome: ReleaseStepOutcome::Done,
-                });
-                self.next_step(
-                    request,
-                    remaining,
-                    receipts,
-                    pending,
-                    live,
-                    last_activity_ms,
-                    now,
-                    effects,
-                )
-            }
-            (
-                S::ReleaseFenced {
-                    live,
-                    last_activity_ms,
-                    pending,
-                    ..
-                },
-                E::ReleaseCancelled,
-            ) => resume_admission(live, last_activity_ms, pending, effects),
-            (
-                S::ReleaseFenced {
-                    request,
-                    failed,
-                    remaining,
-                    receipts,
-                    pending,
-                    ..
-                },
-                E::Detached,
-            ) => exited_mid_release(
-                request,
-                std::iter::once(failed.step).chain(remaining).collect(),
-                receipts,
-                pending,
-                effects,
-            ),
-
-            // Input and live-work updates while releasing or fenced.
+            // Input and live-work updates while releasing.
             (
                 S::Releasing {
                     request,
@@ -980,29 +762,6 @@ impl HoldMachine {
                     request,
                     current,
                     deadline_ms,
-                    remaining,
-                    receipts,
-                    pending,
-                    live,
-                    last_activity_ms,
-                }
-            }
-            (
-                S::ReleaseFenced {
-                    request,
-                    failed,
-                    remaining,
-                    receipts,
-                    mut pending,
-                    mut live,
-                    last_activity_ms,
-                },
-                event @ (E::AcquireRequested { .. } | E::Activity { .. }),
-            ) => {
-                absorb(event, &mut pending, &mut live);
-                S::ReleaseFenced {
-                    request,
-                    failed,
                     remaining,
                     receipts,
                     pending,
@@ -1264,20 +1023,6 @@ impl HoldMachine {
             pending,
             phase,
         }
-    }
-}
-
-fn resume_admission(
-    live: LiveWork,
-    last_activity_ms: u64,
-    pending: Vec<PendingInput>,
-    effects: &mut Vec<HoldEffect>,
-) -> HoldState {
-    effects.push(HoldEffect::ReleaseAbandoned);
-    push_inputs(effects, HoldEffect::Deliver { inputs: pending });
-    HoldState::Held {
-        last_activity_ms,
-        live,
     }
 }
 
@@ -2051,7 +1796,6 @@ mod tests {
         held(&mut machine, 0);
         machine.handle(HoldEvent::Activity { live: busy() }, 0);
         machine.handle(release(ReleaseCause::Command), 0);
-        machine.handle(HoldEvent::ReleaseConfirmed, 0);
         let json = serde_json::to_string(&machine).unwrap();
         let back: HoldMachine = serde_json::from_str(&json).unwrap();
         assert_eq!(back, machine);

@@ -82,6 +82,13 @@ pub(crate) trait OwnerCalls: Send + Sync {
         &self,
         input: proto::GetAgentSessionInput,
     ) -> futures_util::future::BoxFuture<'_, Result<proto::GetAgentSessionResult, String>>;
+    /// Replaces the bot's command list in Inline's command menu.
+    fn set_commands(
+        &self,
+        _input: proto::SetBotCommandsInput,
+    ) -> futures_util::future::BoxFuture<'_, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 /// The sender grants the runtime knows, shared by every work.
@@ -188,6 +195,7 @@ pub(crate) enum ActionData {
     /// An approval decision.
     #[serde(rename = "d")]
     Decision { i: String, d: String },
+    /// Release-card buttons earlier versions posted; now always stale.
     #[serde(rename = "rc")]
     ReleaseConfirm,
     #[serde(rename = "rx")]
@@ -376,7 +384,6 @@ pub(crate) fn spawn(
         live: Default::default(),
         cards: HashMap::new(),
         card_by_interaction: HashMap::new(),
-        release_card: None,
         offers: HashMap::new(),
         slots: HashMap::new(),
         edits: HashMap::new(),
@@ -498,7 +505,6 @@ struct Actor {
     renderer: Renderer,
     cards: HashMap<i64, Card>,
     card_by_interaction: HashMap<InteractionId, i64>,
-    release_card: Option<i64>,
     offers: HashMap<InputId, i64>,
     slots: HashMap<u32, i64>,
     edits: HashMap<u32, PendingEdit>,
@@ -967,21 +973,10 @@ impl Actor {
                 )
                 .await
             }
+            // Buttons of release cards earlier versions posted: a release no
+            // longer waits on a confirmation or a retry.
             ActionData::ReleaseConfirm | ActionData::ReleaseCancel | ActionData::ReleaseRetry => {
-                if !grants.permits(Operation::Stop) {
-                    return Some(NO_ACCESS.to_owned());
-                }
-                if self.release_card != Some(message_id) {
-                    return Some(NOT_PENDING.to_owned());
-                }
-                let event = match data {
-                    ActionData::ReleaseConfirm => HoldEvent::ReleaseConfirmed,
-                    ActionData::ReleaseCancel => HoldEvent::ReleaseCancelled,
-                    _ => HoldEvent::ReleaseRetry,
-                };
-                self.close_release_card().await;
-                self.event(event).await;
-                None
+                Some(NOT_PENDING.to_owned())
             }
             ActionData::FullOutput => {
                 if !grants.any() {
@@ -1248,70 +1243,9 @@ impl Actor {
             }
             HoldEffect::ProbeHolder => self.probe().await,
             HoldEffect::ReleaseStarted { .. } => None,
-            HoldEffect::ReleaseAbandoned => {
-                self.close_release_card().await;
-                None
-            }
-            HoldEffect::ConfirmRelease { live, .. } => {
-                let mut parts = Vec::new();
-                if live.turn.is_some() {
-                    parts.push("stop the running turn".to_owned());
-                }
-                if !live.queued.is_empty() {
-                    parts.push(format!(
-                        "keep {} queued message(s) pending in Inline",
-                        live.queued.len()
-                    ));
-                }
-                if !live.interactions.is_empty() {
-                    parts.push(format!(
-                        "cancel {} open request(s)",
-                        live.interactions.len()
-                    ));
-                }
-                if !live.children.is_empty() {
-                    parts.push(format!("stop {} background task(s)", live.children.len()));
-                }
-                let text = format!(
-                    "Releasing {} will {}.",
-                    self.agent.agent_name,
-                    parts.join(", ")
-                );
-                let actions = button_rows(&[
-                    (
-                        "Release",
-                        ActionData::ReleaseConfirm,
-                        ActionStyle::Destructive,
-                    ),
-                    ("Cancel", ActionData::ReleaseCancel, ActionStyle::Default),
-                ]);
-                self.release_card = self.notice_with(&text, actions).await;
-                None
-            }
             HoldEffect::Step(step) => {
                 let outcome = self.step(&step).await;
                 Some(HoldEvent::StepFinished { step, outcome })
-            }
-            HoldEffect::ReleaseFenced { failed, .. } => {
-                let reason = match &failed.outcome {
-                    ReleaseStepOutcome::Failed { reason }
-                    | ReleaseStepOutcome::Unknown { reason } => reason.clone(),
-                    ReleaseStepOutcome::Done => String::new(),
-                };
-                let text = format!(
-                    "The release stopped: {} did not finish ({reason}). Nothing more is sent until you retry or cancel.",
-                    step_label(&failed.step)
-                );
-                let actions = button_rows(&[
-                    ("Retry", ActionData::ReleaseRetry, ActionStyle::Primary),
-                    (
-                        "Cancel release",
-                        ActionData::ReleaseCancel,
-                        ActionStyle::Default,
-                    ),
-                ]);
-                self.release_card = self.notice_with(&text, actions).await;
-                None
             }
             HoldEffect::Unsubscribe | HoldEffect::CloseStdin { .. } => {
                 let Some(session) = self.session.clone() else {
@@ -1962,7 +1896,6 @@ impl Actor {
         self.turn = None;
         // The harness confirmed the release: the session no longer acts here.
         self.unbind_tools();
-        self.close_release_card().await;
         if !cause.is_explicit() {
             return;
         }
@@ -3089,17 +3022,6 @@ impl Actor {
         }
     }
 
-    async fn close_release_card(&mut self) {
-        if let Some(card) = self.release_card.take() {
-            self.edit(
-                card,
-                &paragraph("Release request closed."),
-                Some(proto::MessageActions::default()),
-            )
-            .await;
-        }
-    }
-
     /// Records where an input stands; true once it is saved. A failed save
     /// is kept and written again with the next one, and until then the
     /// ledger still holds the earlier state, which a restart reconciles.
@@ -3175,9 +3097,7 @@ impl Actor {
         // up to its unload delay): only an explicit release shows releasing.
         let releasing = match self.hold.state() {
             HoldState::Detaching { request, .. } => request.cause.is_explicit(),
-            HoldState::ConfirmingRelease { .. }
-            | HoldState::Releasing { .. }
-            | HoldState::ReleaseFenced { .. } => true,
+            HoldState::Releasing { .. } => true,
             _ => false,
         };
         let run_state = match self.hold.state() {
@@ -3857,7 +3777,6 @@ pub(crate) mod recovery_tests {
             live: Default::default(),
             cards: HashMap::new(),
             card_by_interaction: HashMap::new(),
-            release_card: None,
             offers: HashMap::new(),
             slots: HashMap::new(),
             edits: HashMap::new(),

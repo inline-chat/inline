@@ -165,6 +165,18 @@ impl OwnerCalls for OwnerConnection {
                 .map_err(|error| error.to_string())
         })
     }
+
+    fn set_commands(
+        &self,
+        input: proto::SetBotCommandsInput,
+    ) -> futures_util::future::BoxFuture<'_, Result<(), String>> {
+        Box::pin(async move {
+            self.0
+                .set_bot_commands(input)
+                .await
+                .map_err(|error| error.to_string())
+        })
+    }
 }
 
 pub(crate) struct Runtime {
@@ -205,6 +217,8 @@ pub(crate) struct Runtime {
     reported_health: Option<RuntimeHealth>,
     /// What the apps were last told, republished when the catalog changes.
     published: Option<Vec<BotCapability>>,
+    /// The command list last registered in Inline's command menu.
+    published_commands: Option<Vec<proto::BotCommand>>,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
     loop_guards: LoopGuards,
@@ -285,6 +299,7 @@ impl Runtime {
             reconnect: Reconnect::default(),
             reported_health: None,
             published: None,
+            published_commands: None,
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
             loop_guards: LoopGuards::default(),
@@ -492,6 +507,23 @@ impl Runtime {
         let folders = self
             .folders(&catalog)
             .and_then(|folders| folders.catalog(&self.config.machine_label));
+        let commands = command_catalog(self.config.vocabulary, &catalog);
+        if self.published_commands.as_ref() != Some(&commands) {
+            match self
+                .agent
+                .owner
+                .set_commands(proto::SetBotCommandsInput {
+                    bot_user_id: self.config.bot_user_id,
+                    commands: commands.clone(),
+                })
+                .await
+            {
+                Ok(()) => self.published_commands = Some(commands),
+                Err(error) => {
+                    log::warn!(target: "inline::bridge::v2", "commands not registered: {error}");
+                }
+            }
+        }
         let capabilities = settings::capabilities(&catalog, folders);
         if self.published.as_ref() == Some(&capabilities) {
             return;
@@ -2536,6 +2568,77 @@ fn mentioned_users(message: &GroupMessage) -> Vec<i64> {
         .collect()
 }
 
+/// The command menu for this agent: Inline's commands for v2, then the
+/// harness's own (Claude's commands and skills) that fit Inline's rules, up
+/// to Inline's 100.
+fn command_catalog(vocabulary: Vocabulary, catalog: &Catalog) -> Vec<proto::BotCommand> {
+    let mut commands: Vec<(String, String)> = [
+        ("help", "Show this agent's commands"),
+        ("status", "What it's doing, its model and folder"),
+        ("new", "Start a fresh session in a new thread"),
+        ("stop", "Stop the current turn"),
+        ("pause", "Pause this thread's work"),
+        ("resume", "Resume paused work"),
+        ("queue", "Run a message after the current turn"),
+        ("model", "Show or choose the model"),
+        ("reasoning", "Show or choose reasoning effort"),
+        ("permissions", "Show or choose the permission mode"),
+        ("plan", "Plan mode: plan before changing anything"),
+        ("compact", "Compact the session's context"),
+        ("clear", "Clear the session's context"),
+        ("follow", "Answer every message in this thread"),
+        ("unfollow", "Answer only mentions and replies here"),
+        ("allowlist", "Who may use this agent (owner)"),
+        ("release", "Let the session go"),
+        ("terminal", "Continue the session in a terminal"),
+    ]
+    .into_iter()
+    .map(|(name, description)| (name.to_owned(), description.to_owned()))
+    .collect();
+    match vocabulary {
+        Vocabulary::Codex => commands.insert(
+            11,
+            ("review".to_owned(), "Codex reviews your changes".to_owned()),
+        ),
+        Vocabulary::Claude => commands.insert(
+            11,
+            (
+                "undo".to_owned(),
+                "Undo the last turn's file changes".to_owned(),
+            ),
+        ),
+    }
+    let valid = |name: &str| {
+        !name.is_empty()
+            && name.len() <= 32
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+    };
+    for command in &catalog.commands {
+        if commands.len() >= 100 {
+            break;
+        }
+        if valid(&command.name) && !commands.iter().any(|(name, _)| *name == command.name) {
+            let description = if command.description.trim().is_empty() {
+                format!("/{}", command.name)
+            } else {
+                command.description.chars().take(256).collect()
+            };
+            commands.push((command.name.clone(), description));
+        }
+    }
+    commands
+        .into_iter()
+        .enumerate()
+        .map(|(index, (command, description))| proto::BotCommand {
+            command,
+            description,
+            sort_order: i32::try_from(index).ok(),
+        })
+        .collect()
+}
+
 /// Commands Inline answers itself; the harness's own commands with these
 /// names are not forwarded.
 const INLINE_COMMANDS: &[&str] = &[
@@ -2698,6 +2801,43 @@ mod tests {
         ] {
             assert!(INLINE_COMMANDS.contains(&name), "{name} is Inline's");
         }
+    }
+
+    #[test]
+    fn the_command_menu_holds_inlines_commands_then_the_harness_own() {
+        let mut catalog = Catalog::default();
+        for (name, description) in [
+            ("deploy", "Deploy the app"),
+            ("compact", "Claude's own compact"),
+            ("plugin:skill", "Not a valid Inline command name"),
+        ] {
+            catalog.commands.push(inline_agent_bridge::DriverCommand {
+                name: name.to_owned(),
+                description: description.to_owned(),
+                input_hint: None,
+                input: Default::default(),
+            });
+        }
+        let names = |vocabulary| {
+            command_catalog(vocabulary, &catalog)
+                .into_iter()
+                .map(|command| command.command)
+                .collect::<Vec<_>>()
+        };
+        let claude = names(Vocabulary::Claude);
+        assert!(claude.contains(&"undo".to_owned()) && !claude.contains(&"review".to_owned()));
+        assert_eq!(claude.last().map(String::as_str), Some("deploy"));
+        assert_eq!(claude.iter().filter(|name| *name == "compact").count(), 1);
+        assert!(!claude.iter().any(|name| name.contains(':')));
+        let codex = names(Vocabulary::Codex);
+        assert!(codex.contains(&"review".to_owned()) && !codex.contains(&"undo".to_owned()));
+        for name in INLINE_COMMANDS {
+            assert!(
+                claude.contains(&(*name).to_owned()) || codex.contains(&(*name).to_owned()),
+                "/{name} is answered but not in the menu"
+            );
+        }
+        assert!(command_catalog(Vocabulary::Claude, &catalog).len() <= 100);
     }
 
     #[test]
