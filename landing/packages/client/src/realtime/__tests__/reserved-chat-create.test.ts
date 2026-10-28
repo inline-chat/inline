@@ -453,6 +453,7 @@ describe("reserved chat create and chatCreated blocker", () => {
             code: 400,
             errorCode: RpcError_Code.BAD_REQUEST,
             message: "CREATE_FAILED",
+            retryAfterSeconds: 0,
           },
         },
       }),
