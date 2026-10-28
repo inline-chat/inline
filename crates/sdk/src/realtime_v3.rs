@@ -1676,6 +1676,7 @@ fn realtime_error_from_v3(error: InlineProtocolV3Error) -> crate::realtime::Real
             error_code,
             message,
             code: status,
+            retry_after_seconds: 0,
         }),
         InlineProtocolV3Error::Timeout => crate::realtime::RealtimeError::Timeout {
             operation: "Inline Protocol",
@@ -2008,6 +2009,7 @@ mod tests {
                     error_code: proto::rpc_error::Code::Unauthenticated as i32,
                     message: "request rejected".into(),
                     code: 401,
+                    retry_after_seconds: 0,
                 },
             )),
         };

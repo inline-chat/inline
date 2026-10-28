@@ -10082,6 +10082,10 @@ public nonisolated struct RpcError: Sendable {
 
   public var code: Int32 = 0
 
+  /// Seconds the client should wait before retrying, Telegram FLOOD_WAIT-style.
+  /// Zero means no hint; clients keep their own backoff.
+  public var retryAfterSeconds: UInt32 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   /// Type of error
@@ -36588,7 +36592,7 @@ nonisolated extension PhotoSize: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 nonisolated extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcError"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{3}error_code\0\u{1}message\0\u{1}code\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{3}error_code\0\u{1}message\0\u{1}code\0\u{3}retry_after_seconds\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -36600,6 +36604,7 @@ nonisolated extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       case 2: try { try decoder.decodeSingularEnumField(value: &self.errorCode) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.message) }()
       case 4: try { try decoder.decodeSingularInt32Field(value: &self.code) }()
+      case 5: try { try decoder.decodeSingularUInt32Field(value: &self.retryAfterSeconds) }()
       default: break
       }
     }
@@ -36618,6 +36623,9 @@ nonisolated extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if self.code != 0 {
       try visitor.visitSingularInt32Field(value: self.code, fieldNumber: 4)
     }
+    if self.retryAfterSeconds != 0 {
+      try visitor.visitSingularUInt32Field(value: self.retryAfterSeconds, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -36626,6 +36634,7 @@ nonisolated extension RpcError: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if lhs.errorCode != rhs.errorCode {return false}
     if lhs.message != rhs.message {return false}
     if lhs.code != rhs.code {return false}
+    if lhs.retryAfterSeconds != rhs.retryAfterSeconds {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

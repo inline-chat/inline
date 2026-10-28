@@ -3099,6 +3099,7 @@ mod tests {
                             error_code: proto::rpc_error::Code::Unauthenticated as i32,
                             message: "request rejected".into(),
                             code: 401,
+                            retry_after_seconds: 0,
                         },
                     )),
                 },
