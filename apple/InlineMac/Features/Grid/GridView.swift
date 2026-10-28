@@ -8,8 +8,6 @@ struct GridView: View {
   @Environment(\.nav) private var nav
   @Environment(GridRoomService.self) private var store
   @Environment(SidebarViewModel.self) private var sidebar
-  @AppStorage(ExperimentalFeatureFlags.gridTranscriptionKey)
-  private var gridTranscriptionEnabled = false
   @State private var transcriptionNotice: GridTranscriptionNotice?
   let spaceID: Int64
 
@@ -190,10 +188,10 @@ struct GridView: View {
   }
 
   private func transcriptionControl(room: GridRoom) -> GridTranscriptionControl? {
-    guard gridTranscriptionEnabled || room.transcriptionIsRunning else { return nil }
+    // The server reports transcription unavailable outside Pro Spaces, so the control stays hidden there.
+    guard room.transcriptionAvailable || room.transcriptionIsRunning else { return nil }
     return GridTranscriptionControl(
       room: room,
-      allowsStarting: gridTranscriptionEnabled,
       isBusy: store.pendingTranscriptionRequestIDs[room.id] != nil,
       onSetTranscription: { enabled, destination in
         setTranscription(roomID: room.id, enabled: enabled, destination: destination)
@@ -228,7 +226,6 @@ struct GridView: View {
     enabled: Bool,
     destination: GridTranscriptionRequest.Destination
   ) {
-    guard !enabled || ExperimentalFeatureFlags.gridTranscriptionEnabled else { return }
     transcriptionNotice = nil
     // Requests fence on the room's run, revision and generation, so read the
     // room when the action runs rather than when its closure was made.

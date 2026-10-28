@@ -89,7 +89,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case richCopyMarkdownEditing
   case selectMultipleMessages
   case quickForward
-  case gridTranscription
   case fileBrowser
   case nativeFileDownloads
 
@@ -141,7 +140,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
 #endif
     case .newThreadAgentPicker, .richContentRenderer, .inlineMathAttachments,
          .richMessageMultiBlockSelection, .richCopyMarkdownEditing, .selectMultipleMessages, .quickForward,
-         .gridTranscription, .fileBrowser, .nativeFileDownloads:
+         .fileBrowser, .nativeFileDownloads:
       .experimental
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground,
          .appCache, .mediaCache, .dismissedPopovers, .themeWorkshop, .localDatabase:
@@ -212,7 +211,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richCopyMarkdownEditing: "Rich Copy & Markdown Editing"
     case .selectMultipleMessages: "Select Multiple Messages"
     case .quickForward: "Quick Forward"
-    case .gridTranscription: "Grid Transcription"
     case .fileBrowser: "File Browser"
     case .nativeFileDownloads: "Native File Downloads"
     case .syncEngine: "Sync Engine"
@@ -271,7 +269,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
          .richMessageMultiBlockSelection:
       "Agents"
     case .richCopyMarkdownEditing, .selectMultipleMessages, .quickForward: "Messages"
-    case .gridTranscription: "Grid"
     case .fileBrowser, .nativeFileDownloads: "Files"
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground: "Tools"
     case .appCache, .mediaCache, .dismissedPopovers: "Recovery"
@@ -344,7 +341,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .richCopyMarkdownEditing: ["copy", "paste", "markdown", "formatting"]
     case .selectMultipleMessages: ["select", "forward", "delete"]
     case .quickForward: ["forward"]
-    case .gridTranscription: ["transcript", "meeting", "call"]
     case .fileBrowser: ["files window", "browse"]
     case .nativeFileDownloads: ["download", "realtime"]
     case .syncEngine: ["realtime", "sync"]

@@ -7,8 +7,6 @@ struct ExperimentalSettingsDetailView: View {
   @Environment(\.dependencies) private var dependencies
   @ObservedObject private var auth = Auth.shared
   @AppStorage(ExperimentalFeatureFlags.fileBrowserKey) private var fileBrowserEnabled = false
-  @AppStorage(ExperimentalFeatureFlags.gridTranscriptionKey)
-  private var gridTranscriptionEnabled = false
   @StateObject private var settings = AppSettings.shared
   @AppStorage(ExperimentalFeatureFlags.newThreadAgentPickerKey)
   private var newThreadAgentPickerEnabled = false
@@ -27,7 +25,6 @@ struct ExperimentalSettingsDetailView: View {
       // Keep experiments grouped by purpose; see AGENTS.md before adding a section.
       agentsSection
       messagesSection
-      gridSection
       filesSection
     }
     .settingsFormStyle()
@@ -95,20 +92,6 @@ struct ExperimentalSettingsDetailView: View {
       .settingsSearchAnchor(.quickForward)
     } header: {
       SettingsSectionHeader("Messages")
-    }
-  }
-
-  private var gridSection: some View {
-    Section {
-      Toggle(isOn: $gridTranscriptionEnabled) {
-        SettingsRowLabel(
-          .gridTranscription,
-          description: "Try meeting transcripts in Grid. The interface is experimental and will be redesigned."
-        )
-      }
-      .settingsSearchAnchor(.gridTranscription)
-    } header: {
-      SettingsSectionHeader("Grid")
     }
   }
 

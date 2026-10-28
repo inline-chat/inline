@@ -3,13 +3,6 @@ import Foundation
 import InlineConfig
 
 public enum ExperimentalFeatureFlags {
-  public static let gridTranscriptionKey = "experimental.gridTranscription"
-
-  /// Opt-in while the Grid transcription client experience is being rebuilt.
-  public static var gridTranscriptionEnabled: Bool {
-    UserDefaults.standard.bool(forKey: gridTranscriptionKey)
-  }
-
   public static let newThreadAgentPickerKey = "experimental.newThreadAgentPicker"
 
   /// macOS-only, opt-in persistent agent selection for the new-thread composer.

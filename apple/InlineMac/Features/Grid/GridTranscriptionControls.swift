@@ -8,7 +8,6 @@ import SwiftUI
 /// `.id(room.id)` so the earlier-transcript list never outlives its room.
 struct GridTranscriptionControl: View {
   let room: GridRoom
-  let allowsStarting: Bool
   let isBusy: Bool
   let onSetTranscription: (Bool, GridTranscriptionRequest.Destination) -> Void
   let onOpenRoomThread: () -> Void
@@ -95,19 +94,17 @@ struct GridTranscriptionControl: View {
       .disabled(room.transcriptChatID == nil)
     Button("Open Room Thread", systemImage: "bubble.left.and.bubble.right", action: onOpenRoomThread)
       .disabled(!ownsMembership)
-    if allowsStarting {
-      Divider()
-      Button("New Transcript", systemImage: "plus") {
-        onSetTranscription(true, .new)
-      }
-      .disabled(!canStart)
-      Menu {
-        earlierTranscriptsMenuContent
-      } label: {
-        Label("Continue Earlier Transcript", systemImage: "clock.arrow.circlepath")
-      }
-      .disabled(!canStart)
+    Divider()
+    Button("New Transcript", systemImage: "plus") {
+      onSetTranscription(true, .new)
     }
+    .disabled(!canStart)
+    Menu {
+      earlierTranscriptsMenuContent
+    } label: {
+      Label("Continue Earlier Transcript", systemImage: "clock.arrow.circlepath")
+    }
+    .disabled(!canStart)
   }
 
   @ViewBuilder
@@ -147,7 +144,7 @@ struct GridTranscriptionControl: View {
   }
 
   private var canStart: Bool {
-    canControl && allowsStarting && room.canStartTranscription
+    canControl && room.canStartTranscription
   }
 
   private var canToggle: Bool {
@@ -176,7 +173,7 @@ struct GridTranscriptionControl: View {
     EarlierTranscriptsKey(
       roomID: room.id,
       runID: room.hasTranscription ? room.transcription.runID : "",
-      isNeeded: allowsStarting && !room.transcriptionIsRunning,
+      isNeeded: !room.transcriptionIsRunning,
       attempt: earlierTranscriptsAttempt
     )
   }
