@@ -244,6 +244,8 @@ impl Runtime {
             names,
             dm_chat_id: config.dm_chat_id,
             gate_budget: std::sync::Mutex::new(DailySpeakGateBudget::default()),
+            usage: std::sync::Mutex::new(Vec::new()),
+            context: std::sync::Mutex::new(HashMap::new()),
         });
         Ok(Self {
             config,
@@ -1007,12 +1009,27 @@ impl Runtime {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "the agent's folder".to_owned());
+        // Usage as the harness last reported it; none yet and the apps say so.
+        let usage = self
+            .agent
+            .usage
+            .lock()
+            .map(|windows| windows.clone())
+            .unwrap_or_default();
+        let context = self
+            .agent
+            .context
+            .lock()
+            .ok()
+            .and_then(|contexts| contexts.get(&chat_id).copied());
         settings::document(&settings::DocumentFacts {
             catalog,
             settings: self.thread_settings.get(&chat_id).unwrap_or(&default),
             folder_label: &folder,
             machine_label: &self.config.machine_label,
             can_compact: self.works.contains_key(&chat_id),
+            usage: &usage,
+            context,
         })
     }
 

@@ -373,11 +373,48 @@ impl DocBuilder {
                 length: summary_len,
                 ..Default::default()
             }),
-            kind: proto::block_disclosure::Kind::Progress as i32,
             children: children.blocks,
             activity_kind: activity as i32,
             status: status.proto(),
             meta,
+            ..Default::default()
+        }));
+    }
+
+    /// A progress message's outer row, as v1 drew it: "Working" (animated
+    /// and open) while `working`, then its final summary, closed.
+    pub(crate) fn progress(
+        &mut self,
+        summary: &str,
+        working: bool,
+        build: impl FnOnce(&mut DocBuilder),
+    ) {
+        let summary_offset = self.utf16;
+        let summary_len = summary.encode_utf16().count() as i64;
+        self.push_raw(summary);
+        self.push_raw("\n");
+        let mut children = DocBuilder {
+            text: std::mem::take(&mut self.text),
+            utf16: self.utf16,
+            blocks: Vec::new(),
+        };
+        build(&mut children);
+        self.text = children.text;
+        self.utf16 = children.utf16;
+        let kind = if working {
+            proto::block_disclosure::Kind::Progress
+        } else {
+            proto::block_disclosure::Kind::Default
+        };
+        self.push_block(proto::block::Kind::Disclosure(proto::BlockDisclosure {
+            summary: Some(proto::BlockText {
+                offset: summary_offset,
+                length: summary_len,
+                ..Default::default()
+            }),
+            kind: kind as i32,
+            initially_open: Some(working),
+            children: children.blocks,
             ..Default::default()
         }));
     }

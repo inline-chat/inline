@@ -41,7 +41,6 @@ use crate::bridge::inline_tools::{
 /// the work to answer.
 const WORK_ANSWER_TIMEOUT: Duration = Duration::from_secs(12);
 const MAX_TEXT_CHARS: usize = 8_000;
-const MAX_STATUS_CHARS: usize = 80;
 
 /// A tool that acts through the work itself, answered by its actor.
 #[derive(Debug)]
@@ -52,8 +51,6 @@ pub(crate) enum WorkTool {
         summary: Option<String>,
         anchor_message_id: Option<i64>,
     },
-    /// Short status for the work's chip; `None` clears it.
-    ReportStatus { text: Option<String> },
 }
 
 pub(crate) struct ToolsConfig {
@@ -415,15 +412,6 @@ impl Tools {
                         title,
                         summary: string_arg(arguments, "summary", 2_000),
                         anchor_message_id: positive_i64(arguments, "anchor_message_id"),
-                    },
-                )
-                .await
-            }
-            "report_status" => {
-                self.through_work(
-                    work,
-                    WorkTool::ReportStatus {
-                        text: string_arg(arguments, "text", MAX_STATUS_CHARS),
                     },
                 )
                 .await
@@ -842,10 +830,6 @@ pub(crate) fn specs() -> Vec<HostToolSpec> {
             "Send a local file from your folder to this work's thread as native Inline media, only when a person asked to receive it. Choose image, video or file from their request.",
         ),
         (
-            "report_status",
-            "Set the short status shown on this work's chip (under 80 characters); omit text to clear it.",
-        ),
-        (
             "ask_teammate",
             "Ask a person or agent in this work's thread a question, mentioning them.",
         ),
@@ -962,10 +946,6 @@ fn input_schema(name: &str) -> Value {
                 "confirmed_intent": intent,
             }),
             &["path", "kind", "confirmed_intent"],
-        ),
-        "report_status" => (
-            json!({"text": {"type": "string", "maxLength": MAX_STATUS_CHARS}}),
-            &[],
         ),
         "ask_teammate" => (
             json!({

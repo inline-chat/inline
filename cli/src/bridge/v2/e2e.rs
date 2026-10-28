@@ -433,7 +433,6 @@ async fn codex_round_trip_through_inline() {
             json!({"title": "E2E sub", "summary": "Moved for the long part"}),
         ),
         inline_tool("send_message", json!({"text": "E2E_IN_SUBTHREAD"})),
-        inline_tool("report_status", json!({"text": "Halfway"})),
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_SUB_DONE"}]}),
         json!({"type": "message", "role": "assistant",
@@ -1178,19 +1177,6 @@ async fn codex_round_trip_through_inline() {
         !parent.iter().any(|(_, text)| text.contains("E2E_SUB_DONE")),
         "the answer went to the subthread only: {parent:#?}"
     );
-    wait_for(
-        &model,
-        &owner,
-        group,
-        bot_user_id,
-        "the status on the parent card",
-        |texts| {
-            texts
-                .iter()
-                .any(|(_, text)| text.contains("Status: Halfway"))
-        },
-    )
-    .await;
     // The server publishes the work in the subthread now.
     let moved = owner
         .get_agent_session(proto::GetAgentSessionInput {

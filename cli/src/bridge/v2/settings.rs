@@ -4,6 +4,7 @@
 //! message on. Item IDs match what the apps already read
 //! (`ComposeAgentSettingsItem`).
 
+use inline_agent_bridge::DriverUsageWindow;
 use inline_agent_bridge::harness::{Catalog, SettingsChange};
 use inline_client::{
     AgentConfigurationCatalog, AgentModelCatalog, AgentModelOption, AgentReasoningCatalog,
@@ -21,6 +22,12 @@ pub(crate) const ITEM_REASONING: &str = "agent.reasoning";
 pub(crate) const ITEM_PERMISSIONS: &str = "agent.permissions";
 pub(crate) const ITEM_COMPACT: &str = "session.compact";
 const ITEM_FOLDER: &str = "workspace.folder";
+/// Account limits. Each window item's ID carries its numbers for Compose's
+/// usage popover: `account.usage.window:<minutes>:<used %>:<resets at>`.
+const SECTION_USAGE: &str = "account.usage";
+const ITEM_USAGE_WINDOW: &str = "account.usage.window";
+/// This thread's context window: `session.context:<used tokens>:<window>`.
+const ITEM_CONTEXT: &str = "session.context";
 /// "Use the harness's default", as a select value.
 const DEFAULT_VALUE: &str = "__inline_provider_default__";
 
@@ -98,6 +105,17 @@ pub(crate) struct DocumentFacts<'a> {
     pub machine_label: &'a str,
     /// A session is open, so it can be compacted now.
     pub can_compact: bool,
+    /// The account's usage windows, as the harness last reported them.
+    pub usage: &'a [DriverUsageWindow],
+    /// This thread's context fill, once a turn reported it.
+    pub context: Option<ContextUsage>,
+}
+
+/// How full a thread's context window is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ContextUsage {
+    pub used: u64,
+    pub window: u64,
 }
 
 pub(crate) fn document(facts: &DocumentFacts<'_>) -> BotChatSettingsDocument {
@@ -151,7 +169,13 @@ pub(crate) fn document(facts: &DocumentFacts<'_>) -> BotChatSettingsDocument {
             }),
         ));
     }
-    let session = vec![BotChatSettingsItem {
+    let mut session: Vec<BotChatSettingsItem> = facts
+        .context
+        .filter(|context| context.window > 0)
+        .map(context_item)
+        .into_iter()
+        .collect();
+    session.push(BotChatSettingsItem {
         id: ITEM_COMPACT.to_owned(),
         label: Some("Compact context".to_owned()),
         description: Some("Summarize this thread's session to free context.".to_owned()),
@@ -159,19 +183,21 @@ pub(crate) fn document(facts: &DocumentFacts<'_>) -> BotChatSettingsDocument {
         disabled_reason: (!facts.can_compact)
             .then(|| "Nothing is open in this thread yet.".to_owned()),
         control: BotChatSettingsControl::Button,
-    }];
+    });
     let workspace = vec![BotChatSettingsItem {
         id: ITEM_FOLDER.to_owned(),
         label: Some("Folder".to_owned()),
-        description: None,
+        description: Some(format!("On {}", facts.machine_label)),
         disabled: false,
         disabled_reason: None,
         control: BotChatSettingsControl::Info {
-            text: format!("{} on {}", facts.folder_label, facts.machine_label),
+            text: facts.folder_label.to_owned(),
             tone: BotChatSettingsInfoTone::Neutral,
         },
     }];
+    let usage = usage_items(facts.usage);
     let sections = [
+        (SECTION_USAGE, "Usage", usage),
         ("agent", "Agent", agent),
         ("session", "Session", session),
         ("workspace", "Workspace", workspace),
@@ -189,6 +215,115 @@ pub(crate) fn document(facts: &DocumentFacts<'_>) -> BotChatSettingsDocument {
         version: SETTINGS_VERSION,
         revision: revision(facts),
         sections,
+    }
+}
+
+/// One read-only item per usage window, 5-hour first, in the harness's
+/// numbers. They stay out of the revision: usage is not a choice.
+fn usage_items(windows: &[DriverUsageWindow]) -> Vec<BotChatSettingsItem> {
+    let mut windows: Vec<&DriverUsageWindow> = windows.iter().take(8).collect();
+    windows.sort_by_key(|window| window.window_minutes.unwrap_or(i64::MAX));
+    windows
+        .iter()
+        .map(|window| {
+            let shared = windows
+                .iter()
+                .filter(|other| other.window_minutes == window.window_minutes)
+                .count()
+                > 1;
+            BotChatSettingsItem {
+                id: format!(
+                    "{ITEM_USAGE_WINDOW}:{}:{}:{}",
+                    window.window_minutes.unwrap_or(0),
+                    window.used_percent,
+                    window.resets_at.unwrap_or(0)
+                ),
+                label: Some(window_title(window, shared)),
+                description: window
+                    .resets_at
+                    .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
+                    .map(|time| format!("Resets {}", time.format("%b %-d at %H:%M UTC"))),
+                disabled: true,
+                disabled_reason: None,
+                control: BotChatSettingsControl::Info {
+                    text: format!("{}% used", window.used_percent),
+                    tone: if window.used_percent >= 100 {
+                        BotChatSettingsInfoTone::Warning
+                    } else {
+                        BotChatSettingsInfoTone::Neutral
+                    },
+                },
+            }
+        })
+        .collect()
+}
+
+/// "5-hour limit", "Weekly · all models"; the harness's own name tells
+/// windows of the same length apart (Claude's `seven_day_opus`).
+fn window_title(window: &DriverUsageWindow, shared: bool) -> String {
+    let base = match window.window_minutes {
+        Some(10_080) if window.label.starts_with("seven_day") => "Weekly".to_owned(),
+        Some(10_080) => "Weekly limit".to_owned(),
+        Some(minutes) if minutes % 60 == 0 => format!("{}-hour limit", minutes / 60),
+        Some(minutes) => format!("{minutes}-minute limit"),
+        None => window.label.clone(),
+    };
+    let scope = window
+        .label
+        .strip_prefix("seven_day_")
+        .or_else(|| window.label.strip_prefix("five_hour_"))
+        .map(|model| {
+            let mut name = model.replace('_', " ");
+            if let Some(first) = name.get_mut(..1) {
+                first.make_ascii_uppercase();
+            }
+            name
+        });
+    match scope {
+        Some(scope) => format!("{base} · {scope}"),
+        None if window.label == "seven_day" => format!("{base} · all models"),
+        None if shared && window.window_minutes.is_some() => format!("{base} · {}", window.label),
+        None => base,
+    }
+}
+
+fn context_item(context: ContextUsage) -> BotChatSettingsItem {
+    let used = context.used.min(context.window);
+    let percent = used.saturating_mul(100) / context.window;
+    BotChatSettingsItem {
+        id: format!("{ITEM_CONTEXT}:{}:{}", context.used, context.window),
+        label: Some("Context window".to_owned()),
+        description: Some(format!(
+            "{} of {} tokens used",
+            token_count(context.used),
+            token_count(context.window)
+        )),
+        disabled: true,
+        disabled_reason: None,
+        control: BotChatSettingsControl::Info {
+            text: format!("{percent}% full"),
+            tone: if percent >= 90 {
+                BotChatSettingsInfoTone::Warning
+            } else {
+                BotChatSettingsInfoTone::Neutral
+            },
+        },
+    }
+}
+
+/// "850", "439k", "1.2M".
+fn token_count(tokens: u64) -> String {
+    match tokens {
+        0..1_000 => tokens.to_string(),
+        1_000..1_000_000 => format!("{}k", tokens / 1_000),
+        _ => {
+            let tenths = tokens / 100_000;
+            if tenths.is_multiple_of(10) {
+                format!("{}M", tenths / 10)
+            } else {
+                format!("{}.{}M", tenths / 10, tenths % 10)
+            }
+        }
     }
 }
 
@@ -475,7 +610,68 @@ mod tests {
             folder_label: "project",
             machine_label: "MacBook",
             can_compact: true,
+            usage: &[],
+            context: None,
         }
+    }
+
+    #[test]
+    fn usage_windows_and_context_read_as_items_compose_can_parse() {
+        let catalog = catalog();
+        let settings = SettingsChange::default();
+        let windows = [
+            DriverUsageWindow {
+                label: "seven_day".to_owned(),
+                used_percent: 18,
+                window_minutes: Some(10_080),
+                resets_at: Some(1_793_000_000),
+            },
+            DriverUsageWindow {
+                label: "five_hour".to_owned(),
+                used_percent: 26,
+                window_minutes: Some(300),
+                resets_at: None,
+            },
+        ];
+        let document = document(&DocumentFacts {
+            usage: &windows,
+            context: Some(ContextUsage {
+                used: 439_000,
+                window: 475_000,
+            }),
+            ..facts(&catalog, &settings)
+        });
+        let usage = &document.sections[0];
+        assert_eq!(usage.id, "account.usage");
+        let titles: Vec<(&str, Option<&str>)> = usage
+            .items
+            .iter()
+            .map(|item| (item.id.as_str(), item.label.as_deref()))
+            .collect();
+        assert_eq!(
+            titles,
+            vec![
+                ("account.usage.window:300:26:0", Some("5-hour limit")),
+                (
+                    "account.usage.window:10080:18:1793000000",
+                    Some("Weekly · all models")
+                ),
+            ]
+        );
+        let context = item(&document, "session.context:439000:475000");
+        assert!(matches!(
+            &context.control,
+            BotChatSettingsControl::Info { text, .. } if text == "92% full"
+        ));
+        assert_eq!(
+            context.description.as_deref(),
+            Some("439k of 475k tokens used")
+        );
+        assert_eq!(
+            document.revision,
+            super::document(&facts(&catalog, &settings)).revision,
+            "usage is not part of the revision"
+        );
     }
 
     fn item<'a>(document: &'a BotChatSettingsDocument, id: &str) -> &'a BotChatSettingsItem {
