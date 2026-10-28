@@ -13,6 +13,8 @@ struct PreparedChatPayload: Sendable {
 }
 
 struct PreparedPinnedMessage: Sendable, Equatable {
+  /// Every pin in the chat, oldest first, so the header's first frame shows the right count.
+  let messageIds: [Int64]
   let messageId: Int64
   let message: FullMessage?
 }
@@ -326,24 +328,22 @@ actor ChatOpenPreloader {
     db: Database
   ) throws -> PreparedPinnedMessage? {
     guard let chatId = try resolveChatId(peer: peer, chatItem: chatItem, db: db) else { return nil }
-    guard let pinned = try PinnedMessage
-      .filter(Column("chatId") == chatId)
-      .order(PinnedMessage.Columns.position.asc)
-      .fetchOne(db)
-    else {
-      return nil
-    }
+    let bar = try PinnedMessageBar(messageIds: PinnedMessage
+      .filter(PinnedMessage.Columns.chatId == chatId)
+      .select(PinnedMessage.Columns.messageId, as: Int64.self)
+      .fetchAll(db))
+    guard let messageId = bar.displayedMessageId else { return nil }
 
     var message = messages.first {
-      $0.message.chatId == chatId && $0.message.messageId == pinned.messageId
+      $0.message.chatId == chatId && $0.message.messageId == messageId
     }
     if message == nil {
       message = try FullMessage.queryRequest()
-        .filter(Column("messageId") == pinned.messageId && Column("chatId") == chatId)
+        .filter(Column("messageId") == messageId && Column("chatId") == chatId)
         .fetchOne(db)
     }
 
-    return PreparedPinnedMessage(messageId: pinned.messageId, message: message)
+    return PreparedPinnedMessage(messageIds: bar.messageIds, messageId: messageId, message: message)
   }
 
   private static func fillMissingChat(in item: SpaceChatItem, peer: Peer, db: Database) throws -> SpaceChatItem {

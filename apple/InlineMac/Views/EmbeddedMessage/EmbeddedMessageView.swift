@@ -47,6 +47,17 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
   private var messageLabelBottomConstraint: NSLayoutConstraint?
   private var photoConstraints: [NSLayoutConstraint] = []
 
+  /// Header for `.pinnedInHeader`, such as "Pinned Message #2" when a chat has several pins.
+  var pinnedHeaderTitle = "Pinned Message" {
+    didSet {
+      guard kind == .pinnedInHeader, pinnedHeaderTitle != oldValue else { return }
+      nameLabel.stringValue = pinnedHeaderTitle
+    }
+  }
+
+  /// Replaces the default jump-to-message click, for hosts that decide where a click goes.
+  var onTap: (() -> Void)?
+
   var showsBackground: Bool = true {
     didSet {
       applyBackgroundAppearance()
@@ -311,6 +322,10 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
   }
 
   @objc func handleTap(_ gesture: NSClickGestureRecognizer) {
+    if let onTap {
+      onTap()
+      return
+    }
     guard let message else { return }
     guard message.status != .sending, message.status != .failed else { return }
 
@@ -429,7 +444,7 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
         "Forward Message"
 
       case .pinnedInHeader:
-        "Pinned Message"
+        pinnedHeaderTitle
     }
 
     // Update visuals after setting senderNameForColor
@@ -476,7 +491,7 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
       case .forwardingInCompose:
         "Forward Message"
       case .pinnedInHeader:
-        "Pinned Message"
+        pinnedHeaderTitle
     }
 
     if kind == .forwardingInCompose {

@@ -4,6 +4,7 @@ import GRDB
 import InlineKit
 import Logger
 import SwiftUI
+import Translation
 import os.signpost
 
 private let pinnedHeaderCornerRadius: CGFloat = 14
@@ -15,6 +16,10 @@ final class PinnedMessageHeaderView: NSView {
     static let contentSpacing: CGFloat = 8
     static let closeButtonSize: CGFloat = EmbedMessageView.height
     static let fadeDuration: TimeInterval = 0.2
+    static let swapDuration: TimeInterval = 0.18
+    static let stripeLeadingInset: CGFloat = 12
+    static let stripeWidth: CGFloat = 2
+    static let stripeTextSpacing: CGFloat = 6
   }
 
   static let preferredHeight: CGFloat = EmbedMessageView.height + (Constants.verticalPadding * 2)
@@ -29,7 +34,8 @@ final class PinnedMessageHeaderView: NSView {
 
   private var pinnedMessageObservation: AnyCancellable?
   private var messageObservation: AnyCancellable?
-  private var currentMessageId: Int64?
+  private var bar = PinnedMessageBar()
+  private var currentMessageId: Int64? { bar.displayedMessageId }
 
   private let backgroundView: NSView
   private let backgroundContentView: NSView
@@ -44,6 +50,17 @@ final class PinnedMessageHeaderView: NSView {
     view.showsLeadingBar = false
     view.textLeadingPadding = Constants.horizontalPadding
     view.textTrailingPadding = Constants.horizontalPadding
+    view.wantsLayer = true
+    view.onTap = { [weak self] in
+      self?.primaryTapped()
+    }
+    return view
+  }()
+
+  private let stripeView: PinnedMessageStripeView = {
+    let view = PinnedMessageStripeView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isHidden = true
     return view
   }()
 
@@ -112,6 +129,7 @@ final class PinnedMessageHeaderView: NSView {
 
     backgroundView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(backgroundView)
+    backgroundContentView.addSubview(stripeView)
     backgroundContentView.addSubview(embedView)
     backgroundContentView.addSubview(closeButton)
     isHidden = true
@@ -132,6 +150,14 @@ final class PinnedMessageHeaderView: NSView {
       backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Constants.horizontalPadding),
       backgroundViewTopConstraint!,
       backgroundViewBottomConstraint!,
+
+      stripeView.leadingAnchor.constraint(
+        equalTo: backgroundContentView.leadingAnchor,
+        constant: Constants.stripeLeadingInset
+      ),
+      stripeView.centerYAnchor.constraint(equalTo: embedView.centerYAnchor),
+      stripeView.widthAnchor.constraint(equalToConstant: Constants.stripeWidth),
+      stripeView.heightAnchor.constraint(equalToConstant: EmbedMessageView.height - 8),
 
       embedView.leadingAnchor.constraint(equalTo: backgroundContentView.leadingAnchor, constant: Constants.horizontalPadding),
       embedView.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -Constants.contentSpacing),
@@ -179,44 +205,71 @@ final class PinnedMessageHeaderView: NSView {
     pinnedMessageObservation = ValueObservation
       .tracking { [chatId] db in
         try PinnedMessage
-          .filter(Column("chatId") == chatId)
-          .order(PinnedMessage.Columns.position.asc)
-          .fetchOne(db)
+          .filter(PinnedMessage.Columns.chatId == chatId)
+          .select(PinnedMessage.Columns.messageId, as: Int64.self)
+          .fetchAll(db)
+          .sorted()
       }
+      .removeDuplicates()
       .publisher(in: AppDatabase.shared.dbWriter, scheduling: .immediate)
       .receive(on: DispatchQueue.main)
       .sink(
         receiveCompletion: { [weak self] completion in
           self?.log.error("Pinned message observation failed: \(completion)")
         },
-        receiveValue: { [weak self] pinned in
-          self?.updatePinnedMessageId(pinned?.messageId)
+        receiveValue: { [weak self] messageIds in
+          self?.updatePinnedMessageIds(messageIds)
         }
       )
   }
 
-  private func updatePinnedMessageId(_ messageId: Int64?) {
-    guard messageId != currentMessageId else { return }
+  private func updatePinnedMessageIds(_ messageIds: [Int64]) {
+    var next = bar
+    next.update(messageIds: messageIds)
+    applyBar(next)
+  }
 
-    currentMessageId = messageId
+  private func applyBar(_ next: PinnedMessageBar, animated: Bool = true) {
+    let previousMessageId = bar.displayedMessageId
+    bar = next
+    updatePinCountPresentation(animated: animated)
+
+    guard next.displayedMessageId != previousMessageId else {
+      embedView.pinnedHeaderTitle = next.title
+      return
+    }
+
     messageObservation?.cancel()
     messageObservation = nil
 
-    if let messageId {
-      setVisible(true)
-      if let message = loadPinnedMessage(messageId: messageId) {
-        configurePinnedMessage(message)
-      } else {
-        showPinnedMessageUnavailable(messageId: messageId, shouldFetch: true)
-      }
-      observePinnedMessageContent(messageId: messageId)
-    } else {
+    guard let messageId = next.displayedMessageId else {
       setVisible(false)
+      return
     }
+
+    setVisible(true)
+    if animated, previousMessageId != nil, window != nil,
+       !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    {
+      let transition = CATransition()
+      transition.type = .fade
+      transition.duration = Constants.swapDuration
+      embedView.layer?.add(transition, forKey: "pinnedMessageSwap")
+    }
+    embedView.pinnedHeaderTitle = next.title
+    if let message = loadPinnedMessage(messageId: messageId) {
+      configurePinnedMessage(message)
+    } else {
+      showPinnedMessageUnavailable(messageId: messageId, shouldFetch: true)
+    }
+    observePinnedMessageContent(messageId: messageId)
   }
 
   private func applyInitialPinnedMessage(_ pinned: PreparedPinnedMessage) {
-    currentMessageId = pinned.messageId
+    bar = PinnedMessageBar(messageIds: pinned.messageIds)
+    bar.show(pinned.messageId)
+    updatePinCountPresentation(animated: false)
+    embedView.pinnedHeaderTitle = bar.title
     setVisible(true, animate: false)
 
     if let message = pinned.message {
@@ -224,6 +277,32 @@ final class PinnedMessageHeaderView: NSView {
     } else {
       showPinnedMessageUnavailable(messageId: pinned.messageId, shouldFetch: true)
     }
+  }
+
+  /// The stripe, title and trailing button follow how many pins the chat has.
+  private func updatePinCountPresentation(animated: Bool) {
+    let hasSeveral = bar.count > 1
+    stripeView.update(
+      range: bar.visibleStripeRange,
+      selectedIndex: bar.displayedIndex,
+      animated: animated && window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    )
+    stripeView.isHidden = !hasSeveral
+    embedView.textLeadingPadding = hasSeveral
+      ? Constants.stripeLeadingInset + Constants.stripeWidth + Constants.stripeTextSpacing - Constants.horizontalPadding
+      : Constants.horizontalPadding
+
+    if let index = bar.displayedIndex, hasSeveral {
+      embedView.setAccessibilityValue("\(index + 1) of \(bar.count)")
+    } else {
+      embedView.setAccessibilityValue(nil)
+    }
+
+    let symbolName = hasSeveral ? "list.bullet" : "xmark"
+    let label = hasSeveral ? "Pinned Messages" : "Unpin"
+    guard closeButton.toolTip != label else { return }
+    closeButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)
+    closeButton.toolTip = label
   }
 
   private func configurePinnedMessage(_ message: FullMessage) {
@@ -393,9 +472,78 @@ final class PinnedMessageHeaderView: NSView {
     menu.addItem(contextMenuItem(
       title: "Unpin",
       systemSymbolName: "pin.slash",
-      action: #selector(unpinTapped)
+      action: #selector(unpinShown)
+    ))
+    if bar.count > 1 {
+      menu.addItem(contextMenuItem(
+        title: "Unpin All \(bar.count) Messages…",
+        systemSymbolName: "pin.slash",
+        action: #selector(confirmUnpinAll)
+      ))
+    }
+    return menu
+  }
+
+  /// Every pin, newest first, then the unpin actions. Opened from the trailing button when there are several.
+  private func pinnedListMenu() -> NSMenu {
+    let menu = NSMenu()
+    let messageIds = bar.messageIds
+    let messages = loadPinnedMessages(messageIds: messageIds)
+    let missing = messageIds.filter { messages[$0] == nil }
+    if !missing.isEmpty {
+      Task { [peerId, chatId] in
+        await TargetMessagesFetcher.shared.ensureCached(peer: peerId, chatId: chatId, messageIds: missing)
+      }
+    }
+
+    for messageId in messageIds.reversed() {
+      let item = NSMenuItem(
+        title: messages[messageId].map(Self.menuTitle) ?? "Pinned message unavailable",
+        action: #selector(openPinFromMenu(_:)),
+        keyEquivalent: ""
+      )
+      item.target = self
+      item.tag = Int(messageId)
+      item.state = messageId == bar.displayedMessageId ? .on : .off
+      menu.addItem(item)
+    }
+
+    menu.addItem(.separator())
+    menu.addItem(contextMenuItem(
+      title: "Unpin",
+      systemSymbolName: "pin.slash",
+      action: #selector(unpinShown)
+    ))
+    menu.addItem(contextMenuItem(
+      title: "Unpin All \(messageIds.count) Messages…",
+      systemSymbolName: "pin.slash",
+      action: #selector(confirmUnpinAll)
     ))
     return menu
+  }
+
+  private static func menuTitle(_ message: FullMessage) -> String {
+    let text = (message.displayTextForLastMessage ?? message.message.stringRepresentationWithEmoji)
+      .split(whereSeparator: \.isNewline)
+      .joined(separator: " ")
+      .trimmingCharacters(in: .whitespaces)
+    let preview = text.count > 60 ? "\(text.prefix(60))…" : text
+    guard let sender = message.from?.shortDisplayName else { return preview }
+    return "\(sender): \(preview)"
+  }
+
+  private func loadPinnedMessages(messageIds: [Int64]) -> [Int64: FullMessage] {
+    do {
+      let messages = try AppDatabase.shared.dbWriter.read { [chatId] db in
+        try FullMessage.queryRequest()
+          .filter(Column("chatId") == chatId && messageIds.contains(Column("messageId")))
+          .fetchAll(db)
+      }
+      return Dictionary(messages.map { ($0.message.messageId, $0) }, uniquingKeysWith: { first, _ in first })
+    } catch {
+      log.error("Failed to read pinned messages", error: error)
+      return [:]
+    }
   }
 
   private func contextMenuItem(title: String, systemSymbolName: String, action: Selector) -> NSMenuItem {
@@ -417,19 +565,155 @@ final class PinnedMessageHeaderView: NSView {
 
   @objc private func goToMessage() {
     guard let messageId = currentMessageId else { return }
+    scrollTo(messageId)
+  }
+
+  /// Jumps to the shown pin and moves the header to the next older one.
+  private func primaryTapped() {
+    var next = bar
+    guard let messageId = next.advance() else { return }
+    applyBar(next)
+    scrollTo(messageId)
+  }
+
+  @objc private func openPinFromMenu(_ sender: NSMenuItem) {
+    var next = bar
+    next.show(Int64(sender.tag))
+    guard let messageId = next.advance() else { return }
+    applyBar(next)
+    scrollTo(messageId)
+  }
+
+  private func scrollTo(_ messageId: Int64) {
     ChatsManager.shared
       .get(for: peerId, chatId: chatId)
       .scrollTo(msgId: messageId, reason: .pinned)
   }
 
   @objc private func unpinTapped() {
+    if bar.count > 1 {
+      pinnedListMenu().popUp(
+        positioning: nil,
+        at: NSPoint(x: 0, y: closeButton.isFlipped ? closeButton.bounds.maxY + 4 : -4),
+        in: closeButton
+      )
+      return
+    }
+    unpinShown()
+  }
+
+  @objc private func unpinShown() {
     guard let messageId = currentMessageId else { return }
-    Task { @MainActor in
-      do {
-        _ = try await dependencies.realtimeV2.send(.pinMessage(peer: peerId, messageId: messageId, unpin: true))
-      } catch {
-        Log.shared.error("Failed to unpin message", error: error)
+    unpin([messageId])
+  }
+
+  @objc private func confirmUnpinAll() {
+    let messageIds = bar.messageIds
+    guard !messageIds.isEmpty else { return }
+    let alert = NSAlert()
+    alert.messageText = "Unpin all \(messageIds.count) messages?"
+    alert.informativeText = "They'll be unpinned for everyone in this chat."
+    alert.addButton(withTitle: "Unpin All").hasDestructiveAction = true
+    alert.addButton(withTitle: "Cancel")
+    let unpinAll: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+      guard response == .alertFirstButtonReturn else { return }
+      self?.unpin(messageIds)
+    }
+    if let window {
+      alert.beginSheetModal(for: window, completionHandler: unpinAll)
+    } else {
+      unpinAll(alert.runModal())
+    }
+  }
+
+  private func unpin(_ messageIds: [Int64]) {
+    for messageId in messageIds {
+      Task { @MainActor [dependencies, peerId] in
+        do {
+          _ = try await dependencies.realtimeV2.send(.pinMessage(peer: peerId, messageId: messageId, unpin: true))
+        } catch {
+          Log.shared.error("Failed to unpin message", error: error)
+        }
       }
+    }
+  }
+}
+
+/// Telegram-style position indicator: one segment per pin in chat order, the shown pin highlighted.
+private final class PinnedMessageStripeView: NSView {
+  private static let segmentSpacing: CGFloat = 2
+
+  private var segmentLayers: [CALayer] = []
+  private var range: Range<Int> = 0 ..< 0
+  private var selectedIndex: Int?
+
+  override var isFlipped: Bool { true }
+
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    wantsLayer = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func hitTest(_: NSPoint) -> NSView? { nil }
+
+  func update(range: Range<Int>, selectedIndex: Int?, animated: Bool) {
+    self.range = range
+    self.selectedIndex = selectedIndex
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(!animated)
+    while segmentLayers.count < range.count {
+      let segment = CALayer()
+      segment.cornerRadius = 1
+      layer?.addSublayer(segment)
+      segmentLayers.append(segment)
+    }
+    while segmentLayers.count > range.count {
+      segmentLayers.removeLast().removeFromSuperlayer()
+    }
+    applyColors()
+    layoutSegments()
+    CATransaction.commit()
+  }
+
+  override func layout() {
+    super.layout()
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    layoutSegments()
+    CATransaction.commit()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    applyColors()
+  }
+
+  private func applyColors() {
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      for (offset, segment) in segmentLayers.enumerated() {
+        let isSelected = range.lowerBound + offset == selectedIndex
+        segment.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(isSelected ? 1 : 0.3).cgColor
+      }
+    }
+  }
+
+  private func layoutSegments() {
+    guard !segmentLayers.isEmpty else { return }
+    let count = CGFloat(segmentLayers.count)
+    let height = max(0, (bounds.height - Self.segmentSpacing * (count - 1)) / count)
+    for (offset, segment) in segmentLayers.enumerated() {
+      segment.frame = CGRect(
+        x: 0,
+        y: CGFloat(offset) * (height + Self.segmentSpacing),
+        width: bounds.width,
+        height: height
+      )
     }
   }
 }
