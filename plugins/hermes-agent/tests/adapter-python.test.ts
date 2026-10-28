@@ -5426,6 +5426,36 @@ async def assert_cold_boot_drops_replayed_history():
 
 asyncio.run(assert_cold_boot_drops_replayed_history())
 
+def assert_unknown_send_outcome_is_final():
+    adapter = InlineAdapter(PlatformConfig(extra={"token": "fake"}))
+    lost = SendResult(success=False, error="RPC timed out after dispatch",
+        raw_response={"ok": False, "errorKind": "unknown", "outcomeUnknown": True})
+    assert adapter._send_retry_is_final(lost)
+    assert not adapter._send_retry_is_final(SendResult(success=False, error="network closed",
+        raw_response={"ok": False, "errorKind": "transient"}))
+    assert not adapter._send_retry_is_final(SendResult(success=False, error="weird"))
+
+assert_unknown_send_outcome_is_final()
+
+async def assert_rate_limit_carries_server_wait():
+    adapter = InlineAdapter(PlatformConfig(extra={"token": "fake"}))
+    async def flood(path, body):
+        raise inline_adapter_module.InlineSidecarError(path, 429, "Too many requests: rate limited, retry after 7 s",
+            "rate_limited", {"ok": False, "errorKind": "rate_limited", "retryAfterSeconds": 7})
+    adapter._sidecar_call = flood
+    # Hermes hosts that know retry_after get the server's wait; older ones drop the field.
+    SendResult.__dataclass_fields__ = {"error_kind": object(), "retry_after": object()}
+    try:
+        limited = await adapter._send_sidecar("/send", {"target": {"chatId": "10"}, "text": "hi"})
+    finally:
+        del SendResult.__dataclass_fields__
+    assert limited.success is False and limited.retry_after == 7.0 and limited.error_kind == "rate_limited"
+    assert limited.retryable is False
+    legacy = await adapter._send_sidecar("/send", {"target": {"chatId": "10"}, "text": "hi"})
+    assert not hasattr(legacy, "retry_after")
+
+asyncio.run(assert_rate_limit_carries_server_wait())
+
 async def assert_action_authorization():
     os.environ.pop("GATEWAY_ALLOWED_USERS", None)
     os.environ.pop("GATEWAY_ALLOW_ALL_USERS", None)

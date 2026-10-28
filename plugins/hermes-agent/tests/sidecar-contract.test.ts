@@ -112,6 +112,29 @@ describe("sidecar contract helpers", () => {
     expect(normalizeError(new Error("weird failure")).errorKind).toBe("unknown")
   })
 
+  it("never marks a dispatched mutation with a lost result as retry-safe", () => {
+    const lost = (message: string) => Object.assign(new Error(message), { code: "commit-outcome-unknown" })
+    for (const message of [
+      "RPC timed out after dispatch",
+      "Connection reopened before the RPC result arrived",
+      "RPC transport failed after dispatch: TransportError: socket closed",
+    ]) {
+      expect(normalizeError(lost(message))).toEqual({ status: 504, errorKind: "unknown", message, outcomeUnknown: true })
+    }
+    // Server pacing: classified by rpc code, with the server's wait passed through.
+    const flood = (rpcCode: number, retryAfterSeconds?: number) =>
+      Object.assign(new Error("Too many requests"), { code: "rpc-error", rpcCode, retryAfterSeconds })
+    expect(normalizeError(flood(3, 7))).toEqual({
+      status: 429, errorKind: "rate_limited", message: "Too many requests", retryAfterSeconds: 7,
+    })
+    expect(normalizeError(flood(429))).toEqual({ status: 429, errorKind: "rate_limited", message: "Too many requests" })
+    expect(normalizeError(flood(2, 7)).errorKind).toBe("unknown")
+    expect(normalizeError(new Error("Too many requests: rate limited, retry after 9 s")).errorKind).toBe("rate_limited")
+    // Never sent: the SDK's plain timeout and a missing connection stay retry-safe.
+    expect(normalizeError(Object.assign(new Error("timeout"), { code: "timeout" })).errorKind).toBe("transient")
+    expect(normalizeError(new Error("network closed")).outcomeUnknown).toBeUndefined()
+  })
+
   it("redacts configured secrets without treating empty secrets as matches", () => {
     expect(redactText("token before inline-secret after", [
       { value: "", label: "[EMPTY]" },
