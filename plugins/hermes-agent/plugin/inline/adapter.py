@@ -76,6 +76,16 @@ _CHAT_ACCESS_LOOKUP_TIMEOUT_SECONDS = 2.0
 _INBOUND_ACCESS_LOOKUP_TIMEOUT_SECONDS = 30.0
 _INBOUND_RETRY_INITIAL_SECONDS = 1.0
 _MAX_INBOUND_DELIVERIES = 16
+# Telegram's drop_pending_on_cold_boot, for Inline: updates the server recorded
+# before this gateway process started are acknowledged without waking the agent.
+# A lost or fresh SDK cursor otherwise replays chat history as new messages.
+_PROCESS_STARTED_AT = time.time()
+_COLD_BOOT_CLOCK_SKEW_SECONDS = 60
+_COLD_BOOT_DROP_LOG_INTERVAL_SECONDS = 60.0
+_COLD_BOOT_GATED_KINDS = frozenset({
+    "message.new", "message.edit", "message.delete", "message.history.clear",
+    "reaction.add", "reaction.delete", "chat.participant.add", "chat.participant.delete",
+})
 # Provider discovery may invoke host CLIs. Keep repeated panel opens and
 # unrelated mutations off that slow path while always injecting the live
 # current/default model into the document below.
@@ -915,6 +925,14 @@ class InlineAdapter(BasePlatformAdapter):
             else inline_env("INLINE_OBSERVE_UNMENTIONED_MESSAGES"),
             True,
         )
+        self._drop_pending_on_cold_boot = _truthy(
+            extra.get("drop_pending_on_cold_boot")
+            if "drop_pending_on_cold_boot" in extra
+            else inline_env("INLINE_DROP_PENDING_ON_COLD_BOOT"),
+            True,
+        )
+        self._cold_boot_dropped = 0
+        self._cold_boot_drop_logged_at = 0.0
         self._reply_thread_mode = _reply_thread_mode(
             extra.get("reply_threads") if "reply_threads" in extra else inline_env("INLINE_REPLY_THREADS"),
             "auto",
@@ -1953,6 +1971,12 @@ class InlineAdapter(BasePlatformAdapter):
         self._inbound_task = asyncio.get_event_loop().create_task(self._inbound_loop())
         self._mark_connected()
         logger.info("[inline] connected via sidecar on %s:%d", self._sidecar_bind, self._sidecar_port)
+        if not is_reconnect:
+            logger.info(
+                "[inline] Cold boot: %s Inline updates recorded before this gateway started "
+                "(drop_pending_on_cold_boot: %s)",
+                "dropping" if self._drop_pending_on_cold_boot else "preserving",
+                "true" if self._drop_pending_on_cold_boot else "false")
         self._schedule_bot_command_sync()
         return True
 
@@ -2393,6 +2417,8 @@ class InlineAdapter(BasePlatformAdapter):
         # owns a coherent client-state cache.
         self._invalidate_chat_info(event.get("chatId"))
         kind = event.get("kind")
+        if kind in _COLD_BOOT_GATED_KINDS and self._recorded_before_cold_boot(event):
+            return
         if kind == "bot.chatSettings.request":
             if event.get("_inlineDeliveryId"):
                 await self._handle_bot_settings_request(event)
@@ -2436,6 +2462,29 @@ class InlineAdapter(BasePlatformAdapter):
         if kind != "message.new":
             return
         await self._dispatch_message(event)
+
+    def _recorded_before_cold_boot(self, event: Dict[str, Any]) -> bool:
+        """Whether this update predates the gateway process and must not wake the agent.
+
+        The update date is when the server recorded the change, so a live edit or reaction
+        on an old message still passes. Updates without a date pass rather than risk
+        dropping live work."""
+        if not self._drop_pending_on_cold_boot:
+            return False
+        date = _to_int(event.get("date"))
+        if date is None and event.get("kind") == "message.new":
+            date = _to_int((event.get("message") or {}).get("date"))
+        if date is None or date <= 0 or date >= _PROCESS_STARTED_AT - _COLD_BOOT_CLOCK_SKEW_SECONDS:
+            return False
+        self._cold_boot_dropped += 1
+        now = time.time()
+        if now - self._cold_boot_drop_logged_at >= _COLD_BOOT_DROP_LOG_INTERVAL_SECONDS:
+            self._cold_boot_drop_logged_at = now
+            logger.info(
+                "[inline] dropped %d update(s) recorded before this gateway started; latest %s in chat %s, %ds before startup",
+                self._cold_boot_dropped, event.get("kind"), event.get("chatId") or "?",
+                int(_PROCESS_STARTED_AT - date))
+        return True
 
     def _is_duplicate(self, key: str) -> bool:
         now = time.time()

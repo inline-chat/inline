@@ -5369,6 +5369,63 @@ async def assert_inbound_receipt_recovery():
 
 asyncio.run(assert_inbound_receipt_recovery())
 
+async def assert_cold_boot_drops_replayed_history():
+    started = inline_adapter_module._PROCESS_STARTED_AT
+    before_boot = str(int(started) - 3600)
+    after_boot = str(int(started) + 5)
+    saved = os.environ.pop("INLINE_DROP_PENDING_ON_COLD_BOOT", None)
+    try:
+        # Default on, like Hermes' Telegram drop_pending_on_cold_boot.
+        assert InlineAdapter(PlatformConfig(extra={"token": "fake"}))._drop_pending_on_cold_boot
+    finally:
+        if saved is not None:
+            os.environ["INLINE_DROP_PENDING_ON_COLD_BOOT"] = saved
+    adapter = InlineAdapter(PlatformConfig(extra={**trusted_extra, "drop_pending_on_cold_boot": True}))
+    dispatched, acknowledgements = [], []
+    async def message(event, edit=False):
+        dispatched.append((event["kind"], event["message"]["id"]))
+    async def system(event):
+        dispatched.append((event["kind"], event.get("chatId")))
+    async def recover(event):
+        dispatched.append(("recover", event.get("chatId")))
+        return True
+    async def ack(path, body):
+        assert path == "/inbound/ack", path
+        acknowledgements.append(body["deliveryId"])
+        return {"ok": True}
+    adapter._dispatch_message = message
+    adapter._dispatch_system_event = system
+    adapter._recover_self_join_mentions = recover
+    adapter._sidecar_call = ack
+    def new(msg_id, date, delivery, **extra):
+        return {"kind": "message.new", "chatId": "10", "seq": int(msg_id), "date": date,
+            "_inlineDeliveryId": delivery, "message": {"id": msg_id, "fromId": "u1", "message": "/new", **extra}}
+    # Replayed history is acknowledged so the cursor advances, but never reaches the agent.
+    await adapter._on_inbound(json.dumps(new("1", before_boot, "old")))
+    await asyncio.wait_for(adapter._inbound_deliveries["old"], 1)
+    assert acknowledgements == ["old"] and dispatched == []
+    await adapter._dispatch_inbound({"kind": "chat.participant.add", "chatId": "10", "date": before_boot,
+        "participant": {"userId": "777", "date": before_boot}})
+    await adapter._dispatch_inbound({"kind": "reaction.add", "chatId": "10", "date": before_boot})
+    assert dispatched == [] and adapter._cold_boot_dropped == 3
+    # An old message without an update date still uses its own date.
+    await adapter._dispatch_inbound({**new("2", None, "x"), "message": {"id": "2", "message": "hi", "date": before_boot}})
+    assert dispatched == []
+    # Live work passes: new messages, edits recorded now on an old message, and undated updates.
+    await adapter._dispatch_inbound(new("3", after_boot, "y"))
+    adapter._system_events = True
+    await adapter._dispatch_inbound({"kind": "message.edit", "chatId": "10", "date": after_boot,
+        "message": {"id": "1", "message": "edited", "date": before_boot}})
+    await adapter._dispatch_inbound({"kind": "message.new", "chatId": "10", "message": {"id": "4", "message": "undated"}})
+    assert dispatched == [("message.new", "3"), ("message.edit", "1"), ("message.new", "4")], dispatched
+    # Opting out preserves queued history.
+    keep = InlineAdapter(PlatformConfig(extra={**trusted_extra, "drop_pending_on_cold_boot": False}))
+    keep._dispatch_message = message
+    await keep._dispatch_inbound(new("5", before_boot, "z"))
+    assert dispatched[-1] == ("message.new", "5")
+
+asyncio.run(assert_cold_boot_drops_replayed_history())
+
 async def assert_action_authorization():
     os.environ.pop("GATEWAY_ALLOWED_USERS", None)
     os.environ.pop("GATEWAY_ALLOW_ALL_USERS", None)
@@ -6382,6 +6439,8 @@ describe("python adapter smoke", () => {
         INLINE_GROUP_ALLOW_FROM: "",
         INLINE_ALLOW_ALL_USERS: "",
         INLINE_SYSTEM_EVENTS: "",
+        // Fixtures use small epoch dates; the cold-boot test opts back in explicitly.
+        INLINE_DROP_PENDING_ON_COLD_BOOT: "0",
         INLINE_SIDECAR_TEST_MOCK: "1",
         INLINE_SIDECAR_TEST_ALLOW_MOCK: "1",
         INLINE_NODE_BIN: nodeBin,
