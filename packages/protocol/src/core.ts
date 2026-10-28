@@ -6204,6 +6204,12 @@ export interface RpcCall {
          */
         moveAgentSession: MoveAgentSessionInput;
     } | {
+        oneofKind: "unpinAllMessages";
+        /**
+         * @generated from protobuf field: UnpinAllMessagesInput unpinAllMessages = 164;
+         */
+        unpinAllMessages: UnpinAllMessagesInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -7184,6 +7190,12 @@ export interface RpcResult {
          * @generated from protobuf field: MoveAgentSessionResult moveAgentSession = 163;
          */
         moveAgentSession: MoveAgentSessionResult;
+    } | {
+        oneofKind: "unpinAllMessages";
+        /**
+         * @generated from protobuf field: UnpinAllMessagesResult unpinAllMessages = 164;
+         */
+        unpinAllMessages: UnpinAllMessagesResult;
     } | {
         oneofKind: undefined;
     };
@@ -13853,6 +13865,26 @@ export interface PinMessageResult {
     updates: Update[];
 }
 /**
+ * Unpin every pinned message in a chat for everyone
+ *
+ * @generated from protobuf message UnpinAllMessagesInput
+ */
+export interface UnpinAllMessagesInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+}
+/**
+ * @generated from protobuf message UnpinAllMessagesResult
+ */
+export interface UnpinAllMessagesResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
  * Apple only types
  *
  * @generated from protobuf message DraftMessage
@@ -17112,7 +17144,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: MOVE_AGENT_SESSION = 162;
      */
-    MOVE_AGENT_SESSION = 162
+    MOVE_AGENT_SESSION = 162,
+    /**
+     * @generated from protobuf enum value: UNPIN_ALL_MESSAGES = 163;
+     */
+    UNPIN_ALL_MESSAGES = 163
 }
 /**
  * @generated from protobuf enum GridTranscriptionState
@@ -29962,7 +29998,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 160, name: "setAgentParticipation", kind: "message", oneof: "input", T: () => SetAgentParticipationInput },
             { no: 161, name: "updateAgentSettings", kind: "message", oneof: "input", T: () => UpdateAgentSettingsInput },
             { no: 162, name: "controlAgentSession", kind: "message", oneof: "input", T: () => ControlAgentSessionInput },
-            { no: 163, name: "moveAgentSession", kind: "message", oneof: "input", T: () => MoveAgentSessionInput }
+            { no: 163, name: "moveAgentSession", kind: "message", oneof: "input", T: () => MoveAgentSessionInput },
+            { no: 164, name: "unpinAllMessages", kind: "message", oneof: "input", T: () => UnpinAllMessagesInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -30947,6 +30984,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         moveAgentSession: MoveAgentSessionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).moveAgentSession)
                     };
                     break;
+                case /* UnpinAllMessagesInput unpinAllMessages */ 164:
+                    message.input = {
+                        oneofKind: "unpinAllMessages",
+                        unpinAllMessages: UnpinAllMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).unpinAllMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -31445,6 +31488,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* MoveAgentSessionInput moveAgentSession = 163; */
         if (message.input.oneofKind === "moveAgentSession")
             MoveAgentSessionInput.internalBinaryWrite(message.input.moveAgentSession, writer.tag(163, WireType.LengthDelimited).fork(), options).join();
+        /* UnpinAllMessagesInput unpinAllMessages = 164; */
+        if (message.input.oneofKind === "unpinAllMessages")
+            UnpinAllMessagesInput.internalBinaryWrite(message.input.unpinAllMessages, writer.tag(164, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -31620,7 +31666,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 160, name: "setAgentParticipation", kind: "message", oneof: "result", T: () => SetAgentParticipationResult },
             { no: 161, name: "updateAgentSettings", kind: "message", oneof: "result", T: () => UpdateAgentSettingsResult },
             { no: 162, name: "controlAgentSession", kind: "message", oneof: "result", T: () => ControlAgentSessionResult },
-            { no: 163, name: "moveAgentSession", kind: "message", oneof: "result", T: () => MoveAgentSessionResult }
+            { no: 163, name: "moveAgentSession", kind: "message", oneof: "result", T: () => MoveAgentSessionResult },
+            { no: 164, name: "unpinAllMessages", kind: "message", oneof: "result", T: () => UnpinAllMessagesResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -32605,6 +32652,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         moveAgentSession: MoveAgentSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).moveAgentSession)
                     };
                     break;
+                case /* UnpinAllMessagesResult unpinAllMessages */ 164:
+                    message.result = {
+                        oneofKind: "unpinAllMessages",
+                        unpinAllMessages: UnpinAllMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).unpinAllMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -33103,6 +33156,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* MoveAgentSessionResult moveAgentSession = 163; */
         if (message.result.oneofKind === "moveAgentSession")
             MoveAgentSessionResult.internalBinaryWrite(message.result.moveAgentSession, writer.tag(163, WireType.LengthDelimited).fork(), options).join();
+        /* UnpinAllMessagesResult unpinAllMessages = 164; */
+        if (message.result.oneofKind === "unpinAllMessages")
+            UnpinAllMessagesResult.internalBinaryWrite(message.result.unpinAllMessages, writer.tag(164, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -54087,6 +54143,99 @@ class PinMessageResult$Type extends MessageType<PinMessageResult> {
  * @generated MessageType for protobuf message PinMessageResult
  */
 export const PinMessageResult = new PinMessageResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UnpinAllMessagesInput$Type extends MessageType<UnpinAllMessagesInput> {
+    constructor() {
+        super("UnpinAllMessagesInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer }
+        ]);
+    }
+    create(value?: PartialMessage<UnpinAllMessagesInput>): UnpinAllMessagesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UnpinAllMessagesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UnpinAllMessagesInput): UnpinAllMessagesInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UnpinAllMessagesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UnpinAllMessagesInput
+ */
+export const UnpinAllMessagesInput = new UnpinAllMessagesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UnpinAllMessagesResult$Type extends MessageType<UnpinAllMessagesResult> {
+    constructor() {
+        super("UnpinAllMessagesResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<UnpinAllMessagesResult>): UnpinAllMessagesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<UnpinAllMessagesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UnpinAllMessagesResult): UnpinAllMessagesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UnpinAllMessagesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UnpinAllMessagesResult
+ */
+export const UnpinAllMessagesResult = new UnpinAllMessagesResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class DraftMessage$Type extends MessageType<DraftMessage> {
     constructor() {
