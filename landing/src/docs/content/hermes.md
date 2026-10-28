@@ -78,7 +78,10 @@ answers. Review these before upgrading:
   otherwise no bot runs it.
 - **A thread's first message and its follow-ups share one conversation.** The
   first message used to start a separate session from the replies inside the
-  thread.
+  thread. When the agent opens a thread partway through an answer, replies
+  there start a new session, as with threads Hermes opens on other platforms.
+  The agent begins the thread with a short summary and can read the parent
+  chat for anything earlier.
 - **The agent can manage chats.** It can add people or agents, rename a chat
   and delete one it created. A private chat it creates for you includes you.
 - **Status tells you whether messages are arriving.** `hermes inline status`

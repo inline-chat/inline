@@ -1160,6 +1160,7 @@ def assert_reply_thread_settings():
             turn("10", "40")
             first = tool("create_thread", title="Launch plan")["result"]
             assert first["chatId"] == "701" and created[-1][1] == {"parentChatId": "10", "parentMessageId": "40", "title": "Launch plan"}
+            assert "short summary" in first["message"]
             again = tool("create_thread", title="Launch plan again")["result"]
             assert again == {"chatId": "701", "existing": True, "message": "This conversation already has its thread; your answer goes there."}
             assert len(created) == 1
@@ -1167,8 +1168,9 @@ def assert_reply_thread_settings():
             assert adapter._with_turn_thread("10", "41", None) is None
             assert adapter._with_turn_thread("10", "40", {"thread_id": "other"}) == {"thread_id": "other"}
             # A thread on another message, or in another chat, is a deliberate choice.
-            tool("create_thread", parent_message_id="12", title="Older topic")
+            other = tool("create_thread", parent_message_id="12", title="Older topic")["result"]
             assert created[-1][1]["parentMessageId"] == "12" and adapter._with_turn_thread("10", "12", None) is None
+            assert "message" not in other
             # Inside a thread, "make a thread" means this one; no thread inside it.
             turn("701", "3", thread_id="701", parent="10")
             assert tool("create_thread", title="Nested")["result"]["chatId"] == "701"

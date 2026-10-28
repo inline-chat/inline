@@ -245,7 +245,10 @@ def tool_context_prompt(
         lines.append(f"- Current Inline reply thread: `{thread_id}`. Use this as `chat_id` for thread-scoped reads.")
         lines.append(f"- Link the current thread as `[this thread](inline://thread?id={thread_id})` when asked for a thread link.")
         if parent_chat_id:
-            lines.append(f"- Parent Inline chat: `{parent_chat_id}`.")
+            lines.append(
+                f"- Parent Inline chat: `{parent_chat_id}`. Earlier conversation lives there; "
+                "read it with get_history or search_messages using that chat_id."
+            )
     else:
         lines.append(f"- Current Inline chat: `{chat_id}`.")
         lines.append(f"- Link the current chat as `[this chat](inline://chat?id={chat_id})` when asked for a chat link.")
@@ -268,7 +271,7 @@ INLINE_TOOL_SCHEMA = {
         "When chat_id is omitted, the tool uses the current Inline reply thread if present, otherwise the current chat. "
         "Return normal assistant replies as text. Use send_message only for a button card or a different destination. "
         "Agent-owned button presses return as ordinary turns, and the normal response replaces the source card while clearing omitted buttons. "
-        "Use create_thread on the current triggering message when someone asks to continue in a thread; your answer then goes into it, so don't also post it in the chat. "
+        "Use create_thread on the current triggering message when someone asks to continue in a thread; your answer then goes into it, so don't also post it in the chat, and it starts with a short summary of the conversation so far. "
         "Use set_reply_threads when someone asks you to always or never answer in threads here. "
         "Use create_chat to create a new top-level destination outside the current conversation; it defaults to private, and public creation must explicitly set is_public with a space_id. "
         "Use search_messages for exact catch-up across older chat history. "
@@ -649,7 +652,16 @@ def _create_thread(args: Dict[str, Any]) -> Dict[str, Any]:
     thread_id = _inline_id(result.get("chatId"))
     if for_this_turn and owner is not None and thread_id:
         owner.note_turn_thread(turn["chatId"], turn["messageId"], thread_id)
+        result["message"] = _NEW_TURN_THREAD_MESSAGE
     return result
+
+
+# Later messages in a thread opened mid-turn start a new session that reads the thread's
+# history, so the answer that opens it carries what matters from this conversation.
+_NEW_TURN_THREAD_MESSAGE = (
+    "Your answer goes into this thread. Start it with a short summary of what matters from the "
+    "conversation so far; later messages here start a new session that reads this thread."
+)
 
 
 _FOLLOW_CONFIRMATIONS = {
