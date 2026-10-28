@@ -1291,11 +1291,31 @@ fn a_suspect_owner_end_with_a_valid_probe_restarts_the_owner_connection() {
 
 #[test]
 fn bridge_v2_flag_leaves_providers_without_a_v2_driver_on_v1() {
-    assert!(v2_enabled_in(Some("all"), "codex"));
-    assert!(v2_enabled_in(Some("codex, claude"), "claude"));
-    assert!(!v2_enabled_in(Some("codex"), "claude"));
-    assert!(!v2_enabled_in(None, "codex"));
+    let version = "0.7.19";
+    assert!(v2_enabled_in(Some("all"), "codex", version));
+    assert!(v2_enabled_in(Some("codex, claude"), "claude", version));
+    assert!(!v2_enabled_in(Some("codex"), "claude", version));
+    assert!(!v2_enabled_in(None, "codex", version));
     // OpenCode and other ACP agents keep running on v1.
-    assert!(!v2_enabled_in(Some("all"), "opencode"));
-    assert!(!v2_enabled_in(Some("opencode"), "opencode"));
+    assert!(!v2_enabled_in(Some("all"), "opencode", version));
+    assert!(!v2_enabled_in(Some("opencode"), "opencode", version));
+}
+
+#[test]
+fn bridge_v2_is_the_alpha_default_for_codex_and_claude_with_an_explicit_rollback() {
+    for provider in ["codex", "claude"] {
+        assert!(v2_enabled_in(None, provider, "0.7.19-alpha.7"));
+        assert!(v2_enabled_in(None, provider, "0.7.19-alpha.7+build"));
+        assert!(!v2_enabled_in(None, provider, "0.7.19"));
+        assert!(!v2_enabled_in(None, provider, "0.7.19-beta.1"));
+        assert!(!v2_enabled_in(None, provider, "0.7.19-alphabet.1"));
+        for setting in ["off", "false", "0", ""] {
+            assert!(!v2_enabled_in(Some(setting), provider, "0.7.19-alpha.7"));
+        }
+    }
+    assert!(!v2_enabled_in(Some("codex"), "claude", "0.7.19-alpha.7"));
+    for provider in ["opencode", "amp"] {
+        assert!(!v2_enabled_in(None, provider, "0.7.19-alpha.7"));
+        assert!(!v2_enabled_in(Some("all"), provider, "0.7.19-alpha.7"));
+    }
 }

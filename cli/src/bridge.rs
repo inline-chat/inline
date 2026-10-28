@@ -3098,19 +3098,26 @@ async fn run_provider_installation(
 /// OpenCode) keeps running on v1, whatever `INLINE_BRIDGE_V2` says.
 const V2_PROVIDERS: &[&str] = &["codex", "claude"];
 
-/// Bridge v2 per provider while it is staged: `INLINE_BRIDGE_V2=codex,claude`
-/// (or `all`, meaning every provider v2 supports). v1 stays the default.
+/// Alpha builds use v2 for its supported providers. An explicit
+/// `INLINE_BRIDGE_V2=codex,claude` (or `all`) selects providers, and `off`
+/// restores v1. Stable builds keep v1 unless explicitly opted in.
 fn v2_enabled_for(provider_id: &str) -> bool {
-    v2_enabled_in(env::var("INLINE_BRIDGE_V2").ok().as_deref(), provider_id)
+    v2_enabled_in(
+        env::var("INLINE_BRIDGE_V2").ok().as_deref(),
+        provider_id,
+        env!("CARGO_PKG_VERSION"),
+    )
 }
 
-fn v2_enabled_in(setting: Option<&str>, provider_id: &str) -> bool {
+fn v2_enabled_in(setting: Option<&str>, provider_id: &str, version: &str) -> bool {
     V2_PROVIDERS.contains(&provider_id)
-        && setting.is_some_and(|value| {
-            value.split(',').map(str::trim).any(|entry| {
+        && match setting {
+            Some(value) => value.split(',').map(str::trim).any(|entry| {
                 entry.eq_ignore_ascii_case("all") || entry.eq_ignore_ascii_case(provider_id)
-            })
-        })
+            }),
+            None => semver::Version::parse(version)
+                .is_ok_and(|version| version.pre.as_str().split('.').next() == Some("alpha")),
+        }
 }
 
 struct V2Launch<'a> {

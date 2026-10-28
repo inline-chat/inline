@@ -1,6 +1,6 @@
-//! Bridge v2: the session-contract runtime, behind a per-provider flag.
+//! Bridge v2: the session-contract runtime, default for Codex and Claude in alpha.
 //!
-//! v1 stays untouched until a provider passes its stage acceptance.
+//! Other providers stay on v1; INLINE_BRIDGE_V2 can select providers or roll back.
 
 pub(crate) mod api;
 #[cfg(test)]
