@@ -46,6 +46,8 @@ use super::work::{
 const DEFAULT_HEARTBEAT: Duration = Duration::from_secs(60);
 /// How long the harness's pickers are reused.
 const CATALOG_TTL: Duration = Duration::from_secs(60);
+/// How long heartbeats reuse the harness's listing before asking again.
+const CAPABILITIES_REFRESH: Duration = Duration::from_secs(600);
 const NO_ACCESS: &str = "You don't have access to do that with this agent.";
 /// How often the bot's Inline connection is checked.
 const CONNECTION_CHECK: Duration = Duration::from_secs(5);
@@ -466,11 +468,13 @@ impl Runtime {
     /// Agent Settings, the composer chain and the empty-page Compose read
     /// these. A harness that cannot list its models yet keeps what an earlier
     /// run published, and is asked again with the next heartbeat. Later
-    /// heartbeats reuse the models last listed (listing can start a harness
-    /// process) and bring new folders to the apps.
+    /// heartbeats reuse the last listing (listing can start a harness
+    /// process) for up to ten minutes, so the harness's own folders, such as
+    /// Codex projects, still reach the apps.
     async fn publish_capabilities(&mut self) {
         let catalog = match &self.catalog {
-            Some((_, catalog)) => catalog.clone(),
+            Some((at, catalog)) if at.elapsed() < CAPABILITIES_REFRESH => catalog.clone(),
+            Some(_) => self.catalog().await,
             None => {
                 let catalog = self.catalog().await;
                 if self.catalog.is_none() {
@@ -2049,6 +2053,9 @@ impl Runtime {
         {
             return Ok(());
         }
+        // Every path, recovery included, learns a bound thread's project
+        // first: its session's registration must name it.
+        self.is_own_thread(chat_id).await;
         let result = self
             .agent
             .owner

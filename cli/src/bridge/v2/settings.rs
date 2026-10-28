@@ -26,7 +26,8 @@ const ITEM_FOLDER: &str = "workspace.folder";
 /// The thread's folder as a choice; the apps read this id's select.
 pub(crate) const ITEM_FOLDER_CHOICE: &str = "workspace.project";
 /// Account limits. Each window item's ID carries its numbers for Compose's
-/// usage popover: `account.usage.window:<minutes>:<used %>:<resets at>`.
+/// usage popover, and its position to stay unique:
+/// `account.usage.window:<minutes>:<used %>:<resets at>:<index>`.
 const SECTION_USAGE: &str = "account.usage";
 const ITEM_USAGE_WINDOW: &str = "account.usage.window";
 /// This thread's context window: `session.context:<used tokens>:<window>`.
@@ -35,6 +36,9 @@ const ITEM_CONTEXT: &str = "session.context";
 const DEFAULT_VALUE: &str = "__inline_provider_default__";
 /// The thread's folder when it is not among the choices.
 const CURRENT_FOLDER_VALUE: &str = "__inline_current_folder__";
+/// Inline takes at most 100 options per select; one stays free for the
+/// thread's folder when it is not among the choices.
+const MAX_FOLDER_OPTIONS: usize = 99;
 
 /// What a settings invocation asks for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -257,7 +261,8 @@ fn usage_items(windows: &[DriverUsageWindow]) -> Vec<BotChatSettingsItem> {
     windows.sort_by_key(|window| window.window_minutes.unwrap_or(i64::MAX));
     windows
         .iter()
-        .map(|window| {
+        .enumerate()
+        .map(|(index, window)| {
             let shared = windows
                 .iter()
                 .filter(|other| other.window_minutes == window.window_minutes)
@@ -265,7 +270,7 @@ fn usage_items(windows: &[DriverUsageWindow]) -> Vec<BotChatSettingsItem> {
                 > 1;
             BotChatSettingsItem {
                 id: format!(
-                    "{ITEM_USAGE_WINDOW}:{}:{}:{}",
+                    "{ITEM_USAGE_WINDOW}:{}:{}:{}:{index}",
                     window.window_minutes.unwrap_or(0),
                     window.used_percent,
                     window.resets_at.unwrap_or(0)
@@ -373,6 +378,16 @@ fn folder_choice(facts: &DocumentFacts<'_>) -> BotChatSettingsItem {
             disabled: fixed,
         })
         .collect();
+    if options.len() > MAX_FOLDER_OPTIONS {
+        // Keep the thread's own choice when it falls past the cut.
+        let chosen = facts
+            .folder_id
+            .and_then(|id| options.iter().position(|option| option.value == id))
+            .filter(|index| *index >= MAX_FOLDER_OPTIONS)
+            .map(|index| options.remove(index));
+        options.truncate(MAX_FOLDER_OPTIONS - usize::from(chosen.is_some()));
+        options.extend(chosen);
+    }
     let value = match facts.folder_id {
         Some(id) if options.iter().any(|option| option.value == id) => id.to_owned(),
         _ => {
@@ -719,6 +734,61 @@ mod tests {
     }
 
     #[test]
+    fn a_long_folder_list_fits_the_select_and_keeps_the_threads_choice() {
+        let catalog = catalog();
+        let settings = SettingsChange::default();
+        let folders: Vec<Folder> = (0..150)
+            .map(|index| Folder {
+                id: format!("workspace-{index}"),
+                label: format!("folder {index}"),
+                description: None,
+            })
+            .collect();
+        let document = document(&DocumentFacts {
+            folders: &folders,
+            folder_id: Some("workspace-140"),
+            ..facts(&catalog, &settings)
+        });
+        let BotChatSettingsControl::Select { value, options } =
+            &item(&document, ITEM_FOLDER_CHOICE).control
+        else {
+            panic!("a folder select");
+        };
+        assert!(options.len() <= 100, "{}", options.len());
+        assert_eq!(value, "workspace-140");
+        assert!(options.iter().any(|option| option.value == "workspace-140"));
+    }
+
+    #[test]
+    fn usage_windows_with_equal_readings_keep_unique_ids() {
+        let catalog = catalog();
+        let settings = SettingsChange::default();
+        let window = |label: &str| DriverUsageWindow {
+            label: label.to_owned(),
+            used_percent: 18,
+            window_minutes: Some(10_080),
+            resets_at: Some(1_793_000_000),
+        };
+        let windows = [window("seven_day"), window("seven_day_sonnet")];
+        let document = document(&DocumentFacts {
+            usage: &windows,
+            ..facts(&catalog, &settings)
+        });
+        let ids: Vec<&str> = document
+            .sections
+            .iter()
+            .flat_map(|section| &section.items)
+            .map(|item| item.id.as_str())
+            .collect();
+        let unique: std::collections::HashSet<&str> = ids.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            ids.len(),
+            "Inline refuses duplicate ids: {ids:?}"
+        );
+    }
+
+    #[test]
     fn usage_windows_and_context_read_as_items_compose_can_parse() {
         let catalog = catalog();
         let settings = SettingsChange::default();
@@ -754,9 +824,9 @@ mod tests {
         assert_eq!(
             titles,
             vec![
-                ("account.usage.window:300:26:0", Some("5-hour limit")),
+                ("account.usage.window:300:26:0:0", Some("5-hour limit")),
                 (
-                    "account.usage.window:10080:18:1793000000",
+                    "account.usage.window:10080:18:1793000000:1",
                     Some("Weekly · all models")
                 ),
             ]
