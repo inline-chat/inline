@@ -1368,6 +1368,9 @@ pub async fn restart(
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let loaded = load_installation(config)?;
+    // A manual archive install may have updated only the invoking CLI. An
+    // explicit restart must also run that binary in the installed service.
+    service::refresh_stable_binary(&loaded.paths, &env::current_exe()?)?;
     service::restart_service(&loaded.paths, &loaded.account, &loaded.secrets).await?;
     service::wait_for_all_providers_ready(&loaded.paths, &loaded.account, &loaded.secrets).await?;
     let results = provider_statuses(&loaded).await;
