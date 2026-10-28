@@ -138,6 +138,37 @@ describe("per microphone finite turn owner", () => {
     expect(value.failures).toEqual([])
     await value.worker.stop(false)
   })
+  test("spooled speech is removed after its final lands and handed to batch when the provider stays down", async () => {
+    const spooled = new Map<string, { frames: number; closed: boolean; handoff: boolean }>()
+    const spool = {
+      open(id: string) { spooled.set(id, { frames: 0, closed: false, handoff: false }); return true },
+      append(id: string) { spooled.get(id)!.frames++; return true },
+      close(id: string) { spooled.get(id)!.closed = true },
+      handoff(id: string) { spooled.get(id)!.handoff = true },
+      touch() {}, remove(id: string) { spooled.delete(id) },
+    }
+    let providerUp = true
+    const value = fixture({ spool, retryBaseMs: 5, batchAfterMs: 50, connect: async (options) => {
+      if (!providerUp) throw new TranscriptionError("provider")
+      value.events.push("connect")
+      value.options = options
+      return value.connection
+    } })
+    await spokenTurn(value)
+    expect(spooled.get("segment-1")).toMatchObject({ closed: true, handoff: false })
+    value.final("segment-1", "Delivered live.")
+    await eventually(() => !spooled.has("segment-1"))
+    providerUp = false
+    value.dropSocket()
+    value.worker.push(frame(true))
+    for (let index = 0; index < 28; index++) value.worker.push(frame(false))
+    await eventually(() => spooled.get("segment-2")?.handoff === true)
+    expect(spooled.get("segment-2")?.frames).toBeGreaterThan(0)
+    expect(value.finals.map((turn) => turn.turnId)).toEqual(["segment-1"])
+    expect(value.failures).toEqual([])
+    await value.worker.stop(false)
+    expect(spooled.has("segment-2")).toBe(true)
+  })
   test("back-to-back turns inside the idle window reuse one socket", async () => {
     const value = fixture({ idleCloseMs: 1_000 })
     await utterance(value)

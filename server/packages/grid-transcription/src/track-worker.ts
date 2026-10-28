@@ -4,6 +4,7 @@ import { MAX_PENDING_TURNS, TranscriptionError, type FinalTurn, type Model } fro
 import { SpeechSegmenter } from "./segmenter.js"
 import type { SpeechDetector } from "./silero.js"
 import { ProviderConnection, type ProviderOptions } from "./socket.js"
+import type { TurnSpoolWriter } from "./spool.js"
 import { monotonicMilliseconds } from "./watchdog.js"
 
 export interface TurnApi {
@@ -21,8 +22,12 @@ export type TrackWorkerOptions = Readonly<{
   idleCloseMs?: number;
   retryBaseMs?: number;
   maxBacklogMs?: number;
+  spool?: TurnSpoolWriter;
+  batchAfterMs?: number;
 }>
-type Turn = { id: string; frames: Int16Array[]; samples: number; closed: boolean; failures: number; capturedAt: number }
+type Turn = {
+  id: string; frames: Int16Array[]; samples: number; closed: boolean; failures: number; capturedAt: number; spooled: boolean
+}
 const FINAL_TIMEOUT_MS = 5_000
 const DRAIN_TIMEOUT_MS = 5_000
 const SOCKET_MAX_AGE_MS = 9 * 60 * 1000
@@ -43,6 +48,11 @@ const MAX_BACKLOG_MS = 5 * 60 * 1000
 const REPLAY_AFTER_MS = 1_000
 const REPLAY_SPEED = 1.25
 const REPLAY_HEADROOM_MS = 500
+// With a spool, a closed turn still unsent a minute after capture goes to batch transcription
+// instead of real-time replay, so a long outage cannot leave a speaker permanently behind.
+const BATCH_AFTER_MS = 60_000
+// Owners refresh spooled turns so recovery only takes turns whose process stopped caring.
+const SPOOL_TOUCH_MS = 10_000
 
 // Exactly one consumer owns each speaker's VAD and admission order; one sender owns provider
 // order. Native RTC readers only push owned copies and never wait for inference or network I/O.
@@ -78,6 +88,7 @@ export class TrackWorker {
   private drainResolve: (() => void) | undefined
   private drainTimer: NodeJS.Timeout | undefined
   private processingTimer: NodeJS.Timeout | undefined
+  private touchTimer: NodeJS.Timeout | undefined
 
   constructor(private readonly options: TrackWorkerOptions) {
     this.sampleRate = options.model === "meeting" ? 16_000 : 24_000
@@ -90,6 +101,11 @@ export class TrackWorker {
       if (this.accepting) this.fail(error)
     })
     this.sender = this.send().catch((error: unknown) => this.fail(error))
+    const spool = options.spool
+    if (spool) {
+      this.touchTimer = setInterval(() => { for (const turn of this.turns) if (turn.spooled) spool.touch(turn.id) }, SPOOL_TOUCH_MS)
+      this.touchTimer.unref()
+    }
   }
 
   push(samples: Int16Array): void {
@@ -143,7 +159,8 @@ export class TrackWorker {
     }
     this.options.assertRunAuthority()
     this.options.assertMicrophone()
-    this.turns.push({ id, frames: [], samples: 0, closed: false, failures: 0, capturedAt: this.now() })
+    const spooled = this.options.spool?.open(id, this.options.model, this.sampleRate) ?? false
+    this.turns.push({ id, frames: [], samples: 0, closed: false, failures: 0, capturedAt: this.now(), spooled })
     for (const frame of frames) this.append(frame)
     this.notify()
   }
@@ -155,6 +172,7 @@ export class TrackWorker {
     this.options.assertMicrophone()
     if ((this.backlogSamples + frame.length) * 1000 > (this.options.maxBacklogMs ?? MAX_BACKLOG_MS) * this.sampleRate)
       throw new TranscriptionError("overflow")
+    if (turn.spooled && !this.options.spool!.append(turn.id, frame)) turn.spooled = false
     turn.frames.push(frame)
     turn.samples += frame.length
     this.backlogSamples += frame.length
@@ -166,6 +184,7 @@ export class TrackWorker {
     if (!turn) return
     this.assertFinalAuthority()
     turn.closed = true
+    if (turn.spooled) this.options.spool!.close(turn.id)
     this.notify()
   }
 
@@ -180,6 +199,11 @@ export class TrackWorker {
       }
       clearTimeout(this.idleTimer)
       this.idleTimer = undefined
+      if (this.committed === 0 && turn.spooled && turn.closed
+        && this.now() - turn.capturedAt > (this.options.batchAfterMs ?? BATCH_AFTER_MS)) {
+        this.handOff(turn)
+        continue
+      }
       if (turn.closed && turn.samples === 0) {
         // Finals retire in order, so an empty turn waits behind committed predecessors.
         if (this.committed === 0) this.retire(turn, "")
@@ -269,7 +293,20 @@ export class TrackWorker {
     this.closeConnection()
     this.retryAttempt++
     const oldest = this.turns[0]
-    if (oldest && ++oldest.failures >= MAX_TURN_FAILURES && oldest.closed) this.retire(oldest, "")
+    if (oldest && ++oldest.failures >= MAX_TURN_FAILURES && oldest.closed) {
+      if (oldest.spooled) this.handOff(oldest)
+      else this.retire(oldest, "")
+    }
+    this.notify()
+  }
+
+  /** Leave a spooled turn to batch recovery; its late final arrives after later live turns. */
+  private handOff(turn: Turn): void {
+    if (this.turns[0] !== turn || this.committed !== 0) throw new TranscriptionError("protocol")
+    this.turns.shift()
+    this.backlogSamples -= turn.samples
+    this.streaming = undefined
+    this.options.spool!.handoff(turn.id)
     this.notify()
   }
 
@@ -304,7 +341,10 @@ export class TrackWorker {
       this.committed--
       if (this.committed > 0) this.armFinalTimer()
     }
-    this.trackPost(() => this.postFinal({ turnId: turn.id, text }))
+    this.trackPost(async () => {
+      await this.postFinal({ turnId: turn.id, text })
+      if (turn.spooled) this.options.spool!.remove(turn.id)
+    })
     this.notify()
   }
 
@@ -430,6 +470,7 @@ export class TrackWorker {
     this.backlogSamples = 0
     clearTimeout(this.drainTimer)
     clearTimeout(this.processingTimer)
+    clearInterval(this.touchTimer)
     this.options.detector.close()
     this.drainResolve?.()
     this.wake?.()

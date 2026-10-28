@@ -177,6 +177,11 @@ export class WorkerControlClient {
     await this.http.post("heartbeat", { workerId: this.workerId, model, ready, slot: this.slot })
   }
 
+  /** Stores spooled speech after its run ended or its live turn was handed off. */
+  async late(segmentId: string, text: string): Promise<void> {
+    await this.http.post("late", { workerId: this.workerId, segmentId, text })
+  }
+
   async claim(): Promise<ClaimedRun | StoppedClaim | undefined> {
     const value = await this.http.post("claim", { workerId: this.workerId })
     return value === undefined ? undefined : claimResponse(value)

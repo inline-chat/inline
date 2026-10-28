@@ -41,9 +41,13 @@ export function runRoomChild(): void {
           throw new TranscriptionError("protocol")
         }
         if (payload.apiTimeoutMs !== undefined && typeof payload.apiTimeoutMs !== "number") throw new TranscriptionError("protocol")
+        const spool = payload.spool === undefined ? undefined : record(payload.spool)
+        if (spool && (typeof spool.dir !== "string" || typeof spool.key !== "string" || typeof spool.maxBytes !== "number"))
+          throw new TranscriptionError("protocol")
         worker = new RoomWorker({ run, identity: message.identity, requestedAtMs: message.requestedAtMs,
           leaseMs: message.leaseMs, expiresAtMs: payload.expiresAtMs, apiBaseUrl: payload.apiBaseUrl, apiKey: payload.apiKey,
-          apiTimeoutMs: payload.apiTimeoutMs, onFailure: fail })
+          apiTimeoutMs: payload.apiTimeoutMs, onFailure: fail,
+          ...(spool ? { spool: { dir: String(spool.dir), key: String(spool.key), maxBytes: Number(spool.maxBytes) } } : {}) })
         void worker.start().then(() => { if (!stopping) send({ type: "ready" }) }).catch((error: unknown) => {
           if (!stopping) fail(error)
         })
