@@ -10,6 +10,7 @@ pub(crate) mod files;
 pub(crate) mod folders;
 pub(crate) mod intake;
 pub(crate) mod ledger;
+pub(crate) mod limits;
 pub(crate) mod render;
 pub(crate) mod runtime;
 pub(crate) mod settings;

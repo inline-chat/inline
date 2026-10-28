@@ -34,9 +34,10 @@ use inline_protocol::proto;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, watch};
 
-use super::api::{self, Notify, chat_peer};
+use super::api::{self, Failure, Notify, chat_peer};
 use super::doc::{Doc, DocBuilder};
 use super::ledger::{InputState, Ledger};
+use super::limits;
 use super::render::{ActionStyle, CardAction, FullDetail, RenderOp, Renderer, Vocabulary};
 use super::settings;
 use super::tools::{Tools, WorkTool};
@@ -54,6 +55,8 @@ const PUBLISH_RETRIES: [Duration; 3] = [
     Duration::from_millis(500),
     Duration::from_secs(2),
 ];
+/// The longest a rate-limited answer waits within one publish attempt.
+const MAX_PUBLISH_WAIT: Duration = Duration::from_secs(30);
 const NOT_PENDING: &str = "This request is no longer pending.";
 /// Trusted instructions for the speak gate's side call.
 const SPEAK_GATE_GUIDE: &str = "You take part in this Inline thread but nobody addressed you. \
@@ -422,6 +425,9 @@ struct Outgoing {
     card: Option<(InteractionId, Option<QuestionForm>)>,
     #[serde(default)]
     closed: bool,
+    /// Already the plain-text form of an item Inline refused once.
+    #[serde(default)]
+    fallback: bool,
 }
 
 /// An input the harness may or may not have.
@@ -436,6 +442,10 @@ struct Uncertain {
 struct PendingEdit {
     doc: Doc,
     due: tokio::time::Instant,
+    /// Replaces the message's buttons; `None` leaves them.
+    actions: Option<proto::MessageActions>,
+    /// The message's last edit ("Worked for 2m"): it settles the slot.
+    closing: bool,
 }
 
 struct Actor {
@@ -2301,6 +2311,7 @@ impl Actor {
             }
             _ => {}
         }
+        self.renderer.set_folder(self.folder());
         let ops = self.renderer.apply(&envelope);
         self.render(ops).await;
         if (envelope.event.is_control() || matches!(envelope.event, Event::Child { .. }))
@@ -2397,6 +2408,49 @@ impl Actor {
         self.flush_outbox().await;
     }
 
+    /// An answer or card Inline refused (or whose chat is gone): one plain-text
+    /// try, then it is dropped with a notice, so it never blocks the outbox.
+    async fn drop_refused(&mut self, outgoing: Outgoing, failure: Failure) {
+        let kind = if outgoing.card.is_some() {
+            "card"
+        } else {
+            "answer"
+        };
+        log::error!(
+            target: "inline::bridge::v2",
+            "chat={} {kind} {failure:?} by Inline ({:?})",
+            outgoing.chat,
+            limits::Size::of(&outgoing.doc)
+        );
+        if let Err(error) = self.agent.ledger.remove_output(outgoing.random_id) {
+            log::error!(target: "inline::bridge::v2", "cannot settle retained output: {error}");
+        }
+        if failure == Failure::Gone {
+            return;
+        }
+        crate::telemetry::report_bridge_output_refused(kind);
+        if !outgoing.fallback {
+            let random_id = outgoing.random_id.wrapping_add(1).max(1);
+            self.outbox.push_front(Outgoing {
+                doc: plain_fallback(&outgoing.doc),
+                random_id,
+                fallback: true,
+                ..outgoing
+            });
+            return;
+        }
+        let what = if kind == "card" {
+            "a request for you"
+        } else {
+            "an answer"
+        };
+        self.notice(&format!(
+            "{} had {what} Inline couldn't show. Continue in the terminal to see it.",
+            self.agent.agent_name
+        ))
+        .await;
+    }
+
     async fn flush_outbox(&mut self) {
         while let Some(outgoing) = self.outbox.pop_front() {
             // Persist before the first attempt, including a closed card's replacement.
@@ -2419,7 +2473,12 @@ impl Actor {
                 return;
             }
             let mut sent = None;
+            let mut failure = Failure::Retry(None);
             for delay in PUBLISH_RETRIES {
+                let delay = match failure {
+                    Failure::Retry(Some(after)) => delay.max(after.min(MAX_PUBLISH_WAIT)),
+                    _ => delay,
+                };
                 tokio::time::sleep(delay).await;
                 match api::send_doc_as(
                     &self.agent.bot,
@@ -2438,17 +2497,33 @@ impl Actor {
                     }
                     Err(error) => {
                         log::warn!(target: "inline::bridge::v2", "chat={} publish failed: {error}", outgoing.chat);
+                        failure = error.failure();
+                        if !matches!(failure, Failure::Retry(_)) {
+                            break;
+                        }
                     }
                 }
             }
             let Some(message_id) = sent else {
-                // Kept in order; the next tick tries again.
-                self.outbox.push_front(outgoing);
-                return;
+                match failure {
+                    // Kept in order; the next tick tries again.
+                    Failure::Retry(_) => {
+                        self.outbox.push_front(outgoing);
+                        return;
+                    }
+                    // Never retried as it is, so later output is not stuck
+                    // behind it.
+                    Failure::Refused | Failure::Gone => {
+                        self.drop_refused(outgoing, failure).await;
+                        continue;
+                    }
+                }
             };
+            // A closed card also drops its buttons; a refused or vanished
+            // card has nothing left to close.
             if outgoing.closed
-                && !self
-                    .edit_in(
+                && let Err(Failure::Retry(_)) = self
+                    .try_edit(
                         outgoing.chat,
                         message_id,
                         &outgoing.doc,
@@ -2500,7 +2575,12 @@ impl Actor {
                         self.edits
                             .entry(slot)
                             .and_modify(|edit| edit.doc = doc.clone())
-                            .or_insert(PendingEdit { doc, due });
+                            .or_insert(PendingEdit {
+                                doc,
+                                due,
+                                actions: None,
+                                closing: false,
+                            });
                     }
                     None => {
                         if let Some(id) = self.send(&doc, None, Notify::Silent).await {
@@ -2519,9 +2599,29 @@ impl Actor {
                             )])
                         })
                         .flatten();
-                    let message_id = match self.slots.remove(&slot) {
+                    let message_id = match self.slots.get(&slot).copied() {
                         Some(message_id) => {
-                            self.edit(message_id, &doc, actions).await;
+                            match self
+                                .try_edit(self.chat_id, message_id, &doc, actions.clone())
+                                .await
+                            {
+                                Err(Failure::Retry(after)) => {
+                                    // "Worked for" must land: kept until it does.
+                                    self.edits.insert(
+                                        slot,
+                                        PendingEdit {
+                                            doc,
+                                            due: tokio::time::Instant::now()
+                                                + after.unwrap_or(EDIT_INTERVAL),
+                                            actions,
+                                            closing: true,
+                                        },
+                                    );
+                                }
+                                _ => {
+                                    self.slots.remove(&slot);
+                                }
+                            }
                             Some(message_id)
                         }
                         None => self.send(&doc, actions, Notify::Silent).await,
@@ -2544,17 +2644,36 @@ impl Actor {
                         .as_ref()
                         .or(self.rendering_turn.as_ref())
                         .map(|turn| format!("{turn}:{}", text_digest(&doc.text)));
-                    let random_id = self.output_id("final", token.as_deref());
-                    self.publish(Outgoing {
-                        chat: self.chat_id,
-                        doc,
-                        reply_to,
-                        actions: None,
-                        random_id,
-                        card: None,
-                        closed: false,
-                    })
-                    .await;
+                    // An answer over Inline's limit goes out in parts.
+                    let parts = if limits::Size::of(&doc).fits() {
+                        vec![doc]
+                    } else {
+                        split_markdown(&doc.text, limits::MAX_TEXT_UTF16 * 4 / 5)
+                            .iter()
+                            .map(|part| Doc::markdown(part))
+                            .collect()
+                    };
+                    for (index, doc) in parts.into_iter().enumerate() {
+                        let token = token.as_ref().map(|token| {
+                            if index == 0 {
+                                token.clone()
+                            } else {
+                                format!("{token}:{index}")
+                            }
+                        });
+                        let random_id = self.output_id("final", token.as_deref());
+                        self.publish(Outgoing {
+                            chat: self.chat_id,
+                            doc,
+                            reply_to: if index == 0 { reply_to } else { None },
+                            actions: None,
+                            random_id,
+                            card: None,
+                            closed: false,
+                            fallback: false,
+                        })
+                        .await;
+                    }
                 }
                 RenderOp::Notice { doc } => {
                     self.flush_edits(true).await;
@@ -2586,6 +2705,7 @@ impl Actor {
                         random_id,
                         card: Some((interaction, form)),
                         closed: false,
+                        fallback: false,
                     })
                     .await;
                 }
@@ -2615,6 +2735,7 @@ impl Actor {
                         random_id,
                         card: None,
                         closed: true,
+                        fallback: false,
                     })
                     .await;
                 }
@@ -2631,17 +2752,35 @@ impl Actor {
             .map(|(slot, _)| *slot)
             .collect();
         for slot in due {
-            if let (Some(edit), Some(message_id)) =
+            let (Some(edit), Some(message_id)) =
                 (self.edits.remove(&slot), self.slots.get(&slot).copied())
-                && !self
-                    .edit_in(self.chat_id, message_id, &edit.doc, None)
-                    .await
+            else {
+                continue;
+            };
+            match self
+                .try_edit(self.chat_id, message_id, &edit.doc, edit.actions.clone())
+                .await
             {
+                Ok(()) => {
+                    if edit.closing {
+                        self.slots.remove(&slot);
+                    }
+                }
                 // Tried again later, unless a newer edit replaced it.
-                self.edits.entry(slot).or_insert(PendingEdit {
-                    doc: edit.doc,
-                    due: now + EDIT_INTERVAL,
-                });
+                Err(Failure::Retry(after)) => {
+                    self.edits.entry(slot).or_insert(PendingEdit {
+                        due: now + after.unwrap_or(EDIT_INTERVAL),
+                        ..edit
+                    });
+                }
+                // Never retried as it is: the renderer keeps messages within
+                // Inline's limits, so this is rare and reported. The next
+                // edit of an open message may still land.
+                Err(Failure::Refused | Failure::Gone) => {
+                    if edit.closing {
+                        self.slots.remove(&slot);
+                    }
+                }
             }
         }
     }
@@ -2726,11 +2865,29 @@ impl Actor {
         doc: &Doc,
         actions: Option<proto::MessageActions>,
     ) -> bool {
+        self.try_edit(chat_id, message_id, doc, actions)
+            .await
+            .is_ok()
+    }
+
+    async fn try_edit(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        doc: &Doc,
+        actions: Option<proto::MessageActions>,
+    ) -> Result<(), Failure> {
         match api::edit_doc(&self.agent.bot, chat_id, message_id, doc, actions).await {
-            Ok(()) => true,
+            Ok(()) => Ok(()),
             Err(error) => {
-                log::warn!(target: "inline::bridge::v2", "edit failed: {error}");
-                false
+                let failure = error.failure();
+                if failure == Failure::Refused {
+                    log::error!(target: "inline::bridge::v2", "chat={chat_id} edit refused: {error} ({:?})", limits::Size::of(doc));
+                    crate::telemetry::report_bridge_output_refused("edit");
+                } else {
+                    log::warn!(target: "inline::bridge::v2", "edit failed: {error}");
+                }
+                Err(failure)
             }
         }
     }
@@ -3063,6 +3220,74 @@ fn limit_notice(agent_name: &str, resets_at: Option<i64>, now: i64) -> String {
     format!("{agent_name} reached its usage limit.{when}")
 }
 
+/// Markdown cut into parts of at most `max_utf16` units at line ends, closing
+/// and reopening a code fence a cut falls inside.
+fn split_markdown(text: &str, max_utf16: usize) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut part = String::new();
+    let mut fence: Option<String> = None;
+    for line in text.split_inclusive('\n') {
+        let units = |text: &str| text.encode_utf16().count();
+        if !part.is_empty() && units(&part) + units(line) + 4 > max_utf16 {
+            if fence.is_some() {
+                part.push_str("\n```");
+            }
+            parts.push(std::mem::take(&mut part));
+            if let Some(open) = &fence {
+                part.push_str(open);
+                part.push('\n');
+            }
+        }
+        // A line longer than a whole part is cut by characters.
+        let mut rest = line;
+        while units(rest) > max_utf16 {
+            let mut count = 0;
+            let cut = rest
+                .char_indices()
+                .find(|(_, character)| {
+                    count += character.len_utf16();
+                    count > max_utf16
+                })
+                .map_or(rest.len(), |(index, _)| index);
+            parts.push(rest[..cut].to_owned());
+            rest = &rest[cut..];
+        }
+        let trimmed = rest.trim_start();
+        if trimmed.starts_with("```") {
+            fence = match fence {
+                Some(_) => None,
+                None => Some(trimmed.trim_end().to_owned()),
+            };
+        }
+        part.push_str(rest);
+    }
+    if !part.trim().is_empty() {
+        parts.push(part);
+    }
+    parts
+}
+
+/// The plain text of a message Inline refused, within its limits.
+fn plain_fallback(doc: &Doc) -> Doc {
+    let max = limits::MAX_TEXT_UTF16 * 4 / 5;
+    let mut text: String = doc
+        .text
+        .chars()
+        .scan(0, |count, character| {
+            *count += character.len_utf16();
+            (*count <= max).then_some(character)
+        })
+        .collect();
+    if text.len() < doc.text.len() {
+        text.push_str("\n\n(Cut: the rest was longer than Inline allows.)");
+    }
+    Doc {
+        text,
+        blocks: Vec::new(),
+        markdown: false,
+    }
+}
+
 pub(crate) fn paragraph(text: &str) -> Doc {
     let mut builder = DocBuilder::new();
     builder.paragraph(text);
@@ -3225,6 +3450,55 @@ pub(crate) fn form_answers(form: &QuestionForm, values: &[FormValue]) -> Vec<Fie
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_answer_over_the_limit_splits_at_lines_and_keeps_code_fences_whole() {
+        let mut text = String::from("## Report\n\n```rust\n");
+        for line in 0..12_000 {
+            text.push_str(&format!("let value_{line} = {line};\n"));
+        }
+        text.push_str("```\n\nDone.");
+        let max = limits::MAX_TEXT_UTF16 * 4 / 5;
+        let parts = split_markdown(&text, max);
+        assert!(parts.len() > 1);
+        for part in &parts {
+            assert!(part.encode_utf16().count() <= max + 8, "{}", part.len());
+            assert_eq!(
+                part.matches("```").count() % 2,
+                0,
+                "every part closes its fences"
+            );
+        }
+        assert!(parts[0].starts_with("## Report"));
+        assert!(parts.last().expect("last").trim_end().ends_with("Done."));
+        assert!(
+            parts[1].starts_with("```rust\n"),
+            "the next part reopens the fence"
+        );
+    }
+
+    #[test]
+    fn one_line_longer_than_a_part_is_cut_by_characters() {
+        let text = "é".repeat(250_000);
+        let parts = split_markdown(&text, 80_000);
+        assert_eq!(parts.concat(), text);
+        assert!(
+            parts
+                .iter()
+                .all(|part| part.encode_utf16().count() <= 80_000)
+        );
+    }
+
+    #[test]
+    fn the_plain_fallback_fits_and_says_it_was_cut() {
+        let doc = Doc::markdown(&"word ".repeat(40_000));
+        let plain = plain_fallback(&doc);
+        assert!(!plain.markdown && plain.blocks.is_empty());
+        assert!(limits::Size::of(&plain).fits());
+        assert!(plain.text.ends_with("longer than Inline allows.)"));
+        let short = plain_fallback(&Doc::markdown("**hi**"));
+        assert_eq!(short.text, "**hi**");
+    }
     use inline_agent_bridge::harness::{FieldOption, FormField};
 
     #[test]

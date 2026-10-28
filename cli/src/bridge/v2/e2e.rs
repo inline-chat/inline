@@ -393,8 +393,9 @@ async fn codex_round_trip_through_inline() {
             "namespace": "inline", "name": name, "arguments": arguments.to_string()})
     };
     let (model, base_url) = FakeModel::start(vec![
+        // Markdown, which must render rather than show its markers.
         json!({"type": "message", "role": "assistant",
-            "content": [{"type": "output_text", "text": "E2E_ANSWER_ONE"}]}),
+            "content": [{"type": "output_text", "text": "**E2E_ANSWER_ONE** done"}]}),
         // After /model, the next turn runs on the chosen model.
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_NEW_MODEL"}]}),
@@ -520,6 +521,35 @@ async fn codex_round_trip_through_inline() {
     )
     .await;
     assert!(model.request_count() >= 1);
+    // The answer went out as Markdown: Inline parsed the bold, as for v1.
+    let answer = owner
+        .history(HistoryRequest {
+            chat_id: InlineId::new(chat_id),
+            limit: Some(20),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .unwrap()
+        .messages
+        .into_iter()
+        .find(|message| {
+            matches!(&message.content, MessageContent::Text { text } if text.contains("E2E_ANSWER_ONE"))
+        })
+        .expect("the first answer");
+    assert!(
+        matches!(&answer.content, MessageContent::Text { text } if !text.contains("**")),
+        "the answer shows its Markdown markers"
+    );
+    assert!(
+        answer
+            .metadata
+            .entities
+            .iter()
+            .any(|entity| entity.kind.contains("BOLD")),
+        "the answer has no bold entity: {:?}",
+        answer.metadata.entities
+    );
 
     // The work is recorded on the server, connected by the owner.
     let work = owner
