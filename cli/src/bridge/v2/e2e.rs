@@ -220,6 +220,22 @@ impl OwnerCalls for OwnerClient {
                 .map_err(|error| error.to_string())
         })
     }
+
+    fn set_commands(
+        &self,
+        input: proto::SetBotCommandsInput,
+    ) -> futures_util::future::BoxFuture<'_, Result<(), String>> {
+        Box::pin(async move {
+            self.0
+                .invoke_rpc(
+                    proto::Method::SetBotCommands,
+                    proto::rpc_call::Input::SetBotCommands(input),
+                )
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+    }
 }
 
 async fn client(dir: &std::path::Path, name: &str, token: &str) -> InlineClient {
@@ -371,6 +387,7 @@ async fn send(owner: &InlineClient, chat_id: i64, text: &str) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs the server side of the bridge v2 end-to-end test"]
 async fn codex_round_trip_through_inline() {
+    let mut scenario = Scenario::new("setup");
     let _ = env_logger::builder()
         .is_test(true)
         .parse_filters(
@@ -511,6 +528,7 @@ async fn codex_round_trip_through_inline() {
     let (stop, running, bot) = bridge.start().await;
 
     // 1. A DM message runs a turn and the answer arrives.
+    scenario.next("1. A DM message runs a turn and the answer arrives.");
     send(&owner, chat_id, "Say the first answer").await;
     wait_for(
         &model,
@@ -576,6 +594,7 @@ async fn codex_round_trip_through_inline() {
     // 1b. Commands and settings: /status and an unknown command answer in
     // text; the settings document comes from the harness's catalog, and a
     // model chosen there runs the next turn.
+    scenario.next("1b. Commands and settings: /status and an unknown command answer in");
     send(&owner, chat_id, "/status").await;
     wait_for(
         &model,
@@ -706,6 +725,7 @@ async fn codex_round_trip_through_inline() {
 
     // 2. Inline tools act as the agent: a message sent by the tool arrives,
     // and the context names this work's thread.
+    scenario.next("2. Inline tools act as the agent: a message sent by the tool arrives");
     send(&owner, chat_id, "Use your tools").await;
     wait_for(
         &model,
@@ -731,6 +751,7 @@ async fn codex_round_trip_through_inline() {
 
     // 3. A one-choice question card asks with message buttons, which every
     // app shows; the owner taps one, and the answer reaches Codex.
+    scenario.next("3. A one-choice question card asks with message buttons, which every");
     send(&owner, chat_id, "Ask me something").await;
     let (card, first) = wait_card(
         &model,
@@ -762,6 +783,7 @@ async fn codex_round_trip_through_inline() {
     );
 
     // 4. A message sent while a turn runs steers it.
+    scenario.next("4. A message sent while a turn runs steers it.");
     let before = model.request_count();
     send(&owner, chat_id, "Start the long part").await;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
@@ -795,6 +817,7 @@ async fn codex_round_trip_through_inline() {
 
     // 4b. /stop interrupts a running turn: its late reply is dropped and the
     // work settles idle.
+    scenario.next("4b. /stop interrupts a running turn: its late reply is dropped and the");
     let before = model.request_count();
     send(&owner, chat_id, "Begin something slow").await;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
@@ -830,6 +853,7 @@ async fn codex_round_trip_through_inline() {
     );
 
     // 4c. `/new` opens a thread under the message with a fresh session.
+    scenario.next("4c. `/new` opens a thread under the message with a fresh session.");
     send(&owner, chat_id, "/new the side task").await;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
     let new_thread = loop {
@@ -900,6 +924,7 @@ async fn codex_round_trip_through_inline() {
     );
 
     // 4d. Editing a message that already ran does not run it again.
+    scenario.next("4d. Editing a message that already ran does not run it again.");
     let first = owner
         .history(HistoryRequest {
             chat_id: InlineId::new(chat_id),
@@ -936,6 +961,7 @@ async fn codex_round_trip_through_inline() {
     );
 
     // 4e. /pause: the work reports paused; the next message restarts it.
+    scenario.next("4e. /pause: the work reports paused; the next message restarts it.");
     send(&owner, chat_id, "/pause").await;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     loop {
@@ -982,6 +1008,7 @@ async fn codex_round_trip_through_inline() {
 
     // 5. A command needs approval: the card carries Codex's own choices, and
     // the owner's approval runs it.
+    scenario.next("5. A command needs approval: the card carries Codex's own choices, and");
     send(&owner, chat_id, "Run the check").await;
     let (card, action) =
         wait_card(&model, &owner, chat_id, "echo E2E_RAN", CardKind::Buttons).await;
@@ -1022,6 +1049,7 @@ async fn codex_round_trip_through_inline() {
     wait_idle(&owner, chat_id, agent_session_id).await;
 
     // 6. /release hands the session back with a resume command.
+    scenario.next("6. /release hands the session back with a resume command.");
     send(&owner, chat_id, "/release").await;
     wait_for(
         &model,
@@ -1035,6 +1063,7 @@ async fn codex_round_trip_through_inline() {
 
     // 6b. The bridge restarts (new client, new Codex process, same ledger):
     // the next message resumes the same native session from the server.
+    scenario.next("6b. The bridge restarts (new client, new Codex process, same ledger)");
     let session_ref = |work: proto::GetAgentSessionResult| {
         work.connection
             .map(|connection| connection.session_ref)
@@ -1136,6 +1165,7 @@ async fn codex_round_trip_through_inline() {
 
     // 7. In a group thread, a mention starts a work that moves itself into a
     // subthread; the parent keeps a card and the work goes on there.
+    scenario.next("7. In a group thread, a mention starts a work that moves itself into a");
     let group = owner
         .create_thread(CreateThreadRequest {
             title: Some("E2E group".to_owned()),
@@ -1236,6 +1266,7 @@ async fn codex_round_trip_through_inline() {
     // 8. Passive context: in a mentions-only group thread a plain message
     // does not wake the agent, and reaches it with its next mention as
     // untrusted context.
+    scenario.next("8. Passive context: in a mentions-only group thread a plain message");
     let group_two = owner
         .create_thread(CreateThreadRequest {
             title: Some("E2E group two".to_owned()),
@@ -1362,6 +1393,7 @@ async fn codex_round_trip_through_inline() {
 
     // 8b. Friendly mode for this thread: no progress messages, only the
     // answer. The change reaches the running bridge without a restart.
+    scenario.next("8b. Friendly mode for this thread: no progress messages, only the");
     owner
         .invoke_rpc(
             proto::Method::SetAgentParticipation,
@@ -1399,6 +1431,7 @@ async fn codex_round_trip_through_inline() {
 
     // 9. A teammate: no access until the owner grants it, and never the
     // owner's approvals.
+    scenario.next("9. A teammate: no access until the owner grants it, and never the");
     let teammate_id: i64 = env("INLINE_V2_E2E_TEAMMATE_USER_ID").parse().unwrap();
     let teammate = client(dir.path(), "teammate", &env("INLINE_V2_E2E_TEAMMATE_TOKEN")).await;
     let group_three = owner
@@ -1520,6 +1553,7 @@ async fn codex_round_trip_through_inline() {
     // 10. A thread the owner bound to the agent is the agent's own: a plain
     // message reaches it, in the folder, on the model and reasoning its
     // composer chain set.
+    scenario.next("10. A thread the owner bound to the agent is the agent's own: a plain");
     let other_project_id = crate::bridge::workspace_id(&other_project)
         .unwrap()
         .as_str()
@@ -1627,6 +1661,7 @@ async fn codex_round_trip_through_inline() {
 
     // 11. Out of usage: one notice says so and the owner's attention points
     // at it; the next turn that runs clears it.
+    scenario.next("11. Out of usage: one notice says so and the owner's attention points");
     send(&owner, chat_id, "Run into the limit").await;
     let texts = wait_for(
         &model,
@@ -1689,6 +1724,7 @@ async fn codex_round_trip_through_inline() {
     // 12. Agents going back and forth without a person: past the loop cap
     // this agent stops answering the other one and says so, and the owner
     // allows more in place.
+    scenario.next("12. Agents going back and forth without a person: past the loop cap");
     let other_bot_id: i64 = env("INLINE_V2_E2E_OTHER_BOT_USER_ID").parse().unwrap();
     let other_bot = client(
         dir.path(),
@@ -1814,8 +1850,9 @@ async fn codex_round_trip_through_inline() {
     }
     other_bot.shutdown().await.unwrap();
 
-    // 14. A long turn: dozens of tool calls with long output continue in a
+    // 13. A long turn: dozens of tool calls with long output continue in a
     // new progress message before Inline's size limit, and the answer lands.
+    scenario.next("13. A long turn: dozens of tool calls with long output continue in a");
     settle(&model).await;
     let mut long_turn: Vec<Value> = (0..45)
         .map(|_| inline_tool("get_messages", json!({"limit": 100})))
@@ -1840,9 +1877,10 @@ async fn codex_round_trip_through_inline() {
         "the long turn never continued in a new message"
     );
 
-    // 15. Following: a thread whose first message mentions the agent is one
+    // 14. Following: a thread whose first message mentions the agent is one
     // it follows (Inline's opener rule), so plain messages reach it; the
     // agent's follow_thread tool stops that when asked.
+    scenario.next("14. Following: a thread whose first message mentions the agent is one");
     settle(&model).await;
     let followed = owner
         .create_thread(CreateThreadRequest {
@@ -1952,7 +1990,9 @@ async fn codex_round_trip_through_inline() {
         "an unfollowed thread still answered a message without a mention"
     );
 
-    // 16. /help lists the commands, Codex's own included.
+    // 15. /help lists the commands, Codex's own included, and Inline's
+    // command menu holds them too.
+    scenario.next("15. /help and the command menu");
     send(&owner, chat_id, "/help").await;
     wait_for(
         &model,
@@ -1967,6 +2007,35 @@ async fn codex_round_trip_through_inline() {
         },
     )
     .await;
+    let proto::rpc_result::Result::GetBotCommands(menu) = owner
+        .invoke_rpc(
+            proto::Method::GetBotCommands,
+            proto::rpc_call::Input::GetBotCommands(proto::GetBotCommandsInput { bot_user_id }),
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("unexpected result");
+    };
+    let menu: Vec<&str> = menu
+        .commands
+        .iter()
+        .map(|command| command.command.as_str())
+        .collect();
+    for name in [
+        "help",
+        "pause",
+        "plan",
+        "review",
+        "follow",
+        "allowlist",
+        "terminal",
+    ] {
+        assert!(
+            menu.contains(&name),
+            "/{name} is missing from the command menu: {menu:?}"
+        );
+    }
 
     let _ = stop.send(());
     let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
@@ -1974,6 +2043,30 @@ async fn codex_round_trip_through_inline() {
         matches!(outcome, Ok(Ok(Ok(())))),
         "runtime ended cleanly: {outcome:?}"
     );
+}
+
+/// The scenario an end-to-end test is in, named on failure so a long test
+/// says which step broke.
+struct Scenario(String);
+
+impl Scenario {
+    fn new(name: &str) -> Self {
+        eprintln!("e2e scenario: {name}");
+        Self(name.to_owned())
+    }
+
+    fn next(&mut self, name: &str) {
+        eprintln!("e2e scenario: {name}");
+        self.0 = name.to_owned();
+    }
+}
+
+impl Drop for Scenario {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("e2e scenario failed: {}", self.0);
+        }
+    }
 }
 
 /// Waits until the model has been quiet for a few seconds.
@@ -2261,6 +2354,7 @@ async fn wait_card(
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "needs the server side of the bridge v2 end-to-end test"]
 async fn claude_round_trip_through_inline() {
+    let mut scenario = Scenario::new("setup");
     let _ = env_logger::builder()
         .is_test(true)
         .parse_filters(
@@ -2291,6 +2385,7 @@ async fn claude_round_trip_through_inline() {
     let (stop, running, bot) = bridge.start().await;
 
     // 1. A DM message runs a turn and the answer arrives.
+    scenario.next("1. A DM message runs a turn and the answer arrives.");
     send(&owner, chat_id, "Say hello\n@text E2E_CLAUDE_ONE").await;
     wait_for(
         &api,
@@ -2307,6 +2402,7 @@ async fn claude_round_trip_through_inline() {
     .await;
 
     // 2. Inline tools reach Claude over `mcp_message` and act as the agent.
+    scenario.next("2. Inline tools reach Claude over `mcp_message` and act as the agent.");
     send(
         &owner,
         chat_id,
@@ -2330,6 +2426,7 @@ async fn claude_round_trip_through_inline() {
 
     // 3. AskUserQuestion: a one-choice question asks with buttons; Claude
     // also takes an answer of its own, given by replying to the card.
+    scenario.next("3. AskUserQuestion: a one-choice question asks with buttons; Claude");
     send(
         &owner,
         chat_id,
@@ -2373,6 +2470,7 @@ async fn claude_round_trip_through_inline() {
     .await;
 
     // 3b. A message sent while Claude works steers it.
+    scenario.next("3b. A message sent while Claude works steers it.");
     let before = api.conversation_calls().len();
     send(
         &owner,
@@ -2407,6 +2505,7 @@ async fn claude_round_trip_through_inline() {
     .await;
 
     // 3c. /stop interrupts a running turn; its late reply never appears.
+    scenario.next("3c. /stop interrupts a running turn; its late reply never appears.");
     let before = api.conversation_calls().len();
     send(
         &owner,
@@ -2447,6 +2546,7 @@ async fn claude_round_trip_through_inline() {
 
     // 4. Asking before Bash: the card carries the command, and the owner's
     // approval runs it.
+    scenario.next("4. Asking before Bash: the card carries the command, and the owner's");
     send(
         &owner,
         chat_id,
@@ -2490,6 +2590,7 @@ async fn claude_round_trip_through_inline() {
     );
 
     // 5. /release ends the process and hands the session back.
+    scenario.next("5. /release ends the process and hands the session back.");
     send(&owner, chat_id, "/release").await;
     wait_for(
         &api,
@@ -2507,6 +2608,7 @@ async fn claude_round_trip_through_inline() {
 
     // 6. The bridge restarts on the same store: a message sent while it was
     // down is caught up, and the released session resumes (`--resume`).
+    scenario.next("6. The bridge restarts on the same store: a message sent while it was");
     let session_ref = |work: proto::GetAgentSessionResult| {
         work.connection
             .map(|connection| connection.session_ref)
@@ -2551,6 +2653,7 @@ async fn claude_round_trip_through_inline() {
     );
 
     // 7. Agent Settings: a model picked there runs the next turn.
+    scenario.next("7. Agent Settings: a model picked there runs the next turn.");
     let model_of = |needle: &str| {
         api.conversation_calls()
             .iter()
@@ -2650,6 +2753,7 @@ async fn claude_round_trip_through_inline() {
     // 8. A group thread: joining, the agent learns where it is; its answer
     // replies to the request; in mentions-only mode a plain message comes
     // along as context with the next mention.
+    scenario.next("8. A group thread: joining, the agent learns where it is; its answer");
     let group = owner
         .create_thread(CreateThreadRequest {
             title: Some("E2E Claude group".to_owned()),
@@ -2755,6 +2859,7 @@ async fn claude_round_trip_through_inline() {
     );
 
     // 9. A teammate: nothing until the owner grants access, then answered.
+    scenario.next("9. A teammate: nothing until the owner grants access, then answered.");
     let teammate_id: i64 = env("INLINE_V2_E2E_TEAMMATE_USER_ID").parse().unwrap();
     let teammate = client(dir.path(), "teammate", &env("INLINE_V2_E2E_TEAMMATE_TOKEN")).await;
     let team = owner
@@ -2820,6 +2925,7 @@ async fn claude_round_trip_through_inline() {
 
     // 10. A group work moves itself into a subthread with Inline's tool; the
     // parent keeps a card and replies there reach the same work.
+    scenario.next("10. A group work moves itself into a subthread with Inline's tool; the");
     let moving = owner
         .create_thread(CreateThreadRequest {
             title: Some("E2E Claude move".to_owned()),
