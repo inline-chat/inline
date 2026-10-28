@@ -3664,12 +3664,12 @@ var require_receiver = __commonJS(function(exports, module) {
         });
       }
     }
-    createError(ErrorCtor, message, prefix, statusCode, errorCode) {
+    createError(ErrorCtor, message, prefix, statusCode, errorCode2) {
       this._loop = false;
       this._errored = true;
       const err = new ErrorCtor(prefix ? `Invalid WebSocket frame: ${message}` : message);
       Error.captureStackTrace(err, this.createError);
-      err.code = errorCode;
+      err.code = errorCode2;
       err[kStatusCode] = statusCode;
       return err;
     }
@@ -5754,9 +5754,13 @@ function normalizeError(error, redact = defaultErrorText) {
     };
   }
   const message = redact(error);
+  if (errorCode(error) === "commit-outcome-unknown") {
+    return { status: 504, errorKind: "unknown", message, outcomeUnknown: true };
+  }
   const lower = message.toLowerCase();
-  if (lower.includes("rate") && lower.includes("limit")) {
-    return { status: 429, errorKind: "rate_limited", message };
+  if (isRateLimitCode(error) || lower.includes("rate") && lower.includes("limit")) {
+    const retryAfterSeconds = error?.retryAfterSeconds;
+    return typeof retryAfterSeconds === "number" && retryAfterSeconds > 0 ? { status: 429, errorKind: "rate_limited", message, retryAfterSeconds } : { status: 429, errorKind: "rate_limited", message };
   }
   if (lower.includes("forbidden") || lower.includes("unauthorized")) {
     return { status: 403, errorKind: "forbidden", message };
@@ -5768,6 +5772,15 @@ function normalizeError(error, redact = defaultErrorText) {
     return { status: 503, errorKind: "transient", message };
   }
   return { status: 500, errorKind: "unknown", message };
+}
+function errorCode(error) {
+  return typeof error === "object" && error !== null ? error.code : undefined;
+}
+function isRateLimitCode(error) {
+  if (errorCode(error) !== "rpc-error")
+    return false;
+  const rpcCode = error.rpcCode;
+  return rpcCode === 3 || rpcCode === 429;
 }
 function statusForErrorKind(errorKind) {
   switch (errorKind) {
@@ -44233,9 +44246,9 @@ class InvalidEncryptedRecord extends Error {
 class RecoverableEncryptedRecordError extends Error {
   errorCode;
   fields;
-  constructor(errorCode, fields) {
+  constructor(errorCode2, fields) {
     super("Recoverable Inline Protocol record error");
-    this.errorCode = errorCode;
+    this.errorCode = errorCode2;
     this.fields = fields;
   }
 }
@@ -50488,7 +50501,9 @@ var server = http.createServer((req, res) => {
     writeJson(res, err.status, {
       ok: false,
       error: err.message,
-      errorKind: err.errorKind
+      errorKind: err.errorKind,
+      ...err.outcomeUnknown ? { outcomeUnknown: true } : {},
+      ...err.retryAfterSeconds ? { retryAfterSeconds: err.retryAfterSeconds } : {}
     });
   });
 });
