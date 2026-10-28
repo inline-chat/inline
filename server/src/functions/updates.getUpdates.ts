@@ -14,7 +14,7 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { Sync, type ReplayAccessCache } from "@in/server/modules/updates/sync"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
-import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { RealtimeRpcError, retryAfterSecondsFromMs } from "@in/server/realtime/errors"
 import { ModelError } from "@in/server/db/models/_errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getSpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
@@ -58,6 +58,9 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   const resolveStartedAt = performance.now()
   const descriptor = await resolveBucket(input.bucket, context)
   const resolveMs = elapsedMs(resolveStartedAt)
+  // A caller past its deadline has abandoned this page. Stop before the next
+  // database stage; the guard is untouched, so a retry starts clean.
+  context.signal?.throwIfAborted()
 
   const seqStartBigInt = input.startSeq ?? 0n
   if (seqStartBigInt < 0n) {
@@ -99,7 +102,8 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     : undefined
   if (replayIdentity !== undefined && !replayLoopGuard.allow(replayIdentity, seqStart)) {
     databaseDiagnostics.record("replay.user.throttled", 0)
-    throw RealtimeRpcError.RateLimit()
+    const retryAfterMs = replayLoopGuard.retryAfterMs(replayIdentity)
+    throw RealtimeRpcError.RateLimit(retryAfterMs > 0 ? retryAfterSecondsFromMs(retryAfterMs) : undefined)
   }
   const connection = context.currentConnectionId
     ? connectionManager.getConnection(context.currentConnectionId)
@@ -129,6 +133,8 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     latestDate,
   } = fetchTiming.value
   const fetchMs = fetchTiming.ms
+  // An abandoned page was never delivered, so it must not count as served.
+  context.signal?.throwIfAborted()
   if (replayIdentity !== undefined) replayLoopGuard.served(replayIdentity, seqStart, dbUpdates.length)
 
   const seqDifference = latestSeq - seqStart
@@ -228,6 +234,8 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   assertPageSequenceAccounting(dbUpdates, inflatedUpdates, skippedSequences)
   const sidecarsStartedAt = performance.now()
   const buildCandidate = async (databaseUpdateCount: number) => {
+    // Each candidate repeats database-backed sidecar hydration.
+    context.signal?.throwIfAborted()
     const candidateDatabaseUpdates = dbUpdates.slice(0, databaseUpdateCount)
     const includedSequences = new Set(candidateDatabaseUpdates.map((update) => update.seq))
     const updates = inflatedUpdates.filter((update) => includedSequences.has(Number(update.seq ?? 0)))

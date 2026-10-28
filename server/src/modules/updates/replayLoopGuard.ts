@@ -85,6 +85,12 @@ export class ReplayLoopGuard {
     return true
   }
 
+  /** Time left on a session's block, for the RATE_LIMIT retry-after hint. */
+  retryAfterMs(identity: string): number {
+    const state = this.states.get(identity)
+    return state ? Math.max(0, state.blockedUntil - this.now()) : 0
+  }
+
   /** Records what the last allowed request for `startSeq` returned. */
   served(identity: string, startSeq: number, databaseRecords: number): void {
     const state = this.states.get(identity)

@@ -63,11 +63,16 @@ export const getUpdatesState = async (
   // and therefore cannot advance the client's checkpoint.
   const scanStartedAt = options.discoveryWatermark ?? await captureUpdateDiscoveryWatermark()
   const scanStartDate = floorWireDate(scanStartedAt)
+  // Read-only until hints are emitted: a caller past its deadline has given up,
+  // so stop between database stages instead of finishing an unread scan.
+  const signal = context.signal
+  signal?.throwIfAborted()
 
   const userSeq = options.discoveryWatermark !== undefined && options.userFrontier !== undefined
     ? options.userFrontier
     : await readUserFrontier(context.currentUserId)
   if (!Number.isSafeInteger(userSeq) || userSeq < 0) throw RealtimeRpcError.InternalError()
+  signal?.throwIfAborted()
 
   if (requestedDate !== undefined && requestedDate > scanStartDate) {
     // A future cursor cannot be clamped and scanned from "now": that would
@@ -114,8 +119,10 @@ export const getUpdatesState = async (
       lastUpdateAtGreaterThanEqual: userLocalDate,
     },
   })
-  chats = await filterAccessibleChats(chats, context.currentUserId)
+  signal?.throwIfAborted()
+  chats = await filterAccessibleChats(chats, context.currentUserId, signal)
   const chatsMs = elapsedMs(chatsStartedAt)
+  signal?.throwIfAborted()
 
   // Get spaces that have been updated
   const spacesStartedAt = performance.now()
@@ -155,6 +162,7 @@ export const getUpdatesState = async (
     }
   }
 
+  signal?.throwIfAborted()
   const durableSeqs = await getDurableSeqsByTarget(
     chats.filter((chat) => chat.lastUpdateDate).map((chat) => chat.id),
     spaces.filter((space) => space.lastUpdateDate).map((space) => space.id),
@@ -203,7 +211,7 @@ export const getUpdatesState = async (
   }
 
   if (updatesToPush.length > 0) {
-    await pushBoundedUpdateHints(context.currentUserId, updatesToPush, options.shouldEmitHints)
+    await pushBoundedUpdateHints(context.currentUserId, updatesToPush, options.shouldEmitHints, signal)
   }
 
   logGetUpdatesStateTiming({
@@ -296,9 +304,13 @@ const pushBoundedUpdateHints = async (
   userId: number,
   updates: Parameters<typeof RealtimeUpdates.pushToUser>[1],
   shouldEmitHints: (() => boolean) | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<void> => {
   let offset = 0
   while (offset < updates.length) {
+    // Unlike a stopped repair, an abandoned RPC must fail: returning would hand
+    // out a checkpoint whose remaining hints were never emitted.
+    signal?.throwIfAborted()
     // Internal repair can be stopped while discovery is reading the database.
     // Never begin a new side-effecting batch after its lifecycle is inactive.
     if (shouldEmitHints && !shouldEmitHints()) return
@@ -338,7 +350,11 @@ const logGetUpdatesStateTiming = (timing: GetUpdatesStateTiming): void => {
   }
 }
 
-const filterAccessibleChats = async (chats: DbChat[], userId: number): Promise<DbChat[]> => {
+const filterAccessibleChats = async (
+  chats: DbChat[],
+  userId: number,
+  signal: AbortSignal | undefined,
+): Promise<DbChat[]> => {
   const knownAccessibleChatIds = await findKnownAccessibleChatIds(chats, userId)
   const chatsRequiringGuard = chats.filter((chat) => !knownAccessibleChatIds.has(chat.id))
   if (chatsRequiringGuard.length === 0) {
@@ -351,6 +367,7 @@ const filterAccessibleChats = async (chats: DbChat[], userId: number): Promise<D
 
   await Promise.all(Array.from({ length: workerCount }, async () => {
     while (nextIndex < chatsRequiringGuard.length) {
+      signal?.throwIfAborted()
       const index = nextIndex
       nextIndex += 1
       const chat = chatsRequiringGuard[index]

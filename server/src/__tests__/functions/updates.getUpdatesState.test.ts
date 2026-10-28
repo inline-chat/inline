@@ -57,6 +57,33 @@ describe("getUpdatesState", () => {
     }
   })
 
+  test("stops an abandoned scan at the deadline before emitting hints", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Scan deadline", ["scan-deadline@example.com"])
+    const user = users[0]
+    const chat = await testUtils.createChat(space.id, "Changed chat", "thread", true)
+    if (!user || !chat) throw new Error("Fixture creation failed")
+    await db.update(chats).set({ lastUpdateDate: new Date(), updateSeq: 1 }).where(eq(chats.id, chat.id))
+    const deadline = new AbortController()
+    const original = ChatModel.getUserChats
+    const getUserChats = spyOn(ChatModel, "getUserChats").mockImplementation(async (params) => {
+      const result = await original(params)
+      deadline.abort()
+      return result
+    })
+    const spacesAfter = spyOn(SpaceModel, "getSpacesAfterUpdateDate")
+    const push = spyOn(RealtimeUpdates, "pushToUser")
+    try {
+      await expect(getUpdatesState({ date: 1n }, { ...testUtils.functionContext({ userId: user.id }), signal: deadline.signal }))
+        .rejects.toMatchObject({ name: "AbortError" })
+      expect(spacesAfter).not.toHaveBeenCalled()
+      expect(push).not.toHaveBeenCalled()
+    } finally {
+      getUserChats.mockRestore()
+      spacesAfter.mockRestore()
+      push.mockRestore()
+    }
+  })
+
   test("does not begin a hint batch after an internal repair lifecycle stops", async () => {
     const { users, space } = await testUtils.createSpaceWithMembers("Stopped repair hints", ["stopped-repair-hints@example.com"])
     const user = users[0]

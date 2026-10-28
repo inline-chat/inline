@@ -178,6 +178,63 @@ describe("getUpdates", () => {
     }
   })
 
+  test("stops an abandoned page at the deadline without counting it as served", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("Replay deadline", ["replay-deadline@example.com"])
+    const user = users[0]!
+    for (let seq = 1; seq <= 3; seq += 1) {
+      await insertServerUpdate({
+        bucket: UpdateBucket.User,
+        entityId: user.id,
+        seq,
+        payload: { oneofKind: "userChatParticipantDelete", userChatParticipantDelete: { chatId: BigInt(seq) } },
+      })
+    }
+    const input: GetUpdatesInput = {
+      bucket: { type: { oneofKind: "user", user: {} } },
+      startSeq: 0n, seqEnd: 0n, totalLimit: 0, limit: 100,
+    }
+    const context = {
+      userId: user.id, sessionId: 9, connectionId: "deadline-socket",
+      sendRaw: () => {}, sendRpcReply: () => {},
+    }
+    const expired = new AbortController()
+    expired.abort()
+    const fetch = spyOn(Sync, "getUpdates")
+    try {
+      await expect(handleGetUpdates(input, { ...context, signal: expired.signal })).rejects.toMatchObject({ name: "AbortError" })
+      expect(fetch).not.toHaveBeenCalled()
+    } finally {
+      fetch.mockRestore()
+    }
+
+    const sidecars = spyOn(Sync, "buildUserSidecarsForUpdates")
+    try {
+      // The deadline passes while the page is being read.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const deadline = new AbortController()
+        const original = Sync.getUpdates
+        const fetchDuringDeadline = spyOn(Sync, "getUpdates").mockImplementation(async (params) => {
+          const page = await original(params)
+          deadline.abort()
+          return page
+        })
+        try {
+          await expect(handleGetUpdates(input, { ...context, signal: deadline.signal })).rejects.toMatchObject({ name: "AbortError" })
+        } finally {
+          fetchDuringDeadline.mockRestore()
+        }
+      }
+      expect(sidecars).not.toHaveBeenCalled()
+      // Abandoned pages were never delivered, so the repeat allowance is intact.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const result = await handleGetUpdates(input, context)
+        expect(result.seq).toBe(3n)
+      }
+    } finally {
+      sidecars.mockRestore()
+    }
+  })
+
   test("uses an exclusive 10,000-update authoritative-repair boundary", () => {
     expect(replayRequiresAuthoritativeRepair(0, 9_999)).toBe(false)
     expect(replayRequiresAuthoritativeRepair(0, 10_000)).toBe(false)
