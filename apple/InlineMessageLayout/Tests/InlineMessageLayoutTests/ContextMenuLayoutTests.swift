@@ -4,7 +4,9 @@ import Testing
 
 @Suite("Context menu layout")
 struct ContextMenuLayoutTests {
-  /// An iPhone 15 screen: 47-point top and 34-point bottom safe area.
+  /// An iPhone 15 screen: 47-point top and 34-point bottom safe area. Expected values are
+  /// written out: `#expect` type-checks arithmetic on bare literals on its own, so `== 47 + 8`
+  /// fails on CI even when the frame is exactly 55.
   let viewport = CGSize(width: 390, height: 844)
   let safe = ContextMenuLayout.Insets(top: 47, bottom: 34)
   let menu = CGSize(width: 250, height: 300)
@@ -51,7 +53,8 @@ struct ContextMenuLayoutTests {
     let result = plan(source: CGRect(x: 16, y: 700, width: 200, height: 60))
     // 844 - 34 safe - 10 inset = 800 for the menu's bottom.
     #expect(result.menu.maxY == 800)
-    #expect(result.preview.minY == 800 - 300 - 8 - 60)
+    // 800 less the 300-point menu, 8 of spacing and the 60-point bubble.
+    #expect(result.preview.minY == 432)
     #expect(!result.isScrollable)
   }
 
@@ -60,7 +63,7 @@ struct ContextMenuLayoutTests {
     let accessory = CGSize(width: 300, height: 52)
     let result = plan(source: CGRect(x: 16, y: 30, width: 200, height: 60), accessory: accessory)
     let bar = try #require(result.accessory)
-    #expect(bar.minY == 47 + 8)
+    #expect(bar.minY == 55) // 47 safe area + 8 inset
     #expect(result.preview.minY == bar.maxY + 8)
     #expect(bar.minX == 16)
     #expect(bar.size == accessory)
@@ -71,7 +74,7 @@ struct ContextMenuLayoutTests {
     let source = CGRect(x: 16, y: 100, width: 300, height: 900)
     let result = plan(source: source)
     #expect(result.isScrollable)
-    #expect(result.preview.minY == 47 + 8)
+    #expect(result.preview.minY == 55) // 47 safe area + 8 inset
     #expect(result.menu.minY == result.preview.maxY + 8)
     #expect(result.contentSize.height == result.menu.maxY + 10 + 34)
     #expect(result.contentOffsetY == result.contentSize.height - viewport.height)
@@ -83,10 +86,10 @@ struct ContextMenuLayoutTests {
   @Test("Bubbles and menus stay inside the side insets")
   func clampsHorizontally() {
     let shifted = plan(source: CGRect(x: 300, y: 400, width: 200, height: 60))
-    #expect(shifted.preview.maxX == 390 - 12)
+    #expect(shifted.preview.maxX == 378) // 390 less the 12-point side inset
 
     let wide = plan(source: CGRect(x: 16, y: 400, width: 200, height: 60), menu: CGSize(width: 500, height: 200))
-    #expect(wide.menu.width == 390 - 24)
+    #expect(wide.menu.width == 366) // 390 less both side insets
     #expect(wide.menu.minX == 12)
 
     let right = plan(source: CGRect(x: 16, y: 400, width: 100, height: 60), alignment: .right)
