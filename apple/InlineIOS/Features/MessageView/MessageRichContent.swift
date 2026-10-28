@@ -34,7 +34,7 @@ struct MessageRichContent {
     expanded: [RichPath: Bool]
   ) -> MessageRichContent? {
     // Block ranges index the original text; a translation replaces it.
-    if message.translationText == nil, let content = message.message.displayBlockContentPayload?.content {
+    if message.translationText == nil, let content = message.message.blockContentPayload?.content {
       var builder = Builder(body: body, style: style, expanded: expanded)
       guard builder.withinLimits(content), let blocks = builder.blocks(content.blocks, path: RichPath()),
             !blocks.isEmpty
@@ -199,7 +199,9 @@ struct MessageRichContent {
           hasActivityIcon: activity != .unspecified && activity != .agent,
           isRightToLeft: disclosure.hasIsRtl && disclosure.isRtl
         ))
-      case nil:
+      default:
+        // Kinds this view doesn't draw yet, such as agent steps and forms, fall back to the
+        // message's flat text, as the protocol asks of clients that don't know a kind.
         return nil
       }
     }
