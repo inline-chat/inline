@@ -2305,6 +2305,7 @@ enum Method {
   UPDATE_AGENT_SETTINGS = 160;
   CONTROL_AGENT_SESSION = 161;
   MOVE_AGENT_SESSION = 162;
+  UNPIN_ALL_MESSAGES = 163;
 }
 
 message RpcCall {
@@ -2472,6 +2473,7 @@ message RpcCall {
     UpdateAgentSettingsInput updateAgentSettings = 161;
     ControlAgentSessionInput controlAgentSession = 162;
     MoveAgentSessionInput moveAgentSession = 163;
+    UnpinAllMessagesInput unpinAllMessages = 164;
   }
 }
 
@@ -2641,6 +2643,7 @@ message RpcResult {
     UpdateAgentSettingsResult updateAgentSettings = 161;
     ControlAgentSessionResult controlAgentSession = 162;
     MoveAgentSessionResult moveAgentSession = 163;
+    UnpinAllMessagesResult unpinAllMessages = 164;
   }
 }
 
@@ -5185,6 +5188,13 @@ message PinMessageInput {
 }
 
 message PinMessageResult { repeated Update updates = 1; }
+
+// Unpin every pinned message in a chat for everyone
+message UnpinAllMessagesInput {
+  InputPeer peer_id = 1;
+}
+
+message UnpinAllMessagesResult { repeated Update updates = 1; }
 
 // Apple only types
 message DraftMessage {
