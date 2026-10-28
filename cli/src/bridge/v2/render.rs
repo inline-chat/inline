@@ -18,9 +18,9 @@ use std::path::{Path, PathBuf};
 
 use inline_agent_bridge::harness::{
     ApprovalSubject, ChildRef, ClosedBy, CommandAction, Decision, DecisionKind, Envelope, Event,
-    FileChangeKind, FileDiff, InputFact, InputId, Interaction, InteractionId, InteractionKind,
-    Item, ItemBody, ItemKind, ItemStatus, ItemUpdate, MessageRole, NoticeLevel, OutputMode,
-    QuestionForm, TurnPhase,
+    FieldInput, FileChangeKind, FileDiff, InputFact, InputId, Interaction, InteractionId,
+    InteractionKind, Item, ItemBody, ItemKind, ItemStatus, ItemUpdate, MessageRole, NoticeLevel,
+    OutputMode, QuestionForm, TurnPhase,
 };
 use inline_agent_bridge::{AgentMessagePhase, PlanStepStatus, TurnId, TurnOutcome};
 use serde_json::Value;
@@ -1629,7 +1629,79 @@ fn approval_card(agent: &str, subject: &ApprovalSubject) -> Doc {
 /// Form ID of a question card; one form per card message.
 pub(crate) const QUESTION_FORM_ID: &str = "q";
 
+/// Most options a question shows as buttons.
+const MAX_PICK_OPTIONS: usize = 8;
+
+/// Every question picks one option, so the card can ask them one at a time
+/// with message buttons, which every Inline app already shows. Other forms
+/// stay forms until every app draws them.
+pub(crate) fn pickable(form: &QuestionForm) -> bool {
+    !form.fields.is_empty()
+        && form.fields.iter().all(|field| {
+            matches!(&field.input, FieldInput::Select { options, multiple: false, .. }
+                if !options.is_empty() && options.len() <= MAX_PICK_OPTIONS)
+        })
+}
+
+/// Whether the question `field` also takes an answer in the person's own
+/// words: a reply to the card.
+pub(crate) fn takes_reply(form: &QuestionForm, field: usize) -> bool {
+    matches!(
+        form.fields.get(field).map(|field| &field.input),
+        Some(FieldInput::Select {
+            allow_other: true,
+            ..
+        })
+    )
+}
+
+/// A pickable form's card while question `field` is open, with the answers
+/// already given above it. The buttons carry the options.
+pub(crate) fn pick_card(
+    agent: &str,
+    form: &QuestionForm,
+    field: usize,
+    answered: &[String],
+) -> Doc {
+    let mut builder = DocBuilder::new();
+    let count = form.fields.len();
+    builder.paragraph(&match (&form.title, count) {
+        (Some(title), _) => title.clone(),
+        (None, 1) => format!("{agent} has a question"),
+        (None, count) => format!("{agent} has {count} questions"),
+    });
+    for (question, answer) in form.fields.iter().zip(answered) {
+        builder.paragraph(&format!("{}: {answer}", question.prompt));
+    }
+    let Some(question) = form.fields.get(field) else {
+        return builder.finish();
+    };
+    builder.paragraph(&if count > 1 {
+        format!("{}/{count}. {}", field + 1, question.prompt)
+    } else {
+        question.prompt.clone()
+    });
+    if let FieldInput::Select { options, .. } = &question.input {
+        for option in options {
+            if let Some(description) = option
+                .description
+                .as_deref()
+                .filter(|text| !text.trim().is_empty())
+            {
+                builder.paragraph(&format!("• {}: {description}", option.label));
+            }
+        }
+    }
+    if takes_reply(form, field) {
+        builder.footer("Or reply to this message with your own answer.");
+    }
+    builder.finish()
+}
+
 fn question_card(agent: &str, form: &QuestionForm) -> Doc {
+    if pickable(form) {
+        return pick_card(agent, form, 0, &[]);
+    }
     let mut builder = DocBuilder::new();
     if form.title.is_none() {
         builder.paragraph(&format!("{agent} has a question"));
@@ -2300,6 +2372,62 @@ Ran cargo test"
             assert!(doc.blocks.is_empty(), "Inline builds the blocks itself");
         }
         assert!(matches!(ops.last(), Some(RenderOp::Final { doc }) if doc.text == answer));
+    }
+
+    fn question(
+        prompt: &str,
+        options: &[&str],
+        allow_other: bool,
+    ) -> inline_agent_bridge::harness::FormField {
+        inline_agent_bridge::harness::FormField {
+            id: inline_agent_bridge::harness::FieldId::new(prompt).expect("id"),
+            header: None,
+            prompt: prompt.to_owned(),
+            input: FieldInput::Select {
+                options: options
+                    .iter()
+                    .map(|label| inline_agent_bridge::harness::FieldOption {
+                        label: (*label).to_owned(),
+                        description: Some(format!("{label} details")),
+                    })
+                    .collect(),
+                multiple: false,
+                allow_other,
+            },
+            required: true,
+        }
+    }
+
+    #[test]
+    fn one_choice_questions_ask_one_at_a_time_with_their_answers_above() {
+        let form = QuestionForm {
+            title: None,
+            fields: vec![
+                question("Scope", &["Only the CLI", "CLI and server"], true),
+                question("Run tests after", &["Yes", "No"], false),
+            ],
+            asynchronous: false,
+            auto_resolution_ms: None,
+        };
+        assert!(pickable(&form));
+        let first = pick_card("Claude", &form, 0, &[]);
+        assert!(first.text.starts_with("Claude has 2 questions"));
+        assert!(first.text.contains("1/2. Scope"));
+        assert!(first.text.contains("Only the CLI: Only the CLI details"));
+        assert!(
+            first.text.contains("reply to this message"),
+            "Claude takes its own words"
+        );
+        let second = pick_card("Claude", &form, 1, &["Only the CLI".to_owned()]);
+        assert!(second.text.contains("Scope: Only the CLI"));
+        assert!(second.text.contains("2/2. Run tests after"));
+        assert!(!second.text.contains("reply to this message"));
+        // Many choices, or several at once, stay a form.
+        let mut multiple = form.clone();
+        if let FieldInput::Select { multiple: many, .. } = &mut multiple.fields[0].input {
+            *many = true;
+        }
+        assert!(!pickable(&multiple));
     }
 
     #[test]

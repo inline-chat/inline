@@ -38,7 +38,7 @@ use super::api::{self, Failure, Notify, chat_peer};
 use super::doc::{Doc, DocBuilder};
 use super::ledger::{InputState, Ledger};
 use super::limits;
-use super::render::{ActionStyle, CardAction, FullDetail, RenderOp, Renderer, Vocabulary};
+use super::render::{self, ActionStyle, CardAction, FullDetail, RenderOp, Renderer, Vocabulary};
 use super::settings;
 use super::tools::{Tools, WorkTool};
 
@@ -208,6 +208,9 @@ pub(crate) enum ActionData {
     /// More speak-gate checks for the rest of today.
     #[serde(rename = "gr")]
     RaiseGateBudget,
+    /// Option `o` of question `f` on a question card asked with buttons.
+    #[serde(rename = "q")]
+    Pick { i: String, f: usize, o: usize },
 }
 
 pub(crate) enum Command {
@@ -219,6 +222,9 @@ pub(crate) enum Command {
         /// In a group thread the final answer replies to the requester
         /// (spec §6, placement); a DM or the agent's own thread has none.
         answer_reply: bool,
+        /// The message this one replies to: a reply to an open question card
+        /// is the answer in the person's own words.
+        reply_to: Option<i64>,
     },
     /// A message the agent observes without a turn; batched until the next
     /// native boundary.
@@ -282,6 +288,13 @@ pub(crate) enum SessionOp {
     Settings(SettingsChange),
     Compact,
     Clear,
+    /// The harness's own mode: Codex collaboration mode, Claude permission
+    /// mode ("plan" for both).
+    Mode(String),
+    /// Codex's review of uncommitted changes, or of the branch named.
+    Review(Option<String>),
+    /// Claude's rewind of the last turn's file changes.
+    Undo,
 }
 
 /// The main loop's handle on one work.
@@ -385,6 +398,7 @@ pub(crate) fn spawn(
         uncertain: HashMap::new(),
         outbox,
         rendering_turn: None,
+        last_turn_input: None,
     };
     let task = tokio::spawn(actor.run(rx));
     WorkHandle {
@@ -402,6 +416,8 @@ struct Card {
     interaction: InteractionId,
     approval: bool,
     form: Option<QuestionForm>,
+    /// Answers so far, when the card asks its questions one at a time.
+    answered: Vec<String>,
 }
 
 /// A short digest of an answer's text, for its identity.
@@ -514,6 +530,8 @@ struct Actor {
     outbox: VecDeque<Outgoing>,
     /// The turn whose output is being rendered, for the answer's identity.
     rendering_turn: Option<TurnId>,
+    /// The first input of the latest turn: what `/undo` rewinds to.
+    last_turn_input: Option<InputId>,
     /// Inputs whose delivery was unknown, until the session settles them.
     uncertain: HashMap<InputId, Uncertain>,
     /// Ledger states not saved yet, written again with the next update.
@@ -571,7 +589,33 @@ impl Actor {
                 input,
                 pending,
                 message_id,
+                reply_to: Some(card),
+                ..
+            } if self.cards.get(&card).is_some_and(|open| {
+                open.form.as_ref().is_some_and(|form| {
+                    render::pickable(form) && render::takes_reply(form, open.answered.len())
+                })
+            }) =>
+            {
+                let (interaction, field) = {
+                    let open = &self.cards[&card];
+                    (open.interaction.to_string(), open.answered.len())
+                };
+                let answer = input.content.text.trim().to_owned();
+                let toast = self
+                    .pick(card, pending.sender.0, &interaction, field, answer)
+                    .await;
+                self.mark(&input.id, InputState::Consumed);
+                if let Some(toast) = toast {
+                    self.reply(message_id, &toast).await;
+                }
+            }
+            Command::Input {
+                input,
+                pending,
+                message_id,
                 answer_reply,
+                ..
             } => {
                 // Direct input restarts paused work (spec §4.5) and answers
                 // anything the speak gate was weighing.
@@ -881,6 +925,22 @@ impl Actor {
         match data {
             // The main loop answers these; they never reach a work.
             ActionData::ExtendLoop | ActionData::RaiseGateBudget => None,
+            ActionData::Pick { i, f, o } => {
+                let label = self
+                    .cards
+                    .get(&message_id)
+                    .and_then(|card| card.form.as_ref())
+                    .and_then(|form| form.fields.get(f))
+                    .and_then(|field| match &field.input {
+                        FieldInput::Select { options, .. } => options.get(o),
+                        _ => None,
+                    })
+                    .map(|option| option.label.clone());
+                let Some(label) = label else {
+                    return Some(NOT_PENDING.to_owned());
+                };
+                self.pick(message_id, actor, &i, f, label).await
+            }
             ActionData::Decision { i, d } => {
                 let card = self.cards.get(&message_id).cloned()?;
                 if card.interaction.as_str() != i {
@@ -1000,6 +1060,65 @@ impl Actor {
                 None
             }
         }
+    }
+
+    /// One answer on a card that asks its questions one at a time: the next
+    /// question replaces it, and the last one answers the harness.
+    async fn pick(
+        &mut self,
+        message_id: i64,
+        actor: i64,
+        interaction: &str,
+        field: usize,
+        answer: String,
+    ) -> Option<String> {
+        if !self.agent.access.grants(actor).await.any() {
+            return Some(NO_ACCESS.to_owned());
+        }
+        let Some(card) = self.cards.get_mut(&message_id) else {
+            return Some(NOT_PENDING.to_owned());
+        };
+        let Some(form) = card.form.clone() else {
+            return Some(NOT_PENDING.to_owned());
+        };
+        // A second tap on an answered question, or a stale card.
+        if card.interaction.as_str() != interaction || card.answered.len() != field {
+            return Some(NOT_PENDING.to_owned());
+        }
+        card.answered.push(answer);
+        let (chat, interaction, answered) =
+            (card.chat, card.interaction.clone(), card.answered.clone());
+        if answered.len() < form.fields.len() {
+            let doc = render::pick_card(&self.agent.agent_name, &form, answered.len(), &answered);
+            let actions = pick_actions(&interaction, &form, answered.len());
+            if self.edit_in(chat, message_id, &doc, actions).await {
+                return None;
+            }
+            if let Some(card) = self.cards.get_mut(&message_id) {
+                card.answered.pop();
+            }
+            return Some("Could not show the next question. Try again.".to_owned());
+        }
+        let answers = form
+            .fields
+            .iter()
+            .zip(answered)
+            .filter_map(|(field, value)| {
+                Some(FieldAnswer {
+                    field: FieldId::new(field.id.as_str()).ok()?,
+                    values: vec![value],
+                })
+            })
+            .collect();
+        let toast = self
+            .answer(interaction, InteractionResponse::Answers { answers }, actor)
+            .await;
+        if toast.is_some()
+            && let Some(card) = self.cards.get_mut(&message_id)
+        {
+            card.answered.pop();
+        }
+        toast
     }
 
     async fn form(&mut self, message_id: i64, actor: i64, values: &[FormValue]) -> Option<String> {
@@ -1860,6 +1979,17 @@ impl Actor {
         if !done.is_empty() {
             builder.paragraph(&format!("Done: {}.", done.join(", ")));
         }
+        let missed: Vec<String> = receipts
+            .iter()
+            .filter(|receipt| receipt.outcome != ReleaseStepOutcome::Done)
+            .map(|receipt| step_label(&receipt.step))
+            .collect();
+        if !missed.is_empty() {
+            builder.paragraph(&format!(
+                "Could not confirm: {}. Check it where you continue.",
+                missed.join(", ")
+            ));
+        }
         if let Some(native) = &self.native {
             match handoff_instruction(
                 self.agent.handoff_provider(),
@@ -1937,6 +2067,38 @@ impl Actor {
             }
             SessionOp::Compact => self.native_op(Op::Compact, "Compacting the context.").await,
             SessionOp::Clear => self.native_op(Op::Clear, "Context cleared.").await,
+            SessionOp::Mode(mode) => {
+                let Ok(id) = inline_agent_bridge::harness::ModeId::new(mode.clone()) else {
+                    return Some("That mode is not available.".to_owned());
+                };
+                let done = if mode == "plan" {
+                    "Plan mode: the agent plans and changes nothing until you approve."
+                } else {
+                    "Plan mode is off."
+                };
+                self.native_op(Op::Mode { mode: id }, done).await
+            }
+            SessionOp::Review(branch) => {
+                let target = match branch {
+                    Some(branch) => {
+                        inline_agent_bridge::harness::ReviewTarget::BaseBranch { branch }
+                    }
+                    None => inline_agent_bridge::harness::ReviewTarget::UncommittedChanges,
+                };
+                self.native_op(Op::Review { target }, "Reviewing.").await
+            }
+            SessionOp::Undo => match self.last_turn_input.clone() {
+                Some(input) => {
+                    self.native_op(
+                        Op::RewindFiles {
+                            to: inline_agent_bridge::harness::RewindPoint::Input { input },
+                        },
+                        "Undid the last turn's file changes.",
+                    )
+                    .await
+                }
+                None => Some("Nothing to undo yet.".to_owned()),
+            },
         }
     }
 
@@ -2232,6 +2394,9 @@ impl Actor {
             Event::Turn { turn, phase } => match phase {
                 TurnPhase::Started { inputs } => {
                     self.turn = Some(turn.clone());
+                    if let Some(first) = inputs.first() {
+                        self.last_turn_input = Some(first.clone());
+                    }
                     self.turn_started = Some(now_ms() as i64 / 1000);
                     // Running again: whatever limit it waited on has reset.
                     self.waiting = None;
@@ -2558,6 +2723,7 @@ impl Actor {
                         interaction,
                         approval: form.is_none(),
                         form,
+                        answered: Vec::new(),
                     },
                 );
                 self.report().await;
@@ -2685,7 +2851,10 @@ impl Actor {
                     actions,
                     form,
                 } => {
-                    let buttons = card_actions(&interaction, &actions);
+                    let buttons = match &form {
+                        Some(form) if render::pickable(form) => pick_actions(&interaction, form, 0),
+                        _ => card_actions(&interaction, &actions),
+                    };
                     let long = long_labels(&actions);
                     let doc = if long.is_empty() {
                         doc
@@ -3375,6 +3544,43 @@ fn long_labels(actions: &[CardAction]) -> Vec<String> {
         .collect()
 }
 
+/// A question's options as buttons, one per row; anyone with access to the
+/// agent may answer.
+pub(crate) fn pick_actions(
+    interaction: &InteractionId,
+    form: &QuestionForm,
+    field: usize,
+) -> Option<proto::MessageActions> {
+    let FieldInput::Select { options, .. } = &form.fields.get(field)?.input else {
+        return None;
+    };
+    let rows = options
+        .iter()
+        .enumerate()
+        .filter_map(|(index, option)| {
+            let data = serde_json::to_vec(&ActionData::Pick {
+                i: interaction.to_string(),
+                f: field,
+                o: index,
+            })
+            .ok()?;
+            Some(proto::MessageActionRow {
+                actions: vec![proto::MessageAction {
+                    action_id: format!("v2-q{field}-{index}"),
+                    text: button_text(&option.label),
+                    action: Some(proto::message_action::Action::Callback(
+                        proto::MessageActionCallback { data },
+                    )),
+                    style: proto::message_action::Style::Default as i32,
+                    required_grant: proto::AgentGrantRequirement::Access as i32,
+                    ..Default::default()
+                }],
+            })
+        })
+        .collect();
+    Some(proto::MessageActions { rows })
+}
+
 /// Approval buttons with the harness's own labels, one per row.
 pub(crate) fn card_actions(
     interaction: &InteractionId,
@@ -3673,6 +3879,7 @@ pub(crate) mod recovery_tests {
             uncertain: HashMap::new(),
             outbox,
             rendering_turn: None,
+            last_turn_input: None,
         }
     }
 

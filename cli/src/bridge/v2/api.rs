@@ -237,6 +237,35 @@ pub(crate) async fn join(bot: &InlineClient, chat_id: i64, bot_user_id: i64) -> 
     Ok(())
 }
 
+/// Lets `user_id` use and steer this agent: what a bot may grant itself.
+pub(crate) async fn grant_use(bot: &InlineClient, user_id: i64) -> ApiResult<()> {
+    call!(
+        bot,
+        SetAgentGrant,
+        proto::SetAgentGrantInput {
+            bot_user_id: 0,
+            user_id,
+            operations: vec![
+                proto::AgentGrantOperation::Invoke as i32,
+                proto::AgentGrantOperation::Steer as i32,
+            ],
+        }
+    )?;
+    Ok(())
+}
+
+pub(crate) async fn delete_grant(bot: &InlineClient, user_id: i64) -> ApiResult<()> {
+    call!(
+        bot,
+        DeleteAgentGrant,
+        proto::DeleteAgentGrantInput {
+            bot_user_id: 0,
+            user_id,
+        }
+    )?;
+    Ok(())
+}
+
 pub(crate) async fn import_grants(bot: &InlineClient, user_ids: Vec<i64>) -> ApiResult<()> {
     call!(
         bot,

@@ -3,6 +3,8 @@
 //! v1 stays untouched until a provider passes its stage acceptance.
 
 pub(crate) mod api;
+#[cfg(test)]
+mod corpus;
 pub(crate) mod doc;
 #[cfg(test)]
 mod e2e;
