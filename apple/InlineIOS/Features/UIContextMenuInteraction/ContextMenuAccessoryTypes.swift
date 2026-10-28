@@ -70,6 +70,48 @@ enum ContextMenuAccessoryLayout {
   }
 }
 
+/// Fades reactions out at an edge with more content past it, so the one next to the plus
+/// dissolves instead of reading as clipped behind it.
+final class ReactionPickerScrollView: UIScrollView {
+  private static let fadeWidth: CGFloat = 24
+  private let fadeMask = CAGradientLayer()
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    fadeMask.startPoint = CGPoint(x: 0, y: 0.5)
+    fadeMask.endPoint = CGPoint(x: 1, y: 0.5)
+    layer.mask = fadeMask
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  // Runs on every scroll; the mask tracks bounds so it stays put while content moves.
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    let width = max(bounds.width, 1)
+    let fade = min(Self.fadeWidth / width, 0.5)
+    let minOffset = -adjustedContentInset.left
+    let maxOffset = contentSize.width + adjustedContentInset.right - bounds.width
+    let opaque = UIColor.black.cgColor
+    let clear = UIColor.clear.cgColor
+
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    fadeMask.frame = bounds
+    fadeMask.colors = [
+      contentOffset.x > minOffset + 1 ? clear : opaque,
+      opaque,
+      opaque,
+      contentOffset.x < maxOffset - 1 ? clear : opaque,
+    ]
+    fadeMask.locations = [0, fade, 1 - fade, 1].map { NSNumber(value: Double($0)) }
+    CATransaction.commit()
+  }
+}
+
 protocol AnyContextMenuIdentifierUIView: UIView, AnyObject {
   var accessoryView: UIView { get }
   var configuration: ContextMenuAccessoryConfiguration { get }

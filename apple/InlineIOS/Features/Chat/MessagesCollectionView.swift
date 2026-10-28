@@ -3895,7 +3895,7 @@ private extension MessagesCollectionView {
       effectView.clipsToBounds = true
       containerView.addSubview(effectView)
 
-      let scrollView = UIScrollView()
+      let scrollView = ReactionPickerScrollView()
       scrollView.translatesAutoresizingMaskIntoConstraints = false
       scrollView.showsHorizontalScrollIndicator = false
       scrollView.alwaysBounceHorizontal = true
@@ -3963,7 +3963,9 @@ private extension MessagesCollectionView {
 
         scrollView.topAnchor.constraint(equalTo: effectView.contentView.topAnchor),
         scrollView.leadingAnchor.constraint(equalTo: effectView.contentView.leadingAnchor),
-        scrollView.trailingAnchor.constraint(equalTo: moreButton.leadingAnchor, constant: -2),
+        // Run the row's trailing fade under the plus so the two blend; the stack inset
+        // below keeps the last reaction clear of the plus at the end of the scroll.
+        scrollView.trailingAnchor.constraint(equalTo: moreButton.leadingAnchor, constant: 12),
         scrollView.bottomAnchor.constraint(equalTo: effectView.contentView.bottomAnchor),
 
         stackView.topAnchor.constraint(
@@ -3971,7 +3973,7 @@ private extension MessagesCollectionView {
           constant: ContextMenuAccessoryLayout.reactionPickerContentInset
         ),
         stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 4),
-        stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -4),
+        stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -16),
         stackView.bottomAnchor.constraint(
           equalTo: scrollView.contentLayoutGuide.bottomAnchor,
           constant: -ContextMenuAccessoryLayout.reactionPickerContentInset
