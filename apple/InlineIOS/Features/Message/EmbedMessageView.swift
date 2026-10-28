@@ -88,6 +88,14 @@ class EmbedMessageView: UIView {
   private var style: Style = .replyBubble
   private var senderNameForColor: String?
 
+  /// Header for `.pinnedInHeader`, such as "Pinned Message #2" when a chat has several pins.
+  var pinnedHeaderTitle = "Pinned Message" {
+    didSet {
+      guard kind == .pinnedInHeader, pinnedHeaderTitle != oldValue else { return }
+      headerLabel.text = pinnedHeaderTitle
+    }
+  }
+
   private lazy var headerLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
@@ -457,7 +465,7 @@ private extension EmbedMessageView {
       case .forwardingInCompose:
         "Forward Message"
       case .pinnedInHeader:
-        "Pinned Message"
+        pinnedHeaderTitle
     }
   }
 
