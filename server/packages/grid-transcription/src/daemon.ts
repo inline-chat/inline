@@ -6,7 +6,15 @@ import { SileroModel } from "./silero.js"
 import { NativeRoomSupervisor, type NativeExitReceipt, type StopReason } from "./supervisor.js"
 import { monotonicMilliseconds } from "./watchdog.js"
 
-export type WorkerConfig = Readonly<{ apiBaseUrl: string; sharedSecret: string; workerId: string; model: Model; apiKey?: string }>
+export type WorkerConfig = Readonly<{ apiBaseUrl: string; sharedSecret: string; workerId: string; model: Model; apiKey?: string;
+  slot?: number }>
+/** Rooms one worker process captures at once. Each room gets its own daemon, boot identity and native child. */
+export function workerRoomCount(environment: Readonly<Record<string, string | undefined>>): number {
+  const raw = environment.GRID_TRANSCRIPTION_ROOMS ?? "2"
+  const rooms = Number(raw)
+  if (!/^\d+$/.test(raw) || rooms < 1 || rooms > 64) throw new TranscriptionError("protocol")
+  return rooms
+}
 export function workerConfig(environment: Readonly<Record<string, string | undefined>>): WorkerConfig {
   const model = environment.GRID_TRANSCRIPTION_MODEL ?? "meeting"
   if (model !== "meeting" && model !== "standard") throw new TranscriptionError("protocol")
@@ -40,7 +48,7 @@ export class WorkerDaemon {
   private shutdownPromise: Promise<void> | undefined
 
   constructor(private readonly config: WorkerConfig) {
-    this.control = new WorkerControlClient(config.apiBaseUrl, config.sharedSecret, config.workerId)
+    this.control = new WorkerControlClient(config.apiBaseUrl, config.sharedSecret, config.workerId, undefined, config.slot)
     this.supervisor = new NativeRoomSupervisor({ roomChildPath: new URL("./room-child.js", import.meta.url),
       // Secrets arrive only over IPC. Avoid inherited debug flags, NODE_OPTIONS and credential environment.
       environment: { NODE_ENV: "production" } })
@@ -217,10 +225,14 @@ export class WorkerDaemon {
 
 export async function runDaemon(): Promise<void> {
   try {
-    const daemon = new WorkerDaemon(workerConfig(process.env))
-    process.on("SIGTERM", () => { void daemon.shutdown().then(() => process.exit(0)).catch(() => process.exit(1)) })
-    process.on("SIGINT", () => { void daemon.shutdown().then(() => process.exit(0)).catch(() => process.exit(1)) })
-    await daemon.start()
+    const daemons = Array.from({ length: workerRoomCount(process.env) },
+      (_, index) => new WorkerDaemon({ ...workerConfig(process.env), slot: index + 1 }))
+    const shutdown = () => {
+      void Promise.all(daemons.map((daemon) => daemon.shutdown())).then(() => process.exit(0)).catch(() => process.exit(1))
+    }
+    process.on("SIGTERM", shutdown)
+    process.on("SIGINT", shutdown)
+    await Promise.all(daemons.map((daemon) => daemon.start()))
     // Coarse state only. No provider errors, room metadata, audio, text or credentials are logged.
     process.stdout.write("Grid transcription worker initialized\n")
   } catch {

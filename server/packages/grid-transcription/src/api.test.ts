@@ -142,7 +142,7 @@ assert.equal(await run.admit('identity','track','turn'),segmentId);await run.fin
 assert.equal(requests.length,7);assert(requests.every(value=>value.method==='POST'));
 assert(requests.slice(0,3).every(value=>value.auth==='Bearer worker-fixture-secret'));
 assert(requests.slice(3).every(value=>value.auth==='Bearer run-fixture-token'));
-assert.deepEqual(requests[0].body,{workerId:'worker-1',model:'meeting',ready:true});assert.deepEqual(requests[3].body,{});
+assert.deepEqual(requests[0].body,{workerId:'worker-1',model:'meeting',ready:true,slot:1});assert.deepEqual(requests[3].body,{});
 assert.deepEqual(requests[4].body,{participantIdentity:'identity',trackSid:'track',sourceTurnKey:'turn'});
 assert.equal(requests[5].body.text.length,32768);console.log(JSON.stringify({requests:requests.length}));
 }finally{await fixture.close();}

@@ -63,6 +63,49 @@ describe("per microphone finite turn owner", () => {
     expect(value.commits).toEqual(["segment-1", "segment-2"])
     await value.worker.stop(false)
   })
+  test("a quiet speaker's socket closes after the idle window and reopens on their next turn", async () => {
+    const value = fixture({ idleCloseMs: 30 })
+    await utterance(value)
+    value.final("segment-1", "Before the pause.")
+    await until(() => value.finals.length === 1)
+    expect(value.events).not.toContain("close")
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(value.events.filter((event) => event === "close")).toHaveLength(1)
+    await utterance(value)
+    await until(() => value.commits.length === 2)
+    expect(value.events.filter((event) => event === "connect")).toHaveLength(2)
+    expect(value.events.lastIndexOf("connect")).toBeLessThan(value.events.lastIndexOf("audio"))
+    await value.worker.stop(false)
+  })
+  test("one transient provider refusal retries, a second interrupts", async () => {
+    for (const refusals of [1, 2]) {
+      let attempts = 0
+      const connection: SpeechConnection = { appendAudio() {}, commitTurn() {}, close() {} }
+      const value = fixture({ async connect() {
+        if (++attempts <= refusals) throw new TranscriptionError("provider")
+        return connection
+      } })
+      value.worker.push(frame(true))
+      for (let index = 0; index < 28; index++) value.worker.push(frame(false))
+      for (let waited = 0; waited < 2_000 && attempts < 2; waited += 20) await new Promise((resolve) => setTimeout(resolve, 20))
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(attempts).toBe(2)
+      expect(value.failures.map((error) => error.code)).toEqual(refusals === 1 ? [] : ["provider"])
+      await value.worker.stop(false)
+    }
+  })
+  test("back-to-back turns inside the idle window reuse one socket", async () => {
+    const value = fixture({ idleCloseMs: 1_000 })
+    await utterance(value)
+    value.final("segment-1", "First.")
+    await until(() => value.finals.length === 1)
+    await utterance(value)
+    value.final("segment-2", "Second.")
+    await until(() => value.finals.length === 2)
+    expect(value.events.filter((event) => event === "connect")).toHaveLength(1)
+    expect(value.events).not.toContain("close")
+    await value.worker.stop(false)
+  })
   test("a non-cancellable inference promise fails boundedly even without more room audio", async () => {
     const failed = deferred<TranscriptionError>()
     const inference = deferred<number>()

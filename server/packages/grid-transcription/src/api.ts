@@ -168,13 +168,13 @@ class ControlHttp {
 export class WorkerControlClient {
   private readonly http: ControlHttp
 
-  constructor(baseUrl: string, sharedSecret: string, readonly workerId: string, timeoutMs?: number) {
+  constructor(baseUrl: string, sharedSecret: string, readonly workerId: string, timeoutMs?: number, readonly slot = 1) {
     boundedString(workerId, 80)
     this.http = new ControlHttp(baseUrl, sharedSecret, timeoutMs)
   }
 
   async heartbeat(model: Model, ready: boolean): Promise<void> {
-    await this.http.post("heartbeat", { workerId: this.workerId, model, ready })
+    await this.http.post("heartbeat", { workerId: this.workerId, model, ready, slot: this.slot })
   }
 
   async claim(): Promise<ClaimedRun | StoppedClaim | undefined> {

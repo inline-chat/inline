@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { execFileSync, fork } from "node:child_process"
 import { createServer } from "node:http"
 import { fileURLToPath } from "node:url"
-import { workerConfig } from "./daemon.js"
+import { workerConfig, workerRoomCount } from "./daemon.js"
 
 const nodeExecutable = execFileSync(process.env.GRID_TRANSCRIPTION_TEST_NODE ?? "node", ["--print", "process.execPath"], { encoding: "utf8" }).trim()
 let compiled = false
@@ -58,7 +58,7 @@ async function noChildClaimFixture(mode: "delayed" | "lost" | "retry_stopped") {
   try {
     daemon = fork(fileURLToPath(new URL("../dist/daemon.js", import.meta.url)), [], {
       execPath: nodeExecutable, execArgv: [], env: { GRID_TRANSCRIPTION_API_URL: `http://127.0.0.1:${address.port}`,
-        GRID_TRANSCRIPTION_WORKER_SECRET: "fixture-secret", SONIOX_API_KEY: "fixture-key" },
+        GRID_TRANSCRIPTION_WORKER_SECRET: "fixture-secret", GRID_TRANSCRIPTION_ROOMS: "1", SONIOX_API_KEY: "fixture-key" },
       stdio: ["ignore", "ignore", "ignore", "ipc"],
     })
     const child = daemon
@@ -101,6 +101,49 @@ describe("daemon configuration and real shutdown", () => {
     expect(standard.apiKey).toBe("fixture-key")
     expect(() => workerConfig({ ...source, GRID_TRANSCRIPTION_MODEL: "client-selected-model" })).toThrow("protocol")
   })
+
+  test("room count defaults to two and is bounded", () => {
+    expect(workerRoomCount({})).toBe(2)
+    expect(workerRoomCount({ GRID_TRANSCRIPTION_ROOMS: "4" })).toBe(4)
+    for (const value of ["0", "65", "two", "1.5", ""]) expect(() => workerRoomCount({ GRID_TRANSCRIPTION_ROOMS: value })).toThrow("protocol")
+  })
+
+  test("compiled Node daemon heartbeats one slot and boot identity per room", async () => {
+    ensureCompiled()
+    const heartbeats = new Map<number, string>()
+    let daemon: ReturnType<typeof fork> | undefined
+    const server = createServer((request, response) => {
+      let body = ""
+      request.on("data", (chunk) => { body += chunk })
+      request.on("end", () => {
+        response.setHeader("Content-Type", "application/json")
+        if (request.url?.endsWith("/heartbeat")) {
+          const value = JSON.parse(body) as { workerId: string; slot: number; ready: boolean }
+          if (value.ready) heartbeats.set(value.slot, value.workerId)
+          if (heartbeats.size === 2) daemon?.kill("SIGTERM")
+          response.end(JSON.stringify({ ready: value.ready }))
+        } else response.writeHead(204).end()
+      })
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const address = server.address()
+    if (!address || typeof address === "string") throw new Error("loopback fixture failed")
+    try {
+      daemon = fork(fileURLToPath(new URL("../dist/daemon.js", import.meta.url)), [], {
+        execPath: nodeExecutable, execArgv: [], env: { GRID_TRANSCRIPTION_API_URL: `http://127.0.0.1:${address.port}`,
+          GRID_TRANSCRIPTION_WORKER_SECRET: "fixture-secret", GRID_TRANSCRIPTION_ROOMS: "2", SONIOX_API_KEY: "fixture-key" },
+        stdio: ["ignore", "ignore", "ignore", "ipc"],
+      })
+      const code = await new Promise<number | null>((resolve) => daemon!.once("exit", resolve))
+      expect(code).toBe(0)
+      expect([...heartbeats.keys()].sort()).toEqual([1, 2])
+      expect(new Set(heartbeats.values()).size).toBe(2)
+    } finally {
+      if (daemon && daemon.exitCode === null && daemon.signalCode === null) daemon.kill("SIGKILL")
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  }, 20_000)
 
   test("compiled Node daemon SIGTERM waits for its stopped HTTP acknowledgement after actual native exit", async () => {
     // No real credentials, provider socket or remote room is contacted. The real

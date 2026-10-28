@@ -18,11 +18,17 @@ export type TrackWorkerOptions = Readonly<{
   onFailure: (error: TranscriptionError) => void;
   connect?: (options: ProviderOptions) => Promise<SpeechConnection>;
   now?: () => number;
+  idleCloseMs?: number;
 }>
 type PendingTurn = { timer: NodeJS.Timeout; posting: boolean }
 const FINAL_TIMEOUT_MS = 5_000
 const SOCKET_MAX_AGE_MS = 9 * 60 * 1000
 const SOCKET_MAX_TURNS = 900
+// Providers bill open stream time, so a speaker's socket lives only while they talk. A quiet
+// stretch closes it; their next turn reconnects while the PCM queue holds the opening audio.
+const SOCKET_IDLE_MS = 15_000
+// Reconnecting per burst makes a transient refusal likelier; one quick retry fits inside the PCM queue.
+const CONNECT_RETRY_MS = 300
 
 // Exactly one consumer owns each speaker's VAD, admission and provider commit order.
 // Native RTC readers only push owned copies and never wait for inference or network I/O.
@@ -39,6 +45,7 @@ export class TrackWorker {
   private connectionStartedAt = 0
   private socketTurns = 0
   private rotationTimer: NodeJS.Timeout | undefined
+  private idleTimer: NodeJS.Timeout | undefined
   private current: { id: string; samples: number } | undefined
   private readonly pending = new Map<string, PendingTurn>()
   private readonly posting = new Set<Promise<void>>()
@@ -95,6 +102,8 @@ export class TrackWorker {
 
   private async startTurn(frames: readonly Int16Array[]): Promise<void> {
     if (this.current || this.pending.size >= MAX_PENDING_TURNS) throw new TranscriptionError("overflow")
+    clearTimeout(this.idleTimer)
+    this.idleTimer = undefined
     this.options.assertRunAuthority()
     this.options.assertMicrophone()
     const id = await this.options.api.admit(this.options.participantIdentity, this.options.trackSid, randomUUID())
@@ -109,17 +118,10 @@ export class TrackWorker {
     if (this.connection && (this.now() - this.connectionStartedAt >= SOCKET_MAX_AGE_MS || this.socketTurns >= SOCKET_MAX_TURNS)) {
       // No unbounded completion history: rotate only with every old commit acknowledged.
       if (this.pending.size !== 0) throw new TranscriptionError("overflow")
-      this.connection.close()
-      this.connection = undefined
-      clearTimeout(this.rotationTimer)
+      this.closeConnection()
     }
     if (!this.connection) {
-      const connection = await (this.options.connect ?? ProviderConnection.connect)({
-        model: this.options.model, apiKey: this.options.apiKey,
-        assertAuthority: () => this.assertFinalAuthority(),
-        onFinal: (turn) => this.receiveFinal(turn),
-        onFailure: (error) => this.fail(error),
-      })
+      const connection = await this.connectProvider()
       if (!this.accepting || this.closed) { connection.close(); return }
       this.options.assertRunAuthority()
       this.options.assertMicrophone()
@@ -129,6 +131,22 @@ export class TrackWorker {
       this.rotationTimer = setTimeout(() => this.rotateIfIdle(), SOCKET_MAX_AGE_MS)
     }
     for (const frame of frames) this.append(frame)
+  }
+
+  private async connectProvider(): Promise<SpeechConnection> {
+    const connect = this.options.connect ?? ProviderConnection.connect
+    const options: ProviderOptions = {
+      model: this.options.model, apiKey: this.options.apiKey,
+      assertAuthority: () => this.assertFinalAuthority(),
+      onFinal: (turn) => this.receiveFinal(turn),
+      onFailure: (error) => this.fail(error),
+    }
+    try { return await connect(options) } catch (error) {
+      if (!(error instanceof TranscriptionError) || error.code !== "provider" || !this.accepting) throw error
+      await new Promise((resolve) => setTimeout(resolve, CONNECT_RETRY_MS))
+      if (!this.accepting || this.closed) throw new TranscriptionError("stopped")
+      return connect(options)
+    }
   }
 
   private append(frame: Int16Array): void {
@@ -206,13 +224,26 @@ export class TrackWorker {
     this.rotateIfIdle()
     if (!this.accepting && !this.current && this.pending.size === 0 && this.posting.size === 0) this.drainResolve?.()
   }
+  private connectionIdle(): boolean {
+    return this.accepting && !!this.connection && !this.current && !this.pending.size && !this.posting.size
+  }
   private rotateIfIdle(): void {
-    if (!this.accepting || !this.connection || this.current || this.pending.size || this.posting.size
-      || (this.now() - this.connectionStartedAt < SOCKET_MAX_AGE_MS && this.socketTurns < SOCKET_MAX_TURNS)) return
-    this.connection.close()
+    if (!this.connectionIdle()) return
+    if (this.now() - this.connectionStartedAt >= SOCKET_MAX_AGE_MS || this.socketTurns >= SOCKET_MAX_TURNS) {
+      this.closeConnection()
+      return
+    }
+    clearTimeout(this.idleTimer)
+    this.idleTimer = setTimeout(() => { if (this.connectionIdle()) this.closeConnection() },
+      this.options.idleCloseMs ?? SOCKET_IDLE_MS)
+  }
+  private closeConnection(): void {
+    this.connection?.close()
     this.connection = undefined
     clearTimeout(this.rotationTimer)
     this.rotationTimer = undefined
+    clearTimeout(this.idleTimer)
+    this.idleTimer = undefined
   }
   private safe(error: unknown): TranscriptionError {
     return error instanceof TranscriptionError ? error : new TranscriptionError("provider")
@@ -265,6 +296,7 @@ export class TrackWorker {
     clearTimeout(this.drainTimer)
     clearTimeout(this.processingTimer)
     clearTimeout(this.rotationTimer)
+    clearTimeout(this.idleTimer)
     this.options.detector.close()
     this.drainResolve?.()
   }
