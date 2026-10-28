@@ -8,4 +8,6 @@ export type FunctionContext = {
    * and the Bot API do). Undefined means unknown: look the user up rather than assume a person.
    */
   isBot?: boolean
+  /** V3 application deadline. Read-only work checks it between database stages. */
+  signal?: AbortSignal
 }

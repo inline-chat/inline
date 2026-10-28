@@ -12,6 +12,7 @@ export const getUpdatesState = async (
   const { date, updatesFound, seq } = await Functions.updates.getUpdatesState(input, {
     currentSessionId: handlerContext.sessionId,
     currentUserId: handlerContext.userId,
+    signal: handlerContext.signal,
   })
 
   return {
