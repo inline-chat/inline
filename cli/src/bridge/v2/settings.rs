@@ -1,7 +1,7 @@
 //! Bot chat settings for v2 works: Agent Settings and the composer chain
 //! (spec §6, decided Oct 26). Model, reasoning and permission mode come from
 //! the harness's own catalog and apply to this thread's work from the next
-//! message on. The folder is a choice among the bridge's projects until a
+//! message on. The folder is a choice among the agent's folders until a
 //! session works there. Item IDs match what the apps already read
 //! (`ComposeAgentSettingsItem`).
 
@@ -23,7 +23,8 @@ pub(crate) const ITEM_REASONING: &str = "agent.reasoning";
 pub(crate) const ITEM_PERMISSIONS: &str = "agent.permissions";
 pub(crate) const ITEM_COMPACT: &str = "session.compact";
 const ITEM_FOLDER: &str = "workspace.folder";
-pub(crate) const ITEM_PROJECT: &str = "workspace.project";
+/// The thread's folder as a choice; the apps read this id's select.
+pub(crate) const ITEM_FOLDER_CHOICE: &str = "workspace.project";
 /// Account limits. Each window item's ID carries its numbers for Compose's
 /// usage popover: `account.usage.window:<minutes>:<used %>:<resets at>`.
 const SECTION_USAGE: &str = "account.usage";
@@ -39,15 +40,15 @@ const CURRENT_FOLDER_VALUE: &str = "__inline_current_folder__";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Invocation {
     Change(SettingsChange),
-    /// A project for the thread's folder, by its choice id.
-    Project(String),
+    /// The thread's folder, by its choice id.
+    Folder(String),
     Compact,
 }
 
 /// The capabilities that make the apps offer settings and the chain.
 pub(crate) fn capabilities(
     catalog: &Catalog,
-    projects: Option<AgentProjectCatalog>,
+    folders: Option<AgentProjectCatalog>,
 ) -> Vec<BotCapability> {
     vec![
         BotCapability {
@@ -58,15 +59,16 @@ pub(crate) fn capabilities(
         BotCapability {
             kind: BotCapabilityKind::AgentConfiguration,
             version: AGENT_CONFIGURATION_VERSION,
-            agent_configuration: Some(configuration_catalog(catalog, projects)),
+            agent_configuration: Some(configuration_catalog(catalog, folders)),
         },
     ]
 }
 
-/// Projects, models and efforts as the apps' Agent configuration catalog.
+/// Folders, models and efforts as the apps' Agent configuration catalog
+/// (folders are its `projects`).
 pub(crate) fn configuration_catalog(
     catalog: &Catalog,
-    projects: Option<AgentProjectCatalog>,
+    folders: Option<AgentProjectCatalog>,
 ) -> AgentConfigurationCatalog {
     let mut efforts: Vec<AgentReasoningEffortOption> = Vec::new();
     for model in &catalog.models {
@@ -81,7 +83,7 @@ pub(crate) fn configuration_catalog(
         }
     }
     AgentConfigurationCatalog {
-        projects,
+        projects: folders,
         models: (!catalog.models.is_empty()).then(|| AgentModelCatalog {
             options: catalog
                 .models
@@ -108,9 +110,9 @@ pub(crate) fn configuration_catalog(
     }
 }
 
-/// A folder a thread can pick, from the bridge's project listing.
+/// A folder a thread can pick.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Project {
+pub(crate) struct Folder {
     pub id: String,
     pub label: String,
     pub description: Option<String>,
@@ -124,9 +126,9 @@ pub(crate) struct DocumentFacts<'a> {
     pub folder_label: &'a str,
     pub machine_label: &'a str,
     /// The folders this thread can pick here; empty shows its folder only.
-    pub projects: &'a [Project],
-    /// The thread's folder among `projects`.
-    pub project: Option<&'a str>,
+    pub folders: &'a [Folder],
+    /// The thread's folder among `folders`.
+    pub folder_id: Option<&'a str>,
     /// A session works in the folder, so it stays.
     pub folder_fixed: bool,
     /// A session is open, so it can be compacted now.
@@ -210,7 +212,7 @@ pub(crate) fn document(facts: &DocumentFacts<'_>) -> BotChatSettingsDocument {
             .then(|| "Nothing is open in this thread yet.".to_owned()),
         control: BotChatSettingsControl::Button,
     });
-    let workspace = if facts.projects.is_empty() {
+    let workspace = if facts.folders.is_empty() {
         vec![BotChatSettingsItem {
             id: ITEM_FOLDER.to_owned(),
             label: Some("Folder".to_owned()),
@@ -223,7 +225,7 @@ pub(crate) fn document(facts: &DocumentFacts<'_>) -> BotChatSettingsDocument {
             },
         }]
     } else {
-        vec![project(facts)]
+        vec![folder_choice(facts)]
     };
     let usage = usage_items(facts.usage);
     let sections = [
@@ -357,21 +359,21 @@ fn token_count(tokens: u64) -> String {
     }
 }
 
-/// The thread's folder as a choice among projects. Once a session works in
-/// it, it stays: the choice is shown, disabled, with how to work elsewhere.
-fn project(facts: &DocumentFacts<'_>) -> BotChatSettingsItem {
+/// The thread's folder as a choice. Once a session works in it, it stays:
+/// the choice is shown, disabled, with how to work elsewhere.
+fn folder_choice(facts: &DocumentFacts<'_>) -> BotChatSettingsItem {
     let fixed = facts.folder_fixed;
     let mut options: Vec<BotChatSettingsSelectOption> = facts
-        .projects
+        .folders
         .iter()
-        .map(|project| BotChatSettingsSelectOption {
-            value: project.id.clone(),
-            label: project.label.clone(),
-            description: project.description.clone(),
+        .map(|folder| BotChatSettingsSelectOption {
+            value: folder.id.clone(),
+            label: folder.label.clone(),
+            description: folder.description.clone(),
             disabled: fixed,
         })
         .collect();
-    let value = match facts.project {
+    let value = match facts.folder_id {
         Some(id) if options.iter().any(|option| option.value == id) => id.to_owned(),
         _ => {
             options.insert(
@@ -379,7 +381,7 @@ fn project(facts: &DocumentFacts<'_>) -> BotChatSettingsItem {
                 BotChatSettingsSelectOption {
                     value: CURRENT_FOLDER_VALUE.to_owned(),
                     label: facts.folder_label.to_owned(),
-                    description: Some("Not in this machine's projects.".to_owned()),
+                    description: Some("Not among this agent's folders.".to_owned()),
                     disabled: true,
                 },
             );
@@ -387,8 +389,8 @@ fn project(facts: &DocumentFacts<'_>) -> BotChatSettingsItem {
         }
     };
     BotChatSettingsItem {
-        id: ITEM_PROJECT.to_owned(),
-        label: Some("Project".to_owned()),
+        id: ITEM_FOLDER_CHOICE.to_owned(),
+        label: Some("Folder".to_owned()),
         description: Some(format!("On {}", facts.machine_label)),
         disabled: fixed,
         disabled_reason: fixed.then(|| folder_fixed(facts.folder_label)),
@@ -421,7 +423,7 @@ fn revision(facts: &DocumentFacts<'_>) -> String {
         models.join(","),
         facts.can_compact,
         facts.folder_label,
-        facts.project.unwrap_or(""),
+        facts.folder_id.unwrap_or(""),
         facts.folder_fixed,
     );
     let digest = <sha2::Sha256 as sha2::Digest>::digest(key.as_bytes());
@@ -478,11 +480,11 @@ pub(crate) fn invocation(
         Some(BotSettingsValue::String(value)) => value.as_str(),
         _ => return Err("Choose a value."),
     };
-    if item_id == ITEM_PROJECT {
+    if item_id == ITEM_FOLDER_CHOICE {
         if value == CURRENT_FOLDER_VALUE {
-            return Err("Choose one of this machine's projects.");
+            return Err("Choose one of the agent's folders.");
         }
-        return Ok(Invocation::Project(value.to_owned()));
+        return Ok(Invocation::Folder(value.to_owned()));
     }
     let chosen = (value != DEFAULT_VALUE).then(|| value.to_owned());
     let mut change = SettingsChange::default();
@@ -696,8 +698,8 @@ mod tests {
             settings,
             folder_label: "project",
             machine_label: "MacBook",
-            projects: &[],
-            project: None,
+            folders: &[],
+            folder_id: None,
             folder_fixed: false,
             can_compact: true,
             usage: &[],
@@ -705,10 +707,10 @@ mod tests {
         }
     }
 
-    fn projects() -> Vec<Project> {
+    fn folders() -> Vec<Folder> {
         ["inline", "secret-sauce"]
             .into_iter()
-            .map(|name| Project {
+            .map(|name| Folder {
                 id: format!("workspace-{name}"),
                 label: name.to_owned(),
                 description: None,
@@ -811,14 +813,14 @@ mod tests {
     }
 
     #[test]
-    fn projects_make_the_folder_a_choice_until_a_session_works_there() {
+    fn the_folder_is_a_choice_until_a_session_works_there() {
         let catalog = catalog();
         let settings = SettingsChange::default();
-        let projects = projects();
+        let folders = folders();
         let open = DocumentFacts {
             folder_label: "inline",
-            projects: &projects,
-            project: Some("workspace-inline"),
+            folders: &folders,
+            folder_id: Some("workspace-inline"),
             ..facts(&catalog, &settings)
         };
         let offered = document(&open);
@@ -828,12 +830,13 @@ mod tests {
                 .iter()
                 .flat_map(|section| &section.items)
                 .all(|item| item.id != ITEM_FOLDER),
-            "the project choice replaces the read-only folder"
+            "the choice replaces the read-only folder"
         );
-        let project = item(&offered, ITEM_PROJECT);
-        assert!(!project.disabled);
-        let BotChatSettingsControl::Select { value, options } = &project.control else {
-            panic!("project select");
+        let choice = item(&offered, ITEM_FOLDER_CHOICE);
+        assert_eq!(choice.label.as_deref(), Some("Folder"));
+        assert!(!choice.disabled);
+        let BotChatSettingsControl::Select { value, options } = &choice.control else {
+            panic!("folder select");
         };
         assert_eq!(value, "workspace-inline");
         let values: Vec<&str> = options.iter().map(|option| option.value.as_str()).collect();
@@ -844,16 +847,16 @@ mod tests {
             folder_fixed: true,
             ..open
         });
-        let project = item(&fixed, ITEM_PROJECT);
-        assert!(project.disabled);
+        let choice = item(&fixed, ITEM_FOLDER_CHOICE);
+        assert!(choice.disabled);
         assert_eq!(
-            project.disabled_reason.as_deref(),
+            choice.disabled_reason.as_deref(),
             Some(
                 "This thread's session works in inline. Start a new thread to work in another folder."
             )
         );
-        let BotChatSettingsControl::Select { value, options } = &project.control else {
-            panic!("project select");
+        let BotChatSettingsControl::Select { value, options } = &choice.control else {
+            panic!("folder select");
         };
         assert_eq!(value, "workspace-inline", "the folder still shows");
         assert!(options.iter().all(|option| option.disabled));
@@ -861,19 +864,19 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_outside_the_projects_shows_as_itself() {
+    fn a_folder_outside_the_list_shows_as_itself() {
         let catalog = catalog();
         let settings = SettingsChange::default();
-        let projects = projects();
+        let folders = folders();
         let document = document(&DocumentFacts {
             folder_label: "scratch",
-            projects: &projects,
+            folders: &folders,
             ..facts(&catalog, &settings)
         });
         let BotChatSettingsControl::Select { value, options } =
-            &item(&document, ITEM_PROJECT).control
+            &item(&document, ITEM_FOLDER_CHOICE).control
         else {
-            panic!("project select");
+            panic!("folder select");
         };
         assert_eq!(value, CURRENT_FOLDER_VALUE);
         assert_eq!(options[0].label, "scratch");
@@ -882,15 +885,26 @@ mod tests {
     }
 
     #[test]
-    fn a_project_invocation_names_its_choice() {
+    fn a_folder_invocation_names_its_choice() {
         let catalog = catalog();
         let value = |text: &str| BotSettingsValue::String(text.to_owned());
         assert_eq!(
-            invocation(ITEM_PROJECT, Some(&value("workspace-inline")), &catalog),
-            Ok(Invocation::Project("workspace-inline".to_owned()))
+            invocation(
+                ITEM_FOLDER_CHOICE,
+                Some(&value("workspace-inline")),
+                &catalog
+            ),
+            Ok(Invocation::Folder("workspace-inline".to_owned()))
         );
-        assert!(invocation(ITEM_PROJECT, Some(&value(CURRENT_FOLDER_VALUE)), &catalog).is_err());
-        assert!(invocation(ITEM_PROJECT, None, &catalog).is_err());
+        assert!(
+            invocation(
+                ITEM_FOLDER_CHOICE,
+                Some(&value(CURRENT_FOLDER_VALUE)),
+                &catalog
+            )
+            .is_err()
+        );
+        assert!(invocation(ITEM_FOLDER_CHOICE, None, &catalog).is_err());
     }
 
     #[test]
@@ -960,18 +974,18 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_capability_lists_projects_models_and_their_efforts() {
-        let projects = AgentProjectCatalog {
+    fn the_catalog_capability_lists_folders_models_and_their_efforts() {
+        let folders = AgentProjectCatalog {
             options: Vec::new(),
             can_select_folder: None,
             default_project_id: Some("workspace-inline".to_owned()),
         };
-        let capabilities = capabilities(&catalog(), Some(projects.clone()));
+        let capabilities = capabilities(&catalog(), Some(folders.clone()));
         let configuration = capabilities
             .iter()
             .find_map(|capability| capability.agent_configuration.clone())
             .unwrap();
-        assert_eq!(configuration.projects, Some(projects));
+        assert_eq!(configuration.projects, Some(folders));
         let models = configuration.models.unwrap();
         assert_eq!(models.default_model_id.as_deref(), Some("sol"));
         assert_eq!(models.options[0].reasoning_effort_ids, ["low", "high"]);

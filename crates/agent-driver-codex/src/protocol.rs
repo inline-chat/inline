@@ -253,6 +253,29 @@ pub struct CodexPermissionOption {
     pub allowed: Option<bool>,
 }
 
+/// `project/list` (experimental API): Codex's saved projects.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectListResponse {
+    pub data: Vec<CodexProject>,
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexProject {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub roots: Vec<CodexProjectRoot>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodexProjectRoot {
+    pub path: std::path::PathBuf,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct CodexNotification {
     pub method: String,

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::Duration;
 
 use inline_agent_bridge::harness::{
-    AvailabilityMatrix, Catalog, CatalogMode, CatalogScope, ChildRef, CompatTier,
+    AvailabilityMatrix, Catalog, CatalogFolder, CatalogMode, CatalogScope, ChildRef, CompatTier,
     DEFAULT_HUB_CAPACITY, Delivery, EffectiveSettings, Event, EventHub, EventStream,
     ExecutableInfo, ExecutableSource, HarnessDriver, HarnessFuture, Input, InputDisposition,
     InputReceipt, LiveWork, ModeId, Op, OpError, OpOutcome, OpenError, OpenMode, OpenSpec,
@@ -37,6 +37,8 @@ const QUEUE_PREVIEW_CHARS: usize = 160;
 const QUEUE_PAGE_SIZE: u32 = 100;
 /// Bound on queue pages read in one listing (10,000 entries).
 const QUEUE_MAX_PAGES: usize = 100;
+/// Bound on project pages read for the catalog (1,000 projects).
+const PROJECT_MAX_PAGES: usize = 10;
 
 /// How to run Codex for one bot on this machine.
 #[derive(Clone, Debug)]
@@ -277,6 +279,60 @@ impl CodexHarness {
     }
 }
 
+/// Codex's projects as folders, each root under its project's name. An
+/// app-server without `project/list` has none.
+async fn project_folders(connection: &Connection) -> Vec<CatalogFolder> {
+    let mut folders = Vec::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..PROJECT_MAX_PAGES {
+        let Ok(page) = connection
+            .request(Request {
+                method: "project/list",
+                params: json!({"cursor": cursor, "limit": 100}),
+            })
+            .await
+        else {
+            break;
+        };
+        let Ok(page) = serde_json::from_value::<crate::protocol::ProjectListResponse>(page) else {
+            break;
+        };
+        folders.extend(page.data.into_iter().flat_map(project_roots));
+        match page.next_cursor {
+            Some(next) if !next.is_empty() && cursor.as_deref() != Some(next.as_str()) => {
+                cursor = Some(next);
+            }
+            _ => break,
+        }
+    }
+    folders
+}
+
+fn project_roots(project: crate::protocol::CodexProject) -> Vec<CatalogFolder> {
+    let several = project.roots.len() > 1;
+    project
+        .roots
+        .into_iter()
+        .filter(|root| root.path.is_absolute())
+        .map(|root| {
+            let folder = root
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned());
+            let label = match (project.name.trim(), folder) {
+                ("", Some(folder)) => folder,
+                (name, Some(folder)) if several => format!("{name} · {folder}"),
+                ("", None) => root.path.display().to_string(),
+                (name, _) => name.to_owned(),
+            };
+            CatalogFolder {
+                path: root.path,
+                label,
+            }
+        })
+        .collect()
+}
+
 impl HarnessDriver for CodexHarness {
     fn describe(&self) -> RuntimeInfo {
         self.info.lock().expect("runtime info poisoned").clone()
@@ -376,6 +432,7 @@ impl HarnessDriver for CodexHarness {
                     })
                     .unwrap_or_default();
             }
+            catalog.folders = project_folders(&connection).await;
             Ok(catalog)
         })
     }
@@ -1288,5 +1345,49 @@ fn op_error(error: PeerError) -> OpError {
             OpError::Unknown(error.to_string())
         }
         other => OpError::Driver(peer_to_driver(other)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_project_lists_each_root_under_its_name() {
+        let project = |name: &str, roots: &[&str]| crate::protocol::CodexProject {
+            name: name.to_owned(),
+            roots: roots
+                .iter()
+                .map(|path| crate::protocol::CodexProjectRoot { path: path.into() })
+                .collect(),
+        };
+        let labels = |project| {
+            project_roots(project)
+                .into_iter()
+                .map(|folder| (folder.path.display().to_string(), folder.label))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            labels(project("Inline", &["/work/inline"])),
+            [("/work/inline".to_owned(), "Inline".to_owned())]
+        );
+        assert_eq!(
+            labels(project("Site", &["/work/web", "/work/api", "relative"])),
+            [
+                ("/work/web".to_owned(), "Site · web".to_owned()),
+                ("/work/api".to_owned(), "Site · api".to_owned()),
+            ]
+        );
+        assert_eq!(
+            labels(project(" ", &["/work/scratch"])),
+            [("/work/scratch".to_owned(), "scratch".to_owned())]
+        );
+        let page: crate::protocol::ProjectListResponse = serde_json::from_value(json!({
+            "data": [{"id": "p1", "name": "Inline", "createdAt": 1, "updatedAt": 1,
+                "position": 0, "metadata": {}, "roots": [{"path": "/work/inline"}]}],
+            "nextCursor": null
+        }))
+        .unwrap();
+        assert_eq!(page.data[0].name, "Inline");
     }
 }

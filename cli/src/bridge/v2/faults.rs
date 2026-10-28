@@ -6,10 +6,10 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use inline_agent_bridge::harness::{
-    Availability, AvailabilityMatrix, Catalog, CatalogScope, DeliveryKind, Event, EventHub,
-    EventStream, ExecutableInfo, ExecutableSource, HarnessFuture, InputDisposition, InputFact,
-    InputReceipt, LiveWork, Op, OpError, OpOutcome, OpenError, OpenMode, OpenSpec, Origin,
-    Released, RuntimeInfo, SendError, Session, SessionKey, SessionPage, SessionQuery,
+    Availability, AvailabilityMatrix, Catalog, CatalogFolder, CatalogScope, DeliveryKind, Event,
+    EventHub, EventStream, ExecutableInfo, ExecutableSource, HarnessFuture, InputDisposition,
+    InputFact, InputReceipt, LiveWork, Op, OpError, OpOutcome, OpenError, OpenMode, OpenSpec,
+    Origin, Released, RuntimeInfo, SendError, Session, SessionKey, SessionPage, SessionQuery,
 };
 use inline_agent_bridge::{DriverFuture, DriverSettingOption, ProviderId, TurnId};
 
@@ -124,6 +124,8 @@ impl Session for FakeSession {
 struct FakeHarness {
     session: Arc<FakeSession>,
     opened: Mutex<Vec<OpenSpec>>,
+    /// Folders the harness knows, as Codex lists its projects.
+    folders: Mutex<Vec<CatalogFolder>>,
 }
 
 impl HarnessDriver for FakeHarness {
@@ -152,6 +154,7 @@ impl HarnessDriver for FakeHarness {
                     description: None,
                     disabled: false,
                 }],
+                folders: self.folders.lock().unwrap().clone(),
                 ..Default::default()
             })
         })
@@ -212,6 +215,7 @@ fn fixture(unknown_first: bool) -> (Runtime, Arc<FakeHarness>, Cleanup) {
     let harness = Arc::new(FakeHarness {
         session,
         opened: Mutex::new(vec![]),
+        folders: Mutex::new(vec![]),
     });
     (runtime(&mut cleanup, harness.clone()), harness, cleanup)
 }
@@ -541,9 +545,9 @@ impl OwnerCalls for NoSessionYet {
     }
 }
 
-/// A runtime whose agent works in its own folder, with another project in
-/// the bridge store: (runtime, harness, cleanup, own folder, other folder).
-fn project_fixture(
+/// A runtime whose agent works in its own folder, and whose harness knows
+/// another: (runtime, harness, cleanup, own folder, other folder).
+fn folder_fixture(
     owner: Arc<dyn OwnerCalls>,
 ) -> (Runtime, Arc<FakeHarness>, Cleanup, PathBuf, PathBuf) {
     let (mut runtime, harness, cleanup) = fixture(false);
@@ -551,19 +555,23 @@ fn project_fixture(
     let own = std::fs::canonicalize(&cleanup.dir).unwrap();
     let other = own.join("other");
     std::fs::create_dir(&other).unwrap();
+    *harness.folders.lock().unwrap() = vec![CatalogFolder {
+        path: other.clone(),
+        label: "Other project".into(),
+    }];
     runtime.config.folder = own.clone();
     let agent = Arc::get_mut(&mut runtime.agent).unwrap();
     agent.folder = own.clone();
     agent.owner = owner;
-    let runtime = runtime.with_projects(super::super::projects::ProjectSource::listing(
+    let runtime = runtime.with_folders(super::super::folders::FolderSource::listing(
         &own.join("bridge.sqlite"),
         "faults",
-        &[&own, &other],
+        &[],
     ));
     (runtime, harness, cleanup, own, other)
 }
 
-fn project_item(response: &BotChatSettingsResponse) -> inline_client::BotChatSettingsItem {
+fn folder_item(response: &BotChatSettingsResponse) -> inline_client::BotChatSettingsItem {
     let document = match response {
         BotChatSettingsResponse::Document(document) => document,
         BotChatSettingsResponse::Problem(problem) => {
@@ -575,9 +583,9 @@ fn project_item(response: &BotChatSettingsResponse) -> inline_client::BotChatSet
         .sections
         .iter()
         .flat_map(|section| &section.items)
-        .find(|item| item.id == settings::ITEM_PROJECT)
+        .find(|item| item.id == settings::ITEM_FOLDER_CHOICE)
         .cloned()
-        .expect("the project choice")
+        .expect("the folder choice")
 }
 
 fn revision(response: &BotChatSettingsResponse) -> String {
@@ -595,39 +603,45 @@ fn selected(item: &inline_client::BotChatSettingsItem) -> &str {
 }
 
 #[tokio::test]
-async fn a_project_picked_in_settings_is_where_the_session_opens_and_stays() {
-    let (mut runtime, harness, mut cleanup, own, other) = project_fixture(Arc::new(NoSessionYet));
+async fn a_folder_picked_in_settings_is_where_the_session_opens_and_stays() {
+    let (mut runtime, harness, mut cleanup, own, other) = folder_fixture(Arc::new(NoSessionYet));
     let own_id = crate::bridge::workspace_id(&own).unwrap();
     let other_id = crate::bridge::workspace_id(&other).unwrap();
-    // The agent publishes its projects, its own folder the default.
+    // The agent publishes its folders, its own the default, the harness's
+    // under the harness's name.
+    let catalog = runtime.catalog().await;
     let catalog = runtime
-        .projects()
+        .folders(&catalog)
         .unwrap()
         .catalog("faults")
-        .expect("project catalog");
+        .expect("folder catalog");
     assert_eq!(catalog.default_project_id.as_deref(), Some(own_id.as_str()));
     assert!(
         catalog
             .options
             .iter()
-            .any(|option| option.id == other_id.as_str() && option.label == "other")
+            .any(|option| option.id == other_id.as_str() && option.label == "Other project")
     );
 
     // Before any work, the thread's folder is a choice.
     let shown = runtime.chat_settings(9, 1, 1, None).await;
-    let project = project_item(&shown);
-    assert!(!project.disabled);
-    assert_eq!(selected(&project), own_id.as_str());
+    let choice = folder_item(&shown);
+    assert!(!choice.disabled);
+    assert_eq!(selected(&choice), own_id.as_str());
     let value = BotSettingsValue::String(other_id.as_str().to_owned());
     let chosen = runtime
         .chat_settings(
             9,
             1,
             1,
-            Some((settings::ITEM_PROJECT, Some(&value), &revision(&shown))),
+            Some((
+                settings::ITEM_FOLDER_CHOICE,
+                Some(&value),
+                &revision(&shown),
+            )),
         )
         .await;
-    assert_eq!(selected(&project_item(&chosen)), other_id.as_str());
+    assert_eq!(selected(&folder_item(&chosen)), other_id.as_str());
 
     // The work opens its session there.
     runtime.ensure_work(9, None).await.unwrap();
@@ -639,11 +653,11 @@ async fn a_project_picked_in_settings_is_where_the_session_opens_and_stays() {
 
     // Now the session keeps its folder: shown, disabled, and refused.
     let shown = runtime.chat_settings(9, 1, 1, None).await;
-    let project = project_item(&shown);
-    assert!(project.disabled);
-    assert_eq!(selected(&project), other_id.as_str());
+    let choice = folder_item(&shown);
+    assert!(choice.disabled);
+    assert_eq!(selected(&choice), other_id.as_str());
     assert!(
-        project
+        choice
             .disabled_reason
             .as_deref()
             .is_some_and(|reason| reason.contains("Start a new thread"))
@@ -654,7 +668,7 @@ async fn a_project_picked_in_settings_is_where_the_session_opens_and_stays() {
             9,
             1,
             1,
-            Some((settings::ITEM_PROJECT, Some(&back), &revision(&shown))),
+            Some((settings::ITEM_FOLDER_CHOICE, Some(&back), &revision(&shown))),
         )
         .await;
     let BotChatSettingsResponse::Problem(problem) = &refused else {
@@ -672,7 +686,7 @@ async fn a_project_picked_in_settings_is_where_the_session_opens_and_stays() {
 
 #[tokio::test]
 async fn a_bound_thread_runs_in_its_project_and_a_restart_keeps_it() {
-    let (mut runtime, harness, mut cleanup, _own, other) = project_fixture(Arc::new(NoSessionYet));
+    let (mut runtime, harness, mut cleanup, _own, other) = folder_fixture(Arc::new(NoSessionYet));
     let other_id = crate::bridge::workspace_id(&other).unwrap();
     runtime
         .bound_project(9, Some(other_id.as_str().to_owned()))
@@ -699,10 +713,10 @@ async fn a_bound_thread_runs_in_its_project_and_a_restart_keeps_it() {
 #[tokio::test]
 async fn a_session_inline_knows_keeps_its_folder_with_no_work_here() {
     // The default owner knows a session for every thread.
-    let (mut runtime, harness, _cleanup, _own, other) = project_fixture(Arc::new(Owner));
+    let (mut runtime, harness, _cleanup, _own, other) = folder_fixture(Arc::new(Owner));
     let other_id = crate::bridge::workspace_id(&other).unwrap();
     let shown = runtime.chat_settings(9, 1, 1, None).await;
-    assert!(project_item(&shown).disabled);
+    assert!(folder_item(&shown).disabled);
     runtime
         .bound_project(9, Some(other_id.as_str().to_owned()))
         .await;

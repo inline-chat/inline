@@ -781,6 +781,9 @@ fn catalog_from(init: &InitializeResponse, permission_modes: &[String]) -> Catal
             .map(|agent| option(&agent.name, None, agent.description.as_deref()))
             .collect(),
         skills: Vec::new(),
+        // Claude keeps sessions per folder but no list of folders; reading
+        // them back means reading every session file.
+        folders: Vec::new(),
     }
 }
 
