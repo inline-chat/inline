@@ -37,6 +37,10 @@ class ComposeMenuButton: NSView {
   var isCommandsEnabledProvider: (() -> Bool)?
   var isSendSilentlyEnabledProvider: (() -> Bool)?
   var onToggleSendSilently: (() -> Void)?
+  /// The draft would reach an Agent, so its controls can be shown or hidden.
+  var isAgentControlsToggleAvailableProvider: (() -> Bool)?
+  var isAgentControlsShownProvider: (() -> Bool)?
+  var onToggleAgentControls: (() -> Void)?
   private var cameraWindow: NSWindow?
   private var cameraViewController: CameraViewController?
 
@@ -198,7 +202,8 @@ class ComposeMenuButton: NSView {
       menu.addItem(commandsItem)
     }
 
-    if capabilities.contains(.sendSilently) {
+    let showsAgentControlsItem = isAgentControlsToggleAvailableProvider?() == true
+    if capabilities.contains(.sendSilently) || showsAgentControlsItem {
       if !menu.items.isEmpty {
         menu.addItem(.separator())
       }
@@ -214,16 +219,30 @@ class ComposeMenuButton: NSView {
       )
       menu.addItem(sectionTitle)
 
-      let sendSilentlyEnabled = isSendSilentlyEnabledProvider?() ?? false
-      let silentItem = NSMenuItem(
-        title: "Send as Silent",
-        action: #selector(toggleSendSilently),
-        keyEquivalent: ""
-      )
-      silentItem.target = self
-      silentItem.image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: nil)
-      silentItem.state = sendSilentlyEnabled ? .on : .off
-      menu.addItem(silentItem)
+      if capabilities.contains(.sendSilently) {
+        let sendSilentlyEnabled = isSendSilentlyEnabledProvider?() ?? false
+        let silentItem = NSMenuItem(
+          title: "Send as Silent",
+          action: #selector(toggleSendSilently),
+          keyEquivalent: ""
+        )
+        silentItem.target = self
+        silentItem.image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: nil)
+        silentItem.state = sendSilentlyEnabled ? .on : .off
+        menu.addItem(silentItem)
+      }
+
+      if showsAgentControlsItem {
+        let agentItem = NSMenuItem(
+          title: "Show Agent Controls",
+          action: #selector(toggleAgentControls),
+          keyEquivalent: ""
+        )
+        agentItem.target = self
+        agentItem.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: nil)
+        agentItem.state = isAgentControlsShownProvider?() == true ? .on : .off
+        menu.addItem(agentItem)
+      }
     }
 
     return menu
@@ -240,6 +259,10 @@ class ComposeMenuButton: NSView {
 
   @objc private func toggleSendSilently() {
     onToggleSendSilently?()
+  }
+
+  @objc private func toggleAgentControls() {
+    onToggleAgentControls?()
   }
 
   @objc private func createThread() {

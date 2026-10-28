@@ -7,16 +7,17 @@ import InlineUI
 import Observation
 import SwiftUI
 
-/// Agent controls for the thread Compose (spec §6, decided Oct 26).
+/// Agent controls for the thread Compose.
 ///
-/// A compact pill appears when the draft would reach an Agent in Detailed
-/// mode. Clicking it opens or closes the chain (folder or project, model,
-/// reasoning, usage) in Compose's accessory row. Friendly mode shows nothing.
-/// The output mode itself is never set here; it lives in the toolbar's
-/// Agent Settings.
+/// While the draft would reach an Agent in Detailed mode, a quiet row under
+/// the editor shows the Agent, its folder, context, model and reasoning, like
+/// the empty-page Compose. Friendly mode shows nothing, and the plus menu can
+/// hide the row. A stop or resume circle sits beside the send button while an
+/// Agent's turn runs in this chat. The output mode itself is never set here;
+/// it lives in the toolbar's Agent Settings.
 @MainActor
 final class ComposeAgentChainModel: ObservableObject {
-  private static let chainOpenDefaultsKey = "compose.agentChain.open"
+  private static let hiddenDefaultsKey = "compose.agentControls.hidden"
 
   /// Where the chain reads and writes this thread's Agent configuration.
   enum Source: Equatable {
@@ -28,15 +29,16 @@ final class ComposeAgentChainModel: ObservableObject {
 
   @Published private(set) var target: AgentComposeTarget?
   @Published private(set) var source: Source?
+  /// The draft would reach an Agent in Detailed mode.
+  @Published private(set) var isEligible = false
+  /// Eligible and not hidden from the plus menu: the row shows.
   @Published private(set) var isAvailable = false
+  @Published private(set) var isHidden: Bool
+  /// The Agent work the stop or resume circle controls: the target's when it
+  /// runs or is paused, else any running in this chat.
+  @Published private(set) var runWork: AgentWorkState?
   @Published private(set) var botUserInfo: UserInfo?
   @Published private(set) var catalog: AgentConfigurationCatalogSnapshot?
-  @Published var isChainOpen: Bool {
-    didSet {
-      guard oldValue != isChainOpen else { return }
-      UserDefaults.standard.set(isChainOpen, forKey: Self.chainOpenDefaultsKey)
-    }
-  }
 
   let peer: InlineKit.Peer
   let chatID: Int64?
@@ -66,7 +68,7 @@ final class ComposeAgentChainModel: ObservableObject {
     self.updateAgentContext = updateAgentContext
     directMessageBotUserID = peerUser?.bot == true ? peerUser?.id : nil
     threadModel = AgentThreadToolbarModel(peer: peer)
-    isChainOpen = UserDefaults.standard.bool(forKey: Self.chainOpenDefaultsKey)
+    isHidden = UserDefaults.standard.bool(forKey: Self.hiddenDefaultsKey)
   }
 
   deinit {
@@ -86,7 +88,7 @@ final class ComposeAgentChainModel: ObservableObject {
         .store(in: &cancellables)
       threadModel.objectWillChange
         .sink { [weak self] in
-          // Thread preset and catalog changes re-render the pill and chain.
+          // Thread preset and catalog changes re-render the row.
           self?.objectWillChange.send()
           Task { @MainActor [weak self] in self?.refreshAvailability() }
         }
@@ -101,7 +103,14 @@ final class ComposeAgentChainModel: ObservableObject {
       Task { @MainActor [weak self] in self?.refreshAvailability() }
     }
     .store(in: &cancellables)
+    store.objectWillChange
+      .sink { [weak self] in
+        // objectWillChange fires before the store changes.
+        DispatchQueue.main.async { self?.refreshRunWork() }
+      }
+      .store(in: &cancellables)
     resolve()
+    refreshRunWork()
   }
 
   func stop() {
@@ -129,32 +138,34 @@ final class ComposeAgentChainModel: ObservableObject {
     resolve()
   }
 
-  func toggleChain() {
-    isChainOpen.toggle()
+  /// From the plus menu; remembered for every chat.
+  func toggleHidden() {
+    isHidden.toggle()
+    UserDefaults.standard.set(isHidden, forKey: Self.hiddenDefaultsKey)
+    refreshAvailability()
   }
 
-  /// Inserts text at the composer's cursor. Set by Compose.
-  var onInsertText: ((String) -> Void)?
+  // MARK: Run state
 
-  /// The work in this chat that file references resolve against.
-  var workSessionID: Int64? {
-    target.flatMap { AgentWorkStateStore.shared.state(peer: peer, botUserID: $0.botUserID)?.sessionID }
-  }
+  private var targetWasActive = false
 
-  /// The owner or an INVOKE grantee; unknown grants show the button and the
-  /// server decides.
-  var canReferenceFiles: Bool {
-    guard let target else { return false }
-    AgentGrantStore.shared.ensureLoaded(botUserID: target.botUserID)
-    return AgentGrantStore.shared.access(botUserID: target.botUserID)?.satisfies(.invoke) ?? true
-  }
-
-  func insertFileReference(_ entry: AgentWorkFileEntry) {
-    onInsertText?(AgentWorkFiles.referenceText(for: entry) + " ")
-  }
-
-  var showsChain: Bool {
-    isAvailable && isChainOpen
+  private func refreshRunWork() {
+    let states = AgentWorkStateStore.shared.states(peer: peer)
+    let targetState = target.flatMap { target in
+      states.first(where: { $0.key.botUserID == target.botUserID })
+    }
+    let next = targetState.flatMap { $0.runState.isActive || $0.runState == .paused ? $0 : nil }
+      ?? states.first(where: { $0.runState.isActive })
+    if next != runWork {
+      runWork = next
+      if let next { AgentGrantStore.shared.ensureLoaded(botUserID: next.key.botUserID) }
+    }
+    // A finished turn changes the context fill and usage: read them again.
+    let targetActive = targetState?.runState.isActive == true
+    if targetWasActive, !targetActive, settingsDocument != nil {
+      settings?.refreshSelected()
+    }
+    targetWasActive = targetActive
   }
 
   // MARK: Resolution
@@ -177,7 +188,10 @@ final class ComposeAgentChainModel: ObservableObject {
     let targetChanged = next?.botUserID != target?.botUserID
     if next != target { target = next }
     if nextSource != source { source = nextSource }
-    if targetChanged { loadTarget() }
+    if targetChanged {
+      loadTarget()
+      refreshRunWork()
+    }
     refreshAvailability()
   }
 
@@ -202,13 +216,13 @@ final class ComposeAgentChainModel: ObservableObject {
       if let refreshed { self.catalog = refreshed }
       self.refreshAvailability()
     }
-    if source == .agentSettings {
-      prepareSettings(for: botUserID)
-    }
+    // Both sources read the folder, context and usage from the settings.
+    prepareSettings(for: botUserID)
   }
 
-  /// The Agent's bridge publishes this chat's model, reasoning and folder in
-  /// its settings document. Agent threads keep them in the server preset.
+  /// The Agent's bridge publishes this chat's model, reasoning, folder,
+  /// context and usage in its settings document. Agent threads keep model
+  /// and reasoning in the server preset.
   private func prepareSettings(for botUserID: Int64) {
     let settings = ensureSettings()
     settingsTask?.cancel()
@@ -225,7 +239,7 @@ final class ComposeAgentChainModel: ObservableObject {
 
   func prepareUsage() {
     guard let target else { return }
-    if source == .agentThread {
+    if settingsDocument == nil {
       prepareSettings(for: target.botUserID)
     } else {
       settings?.refreshSelectedIfStale()
@@ -254,8 +268,10 @@ final class ComposeAgentChainModel: ObservableObject {
   }
 
   private func refreshAvailability() {
-    let next = computeAvailability()
-    if next != isAvailable { isAvailable = next }
+    let eligible = computeAvailability()
+    if eligible != isEligible { isEligible = eligible }
+    let available = eligible && !isHidden
+    if available != isAvailable { isAvailable = available }
   }
 
   private func computeAvailability() -> Bool {
@@ -294,16 +310,6 @@ final class ComposeAgentChainModel: ObservableObject {
     botUserInfo?.user.firstName ?? botUserInfo?.user.displayName ?? "Agent"
   }
 
-  var pillTitle: String {
-    let parts = [modelTitle, reasoningTitle].compactMap { $0 }
-    return parts.isEmpty ? agentName : parts.joined(separator: " · ")
-  }
-
-  var pillTooltip: String {
-    let name = botUserInfo?.user.displayName ?? agentName
-    return ([name] + [projectTitle, modelTitle, reasoningTitle].compactMap { $0 }).joined(separator: " · ")
-  }
-
   var canEdit: Bool {
     switch source {
     case .agentThread: threadModel.canEdit && !threadModel.isUpdating
@@ -320,13 +326,22 @@ final class ComposeAgentChainModel: ObservableObject {
       if let item = settingsDocument?.item(ComposeAgentSettingsItem.project), case let .select(value, options) = item.control {
         return options.first(where: { $0.value == value })?.label
       }
-      if let folder = settingsDocument?.item(ComposeAgentSettingsItem.folder)?.control.folderPresentation {
-        return folder.selectedFolder.label
+      let folder = settingsDocument?.item(ComposeAgentSettingsItem.folder)
+      if let presentation = folder?.control.folderPresentation {
+        return presentation.selectedFolder.label
       }
+      // Bridge v2 shows its working folder read-only.
+      if case let .info(text, _)? = folder?.control { return text }
       return nil
     case nil:
       return nil
     }
+  }
+
+  /// Where the folder lives, for the read-only folder's tooltip.
+  var projectDetail: String? {
+    guard source == .agentSettings else { return nil }
+    return settingsDocument?.item(ComposeAgentSettingsItem.folder)?.description
   }
 
   var projectOptions: [AgentConfigurationOption] {
@@ -369,11 +384,15 @@ final class ComposeAgentChainModel: ObservableObject {
     case .agentThread:
       return threadModel.modelTitle
     case .agentSettings:
-      if let title = selectedLabel(ComposeAgentSettingsItem.model) { return title }
-      return catalog?.modelTitle(forModelID: catalog?.defaultModelID)
+      return catalog?.modelTitle(forModelID: effectiveSettingsModelID) ?? selectedLabel(ComposeAgentSettingsItem.model)
     case nil:
       return nil
     }
+  }
+
+  /// The model this thread runs: its choice, else the harness's default.
+  private var effectiveSettingsModelID: String? {
+    selectedValue(ComposeAgentSettingsItem.model) ?? catalog?.defaultModelID
   }
 
   var modelOptions: [AgentModelConfigurationOption] {
@@ -398,7 +417,11 @@ final class ComposeAgentChainModel: ObservableObject {
   }
 
   var automaticModelTitle: String? {
-    source == .agentThread ? threadModel.automaticModelTitle : nil
+    switch source {
+    case .agentThread: threadModel.automaticModelTitle
+    case .agentSettings: settingsDocument == nil ? nil : catalog?.automaticModelTitle
+    case nil: nil
+    }
   }
 
   var reasoningTitle: String? {
@@ -407,7 +430,7 @@ final class ComposeAgentChainModel: ObservableObject {
       return threadModel.reasoningTitle
     case .agentSettings:
       if let title = selectedLabel(ComposeAgentSettingsItem.reasoning) { return title }
-      guard let catalog, let id = catalog.defaultReasoningEffortID(forModelID: catalog.defaultModelID) else { return nil }
+      guard let catalog, let id = catalog.defaultReasoningEffortID(forModelID: effectiveSettingsModelID) else { return nil }
       return catalog.reasoning?.first(where: { $0.id == id })?.label
     case nil:
       return nil
@@ -431,7 +454,12 @@ final class ComposeAgentChainModel: ObservableObject {
   }
 
   var automaticReasoningTitle: String? {
-    source == .agentThread ? threadModel.automaticReasoningTitle : nil
+    switch source {
+    case .agentThread: threadModel.automaticReasoningTitle
+    case .agentSettings:
+      settingsDocument == nil ? nil : catalog?.automaticReasoningTitle(forModelID: effectiveSettingsModelID)
+    case nil: nil
+    }
   }
 
   // MARK: Writes (apply to this thread from the next message on)
@@ -459,8 +487,7 @@ final class ComposeAgentChainModel: ObservableObject {
       guard let context = threadModel.contextSelectingModel(id) else { return }
       threadModel.performUpdate(context, using: updateAgentContext)
     case .agentSettings:
-      guard let id else { return }
-      settings?.invoke(itemID: ComposeAgentSettingsItem.model, value: .string(id))
+      settings?.invoke(itemID: ComposeAgentSettingsItem.model, value: .string(id ?? ComposeAgentSettingsItem.defaultValue))
     case nil:
       break
     }
@@ -472,8 +499,7 @@ final class ComposeAgentChainModel: ObservableObject {
       guard let context = threadModel.contextSelectingReasoning(id) else { return }
       threadModel.performUpdate(context, using: updateAgentContext)
     case .agentSettings:
-      guard let id else { return }
-      settings?.invoke(itemID: ComposeAgentSettingsItem.reasoning, value: .string(id))
+      settings?.invoke(itemID: ComposeAgentSettingsItem.reasoning, value: .string(id ?? ComposeAgentSettingsItem.defaultValue))
     case nil:
       break
     }
@@ -481,24 +507,120 @@ final class ComposeAgentChainModel: ObservableObject {
 
   // MARK: Usage
 
+  /// One usage limit, as the bridge publishes it.
+  struct UsageWindow: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let usedPercent: Int
+    let resetsAt: Date?
+  }
+
+  /// How full this thread's context window is.
+  struct ContextFill: Equatable {
+    let used: Int
+    let window: Int
+    var fraction: Double { window > 0 ? min(1, Double(used) / Double(window)) : 0 }
+  }
+
+  /// 5-hour, weekly and other limits. Bridge v2 carries the numbers in each
+  /// item's ID: `account.usage.window:<minutes>:<used %>:<resets at>`.
+  var usageWindows: [UsageWindow] {
+    allItems.compactMap { item in
+      let parts = item.id.split(separator: ":", omittingEmptySubsequences: false)
+      guard parts.count == 4, parts[0] == ComposeAgentSettingsItem.usageWindow,
+            let used = Int(parts[2]), let resets = Int(parts[3])
+      else { return nil }
+      return UsageWindow(
+        id: item.id,
+        title: item.label ?? String(localized: "Limit"),
+        usedPercent: min(100, max(0, used)),
+        resetsAt: resets > 0 ? Date(timeIntervalSince1970: TimeInterval(resets)) : nil
+      )
+    }
+  }
+
+  /// `session.context:<used tokens>:<window>`, once a turn reported it.
+  var contextFill: ContextFill? {
+    for item in allItems {
+      let parts = item.id.split(separator: ":")
+      guard parts.count == 3, parts[0] == ComposeAgentSettingsItem.context,
+            let used = Int(parts[1]), let window = Int(parts[2]), window > 0
+      else { continue }
+      return ContextFill(used: used, window: window)
+    }
+    return nil
+  }
+
+  /// A v1 bridge's one-line usage summary.
   var usageItem: BotChatSettingsModel.Item? {
     settingsDocument?.item(ComposeAgentSettingsItem.usage)
   }
 
+  private var allItems: [BotChatSettingsModel.Item] {
+    settingsDocument?.sections.flatMap(\.items) ?? []
+  }
+
+  // MARK: Stop and resume
+
+  @Published private(set) var isControlling = false
+
+  func runWorkName(_ work: AgentWorkState) -> String {
+    ObjectCache.shared.getCachedUser(id: work.key.botUserID)?.user.firstName ?? String(localized: "Agent")
+  }
+
+  /// Nil when the viewer may stop or resume this work; grants not loaded
+  /// yet count as allowed and the server decides.
+  func controlDisabledReason(_ work: AgentWorkState) -> String? {
+    let access = AgentGrantStore.shared.access(botUserID: work.key.botUserID)
+    return MessageActionPresentation.disabledReason(
+      requirement: .steer,
+      access: access,
+      ownerName: access.flatMap { ObjectCache.shared.getCachedUser(id: $0.ownerUserID)?.user.firstName },
+      botName: runWorkName(work)
+    )
+  }
+
+  /// Stops a running turn, or resumes paused work.
+  func toggleRun() {
+    guard let work = runWork, !isControlling, work.runState != .stopping else { return }
+    let op: InlineProtocol.AgentSessionControl = work.runState == .paused ? .resume : .stop
+    isControlling = true
+    Task { @MainActor [weak self] in
+      defer { self?.isControlling = false }
+      do {
+        _ = try await Api.realtime.callRpcDirect(
+          method: .controlAgentSession,
+          input: .controlAgentSession(.with {
+            $0.agentSessionID = work.sessionID
+            $0.op = op
+          })
+        )
+      } catch {
+        ToastCenter.shared.showError(error.localizedDescription)
+      }
+    }
+  }
+
+  /// The harness's "Default" choice is the menu's "Use default — …" row,
+  /// so it is left out of the options and reads as no selection.
   private func selectOptions(_ itemID: String) -> [AgentConfigurationOption] {
     guard case let .select(_, options)? = settingsDocument?.item(itemID)?.control else { return [] }
-    return options.filter { !$0.isDisabled }.map {
+    return options.filter { !$0.isDisabled && $0.value != ComposeAgentSettingsItem.defaultValue }.map {
       AgentConfigurationOption(id: $0.value, label: $0.label, description: $0.description)
     }
   }
 
   private func selectedValue(_ itemID: String) -> String? {
-    guard case let .select(value, _)? = settingsDocument?.item(itemID)?.control else { return nil }
+    guard case let .select(value, _)? = settingsDocument?.item(itemID)?.control,
+          value != ComposeAgentSettingsItem.defaultValue
+    else { return nil }
     return value
   }
 
   private func selectedLabel(_ itemID: String) -> String? {
-    guard case let .select(value, options)? = settingsDocument?.item(itemID)?.control else { return nil }
+    guard let value = selectedValue(itemID),
+          case let .select(_, options)? = settingsDocument?.item(itemID)?.control
+    else { return nil }
     return options.first(where: { $0.value == value })?.label
   }
 }
@@ -510,6 +632,10 @@ enum ComposeAgentSettingsItem {
   static let folder = "workspace.folder"
   static let project = "workspace.project"
   static let usage = "account.usage"
+  static let usageWindow = "account.usage.window"
+  static let context = "session.context"
+  /// The select value meaning "the harness's own default".
+  static let defaultValue = "__inline_provider_default__"
 }
 
 extension BotChatSettingsModel.Document {
@@ -523,91 +649,56 @@ extension BotChatSettingsModel.Document {
 
 // MARK: - Views
 
-/// The compact pill that sits at the leading edge of the Compose pill, like
-/// Telegram's bot menu button. It hugs its content and renders nothing when
-/// the draft would not reach an Agent in Detailed mode.
-@available(macOS 26.0, *)
-struct ComposeAgentPill: View {
-  @ObservedObject var model: ComposeAgentChainModel
-  @State private var isHovering = false
-
-  var body: some View {
-    if model.isAvailable {
-      Button(action: model.toggleChain) {
-        HStack(spacing: 5) {
-          if let userInfo = model.botUserInfo {
-            UserAvatar(userInfo: userInfo, size: 16)
-          } else {
-            Image(systemName: "sparkle")
-              .font(.system(size: 10, weight: .semibold))
-              .frame(width: 16, height: 16)
-          }
-          Text(model.pillTitle)
-            .font(.system(size: 11.5, weight: .medium))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: 132, alignment: .leading)
-            .fixedSize(horizontal: true, vertical: false)
-          Image(systemName: "chevron.up")
-            .font(.system(size: 8, weight: .bold))
-            .rotationEffect(.degrees(model.isChainOpen ? 180 : 0))
-            .opacity(isHovering || model.isChainOpen ? 0.8 : 0.45)
-        }
-        .foregroundStyle(.secondary)
-        .padding(.leading, 4)
-        .padding(.trailing, 8)
-        .frame(height: 24)
-        .background {
-          Capsule()
-            .fill(.quaternary)
-            .opacity(model.isChainOpen ? 1 : (isHovering ? 0.8 : 0.5))
-        }
-        .contentShape(Capsule())
-      }
-      .buttonStyle(.plain)
-      .onHover { isHovering = $0 }
-      .padding(.leading, 6)
-      .padding(.trailing, 2)
-      .frame(height: 34)
-      .accessibilityLabel("Agent controls")
-      .accessibilityValue(model.pillTooltip)
-      .accessibilityHint(model.isChainOpen ? "Hide model and reasoning controls" : "Show model and reasoning controls")
-      .inlineTooltip(
-        verbatim: model.pillTooltip,
-        description: model.isChainOpen
-          ? "Hide agent controls"
-          : "Show folder, model, reasoning and usage for this thread",
-        placement: .above
-      )
-    }
-  }
-}
-
-/// The chain in Compose's accessory row: folder or project, model, reasoning,
-/// and a usage button. A change applies to this Agent's work in this thread
-/// from the next message on.
+/// The row under the editor: the Agent and its folder at the leading edge;
+/// context, model and reasoning at the trailing edge, as in the empty-page
+/// Compose. A change applies to this Agent's work in this thread from the
+/// next message on.
 @available(macOS 26.0, *)
 struct ComposeAgentChainBar: View {
   @ObservedObject var model: ComposeAgentChainModel
-  @State private var isShowingUsage = false
-  @State private var isShowingFiles = false
 
   var body: some View {
-    if model.showsChain {
-      HStack(spacing: 4) {
-        if let title = model.projectTitle {
-          AgentConfigurationMenu(
-            title: title,
-            automaticTitle: nil,
-            options: model.projectOptions,
-            selection: model.selectedProjectID,
-            isDisabled: !model.canEdit || model.projectOptions.isEmpty,
-            tooltipTitle: "Project",
-            tooltipDescription: "Choose the folder or project for this thread.",
-            tooltipPlacement: .above,
-            select: model.selectProject
-          )
+    if model.isAvailable {
+      HStack(spacing: 2) {
+        if let userInfo = model.botUserInfo {
+          UserAvatar(userInfo: userInfo, size: 16)
+            .frame(width: 24, height: 24)
+            .inlineTooltip(
+              verbatim: userInfo.user.displayName,
+              description: "Gets this message and these settings. Start your message with another agent's mention to switch.",
+              placement: .above
+            )
+            .accessibilityLabel("Agent: \(userInfo.user.displayName)")
         }
+
+        if let title = model.projectTitle {
+          if model.projectOptions.isEmpty {
+            AllChatsComposePillLabel(title: title, systemImage: "folder")
+              .fixedSize(horizontal: true, vertical: true)
+              .inlineTooltip(
+                verbatim: "Folder",
+                description: model.projectDetail ?? "The folder this agent works in.",
+                placement: .above
+              )
+          } else {
+            AgentConfigurationMenu(
+              title: title,
+              automaticTitle: nil,
+              options: model.projectOptions,
+              selection: model.selectedProjectID,
+              isDisabled: !model.canEdit,
+              tooltipTitle: "Folder",
+              tooltipDescription: "Choose the folder for this thread.",
+              tooltipPlacement: .above,
+              systemImage: "folder",
+              select: model.selectProject
+            )
+          }
+        }
+
+        Spacer(minLength: 0)
+
+        ComposeAgentUsageButton(model: model)
 
         if let title = model.modelTitle {
           AgentModelConfigurationMenu(
@@ -634,101 +725,107 @@ struct ComposeAgentChainBar: View {
             select: model.selectReasoning
           )
         }
-
-        Spacer(minLength: 0)
-
-        if model.canReferenceFiles {
-        Button {
-          isShowingFiles.toggle()
-        } label: {
-          Image(systemName: "doc.badge.plus")
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(.secondary)
-            .frame(width: 24, height: 24)
-            .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Insert file reference")
-        .inlineTooltip(
-          verbatim: "Files",
-          description: "Insert a path from this work's folder.",
-          placement: .above
-        )
-        .popover(isPresented: $isShowingFiles, arrowEdge: .bottom) {
-          ComposeAgentFilePicker(
-            peer: model.peer,
-            botUserID: model.target?.botUserID ?? 0,
-            sessionID: model.workSessionID
-          ) { entry in
-            model.insertFileReference(entry)
-            isShowingFiles = false
-          }
-        }
-        }
-
-        Button {
-          model.prepareUsage()
-          isShowingUsage.toggle()
-        } label: {
-          Image(systemName: "gauge.with.dots.needle.50percent")
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(.secondary)
-            .frame(width: 24, height: 24)
-            .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Usage")
-        .inlineTooltip(verbatim: "Usage", description: "Show this agent's usage limits.", placement: .above)
-        .popover(isPresented: $isShowingUsage, arrowEdge: .bottom) {
-          ComposeAgentUsagePopover(model: model)
-        }
       }
-      .padding(.horizontal, 6)
-      .frame(height: 30)
+      .padding(.leading, 6)
+      .padding(.trailing, 8)
+      .frame(height: 28)
     }
   }
 }
 
+/// A small ring for how full this thread's context is, with the numbers in
+/// its tooltip. Clicking it shows the account's usage limits.
+@available(macOS 26.0, *)
+private struct ComposeAgentUsageButton: View {
+  @ObservedObject var model: ComposeAgentChainModel
+  @State private var isShowingUsage = false
+
+  var body: some View {
+    let fill = model.contextFill
+    Button {
+      model.prepareUsage()
+      isShowingUsage.toggle()
+    } label: {
+      ZStack {
+        Circle()
+          .stroke(.quaternary, lineWidth: 2)
+        if let fill {
+          Circle()
+            .trim(from: 0, to: fill.fraction)
+            .stroke(
+              fill.fraction >= 0.9 ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary),
+              style: StrokeStyle(lineWidth: 2, lineCap: .round)
+            )
+            .rotationEffect(.degrees(-90))
+        }
+      }
+      .frame(width: 12, height: 12)
+      .frame(width: 24, height: 24)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .inlineTooltip(
+      verbatim: fill.map { "Context window: \(Int(($0.fraction * 100).rounded()))% full" } ?? "Usage",
+      description: fill.map { "\(ComposeAgentTokens.text($0.used)) / \(ComposeAgentTokens.text($0.window)) tokens used" }
+        ?? "Show usage limits.",
+      placement: .above
+    )
+    .accessibilityLabel("Usage")
+    .accessibilityValue(fill.map { "Context \(Int(($0.fraction * 100).rounded())) percent full" } ?? "")
+    .popover(isPresented: $isShowingUsage, arrowEdge: .bottom) {
+      ComposeAgentUsagePopover(model: model)
+    }
+  }
+}
+
+/// The account's limits, one track each, then this thread's context.
 @available(macOS 26.0, *)
 private struct ComposeAgentUsagePopover: View {
   @ObservedObject var model: ComposeAgentChainModel
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack(spacing: 6) {
-        if let userInfo = model.botUserInfo {
-          UserAvatar(userInfo: userInfo, size: 16)
-        }
-        Text("Usage")
-          .font(.headline)
-        Spacer(minLength: 12)
-        if let item = model.usageItem, case let .info(text, tone) = item.control {
-          Text(text)
-            .font(.callout.monospacedDigit())
-            .foregroundStyle(tone == .warning || tone == .error ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
-        }
-      }
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Usage limits · \(model.agentName)")
+        .font(.callout)
+        .foregroundStyle(.secondary)
       content
     }
     .padding(14)
-    .frame(width: 280, alignment: .leading)
+    .frame(width: 300, alignment: .leading)
   }
 
   @ViewBuilder
   private var content: some View {
-    if let item = model.usageItem {
-      if let description = item.description {
-        Text(description)
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
+    let windows = model.usageWindows
+    if !windows.isEmpty || model.contextFill != nil {
+      ForEach(windows) { window in
+        track(
+          title: window.title,
+          detail: window.resetsAt.map(Self.resetText),
+          value: "\(window.usedPercent)%",
+          fraction: Double(window.usedPercent) / 100
+        )
       }
+      if let fill = model.contextFill {
+        if !windows.isEmpty { Divider() }
+        track(
+          title: String(localized: "Context window"),
+          detail: "\(ComposeAgentTokens.text(fill.used)) / \(ComposeAgentTokens.text(fill.window))",
+          value: "\(Int((fill.fraction * 100).rounded()))%",
+          fraction: fill.fraction
+        )
+      }
+    } else if let item = model.usageItem, let description = item.description {
+      Text(description)
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     } else if let problem = model.settingsState?.problem {
       Label(problem.message, systemImage: "exclamationmark.triangle")
         .font(.callout)
         .foregroundStyle(.secondary)
     } else if model.settingsState?.phase == .loaded {
-      Text("This agent doesn’t report usage.")
+      Text("No usage reported yet. It shows after \(model.agentName)’s next turn.")
         .font(.callout)
         .foregroundStyle(.secondary)
     } else {
@@ -740,144 +837,81 @@ private struct ComposeAgentUsagePopover: View {
       }
     }
   }
+
+  private func track(title: String, detail: String?, value: String, fraction: Double) -> some View {
+    VStack(alignment: .leading, spacing: 5) {
+      HStack(spacing: 8) {
+        Text(title)
+        Spacer(minLength: 8)
+        if let detail {
+          Text(detail).foregroundStyle(.secondary)
+        }
+        Text(value)
+          .monospacedDigit()
+          .foregroundStyle(.secondary)
+      }
+      .font(.callout)
+      ProgressView(value: min(1, max(0, fraction)))
+        .progressViewStyle(.linear)
+        .tint(fraction >= 0.9 ? .orange : .accentColor)
+    }
+  }
+
+  /// "Resets at 2:30 PM" today, "Resets Tue 9:30 AM" this week, else a date.
+  private static func resetText(_ date: Date) -> String {
+    let calendar = Calendar.current
+    if calendar.isDateInToday(date) {
+      return String(localized: "Resets at \(date.formatted(date: .omitted, time: .shortened))")
+    }
+    if date.timeIntervalSinceNow < 6 * 24 * 3600 {
+      let day = date.formatted(.dateTime.weekday(.abbreviated))
+      return String(localized: "Resets \(day) \(date.formatted(date: .omitted, time: .shortened))")
+    }
+    return String(localized: "Resets \(date.formatted(.dateTime.month(.abbreviated).day()))")
+  }
 }
 
-/// Searchable picker over the work's folder. It inserts a plain path token,
-/// never a mention entity; nothing it lists is cached.
-@available(macOS 26.0, *)
-private struct ComposeAgentFilePicker: View {
-  let peer: InlineKit.Peer
-  let botUserID: Int64
-  let sessionID: Int64?
-  let select: (AgentWorkFileEntry) -> Void
-
-  @State private var query = ""
-  @State private var path = ""
-  @State private var entries: [AgentWorkFileEntry] = []
-  @State private var nextAfter: String?
-  @State private var phase: Phase = .loading
-
-  private enum Phase: Equatable {
-    case loading, loaded, unavailable, noWork, problem(String)
+enum ComposeAgentTokens {
+  /// "850", "439k", "1.2M".
+  static func text(_ tokens: Int) -> String {
+    switch tokens {
+    case ..<1000: "\(tokens)"
+    case ..<1_000_000: "\(tokens / 1000)k"
+    default: (Double(tokens) / 1_000_000).formatted(.number.precision(.fractionLength(0 ... 1))) + "M"
+    }
   }
+}
+
+/// The circle beside the send button while an Agent's turn runs in this
+/// chat: a quiet stop square, or a play glyph to resume paused work. Sending
+/// stays available; a message while it works steers.
+@available(macOS 26.0, *)
+struct ComposeAgentRunButton: View {
+  @ObservedObject var model: ComposeAgentChainModel
+  @ObservedObject private var grants = AgentGrantStore.shared
+  let size: CGFloat
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      TextField("Search files", text: $query)
-        .textFieldStyle(.roundedBorder)
-      if !path.isEmpty, query.isEmpty {
-        Button {
-          path = parent(of: path)
-        } label: {
-          Label(path, systemImage: "chevron.left")
-            .lineLimit(1)
-            .truncationMode(.head)
-        }
-        .buttonStyle(.plain)
-        .font(.caption)
-        .foregroundStyle(.secondary)
+    if let work = model.runWork {
+      let paused = work.runState == .paused
+      let name = model.runWorkName(work)
+      let disabledReason = model.controlDisabledReason(work)
+      Button(action: model.toggleRun) {
+        Image(systemName: paused ? "play.fill" : "stop.fill")
+          .font(.system(size: size * 0.3, weight: .bold))
+          .foregroundStyle(.secondary)
+          .frame(width: size, height: size)
+        .contentShape(Circle())
       }
-      content
-    }
-    .padding(12)
-    .frame(width: 320, height: 300, alignment: .top)
-    .task(id: "\(sessionID ?? 0)|\(path)|\(query)") {
-      await load(after: nil)
-    }
-  }
-
-  @ViewBuilder
-  private var content: some View {
-    switch phase {
-    case .loading where entries.isEmpty:
-      ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-    case .noWork:
-      message("Files appear once the agent has started work in this thread.")
-    case .unavailable:
-      message("This agent can't list its folder yet. Update the Inline CLI on its machine.")
-    case let .problem(text):
-      message(text)
-    default:
-      if entries.isEmpty {
-        message(query.isEmpty ? "This folder is empty." : "No matching files.")
-      } else {
-        List {
-          ForEach(entries) { entry in
-            Button {
-              if entry.isDirectory, query.isEmpty {
-                path = entry.relativePath
-              } else {
-                select(entry)
-              }
-            } label: {
-              Label(query.isEmpty ? entry.name : entry.relativePath, systemImage: entry.isDirectory ? "folder" : "doc")
-                .lineLimit(1)
-                .truncationMode(.middle)
-            }
-            .buttonStyle(.plain)
-          }
-          if let nextAfter {
-            Button("Show more") { Task { await load(after: nextAfter) } }
-              .buttonStyle(.plain)
-              .foregroundStyle(.secondary)
-          }
-        }
-        .listStyle(.plain)
-      }
-    }
-  }
-
-  private func message(_ text: LocalizedStringKey) -> some View {
-    Text(text)
-      .font(.callout)
-      .foregroundStyle(.secondary)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .multilineTextAlignment(.center)
-  }
-
-  private func message(_ text: String) -> some View {
-    message(LocalizedStringKey(text))
-  }
-
-  private func parent(of path: String) -> String {
-    var components = path.split(separator: "/")
-    _ = components.popLast()
-    return components.joined(separator: "/")
-  }
-
-  @MainActor
-  private func load(after: String?) async {
-    guard let sessionID else {
-      phase = .noWork
-      return
-    }
-    if after == nil {
-      // Debounce typing; a newer task cancels this one.
-      if !query.isEmpty { try? await Task.sleep(for: .milliseconds(180)) }
-      guard !Task.isCancelled else { return }
-      phase = .loading
-    }
-    do {
-      let page = try await AgentWorkFiles.listing.list(
-        peer: peer,
-        botUserID: botUserID,
-        agentSessionID: sessionID,
-        relativePath: path,
-        query: query.isEmpty ? nil : query,
-        after: after,
-        limit: 100
+      .buttonStyle(.plain)
+      .glassEffect(.regular.interactive(), in: .circle)
+      .disabled(disabledReason != nil || model.isControlling || work.runState == .stopping)
+      .inlineTooltip(
+        verbatim: paused ? "Resume \(name)" : (work.runState == .stopping ? "Stopping \(name)…" : "Stop \(name)"),
+        description: disabledReason ?? (paused ? "Continue the paused work." : "Sending a message still works; it steers the turn."),
+        placement: .above
       )
-      guard !Task.isCancelled else { return }
-      entries = after == nil ? page.entries : entries + page.entries
-      nextAfter = page.nextAfter
-      phase = .loaded
-    } catch AgentWorkFilesError.unavailable {
-      phase = .unavailable
-    } catch let AgentWorkFilesError.problem(text) {
-      phase = .problem(text)
-    } catch {
-      guard !Task.isCancelled else { return }
-      phase = .problem(String(localized: "Couldn't list files. Try again."))
+      .accessibilityLabel(paused ? "Resume \(name)" : "Stop \(name)")
     }
   }
 }

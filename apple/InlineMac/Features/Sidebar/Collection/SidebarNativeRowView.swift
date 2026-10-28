@@ -1975,7 +1975,6 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
   private let backgroundLayer = CALayer()
   private let leadingUnreadBadge = SidebarNativeUnreadBadgeView()
   private let identityView = SidebarNativeIdentityView()
-  private let agentBadge = SidebarAgentStateBadgeView()
   private let titleField = SidebarNativeTextField()
   private let previewView = SidebarNativeComposeActivityView()
   private let titleActivityView = SidebarNativeComposeActivityView()
@@ -1995,7 +1994,6 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     layer?.addSublayer(backgroundLayer)
     addSubview(leadingUnreadBadge)
     addSubview(identityView)
-    addSubview(agentBadge)
     addSubview(titleField)
     addSubview(previewView)
     addSubview(titleActivityView)
@@ -2107,7 +2105,6 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     )
 
     configureUnreadBadges()
-    agentBadge.configure(peer: presentation.peerID)
 
     configureDisclosureVisual()
     updateControlPresentation(animated: false)
@@ -2147,15 +2144,6 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         height: iconSize
       )
       leading = identityView.frame.maxX + 8
-      let badgeSide: CGFloat = 11
-      agentBadge.frame = CGRect(
-        x: identityView.frame.maxX - badgeSide + 2,
-        y: identityView.frame.maxY - badgeSide + 2,
-        width: badgeSide,
-        height: badgeSide
-      )
-    } else {
-      agentBadge.frame = .zero
     }
 
     if configuration.unreadBadgeStyle == .dot {
@@ -2568,7 +2556,6 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     primaryAction = nil
     doubleClickAction = nil
     identityView.prepareForReuse()
-    agentBadge.prepareForReuse()
     previewView.prepareForReuse()
     titleActivityView.prepareForReuse()
     leadingUnreadBadge.prepareForReuse()
