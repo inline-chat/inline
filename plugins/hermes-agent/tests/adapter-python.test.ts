@@ -1111,14 +1111,14 @@ def assert_reply_thread_settings():
 
     inline_tools._sidecar_call = fake_sidecar
 
-    def turn(session_chat, message_id, *, chat_id=None, sender="501", bot=False, chat_type="group", thread_id="", in_thread=False):
+    def turn(session_chat, message_id, *, chat_id=None, sender="501", bot=False, chat_type="group", thread_id="", parent=""):
         os.environ["HERMES_SESSION_PLATFORM"] = "inline"
         os.environ["HERMES_SESSION_CHAT_ID"] = session_chat
         os.environ["HERMES_SESSION_THREAD_ID"] = thread_id
         os.environ["HERMES_SESSION_MESSAGE_ID"] = message_id
         inline_tools.remember_turn_message(
             session_chat_id=session_chat, thread_id=thread_id, message_id=message_id, chat_id=chat_id or session_chat,
-            sender_id=sender, sender_is_bot=bot, chat_type=chat_type, in_reply_thread=in_thread,
+            sender_id=sender, sender_is_bot=bot, chat_type=chat_type, parent_chat_id=parent,
         )
 
     def tool(action, **args):
@@ -1144,11 +1144,17 @@ def assert_reply_thread_settings():
             adapter._set_reply_threads_for_chat("30", "off")
             assert adapter._reply_thread_mode_for_chat("30") == "auto"
 
-            # Only the person asking can change it: not another bot, and not from inside a thread.
+            # Only a person can change it, never another bot.
             turn("10", "7", sender="800", bot=True)
             assert "only a person" in tool("set_reply_threads", mode="on")["error"]
-            turn("99", "8", thread_id="99", in_thread=True)
-            assert "parent chat" in tool("set_reply_threads", mode="on")["error"]
+            # Asked from inside a reply thread, it changes the chat the thread hangs off, as /threads does.
+            turn("99", "8", thread_id="99", parent="10")
+            assert tool("set_reply_threads", mode="on")["result"] == {"chat_id": "10", "mode": "on"}
+            assert "99" not in adapter._reply_thread_overrides
+            assert tool("set_reply_threads", mode="default")["result"] == {"chat_id": "10", "mode": "auto"}
+            adapter._allowed_chats = {"99"}
+            assert "parent chat access" in tool("set_reply_threads", mode="on")["error"]
+            adapter._allowed_chats = set()
 
             # Asked for a thread in an Auto chat: one thread, and the answer goes into it.
             turn("10", "40")
@@ -1164,7 +1170,7 @@ def assert_reply_thread_settings():
             tool("create_thread", parent_message_id="12", title="Older topic")
             assert created[-1][1]["parentMessageId"] == "12" and adapter._with_turn_thread("10", "12", None) is None
             # Inside a thread, "make a thread" means this one; no thread inside it.
-            turn("701", "3", thread_id="701", in_thread=True)
+            turn("701", "3", thread_id="701", parent="10")
             assert tool("create_thread", title="Nested")["result"]["chatId"] == "701"
             assert len(created) == 2
 

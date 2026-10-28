@@ -1176,18 +1176,19 @@ class InlineAdapter(BasePlatformAdapter):
         return {**(metadata or {}), "thread_id": thread_id} if thread_id else metadata
 
     def set_reply_threads_from_tool(
-        self, *, chat_id: str, chat_type: str, in_reply_thread: bool, actor_id: str, actor_is_bot: bool, mode: str,
+        self, *, chat_id: str, chat_type: str, parent_chat_id: str, actor_id: str, actor_is_bot: bool, mode: str,
     ) -> Dict[str, Any]:
-        """Change this chat's reply threads because the person talking to the agent asked,
-        with the access /threads needs."""
+        """Change reply threads because the person talking to the agent asked, with the access
+        /threads needs. Inside a reply thread it changes the parent chat, as /threads does."""
         if actor_is_bot or not actor_id:
             raise PermissionError("only a person can change reply threads")
-        if in_reply_thread:
-            raise PermissionError("change reply threads from the parent chat, not inside a thread")
+        target_chat_id = parent_chat_id or chat_id
+        if parent_chat_id and self._actor_authorization(chat_type, actor_id, parent_chat_id) is not True:
+            raise PermissionError("parent chat access could not be confirmed")
         if not self._may_change_reply_threads(actor_id, chat_type):
             raise PermissionError("changing reply threads needs access to the threads command")
-        self._set_reply_threads_for_chat(chat_id, None if mode in {"default", "reset"} else _reply_thread_mode(mode))
-        return {"chat_id": self._chat_key(chat_id), "mode": self._reply_thread_mode_for_chat(chat_id)}
+        self._set_reply_threads_for_chat(target_chat_id, None if mode in {"default", "reset"} else _reply_thread_mode(mode))
+        return {"chat_id": self._chat_key(target_chat_id), "mode": self._reply_thread_mode_for_chat(target_chat_id)}
 
     @staticmethod
     def _bot_settings_chat_type(info: Dict[str, Any]) -> str:
@@ -2795,7 +2796,8 @@ class InlineAdapter(BasePlatformAdapter):
             _inline_tools.remember_turn_message(
                 session_chat_id=session_chat_id, thread_id=str(thread_id or ""), message_id=msg_id,
                 chat_id=chat_id, sender_id=from_id, sender_is_bot=sender_profile.get("bot") is True,
-                chat_type=chat_type, in_reply_thread=bool(parent_chat_id) and parent_chat_id != chat_id,
+                chat_type=chat_type,
+                parent_chat_id=parent_chat_id if parent_chat_id and parent_chat_id != chat_id else "",
             )
         except Exception:
             logger.debug("[inline] failed to record the turn's message for tools", exc_info=True)

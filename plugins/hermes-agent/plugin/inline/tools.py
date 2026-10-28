@@ -88,12 +88,13 @@ _TURN_MESSAGES_MAX = 1000
 
 def remember_turn_message(
     *, session_chat_id: str, thread_id: str, message_id: str, chat_id: str, sender_id: str, sender_is_bot: bool,
-    chat_type: str = "", in_reply_thread: bool = False,
+    chat_type: str = "", parent_chat_id: str = "",
 ) -> None:
+    """``parent_chat_id`` is set only when the message itself was sent inside a reply thread."""
     key = (str(hermes_home()), str(session_chat_id or ""), str(thread_id or ""), str(message_id or ""))
     _turn_messages[key] = {
         "chatId": str(chat_id), "senderId": str(sender_id or ""), "senderIsBot": bool(sender_is_bot),
-        "chatType": str(chat_type or ""), "inReplyThread": bool(in_reply_thread),
+        "chatType": str(chat_type or ""), "parentChatId": str(parent_chat_id or ""),
     }
     _turn_messages.move_to_end(key)
     while len(_turn_messages) > _TURN_MESSAGES_MAX:
@@ -108,14 +109,15 @@ def _current_turn() -> Dict[str, Any]:
     known = _turn_messages.get((str(hermes_home()), session_chat, thread_id, message_id)) or {}
     # The turn already runs in a thread when reply threads moved it there (its message lives
     # in the parent chat) or when its message was sent inside the thread.
-    in_thread = bool(thread_id) and (bool(known.get("inReplyThread")) or (known.get("chatId") or session_chat) != thread_id)
+    parent_chat_id = known.get("parentChatId") or ""
+    in_thread = bool(thread_id) and (bool(parent_chat_id) or (known.get("chatId") or session_chat) != thread_id)
     return {
         "messageId": message_id,
         "chatId": known.get("chatId") or session_chat,
         "senderId": known.get("senderId") or "",
         "senderIsBot": known.get("senderIsBot"),
         "chatType": known.get("chatType") or "",
-        "inReplyThread": bool(known.get("inReplyThread")),
+        "parentChatId": parent_chat_id,
         "threadId": thread_id if in_thread else "",
     }
 
@@ -620,7 +622,7 @@ def _set_reply_threads(args: Dict[str, Any]) -> Dict[str, Any]:
         return owner.set_reply_threads_from_tool(
             chat_id=turn["chatId"],
             chat_type=turn.get("chatType") or "group",
-            in_reply_thread=bool(turn.get("inReplyThread")),
+            parent_chat_id=turn.get("parentChatId") or "",
             actor_id=turn["senderId"],
             actor_is_bot=bool(turn.get("senderIsBot")),
             mode=mode,
