@@ -364,7 +364,10 @@ describe("Grid transcription control and worker authorization", () => {
     const ticket = (await admitted.json()) as { segmentId: string }
     expect(await (await api("admit", input, claim.runToken)).json()).toEqual(ticket)
     expect((await api("admit", { ...input, sourceTurnKey: "two" }, claim.runToken)).status).toBe(200)
-    expect((await api("admit", { ...input, sourceTurnKey: "three" }, claim.runToken)).status).toBe(409)
+    // A speaker's backlog may hold many admitted turns through a provider outage, up to 128.
+    for (let turn = 3; turn <= 128; turn++)
+      expect((await api("admit", { ...input, sourceTurnKey: `backlog-${turn}` }, claim.runToken)).status).toBe(200)
+    expect((await api("admit", { ...input, sourceTurnKey: "overflow" }, claim.runToken)).status).toBe(409)
     const finish = () => api("final", { segmentId: ticket.segmentId, text: "A verified turn" }, claim.runToken)
     const responses = await Promise.all([finish(), finish()])
     expect(responses.map((response) => response.status)).toEqual([200, 200])

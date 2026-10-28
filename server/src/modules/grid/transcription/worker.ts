@@ -410,9 +410,11 @@ export async function handleGridTranscriptionWorkerRequest(request: Request): Pr
           .from(gridTranscriptionSegments)
           .where(and(eq(gridTranscriptionSegments.runId, run.id), eq(gridTranscriptionSegments.state, "admitted")))
           .groupBy(gridTranscriptionSegments.trackSid)
+        // Workers buffer a speaker's turns through provider outages and replay them in order,
+        // so admitted-but-unfinalized turns can queue up; these bounds only stop runaway admission.
         if (
-          pending.reduce((sum, p) => sum + Number(p.value), 0) >= 64 ||
-          Number(pending.find((p) => p.trackSid === input.trackSid)?.value ?? 0) >= 2
+          pending.reduce((sum, p) => sum + Number(p.value), 0) >= 1024 ||
+          Number(pending.find((p) => p.trackSid === input.trackSid)?.value ?? 0) >= 128
         )
           throw new WorkerRequestError(409)
         const [segment] = await tx
