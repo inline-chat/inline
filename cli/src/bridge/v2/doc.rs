@@ -12,9 +12,23 @@ use inline_protocol::proto;
 pub(crate) struct Doc {
     pub text: String,
     pub blocks: Vec<proto::Block>,
+    /// `text` is Markdown for Inline to parse into blocks, as v1 sent answers;
+    /// `blocks` is then empty.
+    #[serde(default)]
+    pub markdown: bool,
 }
 
 impl Doc {
+    /// The agent's own prose (answers, Friendly updates): Inline parses its
+    /// Markdown, so headings, lists, code and links render.
+    pub(crate) fn markdown(text: &str) -> Self {
+        Self {
+            text: text.trim().to_owned(),
+            blocks: Vec::new(),
+            markdown: true,
+        }
+    }
+
     pub(crate) fn block_content(&self) -> proto::BlockContent {
         proto::BlockContent {
             blocks: self.blocks.clone(),
@@ -32,6 +46,10 @@ impl Doc {
         }
         if !self.text.is_empty() {
             self.text.push('\n');
+        }
+        if self.markdown {
+            self.text.push_str(text);
+            return;
         }
         let offset = self.text.encode_utf16().count() as i64;
         self.text.push_str(text);
@@ -95,6 +113,7 @@ impl DocBuilder {
         Doc {
             text: self.text,
             blocks: self.blocks,
+            markdown: false,
         }
     }
 

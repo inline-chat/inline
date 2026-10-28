@@ -46,7 +46,8 @@ Inline tools:\n\
 - Links never broaden your access: you can read a linked thread only if you can already access it.\n\
 - For long, multi-step or approval-heavy work in a group thread, start a subthread for it and post a short summary back. \
 Replies in that subthread are addressed to your work.\n\
-- To delegate, start a subthread and mention the other agent with a clear brief.\n",
+- To delegate, start a subthread and mention the other agent with a clear brief.\n\
+- When someone asks you to follow a thread (answer everything there) or to stop, use follow_thread.\n",
         );
     }
     guide

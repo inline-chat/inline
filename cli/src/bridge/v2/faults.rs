@@ -240,6 +240,7 @@ fn input(runtime: &Runtime, message: i64) -> (String, Command) {
             },
             message_id: message,
             answer_reply: false,
+            reply_to: None,
         },
     )
 }
@@ -396,7 +397,7 @@ async fn restart_accepts_positive_receipts_and_keeps_unconfirmed_input_unknown()
 async fn a_thread_permission_choice_survives_a_restart() {
     let (mut runtime, harness, mut cleanup) = fixture(false);
     let reply = runtime
-        .command(9, 1, Grants::OWNER, "permissions", "plan")
+        .command(9, 1, Grants::OWNER, "permissions", "plan", &[])
         .await;
     assert!(reply.contains("Set for this thread"), "{reply}");
     drop(runtime);
@@ -469,7 +470,7 @@ async fn completed_turn_consumption_remains_consumed() {
 async fn moved_work_keeps_permissions_on_restart() {
     let (mut runtime, harness, mut cleanup) = fixture(false);
     let reply = runtime
-        .command(9, 1, Grants::OWNER, "permissions", "plan")
+        .command(9, 1, Grants::OWNER, "permissions", "plan", &[])
         .await;
     assert!(reply.contains("Set for this thread"));
     runtime.ensure_work(9, None).await.unwrap();

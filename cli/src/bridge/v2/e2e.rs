@@ -67,6 +67,11 @@ impl FakeModel {
         (model, format!("http://{address}/v1"))
     }
 
+    /// Adds outputs for steps after the scripted ones have been used.
+    fn script(&self, outputs: Vec<Value>) {
+        self.outputs.lock().unwrap().extend(outputs);
+    }
+
     async fn serve(&self, stream: TcpStream) {
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
@@ -393,8 +398,9 @@ async fn codex_round_trip_through_inline() {
             "namespace": "inline", "name": name, "arguments": arguments.to_string()})
     };
     let (model, base_url) = FakeModel::start(vec![
+        // Markdown, which must render rather than show its markers.
         json!({"type": "message", "role": "assistant",
-            "content": [{"type": "output_text", "text": "E2E_ANSWER_ONE"}]}),
+            "content": [{"type": "output_text", "text": "**E2E_ANSWER_ONE** done"}]}),
         // After /model, the next turn runs on the chosen model.
         json!({"type": "message", "role": "assistant",
             "content": [{"type": "output_text", "text": "E2E_NEW_MODEL"}]}),
@@ -520,6 +526,35 @@ async fn codex_round_trip_through_inline() {
     )
     .await;
     assert!(model.request_count() >= 1);
+    // The answer went out as Markdown: Inline parsed the bold, as for v1.
+    let answer = owner
+        .history(HistoryRequest {
+            chat_id: InlineId::new(chat_id),
+            limit: Some(20),
+            before_message_id: None,
+            after_message_id: None,
+        })
+        .await
+        .unwrap()
+        .messages
+        .into_iter()
+        .find(|message| {
+            matches!(&message.content, MessageContent::Text { text } if text.contains("E2E_ANSWER_ONE"))
+        })
+        .expect("the first answer");
+    assert!(
+        matches!(&answer.content, MessageContent::Text { text } if !text.contains("**")),
+        "the answer shows its Markdown markers"
+    );
+    assert!(
+        answer
+            .metadata
+            .entities
+            .iter()
+            .any(|entity| entity.kind.contains("BOLD")),
+        "the answer has no bold entity: {:?}",
+        answer.metadata.entities
+    );
 
     // The work is recorded on the server, connected by the owner.
     let work = owner
@@ -694,31 +729,19 @@ async fn codex_round_trip_through_inline() {
         tool_outputs(&model)
     );
 
-    // 3. A question card: the owner answers through its form, and the answer
-    // reaches Codex.
+    // 3. A one-choice question card asks with message buttons, which every
+    // app shows; the owner taps one, and the answer reaches Codex.
     send(&owner, chat_id, "Ask me something").await;
-    let (card, _) = wait_card(&model, &owner, chat_id, "Which color fits?", CardKind::Form).await;
-    owner
-        .invoke_rpc(
-            proto::Method::InvokeMessageAction,
-            proto::rpc_call::Input::InvokeMessageAction(proto::InvokeMessageActionInput {
-                peer_id: Some(super::api::chat_peer(chat_id)),
-                message_id: card,
-                action_id: super::render::QUESTION_FORM_ID.to_owned(),
-                form: Some(proto::MessageFormSubmission {
-                    values: vec![proto::MessageFormValue {
-                        field_id: "f0".to_owned(),
-                        value: Some(proto::message_form_value::Value::Selection(
-                            proto::MessageFormSelection {
-                                option_ids: vec!["o1".to_owned()],
-                                other_text: None,
-                            },
-                        )),
-                        redacted: false,
-                    }],
-                }),
-            }),
-        )
+    let (card, first) = wait_card(
+        &model,
+        &owner,
+        chat_id,
+        "Which color fits?",
+        CardKind::Buttons,
+    )
+    .await;
+    assert_eq!(first, "v2-q0-0", "the first option's button");
+    invoke_action(&owner, chat_id, card, "v2-q0-1")
         .await
         .unwrap();
     wait_for(
@@ -1416,20 +1439,28 @@ async fn codex_round_trip_through_inline() {
         requests_before,
         "a teammate without access reached the agent"
     );
-    owner
-        .invoke_rpc(
-            proto::Method::SetAgentGrant,
-            proto::rpc_call::Input::SetAgentGrant(proto::SetAgentGrantInput {
-                bot_user_id,
-                user_id: teammate_id,
-                operations: vec![
-                    proto::AgentGrantOperation::Invoke as i32,
-                    proto::AgentGrantOperation::Steer as i32,
-                ],
-            }),
-        )
-        .await
-        .unwrap();
+    // The owner shares the agent with /allowlist in their DM.
+    let mut allow = SendTextRequest::new(
+        PeerRef::Chat {
+            chat_id: InlineId::new(chat_id),
+        },
+        format!("/allowlist [@Teammate](inline://user?id={teammate_id})"),
+    );
+    allow.parse_markdown = true;
+    owner.send_text(allow).await.unwrap();
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the allowlist answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("can now use me"))
+        },
+    )
+    .await;
     teammate
         .send_text(teammate_mention("now can you help?"))
         .await
@@ -1782,6 +1813,160 @@ async fn codex_round_trip_through_inline() {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     other_bot.shutdown().await.unwrap();
+
+    // 14. A long turn: dozens of tool calls with long output continue in a
+    // new progress message before Inline's size limit, and the answer lands.
+    settle(&model).await;
+    let mut long_turn: Vec<Value> = (0..45)
+        .map(|_| inline_tool("get_messages", json!({"limit": 100})))
+        .collect();
+    long_turn.push(json!({"type": "message", "role": "assistant",
+        "content": [{"type": "output_text", "text": "E2E_LONG_DONE"}]}));
+    model.script(long_turn);
+    send(&owner, chat_id, "Run the long check").await;
+    let texts = wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the answer after the long turn",
+        |texts| texts.iter().any(|(_, text)| text.contains("E2E_LONG_DONE")),
+    )
+    .await;
+    assert!(
+        texts
+            .iter()
+            .any(|(_, text)| text.contains("continued below")),
+        "the long turn never continued in a new message"
+    );
+
+    // 15. Following: a thread whose first message mentions the agent is one
+    // it follows (Inline's opener rule), so plain messages reach it; the
+    // agent's follow_thread tool stops that when asked.
+    settle(&model).await;
+    let followed = owner
+        .create_thread(CreateThreadRequest {
+            title: Some("E2E follow".to_owned()),
+            space_id: None,
+            description: None,
+            emoji: None,
+            is_public: false,
+            participants: vec![
+                ChatCreateParticipant::from(InlineId::new(owner_user_id)),
+                ChatCreateParticipant::from(InlineId::new(bot_user_id)),
+            ],
+        })
+        .await
+        .unwrap()
+        .chat_id
+        .get();
+    let in_followed = |text: String| {
+        let mut request = SendTextRequest::new(
+            PeerRef::Chat {
+                chat_id: InlineId::new(followed),
+            },
+            text,
+        );
+        request.parse_markdown = true;
+        request
+    };
+    model.script(vec![
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_FOLLOW_ONE"}]}),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_FOLLOWED"}]}),
+        inline_tool("follow_thread", json!({"action": "unfollow"})),
+        json!({"type": "message", "role": "assistant",
+            "content": [{"type": "output_text", "text": "E2E_UNFOLLOWED"}]}),
+    ]);
+    owner
+        .send_text(in_followed(format!(
+            "[@Codex](inline://user?id={bot_user_id}) start the follow check"
+        )))
+        .await
+        .unwrap();
+    wait_for(
+        &model,
+        &owner,
+        followed,
+        bot_user_id,
+        "the opener's answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_FOLLOW_ONE"))
+        },
+    )
+    .await;
+    settle(&model).await;
+    owner
+        .send_text(in_followed("and keep going".to_owned()))
+        .await
+        .unwrap();
+    wait_for(
+        &model,
+        &owner,
+        followed,
+        bot_user_id,
+        "an unmentioned answer",
+        |texts| texts.iter().any(|(_, text)| text.contains("E2E_FOLLOWED")),
+    )
+    .await;
+    settle(&model).await;
+    owner
+        .send_text(in_followed(format!(
+            "[@Codex](inline://user?id={bot_user_id}) stop following this thread"
+        )))
+        .await
+        .unwrap();
+    wait_for(
+        &model,
+        &owner,
+        followed,
+        bot_user_id,
+        "the unfollow answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("E2E_UNFOLLOWED"))
+        },
+    )
+    .await;
+    assert!(
+        tool_outputs(&model)
+            .iter()
+            .any(|output| output.contains("\"follow_mode\":\"unfollowed\"")),
+        "follow_thread did not report the unfollow: {:#?}",
+        tool_outputs(&model)
+    );
+    settle(&model).await;
+    let answers_before = bot_texts(&owner, followed, bot_user_id).await.len();
+    owner
+        .send_text(in_followed("anyone there?".to_owned()))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(
+        bot_texts(&owner, followed, bot_user_id).await.len(),
+        answers_before,
+        "an unfollowed thread still answered a message without a mention"
+    );
+
+    // 16. /help lists the commands, Codex's own included.
+    send(&owner, chat_id, "/help").await;
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the help answer",
+        |texts| {
+            texts
+                .iter()
+                .any(|(_, text)| text.contains("/allowlist") && text.contains("/review"))
+        },
+    )
+    .await;
 
     let _ = stop.send(());
     let outcome = tokio::time::timeout(Duration::from_secs(20), running).await;
@@ -2143,8 +2328,8 @@ async fn claude_round_trip_through_inline() {
     )
     .await;
 
-    // 3. AskUserQuestion: the card is an Inline form, and the owner's choice
-    // reaches Claude as the tool's answer.
+    // 3. AskUserQuestion: a one-choice question asks with buttons; Claude
+    // also takes an answer of its own, given by replying to the card.
     send(
         &owner,
         chat_id,
@@ -2157,30 +2342,22 @@ async fn claude_round_trip_through_inline() {
         ),
     )
     .await;
-    let (card, _) = wait_card(&api, &owner, chat_id, "Which color fits?", CardKind::Form).await;
-    owner
-        .invoke_rpc(
-            proto::Method::InvokeMessageAction,
-            proto::rpc_call::Input::InvokeMessageAction(proto::InvokeMessageActionInput {
-                peer_id: Some(super::api::chat_peer(chat_id)),
-                message_id: card,
-                action_id: super::render::QUESTION_FORM_ID.to_owned(),
-                form: Some(proto::MessageFormSubmission {
-                    values: vec![proto::MessageFormValue {
-                        field_id: "f0".to_owned(),
-                        value: Some(proto::message_form_value::Value::Selection(
-                            proto::MessageFormSelection {
-                                option_ids: vec!["o1".to_owned()],
-                                other_text: None,
-                            },
-                        )),
-                        redacted: false,
-                    }],
-                }),
-            }),
-        )
-        .await
-        .unwrap();
+    let (card, _) = wait_card(
+        &api,
+        &owner,
+        chat_id,
+        "Which color fits?",
+        CardKind::Buttons,
+    )
+    .await;
+    let mut reply = SendTextRequest::new(
+        PeerRef::Chat {
+            chat_id: InlineId::new(chat_id),
+        },
+        "Teal",
+    );
+    reply.reply_to_message_id = Some(InlineId::new(card));
+    owner.send_text(reply).await.unwrap();
     wait_for(
         &api,
         &owner,
@@ -2190,7 +2367,7 @@ async fn claude_round_trip_through_inline() {
         |texts| {
             texts
                 .iter()
-                .any(|(_, text)| text.contains("FAKE-DONE") && text.contains("Blue"))
+                .any(|(_, text)| text.contains("FAKE-DONE") && text.contains("Teal"))
         },
     )
     .await;

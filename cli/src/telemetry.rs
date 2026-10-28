@@ -228,6 +228,25 @@ pub(crate) fn report_bridge_setup_required(target: &str, failure: &'static str) 
     capture_bridge_runtime_event(target, "setup_required", failure, None, None, None);
 }
 
+/// Inline refused a bridge v2 message or edit (`kind`: answer, card, edit).
+/// Sampled like restart loops, since an open message may be refused on every
+/// edit until it ends.
+pub(crate) fn report_bridge_output_refused(kind: &'static str) {
+    static REFUSALS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let count = REFUSALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    if !should_report_bridge_attempt(count) {
+        return;
+    }
+    capture_bridge_runtime_event(
+        "inline::bridge::v2",
+        "output_refused",
+        kind,
+        Some(count),
+        None,
+        None,
+    );
+}
+
 pub(crate) fn report_bridge_owner_dm_event(
     target: &str,
     phase: &'static str,

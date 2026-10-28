@@ -34,10 +34,11 @@ use inline_protocol::proto;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, watch};
 
-use super::api::{self, Notify, chat_peer};
+use super::api::{self, Failure, Notify, chat_peer};
 use super::doc::{Doc, DocBuilder};
 use super::ledger::{InputState, Ledger};
-use super::render::{ActionStyle, CardAction, FullDetail, RenderOp, Renderer, Vocabulary};
+use super::limits;
+use super::render::{self, ActionStyle, CardAction, FullDetail, RenderOp, Renderer, Vocabulary};
 use super::settings;
 use super::tools::{Tools, WorkTool};
 
@@ -54,6 +55,8 @@ const PUBLISH_RETRIES: [Duration; 3] = [
     Duration::from_millis(500),
     Duration::from_secs(2),
 ];
+/// The longest a rate-limited answer waits within one publish attempt.
+const MAX_PUBLISH_WAIT: Duration = Duration::from_secs(30);
 const NOT_PENDING: &str = "This request is no longer pending.";
 /// Trusted instructions for the speak gate's side call.
 const SPEAK_GATE_GUIDE: &str = "You take part in this Inline thread but nobody addressed you. \
@@ -205,6 +208,9 @@ pub(crate) enum ActionData {
     /// More speak-gate checks for the rest of today.
     #[serde(rename = "gr")]
     RaiseGateBudget,
+    /// Option `o` of question `f` on a question card asked with buttons.
+    #[serde(rename = "q")]
+    Pick { i: String, f: usize, o: usize },
 }
 
 pub(crate) enum Command {
@@ -216,6 +222,9 @@ pub(crate) enum Command {
         /// In a group thread the final answer replies to the requester
         /// (spec §6, placement); a DM or the agent's own thread has none.
         answer_reply: bool,
+        /// The message this one replies to: a reply to an open question card
+        /// is the answer in the person's own words.
+        reply_to: Option<i64>,
     },
     /// A message the agent observes without a turn; batched until the next
     /// native boundary.
@@ -279,6 +288,13 @@ pub(crate) enum SessionOp {
     Settings(SettingsChange),
     Compact,
     Clear,
+    /// The harness's own mode: Codex collaboration mode, Claude permission
+    /// mode ("plan" for both).
+    Mode(String),
+    /// Codex's review of uncommitted changes, or of the branch named.
+    Review(Option<String>),
+    /// Claude's rewind of the last turn's file changes.
+    Undo,
 }
 
 /// The main loop's handle on one work.
@@ -382,6 +398,7 @@ pub(crate) fn spawn(
         uncertain: HashMap::new(),
         outbox,
         rendering_turn: None,
+        last_turn_input: None,
     };
     let task = tokio::spawn(actor.run(rx));
     WorkHandle {
@@ -399,6 +416,8 @@ struct Card {
     interaction: InteractionId,
     approval: bool,
     form: Option<QuestionForm>,
+    /// Answers so far, when the card asks its questions one at a time.
+    answered: Vec<String>,
 }
 
 /// A short digest of an answer's text, for its identity.
@@ -422,6 +441,9 @@ struct Outgoing {
     card: Option<(InteractionId, Option<QuestionForm>)>,
     #[serde(default)]
     closed: bool,
+    /// Already the plain-text form of an item Inline refused once.
+    #[serde(default)]
+    fallback: bool,
 }
 
 /// An input the harness may or may not have.
@@ -436,6 +458,10 @@ struct Uncertain {
 struct PendingEdit {
     doc: Doc,
     due: tokio::time::Instant,
+    /// Replaces the message's buttons; `None` leaves them.
+    actions: Option<proto::MessageActions>,
+    /// The message's last edit ("Worked for 2m"): it settles the slot.
+    closing: bool,
 }
 
 struct Actor {
@@ -504,6 +530,8 @@ struct Actor {
     outbox: VecDeque<Outgoing>,
     /// The turn whose output is being rendered, for the answer's identity.
     rendering_turn: Option<TurnId>,
+    /// The first input of the latest turn: what `/undo` rewinds to.
+    last_turn_input: Option<InputId>,
     /// Inputs whose delivery was unknown, until the session settles them.
     uncertain: HashMap<InputId, Uncertain>,
     /// Ledger states not saved yet, written again with the next update.
@@ -561,7 +589,33 @@ impl Actor {
                 input,
                 pending,
                 message_id,
+                reply_to: Some(card),
+                ..
+            } if self.cards.get(&card).is_some_and(|open| {
+                open.form.as_ref().is_some_and(|form| {
+                    render::pickable(form) && render::takes_reply(form, open.answered.len())
+                })
+            }) =>
+            {
+                let (interaction, field) = {
+                    let open = &self.cards[&card];
+                    (open.interaction.to_string(), open.answered.len())
+                };
+                let answer = input.content.text.trim().to_owned();
+                let toast = self
+                    .pick(card, pending.sender.0, &interaction, field, answer)
+                    .await;
+                self.mark(&input.id, InputState::Consumed);
+                if let Some(toast) = toast {
+                    self.reply(message_id, &toast).await;
+                }
+            }
+            Command::Input {
+                input,
+                pending,
+                message_id,
                 answer_reply,
+                ..
             } => {
                 // Direct input restarts paused work (spec §4.5) and answers
                 // anything the speak gate was weighing.
@@ -871,6 +925,22 @@ impl Actor {
         match data {
             // The main loop answers these; they never reach a work.
             ActionData::ExtendLoop | ActionData::RaiseGateBudget => None,
+            ActionData::Pick { i, f, o } => {
+                let label = self
+                    .cards
+                    .get(&message_id)
+                    .and_then(|card| card.form.as_ref())
+                    .and_then(|form| form.fields.get(f))
+                    .and_then(|field| match &field.input {
+                        FieldInput::Select { options, .. } => options.get(o),
+                        _ => None,
+                    })
+                    .map(|option| option.label.clone());
+                let Some(label) = label else {
+                    return Some(NOT_PENDING.to_owned());
+                };
+                self.pick(message_id, actor, &i, f, label).await
+            }
             ActionData::Decision { i, d } => {
                 let card = self.cards.get(&message_id).cloned()?;
                 if card.interaction.as_str() != i {
@@ -990,6 +1060,65 @@ impl Actor {
                 None
             }
         }
+    }
+
+    /// One answer on a card that asks its questions one at a time: the next
+    /// question replaces it, and the last one answers the harness.
+    async fn pick(
+        &mut self,
+        message_id: i64,
+        actor: i64,
+        interaction: &str,
+        field: usize,
+        answer: String,
+    ) -> Option<String> {
+        if !self.agent.access.grants(actor).await.any() {
+            return Some(NO_ACCESS.to_owned());
+        }
+        let Some(card) = self.cards.get_mut(&message_id) else {
+            return Some(NOT_PENDING.to_owned());
+        };
+        let Some(form) = card.form.clone() else {
+            return Some(NOT_PENDING.to_owned());
+        };
+        // A second tap on an answered question, or a stale card.
+        if card.interaction.as_str() != interaction || card.answered.len() != field {
+            return Some(NOT_PENDING.to_owned());
+        }
+        card.answered.push(answer);
+        let (chat, interaction, answered) =
+            (card.chat, card.interaction.clone(), card.answered.clone());
+        if answered.len() < form.fields.len() {
+            let doc = render::pick_card(&self.agent.agent_name, &form, answered.len(), &answered);
+            let actions = pick_actions(&interaction, &form, answered.len());
+            if self.edit_in(chat, message_id, &doc, actions).await {
+                return None;
+            }
+            if let Some(card) = self.cards.get_mut(&message_id) {
+                card.answered.pop();
+            }
+            return Some("Could not show the next question. Try again.".to_owned());
+        }
+        let answers = form
+            .fields
+            .iter()
+            .zip(answered)
+            .filter_map(|(field, value)| {
+                Some(FieldAnswer {
+                    field: FieldId::new(field.id.as_str()).ok()?,
+                    values: vec![value],
+                })
+            })
+            .collect();
+        let toast = self
+            .answer(interaction, InteractionResponse::Answers { answers }, actor)
+            .await;
+        if toast.is_some()
+            && let Some(card) = self.cards.get_mut(&message_id)
+        {
+            card.answered.pop();
+        }
+        toast
     }
 
     async fn form(&mut self, message_id: i64, actor: i64, values: &[FormValue]) -> Option<String> {
@@ -1850,6 +1979,17 @@ impl Actor {
         if !done.is_empty() {
             builder.paragraph(&format!("Done: {}.", done.join(", ")));
         }
+        let missed: Vec<String> = receipts
+            .iter()
+            .filter(|receipt| receipt.outcome != ReleaseStepOutcome::Done)
+            .map(|receipt| step_label(&receipt.step))
+            .collect();
+        if !missed.is_empty() {
+            builder.paragraph(&format!(
+                "Could not confirm: {}. Check it where you continue.",
+                missed.join(", ")
+            ));
+        }
         if let Some(native) = &self.native {
             match handoff_instruction(
                 self.agent.handoff_provider(),
@@ -1927,6 +2067,38 @@ impl Actor {
             }
             SessionOp::Compact => self.native_op(Op::Compact, "Compacting the context.").await,
             SessionOp::Clear => self.native_op(Op::Clear, "Context cleared.").await,
+            SessionOp::Mode(mode) => {
+                let Ok(id) = inline_agent_bridge::harness::ModeId::new(mode.clone()) else {
+                    return Some("That mode is not available.".to_owned());
+                };
+                let done = if mode == "plan" {
+                    "Plan mode: the agent plans and changes nothing until you approve."
+                } else {
+                    "Plan mode is off."
+                };
+                self.native_op(Op::Mode { mode: id }, done).await
+            }
+            SessionOp::Review(branch) => {
+                let target = match branch {
+                    Some(branch) => {
+                        inline_agent_bridge::harness::ReviewTarget::BaseBranch { branch }
+                    }
+                    None => inline_agent_bridge::harness::ReviewTarget::UncommittedChanges,
+                };
+                self.native_op(Op::Review { target }, "Reviewing.").await
+            }
+            SessionOp::Undo => match self.last_turn_input.clone() {
+                Some(input) => {
+                    self.native_op(
+                        Op::RewindFiles {
+                            to: inline_agent_bridge::harness::RewindPoint::Input { input },
+                        },
+                        "Undid the last turn's file changes.",
+                    )
+                    .await
+                }
+                None => Some("Nothing to undo yet.".to_owned()),
+            },
         }
     }
 
@@ -2222,6 +2394,9 @@ impl Actor {
             Event::Turn { turn, phase } => match phase {
                 TurnPhase::Started { inputs } => {
                     self.turn = Some(turn.clone());
+                    if let Some(first) = inputs.first() {
+                        self.last_turn_input = Some(first.clone());
+                    }
                     self.turn_started = Some(now_ms() as i64 / 1000);
                     // Running again: whatever limit it waited on has reset.
                     self.waiting = None;
@@ -2301,6 +2476,7 @@ impl Actor {
             }
             _ => {}
         }
+        self.renderer.set_folder(self.folder());
         let ops = self.renderer.apply(&envelope);
         self.render(ops).await;
         if (envelope.event.is_control() || matches!(envelope.event, Event::Child { .. }))
@@ -2397,6 +2573,49 @@ impl Actor {
         self.flush_outbox().await;
     }
 
+    /// An answer or card Inline refused (or whose chat is gone): one plain-text
+    /// try, then it is dropped with a notice, so it never blocks the outbox.
+    async fn drop_refused(&mut self, outgoing: Outgoing, failure: Failure) {
+        let kind = if outgoing.card.is_some() {
+            "card"
+        } else {
+            "answer"
+        };
+        log::error!(
+            target: "inline::bridge::v2",
+            "chat={} {kind} {failure:?} by Inline ({:?})",
+            outgoing.chat,
+            limits::Size::of(&outgoing.doc)
+        );
+        if let Err(error) = self.agent.ledger.remove_output(outgoing.random_id) {
+            log::error!(target: "inline::bridge::v2", "cannot settle retained output: {error}");
+        }
+        if failure == Failure::Gone {
+            return;
+        }
+        crate::telemetry::report_bridge_output_refused(kind);
+        if !outgoing.fallback {
+            let random_id = outgoing.random_id.wrapping_add(1).max(1);
+            self.outbox.push_front(Outgoing {
+                doc: plain_fallback(&outgoing.doc),
+                random_id,
+                fallback: true,
+                ..outgoing
+            });
+            return;
+        }
+        let what = if kind == "card" {
+            "a request for you"
+        } else {
+            "an answer"
+        };
+        self.notice(&format!(
+            "{} had {what} Inline couldn't show. Continue in the terminal to see it.",
+            self.agent.agent_name
+        ))
+        .await;
+    }
+
     async fn flush_outbox(&mut self) {
         while let Some(outgoing) = self.outbox.pop_front() {
             // Persist before the first attempt, including a closed card's replacement.
@@ -2419,7 +2638,12 @@ impl Actor {
                 return;
             }
             let mut sent = None;
+            let mut failure = Failure::Retry(None);
             for delay in PUBLISH_RETRIES {
+                let delay = match failure {
+                    Failure::Retry(Some(after)) => delay.max(after.min(MAX_PUBLISH_WAIT)),
+                    _ => delay,
+                };
                 tokio::time::sleep(delay).await;
                 match api::send_doc_as(
                     &self.agent.bot,
@@ -2438,17 +2662,33 @@ impl Actor {
                     }
                     Err(error) => {
                         log::warn!(target: "inline::bridge::v2", "chat={} publish failed: {error}", outgoing.chat);
+                        failure = error.failure();
+                        if !matches!(failure, Failure::Retry(_)) {
+                            break;
+                        }
                     }
                 }
             }
             let Some(message_id) = sent else {
-                // Kept in order; the next tick tries again.
-                self.outbox.push_front(outgoing);
-                return;
+                match failure {
+                    // Kept in order; the next tick tries again.
+                    Failure::Retry(_) => {
+                        self.outbox.push_front(outgoing);
+                        return;
+                    }
+                    // Never retried as it is, so later output is not stuck
+                    // behind it.
+                    Failure::Refused | Failure::Gone => {
+                        self.drop_refused(outgoing, failure).await;
+                        continue;
+                    }
+                }
             };
+            // A closed card also drops its buttons; a refused or vanished
+            // card has nothing left to close.
             if outgoing.closed
-                && !self
-                    .edit_in(
+                && let Err(Failure::Retry(_)) = self
+                    .try_edit(
                         outgoing.chat,
                         message_id,
                         &outgoing.doc,
@@ -2483,6 +2723,7 @@ impl Actor {
                         interaction,
                         approval: form.is_none(),
                         form,
+                        answered: Vec::new(),
                     },
                 );
                 self.report().await;
@@ -2500,7 +2741,12 @@ impl Actor {
                         self.edits
                             .entry(slot)
                             .and_modify(|edit| edit.doc = doc.clone())
-                            .or_insert(PendingEdit { doc, due });
+                            .or_insert(PendingEdit {
+                                doc,
+                                due,
+                                actions: None,
+                                closing: false,
+                            });
                     }
                     None => {
                         if let Some(id) = self.send(&doc, None, Notify::Silent).await {
@@ -2519,9 +2765,29 @@ impl Actor {
                             )])
                         })
                         .flatten();
-                    let message_id = match self.slots.remove(&slot) {
+                    let message_id = match self.slots.get(&slot).copied() {
                         Some(message_id) => {
-                            self.edit(message_id, &doc, actions).await;
+                            match self
+                                .try_edit(self.chat_id, message_id, &doc, actions.clone())
+                                .await
+                            {
+                                Err(Failure::Retry(after)) => {
+                                    // "Worked for" must land: kept until it does.
+                                    self.edits.insert(
+                                        slot,
+                                        PendingEdit {
+                                            doc,
+                                            due: tokio::time::Instant::now()
+                                                + after.unwrap_or(EDIT_INTERVAL),
+                                            actions,
+                                            closing: true,
+                                        },
+                                    );
+                                }
+                                _ => {
+                                    self.slots.remove(&slot);
+                                }
+                            }
                             Some(message_id)
                         }
                         None => self.send(&doc, actions, Notify::Silent).await,
@@ -2544,17 +2810,36 @@ impl Actor {
                         .as_ref()
                         .or(self.rendering_turn.as_ref())
                         .map(|turn| format!("{turn}:{}", text_digest(&doc.text)));
-                    let random_id = self.output_id("final", token.as_deref());
-                    self.publish(Outgoing {
-                        chat: self.chat_id,
-                        doc,
-                        reply_to,
-                        actions: None,
-                        random_id,
-                        card: None,
-                        closed: false,
-                    })
-                    .await;
+                    // An answer over Inline's limit goes out in parts.
+                    let parts = if limits::Size::of(&doc).fits() {
+                        vec![doc]
+                    } else {
+                        split_markdown(&doc.text, limits::MAX_TEXT_UTF16 * 4 / 5)
+                            .iter()
+                            .map(|part| Doc::markdown(part))
+                            .collect()
+                    };
+                    for (index, doc) in parts.into_iter().enumerate() {
+                        let token = token.as_ref().map(|token| {
+                            if index == 0 {
+                                token.clone()
+                            } else {
+                                format!("{token}:{index}")
+                            }
+                        });
+                        let random_id = self.output_id("final", token.as_deref());
+                        self.publish(Outgoing {
+                            chat: self.chat_id,
+                            doc,
+                            reply_to: if index == 0 { reply_to } else { None },
+                            actions: None,
+                            random_id,
+                            card: None,
+                            closed: false,
+                            fallback: false,
+                        })
+                        .await;
+                    }
                 }
                 RenderOp::Notice { doc } => {
                     self.flush_edits(true).await;
@@ -2566,7 +2851,10 @@ impl Actor {
                     actions,
                     form,
                 } => {
-                    let buttons = card_actions(&interaction, &actions);
+                    let buttons = match &form {
+                        Some(form) if render::pickable(form) => pick_actions(&interaction, form, 0),
+                        _ => card_actions(&interaction, &actions),
+                    };
                     let long = long_labels(&actions);
                     let doc = if long.is_empty() {
                         doc
@@ -2586,6 +2874,7 @@ impl Actor {
                         random_id,
                         card: Some((interaction, form)),
                         closed: false,
+                        fallback: false,
                     })
                     .await;
                 }
@@ -2615,6 +2904,7 @@ impl Actor {
                         random_id,
                         card: None,
                         closed: true,
+                        fallback: false,
                     })
                     .await;
                 }
@@ -2631,17 +2921,35 @@ impl Actor {
             .map(|(slot, _)| *slot)
             .collect();
         for slot in due {
-            if let (Some(edit), Some(message_id)) =
+            let (Some(edit), Some(message_id)) =
                 (self.edits.remove(&slot), self.slots.get(&slot).copied())
-                && !self
-                    .edit_in(self.chat_id, message_id, &edit.doc, None)
-                    .await
+            else {
+                continue;
+            };
+            match self
+                .try_edit(self.chat_id, message_id, &edit.doc, edit.actions.clone())
+                .await
             {
+                Ok(()) => {
+                    if edit.closing {
+                        self.slots.remove(&slot);
+                    }
+                }
                 // Tried again later, unless a newer edit replaced it.
-                self.edits.entry(slot).or_insert(PendingEdit {
-                    doc: edit.doc,
-                    due: now + EDIT_INTERVAL,
-                });
+                Err(Failure::Retry(after)) => {
+                    self.edits.entry(slot).or_insert(PendingEdit {
+                        due: now + after.unwrap_or(EDIT_INTERVAL),
+                        ..edit
+                    });
+                }
+                // Never retried as it is: the renderer keeps messages within
+                // Inline's limits, so this is rare and reported. The next
+                // edit of an open message may still land.
+                Err(Failure::Refused | Failure::Gone) => {
+                    if edit.closing {
+                        self.slots.remove(&slot);
+                    }
+                }
             }
         }
     }
@@ -2726,11 +3034,29 @@ impl Actor {
         doc: &Doc,
         actions: Option<proto::MessageActions>,
     ) -> bool {
+        self.try_edit(chat_id, message_id, doc, actions)
+            .await
+            .is_ok()
+    }
+
+    async fn try_edit(
+        &self,
+        chat_id: i64,
+        message_id: i64,
+        doc: &Doc,
+        actions: Option<proto::MessageActions>,
+    ) -> Result<(), Failure> {
         match api::edit_doc(&self.agent.bot, chat_id, message_id, doc, actions).await {
-            Ok(()) => true,
+            Ok(()) => Ok(()),
             Err(error) => {
-                log::warn!(target: "inline::bridge::v2", "edit failed: {error}");
-                false
+                let failure = error.failure();
+                if failure == Failure::Refused {
+                    log::error!(target: "inline::bridge::v2", "chat={chat_id} edit refused: {error} ({:?})", limits::Size::of(doc));
+                    crate::telemetry::report_bridge_output_refused("edit");
+                } else {
+                    log::warn!(target: "inline::bridge::v2", "edit failed: {error}");
+                }
+                Err(failure)
             }
         }
     }
@@ -3063,6 +3389,74 @@ fn limit_notice(agent_name: &str, resets_at: Option<i64>, now: i64) -> String {
     format!("{agent_name} reached its usage limit.{when}")
 }
 
+/// Markdown cut into parts of at most `max_utf16` units at line ends, closing
+/// and reopening a code fence a cut falls inside.
+fn split_markdown(text: &str, max_utf16: usize) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut part = String::new();
+    let mut fence: Option<String> = None;
+    for line in text.split_inclusive('\n') {
+        let units = |text: &str| text.encode_utf16().count();
+        if !part.is_empty() && units(&part) + units(line) + 4 > max_utf16 {
+            if fence.is_some() {
+                part.push_str("\n```");
+            }
+            parts.push(std::mem::take(&mut part));
+            if let Some(open) = &fence {
+                part.push_str(open);
+                part.push('\n');
+            }
+        }
+        // A line longer than a whole part is cut by characters.
+        let mut rest = line;
+        while units(rest) > max_utf16 {
+            let mut count = 0;
+            let cut = rest
+                .char_indices()
+                .find(|(_, character)| {
+                    count += character.len_utf16();
+                    count > max_utf16
+                })
+                .map_or(rest.len(), |(index, _)| index);
+            parts.push(rest[..cut].to_owned());
+            rest = &rest[cut..];
+        }
+        let trimmed = rest.trim_start();
+        if trimmed.starts_with("```") {
+            fence = match fence {
+                Some(_) => None,
+                None => Some(trimmed.trim_end().to_owned()),
+            };
+        }
+        part.push_str(rest);
+    }
+    if !part.trim().is_empty() {
+        parts.push(part);
+    }
+    parts
+}
+
+/// The plain text of a message Inline refused, within its limits.
+fn plain_fallback(doc: &Doc) -> Doc {
+    let max = limits::MAX_TEXT_UTF16 * 4 / 5;
+    let mut text: String = doc
+        .text
+        .chars()
+        .scan(0, |count, character| {
+            *count += character.len_utf16();
+            (*count <= max).then_some(character)
+        })
+        .collect();
+    if text.len() < doc.text.len() {
+        text.push_str("\n\n(Cut: the rest was longer than Inline allows.)");
+    }
+    Doc {
+        text,
+        blocks: Vec::new(),
+        markdown: false,
+    }
+}
+
 pub(crate) fn paragraph(text: &str) -> Doc {
     let mut builder = DocBuilder::new();
     builder.paragraph(text);
@@ -3150,6 +3544,43 @@ fn long_labels(actions: &[CardAction]) -> Vec<String> {
         .collect()
 }
 
+/// A question's options as buttons, one per row; anyone with access to the
+/// agent may answer.
+pub(crate) fn pick_actions(
+    interaction: &InteractionId,
+    form: &QuestionForm,
+    field: usize,
+) -> Option<proto::MessageActions> {
+    let FieldInput::Select { options, .. } = &form.fields.get(field)?.input else {
+        return None;
+    };
+    let rows = options
+        .iter()
+        .enumerate()
+        .filter_map(|(index, option)| {
+            let data = serde_json::to_vec(&ActionData::Pick {
+                i: interaction.to_string(),
+                f: field,
+                o: index,
+            })
+            .ok()?;
+            Some(proto::MessageActionRow {
+                actions: vec![proto::MessageAction {
+                    action_id: format!("v2-q{field}-{index}"),
+                    text: button_text(&option.label),
+                    action: Some(proto::message_action::Action::Callback(
+                        proto::MessageActionCallback { data },
+                    )),
+                    style: proto::message_action::Style::Default as i32,
+                    required_grant: proto::AgentGrantRequirement::Access as i32,
+                    ..Default::default()
+                }],
+            })
+        })
+        .collect();
+    Some(proto::MessageActions { rows })
+}
+
 /// Approval buttons with the harness's own labels, one per row.
 pub(crate) fn card_actions(
     interaction: &InteractionId,
@@ -3225,6 +3656,55 @@ pub(crate) fn form_answers(form: &QuestionForm, values: &[FormValue]) -> Vec<Fie
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_answer_over_the_limit_splits_at_lines_and_keeps_code_fences_whole() {
+        let mut text = String::from("## Report\n\n```rust\n");
+        for line in 0..12_000 {
+            text.push_str(&format!("let value_{line} = {line};\n"));
+        }
+        text.push_str("```\n\nDone.");
+        let max = limits::MAX_TEXT_UTF16 * 4 / 5;
+        let parts = split_markdown(&text, max);
+        assert!(parts.len() > 1);
+        for part in &parts {
+            assert!(part.encode_utf16().count() <= max + 8, "{}", part.len());
+            assert_eq!(
+                part.matches("```").count() % 2,
+                0,
+                "every part closes its fences"
+            );
+        }
+        assert!(parts[0].starts_with("## Report"));
+        assert!(parts.last().expect("last").trim_end().ends_with("Done."));
+        assert!(
+            parts[1].starts_with("```rust\n"),
+            "the next part reopens the fence"
+        );
+    }
+
+    #[test]
+    fn one_line_longer_than_a_part_is_cut_by_characters() {
+        let text = "é".repeat(250_000);
+        let parts = split_markdown(&text, 80_000);
+        assert_eq!(parts.concat(), text);
+        assert!(
+            parts
+                .iter()
+                .all(|part| part.encode_utf16().count() <= 80_000)
+        );
+    }
+
+    #[test]
+    fn the_plain_fallback_fits_and_says_it_was_cut() {
+        let doc = Doc::markdown(&"word ".repeat(40_000));
+        let plain = plain_fallback(&doc);
+        assert!(!plain.markdown && plain.blocks.is_empty());
+        assert!(limits::Size::of(&plain).fits());
+        assert!(plain.text.ends_with("longer than Inline allows.)"));
+        let short = plain_fallback(&Doc::markdown("**hi**"));
+        assert_eq!(short.text, "**hi**");
+    }
     use inline_agent_bridge::harness::{FieldOption, FormField};
 
     #[test]
@@ -3399,6 +3879,7 @@ pub(crate) mod recovery_tests {
             uncertain: HashMap::new(),
             outbox,
             rendering_turn: None,
+            last_turn_input: None,
         }
     }
 
