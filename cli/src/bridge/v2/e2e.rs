@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
-use super::projects::ProjectSource;
+use super::folders::FolderSource;
 use super::render::Vocabulary;
 use super::runtime::{Runtime, V2Config};
 use super::tools::{Tools, ToolsConfig};
@@ -379,7 +379,7 @@ async fn codex_round_trip_through_inline() {
     let folder = dir.path().join("project");
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("README.md"), "e2e project\n").unwrap();
-    // A second project, for a thread that picks it (step 10).
+    // A second folder, for a thread that picks it (step 10).
     let other_project = std::fs::canonicalize(dir.path())
         .unwrap()
         .join("other-project");
@@ -1487,7 +1487,7 @@ async fn codex_round_trip_through_inline() {
     );
 
     // 10. A thread the owner bound to the agent is the agent's own: a plain
-    // message reaches it, in the project, on the model and reasoning its
+    // message reaches it, in the folder, on the model and reasoning its
     // composer chain set.
     let other_project_id = crate::bridge::workspace_id(&other_project)
         .unwrap()
@@ -1569,12 +1569,12 @@ async fn codex_round_trip_through_inline() {
             used.get("reasoning")
         );
     }
-    // Its session opened in the chosen project, not the agent's folder.
+    // Its session opened in the chosen folder, not the agent's.
     assert!(
         used.get("input_text")
             .and_then(Value::as_str)
             .is_some_and(|input| input.contains(&other_project.display().to_string())),
-        "Codex ran the bound thread in its project: {:?}",
+        "Codex ran the bound thread in its folder: {:?}",
         used.get("input_text")
     );
     let bound_work = owner
@@ -1591,7 +1591,7 @@ async fn codex_round_trip_through_inline() {
     assert_eq!(
         bound_work.workspace_label.as_deref(),
         Some("other-project"),
-        "the work is recorded in its project"
+        "the work is recorded in its folder"
     );
 
     // 11. Out of usage: one notice says so and the owner's attention points
@@ -1913,11 +1913,11 @@ impl CodexBridge {
             Some(tools),
         )
         .unwrap()
-        // The agent's folder and a second project a thread can pick.
-        .with_projects(ProjectSource::listing(
+        // A second folder, registered with the bridge, a thread can pick.
+        .with_folders(FolderSource::listing(
             &self.dir.join("bridge.sqlite"),
             "e2e-installation",
-            &[&self.folder, &self.dir.join("other-project")],
+            &[&self.dir.join("other-project")],
         ));
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let running = tokio::spawn(async move {

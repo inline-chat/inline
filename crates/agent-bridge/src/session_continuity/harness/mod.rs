@@ -29,10 +29,10 @@ mod stream;
 
 pub use availability::{Availability, AvailabilityMatrix, CapabilityManifest, CompatTier};
 pub use driver::{
-    Catalog, CatalogMode, CatalogScope, EventStream, ExecutableInfo, ExecutableSource, ForkPoint,
-    HarnessDriver, HarnessFuture, LiveWork, OpenError, OpenMode, OpenSpec, OutputMode,
-    ReleaseOutcome, Released, RuntimeHealth, RuntimeInfo, SendError, Session, SessionPage,
-    SessionQuery, SessionSummary,
+    Catalog, CatalogFolder, CatalogMode, CatalogScope, EventStream, ExecutableInfo,
+    ExecutableSource, ForkPoint, HarnessDriver, HarnessFuture, LiveWork, OpenError, OpenMode,
+    OpenSpec, OutputMode, ReleaseOutcome, Released, RuntimeHealth, RuntimeInfo, SendError, Session,
+    SessionPage, SessionQuery, SessionSummary,
 };
 pub use event::{
     ApprovalSubject, ChildStatus, ChildUpdate, ClosedBy, CommandAction, Decision, DecisionKind,

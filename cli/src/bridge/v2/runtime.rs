@@ -32,9 +32,9 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::api::{self, Notify, chat_peer};
 use super::doc::DocBuilder;
+use super::folders::{FolderSource, Folders};
 use super::intake::{MessageFacts, grants_by_user, group_message};
 use super::ledger::{Begin, InputState, Ledger, input_id};
-use super::projects::{ProjectSource, Projects};
 use super::render::{ActionStyle, QUESTION_FORM_ID, Vocabulary};
 use super::settings;
 use super::tools::Tools;
@@ -190,9 +190,9 @@ pub(crate) struct Runtime {
     known_sessions: HashMap<i64, bool>,
     /// The harness's pickers, refreshed now and then.
     catalog: Option<(tokio::time::Instant, Catalog)>,
-    /// Where threads' folders are picked from (v1's project listing).
-    project_source: Option<ProjectSource>,
-    projects: Option<(tokio::time::Instant, Projects)>,
+    /// The folders registered with the bridge, which threads pick from with
+    /// the agent's own and the harness's.
+    folder_source: Option<FolderSource>,
     reconnect: Reconnect,
     /// The harness health the last heartbeat reported.
     reported_health: Option<RuntimeHealth>,
@@ -272,8 +272,7 @@ impl Runtime {
             bound_projects: HashMap::new(),
             known_sessions: HashMap::new(),
             catalog: None,
-            project_source: None,
-            projects: None,
+            folder_source: None,
             reconnect: Reconnect::default(),
             reported_health: None,
             published: None,
@@ -292,9 +291,9 @@ impl Runtime {
         self
     }
 
-    /// Lets threads pick their folder among these projects.
-    pub(crate) fn with_projects(mut self, source: ProjectSource) -> Self {
-        self.project_source = Some(source);
+    /// Lets threads pick their folder, among these and the harness's.
+    pub(crate) fn with_folders(mut self, source: FolderSource) -> Self {
+        self.folder_source = Some(source);
         self
     }
 
@@ -467,7 +466,7 @@ impl Runtime {
     /// these. A harness that cannot list its models yet keeps what an earlier
     /// run published, and is asked again with the next heartbeat. Later
     /// heartbeats reuse the models last listed (listing can start a harness
-    /// process) and bring new projects to the apps.
+    /// process) and bring new folders to the apps.
     async fn publish_capabilities(&mut self) {
         let catalog = match &self.catalog {
             Some((_, catalog)) => catalog.clone(),
@@ -479,10 +478,10 @@ impl Runtime {
                 catalog
             }
         };
-        let projects = self
-            .projects()
-            .and_then(|projects| projects.catalog(&self.config.machine_label));
-        let capabilities = settings::capabilities(&catalog, projects);
+        let folders = self
+            .folders(&catalog)
+            .and_then(|folders| folders.catalog(&self.config.machine_label));
+        let capabilities = settings::capabilities(&catalog, folders);
         if self.published.as_ref() == Some(&capabilities) {
             return;
         }
@@ -1040,26 +1039,16 @@ impl Runtime {
         }
     }
 
-    /// The projects threads pick their folder from, read again after a
-    /// minute. A failed read keeps the last one.
-    fn projects(&mut self) -> Option<Projects> {
-        let source = self.project_source.as_ref()?;
-        if self
-            .projects
-            .as_ref()
-            .is_none_or(|(at, _)| at.elapsed() >= CATALOG_TTL)
-        {
-            match source.read() {
-                Ok(projects) => self.projects = Some((tokio::time::Instant::now(), projects)),
-                Err(error) => {
-                    log::warn!(target: "inline::bridge::v2", "projects unavailable: {error}");
-                    if let Some((at, _)) = &mut self.projects {
-                        *at = tokio::time::Instant::now();
-                    }
-                }
-            }
-        }
-        self.projects.as_ref().map(|(_, projects)| projects.clone())
+    /// The folders threads pick from: the agent's own, the harness's in
+    /// `catalog`, and the ones registered with the bridge.
+    fn folders(&self, catalog: &Catalog) -> Option<Folders> {
+        self.folder_source
+            .as_ref()?
+            .read(&self.config.folder, &catalog.folders)
+            .map_err(
+                |error| log::warn!(target: "inline::bridge::v2", "folders unavailable: {error}"),
+            )
+            .ok()
     }
 
     /// Where this thread's work runs: its pick, else the agent's folder.
@@ -1156,9 +1145,10 @@ impl Runtime {
             return;
         }
         self.bound_projects.insert(chat_id, project.clone());
+        let catalog = self.catalog().await;
         let Some(folder) = self
-            .projects()
-            .and_then(|projects| projects.folder(&project).map(PathBuf::from))
+            .folders(&catalog)
+            .and_then(|folders| folders.folder(&project).map(PathBuf::from))
         else {
             log::warn!(target: "inline::bridge::v2", "chat={chat_id} project={project} is not on this machine; the thread keeps its folder");
             return;
@@ -1190,13 +1180,13 @@ impl Runtime {
         let folder = self.thread_folder(chat_id);
         let label = folder_label(&folder);
         let folder_fixed = self.folder_fixed(chat_id).await;
-        // A bound thread's project is its composer chain's.
-        let projects = if self.bound_configs.contains_key(&chat_id) {
+        // A bound thread's folder is its composer chain's.
+        let folders = if self.bound_configs.contains_key(&chat_id) {
             None
         } else {
-            self.projects()
+            self.folders(catalog)
         };
-        let options = projects.as_ref().map(Projects::options).unwrap_or_default();
+        let options = folders.as_ref().map(Folders::options).unwrap_or_default();
         // Usage as the harness last reported it; none yet and the apps say so.
         let usage = self
             .agent
@@ -1215,10 +1205,8 @@ impl Runtime {
             settings: self.thread_settings.get(&chat_id).unwrap_or(&default),
             folder_label: &label,
             machine_label: &self.config.machine_label,
-            projects: &options,
-            project: projects
-                .as_ref()
-                .and_then(|projects| projects.id_of(&folder)),
+            folders: &options,
+            folder_id: folders.as_ref().and_then(|folders| folders.id_of(&folder)),
             folder_fixed,
             can_compact: self.works.contains_key(&chat_id),
             usage: &usage,
@@ -1272,11 +1260,11 @@ impl Runtime {
                 self.save_thread(chat_id);
                 SessionOp::Settings(change)
             }
-            Ok(settings::Invocation::Project(id)) => {
+            Ok(settings::Invocation::Folder(id)) => {
                 let chosen = self
-                    .projects()
-                    .and_then(|projects| projects.folder(&id).map(PathBuf::from))
-                    .ok_or_else(|| "That project is not available on this machine.".to_owned());
+                    .folders(&catalog)
+                    .and_then(|folders| folders.folder(&id).map(PathBuf::from))
+                    .ok_or_else(|| "That folder is not available on this machine.".to_owned());
                 let chosen = match chosen {
                     Ok(folder) => self.choose_folder(chat_id, folder).await,
                     Err(message) => Err(message),
@@ -1371,7 +1359,7 @@ impl Runtime {
                         "Set for this thread, from the next message.".to_owned()
                     }
                 }
-                Ok(settings::Invocation::Compact | settings::Invocation::Project(_)) => {
+                Ok(settings::Invocation::Compact | settings::Invocation::Folder(_)) => {
                     "Use /compact.".to_owned()
                 }
                 Err(message) => message.to_owned(),

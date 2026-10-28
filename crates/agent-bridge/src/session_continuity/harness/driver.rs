@@ -163,6 +163,19 @@ pub struct Catalog {
     /// Skills.
     #[serde(default)]
     pub skills: Vec<DriverSettingOption>,
+    /// Folders the harness knows to work in, in its own order (Codex's
+    /// projects). A session still opens in any folder.
+    #[serde(default)]
+    pub folders: Vec<CatalogFolder>,
+}
+
+/// A folder the harness knows, under its own name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CatalogFolder {
+    /// Absolute path.
+    pub path: PathBuf,
+    /// The harness's name for it.
+    pub label: String,
 }
 
 /// One collaboration or plan mode.

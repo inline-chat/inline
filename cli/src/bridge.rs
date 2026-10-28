@@ -2010,7 +2010,6 @@ async fn run_provider_installation(
             owner_user_id: account.owner_user_id,
             dm_chat_id: dm_chat_id.get(),
             workspace,
-            workspace_id: current_workspace_id.clone(),
             machine_label: if account.host_label.trim().is_empty() {
                 local_host_label()
             } else {
@@ -3120,8 +3119,6 @@ struct V2Launch<'a> {
     owner_user_id: i64,
     dm_chat_id: i64,
     workspace: PathBuf,
-    /// The workspace's id in the bridge store: the default project.
-    workspace_id: WorkspaceId,
     machine_label: String,
     allowlist: Vec<i64>,
     owner_control: Option<Arc<OwnerControl>>,
@@ -3141,7 +3138,6 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         owner_user_id,
         dm_chat_id,
         workspace,
-        workspace_id,
         machine_label,
         allowlist,
         owner_control,
@@ -3238,11 +3234,9 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         harness,
         Some(tools),
     )?
-    .with_projects(v2::projects::ProjectSource {
+    .with_folders(v2::folders::FolderSource {
         store: legacy_store.clone(),
         installation_id: InstallationId::new(installation.installation_id.clone())?,
-        default_id: workspace_id,
-        codex_projects_path: projects::codex_projects_path(&installation.provider_id),
     })
     .with_legacy_store(legacy_store);
     if let Some(readiness) = readiness {
