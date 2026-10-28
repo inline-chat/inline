@@ -6,7 +6,7 @@
 //! hands it to the thread's work actor (`work.rs`).
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,10 +22,10 @@ use inline_agent_bridge::harness::{
     RuntimeHealth, SettingsChange, SetupReason, UserId,
 };
 use inline_client::{
-    AnswerBotChatSettingsRequest, AnswerMessageActionRequest, BotChatSettingsDocument,
-    BotChatSettingsProblemCode, BotChatSettingsResponse, BotInteractionEvent, BotSettingsValue,
-    ClientEvent, ClientStatus, CreateReplyThreadRequest, InlineClient, InlineId,
-    LosslessEventReceiver, MessageRecord,
+    AnswerBotChatSettingsRequest, AnswerMessageActionRequest, BotCapability,
+    BotChatSettingsDocument, BotChatSettingsProblemCode, BotChatSettingsResponse,
+    BotInteractionEvent, BotSettingsValue, ClientEvent, ClientStatus, CreateReplyThreadRequest,
+    InlineClient, InlineId, LosslessEventReceiver, MessageRecord,
 };
 use inline_protocol::proto;
 use tokio::sync::{mpsc, oneshot};
@@ -34,6 +34,7 @@ use super::api::{self, Notify, chat_peer};
 use super::doc::DocBuilder;
 use super::intake::{MessageFacts, grants_by_user, group_message};
 use super::ledger::{Begin, InputState, Ledger, input_id};
+use super::projects::{ProjectSource, Projects};
 use super::render::{ActionStyle, QUESTION_FORM_ID, Vocabulary};
 use super::settings;
 use super::tools::Tools;
@@ -176,17 +177,27 @@ pub(crate) struct Runtime {
     moves: Option<mpsc::UnboundedReceiver<(i64, i64)>>,
     /// Chat → whether this agent created it, so it is the agent's own thread.
     own_threads: HashMap<i64, bool>,
-    /// Chat → its model, reasoning and permissions (settings and commands).
+    /// Chat → its model, reasoning, permissions and folder (settings and
+    /// commands).
     thread_settings: HashMap<i64, SettingsChange>,
     /// Bound chat → the model and reasoning its composer chain last set, so
     /// only a change there overrides a pick made in settings since.
     bound_configs: HashMap<i64, (Option<String>, Option<String>)>,
+    /// Bound chat → the project its composer chain last set.
+    bound_projects: HashMap<i64, String>,
+    /// Chat → whether Inline knows a session for its work, for threads with
+    /// no work running here yet. A session keeps its folder.
+    known_sessions: HashMap<i64, bool>,
     /// The harness's pickers, refreshed now and then.
     catalog: Option<(tokio::time::Instant, Catalog)>,
+    /// Where threads' folders are picked from (v1's project listing).
+    project_source: Option<ProjectSource>,
+    projects: Option<(tokio::time::Instant, Projects)>,
     reconnect: Reconnect,
     /// The harness health the last heartbeat reported.
     reported_health: Option<RuntimeHealth>,
-    capabilities_published: bool,
+    /// What the apps were last told, republished when the catalog changes.
+    published: Option<Vec<BotCapability>>,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
     loop_guards: LoopGuards,
@@ -258,10 +269,14 @@ impl Runtime {
             own_threads: HashMap::new(),
             thread_settings,
             bound_configs,
+            bound_projects: HashMap::new(),
+            known_sessions: HashMap::new(),
             catalog: None,
+            project_source: None,
+            projects: None,
             reconnect: Reconnect::default(),
             reported_health: None,
-            capabilities_published: false,
+            published: None,
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
             loop_guards: LoopGuards::default(),
@@ -274,6 +289,12 @@ impl Runtime {
         store: Arc<inline_agent_bridge::BridgeStore>,
     ) -> Self {
         self.legacy_store = Some(store);
+        self
+    }
+
+    /// Lets threads pick their folder among these projects.
+    pub(crate) fn with_projects(mut self, source: ProjectSource) -> Self {
+        self.project_source = Some(source);
         self
     }
 
@@ -442,24 +463,36 @@ impl Runtime {
         let _ = self.agent.ledger.prune(LEDGER_RETENTION_SECS);
     }
 
-    /// Agent Settings and the composer chain read these. A harness that
-    /// cannot list its models yet keeps what an earlier run published, and
-    /// is asked again with the next heartbeat.
+    /// Agent Settings, the composer chain and the empty-page Compose read
+    /// these. A harness that cannot list its models yet keeps what an earlier
+    /// run published, and is asked again with the next heartbeat. Later
+    /// heartbeats reuse the models last listed (listing can start a harness
+    /// process) and bring new projects to the apps.
     async fn publish_capabilities(&mut self) {
-        if self.capabilities_published {
-            return;
-        }
-        let catalog = self.catalog().await;
-        if self.catalog.is_none() {
+        let catalog = match &self.catalog {
+            Some((_, catalog)) => catalog.clone(),
+            None => {
+                let catalog = self.catalog().await;
+                if self.catalog.is_none() {
+                    return;
+                }
+                catalog
+            }
+        };
+        let projects = self
+            .projects()
+            .and_then(|projects| projects.catalog(&self.config.machine_label));
+        let capabilities = settings::capabilities(&catalog, projects);
+        if self.published.as_ref() == Some(&capabilities) {
             return;
         }
         match self
             .agent
             .bot
-            .set_bot_capabilities(settings::capabilities(&catalog))
+            .set_bot_capabilities(capabilities.clone())
             .await
         {
-            Ok(_) => self.capabilities_published = true,
+            Ok(_) => self.published = Some(capabilities),
             Err(error) => {
                 log::warn!(target: "inline::bridge::v2", "settings capabilities not published: {error}");
             }
@@ -622,8 +655,8 @@ impl Runtime {
                     return Ok(());
                 };
                 // The composer chain of a thread bound to this agent keeps
-                // its model and reasoning on the thread.
-                if let Some((model, effort)) = dialog
+                // its project, model and reasoning on the thread.
+                if let Some((project, model, effort)) = dialog
                     .agent_context
                     .as_ref()
                     .filter(|context| context.bot_user_id.get() == self.config.bot_user_id)
@@ -632,12 +665,17 @@ impl Runtime {
                             .configuration
                             .clone()
                             .map(|configuration| {
-                                (configuration.model_id, configuration.reasoning_effort_id)
+                                (
+                                    configuration.project_id,
+                                    configuration.model_id,
+                                    configuration.reasoning_effort_id,
+                                )
                             })
                             .unwrap_or_default()
                     })
                 {
                     self.bound_settings(chat_id, model, effort).await;
+                    self.bound_project(chat_id, project).await;
                 }
                 if dialog.peer_user_id.is_none()
                     && dialog.parent_chat_id.is_some()
@@ -790,6 +828,7 @@ impl Runtime {
                         configuration.reasoning_effort_id,
                     )
                     .await;
+                    self.bound_project(chat_id, configuration.project_id).await;
                 }
                 self.own_threads.insert(chat_id, own);
                 own
@@ -1001,14 +1040,163 @@ impl Runtime {
         }
     }
 
-    fn settings_document(&self, chat_id: i64, catalog: &Catalog) -> BotChatSettingsDocument {
+    /// The projects threads pick their folder from, read again after a
+    /// minute. A failed read keeps the last one.
+    fn projects(&mut self) -> Option<Projects> {
+        let source = self.project_source.as_ref()?;
+        if self
+            .projects
+            .as_ref()
+            .is_none_or(|(at, _)| at.elapsed() >= CATALOG_TTL)
+        {
+            match source.read() {
+                Ok(projects) => self.projects = Some((tokio::time::Instant::now(), projects)),
+                Err(error) => {
+                    log::warn!(target: "inline::bridge::v2", "projects unavailable: {error}");
+                    if let Some((at, _)) = &mut self.projects {
+                        *at = tokio::time::Instant::now();
+                    }
+                }
+            }
+        }
+        self.projects.as_ref().map(|(_, projects)| projects.clone())
+    }
+
+    /// Where this thread's work runs: its pick, else the agent's folder.
+    fn thread_folder(&self, chat_id: i64) -> PathBuf {
+        self.thread_settings
+            .get(&chat_id)
+            .and_then(|settings| settings.folder.clone())
+            .unwrap_or_else(|| self.config.folder.clone())
+    }
+
+    /// Whether Inline knows a session for this thread's work, asked once
+    /// per thread until a work runs here.
+    async fn session_known(&mut self, chat_id: i64) -> Result<bool, String> {
+        if let Some(known) = self.known_sessions.get(&chat_id) {
+            return Ok(*known);
+        }
+        let result = self
+            .agent
+            .owner
+            .lookup(proto::GetAgentSessionInput {
+                peer_id: Some(chat_peer(chat_id)),
+                bot_user_id: self.config.bot_user_id,
+                ..Default::default()
+            })
+            .await?;
+        let known = result
+            .connection
+            .is_some_and(|connection| !connection.session_ref.is_empty());
+        self.known_sessions.insert(chat_id, known);
+        Ok(known)
+    }
+
+    /// A session works in this thread's folder, so it stays.
+    async fn folder_fixed(&mut self, chat_id: i64) -> bool {
+        match self.works.get(&chat_id) {
+            Some(work) if !work.task.is_finished() => *work.phase.borrow() != WorkPhase::None,
+            _ => self.session_known(chat_id).await.unwrap_or(false),
+        }
+    }
+
+    /// Sets the folder this thread's work opens its session in. A running
+    /// work decides, since only it knows whether a session opened; a session
+    /// keeps its folder, so the change is refused with how to work elsewhere.
+    async fn choose_folder(&mut self, chat_id: i64, folder: PathBuf) -> Result<(), String> {
+        if !folder.is_dir() {
+            return Err(format!(
+                "The folder {} is not available on this machine.",
+                folder.display()
+            ));
+        }
+        match self.works.get(&chat_id) {
+            Some(work) if !work.task.is_finished() => {
+                let stopped = || "This work stopped. Try again.".to_owned();
+                let (reply, answer) = oneshot::channel();
+                work.tx
+                    .send(Command::Folder {
+                        folder: folder.clone(),
+                        reply,
+                    })
+                    .await
+                    .map_err(|_| stopped())?;
+                answer.await.map_err(|_| stopped())??;
+            }
+            _ => {
+                let known = self
+                    .session_known(chat_id)
+                    .await
+                    .map_err(|error| format!("Couldn't check this thread's work: {error}"))?;
+                if known {
+                    return Err(settings::folder_fixed(&folder_label(
+                        &self.thread_folder(chat_id),
+                    )));
+                }
+            }
+        }
+        self.set_thread_folder(chat_id, folder);
+        Ok(())
+    }
+
+    fn set_thread_folder(&mut self, chat_id: i64, folder: PathBuf) {
+        self.thread_settings.entry(chat_id).or_default().folder = Some(folder);
+        self.save_thread(chat_id);
+    }
+
+    /// A bound thread's project, as its composer chain set it, is the folder
+    /// its work opens in. The apps offer the choice only until a session
+    /// works there (they read Inline's record), so with no work here an
+    /// unanswered lookup trusts the binding; a known session keeps its folder.
+    async fn bound_project(&mut self, chat_id: i64, project: Option<String>) {
+        let Some(project) = project else {
+            return;
+        };
+        if self.bound_projects.get(&chat_id) == Some(&project) {
+            return;
+        }
+        self.bound_projects.insert(chat_id, project.clone());
+        let Some(folder) = self
+            .projects()
+            .and_then(|projects| projects.folder(&project).map(PathBuf::from))
+        else {
+            log::warn!(target: "inline::bridge::v2", "chat={chat_id} project={project} is not on this machine; the thread keeps its folder");
+            return;
+        };
+        if self.thread_folder(chat_id) == folder {
+            return;
+        }
+        let alive = self
+            .works
+            .get(&chat_id)
+            .is_some_and(|work| !work.task.is_finished());
+        let result = if alive || self.session_known(chat_id).await.is_ok() {
+            self.choose_folder(chat_id, folder).await
+        } else {
+            self.set_thread_folder(chat_id, folder);
+            Ok(())
+        };
+        if let Err(reason) = result {
+            log::info!(target: "inline::bridge::v2", "chat={chat_id} keeps its folder: {reason}");
+        }
+    }
+
+    async fn settings_document(
+        &mut self,
+        chat_id: i64,
+        catalog: &Catalog,
+    ) -> BotChatSettingsDocument {
         let default = SettingsChange::default();
-        let folder = self
-            .config
-            .folder
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "the agent's folder".to_owned());
+        let folder = self.thread_folder(chat_id);
+        let label = folder_label(&folder);
+        let folder_fixed = self.folder_fixed(chat_id).await;
+        // A bound thread's project is its composer chain's.
+        let projects = if self.bound_configs.contains_key(&chat_id) {
+            None
+        } else {
+            self.projects()
+        };
+        let options = projects.as_ref().map(Projects::options).unwrap_or_default();
         // Usage as the harness last reported it; none yet and the apps say so.
         let usage = self
             .agent
@@ -1025,8 +1213,13 @@ impl Runtime {
         settings::document(&settings::DocumentFacts {
             catalog,
             settings: self.thread_settings.get(&chat_id).unwrap_or(&default),
-            folder_label: &folder,
+            folder_label: &label,
             machine_label: &self.config.machine_label,
+            projects: &options,
+            project: projects
+                .as_ref()
+                .and_then(|projects| projects.id_of(&folder)),
+            folder_fixed,
             can_compact: self.works.contains_key(&chat_id),
             usage: &usage,
             context,
@@ -1062,7 +1255,7 @@ impl Runtime {
             );
         }
         let catalog = self.catalog().await;
-        let current = self.settings_document(chat_id, &catalog);
+        let current = self.settings_document(chat_id, &catalog).await;
         let Some((item_id, value, revision)) = invoked else {
             return BotChatSettingsResponse::Document(current);
         };
@@ -1079,6 +1272,25 @@ impl Runtime {
                 self.save_thread(chat_id);
                 SessionOp::Settings(change)
             }
+            Ok(settings::Invocation::Project(id)) => {
+                let chosen = self
+                    .projects()
+                    .and_then(|projects| projects.folder(&id).map(PathBuf::from))
+                    .ok_or_else(|| "That project is not available on this machine.".to_owned());
+                let chosen = match chosen {
+                    Ok(folder) => self.choose_folder(chat_id, folder).await,
+                    Err(message) => Err(message),
+                };
+                let document = self.settings_document(chat_id, &catalog).await;
+                return match chosen {
+                    Ok(()) => BotChatSettingsResponse::Document(document),
+                    Err(message) => settings::problem(
+                        BotChatSettingsProblemCode::InvalidValue,
+                        &message,
+                        Some(document),
+                    ),
+                };
+            }
             Ok(settings::Invocation::Compact) => SessionOp::Compact,
             Err(message) => {
                 return settings::problem(
@@ -1093,7 +1305,7 @@ impl Runtime {
                 .ask(chat_id, |reply| Command::Session { op, reply })
                 .await;
         }
-        BotChatSettingsResponse::Document(self.settings_document(chat_id, &catalog))
+        BotChatSettingsResponse::Document(self.settings_document(chat_id, &catalog).await)
     }
 
     async fn answer_settings(&self, request_id: u64, response: BotChatSettingsResponse) {
@@ -1159,7 +1371,9 @@ impl Runtime {
                         "Set for this thread, from the next message.".to_owned()
                     }
                 }
-                Ok(settings::Invocation::Compact) => "Use /compact.".to_owned(),
+                Ok(settings::Invocation::Compact | settings::Invocation::Project(_)) => {
+                    "Use /compact.".to_owned()
+                }
                 Err(message) => message.to_owned(),
             };
         }
@@ -1211,10 +1425,7 @@ impl Runtime {
             label(&settings.model),
             label(&settings.effort),
             label(&settings.permission_mode),
-            self.config
-                .folder
-                .file_name()
-                .map_or_else(|| "?".into(), |name| name.to_string_lossy()),
+            folder_label(&self.thread_folder(chat_id)),
             match self.config.vocabulary {
                 Vocabulary::Codex => "Codex",
                 Vocabulary::Claude => "Claude Code",
@@ -1242,6 +1453,8 @@ impl Runtime {
         if let Some(bound) = self.bound_configs.get(&from).cloned() {
             self.bound_configs.insert(to, bound);
         }
+        self.known_sessions.remove(&from);
+        self.known_sessions.remove(&to);
         self.own_threads.insert(to, true);
         if let Some(work) = self.works.remove(&from) {
             self.works.insert(to, work);
@@ -1865,6 +2078,8 @@ impl Runtime {
         // A new work here takes the chat back from one that moved out.
         self.agent.ledger.forget_move(chat_id)?;
         self.moved.remove(&chat_id);
+        // The work knows its session from now on.
+        self.known_sessions.remove(&chat_id);
         self.works.insert(
             chat_id,
             super::work::spawn(
@@ -1906,6 +2121,15 @@ impl Runtime {
             .await?;
         let chat_id = created.chat_id.get();
         self.own_threads.insert(chat_id, true);
+        // The new thread works where its parent does.
+        if let Some(folder) = self
+            .thread_settings
+            .get(&group.chat_id)
+            .and_then(|settings| settings.folder.clone())
+        {
+            self.thread_settings.entry(chat_id).or_default().folder = Some(folder);
+            self.save_thread(chat_id);
+        }
         let mode = self.effective_mode(participation.as_ref());
         self.works.insert(
             chat_id,
@@ -1995,14 +2219,15 @@ impl Runtime {
         let known = self
             .works
             .iter()
-            .any(|(chat, work)| match agent_session_id {
+            .find(|(chat, work)| match agent_session_id {
                 Some(id) => work.agent_session_id() == Some(id),
-                None => *chat == chat_id,
-            });
-        if !known {
+                None => **chat == chat_id,
+            })
+            .map(|(chat, _)| *chat);
+        let Some(work_chat) = known else {
             return problem("This work is not open on this machine.");
-        }
-        let folder = self.config.folder.clone();
+        };
+        let folder = self.thread_folder(work_chat);
         let path = query.path.to_owned();
         let after = query.after.to_owned();
         let text = query.query.map(str::to_owned);
@@ -2032,6 +2257,14 @@ struct FileQuery<'a> {
     after: &'a str,
     query: Option<&'a str>,
     limit: Option<u32>,
+}
+
+/// A folder as people know it: its name.
+fn folder_label(folder: &Path) -> String {
+    folder
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| folder.display().to_string())
 }
 
 /// The text after `/name` (and an optional `@bot`), trimmed.
