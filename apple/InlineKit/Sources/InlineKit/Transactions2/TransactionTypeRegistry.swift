@@ -48,6 +48,7 @@ public enum TransactionTypeRegistry {
       case is UpdateDialogFollowModeTransaction: "update_dialog_follow_mode"
       case is MoveThreadTransaction: "move_thread"
       case is PinMessageTransaction: "pin_message"
+      case is UnpinAllMessagesTransaction: "unpin_all_messages"
       case is TranslateMessagesTransaction: "translate_messages"
       case is UpdateUserSettingsTransaction: "update_user_settings"
       case is MarkAsUnreadTransaction: "mark_as_unread"
@@ -128,6 +129,7 @@ public enum TransactionTypeRegistry {
         return try decoder.decode(UpdateDialogFollowModeTransaction.self, from: data)
       case "move_thread": return try decoder.decode(MoveThreadTransaction.self, from: data)
       case "pin_message": return try decoder.decode(PinMessageTransaction.self, from: data)
+      case "unpin_all_messages": return try decoder.decode(UnpinAllMessagesTransaction.self, from: data)
       case "translate_messages": return try decoder.decode(TranslateMessagesTransaction.self, from: data)
       case "update_user_settings": return try decoder.decode(UpdateUserSettingsTransaction.self, from: data)
       case "mark_as_unread": return try decoder.decode(MarkAsUnreadTransaction.self, from: data)
