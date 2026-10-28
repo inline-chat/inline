@@ -445,6 +445,15 @@ class GlassComposeAppKit: NSView {
       guard let self, case .chat = usage else { return false }
       return state.sendSilently
     }
+    view.isAgentControlsToggleAvailableProvider = { [weak self] in
+      self?.agentChain?.isEligible == true
+    }
+    view.isAgentControlsShownProvider = { [weak self] in
+      self?.agentChain?.isHidden == false
+    }
+    view.onToggleAgentControls = { [weak self] in
+      self?.agentChain?.toggleHidden()
+    }
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -487,14 +496,20 @@ class GlassComposeAppKit: NSView {
   private var isAccessoryBarExpanded = false
   private var newThreadEscapeKeyUnsubscribe: (() -> Void)?
 
-  // Agent controls (thread Compose only): a pill at the editor's leading edge
-  // and the chain row under the editor. Both hug their SwiftUI content.
+  // Agent controls (chat Compose only): a quiet row under the editor with the
+  // Agent, folder, context, model and reasoning, shown while the draft would
+  // reach an Agent in Detailed mode, like the empty-page Compose.
   private var agentChain: ComposeAgentChainModel?
-  private var agentPillHost: NSView?
   private var agentChainHost: NSView?
   private var agentChainHeightConstraint: NSLayoutConstraint?
   private var isAgentChainShown = false
-  private static let agentChainRowHeight: CGFloat = 30
+  private static let agentChainRowHeight: CGFloat = 28
+  // The stop or resume circle right of the Compose pill, beside send, while
+  // an Agent's turn runs in this chat.
+  private var agentRunHost: NSView?
+  private var agentRunWidthConstraint: NSLayoutConstraint?
+  private var agentRunLeadingConstraint: NSLayoutConstraint?
+  private var isAgentRunShown = false
 
   // -------
 
@@ -728,20 +743,21 @@ class GlassComposeAppKit: NSView {
         glassTrailingView = capabilities.supportsVoiceMessages ? voiceButton : nil
 
         if let agentChain {
-          let pillHost = NSHostingView(rootView: ComposeAgentPill(model: agentChain))
-          pillHost.sizingOptions = [.intrinsicContentSize]
-          pillHost.translatesAutoresizingMaskIntoConstraints = false
-          pillHost.setContentHuggingPriority(.required, for: .horizontal)
-          pillHost.setContentCompressionResistancePriority(.required, for: .horizontal)
-          editorRowView.addSubview(pillHost)
-          agentPillHost = pillHost
-
           let chainHost = NSHostingView(rootView: ComposeAgentChainBar(model: agentChain))
           chainHost.sizingOptions = []
           chainHost.translatesAutoresizingMaskIntoConstraints = false
           chainHost.isHidden = true
           pillContentView.addSubview(chainHost)
           agentChainHost = chainHost
+
+          let runHost = NSHostingView(
+            rootView: ComposeAgentRunButton(model: agentChain, size: controlMode.sideButtonSize)
+          )
+          runHost.sizingOptions = []
+          runHost.translatesAutoresizingMaskIntoConstraints = false
+          runHost.isHidden = true
+          contentView.addSubview(runHost)
+          agentRunHost = runHost
         }
 
       case .accessoryBar:
@@ -912,15 +928,7 @@ class GlassComposeAppKit: NSView {
         )
     }
 
-    if let agentPillHost {
-      constraints.append(contentsOf: [
-        agentPillHost.leadingAnchor.constraint(equalTo: glassEditorRowView.leadingAnchor),
-        agentPillHost.bottomAnchor.constraint(equalTo: glassEditorRowView.bottomAnchor),
-        textEditor.leadingAnchor.constraint(equalTo: agentPillHost.trailingAnchor),
-      ])
-    } else {
-      constraints.append(textEditor.leadingAnchor.constraint(equalTo: glassEditorRowView.leadingAnchor))
-    }
+    constraints.append(textEditor.leadingAnchor.constraint(equalTo: glassEditorRowView.leadingAnchor))
 
     switch layout {
       case .sideControls:
@@ -987,11 +995,28 @@ class GlassComposeAppKit: NSView {
           ])
         }
 
+        // The run circle, when present, sits between the pill and the
+        // trailing side button; it is zero wide until a turn runs.
+        var pillTrailingEdge = glassComposePillView.trailingAnchor
+        if let agentRunHost {
+          let leading = agentRunHost.leadingAnchor.constraint(equalTo: glassComposePillView.trailingAnchor)
+          let width = agentRunHost.widthAnchor.constraint(equalToConstant: 0)
+          agentRunLeadingConstraint = leading
+          agentRunWidthConstraint = width
+          constraints.append(contentsOf: [
+            leading,
+            width,
+            agentRunHost.heightAnchor.constraint(equalToConstant: controlMode.sideButtonSize),
+            agentRunHost.bottomAnchor.constraint(equalTo: glassComposePillView.bottomAnchor),
+          ])
+          pillTrailingEdge = agentRunHost.trailingAnchor
+        }
+
         if let glassTrailingView {
           glassTrailingWidthConstraint = glassTrailingView.widthAnchor
             .constraint(equalToConstant: controlMode.sideButtonSize)
           glassPillToTrailingConstraint = glassTrailingView.leadingAnchor.constraint(
-            equalTo: glassComposePillView.trailingAnchor,
+            equalTo: pillTrailingEdge,
             constant: controlMode.glassSpacing
           )
           constraints.append(contentsOf: [
@@ -1002,9 +1027,7 @@ class GlassComposeAppKit: NSView {
             glassTrailingView.heightAnchor.constraint(equalToConstant: controlMode.sideButtonSize),
           ])
         } else {
-          constraints.append(
-            glassComposePillView.trailingAnchor.constraint(equalTo: glassContentView.trailingAnchor)
-          )
+          constraints.append(pillTrailingEdge.constraint(equalTo: glassContentView.trailingAnchor))
         }
 
         if capabilities.supportsVoiceMessages, case .chat = usage {
@@ -2186,18 +2209,19 @@ class GlassComposeAppKit: NSView {
 
   private func setupAgentChainObservers() {
     guard let agentChain else { return }
-    agentChain.onInsertText = { [weak self] text in
-      self?.insertAgentReference(text)
-    }
     agentChain.start()
-    Publishers.CombineLatest(agentChain.$isAvailable, agentChain.$isChainOpen)
-      .map { $0 && $1 }
+    agentChain.$isAvailable
       .removeDuplicates()
       .sink { [weak self] shown in
-        // Applied in place so a remembered open chain is part of the first
+        // Applied in place so an Agent thread's row is part of the first
         // frame. Only the delivered value is read, never the model's.
         self?.setAgentChainShown(shown)
       }
+      .store(in: &cancellables)
+    agentChain.$runWork
+      .map { $0 != nil }
+      .removeDuplicates()
+      .sink { [weak self] shown in self?.setAgentRunShown(shown) }
       .store(in: &cancellables)
   }
 
@@ -2217,13 +2241,12 @@ class GlassComposeAppKit: NSView {
     }
   }
 
-  /// Inserts a plain-text reference (a file path) at the cursor, with plain
-  /// typing attributes so no mention or link styling carries over.
-  private func insertAgentReference(_ text: String) {
-    let textView = textEditor.textView
-    window?.makeFirstResponder(textView)
-    textView.typingAttributes = textView.defaultTypingAttributes
-    textView.insertText(text, replacementRange: textView.selectedRange())
+  private func setAgentRunShown(_ shown: Bool) {
+    guard let agentRunHost, isAgentRunShown != shown else { return }
+    isAgentRunShown = shown
+    agentRunHost.isHidden = !shown
+    agentRunWidthConstraint?.constant = shown ? controlMode.sideButtonSize : 0
+    agentRunLeadingConstraint?.constant = shown ? controlMode.glassSpacing : 0
   }
 
   private func refreshAgentDraftTarget() {

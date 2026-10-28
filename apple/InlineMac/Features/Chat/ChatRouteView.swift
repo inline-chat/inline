@@ -14,7 +14,6 @@ struct ChatRouteView: View {
 
   @ObservedObject private var botPresenceController = BotPresenceController.shared
   @ObservedObject private var settings = AppSettings.shared
-  @ObservedObject private var agentWorkStore = AgentWorkStateStore.shared
   @State private var chatToolbarState = ChatToolbarState()
   @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
   @StateObject private var agentThreadToolbarModel: AgentThreadToolbarModel
@@ -231,18 +230,6 @@ struct ChatRouteView: View {
         } else {
           ToolbarItem {
             Spacer()
-          }
-        }
-
-        if !agentWorkStore.states(peer: peer).filter({ $0.runState != .idle }).isEmpty {
-          ToolbarItem {
-            AgentWorkBar(peer: peer)
-              .macToolbarLayout(toolbarLayout)
-              .id("agent-work-\(peer.toString())")
-          }
-
-          if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed)
           }
         }
 

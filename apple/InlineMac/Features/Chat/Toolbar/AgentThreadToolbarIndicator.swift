@@ -474,7 +474,7 @@ struct AgentThreadSettingsSection: View {
 
         if let projectTitle = model.projectTitle {
           AgentThreadSettingRow(
-            title: "Project",
+            title: "Folder",
             selectionTitle: projectTitle,
             selectionDescription: selectedProjectDescription,
             options: projectOptions,
@@ -483,8 +483,8 @@ struct AgentThreadSettingsSection: View {
             isEditable: model.canEditProject,
             isUpdating: model.isUpdating,
             helpText: model.canEditProject
-              ? "Changing project starts or resumes this chat’s session in that project."
-              : "Project changes are available for chats that aren’t linked to an existing session.",
+              ? "Changing the folder starts or resumes this chat’s session in that folder."
+              : "The folder can change only for chats that aren’t linked to an existing session.",
             select: { id in
               guard let context = model.contextSelectingProject(id) else { return }
               model.performUpdate(context, using: update)

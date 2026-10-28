@@ -1466,9 +1466,10 @@ private struct AllChatsComposeAccessoryView: View {
           options: projects,
           selection: model.effectiveProjectID,
           isDisabled: model.isSubmitting,
-          tooltipTitle: "Project",
-          tooltipDescription: "Choose the project for this thread only.",
+          tooltipTitle: "Folder",
+          tooltipDescription: "Choose the folder for this thread only.",
           tooltipPlacement: tooltipPlacement,
+          systemImage: "folder",
           select: model.selectProject
         )
       }
@@ -1572,6 +1573,8 @@ struct AgentConfigurationMenu: View {
   let tooltipTitle: String
   let tooltipDescription: String
   let tooltipPlacement: InlineTooltipPlacement
+  /// A small leading glyph, such as a folder for projects.
+  var systemImage: String?
   let select: (String?) -> Void
 
   var body: some View {
@@ -1600,7 +1603,7 @@ struct AgentConfigurationMenu: View {
         }
       }
     } label: {
-      AllChatsComposePillLabel(title: title)
+      AllChatsComposePillLabel(title: title, systemImage: systemImage)
     }
     .menuStyle(.button)
     .buttonStyle(.plain)
@@ -1700,12 +1703,18 @@ struct AgentConfigurationOptionMenuLabel: View {
 struct AllChatsComposePillLabel: View {
   let title: String
   var showsRobot = false
+  var systemImage: String?
   @State private var isHovering = false
 
   var body: some View {
     HStack(spacing: 4) {
       if showsRobot {
         Text("🤖")
+          .accessibilityHidden(true)
+      }
+      if let systemImage {
+        Image(systemName: systemImage)
+          .font(.system(size: 10.5, weight: .medium))
           .accessibilityHidden(true)
       }
       Text(title)
