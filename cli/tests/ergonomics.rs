@@ -198,7 +198,14 @@ esac
         std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o700)).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_inline"))
             // Only the fixture host, so a real Claude Code on the machine is never touched.
-            .args(["plugin", "install", "--host", "codex", "--json", "--compact"])
+            .args([
+                "plugin",
+                "install",
+                "--host",
+                "codex",
+                "--json",
+                "--compact",
+            ])
             .env("INLINE_CODEX_BIN", &codex)
             .env(
                 "CODEX_FIXTURE_FORMAT",
