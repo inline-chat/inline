@@ -74,6 +74,11 @@ impl Config {
             release_install_url,
         }
     }
+
+    /// Whether `INLINE_RELEASE_MANIFEST_URL` pins updates to one manifest.
+    pub fn release_manifest_overridden() -> bool {
+        env::var_os("INLINE_RELEASE_MANIFEST_URL").is_some()
+    }
 }
 
 const DEFAULT_RELEASE_BASE_URL: &str = "https://public-assets.inline.chat/cli";

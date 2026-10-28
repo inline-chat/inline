@@ -196,14 +196,19 @@ public actor CLIInstallerService: CLIInstalling {
       source: .inline,
       isOnPath: pathContains(destinationURL.deletingLastPathComponent())
     )
+    rememberChannel(for: destinationURL)
     return CLIServiceInstallOutcome(installation: installation, didInstall: true)
   }
 
   private func fetchRelease() async throws -> CLIRelease {
-    let data: Data
-    let response: URLResponse
+    var data: Data
+    var response: URLResponse
     do {
       (data, response) = try await session.data(from: configuration.manifestURL)
+      if let fallbackURL = configuration.fallbackManifestURL,
+         (response as? HTTPURLResponse)?.statusCode == 404 {
+        (data, response) = try await session.data(from: fallbackURL)
+      }
     } catch {
       try Task.checkCancellation()
       throw failure(
@@ -569,6 +574,17 @@ public actor CLIInstallerService: CLIInstalling {
     }
   }
 
+  /// Lets the CLI's own updates follow the app's channel. Best effort: CLIs
+  /// from before channel support reject the flag, and the app still offers
+  /// the next alpha when it checks.
+  private func rememberChannel(for executableURL: URL) {
+    guard configuration.channel == .alpha else { return }
+    _ = try? runProcess(
+      executableURL: executableURL,
+      arguments: ["update", "--check", "--channel", configuration.channel.rawValue, "--json"]
+    )
+  }
+
   private func readVersion(at executableURL: URL) throws -> String? {
     let output = try runProcess(executableURL: executableURL, arguments: ["--version"])
     guard output.status == 0 else { return nil }
@@ -743,29 +759,31 @@ public actor CLIInstallerService: CLIInstalling {
   static func versionString(in output: String) -> String? {
     for token in output.split(whereSeparator: { $0.isWhitespace }) {
       let candidate = token.first == "v" ? token.dropFirst() : token[...]
-      let trimmed = candidate.prefix { $0.isNumber || $0 == "." }
-      if parseVersion(String(trimmed)) != nil {
-        return String(trimmed)
+      let core = candidate.prefix { $0.isNumber || $0 == "." }
+      var version = String(core)
+      let rest = candidate.dropFirst(core.count)
+      if rest.first == "-" {
+        let prerelease = rest.dropFirst().prefix { $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" }
+        if !prerelease.isEmpty {
+          version += "-" + String(prerelease)
+        }
+      }
+      if parseVersion(version) != nil {
+        return version
       }
     }
     return nil
   }
 
-  static func parseVersion(_ value: String) -> [Int]? {
-    let components = value.split(separator: ".", omittingEmptySubsequences: false)
-    guard components.count >= 2, components.count <= 4 else { return nil }
-    let numbers = components.compactMap { Int($0) }
-    return numbers.count == components.count ? numbers : nil
+  static func parseVersion(_ value: String) -> CLIVersion? {
+    CLIVersion(value)
   }
 
   static func isOlder(_ installedVersion: String?, than releaseVersion: String) -> Bool {
-    guard var installed = installedVersion.flatMap(parseVersion), var release = parseVersion(releaseVersion) else {
+    guard let installed = installedVersion.flatMap(parseVersion), let release = parseVersion(releaseVersion) else {
       return true
     }
-    let count = max(installed.count, release.count)
-    installed += repeatElement(0, count: count - installed.count)
-    release += repeatElement(0, count: count - release.count)
-    return installed.lexicographicallyPrecedes(release)
+    return installed < release
   }
 
   static func supportsAgentSetup(releaseVersion: String) -> Bool {
@@ -816,5 +834,53 @@ private final class InstallerOutputLimitState: @unchecked Sendable {
 
   func markExceeded() {
     lock.withLock { exceeded = true }
+  }
+}
+
+/// A CLI version with SemVer prerelease precedence: `0.7.19-alpha.2` sorts
+/// after `0.7.18` and before `0.7.19`. Build metadata is ignored.
+struct CLIVersion: Comparable {
+  let core: [Int]
+  let prerelease: [String]
+
+  init?(_ value: String) {
+    let withoutBuild = value.split(separator: "+", maxSplits: 1, omittingEmptySubsequences: false)[0]
+    let parts = withoutBuild.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+    let components = parts[0].split(separator: ".", omittingEmptySubsequences: false)
+    guard components.count >= 2, components.count <= 4 else { return nil }
+    let numbers = components.compactMap { Int($0) }
+    guard numbers.count == components.count else { return nil }
+    let identifiers = parts.count == 2
+      ? parts[1].split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+      : []
+    guard !identifiers.contains(where: \.isEmpty) else { return nil }
+    core = numbers + repeatElement(0, count: 4 - numbers.count)
+    prerelease = identifiers
+  }
+
+  static func < (lhs: CLIVersion, rhs: CLIVersion) -> Bool {
+    if lhs.core != rhs.core {
+      return lhs.core.lexicographicallyPrecedes(rhs.core)
+    }
+    switch (lhs.prerelease.isEmpty, rhs.prerelease.isEmpty) {
+    case (true, _):
+      return false
+    case (false, true):
+      return true
+    case (false, false):
+      for (left, right) in zip(lhs.prerelease, rhs.prerelease) where left != right {
+        switch (Int(left), Int(right)) {
+        case let (left?, right?):
+          return left < right
+        case (.some, nil):
+          return true
+        case (nil, .some):
+          return false
+        case (nil, nil):
+          return left < right
+        }
+      }
+      return lhs.prerelease.count < rhs.prerelease.count
+    }
   }
 }

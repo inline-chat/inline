@@ -27,6 +27,7 @@ pub struct LocalState {
     pub last_update_check_at: Option<i64>,
     pub last_update_notified_version: Option<String>,
     pub last_seen_release_version: Option<String>,
+    pub update_channel: Option<crate::update::UpdateChannel>,
 }
 
 #[derive(Clone)]

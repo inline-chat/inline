@@ -136,3 +136,16 @@ final class CLIInstallerModel {
     return bootstrapError == .unexpectedUser
   }
 }
+
+extension CLIUpdateChannel {
+  /// Tip installs CLI alphas so features that span the app and CLI arrive
+  /// together. Read at launch; a channel switch applies after relaunch.
+  @MainActor
+  static var matchingAppUpdates: CLIUpdateChannel {
+#if SPARKLE
+    UpdateController.loadChannel() == .tip ? .alpha : .stable
+#else
+    .stable
+#endif
+  }
+}

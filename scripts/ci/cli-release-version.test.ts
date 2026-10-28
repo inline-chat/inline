@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse } from "yaml";
 import { parseCliReleaseTag, stampCliReleaseVersion, verifyCliReleaseVersion } from "./cli-release-version";
-import { assertMatchingReleaseReceipt, buildManifest, parseRemoteReleaseTag, planGitHubReleaseUploads, publishStableEntryPoints, writeReleaseObject } from "../release-cli";
+import { assertMatchingReleaseReceipt, buildManifest, parseRemoteReleaseTag, planGitHubReleaseUploads, publishStableEntryPoints, shouldAdvanceAlphaManifest, writeReleaseObject } from "../release-cli";
 
 const root = resolve(import.meta.dir, "../..");
 const directories: string[] = [];
@@ -156,12 +156,30 @@ describe("CLI immutable publication retries", () => {
   test("never lets prereleases or an older stable retry change stable entry points", async () => {
     const stable = JSON.stringify({ version: "0.9.0", sourceSha: "b".repeat(40) });
     for (const version of ["0.8.0-alpha.1", "0.8.0-beta.1", "0.8.0-next.1", "0.8.0"]) {
-      const store = storage({ "cli/manifest.json": stable, "cli/install.sh": "current installer" });
+      const store = storage({ "cli/manifest.json": stable, "cli/alpha/manifest.json": stable, "cli/install.sh": "current installer" });
       await publishStableEntryPoints(store.client, "cli", { version, tag: `cli-v${version}`, sourceSha: "a".repeat(40), targets: [], releaseDir: await directory() });
       expect(store.writes).toEqual([]);
       expect(new TextDecoder().decode(store.objects.get("cli/manifest.json"))).toBe(stable);
       expect(new TextDecoder().decode(store.objects.get("cli/install.sh"))).toBe("current installer");
     }
+  });
+
+  test("advances the alpha pointer to the newest release of any kind, never backwards", async () => {
+    const publish = async (current: string | null, version: string) => {
+      const releaseDir = await directory();
+      const manifest = JSON.stringify({ version, sourceSha: "a".repeat(40) });
+      await writeFile(join(releaseDir, "manifest.json"), manifest);
+      const store = storage({ "cli/manifest.json": JSON.stringify({ version: "0.9.0", sourceSha: "b".repeat(40) }), "cli/install.sh": "current installer", ...(current ? { "cli/alpha/manifest.json": JSON.stringify({ version: current, sourceSha: "b".repeat(40) }) } : {}) });
+      await publishStableEntryPoints(store.client, "cli", { version, tag: `cli-v${version}`, sourceSha: "a".repeat(40), targets: [], releaseDir });
+      return { advanced: new TextDecoder().decode(store.objects.get("cli/alpha/manifest.json")) === manifest, stableWrites: store.writes.filter((key) => key !== "cli/alpha/manifest.json") };
+    };
+    expect(await publish(null, "0.9.1-alpha.1")).toEqual({ advanced: true, stableWrites: [] });
+    expect(await publish("0.9.1-alpha.1", "0.9.1-alpha.2")).toEqual({ advanced: true, stableWrites: [] });
+    expect(await publish("0.9.1-alpha.10", "0.9.1-alpha.2")).toEqual({ advanced: false, stableWrites: [] });
+    expect(await publish("0.9.1-alpha.2", "0.9.0-beta.1")).toEqual({ advanced: false, stableWrites: [] });
+    // An older stable retry leaves stable and Homebrew alone but still supersedes older alphas.
+    expect(await publish("0.8.6-alpha.3", "0.8.6")).toEqual({ advanced: true, stableWrites: [] });
+    expect(() => shouldAdvanceAlphaManifest({ version: "0.9.1", sourceSha: "b".repeat(40) }, { version: "0.9.1", sourceSha: "a".repeat(40) })).toThrow("another source");
   });
 });
 

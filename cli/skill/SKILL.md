@@ -161,6 +161,8 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `inline update`
   - Download and install the latest release for this machine.
+- `inline update --channel alpha|stable`
+  - Follow prereleases (`alpha`) or stable releases from now on, then update.
 
 ### doctor
 

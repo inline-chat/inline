@@ -107,13 +107,22 @@ Every release retains `cli/vVERSION/manifest.json`. Stable releases additionally
 advance `cli/manifest.json`, the installer, and the Homebrew cask after artifact
 publication succeeds. Prereleases leave those stable entry points unchanged.
 Resuming an older stable release also leaves a newer stable entry point in
-place. The bundle contains the versioned manifest and matching archives.
+place.
+
+Every release, prerelease or stable, also advances the alpha channel pointer
+`cli/alpha/manifest.json` when it is newer by SemVer precedence; the pointer
+never moves backwards. CLIs on the `alpha` channel (`inline update --channel
+alpha`, or any prerelease build without a saved choice) and the Mac app on its
+Tip channel install from it, so Tip gets CLI features as soon as an alpha
+publishes. Resuming an existing tag seeds the pointer if it is missing. The bundle contains the versioned manifest and matching archives.
 
 ```sh
 gh release view cli-vVERSION --repo inline-chat/inline --json assets
 curl -fsSL https://public-assets.inline.chat/cli/vVERSION/manifest.json
 # Stable pointer, only when checking a stable release:
 curl -fsSL https://public-assets.inline.chat/cli/manifest.json
+# Alpha channel pointer, after any release:
+curl -fsSL https://public-assets.inline.chat/cli/alpha/manifest.json
 ```
 
 For installed checks, resolve `command -v inline` and use the candidate's exact

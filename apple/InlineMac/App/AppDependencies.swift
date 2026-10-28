@@ -26,7 +26,9 @@ public struct AppDependencies {
   let auth = tracedLaunchDependency("DependencyAuth") { Auth.shared }
   let viewModel = tracedLaunchDependency("DependencyMainWindowModel") { MainWindowViewModel() }
   var overlay = tracedLaunchDependency("DependencyOverlay") { OverlayManager() }
-  let cliInstaller = tracedLaunchDependency("DependencyCLIInstaller") { CLIInstallerController() }
+  let cliInstaller = tracedLaunchDependency("DependencyCLIInstaller") {
+    CLIInstallerController(configuration: .production(channel: .matchingAppUpdates))
+  }
 #if SPARKLE
   let updates = tracedLaunchDependency("DependencyUpdater") { UpdateController() }
 #endif

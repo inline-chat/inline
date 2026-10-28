@@ -1,7 +1,17 @@
 import Foundation
 
+/// The CLI release channel the Mac app installs from. Alpha follows the
+/// newest release of any kind, so Tip builds get CLI features with the app.
+public enum CLIUpdateChannel: String, Sendable {
+  case stable
+  case alpha
+}
+
 public struct CLIInstallerConfiguration: Sendable {
   public let manifestURL: URL
+  /// Used when the channel manifest doesn't exist yet.
+  public let fallbackManifestURL: URL?
+  public let channel: CLIUpdateChannel
   public let documentationURL: URL
   public let expectedSigningIdentifier: String
   public let legacySigningIdentifiers: Set<String>
@@ -13,6 +23,8 @@ public struct CLIInstallerConfiguration: Sendable {
 
   public init(
     manifestURL: URL,
+    fallbackManifestURL: URL? = nil,
+    channel: CLIUpdateChannel = .stable,
     documentationURL: URL,
     expectedSigningIdentifier: String,
     legacySigningIdentifiers: Set<String> = [],
@@ -23,6 +35,8 @@ public struct CLIInstallerConfiguration: Sendable {
     maximumArtifactBytes: Int64 = 100_000_000
   ) {
     self.manifestURL = manifestURL
+    self.fallbackManifestURL = fallbackManifestURL
+    self.channel = channel
     self.documentationURL = documentationURL
     self.expectedSigningIdentifier = expectedSigningIdentifier
     self.legacySigningIdentifiers = legacySigningIdentifiers
@@ -34,9 +48,18 @@ public struct CLIInstallerConfiguration: Sendable {
   }
 
   public static var production: CLIInstallerConfiguration {
+    production(channel: .stable)
+  }
+
+  public static func production(channel: CLIUpdateChannel) -> CLIInstallerConfiguration {
     let home = FileManager.default.homeDirectoryForCurrentUser
+    let stableManifestURL = URL(string: "https://public-assets.inline.chat/cli/manifest.json")!
     return CLIInstallerConfiguration(
-      manifestURL: URL(string: "https://public-assets.inline.chat/cli/manifest.json")!,
+      manifestURL: channel == .alpha
+        ? URL(string: "https://public-assets.inline.chat/cli/alpha/manifest.json")!
+        : stableManifestURL,
+      fallbackManifestURL: channel == .alpha ? stableManifestURL : nil,
+      channel: channel,
       documentationURL: URL(string: "https://inline.chat/docs/cli")!,
       expectedSigningIdentifier: "chat.inline.cli",
       legacySigningIdentifiers: ["inline"],

@@ -35,10 +35,27 @@ inline update
 ```
 
 `--check` reads the release manifest without downloading a bundle, accessing
-credentials, changing local state, or restarting agents. A successful check exits
-zero, whether an update is available or not. JSON includes `current_version`,
-`latest_version`, `target`, `supported`, and `update_available`. `inline upgrade`
-is an alias for `inline update`; installing still requires omitting `--check`.
+credentials, changing local state other than a requested `--channel`, or
+restarting agents. A successful check exits
+zero, whether an update is available or not. JSON includes `channel`,
+`current_version`, `latest_version`, `target`, `supported`, and
+`update_available`. `inline upgrade` is an alias for `inline update`; installing
+still requires omitting `--check`.
+
+### Release channels
+
+```bash
+inline update --channel alpha
+inline update --channel stable
+```
+
+`stable` follows stable releases. `alpha` follows the newest release of any
+kind, including the stable release that supersedes an alpha. `--channel` is
+remembered for later updates and update notices; with `--check` it saves the
+choice without installing. Without a saved choice, a prerelease build
+follows `alpha` and a stable build follows `stable`. Switching to `stable` never
+downgrades a newer alpha. The Mac app installs from `alpha` on its Tip channel.
+`INLINE_RELEASE_MANIFEST_URL` overrides both channels.
 
 Updates stream downloads to private temporary storage and verify the checksum
 and optional manifest size before extraction; downloads are limited to 512 MiB.

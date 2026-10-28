@@ -460,6 +460,12 @@ enum Command {
             help = "Check for an update without downloading or installing it"
         )]
         check: bool,
+        #[arg(
+            long,
+            value_enum,
+            help = "Follow this release channel from now on: stable, or alpha for prereleases"
+        )]
+        channel: Option<update::UpdateChannel>,
     },
     #[command(about = "Print diagnostic information about this CLI")]
     Doctor,
@@ -2692,8 +2698,14 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
         return plugin::install_for_codex(*dry_run, cli.json, json_format).await;
     }
     let config = Config::load();
-    if matches!(&cli.command, Command::Update { check: true }) {
-        let check = update::check_update(&config).await?;
+    if let Command::Update {
+        check: true,
+        channel,
+    } = &cli.command
+    {
+        let local_db = LocalDb::new(config.state_path.clone(), config.api_base_url.clone());
+        let channel = update::select_channel(&local_db, *channel)?;
+        let check = update::check_update(&config, channel).await?;
         if cli.json {
             output::print_json(&check, json_format)?;
         } else {
@@ -3060,8 +3072,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                 }
             },
-            Command::Update { .. } => {
-                if let Some(updated_binary) = update::run_update(&config, cli.json).await? {
+            Command::Update { channel, .. } => {
+                let channel = update::select_channel(&local_db, channel)?;
+                if let Some(updated_binary) = update::run_update(&config, channel, cli.json).await? {
                     bridge::refresh_after_update(&config, &updated_binary).await?;
                 }
             }
@@ -6339,10 +6352,24 @@ mod cli_parsing_tests {
     #[test]
     fn update_defaults_to_install_and_check_is_explicit() {
         let cli = Cli::try_parse_from(["inline", "update"]).unwrap();
-        assert!(matches!(cli.command, Command::Update { check: false }));
+        assert!(matches!(
+            cli.command,
+            Command::Update {
+                check: false,
+                channel: None
+            }
+        ));
         let cli = Cli::try_parse_from(["inline", "upgrade", "--check", "--json"]).unwrap();
-        assert!(matches!(cli.command, Command::Update { check: true }));
+        assert!(matches!(cli.command, Command::Update { check: true, .. }));
         assert!(cli.json);
+        let cli = Cli::try_parse_from(["inline", "update", "--channel", "alpha"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Update {
+                channel: Some(update::UpdateChannel::Alpha),
+                ..
+            }
+        ));
     }
 
     #[test]

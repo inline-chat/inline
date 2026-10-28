@@ -28,6 +28,7 @@ struct CLIInstallerModelsTests {
     #expect(CLIInstallerService.versionString(in: "inline 0.4.0\n") == "0.4.0")
     #expect(CLIInstallerService.versionString(in: "inline v1.2.3") == "1.2.3")
     #expect(CLIInstallerService.versionString(in: "not a version") == nil)
+    #expect(CLIInstallerService.versionString(in: "inline 0.7.19-alpha.4\n") == "0.7.19-alpha.4")
   }
 
   @Test("compares versions component by component")
@@ -36,6 +37,27 @@ struct CLIInstallerModelsTests {
     #expect(!CLIInstallerService.isOlder("0.5.0", than: "0.5.0"))
     #expect(!CLIInstallerService.isOlder("1.0", than: "0.9.9"))
     #expect(CLIInstallerService.isOlder(nil, than: "0.5.0"))
+  }
+
+  @Test("orders prereleases with SemVer precedence")
+  func ordersPrereleases() {
+    #expect(CLIInstallerService.isOlder("0.7.18", than: "0.7.19-alpha.1"))
+    #expect(CLIInstallerService.isOlder("0.7.19-alpha.4", than: "0.7.19"))
+    #expect(CLIInstallerService.isOlder("0.7.19-alpha.4", than: "0.7.19-alpha.10"))
+    #expect(CLIInstallerService.isOlder("0.7.19-alpha.4", than: "0.7.19-beta.1"))
+    #expect(!CLIInstallerService.isOlder("0.7.19-alpha.4", than: "0.7.19-alpha.4"))
+    #expect(!CLIInstallerService.isOlder("0.7.19", than: "0.7.19-alpha.4"))
+    #expect(CLIInstallerService.parseVersion("0.7.19-") == nil)
+    #expect(CLIInstallerService.supportsAgentSetup(releaseVersion: "0.7.19-alpha.4"))
+  }
+
+  @Test("tip channel installs from the alpha manifest with a stable fallback")
+  func alphaChannelConfiguration() {
+    let alpha = CLIInstallerConfiguration.production(channel: .alpha)
+    #expect(alpha.manifestURL.absoluteString == "https://public-assets.inline.chat/cli/alpha/manifest.json")
+    #expect(alpha.fallbackManifestURL == CLIInstallerConfiguration.production.manifestURL)
+    #expect(CLIInstallerConfiguration.production.fallbackManifestURL == nil)
+    #expect(CLIInstallerConfiguration.production.channel == .stable)
   }
 
   @Test("classifies Homebrew paths")

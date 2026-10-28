@@ -18,6 +18,55 @@ use crate::config::Config;
 use crate::identity as client_info;
 use crate::state::{LocalDb, StateError};
 
+/// Release channel the CLI updates from. Alpha follows the newest release of
+/// any kind, so it moves onto the stable release that supersedes an alpha.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    Stable,
+    Alpha,
+}
+
+impl UpdateChannel {
+    /// A saved choice wins; otherwise a prerelease build keeps following alphas.
+    fn resolve(saved: Option<Self>, current_version: &str) -> Self {
+        saved.unwrap_or(if current_version.contains('-') {
+            Self::Alpha
+        } else {
+            Self::Stable
+        })
+    }
+
+    /// An explicit manifest override pins every channel to that manifest.
+    fn manifest_url(self, stable_url: &str, overridden: bool) -> String {
+        match (self, stable_url.strip_suffix("/manifest.json")) {
+            (Self::Alpha, Some(base)) if !overridden => format!("{base}/alpha/manifest.json"),
+            _ => stable_url.to_string(),
+        }
+    }
+}
+
+/// Saves a requested channel and returns the one updates should follow.
+pub fn select_channel(
+    local_db: &LocalDb,
+    requested: Option<UpdateChannel>,
+) -> Result<UpdateChannel, UpdateError> {
+    let mut state = local_db.load()?;
+    if let Some(channel) = requested.filter(|channel| state.update_channel != Some(*channel)) {
+        state.update_channel = Some(channel);
+        local_db.save(&state)?;
+    }
+    Ok(UpdateChannel::resolve(
+        state.update_channel,
+        env!("CARGO_PKG_VERSION"),
+    ))
+}
+
+fn channel_manifest_url(config: &Config, channel: UpdateChannel) -> Option<String> {
+    let stable_url = config.release_manifest_url.as_deref()?;
+    Some(channel.manifest_url(stable_url, Config::release_manifest_overridden()))
+}
+
 const UPDATE_CHECK_INTERVAL_SECS: i64 = 6 * 60 * 60;
 const UPDATE_CHECK_TIMEOUT_SECS: u64 = 4;
 const UPDATE_CHECK_FINISH_TIMEOUT_MS: u64 = 150;
@@ -71,6 +120,7 @@ struct UpdateTarget {
 
 #[derive(Debug, Serialize)]
 pub struct UpdateCheck {
+    channel: UpdateChannel,
     current_version: String,
     latest_version: String,
     target: String,
@@ -78,23 +128,31 @@ pub struct UpdateCheck {
     update_available: bool,
 }
 
-pub async fn check_update(config: &Config) -> Result<UpdateCheck, UpdateError> {
-    let manifest_url = config
-        .release_manifest_url
-        .as_deref()
-        .ok_or(UpdateError::MissingManifestUrl)?;
-    let manifest = fetch_manifest(manifest_url).await?;
-    describe_update(&manifest, env!("CARGO_PKG_VERSION"), current_target())
+pub async fn check_update(
+    config: &Config,
+    channel: UpdateChannel,
+) -> Result<UpdateCheck, UpdateError> {
+    let manifest_url =
+        channel_manifest_url(config, channel).ok_or(UpdateError::MissingManifestUrl)?;
+    let manifest = fetch_manifest(&manifest_url).await?;
+    describe_update(
+        &manifest,
+        channel,
+        env!("CARGO_PKG_VERSION"),
+        current_target(),
+    )
 }
 
 fn describe_update(
     manifest: &UpdateManifest,
+    channel: UpdateChannel,
     current: &str,
     target: &str,
 ) -> Result<UpdateCheck, UpdateError> {
     let newer = Version::parse(&manifest.version)? > Version::parse(current)?;
     let supported = target != "unknown" && manifest.targets.contains_key(target);
     Ok(UpdateCheck {
+        channel,
         current_version: current.to_string(),
         latest_version: manifest.version.clone(),
         target: target.to_string(),
@@ -117,14 +175,23 @@ pub fn print_update_check(check: &UpdateCheck) {
             crate::output::terminal_text(&check.latest_version),
             crate::output::terminal_text(&check.current_version)
         );
+    } else if check.channel == UpdateChannel::Alpha {
+        println!(
+            "inline is up to date on the alpha channel (v{}).",
+            check.current_version
+        );
     } else {
         println!("inline is up to date (v{}).", check.current_version);
     }
 }
 
-pub async fn run_update(config: &Config, json: bool) -> Result<Option<PathBuf>, UpdateError> {
+pub async fn run_update(
+    config: &Config,
+    channel: UpdateChannel,
+    json: bool,
+) -> Result<Option<PathBuf>, UpdateError> {
     let mut install_url_hint = config.release_install_url.clone();
-    let result = run_update_inner(config, json, &mut install_url_hint).await;
+    let result = run_update_inner(config, channel, json, &mut install_url_hint).await;
     if result.is_err() && !json {
         print_reinstall_instructions(install_url_hint.as_deref());
     }
@@ -133,13 +200,12 @@ pub async fn run_update(config: &Config, json: bool) -> Result<Option<PathBuf>, 
 
 async fn run_update_inner(
     config: &Config,
+    channel: UpdateChannel,
     json: bool,
     install_url_hint: &mut Option<String>,
 ) -> Result<Option<PathBuf>, UpdateError> {
-    let manifest_url = config
-        .release_manifest_url
-        .clone()
-        .ok_or(UpdateError::MissingManifestUrl)?;
+    let manifest_url =
+        channel_manifest_url(config, channel).ok_or(UpdateError::MissingManifestUrl)?;
     let manifest = fetch_manifest(&manifest_url).await?;
     if manifest.install_url.is_some() {
         *install_url_hint = manifest.install_url.clone();
@@ -208,8 +274,14 @@ pub fn spawn_update_check(
     local_db: &LocalDb,
     json: bool,
 ) -> Option<JoinHandle<()>> {
-    let manifest_url = config.release_manifest_url.clone()?;
-    let install_url = config.release_install_url.clone();
+    let saved_channel = local_db.load().ok().and_then(|state| state.update_channel);
+    let channel = UpdateChannel::resolve(saved_channel, env!("CARGO_PKG_VERSION"));
+    let manifest_url = channel_manifest_url(config, channel)?;
+    // The stable installer would replace an alpha with the older stable.
+    let install_url = match channel {
+        UpdateChannel::Stable => config.release_install_url.clone(),
+        UpdateChannel::Alpha => None,
+    };
     let local_db = local_db.clone();
     let current_version = env!("CARGO_PKG_VERSION").to_string();
 
@@ -230,8 +302,15 @@ pub fn spawn_update_check(
     }
 
     Some(tokio::spawn(async move {
-        let update_result =
-            check_for_update(manifest_url, install_url, local_db, current_version, json).await;
+        let update_result = check_for_update(
+            manifest_url,
+            channel,
+            install_url,
+            local_db,
+            current_version,
+            json,
+        )
+        .await;
         if let (true, Err(error)) = (cfg!(debug_assertions), update_result) {
             eprintln!("update check failed: {error}");
         }
@@ -250,6 +329,7 @@ pub async fn finish_update_check(handle: Option<JoinHandle<()>>) {
 
 async fn check_for_update(
     manifest_url: String,
+    channel: UpdateChannel,
     install_url: Option<String>,
     local_db: LocalDb,
     current_version: String,
@@ -300,7 +380,10 @@ async fn check_for_update(
             .map(|version| version != manifest.version.as_str())
             .unwrap_or(true);
         if should_notify {
-            let install_url = manifest.install_url.clone().or(install_url);
+            let install_url = match channel {
+                UpdateChannel::Stable => manifest.install_url.clone().or(install_url),
+                UpdateChannel::Alpha => None,
+            };
             print_update_notice(
                 &current_version,
                 &manifest.version,
@@ -322,6 +405,8 @@ fn print_update_notice(current: &str, latest: &str, install_url: Option<&str>, j
     eprintln!("Update available: v{latest} (current v{current}).");
     if let Some(url) = install_url {
         eprintln!("Run: curl -fsSL {url} | sh");
+    } else {
+        eprintln!("Run: inline update");
     }
 }
 
@@ -713,24 +798,74 @@ mod tests {
             )]),
         };
         for (current, available) in [("1.1.0", true), ("1.2.0", false), ("1.3.0", false)] {
-            let check = describe_update(&manifest, current, "test-platform").unwrap();
+            let check = describe_update(&manifest, UpdateChannel::Stable, current, "test-platform")
+                .unwrap();
             assert_eq!(check.update_available, available);
             assert!(check.supported);
         }
-        let check = describe_update(&manifest, "1.0.0", "missing-platform").unwrap();
+        let check = describe_update(
+            &manifest,
+            UpdateChannel::Stable,
+            "1.0.0",
+            "missing-platform",
+        )
+        .unwrap();
         assert!(!check.supported);
         assert!(!check.update_available);
         manifest.version = "1.2.0-beta.1".into();
         assert!(
-            !describe_update(&manifest, "1.2.0", "test-platform")
+            !describe_update(&manifest, UpdateChannel::Stable, "1.2.0", "test-platform")
                 .unwrap()
                 .update_available
         );
         manifest.version = "invalid".into();
         assert!(matches!(
-            describe_update(&manifest, "1.0.0", "test-platform"),
+            describe_update(&manifest, UpdateChannel::Stable, "1.0.0", "test-platform"),
             Err(UpdateError::Version(_))
         ));
+    }
+
+    #[test]
+    fn channels_follow_saved_choice_and_pick_their_manifest() {
+        assert_eq!(
+            UpdateChannel::resolve(None, "0.7.18"),
+            UpdateChannel::Stable
+        );
+        assert_eq!(
+            UpdateChannel::resolve(None, "0.7.19-alpha.4"),
+            UpdateChannel::Alpha
+        );
+        assert_eq!(
+            UpdateChannel::resolve(Some(UpdateChannel::Stable), "0.7.19-alpha.4"),
+            UpdateChannel::Stable
+        );
+        let stable = "https://example.com/cli/manifest.json";
+        assert_eq!(UpdateChannel::Stable.manifest_url(stable, false), stable);
+        assert_eq!(
+            UpdateChannel::Alpha.manifest_url(stable, false),
+            "https://example.com/cli/alpha/manifest.json"
+        );
+        assert_eq!(UpdateChannel::Alpha.manifest_url(stable, true), stable);
+    }
+
+    #[test]
+    fn selecting_a_channel_persists_it() {
+        let root = tempfile::tempdir().unwrap();
+        let db = LocalDb::new(root.path().join("state.json"), "https://api".into());
+        let fallback = select_channel(&db, None).unwrap();
+        assert_eq!(
+            fallback,
+            UpdateChannel::resolve(None, env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(
+            select_channel(&db, Some(UpdateChannel::Alpha)).unwrap(),
+            UpdateChannel::Alpha
+        );
+        assert_eq!(select_channel(&db, None).unwrap(), UpdateChannel::Alpha);
+        assert_eq!(
+            db.load().unwrap().update_channel,
+            Some(UpdateChannel::Alpha)
+        );
     }
 
     #[tokio::test]

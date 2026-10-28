@@ -136,6 +136,7 @@ function manifestPublicUrl(publicBaseUrl: string, prefix: string, version: strin
 function logPublishedRelease(publicBaseUrl: string, prefix: string, context: ReleaseContext) {
   console.log(`${publicationChanged ? "Published" : "Verified existing"} Inline CLI v${context.version}`);
   console.log(`Manifest: ${manifestPublicUrl(publicBaseUrl, prefix, context.version)}`);
+  console.log(`Alpha channel: ${publicBaseUrl}/${alphaManifestKey(prefix)}`);
   if (isPrereleaseVersion(context.version)) {
     console.log("Prerelease: stable manifest, install script, and Homebrew cask were not advanced.");
     return;
@@ -337,6 +338,30 @@ export async function publishStableEntryPoints(r2: S3Client, prefix: string, con
     await uploadInstall(r2, prefix);
     await updateHomebrewCask(context);
   }
+  await publishAlphaEntryPoint(r2, prefix, context);
+}
+
+export const alphaManifestKey = (prefix: string) => `${prefix}/alpha/manifest.json`;
+
+// The alpha channel follows the newest release of any kind, so Mac Tip and
+// opted-in CLIs move from alphas onto the stable that supersedes them.
+async function publishAlphaEntryPoint(r2: S3Client, prefix: string, context: ReleaseContext) {
+  const alpha = r2.file(alphaManifestKey(prefix));
+  const current = await alpha.exists() ? JSON.parse(await alpha.text()) as UpdateManifest : null;
+  if (!shouldAdvanceAlphaManifest(current, context)) {
+    console.log(`Alpha manifest already names newer v${current!.version}; retaining it.`);
+    return;
+  }
+  await uploadFile(r2, alphaManifestKey(prefix), join(context.releaseDir, "manifest.json"), "application/json");
+}
+
+export function shouldAdvanceAlphaManifest(current: Pick<UpdateManifest, "version" | "sourceSha"> | null, context: Pick<ReleaseContext, "version" | "sourceSha">) {
+  if (!current) return true;
+  parseCliReleaseTag(`cli-v${current.version}`);
+  const order = Bun.semver.order(current.version, context.version);
+  if (order > 0) return false;
+  if (order === 0 && current.sourceSha && current.sourceSha !== context.sourceSha) throw new Error("Alpha version is already bound to another source");
+  return true;
 }
 
 async function mayAdvanceStableRelease(r2: S3Client, prefix: string, context: ReleaseContext) {

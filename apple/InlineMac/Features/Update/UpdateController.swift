@@ -569,7 +569,7 @@ final class UpdateController {
     return mode
   }
 
-  private static func loadChannel() -> AutoUpdateChannel {
+  static func loadChannel() -> AutoUpdateChannel {
     if let value = UserDefaults.standard.string(forKey: channelDefaultsKey) {
       if let channel = AutoUpdateChannel(rawValue: value) {
         return channel
