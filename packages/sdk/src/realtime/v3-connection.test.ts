@@ -262,6 +262,7 @@ const testServer = async (options: {
                   errorCode: 4,
                   message: "ordinary application error",
                   code: options.applicationRpcErrorCode,
+                  retryAfterSeconds: 0,
                 } },
               }) }
             }
