@@ -26,6 +26,7 @@ import { encodeMessageAttachmentUpdate } from "@in/server/realtime/encoders/enco
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
+import { enforceBotSendPacing } from "@in/server/modules/pacing/botSendPacing"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { getMentionedUserIds, isUserMentioned } from "@in/server/modules/message/helpers"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
@@ -134,6 +135,12 @@ type Input = {
   /** whether to process markdown string */
   parseMarkdown?: boolean
 
+  /**
+   * Charges a bot sender's pacing budget. Set by client entry points only, so
+   * internal fan-out such as forwarding is never paced mid-operation.
+   */
+  paceBotSender?: { isBot?: boolean }
+
   /** skip processing links into attachments */
   skipLinkProcessing?: boolean
 
@@ -203,6 +210,12 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   await ensurePrivatePeerCanReceiveMessages(chat, currentUserId)
   const inputPeer = Encoders.peerFromChat(chat, { currentUserId })
   const chatId = chat.id
+  if (input.paceBotSender) {
+    const committed = await paceBotSend({
+      chatId, currentUserId, randomId: input.randomId, isBot: input.paceBotSender.isBot,
+    })
+    if (committed) return { updates: committed }
+  }
   if (input.sourceChatId !== undefined) {
     const sourceChatId = Number(input.sourceChatId)
     if (!Number.isSafeInteger(sourceChatId) || sourceChatId <= 0 || sourceChatId === chatId) {
@@ -1208,6 +1221,40 @@ const buildAttachmentUpdates = async ({
   }
 
   return selfUpdates
+}
+
+/**
+ * Before any write: a flooding bot gets RATE_LIMIT with a retry-after instead
+ * of fanning more updates out to every recipient. A resend of a message that
+ * already committed is not a new send, so it returns the original result.
+ */
+async function paceBotSend(input: {
+  chatId: number
+  currentUserId: number
+  randomId: bigint | undefined
+  isBot: boolean | undefined
+}): Promise<Update[] | undefined> {
+  try {
+    await enforceBotSendPacing({ senderUserId: input.currentUserId, chatId: input.chatId, isBot: input.isBot })
+    return undefined
+  } catch (error) {
+    if (input.randomId && RealtimeRpcError.is(error, RealtimeRpcError.Code.RATE_LIMIT)) {
+      const existing = await committedRetryUpdates(input.randomId, input.currentUserId, input.chatId)
+      if (existing) return existing
+    }
+    throw error
+  }
+}
+
+async function committedRetryUpdates(randomId: bigint, currentUserId: number, chatId: number): Promise<Update[] | undefined> {
+  let message: DbMessage
+  try {
+    message = await MessageModel.getMessageByRandomId(randomId, currentUserId)
+  } catch (error) {
+    if (error instanceof ModelError && error.code === ModelError.Codes.MESSAGE_INVALID) return undefined
+    throw error
+  }
+  return message.chatId === chatId ? selfUpdatesFromExistingMessage(randomId, currentUserId) : undefined
 }
 
 async function selfUpdatesFromExistingMessage(randomId: bigint, currentUserId: number): Promise<Update[]> {
