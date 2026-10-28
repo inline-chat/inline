@@ -154,8 +154,10 @@ final class ComposeAgentChainModel: ObservableObject {
     let targetState = target.flatMap { target in
       states.first(where: { $0.key.botUserID == target.botUserID })
     }
+    // Paused work keeps its resume circle without a mention in the draft.
     let next = targetState.flatMap { $0.runState.isActive || $0.runState == .paused ? $0 : nil }
       ?? states.first(where: { $0.runState.isActive })
+      ?? states.first(where: { $0.runState == .paused })
     if next != runWork {
       runWork = next
       if let next { AgentGrantStore.shared.ensureLoaded(botUserID: next.key.botUserID) }
@@ -523,11 +525,11 @@ final class ComposeAgentChainModel: ObservableObject {
   }
 
   /// 5-hour, weekly and other limits. Bridge v2 carries the numbers in each
-  /// item's ID: `account.usage.window:<minutes>:<used %>:<resets at>`.
+  /// item's ID: `account.usage.window:<minutes>:<used %>:<resets at>:<index>`.
   var usageWindows: [UsageWindow] {
     allItems.compactMap { item in
       let parts = item.id.split(separator: ":", omittingEmptySubsequences: false)
-      guard parts.count == 4, parts[0] == ComposeAgentSettingsItem.usageWindow,
+      guard parts.count >= 4, parts[0] == ComposeAgentSettingsItem.usageWindow,
             let used = Int(parts[2]), let resets = Int(parts[3])
       else { return nil }
       return UsageWindow(
@@ -801,7 +803,7 @@ private struct ComposeAgentUsagePopover: View {
       ForEach(windows) { window in
         track(
           title: window.title,
-          detail: window.resetsAt.map(Self.resetText),
+          detail: window.resetsAt.flatMap { $0 > .now ? Self.resetText($0) : nil },
           value: "\(window.usedPercent)%",
           fraction: Double(window.usedPercent) / 100
         )
