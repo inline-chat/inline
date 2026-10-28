@@ -42,7 +42,6 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
   // Progress border
   private let progressLayer = CAShapeLayer()
-  private var rotationAnimation: CABasicAnimation?
 
   var documentInfo: DocumentInfo? {
     fullMessage?.documentInfo
@@ -222,18 +221,19 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
   }
 
   private func setupProgressLayer() {
-    let circleRadius = 19
-    let center = CGPoint(x: circleRadius, y: circleRadius)
-
-    // Create a circular border progress layer
-    progressLayer.frame = CGRect(x: 0, y: 0, width: circleRadius * 2, height: circleRadius * 2)
     progressLayer.fillColor = UIColor.clear.cgColor
     progressLayer.strokeColor = progressBarColor.cgColor
     progressLayer.lineWidth = 2
     progressLayer.lineCap = .round
-
-    // Start with no progress (empty path)
-    updateProgressPath(progress: 0.0)
+    // A full circle starting at the top; strokeEnd reveals how much of it is drawn.
+    progressLayer.path = UIBezierPath(
+      arcCenter: CGPoint(x: 19, y: 19),
+      radius: 18,
+      startAngle: -CGFloat.pi / 2,
+      endAngle: 3 * CGFloat.pi / 2,
+      clockwise: true
+    ).cgPath
+    progressLayer.strokeEnd = 0
 
     fileIconButton.layer.addSublayer(progressLayer)
   }
@@ -241,78 +241,57 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
   override func layoutSubviews() {
     super.layoutSubviews()
     let progressSize: CGFloat = 38
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
     progressLayer.frame = CGRect(
       x: floor((fileIconButton.bounds.width - progressSize) / 2),
       y: floor((fileIconButton.bounds.height - progressSize) / 2),
       width: progressSize,
       height: progressSize
     )
+    CATransaction.commit()
   }
 
-  private func updateProgressPath(progress: CGFloat) {
-    let circleRadius: CGFloat = 19
-    let center = CGPoint(x: circleRadius, y: circleRadius)
-    let radius = circleRadius - 1
+  /// Short arc kept visible before the first bytes arrive, so a starting download never looks stalled.
+  private static let minimumDownloadArc: CGFloat = 0.06
 
-    if progress <= 0 {
-      // No progress - empty path
-      progressLayer.path = UIBezierPath().cgPath
-      return
-    }
-
-    // Create a circular border progress indicator
-    let startAngle: CGFloat = -CGFloat.pi / 2 // Start at top
-    let endAngle: CGFloat = startAngle + (2 * CGFloat.pi * progress)
-
-    let path = UIBezierPath()
-    path.addArc(
-      withCenter: center,
-      radius: radius,
-      startAngle: startAngle,
-      endAngle: endAngle,
-      clockwise: true
-    )
-
-    progressLayer.path = path.cgPath
+  /// Fills the ring with download progress while it spins, as other messengers do.
+  private func showDownloadProgress(_ progress: CGFloat) {
+    CATransaction.begin()
+    CATransaction.setAnimationDuration(0.25)
+    progressLayer.strokeEnd = min(1, max(progress, Self.minimumDownloadArc))
+    CATransaction.commit()
+    startProgressRotation()
   }
 
   private func showUploadingSpinner() {
-    let circleRadius: CGFloat = 19
-    let center = CGPoint(x: circleRadius, y: circleRadius)
-    let radius = circleRadius - 2 // Account for stroke width
+    // A 1/9 arc (40 degrees) spinning until the upload reports completion.
+    setProgressStrokeEnd(1 / 9)
+    startProgressRotation()
+  }
 
-    // Create a 1/9 arc (40 degrees) as border
-    let segmentAngle: CGFloat = (2 * CGFloat.pi) / 9 // 40 degrees (1/9 of circle)
-    let startAngle: CGFloat = -CGFloat.pi / 2 // Start at top
-    let endAngle: CGFloat = startAngle + segmentAngle
+  private func hideProgressRing() {
+    progressLayer.removeAnimation(forKey: "rotation")
+    setProgressStrokeEnd(0)
+  }
 
-    let path = UIBezierPath()
-    path.addArc(
-      withCenter: center,
-      radius: radius,
-      startAngle: startAngle,
-      endAngle: endAngle,
-      clockwise: true
-    )
+  private func setProgressStrokeEnd(_ strokeEnd: CGFloat) {
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    progressLayer.strokeEnd = strokeEnd
+    CATransaction.commit()
+  }
 
-    progressLayer.path = path.cgPath
+  private func startProgressRotation() {
+    guard progressLayer.animation(forKey: "rotation") == nil else { return }
 
-    // Create rotation animation - slower speed
     let rotation = CABasicAnimation(keyPath: "transform.rotation")
     rotation.fromValue = 0
     rotation.toValue = 2 * CGFloat.pi
-    rotation.duration = 1.5 // Slower: 1.5 seconds per rotation
+    rotation.duration = 1.5
     rotation.repeatCount = .infinity
     rotation.isRemovedOnCompletion = false
-
     progressLayer.add(rotation, forKey: "rotation")
-    rotationAnimation = rotation
-  }
-
-  private func hideUploadingSpinner() {
-    progressLayer.removeAnimation(forKey: "rotation")
-    rotationAnimation = nil
-    progressLayer.path = UIBezierPath().cgPath
   }
 
   private var fileSizeMinWidthConstraint: NSLayoutConstraint?
@@ -372,6 +351,10 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     }
 
     syncUploadProgressBinding()
+    if superview != nil, case .downloading = documentState {
+      // A rebind cancels the subscription above; keep following the transfer still in flight.
+      startMonitoringProgress()
+    }
 
     updateUIForDocumentState()
     invalidateIntrinsicContentSize()
@@ -467,23 +450,19 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     UIView.performWithoutAnimation {
       switch documentState {
         case .uploadFailed:
-          hideUploadingSpinner()
-          updateProgressPath(progress: 0.0)
+          hideProgressRing()
           fileSizeLabel.text = "Failed to send"
         case .locallyAvailable:
-          hideUploadingSpinner()
-          updateProgressPath(progress: 0.0)
+          hideProgressRing()
           fileSizeLabel.text = FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
 
         case .needsDownload:
-          hideUploadingSpinner()
-          updateProgressPath(progress: 0.0)
+          hideProgressRing()
           fileSizeLabel.text = FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
 
         case let .downloading(bytesReceived, totalBytes):
-          hideUploadingSpinner()
           let progress = totalBytes > 0 ? Double(bytesReceived) / Double(totalBytes) : 0
-          updateProgressPath(progress: CGFloat(progress))
+          showDownloadProgress(CGFloat(progress))
 
           let downloadedStr = FileHelpers.formatFileSize(UInt64(bytesReceived))
           let totalStr = FileHelpers.formatFileSize(UInt64(totalBytes))
@@ -532,6 +511,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
       guard let self else { return }
 
       DispatchQueue.main.async {
+        guard self.documentInfo?.id == documentInfo.id else { return }
         switch result {
           case .success:
             self.documentState = .locallyAvailable
@@ -574,7 +554,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     guard case .uploading = documentState, let fullMessage,
           PendingMessageCanceller.cancel(fullMessage) else { return }
     isBeingRemoved = true
-    hideUploadingSpinner()
+    hideProgressRing()
     clearUploadProgressBinding(resetState: true)
   }
 
@@ -751,14 +731,14 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
 
   func completeUpload() {
     isUploadProcessing = false
-    hideUploadingSpinner()
+    hideProgressRing()
     if let document { documentState = determineDocumentState(document) }
     clearUploadProgressBinding(resetState: false)
   }
 
   func failUpload() {
     isUploadProcessing = false
-    hideUploadingSpinner()
+    hideProgressRing()
     if let document { documentState = determineDocumentState(document) }
     clearUploadProgressBinding(resetState: false)
   }
