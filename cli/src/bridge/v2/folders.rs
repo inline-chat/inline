@@ -103,12 +103,21 @@ impl Folders {
         }
     }
 
-    /// The apps' project catalog: every folder, the agent's own the default.
+    /// The apps' project catalog: the folders Inline takes (at most 500),
+    /// the agent's own among them and the default.
     pub(crate) fn catalog(&self, machine_label: &str) -> Option<AgentProjectCatalog> {
-        (!self.entries.is_empty()).then(|| AgentProjectCatalog {
-            options: self
-                .entries
-                .iter()
+        const MAX_CATALOG_FOLDERS: usize = 500;
+        let mut entries: Vec<&Entry> = self.entries.iter().take(MAX_CATALOG_FOLDERS).collect();
+        if let Some(default) = self.default_id.as_deref()
+            && !entries.iter().any(|entry| entry.id == default)
+            && let Some(own) = self.entries.iter().find(|entry| entry.id == default)
+        {
+            entries.pop();
+            entries.push(own);
+        }
+        (!entries.is_empty()).then(|| AgentProjectCatalog {
+            options: entries
+                .into_iter()
                 .map(|entry| AgentProjectOption {
                     id: entry.id.clone(),
                     label: entry.label.clone(),
