@@ -14,7 +14,10 @@ struct DocumentsTabView: View {
         // Documents content without scroll
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
           ForEach(documentsViewModel.groupedDocumentMessages, id: \.date) { group in
-            Section {
+            ChatInfoDateSection(
+              dateText: formatDate(group.date),
+              headerInsets: EdgeInsets(top: 16, leading: 16, bottom: 8, trailing: 0)
+            ) {
               // Documents for this date
               ForEach(group.messages, id: \.id) { documentMessage in
                 DocumentRow(
@@ -29,23 +32,6 @@ struct DocumentsTabView: View {
                   }
                 }
               }
-            } header: {
-              HStack {
-                Text(formatDate(group.date))
-                  .font(.subheadline)
-                  .fontWeight(.medium)
-                  .foregroundColor(.secondary)
-                  .padding(.horizontal, 12)
-                  .padding(.vertical, 6)
-                  .background(
-                    Capsule()
-                      .fill(Color(.systemBackground).opacity(0.95))
-                  )
-                  .padding(.leading, 16)
-                Spacer()
-              }
-              .padding(.top, 16)
-              .padding(.bottom, 8)
             }
           }
         }

@@ -21,9 +21,12 @@ struct MediaTabView: View {
   var body: some View {
     VStack(spacing: 0) {
       if !mediaViewModel.mediaMessages.isEmpty {
-        LazyVStack(alignment: .leading, spacing: 12, pinnedViews: [.sectionHeaders]) {
+        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
           ForEach(mediaViewModel.groupedMediaMessages, id: \.date) { group in
-            Section {
+            ChatInfoDateSection(
+              dateText: formatDate(group.date),
+              headerInsets: EdgeInsets(top: 6, leading: 16, bottom: 4, trailing: 16)
+            ) {
               LazyVGrid(columns: columns, spacing: gridSpacing) {
                 ForEach(group.messages) { mediaMessage in
                   mediaCell(for: mediaMessage)
@@ -34,17 +37,11 @@ struct MediaTabView: View {
                     }
                 }
               }
-            } header: {
-              DateBadge(dateText: formatDate(group.date))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 6)
-                .padding(.bottom, 4)
+              .padding(.vertical, 12)
             }
           }
         }
         .padding(.horizontal, 8)
-        .padding(.bottom, 12)
       }
       ChatInfoResourceFooter(
         state: mediaViewModel.loadState, isEmpty: mediaViewModel.mediaMessages.isEmpty,
@@ -406,22 +403,5 @@ private struct MediaVideoOverlay: View {
       return String(format: "%d:%02d:%02d", hours, remMins, secs)
     }
     return String(format: "%d:%02d", mins, secs)
-  }
-}
-
-private struct DateBadge: View {
-  let dateText: String
-
-  var body: some View {
-    Text(dateText)
-      .font(.subheadline)
-      .fontWeight(.medium)
-      .foregroundStyle(.secondary)
-      .padding(.horizontal, 12)
-      .padding(.vertical, 6)
-      .background(
-        Capsule()
-          .fill(Color(.systemBackground).opacity(0.95))
-      )
   }
 }

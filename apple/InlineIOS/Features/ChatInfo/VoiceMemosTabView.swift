@@ -12,7 +12,10 @@ struct VoiceMemosTabView: View {
       if !voiceMemosViewModel.voiceMemoMessages.isEmpty {
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
           ForEach(voiceMemosViewModel.groupedVoiceMemoMessages, id: \.date) { group in
-            Section {
+            ChatInfoDateSection(
+              dateText: formatDate(group.date),
+              headerInsets: EdgeInsets(top: 16, leading: 16, bottom: 8, trailing: 0)
+            ) {
               ForEach(group.messages) { voiceMemo in
                 VoiceMemoRow(
                   voiceMemo: voiceMemo,
@@ -27,23 +30,6 @@ struct VoiceMemosTabView: View {
                   }
                 }
               }
-            } header: {
-              HStack {
-                Text(formatDate(group.date))
-                  .font(.subheadline)
-                  .fontWeight(.medium)
-                  .foregroundColor(.secondary)
-                  .padding(.horizontal, 12)
-                  .padding(.vertical, 6)
-                  .background(
-                    Capsule()
-                      .fill(Color(.systemBackground).opacity(0.95))
-                  )
-                  .padding(.leading, 16)
-                Spacer()
-              }
-              .padding(.top, 16)
-              .padding(.bottom, 8)
             }
           }
         }
