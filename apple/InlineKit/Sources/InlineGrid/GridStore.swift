@@ -19,6 +19,9 @@ public final class GridRoomService {
   public private(set) var currentCall: GridCurrentCall?
   public private(set) var callTransferEnabled = false
   public private(set) var membershipMutationInFlight = false
+  /// A room made here keeps its stand-in's identity, so it does not appear
+  /// twice when the server's room replaces the stand-in.
+  public private(set) var roomIdentityAliases: [Int64: Int64] = [:]
   public var pendingMembership: GridPendingMembership? {
     membershipMutationInFlight ? submittedMembership : nil
   }
@@ -101,6 +104,10 @@ public final class GridRoomService {
   @ObservationIgnored private var membershipMutationRevision = 0
   @ObservationIgnored private var retiredMembershipRevision = 0
   @ObservationIgnored private var pendingMembershipMutations: [Int: OptimisticMembershipMutation] = [:]
+  /// The newest room the user picked while an earlier change is still at the
+  /// server. A tap is never dropped: the latest one shows at once and is sent
+  /// as soon as the change in flight settles.
+  @ObservationIgnored private var queuedMembership: QueuedMembership?
   @ObservationIgnored private var membershipRollbackBaseline =
     GridOptimisticState.MembershipRollbackBaseline()
   @ObservationIgnored private var acceptedOwnedRoom: GridOwnedRoomAuthority?
@@ -220,6 +227,7 @@ public final class GridRoomService {
   public func withdrawLocalAdmission() -> Task<GridMediaShutdownReceipt, Never> {
     localIntentRevision &+= 1
     selfReadEpoch &+= 1
+    discardQueuedMembership()
     if membershipMutationInFlight {
       cancelPendingMembershipClaim = true
     }
@@ -252,6 +260,7 @@ public final class GridRoomService {
 
   public func prepareForLogout() async {
     withdrawLocalAdmission()
+    roomIdentityAliases.removeAll()
     currentCall = nil
     callTransferEnabled = false
     membershipMutationInFlight = false
@@ -290,6 +299,11 @@ public final class GridRoomService {
     membershipSync.reset()
     avatarStateSync.setOwnedRoom(nil)
     await mediaCoordinator.shutdown()
+  }
+
+  /// Stable view identity for a room, across a stand-in becoming real.
+  public func displayIdentity(roomID: Int64) -> Int64 {
+    roomIdentityAliases[roomID] ?? roomID
   }
 
   public func grid(spaceID: Int64) -> InlineProtocol.Grid? {
@@ -501,6 +515,14 @@ public final class GridRoomService {
 
   public func createAndJoin(spaceID: Int64) {
     mayResumeAfterRestart = false
+    if membershipMutationInFlight {
+      queueMembership(.create(spaceID: spaceID))
+      return
+    }
+    claimNewRoom(spaceID: spaceID, announce: true)
+  }
+
+  private func claimNewRoom(spaceID: Int64, announce: Bool) {
     guard let accountToken = beginMembershipClaim() else { return }
     submittedMembership = .create(spaceID: spaceID)
     let expectedMembershipID = observedMembershipFence()
@@ -510,8 +532,14 @@ public final class GridRoomService {
     #if os(macOS)
     mediaCoordinator.requestMicrophonePermission()
     #endif
-    platformEffects.playSound?(.join)
-    membershipMutationRevision &+= 1
+    if announce {
+      platformEffects.playSound?(.join)
+    }
+    if let mutation = optimisticallyCreate(spaceID: spaceID) {
+      pendingMembershipMutations[mutation.revision] = mutation
+    } else {
+      membershipMutationRevision &+= 1
+    }
     membershipSync.submit(GridMembershipOperation(
       kind: .create,
       spaceID: spaceID,
@@ -528,6 +556,14 @@ public final class GridRoomService {
 
   public func join(roomID: Int64) {
     mayResumeAfterRestart = false
+    if membershipMutationInFlight {
+      queueMembership(.join(roomID: roomID))
+      return
+    }
+    claimRoom(roomID: roomID, announce: true)
+  }
+
+  private func claimRoom(roomID: Int64, announce: Bool) {
     guard let destination = grids.values.first(where: { $0.rooms.contains(where: { $0.id == roomID }) }),
           let accountToken = beginMembershipClaim()
     else { return }
@@ -545,7 +581,9 @@ public final class GridRoomService {
     #if os(macOS)
     mediaCoordinator.requestMicrophonePermission()
     #endif
-    platformEffects.playSound?(.join)
+    if announce {
+      platformEffects.playSound?(.join)
+    }
     pendingMembershipMutations[mutation.revision] = mutation
     membershipSync.submit(GridMembershipOperation(
       kind: .join(roomID: roomID),
@@ -649,6 +687,68 @@ public final class GridRoomService {
     ))
   }
 
+  /// Shows the newest pick right away and holds it until the change in flight
+  /// settles. Picking again replaces it, so only the last tap is sent.
+  private func queueMembership(_ intent: QueuedMembership.Intent) {
+    let spaceID: Int64
+    switch intent {
+      case let .create(id):
+        spaceID = id
+      case let .join(roomID):
+        guard let grid = grids.values.first(where: { $0.rooms.contains(where: { $0.id == roomID }) }) else { return }
+        spaceID = grid.spaceID
+    }
+    guard queuedMembership?.intent != intent else { return }
+    // The newer pick's display replaces the held one.
+    discardQueuedMembership(restoringDisplay: false)
+    let display = switch intent {
+      case let .join(roomID): optimisticallyJoin(roomID: roomID)
+      case let .create(spaceID): optimisticallyCreate(spaceID: spaceID)
+    }
+    if let display {
+      pendingMembershipMutations[display.revision] = display
+    }
+    let displayRevision = display?.revision
+    queuedMembership = QueuedMembership(intent: intent, displayRevision: displayRevision)
+    submittedMembership = switch intent {
+      case .create: .create(spaceID: spaceID)
+      case let .join(roomID): .join(spaceID: spaceID, roomID: roomID)
+    }
+    platformEffects.playSound?(.join)
+    log.debug("GRID_TRACE phase=membership_queued revision=\(membershipMutationRevision)")
+  }
+
+  /// Drops a held pick. Its optimistic display is undone unless a newer pick
+  /// or the follow-up claim is about to replace it.
+  private func discardQueuedMembership(restoringDisplay: Bool = true) {
+    guard let queued = queuedMembership else { return }
+    queuedMembership = nil
+    guard let revision = queued.displayRevision,
+          let mutation = pendingMembershipMutations.removeValue(forKey: revision)
+    else { return }
+    if restoringDisplay {
+      rollbackMembershipMutation(mutation)
+    }
+  }
+
+  /// Sends the held pick once the change before it has settled. Runs in the
+  /// same main-actor turn as that result, so the display never flickers back.
+  private func runQueuedMembership(_ queued: QueuedMembership) {
+    let revisionBefore = membershipMutationRevision
+    // The pick already played its sound when it was tapped.
+    switch queued.intent {
+      case let .join(roomID): claimRoom(roomID: roomID, announce: false)
+      case let .create(spaceID): claimNewRoom(spaceID: spaceID, announce: false)
+    }
+    guard let displayRevision = queued.displayRevision,
+          let display = pendingMembershipMutations.removeValue(forKey: displayRevision)
+    else { return }
+    if membershipMutationRevision == revisionBefore {
+      // The pick could not start, e.g. the room is gone; show what is confirmed.
+      rollbackMembershipMutation(display)
+    }
+  }
+
   private func beginMembershipClaim() -> AuthAccountMutationToken? {
     guard !membershipMutationInFlight,
           let token = try? auth.beginAccountMutation()
@@ -691,6 +791,19 @@ public final class GridRoomService {
   }
 
   public func toggleMicrophone(spaceID: Int64) {
+    if !hasLocalAdmission, let pending = pendingMembership, pending.isJoining, pending.spaceID == spaceID {
+      // The choice carries into the room once it is admitted.
+      let enabled = mediaCoordinator.toggleMicrophone()
+      let roomID: Int64? = if case let .join(_, joinRoomID) = pending {
+        joinRoomID
+      } else {
+        grids[spaceID]?.rooms.first(where: \.isLocalPlaceholder)?.id
+      }
+      if let roomID {
+        applyAvatarMicrophoneState(spaceID: spaceID, roomID: roomID, userID: nil, enabled: enabled)
+      }
+      return
+    }
     guard hasLocalAdmission, let grid = grids[spaceID], grid.hasCurrentRoomID,
           let room = grid.rooms.first(where: { $0.id == grid.currentRoomID }),
           room.avatars.contains(where: \.ownedByCurrentSession)
@@ -1269,6 +1382,40 @@ public final class GridRoomService {
     return mutation
   }
 
+  /// Puts the user in a stand-in room until the server makes the real one.
+  private func optimisticallyCreate(spaceID: Int64) -> OptimisticMembershipMutation? {
+    let fallbackAvatar = makeCurrentUserAvatar()
+    let joinedAt = Int64(Date().timeIntervalSince1970)
+    let revision = membershipMutationRevision &+ 1
+    // Server room ids are positive, so a negative revision id never collides.
+    let placeholderRoomID = -Int64(revision)
+    guard let change = GridOptimisticState.creating(
+      placeholderRoomID: placeholderRoomID,
+      spaceID: spaceID,
+      in: grids,
+      avatar: fallbackAvatar,
+      microphoneEnabled: mediaCoordinator.isMicrophoneEnabled,
+      joinedAt: joinedAt
+    ) else { return nil }
+
+    membershipRollbackBaseline.beginIfNeeded(with: change.previousGrids)
+
+    membershipMutationRevision = revision
+    let mutation = OptimisticMembershipMutation(
+      roomID: placeholderRoomID,
+      spaceID: spaceID,
+      revision: revision,
+      previousGrids: change.previousGrids,
+      intent: .create(fallbackAvatar: fallbackAvatar, joinedAt: joinedAt)
+    )
+    for (changedSpaceID, grid) in change.nextGrids {
+      grids[changedSpaceID] = grid
+    }
+    reconcileAvatarStateOwnership()
+    log.debug("GRID_TRACE phase=create_optimistic_applied revision=\(revision)")
+    return mutation
+  }
+
   private func optimisticallyLeave(spaceID: Int64) -> OptimisticMembershipMutation? {
     guard let change = GridOptimisticState.leaving(spaceID: spaceID, in: grids) else {
       return nil
@@ -1430,11 +1577,16 @@ public final class GridRoomService {
     // only after this outcome identifies the claim that actually committed.
     membershipMutationInFlight = false
     cancelPendingMembershipClaim = false
+    let queued = queuedMembership
+    queuedMembership = nil
 
     // A membership response can have committed before access was revoked.
     // Its complete snapshot cannot restore that space after the revocation.
     // Repair global call display through a fresh, fenced Home read instead.
     guard accessCurrent else {
+      if let revision = queued?.displayRevision, let display = pendingMembershipMutations.removeValue(forKey: revision) {
+        rollbackMembershipMutation(display)
+      }
       if pendingMembershipMutations.isEmpty {
         membershipRollbackBaseline.clear()
       }
@@ -1442,9 +1594,30 @@ public final class GridRoomService {
       return
     }
 
+    if let queued {
+      if queued.supersedes(operation, succeeded: !event.isFailure) {
+        settleSuperseded(event)
+        runQueuedMembership(queued)
+        if pendingMembershipMutations.isEmpty {
+          membershipRollbackBaseline.clear()
+        }
+        return
+      }
+      // The last pick is the room this result already admits.
+      if let revision = queued.displayRevision {
+        pendingMembershipMutations.removeValue(forKey: revision)
+      }
+    }
+
     switch event {
       case let .created(_, response), let .joined(_, response), let .moved(_, response):
         mediaCoordinator.commitAutomaticMicrophoneChange(operation.automaticMicrophoneChange)
+        if case .created = event, let mutation, case .create = mutation.intent,
+           let roomID = response.grids.first(where: { $0.spaceID == operation.spaceID })?.rooms
+           .first(where: { $0.avatars.contains(where: \.ownedByCurrentSession) })?.id
+        {
+          roomIdentityAliases[roomID] = mutation.roomID
+        }
         updateMembershipRollbackBaseline(with: response.grids)
         applySnapshot(response.grids)
         if accessCurrent, intentCurrent, !wasCancelled, response.moved,
@@ -1505,6 +1678,24 @@ public final class GridRoomService {
     }
     if pendingMembershipMutations.isEmpty {
       membershipRollbackBaseline.clear()
+    }
+  }
+
+  /// Records a result the user has already moved past, without admitting
+  /// media for it. The next claim is fenced on the membership it reports.
+  private func settleSuperseded(_ event: GridMembershipSyncEvent) {
+    switch event {
+      case let .created(operation, response), let .joined(operation, response), let .moved(operation, response),
+           let .left(operation, response):
+        mediaCoordinator.commitAutomaticMicrophoneChange(operation.automaticMicrophoneChange)
+        updateMembershipRollbackBaseline(with: response.grids)
+        if callTransferEnabled {
+          currentCall = response.currentCall
+        }
+        applySnapshot(response.grids)
+      case let .failed(operation, _):
+        mediaInteractionStartedAt = nil
+        mediaCoordinator.restoreAutomaticMicrophoneChangeIfCurrent(operation.automaticMicrophoneChange)
     }
   }
 
@@ -2104,6 +2295,15 @@ public final class GridRoomService {
           microphoneEnabled: mediaCoordinator.isMicrophoneEnabled,
           joinedAt: joinedAt
         )
+      case let .create(fallbackAvatar, joinedAt):
+        GridOptimisticState.creating(
+          placeholderRoomID: mutation.roomID,
+          spaceID: mutation.spaceID,
+          in: grids,
+          avatar: fallbackAvatar,
+          microphoneEnabled: mediaCoordinator.isMicrophoneEnabled,
+          joinedAt: joinedAt
+        )
       case .leave:
         GridOptimisticState.leaving(spaceID: mutation.spaceID, in: grids)
     }
@@ -2291,6 +2491,8 @@ private struct OptimisticRoomMutation {
 private struct OptimisticMembershipMutation {
   enum Intent {
     case join(fallbackAvatar: GridAvatar?, joinedAt: Int64)
+    /// `roomID` is the stand-in's negative id.
+    case create(fallbackAvatar: GridAvatar?, joinedAt: Int64)
     case leave
   }
 
@@ -2299,6 +2501,32 @@ private struct OptimisticMembershipMutation {
   let revision: Int
   let previousGrids: [Int64: InlineProtocol.Grid]
   let intent: Intent
+}
+
+private struct QueuedMembership {
+  enum Intent: Equatable {
+    case create(spaceID: Int64)
+    case join(roomID: Int64)
+  }
+
+  let intent: Intent
+  /// The optimistic join shown while the pick waits, if any.
+  let displayRevision: Int?
+
+  /// False only when the pick is the room the settled claim already joined.
+  func supersedes(_ operation: GridMembershipOperation, succeeded: Bool) -> Bool {
+    guard succeeded, case let .join(roomID) = intent else { return true }
+    switch operation.kind {
+      case let .join(claimedRoomID), let .move(_, claimedRoomID): return claimedRoomID != roomID
+      case .create, .leave: return true
+    }
+  }
+}
+
+private extension GridMembershipSyncEvent {
+  var isFailure: Bool {
+    if case .failed = self { true } else { false }
+  }
 }
 
 private struct GridLocalAdmission {

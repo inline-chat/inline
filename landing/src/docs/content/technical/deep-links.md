@@ -5,7 +5,7 @@ description: "Construct Inline navigation links and distinguish destinations fro
 
 A deep link names a destination in Inline: a person, conversation, message, or space join flow. Use app links when the receiving device has Inline installed; use the supported HTTPS forms when sharing a web entry point.
 
-`in://` is the canonical production scheme. `inline://` is a supported production alias. Development builds can use separate configured schemes; do not distribute those as production links.
+`inline://` is the canonical production scheme. `in://` is a supported production alias. Development builds can use separate configured schemes; do not distribute those as production links.
 
 ## About this page
 
@@ -23,11 +23,11 @@ Opening a person, chat, or message link does not grant access to that destinatio
 
 | Destination | Canonical form |
 | --- | --- |
-| Person or bot | `in://user/{userId}` |
-| Conversation | `in://chat/{chatId}` |
-| Message | `in://chat/{chatId}/message/{messageId}` |
-| Public space join | `in://join/public/{spaceHandle}` |
-| Invitation join | `in://join/invite/{inviteToken}` |
+| Person or bot | `inline://user/{userId}` |
+| Conversation | `inline://chat/{chatId}` |
+| Message | `inline://chat/{chatId}/message/{messageId}` |
+| Public space join | `inline://join/public/{spaceHandle}` |
+| Invitation join | `inline://join/invite/{inviteToken}` |
 
 Use the space handle or invitation token returned by Inline. The app parser accepts public handles of 2–64 ASCII letters, digits, underscores, or hyphens, beginning with a letter or digit. Current invitation tokens have the `iv1_` prefix and 47 characters in total; treat the complete token as opaque.
 
@@ -42,11 +42,11 @@ const maxId = (1n << 63n) - 1n
 if (chatId <= 0n || messageId <= 0n || chatId > maxId || messageId > maxId) {
   throw new Error("Chat and message IDs must be positive signed 64-bit integers")
 }
-const url = new URL(`in://chat/${chatId}/message/${messageId}`)
+const url = new URL(`inline://chat/${chatId}/message/${messageId}`)
 console.log(url.href)
 ```
 
-The output is `in://chat/123/message/456`. Verify a real link with an account that can access the destination. A well-formed URL proves only that the destination can be represented.
+The output is `inline://chat/123/message/456`. Verify a real link with an account that can access the destination. A well-formed URL proves only that the destination can be represented.
 
 ## Web Links
 
@@ -60,12 +60,12 @@ The app's link generator has no HTTPS form for an individual user or message. Us
 
 ## Accepted Aliases
 
-- Scheme: `inline://`
+- Scheme: `in://`
 - Chat host: `thread`
 - User query keys: `id`, `user_id`, `userId`
 - Chat query keys: `id`, `chat_id`, `chatId`, `thread_id`, `threadId`
 - Message query keys: `message_id`, `messageId`
-- Message path alias: `in://thread/{chatId}/message/{messageId}`
+- Message path alias: `inline://thread/{chatId}/message/{messageId}`
 
 Prefer canonical path forms when generating new links. Accept aliases when reading existing links; query key matching in the app parser is case-insensitive.
 

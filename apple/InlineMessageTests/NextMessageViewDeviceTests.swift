@@ -355,8 +355,10 @@ struct NextMessageViewDeviceTests {
     let liftCenter = highlight.target.container.convert(highlight.target.center, to: fixture.window)
     #expect(abs(liftCenter.x - bubbleInWindow.midX) < 0.5 && abs(liftCenter.y - bubbleInWindow.midY) < 0.5, "lift is off the bubble")
 
-    // A reaction lands while the menu is up: the bubble must not move under UIKit's preview.
-    list.delegate?.collectionView?(list, willDisplayContextMenu: configuration, animator: nil)
+    // A reaction lands while UIKit still presents the menu (its animator hasn't completed): the
+    // bubble must not move under UIKit's lifted preview.
+    let presenting = MenuAnimator()
+    list.delegate?.collectionView?(list, willDisplayContextMenu: configuration, animator: presenting)
     var message = try #require(cell.message)
     let before = container.frame
     message.reactions = Self.reactions(1, on: message)
@@ -1246,8 +1248,8 @@ struct NextMessageViewDeviceTests {
         continue
       }
       open(interaction, present, view.convert(CGPoint(x: text.minX + 8, y: text.minY + 8), to: list))
-      // A quick tap on the reaction bar, well before UIKit reports the menu presented.
-      try await Task.sleep(for: .milliseconds(600))
+      // After UIKit has let go of the lifted bubble; earlier picks wait for it (see below).
+      try await Task.sleep(for: .milliseconds(1_300))
       guard list.isContextMenuInteractionActive else {
         failures.append("\(label): the menu never opened")
         continue
@@ -1288,6 +1290,75 @@ struct NextMessageViewDeviceTests {
     }
     Attachment.record(report.joined(separator: "\n"), named: "menu-reaction.txt")
     #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(20).joined(separator: "\n"))")
+  }
+
+  @Test("A menu reaction never changes the row while UIKit holds the bubble, however early it's picked")
+  func menuReactionWaitsForUIKit() async throws {
+    let present = NSSelectorFromString("_presentMenuAtLocation:")
+    typealias Present = @convention(c) (AnyObject, Selector, CGPoint) -> Void
+    var report: [String] = []
+    var failures: [String] = []
+    // A reaction picked early (UIKit still holds the lifted bubble) and late; for the late one, a
+    // second update (the server's echo) racing the dismissal.
+    for (tap, echo) in [(450, -1), (650, -1), (1_300, 0), (1_300, 40), (1_300, 120)] {
+      let rows = (1 ... 5).map { Self.message(Int64($0), Self.strings[$0 % 3], outgoing: $0 != 3, reactions: 0) }
+      let fixture = try await ListFixture(rows: rows)
+      defer { fixture.close() }
+      try await fixture.settle(milliseconds: 400)
+      let list = fixture.list
+      let interaction = try #require(list.interactions.compactMap { $0 as? UIContextMenuInteraction }.first)
+      let open = unsafeBitCast(interaction.method(for: present), to: Present.self)
+      guard let cell = fixture.visibleCells.first(where: { $0.message?.message.messageId == 3 }),
+            let view = cell.nextMessageView, let text = view.layout?.frame(.text), var message = cell.message,
+            let before = view.layout?.size
+      else {
+        failures.append("tap \(tap): no row")
+        continue
+      }
+      let label = "tap \(tap) ms\(echo >= 0 ? ", echo +\(echo) ms" : "")"
+      let start = CACurrentMediaTime()
+      func now() -> Int { Int((CACurrentMediaTime() - start) * 1_000) }
+      var events: [String] = []
+      var sizes: [String: CGSize] = [:]
+      list.onContextMenuEvent = { event in
+        let size = cell.nextMessageView?.layout?.size ?? .zero
+        events.append("\(event)@\(now()) h=\(Int(size.height))")
+        sizes[event] = size
+      }
+      open(interaction, present, view.convert(CGPoint(x: text.minX + 8, y: text.minY + 8), to: list))
+      try await Task.sleep(for: .milliseconds(tap))
+      message.reactions = Self.reactions(1, on: message)
+      let first = message
+      var second = message
+      second.reactions = Self.reactions(3, on: message)
+      list.reactFromContextMenu(messageStableId: message.id) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+          fixture.publisher.publisher.send(.update(.init(message: first, animated: true, peer: fixture.peer)))
+          events.append("update@\(now())")
+          guard echo >= 0 else { return }
+          DispatchQueue.main.asyncAfter(deadline: .now() + Double(echo) / 1_000) {
+            fixture.publisher.publisher.send(.update(.init(message: second, animated: true, peer: fixture.peer)))
+            events.append("echo@\(now())")
+          }
+        }
+      }
+      _ = try await Self.menuDismissal(baseline: 0) { list.isContextMenuInteractionActive }
+      try await Task.sleep(for: .milliseconds(400))
+      list.onContextMenuEvent = nil
+      report.append("\(label): \(events.joined(separator: ", "))")
+      // UIKit lets go of the lifted bubble when its present animation completes. Until then, and
+      // from the dismissal preview until the menu's completion, the row must keep its shape.
+      guard let presented = sizes["presented"], let held = sizes["dismissalPreview"], let done = sizes["completion"] else {
+        failures.append("\(label): missing menu events: \(events)")
+        continue
+      }
+      if presented != before { failures.append("\(label): the row changed before UIKit let go of the bubble") }
+      if held == before { failures.append("\(label): the menu closed before the row had the reaction") }
+      if done != held { failures.append("\(label): the row changed while the preview flew back") }
+      if cell.nextMessageView?.reactionViews.isEmpty != false { failures.append("\(label): no reaction on the row") }
+    }
+    Attachment.record(report.joined(separator: "\n"), named: "menu-reaction-timing.txt")
+    #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.joined(separator: "\n"))\n\(report.joined(separator: "\n"))")
   }
 
   @Test("A thread's parent draws with the next view, without its thread summary, and animates reactions in place")
@@ -2236,6 +2307,8 @@ struct NextMessageViewDeviceTests {
     ) async throws {
       let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
       window = UIWindow(windowScene: scene)
+      // The list uses the light theme; don't let a phone in dark mode mix in dark system colors.
+      window.overrideUserInterfaceStyle = .light
       let controller = UIViewController()
       window.rootViewController = controller
       controller.view.backgroundColor = .systemBackground

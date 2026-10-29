@@ -44,7 +44,9 @@ import {
   ensureGridRoomThread,
   createGridTranscriptDestination,
   grantGridTranscriptUsers,
+  gridTranscriptNames,
   insertGridTranscriptContinuationLink,
+  legacyGridTranscriptTitle,
 } from "@in/server/modules/grid/transcription/threads"
 import { insertGridTranscriptMessage } from "@in/server/modules/grid/transcription/messages"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -60,6 +62,12 @@ function id(value: bigint) {
 function uuid(value: string) {
   if (!uuidPattern.test(value)) throw RealtimeRpcError.BadRequest()
   return value.toLowerCase()
+}
+/** Per-run titles already name their room; older threads need it added. */
+function transcriptPickerTitle(destination: { title: string | null; number: number | null; parentTitle: string | null }) {
+  const title = destination.title?.trim() || legacyGridTranscriptTitle
+  if (title !== legacyGridTranscriptTitle) return title
+  return `${destination.parentTitle?.trim() || "Grid room"} · ${title}${destination.number === null ? "" : ` #${destination.number}`}`
 }
 async function roomAuthority(tx: Transaction, roomId: number, context: FunctionContext, membershipId?: string) {
   const [row] = await tx
@@ -226,6 +234,7 @@ export async function listGridTranscripts(
     const acceptedByChat = new Map(acceptedRows.map((run) => [run.transcriptChatId, run]))
     const parent = alias(chats, "grid_transcript_parent")
     const seen = new Set<number>()
+    const labels = new Set<string>()
     const transcripts: ListGridTranscriptsResult["transcripts"] = []
     for (const run of rows) {
       const accepted = acceptedByChat.get(run.transcriptChatId)
@@ -259,9 +268,13 @@ export async function listGridTranscripts(
           ),
         )
         .limit(1)
+      // Two runs started in the same minute share a title; the thread number tells them apart.
+      let label = transcriptPickerTitle(destination)
+      if (labels.has(label) && destination.number !== null) label = `${label} #${destination.number}`
+      labels.add(label)
       transcripts.push({
         transcriptChatId: BigInt(run.transcriptChatId),
-        title: `${destination.parentTitle?.trim() || "Grid room"} · ${destination.title?.trim() || "Transcript"}${destination.number === null ? "" : ` #${destination.number}`}`,
+        title: label,
         busy: !!active,
       })
       if (transcripts.length === 20) break
@@ -323,6 +336,11 @@ export async function setGridTranscription(
     if (busy.length) throw RealtimeRpcError.BadRequest()
     const roster = await occupants(tx, room.id)
     if (!roster.every(supportedGridTranscriptionSession)) throw RealtimeRpcError.BadRequest()
+    const [actor] = await tx
+      .select({ firstName: users.firstName, timeZone: users.timeZone })
+      .from(users)
+      .where(eq(users.id, context.currentUserId))
+      .limit(1)
     const userIds = roster.map((r) => r.userId)
     if (userIds.length < 2 || userIds.length > GRID_TRANSCRIPTION_MAX_SPEAKERS) throw RealtimeRpcError.BadRequest()
     const runId = randomUUID()
@@ -407,24 +425,28 @@ export async function setGridTranscription(
         })
       else roomLinkMessageId = chosen.roomLinkMessageId ?? undefined
       await grantGridTranscriptUsers(tx, { chatIds: [chosen.destinationParentChatId], userIds })
-    } else
+    } else {
+      const names = gridTranscriptNames(room.title, new Date(), actor?.timeZone ?? null)
       destination = await createGridTranscriptDestination(tx, {
         roomChatId,
         spaceId: room.spaceId,
         actorUserId: context.currentUserId,
         participantUserIds: userIds,
-        title: "Transcript",
+        title: names.title,
+        anchorText: names.anchorText,
         runId,
       })
-    if (chosen)
-      await insertGridTranscriptMessage(tx, {
-        chatId: destination.transcriptChatId,
-        actorUserId: context.currentUserId,
-        runId,
-        segmentId: "started",
-        kind: "started",
-        text: "Transcription started",
-      })
+    }
+    // Each run opens with who started it, in a new thread or a continued one.
+    const actorName = actor?.firstName?.trim()
+    await insertGridTranscriptMessage(tx, {
+      chatId: destination.transcriptChatId,
+      actorUserId: context.currentUserId,
+      runId,
+      segmentId: "started",
+      kind: "started",
+      text: actorName ? `${actorName} started transcription` : "Transcription started",
+    })
     await tx.insert(gridTranscriptionRuns).values({
       id: runId,
       sourceRoomId: room.id,

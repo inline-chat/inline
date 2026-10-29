@@ -45,18 +45,38 @@ export async function ensureGridRoomThread(tx: Transaction, input: {
   return chatId
 }
 
+/** Threads created before per-run titles are all named this. */
+export const legacyGridTranscriptTitle = "Transcript"
+
+/**
+ * One transcript thread per run, named for its room and start time in the
+ * starter's time zone ("Design sync · Oct 29, 12:04 PM"). The room thread's
+ * anchor carries the time alone, since it already sits in the room.
+ */
+export function gridTranscriptNames(roomTitle: string | null, startedAt: Date, timeZone: string | null) {
+  const options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+  let stamp: string
+  try {
+    stamp = new Intl.DateTimeFormat("en-US", { ...options, timeZone: timeZone || "UTC" }).format(startedAt)
+  } catch {
+    stamp = new Intl.DateTimeFormat("en-US", { ...options, timeZone: "UTC" }).format(startedAt)
+  }
+  return { title: `${roomTitle?.trim() || "Grid room"} · ${stamp}`, anchorText: `Transcript · ${stamp}` }
+}
+
 export async function createGridTranscriptDestination(tx: Transaction, input: {
   roomChatId: number
   spaceId: number
   actorUserId: number
   participantUserIds: number[]
   title: string
+  anchorText?: string
   runId: string
 }): Promise<{ transcriptChatId: number; destinationParentChatId: number; originalAnchorId: number }> {
   const [parent] = await tx.select().from(chats).where(eq(chats.id, input.roomChatId)).for("update").limit(1)
   if (!parent || !isGridPrivateParent(parent, input.spaceId)) throw RealtimeRpcError.BadRequest()
   await grantGridTranscriptUsers(tx, { chatIds: [parent.id], userIds: input.participantUserIds })
-  const anchorText = "Grid transcription"
+  const anchorText = input.anchorText ?? "Grid transcription"
   const anchor = await insertGridTranscriptMessage(tx, {
     chatId: parent.id,
     actorUserId: input.actorUserId,

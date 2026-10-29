@@ -1122,8 +1122,8 @@
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
-				INLINE_URL_SCHEME = in;
-				INLINE_URL_SCHEME_ALIAS = inline;
+				INLINE_URL_SCHEME = inline;
+				INLINE_URL_SCHEME_ALIAS = in;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1372,8 +1372,8 @@
 				INFOPLIST_KEY_NSContactsUsageDescription = "Inline needs acccess to your contacts to let you invite or find your friends";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Inline uses microphone when you choose to record and send audio in a chat.";
-				INLINE_URL_SCHEME = in;
-				INLINE_URL_SCHEME_ALIAS = inline;
+				INLINE_URL_SCHEME = inline;
+				INLINE_URL_SCHEME_ALIAS = in;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

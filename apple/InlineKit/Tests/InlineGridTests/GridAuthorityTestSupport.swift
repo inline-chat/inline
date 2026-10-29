@@ -79,9 +79,13 @@ final class GridAuthorityTestFixture {
     return try auth.beginAccountMutation()
   }
 
-  func admit(membershipID: String = "membership-a", intentRevision: Int = 0) async throws {
+  func admit(
+    membershipID: String = "membership-a",
+    intentRevision: Int = 0,
+    extraRoomIDs: [Int64] = []
+  ) async throws {
     let token = try auth.beginAccountMutation()
-    let response = claimResult(membershipID: membershipID)
+    let response = claimResult(membershipID: membershipID, extraRoomIDs: extraRoomIDs)
     let operation = GridMembershipOperation(
       kind: .join(roomID: 7), spaceID: 42, expectedMembershipID: "",
       intentRevision: intentRevision, accountToken: token, microphoneEnabled: false,
@@ -93,7 +97,12 @@ final class GridAuthorityTestFixture {
     #expect(service.hasLocalAdmission)
   }
 
-  func claimResult(membershipID: String, revision: Int64 = 1) -> GridRoomMutationResult {
+  /// Extra rooms are named, so they stay in the Grid while empty.
+  func claimResult(
+    membershipID: String,
+    revision: Int64 = 1,
+    extraRoomIDs: [Int64] = []
+  ) -> GridRoomMutationResult {
     let call = GridCurrentCall.with {
       $0.callID = "call-\(membershipID)"
       $0.membershipID = membershipID
@@ -122,7 +131,13 @@ final class GridAuthorityTestFixture {
             $0.membershipID = "remote"
           },
         ]
-      }]
+      }] + extraRoomIDs.map { roomID in
+        .with {
+          $0.id = roomID
+          $0.spaceID = 42
+          $0.title = "Room \(roomID)"
+        }
+      }
     }
     let credentials = GridConnectionCredentials.with {
       $0.connection = grid.rooms[0].connection

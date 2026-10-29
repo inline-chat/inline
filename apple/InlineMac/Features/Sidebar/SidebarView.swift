@@ -1487,8 +1487,8 @@ struct SidebarView: View {
     }
   }
 
-  /// Ordered so the controls people keep reaching for (stop transcription,
-  /// play/pause) sit closest to the footer and stay put; the update action
+  /// Ordered so the controls people keep reaching for (play/pause) sit
+  /// closest to the footer and stay put; the update action
   /// arrives asynchronously, so it joins on top without shifting them.
   @ViewBuilder
   private var bottomBarAccessories: some View {
@@ -1508,20 +1508,6 @@ struct SidebarView: View {
         .transition(.opacity)
       }
 
-      if let room = gridStore.activeTranscriptionRoom {
-        GridTranscriptionSidebarIndicator(
-          room: room,
-          isBusy: gridStore.pendingTranscriptionRequestIDs[room.id] != nil,
-          onOpenGrid: { openGrid(spaceID: room.spaceID) },
-          onOpenTranscript: {
-            guard let chatID = room.transcriptChatID else { return }
-            dependencies?.requestOpenChat(peer: .thread(id: chatID))
-          },
-          onStop: { try await gridStore.setTranscription(room: room, enabled: false) }
-        )
-        .id(room.id)
-      }
-
       // Temporarily hide the sidebar connection indicator.
       // if let state = sidebarConnectionState {
       //   SidebarConnectionStatePill(state: state)
@@ -1539,7 +1525,7 @@ struct SidebarView: View {
 #if SPARKLE
     if updates.showsSidebarAction { return true }
 #endif
-    return showsWhatsNewPill || gridStore.activeTranscriptionRoom != nil || audioPlayer.item != nil
+    return showsWhatsNewPill || audioPlayer.item != nil
   }
 
   /// A waiting update takes the slot; the pill comes back once it's installed.

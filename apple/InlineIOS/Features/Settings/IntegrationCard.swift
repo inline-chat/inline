@@ -106,7 +106,7 @@ struct IntegrationCard: View {
     }
     .onOpenURL { url in
       InAppBrowser.shared.dismissIfPresented()
-      if url.scheme == "in", url.host == "integrations", url.path == "/\(provider)",
+      if InlineDeepLink.isCurrentAppScheme(url.scheme), url.host == "integrations", url.path == "/\(provider)",
          let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
          components.queryItems?.first(where: { $0.name == "success" })?.value == "true"
       {

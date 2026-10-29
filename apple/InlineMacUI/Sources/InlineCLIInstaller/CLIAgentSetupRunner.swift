@@ -293,7 +293,7 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
       return false
     }
-    return components.scheme == "in"
+    return ["inline", "in"].contains(components.scheme?.lowercased())
       && components.host == "user"
       && components.path == "/\(botID)"
       && components.query == nil

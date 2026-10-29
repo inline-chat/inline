@@ -18,12 +18,14 @@ struct GridView: View {
       grid: store.grid(spaceID: spaceID),
       isLoading: store.loadingSpaceIDs.contains(spaceID),
       didFailLoading: store.failedLoadSpaceIDs.contains(spaceID),
-      hasLocalAdmission: hasLocalAdmissionInSpace,
-      isJoiningDisabled: store.membershipMutationInFlight
-        || (store.callTransferEnabled && store.currentCall?.ownedByCurrentSession == false),
+      localRoomID: localRoomID,
+      roomIdentity: store.displayIdentity(roomID:),
+      // Rooms stay live while a change is at the server; the newest tap wins.
+      isJoiningDisabled: store.callTransferEnabled && store.currentCall?.ownedByCurrentSession == false,
       audioLevel: store.audioLevel,
       isScreenSharing: { store.isScreenSharing(avatar: $0) },
-      connectionState: store.connectionRecoveryAttempt > 0 ? .connecting : store.media.connectionState,
+      connectionState: isJoiningInSpace || store.connectionRecoveryAttempt > 0
+        ? .connecting : store.media.connectionState,
       onCreate: { store.createAndJoin(spaceID: spaceID) },
       onRetry: { Task { await store.load(spaceID: spaceID) } },
       onJoin: { roomID in
@@ -80,14 +82,9 @@ struct GridView: View {
       // Leaving is instant; while it settles there is nothing to resume.
       if case .leave = store.pendingMembership {
         EmptyView()
-      } else if case .create = store.pendingMembership {
-        Button("Cancel") { store.withdrawLocalAdmission() }
-          .padding(.bottom, 18)
-      } else if case .join = store.pendingMembership {
-        // A room switch is a join, not a paused call to resume.
-        Button("Cancel") { store.withdrawLocalAdmission() }
-          .padding(.bottom, 18)
-      } else if let currentRoom, hasLocalAdmissionInSpace {
+      } else if isJoiningInSpace || (currentRoom != nil && hasLocalAdmissionInSpace) {
+        // Joining or switching keeps the controls: you are in the room from
+        // the first tap, and Leave stops a join that is still settling.
         GridControlPill(
           media: store.media,
           onToggleMicrophone: { store.toggleMicrophone(spaceID: spaceID) },
@@ -103,12 +100,16 @@ struct GridView: View {
           onStopScreenShare: store.stopScreenSharing,
           onSetOutputVolume: store.setOutputVolume,
           onRetryAudio: store.retryAudio,
-          transcription: transcriptionControl(room: currentRoom),
-          transcriptionNotice: visibleTranscriptionNotice(room: currentRoom),
+          transcription: admittedRoom.flatMap(transcriptionControl(room:)),
+          transcriptionNotice: admittedRoom.flatMap(visibleTranscriptionNotice(room:)),
           onRetryTranscription: retryTranscription
         )
         .padding(.bottom, 18)
         .transition(.move(edge: .bottom).combined(with: .opacity))
+      } else if store.pendingMembership?.isJoining == true {
+        // Joining in another space; a room switch is not a paused call to resume.
+        Button("Cancel") { store.withdrawLocalAdmission() }
+          .padding(.bottom, 18)
       } else if store.callTransferEnabled, let call = store.currentCall, call.spaceID == spaceID {
         HStack(spacing: 12) {
           Button(call.ownedByCurrentSession ? "Resume here" : "Move here", systemImage: "arrow.down.to.line") {
@@ -135,6 +136,7 @@ struct GridView: View {
       }
     }
     .animation(.smoothSnappy, value: currentRoom?.id)
+    .animation(.smoothSnappy, value: localRoomID)
     .onChange(of: currentRoom.map(GridTranscriptionCapture.init(room:))) { _, capture in
       // A failure notice belongs to one room and capture state. The store's
       // repair reload can land in the same update as a new notice, so keep one
@@ -156,6 +158,27 @@ struct GridView: View {
     }
     guard grid.hasCurrentRoomID else { return nil }
     return grid.rooms.first { $0.id == grid.currentRoomID }
+  }
+
+  /// The room this Mac is in or is joining. A tapped room is yours at once,
+  /// before the server confirms it.
+  private var localRoomID: Int64? {
+    if let pending = store.pendingMembership {
+      guard pending.spaceID == spaceID, case let .join(_, roomID) = pending else { return nil }
+      return roomID
+    }
+    guard hasLocalAdmissionInSpace, let grid = store.grid(spaceID: spaceID), grid.hasCurrentRoomID else { return nil }
+    return grid.currentRoomID
+  }
+
+  private var isJoiningInSpace: Bool {
+    guard let pending = store.pendingMembership else { return false }
+    return pending.isJoining && pending.spaceID == spaceID
+  }
+
+  /// Room-level controls such as transcription wait for the admitted call.
+  private var admittedRoom: GridRoom? {
+    hasLocalAdmissionInSpace ? currentRoom : nil
   }
 
   private var hasLocalAdmissionInSpace: Bool {
@@ -196,7 +219,6 @@ struct GridView: View {
       onSetTranscription: { enabled, destination in
         setTranscription(roomID: room.id, enabled: enabled, destination: destination)
       },
-      onOpenRoomThread: { openRoomThread(roomID: room.id) },
       onOpenTranscript: {
         guard let chatID = room.transcriptChatID else { return }
         dependencies?.requestOpenChat(peer: .thread(id: chatID))
@@ -216,8 +238,6 @@ struct GridView: View {
     switch notice.retry {
       case let .setTranscription(enabled, destination):
         setTranscription(roomID: notice.roomID, enabled: enabled, destination: destination)
-      case .openRoomThread:
-        openRoomThread(roomID: notice.roomID)
     }
   }
 
@@ -235,18 +255,6 @@ struct GridView: View {
         try await store.setTranscription(room: room, enabled: enabled, destination: destination)
       } catch {
         showTranscriptionNotice(.setTranscription(enabled: enabled, destination: destination), roomID: roomID)
-      }
-    }
-  }
-
-  private func openRoomThread(roomID: Int64) {
-    transcriptionNotice = nil
-    Task {
-      do {
-        let chatID = try await store.openRoomThread(roomID: roomID)
-        dependencies?.requestOpenChat(peer: .thread(id: chatID))
-      } catch {
-        showTranscriptionNotice(.openRoomThread, roomID: roomID)
       }
     }
   }

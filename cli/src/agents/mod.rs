@@ -865,6 +865,7 @@ fn print_bridge_result(
         action: "agents.setup",
         status: if ready { "ready" } else { "configured" },
         documentation_url: AGENTS_DOCUMENTATION_URL,
+        // Mac apps before inline:// became the default accept only `in` here.
         open_url: format!("in://user/{}", outcome.bot_user_id),
         target: outcome.provider,
         family: "bridge",
@@ -903,7 +904,7 @@ fn print_bridge_result(
             outcome.provider, outcome.provider_version
         );
         println!("Bot: @{} ({})", outcome.bot_username, outcome.bot_user_id);
-        println!("Open: in://user/{}", outcome.bot_user_id);
+        println!("Open: inline://user/{}", outcome.bot_user_id);
         println!("Background service: {}", outcome.background_service);
         if !ready {
             println!("Restart required before the bot is ready.");
@@ -1021,6 +1022,7 @@ fn print_gateway_result(
         action: "agents.setup",
         status: if outcome.ready { "ready" } else { "configured" },
         documentation_url: AGENTS_DOCUMENTATION_URL,
+        // Mac apps before inline:// became the default accept only `in` here.
         open_url: format!("in://user/{}", bot.id),
         target: descriptor.id,
         family: "gateway",
@@ -1050,7 +1052,7 @@ fn print_gateway_result(
     } else {
         println!("{} is configured in Inline.", descriptor.display_name);
         println!("Bot: @{} ({})", bot.username, bot.id);
-        println!("Open: in://user/{}", bot.id);
+        println!("Open: inline://user/{}", bot.id);
         println!("Integration: {}", outcome.integration_action);
         println!("Gateway: {}", outcome.service_action);
         if !outcome.ready {

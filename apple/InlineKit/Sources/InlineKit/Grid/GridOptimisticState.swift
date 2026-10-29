@@ -201,6 +201,38 @@ public enum GridOptimisticState {
     )
   }
 
+  /// Joins a stand-in for a room the server has not made yet, so the user is
+  /// in it from the first tap. The next snapshot replaces it with the real room.
+  public static func creating(
+    placeholderRoomID: Int64,
+    spaceID: Int64,
+    in grids: [Int64: InlineProtocol.Grid],
+    avatar: GridAvatar?,
+    microphoneEnabled: Bool,
+    joinedAt: Int64
+  ) -> MembershipChange? {
+    guard placeholderRoomID < 0, var grid = grids[spaceID] else { return nil }
+    if !grid.rooms.contains(where: { $0.id == placeholderRoomID }) {
+      grid.rooms.append(.with { $0.id = placeholderRoomID })
+    }
+    var withPlaceholder = grids
+    withPlaceholder[spaceID] = grid
+    guard let change = joining(
+      roomID: placeholderRoomID,
+      in: withPlaceholder,
+      avatar: avatar,
+      microphoneEnabled: microphoneEnabled,
+      joinedAt: joinedAt
+    ) else { return nil }
+    // Roll back to what was there before, never to the stand-in.
+    return MembershipChange(
+      roomID: placeholderRoomID,
+      spaceID: spaceID,
+      previousGrids: grids.filter { change.previousGrids.keys.contains($0.key) },
+      nextGrids: change.nextGrids
+    )
+  }
+
   public static func leaving(
     spaceID: Int64,
     in grids: [Int64: InlineProtocol.Grid]
@@ -296,5 +328,12 @@ public enum GridOptimisticState {
     } else {
       room.clearTitle()
     }
+  }
+}
+
+public extension GridRoom {
+  /// A room this device is making; the server has not assigned its id yet.
+  var isLocalPlaceholder: Bool {
+    id < 0
   }
 }
