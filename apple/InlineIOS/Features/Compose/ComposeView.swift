@@ -247,6 +247,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var textViewTrailingToSendConstraint: NSLayoutConstraint?
   var textViewTrailingToContentConstraint: NSLayoutConstraint?
   let agentPopoverDelegate = ComposeAgentPopoverDelegate()
+  lazy var agentRunButton = makeAgentRunButton()
+  /// The run state last delivered by the model's publisher.
+  var agentRunWork: AgentWorkState?
+  var agentFolderTitle: String?
+  var composeTrailingToEdgeConstraint: NSLayoutConstraint?
+  var composeTrailingToRunConstraint: NSLayoutConstraint?
 
   // MARK: - Initialization
 
@@ -304,7 +310,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       setupAutocompleteManager()
       layoutIfNeeded()
       let hasEmbed = (embedContainerHeightConstraint?.constant ?? 0) > 0
-      if hasEmbed || !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty || !(textView.text?.isEmpty ?? true) {
+      if hasEmbed || isAgentLayout || !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty || !(textView.text?.isEmpty ?? true) {
         updateHeight()
       }
     }
@@ -316,7 +322,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let hasEmbed = (embedContainerHeightConstraint?.constant ?? 0) > 0
 
     // Update height after layout if text view now has proper bounds and there's text, attachments, or an embed
-    if textView.bounds.width > 0, hasEmbed || !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty || !(textView.text?.isEmpty ?? true) {
+    // The agent card is taller than the bar even when empty.
+    if textView.bounds.width > 0, hasEmbed || isAgentLayout || !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty || !(textView.text?.isEmpty ?? true) {
       updateHeight()
     }
   }
@@ -398,6 +405,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let glassContent = composeGlassContentView()
     glassContent.addSubview(plusButton)
     glassContent.addSubview(composeAndButtonContainer)
+    glassContent.addSubview(agentRunButton)
 
     let composeContent = composeContentView()
 
@@ -461,6 +469,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     )
     textViewBottomToAgentRow.isActive = false
     textViewTrailingToContent.isActive = false
+    let composeTrailingToEdge = composeAndButtonContainer.trailingAnchor
+      .constraint(equalTo: glassContent.trailingAnchor, constant: -composeEdgeInset)
+    let composeTrailingToRun = composeAndButtonContainer.trailingAnchor
+      .constraint(equalTo: agentRunButton.leadingAnchor, constant: -composePlusSpacing)
+    composeTrailingToRun.isActive = false
+    composeTrailingToEdgeConstraint = composeTrailingToEdge
+    composeTrailingToRunConstraint = composeTrailingToRun
     textViewBottomToContentConstraint = textViewBottomToContent
     textViewBottomToAgentRowConstraint = textViewBottomToAgentRow
     textViewTrailingToSendConstraint = textViewTrailingToSend
@@ -484,7 +499,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
       // Container constraints
       composeLeadingToPlusConstraint,
-      composeAndButtonContainer.trailingAnchor.constraint(equalTo: glassContent.trailingAnchor, constant: -composeEdgeInset),
+      composeTrailingToEdge,
+      agentRunButton.trailingAnchor.constraint(equalTo: glassContent.trailingAnchor, constant: -composeEdgeInset),
+      agentRunButton.bottomAnchor.constraint(
+        equalTo: glassContent.bottomAnchor,
+        constant: -composePlusButtonBottomInset
+      ),
+      agentRunButton.widthAnchor.constraint(equalToConstant: composePlusButtonVisualSize),
+      agentRunButton.heightAnchor.constraint(equalToConstant: composePlusButtonVisualSize),
       composeAndButtonContainer.topAnchor.constraint(equalTo: glassContent.topAnchor),
       composeAndButtonContainer.bottomAnchor.constraint(
         equalTo: glassContent.bottomAnchor,
@@ -830,6 +852,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     textView.isHidden = voiceActive
     applyAgentLayout(agentLayoutIsWanted, animated: animated)
     updateComposeWidth(showsSideButton: showsOutsidePlusButton, animated: animated)
+    updateAgentRunCircle(animated: animated)
     updateTrailingControlVisibility(controlState, animated: animated)
 
     if voiceActive {

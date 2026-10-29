@@ -60,6 +60,7 @@ struct ChatView: View {
   @State private var userGroupMentionTarget: UserGroupMentionTarget?
   @State private var botAgentMentionTarget: BotAgentMentionTarget?
   @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
+  @State private var composeAgentFolderTitle: String?
   @State private var isBotChatSettingsPresented = false
   @State private var translationPlacement: ChatTranslationPlacement
   @State private var presentedChatInfo: SpaceChatItem?
@@ -152,10 +153,11 @@ struct ChatView: View {
     }
   }
 
-  /// An agent DM's working folder for the header, from its bridge's settings.
+  /// An agent DM's working folder for the header: Compose's copy first,
+  /// since it carries a folder picked there before the first turn.
   private var agentFolderTitle: String? {
     guard fullChatViewModel.peerUser?.bot == true else { return nil }
-    return botChatSettingsCoordinator.selectedState.document?.folderTitle
+    return composeAgentFolderTitle ?? botChatSettingsCoordinator.selectedState.document?.folderTitle
   }
 
   var body: some View {
@@ -284,6 +286,10 @@ struct ChatView: View {
       else { return }
       translationPlacement = .toolbar
     }
+    .onReceive(NotificationCenter.default.publisher(for: .composeAgentFolderDidChange)) { notification in
+      guard notification.userInfo?["peer"] as? Peer == peerId else { return }
+      composeAgentFolderTitle = notification.userInfo?["title"] as? String
+    }
     .sheet(isPresented: $isBotChatSettingsPresented) {
       BotChatSettingsSheet(coordinator: botChatSettingsCoordinator)
     }
@@ -303,6 +309,7 @@ struct ChatView: View {
     .onChange(of: peerId) { _, newPeer in
       guard !preview else { return }
       isBotChatSettingsPresented = false
+      composeAgentFolderTitle = nil
       botChatSettingsCoordinator.cancel()
       botChatSettingsCoordinator = BotChatSettingsCoordinator(peer: newPeer)
       translationPlacement = TranslationState.shared.isTranslationEnabled(for: newPeer) ? .toolbar : .moreMenu

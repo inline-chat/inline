@@ -896,6 +896,9 @@ extension ComposeView: ComposeAutocompleteManagerDelegate {
     case let .inlineCommand(command) where activation == .primary:
       performInlineCommand(command.action)
     case .command, .inlineCommand, .mention, .thread, .externalResource, .emoji:
+      // Inserting text programmatically skips textViewDidChange; a leading
+      // agent mention switches Compose to the agent card here.
+      updateAgentDraftTarget()
       updateHeight()
       draftManager.invalidateLoadedEntities()
     }
