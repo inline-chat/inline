@@ -37,6 +37,7 @@
 - Reserve heavy builds for real checkpoints or after you're done. Avoid too frequent builds that slow us down.
 - Don't read .env files, print them, or inspect the contents. It's fine to load them into scripts for normal use or moving them with backups safely.
 - For database migrations don't change earlier committed migration, append only.
+- Bring any protocol change (`proto/`, generated protocol packages, wire formats, API contracts) or schema change (database migrations, Drizzle schema, client GRDB schema) to my attention explicitly before committing, and call it out in the final summary.
 
 ### Context, memory and responses
 
