@@ -139,7 +139,7 @@ final class MessagesCollectionView: UICollectionView {
     self.isPreview = isPreview
     self.theme = theme
     let implementation = messageViewImplementation ?? NextMessageViewFeature.selectedImplementation(
-      isExperimentAvailable: SettingsBuildAudience.showsDebugTools
+      allowsOverride: SettingsBuildAudience.showsDebugTools
     )
     let coordinator = Coordinator(
       peerId: peerId,
@@ -1367,6 +1367,10 @@ private extension MessagesCollectionView {
     private var pendingSnapshotApplies = 0
     /// Message updates held while a context menu owns a preview of their bubble.
     private var deferredNextUpdateIDs: Set<Int64> = []
+    /// A reaction picked in the menu: the menu closes once its row has it.
+    private var pendingMenuReaction: (stableId: Int64, dismiss: DispatchWorkItem)?
+    /// The open menu shows its own bitmap preview, so rows (the source too) can change under it.
+    private var contextMenuShowsOwnPreview = false
 
     private var contextMenuPreview: (
       configuration: UIContextMenuConfiguration,
@@ -1586,6 +1590,15 @@ private extension MessagesCollectionView {
         }
         collectionView.contextMenuConfiguration = configuration
         collectionView.contextMenuPhase = .presented
+        // UIKit lifts the live bubble, then swaps to the bitmap preview. Its completion arrives
+        // about a second later; the swap is done well before a reaction can be tapped.
+        contextMenuShowsOwnPreview = false
+        let showsOwnPreview = { [weak self, weak collectionView] in
+          guard collectionView?.contextMenuConfiguration === configuration,
+                collectionView?.contextMenuPhase == .presented else { return }
+          self?.contextMenuShowsOwnPreview = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + (animator == nil ? 0 : 0.45), execute: showsOwnPreview)
         contextMenuSourceItem = contextMenuPreview?.configuration === configuration ? contextMenuPreview?.item : nil
         updateContextMenuSourceVisibility(in: collectionView)
         collectionView.stopComposeInsetAnimationAtPresentation()
@@ -1614,6 +1627,7 @@ private extension MessagesCollectionView {
       // Release geometry before replay, but keep background taps suspended
       // until UIKit has returned the independent preview.
       collectionView.contextMenuPhase = .dismissing
+      contextMenuShowsOwnPreview = false
       let animateDismissal = { [weak self, weak collectionView] in
         guard let collectionView,
               collectionView.contextMenuConfiguration === configuration else { return }
@@ -1635,6 +1649,8 @@ private extension MessagesCollectionView {
         animateDismissal()
         collectionView.contextMenuPhase = .idle
         collectionView.contextMenuConfiguration = nil
+        self?.pendingMenuReaction?.dismiss.cancel()
+        self?.pendingMenuReaction = nil
         // If an action kept the keyboard closed, the old keyboard-area offset
         // can now lie outside the scrollable range even with correct insets.
         let minY = -collectionView.adjustedContentInset.top
@@ -3660,9 +3676,13 @@ private extension MessagesCollectionView {
       motion requested: MessageMotion = .standard
     ) -> Set<MessageListItem> {
       guard let collectionView = currentCollectionView else { return [] }
-      // While a context menu is up or flying back, UIKit owns a preview of the source bubble.
-      // Changing the bubble under it tears the preview, so replay these once the menu ends.
-      if (collectionView as? MessagesCollectionView)?.isContextMenuInteractionActive == true {
+      // While UIKit lifts the source bubble or flies its preview back, it holds the live view and
+      // clips or hides it until its late completion; changing the row then tears the preview, so
+      // replay those updates once the menu ends. While the menu shows its own bitmap, rows update
+      // under the blur and the preview later returns to their new shape.
+      if let list = collectionView as? MessagesCollectionView, list.isContextMenuInteractionActive,
+         !(list.contextMenuPhase == .presented && contextMenuShowsOwnPreview)
+      {
         deferredNextUpdateIDs.formUnion(items.compactMap(\.messageStableId))
         return Set(items)
       }
@@ -3692,6 +3712,14 @@ private extension MessagesCollectionView {
           update.cell.invalidateIntrinsicContentSize()
         }
         collectionView.layoutIfNeeded()
+      }
+      if let pending = pendingMenuReaction,
+         handled.contains(where: { $0.messageStableId == pending.stableId })
+      {
+        // The row has the reaction: close now so the preview returns to the new bubble.
+        pending.dismiss.cancel()
+        pendingMenuReaction = nil
+        DispatchQueue.main.async { [weak self] in self?.dismissContextMenuIfNeeded() }
       }
       return handled
     }
@@ -4022,14 +4050,15 @@ private extension MessagesCollectionView {
         .filter { $0.reaction.userId == Auth.shared.getCurrentUserId() }
         .map(\.reaction.emoji))
       let picker = ReactionEmojiPickerSheet(selectedEmojis: selectedEmojis) { [weak self] emoji in
-        self?.dismissContextMenuIfNeeded()
-        self?.toggleReaction(
-          emoji,
-          messageStableId: fullMessage.id,
-          messageId: fullMessage.message.messageId,
-          chatId: fullMessage.message.chatId,
-          randomId: fullMessage.message.randomId
-        )
+        self?.reactFromContextMenu(messageStableId: fullMessage.id) { [weak self] in
+          self?.toggleReaction(
+            emoji,
+            messageStableId: fullMessage.id,
+            messageId: fullMessage.message.messageId,
+            chatId: fullMessage.message.chatId,
+            randomId: fullMessage.message.randomId
+          )
+        }
       }
       // Keep UIKit's live menu and preview in place. Presenting from the chat
       // requires dismissing that menu first and serializes two animations.
@@ -4151,14 +4180,38 @@ private extension MessagesCollectionView {
       randomId: Int64?
     ) {
       buttonTouchUp(sender)
-      dismissContextMenuIfNeeded()
-      toggleReaction(
-        emoji,
-        messageStableId: messageStableId,
-        messageId: messageId,
-        chatId: chatId,
-        randomId: randomId
-      )
+      reactFromContextMenu(messageStableId: messageStableId) { [weak self] in
+        self?.toggleReaction(
+          emoji,
+          messageStableId: messageStableId,
+          messageId: messageId,
+          chatId: chatId,
+          randomId: randomId
+        )
+      }
+    }
+
+    /// Picks a reaction from the open menu. The menu stays up until the row has the reaction (the
+    /// optimistic write takes a few milliseconds), so the returning preview lands on the reacted
+    /// bubble instead of the reaction animating in a second later, after UIKit's completion.
+    func reactFromContextMenu(messageStableId: Int64, toggle: () -> Void) {
+      guard contextMenuShowsOwnPreview,
+            let collectionView = currentCollectionView as? MessagesCollectionView,
+            collectionView.contextMenuPhase == .presented
+      else {
+        dismissContextMenuIfNeeded()
+        toggle()
+        return
+      }
+      pendingMenuReaction?.dismiss.cancel()
+      let dismiss = DispatchWorkItem { [weak self] in
+        self?.pendingMenuReaction = nil
+        self?.dismissContextMenuIfNeeded()
+      }
+      pendingMenuReaction = (messageStableId, dismiss)
+      toggle()
+      // If the write is slow, close anyway; the update then replays after the menu.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: dismiss)
     }
 
     private func toggleReaction(
@@ -5662,5 +5715,11 @@ private extension Int64? {
   var validSpaceId: Int64? {
     guard let self, self > 0 else { return nil }
     return self
+  }
+}
+
+extension MessagesCollectionView {
+  func reactFromContextMenu(messageStableId: Int64, toggle: () -> Void) {
+    coordinator.reactFromContextMenu(messageStableId: messageStableId, toggle: toggle)
   }
 }

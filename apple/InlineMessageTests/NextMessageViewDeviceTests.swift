@@ -1224,6 +1224,72 @@ struct NextMessageViewDeviceTests {
     #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
   }
 
+  @Test("A reaction picked in a real context menu is on its row before the preview flies back")
+  func menuReactionLandsWithPreview() async throws {
+    let present = NSSelectorFromString("_presentMenuAtLocation:")
+    typealias Present = @convention(c) (AnyObject, Selector, CGPoint) -> Void
+    var report: [String] = []
+    var failures: [String] = []
+    for outgoing in [false, true] {
+      let rows = (1 ... 5).map { Self.message(Int64($0), Self.strings[$0 % 3], outgoing: outgoing == ($0 == 3), reactions: 0) }
+      let fixture = try await ListFixture(rows: rows)
+      defer { fixture.close() }
+      try await fixture.settle(milliseconds: 400)
+      let list = fixture.list
+      let interaction = try #require(list.interactions.compactMap { $0 as? UIContextMenuInteraction }.first)
+      let open = unsafeBitCast(interaction.method(for: present), to: Present.self)
+      let label = outgoing ? "outgoing" : "incoming"
+      guard let cell = fixture.visibleCells.first(where: { $0.message?.message.messageId == 3 }),
+            let view = cell.nextMessageView, let text = view.layout?.frame(.text), var message = cell.message
+      else {
+        failures.append("\(label): no row")
+        continue
+      }
+      open(interaction, present, view.convert(CGPoint(x: text.minX + 8, y: text.minY + 8), to: list))
+      // A quick tap on the reaction bar, well before UIKit reports the menu presented.
+      try await Task.sleep(for: .milliseconds(600))
+      guard list.isContextMenuInteractionActive else {
+        failures.append("\(label): the menu never opened")
+        continue
+      }
+      message.reactions = Self.reactions(1, on: message)
+      let update = message
+      let sampler = MenuFrameSampler(window: fixture.window) {
+        guard let current = cell.nextMessageView else { return nil }
+        return (current, current.reactionViews.values.first)
+      }
+      sampler.start()
+      // The optimistic write reaches the list a few milliseconds after the tap.
+      list.reactFromContextMenu(messageStableId: message.id) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+          fixture.publisher.publisher.send(.update(.init(message: update, animated: true, peer: fixture.peer)))
+        }
+      }
+      let gone = try await Self.menuDismissal(baseline: 0) { list.isContextMenuInteractionActive }
+      try await Task.sleep(for: .milliseconds(400))
+      sampler.stop()
+      let summary = sampler.summary()
+      report.append("\(label): menu gone \(gone.map { "\($0) ms" } ?? "never"); \(summary.text)")
+      if let added = summary.pillAddedMs, let back = summary.bubbleBackMs, let shown = summary.pillShownMs {
+        if back < added {
+          failures.append("\(label): the menu began closing (\(back) ms) before the row had the reaction (\(added) ms)")
+        }
+        if shown > 450 { failures.append("\(label): the reaction was fully shown only after \(shown) ms") }
+      } else {
+        failures.append("\(label): the reaction never showed")
+      }
+      if gone == nil { failures.append("\(label): the menu never closed") }
+      if let layout = cell.nextMessageView?.layout, abs(cell.bounds.height - layout.size.height) > 0.5 {
+        failures.append("\(label): row \(cell.bounds.height) vs plan \(layout.size.height)")
+      }
+      if let current = cell.nextMessageView, let layout = current.layout {
+        failures += Self.placementProblems(current, layout).map { "\(label): \($0)" }
+      }
+    }
+    Attachment.record(report.joined(separator: "\n"), named: "menu-reaction.txt")
+    #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(20).joined(separator: "\n"))")
+  }
+
   @Test("A reaction pill pops in, slides its avatars, rolls its count and recolors on the row's curve")
   func reactionPillMotion() async throws {
     let stage = try Stage()
@@ -2207,6 +2273,95 @@ struct NextMessageViewDeviceTests {
       window.isHidden = true
       model.dispose()
     }
+  }
+}
+
+/// Samples, every frame, UIKit's menu views and the row's bubble and pill as they appear on screen.
+@MainActor private final class MenuFrameSampler: NSObject {
+  struct Sample {
+    let ms: Int
+    let menu: [(kind: String, frame: CGRect, opacity: Float)]
+    let bubble: CGRect?
+    let bubbleShown: Bool
+    let pillOpacity: Float?
+  }
+
+  private let window: UIWindow
+  private let source: () -> (MessageView, MessageReactionPillView?)?
+  private var link: CADisplayLink?
+  private var startTime = CACurrentMediaTime()
+  private(set) var samples: [Sample] = []
+
+  init(window: UIWindow, source: @escaping () -> (MessageView, MessageReactionPillView?)?) {
+    self.window = window
+    self.source = source
+  }
+
+  func start() {
+    startTime = CACurrentMediaTime()
+    let link = CADisplayLink(target: self, selector: #selector(tick))
+    link.add(to: .main, forMode: .common)
+    self.link = link
+  }
+
+  func stop() {
+    link?.invalidate()
+    link = nil
+  }
+
+  private func screenFrame(_ layer: CALayer) -> (CGRect, Float)? {
+    let shown = layer.presentation() ?? layer
+    guard let windowLayer = layer.windowRoot?.presentation() ?? layer.windowRoot else { return nil }
+    var opacity = shown.opacity
+    var parent = shown.superlayer
+    while let p = parent { opacity *= p.opacity; if p.isHidden { opacity = 0 }; parent = p.superlayer }
+    if shown.isHidden { opacity = 0 }
+    return (shown.convert(shown.bounds, to: windowLayer), opacity)
+  }
+
+  @objc private func tick() {
+    let ms = Int((CACurrentMediaTime() - startTime) * 1_000)
+    var menu: [(String, CGRect, Float)] = []
+    let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+    func visit(_ view: UIView) {
+      let kind = String(describing: type(of: view))
+      if kind == "MessageContextMenuPreviewView" || (kind.hasPrefix("_UI") && ["Portal", "PreviewPlatter", "MorphingPlatter"].contains(where: kind.contains)) {
+        if let (frame, opacity) = screenFrame(view.layer) { menu.append((kind, frame, opacity)) }
+      }
+      view.subviews.forEach(visit)
+    }
+    windows.filter { !$0.isHidden }.forEach(visit)
+    let row = source()
+    let bubble = row.flatMap { screenFrame($0.0.bubbleContentView.layer) }
+    let pill = row?.1.flatMap { screenFrame($0.layer) }
+    samples.append(Sample(
+      ms: ms, menu: menu.map { (kind: $0.0, frame: $0.1, opacity: $0.2) },
+      bubble: bubble?.0, bubbleShown: (bubble?.1 ?? 0) > 0.01 && row?.0.bubbleContentView.isHidden == false,
+      pillOpacity: pill?.1
+    ))
+  }
+
+  /// When the row got its pill, when the source bubble came back (the menu began closing), and
+  /// when the pill was fully shown on the visible bubble; milliseconds after `start()`.
+  func summary() -> (text: String, pillAddedMs: Int?, bubbleBackMs: Int?, pillShownMs: Int?) {
+    let added = samples.first { $0.pillOpacity != nil }?.ms
+    let back = samples.first { $0.bubbleShown }?.ms
+    let shown = samples.first { $0.bubbleShown && ($0.pillOpacity ?? 0) >= 0.95 }?.ms
+    let menu = samples.last { $0.menu.contains { $0.opacity > 0.05 } }?.ms
+    func ms(_ value: Int?) -> String { value.map { "\($0) ms" } ?? "never" }
+    return (
+      "pill added \(ms(added)), menu closing \(ms(back)), pill shown \(ms(shown)), menu views until \(ms(menu))",
+      added, back, shown
+    )
+  }
+
+}
+
+private extension CALayer {
+  var windowRoot: CALayer? {
+    var layer: CALayer = self
+    while let parent = layer.superlayer { layer = parent }
+    return layer
   }
 }
 
