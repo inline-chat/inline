@@ -311,7 +311,7 @@ let package = Package(
 
     .testTarget(
       name: "InlineGridTests",
-      dependencies: ["InlineGrid", "InlineProtocol", "InlineRTC", "Auth", "RealtimeV2"],
+      dependencies: ["InlineGrid", "InlineKit", "InlineProtocol", "InlineRTC", "Auth", "RealtimeV2"],
       swiftSettings: swiftSettings
     ),
 
