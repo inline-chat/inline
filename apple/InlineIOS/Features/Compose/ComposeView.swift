@@ -829,7 +829,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       voiceViewModel.$isSending.removeDuplicates()
     )
       .sink { [weak self] _, _ in
-        self?.reconcileVoiceControls(animated: true)
+        // `@Published` emits before storing; reconcile once the phase lands,
+        // or a reset from the recorder (too short, system stop) leaves the
+        // voice controls up with nothing in them.
+        Task { @MainActor [weak self] in self?.reconcileVoiceControls(animated: true) }
       }
   }
 
