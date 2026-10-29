@@ -274,7 +274,8 @@ final class RichBlockLayoutPlanner {
       case let .disclosure(progress): nativeRole = .disclosureSummary(
           progress: progress,
           expanded: false,
-          activity: nil
+          activity: nil,
+          isEmpty: false
         )
       case let .table(header):
         return styledTableText(text, offset: range.location, length: range.length, baseFontSize: fontSize,
@@ -547,7 +548,8 @@ final class RichBlockLayoutPlanner {
           role: .disclosureSummary(
             progress: disclosure.kind == .progress || decoration?.value.status == .running,
             expanded: expanded,
-            activity: RichBlockActivityKind(disclosure.activityKind)
+            activity: RichBlockActivityKind(disclosure.activityKind),
+            isEmpty: disclosure.children.isEmpty
           ),
           path: path,
           x: x,
@@ -565,7 +567,7 @@ final class RichBlockLayoutPlanner {
           nodes[index].frame.size.width = min(width, nodes[index].frame.width + decoration.reservedWidth)
           recordMeasuredFrame(nodes[index].frame)
         }
-        guard expanded else { return true }
+        guard expanded, !disclosure.children.isEmpty else { return true }
         height += Self.blockSpacing
         return layout(
           blocks: disclosure.children,
@@ -1015,15 +1017,21 @@ final class RichBlockLayoutPlanner {
       capturesTrailingLine: Bool = false
     ) -> Bool {
       let isRTL = text.hasIsRtl ? text.isRtl : (inheritedDirection ?? false)
-      let disclosureActivity: RichBlockActivityKind? = if case let .disclosureSummary(_, _, activity) = role {
+      let disclosureActivity: RichBlockActivityKind? = if case let .disclosureSummary(_, _, activity, _) = role {
         activity
       } else {
         nil
       }
+      let disclosureHasChevron = if case let .disclosureSummary(_, _, _, isEmpty) = role {
+        !isEmpty
+      } else {
+        false
+      }
       let renderedTextWidth: CGFloat = if case .disclosureSummary = role {
         RichBlockDisclosureMetrics.titleViewportWidth(
           containerWidth: width,
-          hasActivityIcon: disclosureActivity != nil
+          hasActivityIcon: disclosureActivity != nil,
+          hasChevron: disclosureHasChevron
         )
       } else {
         width
@@ -1047,8 +1055,9 @@ final class RichBlockLayoutPlanner {
       let measurement = measureText(attributed, width: measuredWidth, singleLine: singleLine)
       let measuredHeight = measurement.height
       let accessoryWidth: CGFloat = if case .disclosureSummary = role {
-        RichBlockDisclosureMetrics.preferredChevronSide
-          + RichBlockDisclosureMetrics.titleChevronGap
+        (disclosureHasChevron
+          ? RichBlockDisclosureMetrics.preferredChevronSide + RichBlockDisclosureMetrics.titleChevronGap
+          : 0)
           + (disclosureActivity == nil
             ? 0
             : RichBlockDisclosureMetrics.activityIconSide

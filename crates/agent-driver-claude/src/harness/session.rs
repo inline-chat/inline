@@ -42,7 +42,7 @@ use crate::input::UserMessage;
 use crate::mcp::{BoxFuture, SdkMcpServer, ToolDefinition, ToolOutput, ToolServer};
 use crate::options::{LaunchOptions, ProcessHost, SessionStart};
 use crate::sessions::SessionStore;
-use crate::version::{ClaudeVersion, PASSIVE_MIN, capability, probe};
+use crate::version::{ClaudeVersion, PASSIVE_MIN, THINKING_DISPLAY_MIN, capability, probe};
 
 const PROVIDER: &str = "claude";
 const CATALOG_TTL: Duration = Duration::from_secs(300);
@@ -630,6 +630,11 @@ impl HarnessDriver for ClaudeHarness {
                 )));
             }
             options.retain_supported(&self.help());
+            // Thinking summaries are what Claude Code shows between tools;
+            // headless, the API would send current models' thinking empty.
+            if version.at_least(THINKING_DISPLAY_MIN) {
+                options.thinking_display = Some("summarized".to_owned());
+            }
             let session_id = options
                 .target_session_id()
                 .map(str::to_string)

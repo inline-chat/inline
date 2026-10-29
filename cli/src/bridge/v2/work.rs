@@ -38,7 +38,7 @@ use super::api::{self, Failure, Notify, chat_peer};
 use super::doc::{Doc, DocBuilder};
 use super::ledger::{InputState, Ledger};
 use super::limits;
-use super::render::{self, ActionStyle, CardAction, FullDetail, RenderOp, Renderer, Vocabulary};
+use super::render::{self, ActionStyle, CardAction, RenderOp, Renderer, Vocabulary};
 use super::settings;
 use super::tools::{Tools, WorkTool};
 
@@ -64,9 +64,6 @@ Decide whether a reply from you would clearly help the people here right now. St
 for chatter, for questions others are answering, and when unsure. Reply with only JSON: \
 {\"speak\": true or false, \"why\": \"one short reason\", \"confidence\": 0.0 to 1.0}";
 const NO_ACCESS: &str = "You don't have access to do that with this agent.";
-/// Full details kept for "Full output", newest first out.
-const MAX_FULL_DETAILS: usize = 32;
-const MAX_FULL_DETAIL_BYTES: usize = 4 * 1024 * 1024;
 /// Tries at a subthread move whose outcome is unknown.
 const MOVE_ATTEMPTS: u32 = 3;
 /// Bound on the observed messages delivered before the next input.
@@ -199,7 +196,7 @@ pub(crate) enum ActionData {
     /// Run or discard an input kept pending.
     #[serde(rename = "p")]
     Pending { i: String, run: bool },
-    /// Send the untruncated detail of a finished progress message.
+    /// "Full output" on progress messages sent before it was removed.
     #[serde(rename = "o")]
     FullOutput,
     /// More agent-only hops in this thread (spec §5.1 rule 6).
@@ -380,7 +377,6 @@ pub(crate) fn spawn(
         offers: HashMap::new(),
         slots: HashMap::new(),
         edits: HashMap::new(),
-        full: VecDeque::new(),
         reported: None,
         working_due: None,
         phase: phase_tx,
@@ -502,8 +498,6 @@ struct Actor {
     offers: HashMap<InputId, i64>,
     slots: HashMap<u32, i64>,
     edits: HashMap<u32, PendingEdit>,
-    /// Finished progress message → the detail it shows cut short.
-    full: VecDeque<(i64, Vec<FullDetail>)>,
     /// The state last published, without its revision and time, so any
     /// published change (queue count, attention) is sent again.
     reported: Option<proto::AgentSessionState>,
@@ -983,42 +977,8 @@ impl Actor {
                 self.event(event).await;
                 None
             }
-            ActionData::FullOutput => {
-                if !grants.any() {
-                    return Some(NO_ACCESS.to_owned());
-                }
-                let Some((_, details)) = self.full.iter().find(|(id, _)| *id == message_id) else {
-                    return Some(
-                        "That output is no longer kept; it is in the session history.".to_owned(),
-                    );
-                };
-                let text = details
-                    .iter()
-                    .map(|detail| format!("## {}\n\n{}", detail.title, detail.text))
-                    .collect::<Vec<_>>()
-                    .join("\n\n");
-                let bytes = text.into_bytes();
-                let request = inline_client::UploadRequest {
-                    peer: inline_client::PeerRef::Chat {
-                        chat_id: inline_client::InlineId::new(self.chat_id),
-                    },
-                    kind: inline_client::MediaKind::Document,
-                    file_name: Some("output.txt".to_owned()),
-                    mime_type: Some("text/plain".to_owned()),
-                    size_bytes: Some(bytes.len() as u64),
-                    caption: None,
-                    width: None,
-                    height: None,
-                    duration_ms: None,
-                    external_id: None,
-                    random_id: None,
-                    reply_to_message_id: Some(inline_client::InlineId::new(message_id)),
-                };
-                match self.agent.bot.send_media(request, bytes).await {
-                    Ok(_) => None,
-                    Err(error) => Some(format!("Could not send the output: {error}")),
-                }
-            }
+            // Older progress messages still carry this button.
+            ActionData::FullOutput => Some("That output is in the session history.".to_owned()),
             ActionData::ForkHere => {
                 if !grants.permits(Operation::StartWork) {
                     return Some(NO_ACCESS.to_owned());
@@ -2754,23 +2714,11 @@ impl Actor {
                         }
                     }
                 },
-                RenderOp::EndProgress { slot, doc, full } => {
+                RenderOp::EndProgress { slot, doc } => {
                     self.edits.remove(&slot);
-                    let actions = (!full.is_empty())
-                        .then(|| {
-                            button_rows(&[(
-                                "Full output",
-                                ActionData::FullOutput,
-                                ActionStyle::Default,
-                            )])
-                        })
-                        .flatten();
-                    let message_id = match self.slots.get(&slot).copied() {
+                    match self.slots.get(&slot).copied() {
                         Some(message_id) => {
-                            match self
-                                .try_edit(self.chat_id, message_id, &doc, actions.clone())
-                                .await
-                            {
+                            match self.try_edit(self.chat_id, message_id, &doc, None).await {
                                 Err(Failure::Retry(after)) => {
                                     // "Worked for" must land: kept until it does.
                                     self.edits.insert(
@@ -2779,7 +2727,7 @@ impl Actor {
                                             doc,
                                             due: tokio::time::Instant::now()
                                                 + after.unwrap_or(EDIT_INTERVAL),
-                                            actions,
+                                            actions: None,
                                             closing: true,
                                         },
                                     );
@@ -2788,12 +2736,10 @@ impl Actor {
                                     self.slots.remove(&slot);
                                 }
                             }
-                            Some(message_id)
                         }
-                        None => self.send(&doc, actions, Notify::Silent).await,
-                    };
-                    if let Some(message_id) = message_id.filter(|_| !full.is_empty()) {
-                        self.keep_full(message_id, full);
+                        None => {
+                            self.send(&doc, None, Notify::Silent).await;
+                        }
                     }
                 }
                 RenderOp::Update { doc } => {
@@ -2957,27 +2903,6 @@ impl Actor {
     // ---------------------------------------------------------------
     // Inline output and state
     // ---------------------------------------------------------------
-
-    /// Keeps the full detail of a finished message, bounded by count and size.
-    fn keep_full(&mut self, message_id: i64, mut details: Vec<FullDetail>) {
-        for detail in &mut details {
-            // The message already shows the end; keep the beginning.
-            if detail.text.len() > MAX_FULL_DETAIL_BYTES {
-                let mut end = MAX_FULL_DETAIL_BYTES;
-                while !detail.text.is_char_boundary(end) {
-                    end -= 1;
-                }
-                detail.text.truncate(end);
-                detail
-                    .text
-                    .push_str("\n… (cut at 4 MB; the session history has the rest)");
-            }
-        }
-        self.full.push_back((message_id, details));
-        while self.full.len() > MAX_FULL_DETAILS {
-            self.full.pop_front();
-        }
-    }
 
     fn remember(&self, message_id: i64) {
         self.agent.sent.lock().expect("sent").insert(message_id);
@@ -3861,7 +3786,6 @@ pub(crate) mod recovery_tests {
             offers: HashMap::new(),
             slots: HashMap::new(),
             edits: HashMap::new(),
-            full: VecDeque::new(),
             reported: None,
             working_due: None,
             phase: phase_tx,

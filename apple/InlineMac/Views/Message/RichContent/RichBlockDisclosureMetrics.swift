@@ -1,8 +1,10 @@
 import AppKit
 
 enum RichBlockDisclosureMetrics {
-  static let preferredChevronSide: CGFloat = 14
-  static let titleChevronGap: CGFloat = 4
+  /// Matches the sidebar's section chevron: a 9 pt semibold glyph.
+  static let chevronPointSize: CGFloat = 9
+  static let preferredChevronSide: CGFloat = 10
+  static let titleChevronGap: CGFloat = 3
   static let activityIconSide: CGFloat = 14
   static let activityTitleGap: CGFloat = 5
 
@@ -12,9 +14,13 @@ enum RichBlockDisclosureMetrics {
     let activityIconFrame: CGRect?
   }
 
-  static func titleViewportWidth(containerWidth: CGFloat, hasActivityIcon: Bool = false) -> CGFloat {
+  static func titleViewportWidth(
+    containerWidth: CGFloat,
+    hasActivityIcon: Bool = false,
+    hasChevron: Bool = true
+  ) -> CGFloat {
     let width = max(1, containerWidth)
-    let chevronWidth = min(preferredChevronSide, max(0, width - 1))
+    let chevronWidth = hasChevron ? min(preferredChevronSide, max(0, width - 1)) : 0
     let gap = min(titleChevronGap, max(0, width - chevronWidth - 1))
     let activityWidth = hasActivityIcon ? activityIconSide + activityTitleGap : 0
     return max(1, width - chevronWidth - gap - activityWidth)
@@ -24,10 +30,11 @@ enum RichBlockDisclosureMetrics {
     bounds: CGRect,
     intrinsicTitleWidth: CGFloat,
     isRTL: Bool,
-    hasActivityIcon: Bool = false
+    hasActivityIcon: Bool = false,
+    hasChevron: Bool = true
   ) -> HorizontalLayout {
     let width = max(0, bounds.width)
-    let chevronWidth = min(preferredChevronSide, max(0, width - 1))
+    let chevronWidth = hasChevron ? min(preferredChevronSide, max(0, width - 1)) : 0
     let availableGap = min(titleChevronGap, max(0, width - chevronWidth - 1))
     let iconWidth = hasActivityIcon ? min(activityIconSide, max(0, width - chevronWidth - availableGap - 1)) : 0
     let iconGap = iconWidth > 0 ? min(activityTitleGap, max(0, width - chevronWidth - availableGap - iconWidth - 1)) : 0
