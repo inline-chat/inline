@@ -25,7 +25,7 @@ use inline_client::{
 };
 use inline_protocol::proto;
 use serde_json::{Value, json};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use super::api;
 use super::work::Command;
@@ -68,7 +68,7 @@ pub(crate) struct Tools {
     config: ToolsConfig,
     bindings: Mutex<ToolBindings>,
     /// Session → its work's actor, for tools that act through the work.
-    works: Mutex<HashMap<String, mpsc::WeakSender<Command>>>,
+    works: Mutex<HashMap<String, super::work::WeakCommandSender>>,
     /// Session → the folder its work runs in.
     folders: Mutex<HashMap<String, PathBuf>>,
     /// Messages this bot sent, so replies to them address it.
@@ -122,7 +122,7 @@ impl Tools {
         &self,
         session: &ProviderSessionId,
         chat_id: i64,
-        commands: mpsc::WeakSender<Command>,
+        commands: super::work::WeakCommandSender,
         folder: PathBuf,
     ) {
         self.bindings.lock().expect("tool bindings").bind(
@@ -715,7 +715,7 @@ impl Tools {
             .lock()
             .expect("tool works")
             .get(work.session.as_str())
-            .and_then(mpsc::WeakSender::upgrade);
+            .and_then(super::work::WeakCommandSender::upgrade);
         let Some(commands) = commands else {
             return HostToolResult::failure("This work is no longer running here.");
         };

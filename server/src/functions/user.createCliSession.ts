@@ -4,7 +4,7 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { generateToken } from "@in/server/utils/auth"
 import { Log } from "@in/server/utils/log"
-import { validateUpToFourSegementSemver } from "@in/server/utils/validate"
+import { validateCliVersion, validateUpToFourSegementSemver } from "@in/server/utils/validate"
 
 const log = new Log("user.createCliSession")
 const CLI_DEVICE_ID_PATTERN = /^cli_[A-Za-z0-9_-]{16,96}$/
@@ -29,7 +29,7 @@ export async function createCliSession(
   const clientVersion = input.clientVersion.trim()
   const osVersion = normalizeOptionalVersion(input.osVersion)
 
-  if (!CLI_DEVICE_ID_PATTERN.test(deviceId) || !validateUpToFourSegementSemver(clientVersion)) {
+  if (!CLI_DEVICE_ID_PATTERN.test(deviceId) || !validateCliVersion(clientVersion)) {
     throw RealtimeRpcError.BadRequest()
   }
   if (input.deviceName !== undefined && deviceName === undefined) {

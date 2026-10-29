@@ -74,6 +74,8 @@ mod reply_threads;
 mod service;
 mod stream_ui;
 mod supervisor;
+mod update_activity;
+mod update_supervisor;
 // Bridge v2 runtime pieces; wired in behind the per-provider flag.
 #[allow(dead_code)]
 mod v2;
@@ -518,6 +520,10 @@ pub async fn run_service(
     }
 }
 
+pub async fn supervise_service(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    update_supervisor::run(config_path).await
+}
+
 /// Explains why an agent is parked, and whether a re-probe can heal it.
 fn provider_park_reason(
     installation: &ProviderInstallationConfig,
@@ -694,6 +700,28 @@ async fn run_owned_service(
         target: "inline::bridge::trace",
         "trace_schema=1 phase=service_start metadata_only=true"
     );
+    for installation in &account.providers {
+        ensure_private_dir(&installation.state_dir)?;
+        BridgeStore::open(paths.provider_paths(installation).bridge_db)?;
+        if v2_enabled_for(&installation.provider_id) {
+            v2::ledger::Ledger::open(&installation.state_dir.join("v2-ledger.sqlite"))?;
+        }
+    }
+    let health = service::RuntimeHealth::starting(
+        account
+            .providers
+            .iter()
+            .map(|provider| provider.installation_id.clone()),
+    );
+    let provider_readiness = ProviderReadiness::new(health.clone());
+    let control_server = service::ControlServer::bind(
+        &paths.control_socket,
+        secrets.control_token.clone(),
+        health.clone(),
+    )
+    .await?;
+    let mut control_shutdown = Some(control_server.shutdown_receiver());
+    let mut termination = Box::pin(wait_for_termination());
     let owner_control_seed_required = !account.owner_control_cursor_seeded;
     let owner_auth = owner_credential(&secrets).map_err(|_| {
         BridgeSetupRequired::new(
@@ -703,15 +731,20 @@ async fn run_owned_service(
     })?;
     let mut owner_connection_failures = 0_u32;
     let owner_control = loop {
-        match OwnerControl::connect(
+        let connection = OwnerControl::connect(
             &runtime_config,
             &paths,
             account.owner_user_id,
             &owner_auth,
             owner_control_seed_required,
-        )
-        .await
-        {
+        );
+        tokio::pin!(connection);
+        let connected = tokio::select! {
+            result = &mut connection => result,
+            _ = wait_for_control_shutdown(&mut control_shutdown) => return Ok(()),
+            _ = &mut termination => return Ok(()),
+        };
+        match connected {
             Ok(control) => {
                 if owner_control_seed_required {
                     account.owner_control_cursor_seeded = true;
@@ -754,7 +787,11 @@ async fn run_owned_service(
                     describe_delay(delay),
                     safe_diagnostic(&error.to_string())
                 );
-                tokio::time::sleep(delay).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => {},
+                    _ = wait_for_control_shutdown(&mut control_shutdown) => return Ok(()),
+                    _ = &mut termination => return Ok(()),
+                }
             }
         }
     };
@@ -781,19 +818,6 @@ async fn run_owned_service(
             .expect("connected service owner control"),
     )
     .await?;
-    let health = service::RuntimeHealth::starting(
-        account
-            .providers
-            .iter()
-            .map(|provider| provider.installation_id.clone()),
-    );
-    let provider_readiness = ProviderReadiness::new(health.clone());
-    let control_server = service::ControlServer::bind(
-        &paths.control_socket,
-        secrets.control_token.clone(),
-        health.clone(),
-    )
-    .await?;
     let workspace_registrar = match WorkspaceRegistrar::bind(&paths, account.clone()).await {
         Ok(registrar) => registrar,
         Err(error) => {
@@ -807,11 +831,9 @@ async fn run_owned_service(
     let workspace_picker = workspace_registrar
         .as_ref()
         .map(WorkspaceRegistrar::endpoint);
-    let mut control_shutdown = Some(control_server.shutdown_receiver());
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let manifest_write = Arc::new(tokio::sync::Mutex::new(()));
     let provider_probe_capacity = Arc::new(tokio::sync::Semaphore::new(1));
-    let mut termination = Box::pin(wait_for_termination());
     let mut providers = futures_util::stream::FuturesUnordered::new();
     let mut supervisor = ProviderSupervisor::new(
         account
@@ -1165,6 +1187,49 @@ async fn wait_for_owner_connection_end(
     }
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BridgeUpdateStatus {
+    pub version: Option<String>,
+    pub candidate_version: Option<String>,
+    pub phase: String,
+}
+
+pub(crate) fn update_statuses(config: &Config) -> Vec<BridgeUpdateStatus> {
+    let root = config.data_dir.join("bridge");
+    let mut roots = vec![BridgePaths::legacy(config).root];
+    if let Ok(entries) = fs::read_dir(root.join("accounts")) {
+        roots.extend(
+            entries
+                .flatten()
+                .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+                .map(|entry| entry.path()),
+        );
+    }
+    roots
+        .into_iter()
+        .filter_map(|root| {
+            if let Ok(state) = crate::update::store::read_json::<update_supervisor::Activation>(
+                &root.join("activation.json"),
+            ) {
+                Some(BridgeUpdateStatus {
+                    version: Some(state.current.version),
+                    candidate_version: state.candidate.map(|a| a.version),
+                    phase: state.phase,
+                })
+            } else if root.join("config.json").is_file() {
+                Some(BridgeUpdateStatus {
+                    version: None,
+                    candidate_version: None,
+                    phase: "migration_required".into(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// Repeated-failure state of each configured agent, read from local files so
 /// `inline doctor` works even while the service is stopped.
 #[derive(Debug, Serialize)]
@@ -1370,43 +1435,11 @@ pub async fn restart(
     let loaded = load_installation(config)?;
     // A manual archive install may have updated only the invoking CLI. An
     // explicit restart must also run that binary in the installed service.
-    service::refresh_stable_binary(&loaded.paths, &env::current_exe()?)?;
     service::restart_service(&loaded.paths, &loaded.account, &loaded.secrets).await?;
     service::wait_for_all_providers_ready(&loaded.paths, &loaded.account, &loaded.secrets).await?;
     let results = provider_statuses(&loaded).await;
     print_provider_statuses(&results, json, json_format)?;
     ensure_provider_statuses_healthy(&results)
-}
-
-pub async fn refresh_after_update(
-    config: &Config,
-    updated_binary: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    for loaded in load_all_installed_accounts(config)? {
-        if let Err(error) = validate_account(&loaded.account, &loaded.secrets) {
-            eprintln!(
-                "Skipped restarting an agent bridge that needs setup: {}",
-                safe_diagnostic(&error.to_string())
-            );
-            continue;
-        }
-        service::refresh_stable_binary(&loaded.paths, updated_binary)?;
-        // The update itself succeeded. A bridge that is not healthy yet keeps
-        // retrying (or re-probing) on the new binary by itself.
-        let restarted = async {
-            service::restart_service(&loaded.paths, &loaded.account, &loaded.secrets).await?;
-            service::wait_for_all_providers_ready(&loaded.paths, &loaded.account, &loaded.secrets)
-                .await
-        }
-        .await;
-        if let Err(error) = restarted {
-            eprintln!(
-                "The agent bridge restarted on the new version but is not healthy yet: {}. Check `inline bridge status`.",
-                safe_diagnostic(&error.to_string())
-            );
-        }
-    }
-    Ok(())
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1820,6 +1853,9 @@ async fn run_provider_installation(
     mut installation: ProviderInstallationConfig,
     context: ProviderRuntimeContext,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let startup_activity = update_activity::global()
+        .enter()
+        .ok_or_else(|| io::Error::other("update handoff in progress"))?;
     let ProviderRuntimeContext {
         paths,
         mut account,
@@ -2025,6 +2061,7 @@ async fn run_provider_installation(
             readiness: shared_provider_readiness.as_ref(),
             external_shutdown,
             standalone_runtime,
+            startup_activity,
         })
         .await;
     }
@@ -2062,7 +2099,7 @@ async fn run_provider_installation(
         reply_thread_default,
     };
     let (deferred_inbound_tx, mut deferred_inbound_rx) =
-        tokio::sync::mpsc::channel::<InboundRecord>(MAX_PENDING_VOICE_TRANSCRIPTS);
+        tokio::sync::mpsc::channel::<runtime::DeferredInbound>(MAX_PENDING_VOICE_TRANSCRIPTS);
     let attachment_cache_dir = installation.state_dir.join("attachments");
     ensure_private_dir(&attachment_cache_dir)?;
     let claude_history = if installation.provider_id == "claude" {
@@ -2260,6 +2297,7 @@ async fn run_provider_installation(
         );
     }
 
+    drop(startup_activity);
     let run_result: Result<(), Box<dyn std::error::Error>> = async {
         const TURN_EVENT_QUEUE_CAPACITY: usize = 32;
         const TURN_EVENT_DISPATCH_DEADLINE: Duration = Duration::from_secs(2);
@@ -2332,6 +2370,7 @@ async fn run_provider_installation(
                     provider_admission_blocked = true;
                     break;
                 };
+                let Some(update_lease) = update_activity::global().enter() else { break; };
                 let Some(record) =
                     bridge_store
                         .take_next_inbound_if_session_ready(&pending_binding, now_seconds())?
@@ -2412,6 +2451,7 @@ async fn run_provider_installation(
                 let task_lane_sender = event_tx.clone();
                 let task_lane_promotions = lane_promotion_tx.clone();
                 turns.push(Box::pin(async move {
+                    let _update_lease = update_lease;
                     let result = run_inbound_turn(
                         &task_bot,
                         &mut event_rx,
@@ -2530,6 +2570,7 @@ async fn run_provider_installation(
                             "deferred media channel closed",
                         ).into());
                     };
+                    let runtime::DeferredInbound { record, _activity } = record;
                     let admitted = match accept_or_resume_queued_confirmation(&bridge_store, &record)
                     {
                         Ok(admitted) => admitted,
@@ -2556,7 +2597,8 @@ async fn run_provider_installation(
                         );
                     }
                 }
-                delivery = inline_events.recv_delivery() => {
+                delivery = inline_events.recv_delivery(), if !update_activity::global().draining() => {
+                    let Some(_delivery_activity) = update_activity::global().enter() else { continue; };
                     let Some(delivery) = delivery else {
                         break 'runtime Err(io::Error::new(
                             io::ErrorKind::ConnectionAborted,
@@ -2853,7 +2895,8 @@ async fn run_provider_installation(
                         loop {
                             tokio::select! {
                                 _ = &mut retry_delay => break,
-                                delivery = inline_events.recv_delivery() => {
+                                delivery = inline_events.recv_delivery(), if !update_activity::global().draining() => {
+                    let Some(_delivery_activity) = update_activity::global().enter() else { continue; };
                                     let Some(delivery) = delivery else {
                                         break 'runtime Err(io::Error::new(
                                             io::ErrorKind::ConnectionAborted,
@@ -2892,7 +2935,8 @@ async fn run_provider_installation(
                         let restarted = loop {
                             tokio::select! {
                                 result = &mut spawning => break result,
-                                delivery = inline_events.recv_delivery() => {
+                                delivery = inline_events.recv_delivery(), if !update_activity::global().draining() => {
+                    let Some(_delivery_activity) = update_activity::global().enter() else { continue; };
                                     let Some(delivery) = delivery else {
                                         break 'runtime Err(io::Error::new(
                                             io::ErrorKind::ConnectionAborted,
@@ -3137,6 +3181,7 @@ struct V2Launch<'a> {
     readiness: Option<&'a ProviderReadiness>,
     external_shutdown: Option<tokio::sync::watch::Receiver<bool>>,
     standalone_runtime: bool,
+    startup_activity: update_activity::Lease,
 }
 
 /// Serves one provider on the v2 session contract instead of the v1 driver.
@@ -3156,6 +3201,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         readiness,
         mut external_shutdown,
         standalone_runtime,
+        startup_activity,
     } = launch;
     let agent_name = if installation.display_name.trim().is_empty() {
         installation.provider_id.clone()
@@ -3248,7 +3294,8 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         store: legacy_store.clone(),
         installation_id: InstallationId::new(installation.installation_id.clone())?,
     })
-    .with_legacy_store(legacy_store);
+    .with_legacy_store(legacy_store)
+    .with_startup_activity(startup_activity);
     if let Some(readiness) = readiness {
         readiness.mark_ready(&installation.installation_id);
     }

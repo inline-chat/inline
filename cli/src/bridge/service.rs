@@ -82,9 +82,11 @@ pub(super) struct BridgeLogs {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum ControlCommand {
+pub(super) enum ControlCommand {
     Status,
     Shutdown,
+    PrepareUpdate,
+    CancelUpdate,
 }
 
 #[derive(Deserialize)]
@@ -107,15 +109,17 @@ impl std::fmt::Debug for ControlRequest {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ControlResponse {
-    version: u32,
-    status: String,
-    process_id: u32,
-    inline_connected: bool,
-    provider_ready: bool,
-    detail: Option<String>,
+pub(super) struct ControlResponse {
+    pub(super) version: u32,
+    pub(super) status: String,
+    pub(super) process_id: u32,
+    pub(super) inline_connected: bool,
+    pub(super) provider_ready: bool,
+    pub(super) detail: Option<String>,
     #[serde(default)]
     providers: Vec<ProviderRuntimeStatus>,
+    #[serde(default)]
+    pub(super) cli_version: String,
 }
 
 pub(super) struct ControlServer {
@@ -197,9 +201,16 @@ impl ControlServer {
         self.shutdown_rx.clone()
     }
 
-    pub(super) async fn close(self) {
+    pub(super) async fn close(mut self) {
         self.task.abort();
-        let _ = self.task.await;
+        let _ = (&mut self.task).await;
+        let _ = fs::remove_file(&self.socket_path);
+    }
+}
+
+impl Drop for ControlServer {
+    fn drop(&mut self) {
+        self.task.abort();
         let _ = fs::remove_file(&self.socket_path);
     }
 }
@@ -231,6 +242,21 @@ async fn handle_control_connection(
         {
             match request.command {
                 ControlCommand::Status => health_response("running", &health),
+                ControlCommand::PrepareUpdate => {
+                    let ready = super::update_activity::global().prepare();
+                    health_response(
+                        if ready {
+                            "update_ready"
+                        } else {
+                            "waiting_for_idle"
+                        },
+                        &health,
+                    )
+                }
+                ControlCommand::CancelUpdate => {
+                    super::update_activity::global().cancel();
+                    health_response("running", &health)
+                }
                 ControlCommand::Shutdown => {
                     let _ = shutdown_tx.send(true);
                     health_response("stopping", &health)
@@ -245,6 +271,7 @@ async fn handle_control_connection(
             provider_ready: false,
             detail: Some("bridge control authentication failed".to_string()),
             providers: Vec::new(),
+            cli_version: env!("CARGO_PKG_VERSION").into(),
         },
         Err(_) => ControlResponse {
             version: CONTROL_VERSION,
@@ -254,6 +281,7 @@ async fn handle_control_connection(
             provider_ready: false,
             detail: Some("bridge control request was malformed".to_string()),
             providers: Vec::new(),
+            cli_version: env!("CARGO_PKG_VERSION").into(),
         },
     };
     let mut bytes = serde_json::to_vec(&response)?;
@@ -272,6 +300,7 @@ fn health_response(status: &str, health: &RuntimeHealth) -> ControlResponse {
         provider_ready,
         detail: None,
         providers: health.provider_snapshot(),
+        cli_version: env!("CARGO_PKG_VERSION").into(),
     }
 }
 
@@ -296,6 +325,7 @@ pub(super) fn install_service(
     account: &AccountBridgeConfig,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     validate_service_paths(paths, account)?;
+    super::update_supervisor::enroll(paths)?;
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         let _ = (paths, account);
@@ -346,19 +376,6 @@ pub(super) fn install_service(
         run_systemctl(["--user", "restart", &unit_name])?;
         Ok(unit_path)
     }
-}
-
-pub(super) fn refresh_stable_binary(paths: &BridgePaths, updated_binary: &Path) -> io::Result<()> {
-    if !super::is_executable_file(updated_binary) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "updated Inline binary is missing or not executable: {}",
-                updated_binary.display()
-            ),
-        ));
-    }
-    install_stable_binary_from(updated_binary, &paths.installed_binary)
 }
 
 pub(super) async fn start_service(
@@ -472,6 +489,11 @@ pub(super) async fn restart_service(
     secrets: &AccountBridgeSecrets,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validate_service_paths(paths, account)?;
+    let legacy = !super::update_supervisor::enabled(paths);
+    super::update_supervisor::enroll(paths)?;
+    if legacy {
+        install_stable_binary(&paths.installed_binary)?;
+    }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         let definition = service_definition_path(&account.service_label)?;
@@ -1251,7 +1273,7 @@ fn scrubbed_service_log_line(label: &str, line: &str) -> String {
 }
 
 #[cfg(unix)]
-async fn control_request(
+pub(super) async fn control_request(
     paths: &BridgePaths,
     secrets: &AccountBridgeSecrets,
     command: ControlCommand,
@@ -1268,6 +1290,8 @@ async fn control_request(
         "command": match command {
             ControlCommand::Status => "status",
             ControlCommand::Shutdown => "shutdown",
+            ControlCommand::PrepareUpdate => "prepare_update",
+            ControlCommand::CancelUpdate => "cancel_update",
         },
     });
     let mut bytes = serde_json::to_vec(&request)?;
@@ -1293,7 +1317,7 @@ async fn control_request(
 }
 
 #[cfg(not(unix))]
-async fn control_request(
+pub(super) async fn control_request(
     _paths: &BridgePaths,
     _secrets: &AccountBridgeSecrets,
     _command: ControlCommand,

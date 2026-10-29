@@ -30,6 +30,7 @@ rand = "0.8.5"
 rusqlite.workspace = true
 uuid.workspace = true
 regex = "1.10"
+ring = "0.17"
 reqwest = { version = "0.12.12", default-features = false, features = [
   "json",
   "multipart",

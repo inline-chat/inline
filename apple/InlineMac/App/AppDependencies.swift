@@ -27,11 +27,12 @@ public struct AppDependencies {
   let viewModel = tracedLaunchDependency("DependencyMainWindowModel") { MainWindowViewModel() }
   var overlay = tracedLaunchDependency("DependencyOverlay") { OverlayManager() }
   let cliInstaller = tracedLaunchDependency("DependencyCLIInstaller") {
-    CLIInstallerController(configuration: .production(channel: .matchingAppUpdates))
+    CLIInstallerController(configurationProvider: { .production(channel: .matchingAppUpdates) })
   }
 #if SPARKLE
   let updates = tracedLaunchDependency("DependencyUpdater") { UpdateController() }
 #endif
+  let cliUpdates: CLIUpdateController
   let navigation = tracedLaunchDependency("DependencyNavigation") { NavigationModel.shared }
   let transactions = tracedLaunchDependency("DependencyTransactions") { Transactions.shared }
   let realtime = tracedLaunchDependency("DependencyRealtimeLegacy") { Realtime.shared }
@@ -69,6 +70,11 @@ public struct AppDependencies {
 
   init(appBridge: AppBridge = AppBridge()) {
     self.appBridge = appBridge
+    let cliUpdates = CLIUpdateController(installer: cliInstaller, channel: { .matchingAppUpdates })
+    self.cliUpdates = cliUpdates
+#if SPARKLE
+    updates.onChannelChanged = { [weak cliUpdates] in cliUpdates?.channelChanged() }
+#endif
   }
 }
 
@@ -78,6 +84,7 @@ extension View {
     let result = environment(\.auth, deps.auth)
       .environmentObject(deps.viewModel)
       .environment(deps.overlay)
+      .environment(deps.cliUpdates)
       .environmentObject(deps.navigation)
       .environmentObject(deps.nav)
       .environmentObject(deps.data)

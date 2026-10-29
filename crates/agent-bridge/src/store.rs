@@ -70,6 +70,8 @@ pub use workspace::{
 };
 
 const CURRENT_SCHEMA_VERSION: i64 = 30;
+// Advance this only for a change that older readers cannot safely use.
+const MINIMUM_READER_SCHEMA_VERSION: i64 = 30;
 const DEFAULT_QUEUE_LEASE_SECONDS: i64 = 300;
 const DEFAULT_INBOUND_LEASE_SECONDS: i64 = 300;
 
@@ -308,7 +310,23 @@ impl BridgeStore {
         prepare_private_file(path)?;
         let _migration_lock = acquire_migration_lock(path)?;
         let connection = Connection::open(path)?;
+        let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version > CURRENT_SCHEMA_VERSION {
+            if rollback_compatible(path, version)? {
+                connection.execute_batch("PRAGMA foreign_keys = ON;")?;
+                return Ok(Self {
+                    connection: Mutex::new(connection),
+                });
+            }
+            return Err(StoreError::UnsupportedSchemaVersion {
+                found: version,
+                supported: CURRENT_SCHEMA_VERSION,
+            });
+        }
         prepare_migration_backup(path, &connection)?;
+        // Publish the reader contract before the atomic SQLite migration. A
+        // crash after COMMIT must not leave the previous reader stranded.
+        write_reader_contract(path)?;
         Self::from_connection(connection)
     }
 
@@ -1305,6 +1323,74 @@ impl BridgeStore {
         )?;
         Ok(changed)
     }
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReaderContract {
+    schema_version: i64,
+    minimum_reader_schema_version: i64,
+}
+
+fn reader_contract_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".reader.json");
+    PathBuf::from(name)
+}
+
+fn rollback_compatible(path: &Path, schema_version: i64) -> StoreResult<bool> {
+    let contract_path = reader_contract_path(path);
+    let metadata = match fs::symlink_metadata(&contract_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    if !metadata.is_file() || metadata.len() > 4096 {
+        return Ok(false);
+    }
+    let contract: ReaderContract = serde_json::from_slice(&fs::read(contract_path)?)?;
+    Ok(contract.schema_version == schema_version
+        && contract.minimum_reader_schema_version > 0
+        && contract.minimum_reader_schema_version <= CURRENT_SCHEMA_VERSION)
+}
+
+fn write_reader_contract(path: &Path) -> StoreResult<()> {
+    use std::io::Write;
+    let contract_path = reader_contract_path(path);
+    let mut temporary_name = contract_path.as_os_str().to_os_string();
+    temporary_name.push(format!(
+        ".{}.{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let temporary = PathBuf::from(temporary_name);
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary)?;
+    let result = (|| -> StoreResult<()> {
+        file.write_all(&serde_json::to_vec(&ReaderContract {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            minimum_reader_schema_version: MINIMUM_READER_SCHEMA_VERSION,
+        })?)?;
+        file.sync_all()?;
+        fs::rename(&temporary, &contract_path)?;
+        if let Some(parent) = path.parent() {
+            std::fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temporary);
+    }
+    result
 }
 
 fn migrate(connection: &Connection) -> StoreResult<()> {

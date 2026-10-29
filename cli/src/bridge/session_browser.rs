@@ -286,7 +286,11 @@ where
     };
     let mut control_epoch = route.control_epoch.subscribe();
     let _ = control_epoch.borrow_and_update();
+    let Some(update_activity) = super::update_activity::global().enter() else {
+        return Ok(true);
+    };
     tokio::spawn(async move {
+        let _update_activity = update_activity;
         let _permit = permit;
         let runtime = SettingsRuntime {
             sessions: &sessions,

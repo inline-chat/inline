@@ -5,7 +5,7 @@ import { inlineProtocolAuthKeys } from "@in/server/db/schema"
 import { SessionsModel, type SessionReplacement } from "@in/server/db/models/sessions"
 import { finishSessionRevocation } from "@in/server/modules/sessions/revokeSession"
 import { normalizeAuthClientType } from "@in/server/modules/auth/clientType"
-import { validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
+import { validateCliVersion, validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 
@@ -37,7 +37,8 @@ export async function authorizeInlineProtocolKey(input: {
     },
     deviceId: input.client["deviceId"],
     clientType,
-    clientVersion: validVersion(input.client["clientVersion"]),
+    clientVersion: clientType === "cli" && validateCliVersion(input.client["clientVersion"] ?? "")
+      ? input.client["clientVersion"] : validVersion(input.client["clientVersion"]),
     osVersion: validVersion(input.client["osVersion"]),
   }, input.now)
 

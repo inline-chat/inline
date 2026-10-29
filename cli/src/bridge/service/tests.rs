@@ -117,6 +117,7 @@ fn systemd_unit_uses_absolute_args_restart_bounds_and_no_secrets() {
 #[test]
 fn account_running_is_provider_neutral() {
     let response = ControlResponse {
+        cli_version: env!("CARGO_PKG_VERSION").into(),
         version: CONTROL_VERSION,
         status: "running".to_string(),
         process_id: 42,
@@ -390,6 +391,7 @@ fn control_request_debug_redacts_the_capability() {
 #[test]
 fn status_resolves_readiness_for_the_requested_provider() {
     let response = ControlResponse {
+        cli_version: env!("CARGO_PKG_VERSION").into(),
         version: CONTROL_VERSION,
         status: "running".to_string(),
         process_id: 42,

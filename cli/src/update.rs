@@ -1,76 +1,56 @@
-use std::collections::HashMap;
-use std::fs::{self, File};
-use std::io;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
+use crate::{
+    config::Config,
+    identity as client_info,
+    state::{LocalDb, StateError},
+};
 use flate2::read::GzDecoder;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::{
+    fs::{self, File},
+    io::{self, Read},
+    path::{Path, PathBuf},
+    process::Stdio,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tar::Archive;
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
-use tokio::task::JoinHandle;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    task::JoinHandle,
+};
 
-use crate::config::Config;
-use crate::identity as client_info;
-use crate::state::{LocalDb, StateError};
+pub mod manifest;
+pub mod store;
+mod transfer;
+pub use store::{Artifact, Store};
+use transfer::*;
 
-/// Release channel the CLI updates from. Alpha follows the newest release of
-/// any kind, so it moves onto the stable release that supersedes an alpha.
+const MAX_UPDATE_DOWNLOAD_BYTES: u64 = 100 * 1024 * 1024;
+const CHECK_INTERVAL: i64 = 6 * 60 * 60;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum UpdateChannel {
     Stable,
     Alpha,
 }
-
 impl UpdateChannel {
-    /// A saved choice wins; otherwise a prerelease build keeps following alphas.
-    fn resolve(saved: Option<Self>, current_version: &str) -> Self {
-        saved.unwrap_or(if current_version.contains('-') {
+    pub fn resolve(saved: Option<Self>, version: &str) -> Self {
+        saved.unwrap_or(if version.contains('-') {
             Self::Alpha
         } else {
             Self::Stable
         })
     }
-
-    /// An explicit manifest override pins every channel to that manifest.
-    fn manifest_url(self, stable_url: &str, overridden: bool) -> String {
-        match (self, stable_url.strip_suffix("/manifest.json")) {
-            (Self::Alpha, Some(base)) if !overridden => format!("{base}/alpha/manifest.json"),
-            _ => stable_url.to_string(),
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Alpha => "alpha",
         }
     }
 }
-
-/// Saves a requested channel and returns the one updates should follow.
-pub fn select_channel(
-    local_db: &LocalDb,
-    requested: Option<UpdateChannel>,
-) -> Result<UpdateChannel, UpdateError> {
-    let mut state = local_db.load()?;
-    if let Some(channel) = requested.filter(|channel| state.update_channel != Some(*channel)) {
-        state.update_channel = Some(channel);
-        local_db.save(&state)?;
-    }
-    Ok(UpdateChannel::resolve(
-        state.update_channel,
-        env!("CARGO_PKG_VERSION"),
-    ))
-}
-
-fn channel_manifest_url(config: &Config, channel: UpdateChannel) -> Option<String> {
-    let stable_url = config.release_manifest_url.as_deref()?;
-    Some(channel.manifest_url(stable_url, Config::release_manifest_overridden()))
-}
-
-const UPDATE_CHECK_INTERVAL_SECS: i64 = 6 * 60 * 60;
-const UPDATE_CHECK_TIMEOUT_SECS: u64 = 4;
-const UPDATE_CHECK_FINISH_TIMEOUT_MS: u64 = 150;
-const MAX_UPDATE_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub enum UpdateError {
@@ -84,13 +64,17 @@ pub enum UpdateError {
     Version(#[from] semver::Error),
     #[error("io error: {0}")]
     Io(#[from] io::Error),
+    #[error("another update operation is in progress")]
+    Busy,
+    #[error("release verification failed ({0}); the working version was kept")]
+    Verification(&'static str),
     #[error("missing release manifest url")]
     MissingManifestUrl,
     #[error("missing release target for {0}")]
     MissingTarget(String),
     #[error("checksum mismatch (expected {expected}, got {actual})")]
     ChecksumMismatch { expected: String, actual: String },
-    #[error("update download exceeds the {MAX_UPDATE_DOWNLOAD_BYTES}-byte safety limit")]
+    #[error("update download exceeds safety limit")]
     DownloadTooLarge,
     #[error("update download size mismatch (expected {expected} bytes, got {actual})")]
     SizeMismatch { expected: u64, actual: u64 },
@@ -99,19 +83,20 @@ pub enum UpdateError {
     #[error("inline in the update bundle must be a regular file")]
     InvalidBinary,
 }
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UpdateManifest {
-    version: String,
-    #[allow(dead_code)]
-    published_at: Option<String>,
-    install_url: Option<String>,
-    targets: HashMap<String, UpdateTarget>,
+impl UpdateError {
+    pub fn stage(&self) -> &'static str {
+        match self {
+            Self::Verification(stage) => stage,
+            Self::ChecksumMismatch { .. } => "checksum",
+            Self::DownloadTooLarge | Self::SizeMismatch { .. } => "download_size",
+            Self::Http(_) => "network",
+            Self::MissingBinary | Self::InvalidBinary => "archive",
+            Self::Busy => "busy",
+            _ => "installation",
+        }
+    }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct UpdateTarget {
     url: String,
     sha256: String,
@@ -128,982 +113,708 @@ pub struct UpdateCheck {
     update_available: bool,
 }
 
+pub fn select_channel(
+    db: &LocalDb,
+    requested: Option<UpdateChannel>,
+) -> Result<UpdateChannel, UpdateError> {
+    let config = Config::load();
+    let store = Store::new(&config.data_dir);
+    let saved = store.read()?;
+    if requested.is_none() && store.root.join("update.json").exists() {
+        return Ok(saved.channel);
+    }
+    let legacy = db.load()?.update_channel;
+    store.edit(|state| {
+        state.channel = UpdateChannel::resolve(requested.or(legacy), env!("CARGO_PKG_VERSION"));
+        if requested.is_some() {
+            state.follows_app = false;
+            state.channel_override = true;
+            state.revision += 1;
+        }
+        Ok(state.channel)
+    })
+}
+
+pub fn configure(
+    config: &Config,
+    enabled: Option<bool>,
+    channel: Option<UpdateChannel>,
+    app: bool,
+    register: bool,
+) -> Result<store::State, UpdateError> {
+    let store = Store::new(&config.data_dir);
+    if register {
+        enroll_current(&store)?;
+    }
+    store.edit(|state| {
+        let before = (
+            state.auto_update,
+            state.channel,
+            state.follows_app,
+            state.channel_override,
+        );
+        if let Some(enabled) = enabled {
+            state.auto_update = enabled;
+        }
+        if let Some(channel) = channel {
+            if !app || !state.channel_override {
+                if state.channel != channel {
+                    state.last_attempt = None;
+                    state.retry_at = None;
+                }
+                if state.channel != channel {
+                    state.staged = None;
+                }
+                state.channel = channel;
+                state.follows_app = app;
+            }
+        }
+
+        if !app && channel.is_some() {
+            state.follows_app = false;
+            state.channel_override = true;
+        }
+        if before
+            != (
+                state.auto_update,
+                state.channel,
+                state.follows_app,
+                state.channel_override,
+            )
+        {
+            state.revision += 1;
+        }
+        Ok(state.clone())
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Status {
+    #[serde(flatten)]
+    pub state: store::State,
+    pub current_version: &'static str,
+    pub target: &'static str,
+    pub automatic_updates_available: bool,
+    pub installation_method: &'static str,
+    pub bridges: Vec<crate::bridge::BridgeUpdateStatus>,
+}
+pub fn status(config: &Config) -> Result<Status, UpdateError> {
+    let store = Store::new(&config.data_dir);
+    let exe = std::env::current_exe()?;
+    Ok(Status {
+        state: store.read()?,
+        current_version: env!("CARGO_PKG_VERSION"),
+        target: current_target(),
+        automatic_updates_available: automatic_allowed(),
+        installation_method: installation_method(&exe, &store),
+        bridges: crate::bridge::update_statuses(config),
+    })
+}
+
+fn check_due(state: &store::State, now: i64, interval: i64) -> bool {
+    if let Some(retry) = state.retry_at {
+        return now >= retry;
+    }
+    !state
+        .last_attempt
+        .is_some_and(|at| now.saturating_sub(at) < interval)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Compatibility {
+    bridge_schema_version: u32,
+    minimum_reader_schema_version: u32,
+}
+fn compatibility() -> Compatibility {
+    serde_json::from_str(include_str!("../update-compatibility.json"))
+        .expect("embedded update compatibility")
+}
+
+pub(crate) fn automatic_allowed() -> bool {
+    !cfg!(debug_assertions)
+        && !Config::release_manifest_overridden()
+        && std::env::var_os("INLINE_RELEASE_BASE_URL").is_none()
+        && !std::env::var("INLINE_DISABLE_AUTOUPDATE")
+            .is_ok_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "on"))
+}
+
+fn manifest_url(config: &Config, channel: UpdateChannel) -> Result<String, UpdateError> {
+    let base = config
+        .release_manifest_url
+        .as_deref()
+        .ok_or(UpdateError::MissingManifestUrl)?;
+    if Config::release_manifest_overridden() {
+        return Ok(base.to_owned());
+    }
+    Ok(format!(
+        "{}/channels/{}.json",
+        base.trim_end_matches("/manifest.json"),
+        channel.as_str()
+    ))
+}
+
+async fn fetch_release(
+    config: &Config,
+    channel: UpdateChannel,
+) -> Result<manifest::Release, UpdateError> {
+    let client = client_info::http_client_builder()
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .timeout(Duration::from_secs(15))
+        .build()?;
+    let mut response = client
+        .get(manifest_url(config, channel)?)
+        .send()
+        .await?
+        .error_for_status()?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if bytes.len() + chunk.len() > manifest::MAX_MANIFEST_BYTES {
+            return Err(UpdateError::Verification("manifest_size"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let release = manifest::verify(&bytes, channel)?;
+    let state = Store::new(&config.data_dir).read()?;
+    if release.generation < *state.highest_generation.get(channel.as_str()).unwrap_or(&0) {
+        return Err(UpdateError::Verification("manifest_replay"));
+    }
+    if let Some(previous) = state.accepted.get(channel.as_str()).or_else(|| {
+        state
+            .latest
+            .as_ref()
+            .filter(|previous| previous.channel == channel)
+    }) {
+        if release.generation == previous.generation && release != *previous {
+            return Err(UpdateError::Verification("manifest_identity"));
+        }
+        if Version::parse(&release.version)?
+            .cmp_precedence(&Version::parse(&previous.version)?)
+            .is_lt()
+        {
+            return Err(UpdateError::Verification("release_rollback"));
+        }
+    }
+    Ok(release)
+}
+
 pub async fn check_update(
     config: &Config,
     channel: UpdateChannel,
 ) -> Result<UpdateCheck, UpdateError> {
-    let manifest_url =
-        channel_manifest_url(config, channel).ok_or(UpdateError::MissingManifestUrl)?;
-    let manifest = fetch_manifest(&manifest_url).await?;
-    describe_update(
-        &manifest,
-        channel,
-        env!("CARGO_PKG_VERSION"),
-        current_target(),
-    )
-}
-
-fn describe_update(
-    manifest: &UpdateManifest,
-    channel: UpdateChannel,
-    current: &str,
-    target: &str,
-) -> Result<UpdateCheck, UpdateError> {
-    let newer = Version::parse(&manifest.version)? > Version::parse(current)?;
-    let supported = target != "unknown" && manifest.targets.contains_key(target);
+    let release = fetch_release(config, channel).await?;
     Ok(UpdateCheck {
         channel,
-        current_version: current.to_string(),
-        latest_version: manifest.version.clone(),
-        target: target.to_string(),
-        supported,
-        update_available: newer && supported,
+        current_version: env!("CARGO_PKG_VERSION").into(),
+        latest_version: release.version.clone(),
+        target: current_target().into(),
+        supported: release.targets.contains_key(current_target()),
+        update_available: newer(&release.version, env!("CARGO_PKG_VERSION"))?
+            && release.targets.contains_key(current_target()),
+    })
+}
+pub fn print_update_check(check: &UpdateCheck) {
+    if check.update_available {
+        println!(
+            "Update available: v{} (current v{}). Run: inline update",
+            check.latest_version, check.current_version
+        );
+    } else if !check.supported {
+        println!("No release bundle for {}.", check.target);
+    } else {
+        println!(
+            "inline is up to date on {} (v{}).",
+            check.channel.as_str(),
+            check.current_version
+        );
+    }
+}
+pub fn newer(candidate: &str, current: &str) -> Result<bool, UpdateError> {
+    Ok(Version::parse(candidate)?
+        .cmp_precedence(&Version::parse(current)?)
+        .is_gt())
+}
+
+pub async fn perform(
+    config: &Config,
+    channel: UpdateChannel,
+    background: bool,
+) -> Result<Status, UpdateError> {
+    let store = Store::new(&config.data_dir);
+    if background && (!automatic_allowed() || !store.read()?.auto_update) {
+        return status(config);
+    }
+    if background {
+        let state = store.read()?;
+        let now = current_epoch_seconds();
+        if !check_due(&state, now, 3600) {
+            return status(config);
+        }
+    }
+    let _installation = match store.installation_lock() {
+        Ok(lock) => lock,
+        Err(UpdateError::Busy) if background => return status(config),
+        Err(error) => return Err(error),
+    };
+    let revision = store.read()?.revision;
+    store.edit(|state| {
+        state.last_attempt = Some(current_epoch_seconds());
+        Ok(())
+    })?;
+    let result = perform_inner(config, &store, channel, background, revision).await;
+    if let Err(error) = &result {
+        let now = current_epoch_seconds();
+        let report = store
+            .edit(|state| {
+                let since = *state.failure_since.get_or_insert(now);
+                state.failure = Some(error.stage().into());
+                state.outcome = "retry_scheduled".into();
+                state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+                state.retry_at = Some(
+                    now + (300_i64
+                        * (1_i64 << state.consecutive_failures.saturating_sub(1).min(7)))
+                    .min(6 * 3600),
+                );
+                Ok(error.stage() != "network" || now - since >= 24 * 60 * 60)
+            })
+            .unwrap_or(false);
+        if report {
+            crate::telemetry::report_update(
+                "failed",
+                channel.as_str(),
+                env!("CARGO_PKG_VERSION"),
+                "unknown",
+                error.stage(),
+            );
+        }
+    }
+    result?;
+    status(config)
+}
+
+async fn perform_inner(
+    config: &Config,
+    store: &Store,
+    channel: UpdateChannel,
+    background: bool,
+    revision: u64,
+) -> Result<(), UpdateError> {
+    let release = fetch_release(config, channel).await?;
+    let selected = next_release(&release, env!("CARGO_PKG_VERSION"))?;
+    store.edit(|state| {
+        state
+            .highest_generation
+            .insert(channel.as_str().into(), release.generation);
+        state
+            .accepted
+            .insert(channel.as_str().into(), release.clone());
+        state.latest = Some(release.clone());
+        state.last_success = Some(current_epoch_seconds());
+        state.failure = None;
+        state.failure_since = None;
+        state.retry_at = None;
+        state.consecutive_failures = 0;
+        Ok(())
+    })?;
+    if !newer(&selected.version, env!("CARGO_PKG_VERSION"))? {
+        store.edit(|state| {
+            state.outcome = "current".into();
+            Ok(())
+        })?;
+        return Ok(());
+    }
+    let target = selected
+        .targets
+        .get(current_target())
+        .ok_or_else(|| UpdateError::MissingTarget(current_target().into()))?;
+    let artifact = stage_release(store, selected, target).await?;
+    if !background {
+        enroll_current(store)?;
+    }
+    if publish_staged(store, &artifact, background, revision)? {
+        crate::telemetry::report_update(
+            "staged",
+            channel.as_str(),
+            env!("CARGO_PKG_VERSION"),
+            &artifact.version,
+            "verified",
+        );
+    }
+    Ok(())
+}
+
+// Policy and pointer changes share the short settings transaction. The slow
+// network, extraction and executable probes have already completed.
+fn publish_staged(
+    store: &Store,
+    artifact: &Artifact,
+    background: bool,
+    revision: u64,
+) -> Result<bool, UpdateError> {
+    store.edit(|state| {
+        if state.revision != revision || (background && !state.auto_update) {
+            return Ok(false);
+        }
+        state.staged = Some(artifact.clone());
+        state.outcome = "staged".into();
+        for (path, old_hash) in &mut state.launchers {
+            if installation_method(path, store) == "managed"
+                && file_hash(path).ok().as_ref() == Some(old_hash)
+            {
+                copy_binary_atomically(&artifact.executable, path)?;
+                *old_hash = artifact.executable_sha256.clone();
+            }
+        }
+        Ok(true)
     })
 }
 
-pub fn print_update_check(check: &UpdateCheck) {
-    if !check.supported {
-        println!(
-            "Latest release: v{} (current v{}). No update bundle for {}.",
-            crate::output::terminal_text(&check.latest_version),
-            crate::output::terminal_text(&check.current_version),
-            check.target
-        );
-    } else if check.update_available {
-        println!(
-            "Update available: v{} (current v{}). Run: inline update",
-            crate::output::terminal_text(&check.latest_version),
-            crate::output::terminal_text(&check.current_version)
-        );
-    } else if check.channel == UpdateChannel::Alpha {
-        println!(
-            "inline is up to date on the alpha channel (v{}).",
-            check.current_version
-        );
-    } else {
-        println!("inline is up to date (v{}).", check.current_version);
-    }
-}
-
-pub async fn run_update(
-    config: &Config,
-    channel: UpdateChannel,
-    json: bool,
-) -> Result<Option<PathBuf>, UpdateError> {
-    let mut install_url_hint = config.release_install_url.clone();
-    let result = run_update_inner(config, channel, json, &mut install_url_hint).await;
-    if result.is_err() && !json {
-        print_reinstall_instructions(install_url_hint.as_deref());
-    }
-    result
-}
-
-async fn run_update_inner(
-    config: &Config,
-    channel: UpdateChannel,
-    json: bool,
-    install_url_hint: &mut Option<String>,
-) -> Result<Option<PathBuf>, UpdateError> {
-    let manifest_url =
-        channel_manifest_url(config, channel).ok_or(UpdateError::MissingManifestUrl)?;
-    let manifest = fetch_manifest(&manifest_url).await?;
-    if manifest.install_url.is_some() {
-        *install_url_hint = manifest.install_url.clone();
-    }
-    let target = current_target();
-    if target == "unknown" {
-        if !json {
-            eprintln!("Auto-update is not supported on this OS yet.");
-        }
-        return Ok(None);
-    }
-
-    let latest = Version::parse(&manifest.version)?;
-    let current = Version::parse(env!("CARGO_PKG_VERSION"))?;
-    if latest <= current {
-        if !json {
-            println!("inline is up to date (v{current}).");
-        }
-        return Ok(None);
-    }
-
-    let target_manifest = manifest
-        .targets
-        .get(target)
-        .ok_or_else(|| UpdateError::MissingTarget(target.to_string()))?;
-
-    let temp_dir = create_temp_dir()?;
-    let archive_path = temp_dir.path().join("inline.tar.gz");
-    download_file(target_manifest, &archive_path).await?;
-
-    let extract_dir = temp_dir.path().join("extract");
-    fs::create_dir_all(&extract_dir)?;
-    extract_archive(&archive_path, &extract_dir)?;
-
-    let extracted_binary = extract_dir.join("inline");
-    validate_binary(&extracted_binary)?;
-
-    let current_exe = std::env::current_exe()?;
-    let staged_path = stage_binary(&extracted_binary, temp_dir.path())?;
-    let install_outcome = install_binary(&staged_path, &current_exe)?;
-
-    if !json {
-        if install_outcome.used_fallback {
-            println!(
-                "Updated inline to v{latest} (installed to {}).",
-                install_outcome.install_path.display()
-            );
-            if let Some(parent) = (!install_outcome.path_on_env)
-                .then(|| install_outcome.install_path.parent())
-                .flatten()
-            {
-                eprintln!(
-                    "{} is not on your PATH. Add it to run the updated inline.",
-                    parent.display()
-                );
-            }
-        } else {
-            println!("Updated inline to v{latest}.");
+fn next_release<'a>(
+    release: &'a manifest::Release,
+    current: &str,
+) -> Result<&'a manifest::Release, UpdateError> {
+    if let Some(baseline) = &release.required_baseline {
+        if newer(&baseline.version, current)? {
+            return next_release(baseline, current);
         }
     }
-    Ok(Some(install_outcome.install_path))
+    Ok(release)
 }
 
-pub fn spawn_update_check(
-    config: &Config,
-    local_db: &LocalDb,
-    json: bool,
-) -> Option<JoinHandle<()>> {
-    let saved_channel = local_db.load().ok().and_then(|state| state.update_channel);
-    let channel = UpdateChannel::resolve(saved_channel, env!("CARGO_PKG_VERSION"));
-    let manifest_url = channel_manifest_url(config, channel)?;
-    // The stable installer would replace an alpha with the older stable.
-    let install_url = match channel {
-        UpdateChannel::Stable => config.release_install_url.clone(),
-        UpdateChannel::Alpha => None,
+async fn stage_release(
+    store: &Store,
+    release: &manifest::Release,
+    target: &manifest::Target,
+) -> Result<Artifact, UpdateError> {
+    let directory = store.root.join("versions").join(&target.sha256);
+    let executable = directory.join("inline");
+    if let Ok(artifact) = store::read_json::<Artifact>(&directory.join("receipt.json")) {
+        if artifact.version == release.version
+            && artifact.sha256 == target.sha256
+            && artifact.executable == executable
+            && file_hash(&executable)? == artifact.executable_sha256
+        {
+            return Ok(artifact);
+        }
+        return Err(UpdateError::Verification("cache_identity"));
+    }
+    let temporary = create_temp_dir()?;
+    let archive = temporary.path().join("inline.tar.gz");
+    download_file(
+        &UpdateTarget {
+            url: target.url.clone(),
+            sha256: target.sha256.clone(),
+            size: Some(target.size),
+        },
+        &archive,
+    )
+    .await?;
+    let extraction = temporary.path().join("extracted");
+    fs::create_dir(&extraction)?;
+    extract_archive(&archive, &extraction)?;
+    let stage = stage_binary(&extraction.join("inline"), temporary.path())?;
+    verify_executable(&stage, &release.version).await?;
+    store::private_dir(&directory)?;
+    copy_binary_atomically(&stage, &executable)?;
+    verify_executable(&executable, &release.version).await?;
+    let artifact = Artifact {
+        version: release.version.clone(),
+        target: current_target().into(),
+        sha256: target.sha256.clone(),
+        executable_sha256: file_hash(&executable)?,
+        executable,
+        bridge_schema_version: release.bridge_schema_version,
+        minimum_reader_schema_version: release.minimum_reader_schema_version,
     };
-    let local_db = local_db.clone();
-    let current_version = env!("CARGO_PKG_VERSION").to_string();
-
-    // If we're not due for a check, avoid spawning a task at all. This keeps fast CLI
-    // invocations fast (no task scheduling + join timeout).
-    if current_target() == "unknown" {
-        return None;
-    }
-    let now = current_epoch_seconds();
-    let recently_attempted = local_db.load().ok().is_some_and(|state| {
-        state.release_manifest_url.as_deref() == Some(&manifest_url)
-            && state.last_update_attempt_at.is_some_and(|last_attempt| {
-                now.saturating_sub(last_attempt) < UPDATE_CHECK_INTERVAL_SECS
-            })
-    });
-    if recently_attempted {
-        return None;
-    }
-
-    Some(tokio::spawn(async move {
-        let update_result = check_for_update(
-            manifest_url,
-            channel,
-            install_url,
-            local_db,
-            current_version,
-            json,
-        )
-        .await;
-        if let (true, Err(error)) = (cfg!(debug_assertions), update_result) {
-            eprintln!("update check failed: {error}");
-        }
-    }))
+    store::atomic_json(&directory.join("receipt.json"), &artifact)?;
+    Ok(artifact)
 }
 
-pub async fn finish_update_check(handle: Option<JoinHandle<()>>) {
-    if let Some(handle) = handle {
-        let _ = tokio::time::timeout(
-            Duration::from_millis(UPDATE_CHECK_FINISH_TIMEOUT_MS),
-            handle,
-        )
-        .await;
-    }
-}
-
-async fn check_for_update(
-    manifest_url: String,
-    channel: UpdateChannel,
-    install_url: Option<String>,
-    local_db: LocalDb,
-    current_version: String,
-    json: bool,
-) -> Result<(), UpdateError> {
-    let target = current_target();
-    if target == "unknown" {
-        return Ok(());
-    }
-
-    let now = current_epoch_seconds();
-    let mut state = local_db.load()?;
-    if state.release_manifest_url.as_deref() != Some(&manifest_url) {
-        state.last_update_check_at = None;
-        state.last_update_attempt_at = None;
-        state.last_update_notified_version = None;
-        state.last_seen_release_version = None;
-    }
-
-    if state
-        .last_update_attempt_at
-        .is_some_and(|last_attempt| now.saturating_sub(last_attempt) < UPDATE_CHECK_INTERVAL_SECS)
-    {
-        return Ok(());
-    }
-
-    // Mark attempt early so we don't keep spawning checks if the CLI exits quickly.
-    state.release_manifest_url = Some(manifest_url.clone());
-    state.last_update_attempt_at = Some(now);
-    let _ = local_db.save(&state);
-
-    let client = client_info::http_client_builder()
-        .timeout(Duration::from_secs(UPDATE_CHECK_TIMEOUT_SECS))
-        .build()?;
-    let response = client.get(&manifest_url).send().await?.error_for_status()?;
-    let payload = response.text().await?;
-    let manifest: UpdateManifest = serde_json::from_str(&payload)?;
-
-    state.last_update_check_at = Some(now);
-    state.last_seen_release_version = Some(manifest.version.clone());
-
-    let latest = Version::parse(&manifest.version)?;
-    let current = Version::parse(&current_version)?;
-    if latest > current && manifest.targets.contains_key(target) {
-        let should_notify = state
-            .last_update_notified_version
-            .as_deref()
-            .map(|version| version != manifest.version.as_str())
-            .unwrap_or(true);
-        if should_notify {
-            let install_url = match channel {
-                UpdateChannel::Stable => manifest.install_url.clone().or(install_url),
-                UpdateChannel::Alpha => None,
-            };
-            print_update_notice(
-                &current_version,
-                &manifest.version,
-                install_url.as_deref(),
-                json,
-            );
-            state.last_update_notified_version = Some(manifest.version.clone());
-        }
-    }
-
-    local_db.save(&state)?;
-    Ok(())
-}
-
-fn print_update_notice(current: &str, latest: &str, install_url: Option<&str>, json: bool) {
-    if json {
-        return;
-    }
-    eprintln!("Update available: v{latest} (current v{current}).");
-    if let Some(url) = install_url {
-        eprintln!("Run: curl -fsSL {url} | sh");
-    } else {
-        eprintln!("Run: inline update");
-    }
-}
-
-fn print_reinstall_instructions(install_url: Option<&str>) {
-    eprintln!("Update failed. Reinstall with:");
-    if let Some(url) = install_url {
-        eprintln!("  curl -fsSL {url} | sh");
-    } else {
-        eprintln!("  curl -fsSL https://public-assets.inline.chat/cli/install.sh | sh");
-    }
-}
-
-fn current_target() -> &'static str {
-    if cfg!(target_os = "macos") {
-        if cfg!(target_arch = "aarch64") {
-            "aarch64-apple-darwin"
-        } else if cfg!(target_arch = "x86_64") {
-            "x86_64-apple-darwin"
-        } else {
-            "unknown"
-        }
-    } else if cfg!(target_os = "linux") {
-        if cfg!(target_arch = "aarch64") {
-            if cfg!(target_env = "musl") {
-                "aarch64-unknown-linux-musl"
-            } else if cfg!(target_env = "gnu") {
-                "aarch64-unknown-linux-gnu"
-            } else {
-                "unknown"
-            }
-        } else if cfg!(target_arch = "x86_64") {
-            if cfg!(target_env = "musl") {
-                "x86_64-unknown-linux-musl"
-            } else if cfg!(target_env = "gnu") {
-                "x86_64-unknown-linux-gnu"
-            } else {
-                "unknown"
-            }
-        } else {
-            "unknown"
-        }
-    } else {
-        "unknown"
-    }
-}
-
-fn current_epoch_seconds() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
-
-async fn fetch_manifest(url: &str) -> Result<UpdateManifest, UpdateError> {
-    let client = client_info::http_client_builder()
-        .timeout(Duration::from_secs(UPDATE_CHECK_TIMEOUT_SECS))
-        .build()?;
-    let response = client.get(url).send().await?.error_for_status()?;
-    let payload = response.text().await?;
-    Ok(serde_json::from_str(&payload)?)
-}
-
-async fn download_file(target: &UpdateTarget, path: &Path) -> Result<(), UpdateError> {
-    if target
-        .size
-        .is_some_and(|size| size > MAX_UPDATE_DOWNLOAD_BYTES)
-    {
-        return Err(UpdateError::DownloadTooLarge);
-    }
-    let client = client_info::http_client_builder()
-        .timeout(Duration::from_secs(60))
-        .build()?;
-    let mut response = client.get(&target.url).send().await?.error_for_status()?;
-    if let Some(actual) = response.content_length() {
-        if actual > MAX_UPDATE_DOWNLOAD_BYTES {
-            return Err(UpdateError::DownloadTooLarge);
-        }
-        if let Some(expected) = target.size.filter(|size| *size != actual) {
-            return Err(UpdateError::SizeMismatch { expected, actual });
-        }
-    }
-    let mut file = tokio::fs::File::create(path).await?;
+pub fn file_hash(path: &Path) -> Result<String, UpdateError> {
+    let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
-    let mut actual_size = 0u64;
-    while let Some(chunk) = response.chunk().await? {
-        actual_size = actual_size.saturating_add(chunk.len() as u64);
-        if actual_size > MAX_UPDATE_DOWNLOAD_BYTES {
-            return Err(UpdateError::DownloadTooLarge);
+    let mut buffer = [0; 65536];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
         }
-        if let Some(expected) = target.size.filter(|size| actual_size > *size) {
-            return Err(UpdateError::SizeMismatch {
-                expected,
-                actual: actual_size,
-            });
-        }
-        file.write_all(&chunk).await?;
-        hasher.update(&chunk);
+        hasher.update(&buffer[..count]);
     }
-    file.flush().await?;
-    if let Some(expected) = target.size.filter(|size| *size != actual_size) {
-        return Err(UpdateError::SizeMismatch {
-            expected,
-            actual: actual_size,
-        });
-    }
-    let actual = bytes_to_hex(&hasher.finalize());
-    let expected = target.sha256.trim();
-    if !actual.eq_ignore_ascii_case(expected) {
-        return Err(UpdateError::ChecksumMismatch {
-            expected: expected.to_string(),
-            actual,
-        });
-    }
-    Ok(())
+    Ok(bytes_to_hex(&hasher.finalize()))
 }
 
-fn create_temp_dir() -> Result<tempfile::TempDir, io::Error> {
-    let mut builder = tempfile::Builder::new();
-    builder.prefix("inline-update-");
+pub fn installation_method(path: &Path, store: &Store) -> &'static str {
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if [path, canonical.as_path()].iter().any(|path| {
+        path.components()
+            .any(|part| part.as_os_str() == "Cellar" || part.as_os_str() == "Caskroom")
+    }) {
+        return "homebrew";
+    }
+    if canonical.starts_with(store.root.join("versions")) {
+        return "managed";
+    }
+    if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return "external";
+    }
+    if store
+        .read()
+        .is_ok_and(|state| state.launchers.contains_key(path))
+    {
+        return "managed";
+    }
+    "external"
+}
+
+fn enroll_current(store: &Store) -> Result<(), UpdateError> {
+    let path = std::env::current_exe()?;
+    if path.starts_with(&store.root)
+        || path.components().any(|part| part.as_os_str() == "bridge")
+        || installation_method(&path, store) == "homebrew"
+    {
+        return Ok(());
+    }
+    let metadata = fs::symlink_metadata(&path)?;
+    if !metadata.is_file() {
+        return Ok(());
+    }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        builder.permissions(fs::Permissions::from_mode(0o700));
-    }
-    builder.tempdir()
-}
-
-fn validate_binary(path: &Path) -> Result<(), UpdateError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.is_file() => Ok(()),
-        Ok(_) => Err(UpdateError::InvalidBinary),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(UpdateError::MissingBinary),
-        Err(error) => Err(error.into()),
-    }
-}
-
-fn bytes_to_hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        let _ = std::fmt::Write::write_fmt(&mut out, format_args!("{:02x}", byte));
-    }
-    out
-}
-
-fn extract_archive(archive_path: &Path, output_dir: &Path) -> Result<(), UpdateError> {
-    let file = File::open(archive_path)?;
-    let decoder = GzDecoder::new(file);
-    let mut archive = Archive::new(decoder);
-    archive.unpack(output_dir)?;
-    Ok(())
-}
-
-fn stage_binary(extracted_binary: &Path, stage_dir: &Path) -> Result<PathBuf, UpdateError> {
-    let staged_path = stage_dir.join("inline.new");
-    fs::copy(extracted_binary, &staged_path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&staged_path)?.permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&staged_path, perms)?;
-    }
-    Ok(staged_path)
-}
-
-struct InstallOutcome {
-    install_path: PathBuf,
-    used_fallback: bool,
-    path_on_env: bool,
-}
-
-fn install_binary(staged_path: &Path, install_path: &Path) -> Result<InstallOutcome, UpdateError> {
-    match install_binary_direct(staged_path, install_path) {
-        Ok(()) => Ok(InstallOutcome {
-            install_path: install_path.to_path_buf(),
-            used_fallback: false,
-            path_on_env: path_contains_dir(install_path),
-        }),
-        Err(error) => {
-            if error.kind() == io::ErrorKind::PermissionDenied {
-                if command_exists("sudo") {
-                    if let Err(sudo_error) = install_binary_with_sudo(staged_path, install_path) {
-                        let combined = io::Error::new(
-                            io::ErrorKind::PermissionDenied,
-                            format!("install failed: {error}; sudo install failed: {sudo_error}"),
-                        );
-                        return Err(UpdateError::Io(combined));
-                    }
-                    return Ok(InstallOutcome {
-                        install_path: install_path.to_path_buf(),
-                        used_fallback: false,
-                        path_on_env: path_contains_dir(install_path),
-                    });
-                }
-
-                let fallback_path = user_fallback_path(install_path)?;
-                install_binary_direct(staged_path, &fallback_path)?;
-                return Ok(InstallOutcome {
-                    install_path: fallback_path.clone(),
-                    used_fallback: true,
-                    path_on_env: path_contains_dir(&fallback_path),
-                });
-            }
-            Err(UpdateError::Io(error))
-        }
-    }
-}
-
-fn install_binary_direct(staged_path: &Path, install_path: &Path) -> Result<(), io::Error> {
-    match fs::rename(staged_path, install_path) {
-        Ok(()) => Ok(()),
-        Err(error) if is_cross_device_link(&error) => {
-            copy_binary_atomically(staged_path, install_path)
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn copy_binary_atomically(staged_path: &Path, install_path: &Path) -> Result<(), io::Error> {
-    let parent = install_path.parent().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "install path has no parent directory",
-        )
-    })?;
-    let mut replacement = tempfile::Builder::new()
-        .prefix(".inline-update-")
-        .tempfile_in(parent)?;
-    let mut source = File::open(staged_path)?;
-    io::copy(&mut source, replacement.as_file_mut())?;
-    replacement
-        .as_file()
-        .set_permissions(source.metadata()?.permissions())?;
-    replacement.as_file().sync_all()?;
-    replacement
-        .persist(install_path)
-        .map_err(|error| error.error)?;
-    Ok(())
-}
-
-fn install_binary_with_sudo(staged_path: &Path, install_path: &Path) -> Result<(), io::Error> {
-    if !command_exists("sudo") {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "sudo not available",
-        ));
-    }
-    if command_exists("install") {
-        let status = Command::new("sudo")
-            .arg("install")
-            .arg("-m")
-            .arg("0755")
-            .arg(staged_path)
-            .arg(install_path)
-            .status()?;
-        if status.success() {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.uid() != unsafe { libc::geteuid() } {
             return Ok(());
         }
-        return Err(io::Error::other("sudo install failed"));
     }
+    let hash = file_hash(&path)?;
+    store.edit(|state| {
+        state.launchers.entry(path).or_insert(hash);
+        Ok(())
+    })
+}
 
-    let status = Command::new("sudo")
-        .arg("cp")
-        .arg(staged_path)
-        .arg(install_path)
-        .status()?;
-    if !status.success() {
-        return Err(io::Error::other("sudo copy failed"));
+pub(crate) fn retain_running_binary(store: &Store) -> Result<Artifact, UpdateError> {
+    let source = std::env::current_exe()?;
+    let hash = file_hash(&source)?;
+    let directory = store.root.join("versions").join(&hash);
+    store::private_dir(&directory)?;
+    let executable = directory.join("inline");
+    if !executable.exists() {
+        copy_binary_atomically(&source, &executable)?;
     }
-    let status = Command::new("sudo")
-        .arg("chmod")
-        .arg("755")
-        .arg(install_path)
-        .status()?;
-    if !status.success() {
-        return Err(io::Error::other("sudo chmod failed"));
+    let artifact = Artifact {
+        version: env!("CARGO_PKG_VERSION").into(),
+        target: current_target().into(),
+        sha256: hash.clone(),
+        executable_sha256: hash,
+        executable,
+        bridge_schema_version: compatibility().bridge_schema_version,
+        minimum_reader_schema_version: compatibility().minimum_reader_schema_version,
+    };
+    store::atomic_json(&directory.join("receipt.json"), &artifact)?;
+    Ok(artifact)
+}
+
+pub(crate) fn validate_cached(store: &Store, artifact: &Artifact) -> Result<(), UpdateError> {
+    if artifact.sha256.len() != 64
+        || !artifact.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || artifact.executable
+            != store
+                .root
+                .join("versions")
+                .join(&artifact.sha256)
+                .join("inline")
+        || !fs::symlink_metadata(&artifact.executable)?.is_file()
+        || fs::canonicalize(&artifact.executable)?
+            != fs::canonicalize(&store.root)?
+                .join("versions")
+                .join(&artifact.sha256)
+                .join("inline")
+        || file_hash(&artifact.executable)? != artifact.executable_sha256
+    {
+        return Err(UpdateError::Verification("runtime_identity"));
     }
     Ok(())
 }
 
-fn user_fallback_path(install_path: &Path) -> Result<PathBuf, UpdateError> {
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME not set"))?;
-    let file_name = install_path
-        .file_name()
-        .unwrap_or_else(|| std::ffi::OsStr::new("inline"));
-    let dir = PathBuf::from(home).join(".local").join("bin");
-    fs::create_dir_all(&dir)?;
-    Ok(dir.join(file_name))
+pub async fn verify_executable(path: &Path, version: &str) -> Result<(), UpdateError> {
+    validate_binary(path)?;
+    #[cfg(target_os = "macos")]
+    {
+        let result = tokio::time::timeout(Duration::from_secs(15), tokio::process::Command::new("/usr/bin/codesign").args(["--verify", "--strict", "--all-architectures", "-R=anchor apple generic and identifier \"chat.inline.cli\" and certificate leaf[subject.OU] = \"2487AN8AL4\""]).arg(path).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true).status()).await.map_err(|_| UpdateError::Verification("codesign_timeout"))??;
+        if !result.success() {
+            return Err(UpdateError::Verification("codesign"));
+        }
+    }
+    let output = bounded_probe(path).await?;
+    if output.trim() != format!("inline {version}") {
+        return Err(UpdateError::Verification("version_probe"));
+    }
+    Ok(())
 }
 
-fn command_exists(command: &str) -> bool {
-    std::env::var_os("PATH")
-        .and_then(|paths| {
-            for path in std::env::split_paths(&paths) {
-                let full_path = path.join(command);
-                if full_path.exists() {
-                    return Some(());
-                }
-            }
-            None
-        })
-        .is_some()
+async fn bounded_probe(path: &Path) -> Result<String, UpdateError> {
+    let mut child = tokio::process::Command::new(path)
+        .arg("--version")
+        .env("INLINE_DISABLE_AUTOUPDATE", "1")
+        .env("INLINE_CLI_TELEMETRY", "off")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()?;
+    let mut output = child
+        .stdout
+        .take()
+        .ok_or(UpdateError::Verification("version_probe"))?
+        .take(4097);
+    let mut bytes = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        output.read_to_end(&mut bytes).await?;
+        let status = child.wait().await?;
+        if !status.success() || bytes.len() > 4096 {
+            return Err(io::Error::other("version probe failed"));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| UpdateError::Verification("version_probe_timeout"))??;
+    String::from_utf8(bytes).map_err(|_| UpdateError::Verification("version_probe"))
 }
 
-fn path_contains_dir(path: &Path) -> bool {
-    let Some(dir) = path.parent() else {
-        return false;
-    };
-    std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).any(|entry| entry == dir))
-        .unwrap_or(false)
-}
-
-fn is_cross_device_link(error: &io::Error) -> bool {
+pub fn spawn_update_check(config: &Config, _db: &LocalDb, _json: bool) -> Option<JoinHandle<()>> {
+    if !automatic_allowed() {
+        return None;
+    }
+    let store = Store::new(&config.data_dir);
+    let state = store.read().ok()?;
+    if !state.auto_update
+        || !check_due(&state, current_epoch_seconds(), CHECK_INTERVAL)
+        || state.launchers.is_empty()
+    {
+        return None;
+    }
+    let mut command = std::process::Command::new(std::env::current_exe().ok()?);
+    command
+        .args(["update", "--background", "--json"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     #[cfg(unix)]
     {
-        error.raw_os_error() == Some(18)
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
     }
-    #[cfg(not(unix))]
-    {
-        let _ = error;
-        false
+    let _ = command.spawn();
+    None
+}
+pub async fn finish_update_check(handle: Option<JoinHandle<()>>) {
+    if let Some(handle) = handle {
+        let _ = tokio::time::timeout(Duration::from_millis(150), handle).await;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
-    use tokio::io::AsyncReadExt;
-    use tokio::net::TcpListener;
-    use tokio::sync::oneshot;
-
-    fn target(url: String, body: &[u8], size: Option<u64>) -> UpdateTarget {
-        UpdateTarget {
-            url,
-            sha256: bytes_to_hex(&Sha256::digest(body)),
-            size,
-        }
-    }
-
-    async fn read_request(stream: &mut tokio::net::TcpStream) {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            let mut request = Vec::new();
-            while !request.ends_with(b"\r\n\r\n") {
-                let mut byte = [0];
-                stream.read_exact(&mut byte).await.unwrap();
-                request.push(byte[0]);
-                assert!(request.len() < 16 * 1024);
-            }
-            assert!(request.starts_with(b"GET /archive HTTP/1.1\r\n"));
-        })
-        .await
-        .expect("complete HTTP request");
-    }
-
-    async fn serve(response: Vec<u8>) -> (String, JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/archive", listener.local_addr().unwrap());
-        let task = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            read_request(&mut stream).await;
-            stream.write_all(&response).await.unwrap();
-            stream.shutdown().await.unwrap();
-        });
-        (url, task)
-    }
-
-    fn response(body: &[u8]) -> Vec<u8> {
-        let mut response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        )
-        .into_bytes();
-        response.extend_from_slice(body);
-        response
-    }
-
     #[test]
-    fn update_checks_handle_versions_and_unavailable_platforms() {
-        let mut manifest = UpdateManifest {
-            version: "1.2.0".into(),
-            published_at: None,
-            install_url: None,
-            targets: HashMap::from([(
-                "test-platform".into(),
-                target("http://127.0.0.1:9/archive".into(), b"binary", None),
-            )]),
+    fn updater_activation_honors_opt_out_and_preserves_unowned_or_replaced_launchers() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::new(root.path());
+        let owned = root.path().join("inline");
+        let changed = root.path().join("replaced");
+        fs::write(&owned, "old").unwrap();
+        fs::write(&changed, "old").unwrap();
+        let candidate = root.path().join("candidate");
+        fs::write(&candidate, "new").unwrap();
+        let artifact = Artifact {
+            version: "1.1.0".into(),
+            target: "fixture".into(),
+            sha256: "b".repeat(64),
+            executable_sha256: file_hash(&candidate).unwrap(),
+            executable: candidate,
+            bridge_schema_version: 30,
+            minimum_reader_schema_version: 30,
         };
-        for (current, available) in [("1.1.0", true), ("1.2.0", false), ("1.3.0", false)] {
-            let check = describe_update(&manifest, UpdateChannel::Stable, current, "test-platform")
-                .unwrap();
-            assert_eq!(check.update_available, available);
-            assert!(check.supported);
-        }
-        let check = describe_update(
-            &manifest,
-            UpdateChannel::Stable,
-            "1.0.0",
-            "missing-platform",
-        )
-        .unwrap();
-        assert!(!check.supported);
-        assert!(!check.update_available);
-        manifest.version = "1.2.0-beta.1".into();
-        assert!(
-            !describe_update(&manifest, UpdateChannel::Stable, "1.2.0", "test-platform")
-                .unwrap()
-                .update_available
-        );
-        manifest.version = "invalid".into();
-        assert!(matches!(
-            describe_update(&manifest, UpdateChannel::Stable, "1.0.0", "test-platform"),
-            Err(UpdateError::Version(_))
-        ));
-    }
-
-    #[test]
-    fn channels_follow_saved_choice_and_pick_their_manifest() {
-        assert_eq!(
-            UpdateChannel::resolve(None, "0.7.18"),
-            UpdateChannel::Stable
-        );
-        assert_eq!(
-            UpdateChannel::resolve(None, "0.7.19-alpha.4"),
-            UpdateChannel::Alpha
-        );
-        assert_eq!(
-            UpdateChannel::resolve(Some(UpdateChannel::Stable), "0.7.19-alpha.4"),
-            UpdateChannel::Stable
-        );
-        let stable = "https://example.com/cli/manifest.json";
-        assert_eq!(UpdateChannel::Stable.manifest_url(stable, false), stable);
-        assert_eq!(
-            UpdateChannel::Alpha.manifest_url(stable, false),
-            "https://example.com/cli/alpha/manifest.json"
-        );
-        assert_eq!(UpdateChannel::Alpha.manifest_url(stable, true), stable);
-    }
-
-    #[test]
-    fn selecting_a_channel_persists_it() {
-        let root = tempfile::tempdir().unwrap();
-        let db = LocalDb::new(root.path().join("state.json"), "https://api".into());
-        let fallback = select_channel(&db, None).unwrap();
-        assert_eq!(
-            fallback,
-            UpdateChannel::resolve(None, env!("CARGO_PKG_VERSION"))
-        );
-        assert_eq!(
-            select_channel(&db, Some(UpdateChannel::Alpha)).unwrap(),
-            UpdateChannel::Alpha
-        );
-        assert_eq!(select_channel(&db, None).unwrap(), UpdateChannel::Alpha);
-        assert_eq!(
-            db.load().unwrap().update_channel,
-            Some(UpdateChannel::Alpha)
-        );
-    }
-
-    #[tokio::test]
-    async fn archive_is_written_before_the_server_finishes_and_hashes_all_chunks() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("archive");
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/archive", listener.local_addr().unwrap());
-        let body = vec![b'x'; 64 * 1024];
-        let target = target(url, &body, Some(body.len() as u64));
-        let (first_sent, first_received) = oneshot::channel();
-        let (continue_send, continue_receive) = oneshot::channel();
-        let server_body = body.clone();
-        let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            read_request(&mut stream).await;
-            stream
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
-                )
-                .await
-                .unwrap();
-            stream.write_all(b"8000\r\n").await.unwrap();
-            stream.write_all(&server_body[..32 * 1024]).await.unwrap();
-            stream.write_all(b"\r\n").await.unwrap();
-            // The second chunk is held until the test sees the first on disk.
-            first_sent.send(()).unwrap();
-            continue_receive.await.unwrap();
-            stream.write_all(b"8000\r\n").await.unwrap();
-            stream.write_all(&server_body[32 * 1024..]).await.unwrap();
-            stream.write_all(b"\r\n0\r\n\r\n").await.unwrap();
-        });
-        let download_path = path.clone();
-        let download = tokio::spawn(async move { download_file(&target, &download_path).await });
-        tokio::time::timeout(Duration::from_secs(5), first_received)
-            .await
-            .expect("first response chunk")
+        store
+            .edit(|state| {
+                state.launchers.insert(owned.clone(), file_hash(&owned)?);
+                state
+                    .launchers
+                    .insert(changed.clone(), file_hash(&changed)?);
+                Ok(())
+            })
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(3), async {
-            loop {
-                if fs::metadata(&path).is_ok_and(|metadata| metadata.len() > 0) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .expect("first chunk should reach disk before response completes");
-        assert!(!download.is_finished());
-        continue_send.send(()).unwrap();
-        download.await.unwrap().unwrap();
-        server.await.unwrap();
-        assert_eq!(fs::read(path).unwrap(), body);
-    }
-
-    #[tokio::test]
-    async fn downloads_reject_bad_hash_size_and_truncated_responses() {
-        let root = tempfile::tempdir().unwrap();
-        let body = b"binary fixture";
-        let (url, server) = serve(response(body)).await;
-        let mut bad_hash = target(url, body, None);
-        bad_hash.sha256 = "0".repeat(64);
-        assert!(matches!(
-            download_file(&bad_hash, &root.path().join("bad-hash")).await,
-            Err(UpdateError::ChecksumMismatch { .. })
-        ));
-        server.await.unwrap();
-
-        let (url, server) = serve(response(body)).await;
-        let bad_size = target(url, body, Some(1));
-        let path = root.path().join("bad-size");
-        assert!(matches!(
-            download_file(&bad_size, &path).await,
-            Err(UpdateError::SizeMismatch { .. })
-        ));
-        assert!(!path.exists());
-        server.await.unwrap();
-
-        let (url, server) = serve(
-            b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort".to_vec(),
-        )
-        .await;
-        let truncated = target(url, body, None);
-        assert!(matches!(
-            download_file(&truncated, &root.path().join("truncated")).await,
-            Err(UpdateError::Http(_))
-        ));
-        server.await.unwrap();
-
-        let oversize = target(
-            "http://127.0.0.1:9/archive".into(),
-            body,
-            Some(MAX_UPDATE_DOWNLOAD_BYTES + 1),
-        );
-        let path = root.path().join("oversize");
-        assert!(matches!(
-            download_file(&oversize, &path).await,
-            Err(UpdateError::DownloadTooLarge)
-        ));
-        assert!(!path.exists());
-
-        let (url, server) = serve(
-            format!(
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                MAX_UPDATE_DOWNLOAD_BYTES + 1
-            )
-            .into_bytes(),
-        )
-        .await;
-        let oversize_response = target(url, body, None);
-        let path = root.path().join("oversize-response");
-        assert!(matches!(
-            download_file(&oversize_response, &path).await,
-            Err(UpdateError::DownloadTooLarge)
-        ));
-        assert!(!path.exists());
-        server.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn downloads_accept_manifests_without_size_and_uppercase_checksums() {
-        let root = tempfile::tempdir().unwrap();
-        let body = b"binary fixture";
-        let (url, server) = serve(response(body)).await;
-        let mut target = target(url, body, None);
-        target.sha256 = target.sha256.to_uppercase();
-        let path = root.path().join("archive");
-        download_file(&target, &path).await.unwrap();
-        server.await.unwrap();
-        assert_eq!(fs::read(path).unwrap(), body);
-    }
-
-    #[tokio::test]
-    async fn chunked_downloads_enforce_optional_manifest_size() {
-        for expected in [1, 20] {
-            let root = tempfile::tempdir().unwrap();
-            let (url, server) = serve(
-                b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nbinary\r\n0\r\n\r\n"
-                    .to_vec(),
-            )
-            .await;
-            let target = target(url, b"binary", Some(expected));
-            assert!(matches!(
-                download_file(&target, &root.path().join("archive")).await,
-                Err(UpdateError::SizeMismatch { .. })
-            ));
-            server.await.unwrap();
-        }
+        fs::write(&changed, "installed-by-another-owner").unwrap();
+        let mut config = Config::load();
+        config.data_dir = root.path().to_path_buf();
+        let before = store.read().unwrap().revision;
+        configure(&config, Some(false), None, false, false).unwrap();
+        assert!(!publish_staged(&store, &artifact, true, before).unwrap());
+        assert_eq!(fs::read(&owned).unwrap(), b"old");
+        assert!(store.read().unwrap().staged.is_none());
+        let enabled = configure(&config, Some(true), None, false, false).unwrap();
+        assert!(publish_staged(&store, &artifact, true, enabled.revision).unwrap());
+        assert_eq!(fs::read(&owned).unwrap(), b"new");
+        assert_eq!(fs::read(&changed).unwrap(), b"installed-by-another-owner");
+        assert_eq!(store.read().unwrap().staged, Some(artifact));
     }
 
     #[test]
-    fn staging_directories_are_private_unique_and_cleaned_independently() {
-        let first = create_temp_dir().unwrap();
-        let second = create_temp_dir().unwrap();
-        assert_ne!(first.path(), second.path());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                fs::metadata(first.path()).unwrap().permissions().mode() & 0o777,
-                0o700
-            );
-        }
-        let old_path = first.path().to_path_buf();
-        fs::write(first.path().join("partial-download"), b"partial").unwrap();
-        drop(first);
-        assert!(!old_path.exists());
-        assert!(second.path().exists());
+    fn updater_policy_changes_win_without_cancelling_for_redundant_configuration() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = Config::load();
+        config.data_dir = root.path().to_path_buf();
+        let first =
+            configure(&config, Some(true), Some(UpdateChannel::Alpha), true, false).unwrap();
+        let same = configure(&config, None, Some(UpdateChannel::Alpha), true, false).unwrap();
+        assert_eq!(same.revision, first.revision);
+        let off = configure(&config, Some(false), None, false, false).unwrap();
+        assert!(off.revision > first.revision);
+        assert!(!off.auto_update);
+        configure(&config, None, Some(UpdateChannel::Stable), false, false).unwrap();
+        let app = configure(&config, None, Some(UpdateChannel::Alpha), true, false).unwrap();
+        assert_eq!(app.channel, UpdateChannel::Stable);
+        assert!(!app.follows_app);
+        assert!(!app.auto_update);
     }
 
     #[test]
-    fn atomic_copy_replaces_the_binary_without_modifying_old_open_handles() {
-        let root = tempfile::tempdir().unwrap();
-        let source = root.path().join("source");
-        let destination = root.path().join("inline");
-        fs::write(&source, b"new complete binary").unwrap();
-        fs::write(&destination, b"old complete binary").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        let mut previous_handle = File::open(&destination).unwrap();
-        copy_binary_atomically(&source, &destination).unwrap();
-        assert_eq!(fs::read(&destination).unwrap(), b"new complete binary");
-        let mut old = String::new();
-        previous_handle.read_to_string(&mut old).unwrap();
-        assert_eq!(old, "old complete binary");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
-                0o755
-            );
-        }
-        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+    fn updater_retry_deadline_takes_precedence_over_normal_check_interval() {
+        let mut state = store::State::default();
+        state.last_attempt = Some(100);
+        state.retry_at = Some(400);
+        assert!(!check_due(&state, 399, CHECK_INTERVAL));
+        assert!(check_due(&state, 400, CHECK_INTERVAL));
+        state.retry_at = None;
+        assert!(!check_due(&state, 400, CHECK_INTERVAL));
+        assert!(check_due(&state, 100 + CHECK_INTERVAL, CHECK_INTERVAL));
     }
 
     #[test]
-    fn failed_atomic_copy_keeps_the_existing_install_and_leaves_no_sibling_file() {
-        let root = tempfile::tempdir().unwrap();
-        let destination = root.path().join("inline");
-        fs::write(&destination, b"working binary").unwrap();
-        assert!(copy_binary_atomically(&root.path().join("missing"), &destination).is_err());
-        assert_eq!(fs::read(&destination).unwrap(), b"working binary");
-        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
-
-        let directory = root.path().join("directory");
-        fs::create_dir(&directory).unwrap();
-        fs::write(directory.join("keep"), b"untouched").unwrap();
-        assert!(copy_binary_atomically(&destination, &directory).is_err());
-        assert_eq!(fs::read(directory.join("keep")).unwrap(), b"untouched");
-        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+    fn semver_channels_do_not_downgrade_or_order_build_metadata() {
+        assert!(!newer("1.2.3", "1.2.4-alpha.1").unwrap());
+        assert!(newer("1.2.3", "1.2.3-alpha.8").unwrap());
+        assert!(!newer("1.2.3+b", "1.2.3+a").unwrap());
     }
-
     #[test]
-    fn bundle_binary_must_be_a_regular_file() {
+    fn foreign_and_homebrew_launchers_are_not_managed() {
         let root = tempfile::tempdir().unwrap();
-        assert!(matches!(
-            validate_binary(&root.path().join("missing")),
-            Err(UpdateError::MissingBinary)
-        ));
-        assert!(matches!(
-            validate_binary(root.path()),
-            Err(UpdateError::InvalidBinary)
-        ));
-        let regular = root.path().join("inline");
-        fs::write(&regular, b"binary").unwrap();
-        validate_binary(&regular).unwrap();
+        let store = Store::new(root.path());
+        let foreign = root.path().join("inline");
+        fs::write(&foreign, "foreign").unwrap();
+        assert_eq!(installation_method(&foreign, &store), "external");
         #[cfg(unix)]
         {
-            let link = root.path().join("link");
-            std::os::unix::fs::symlink(&regular, &link).unwrap();
-            assert!(matches!(
-                validate_binary(&link),
-                Err(UpdateError::InvalidBinary)
-            ));
+            let brew = root.path().join("Caskroom/inline/version");
+            fs::create_dir_all(&brew).unwrap();
+            let binary = brew.join("inline");
+            fs::write(&binary, "brew").unwrap();
+            let launcher = root.path().join("brew-inline");
+            std::os::unix::fs::symlink(&binary, &launcher).unwrap();
+            assert_eq!(installation_method(&launcher, &store), "homebrew");
         }
     }
 }

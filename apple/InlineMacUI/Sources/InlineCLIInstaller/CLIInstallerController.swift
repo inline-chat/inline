@@ -4,14 +4,27 @@ import Observation
 @MainActor
 @Observable
 public final class CLIInstallerController {
+  public var onInstallationChanged: (@MainActor (CLIInstallation) -> Void)?
   public private(set) var phase: CLIInstallerPhase = .idle
 
   @ObservationIgnored private let service: any CLIInstalling
+  @ObservationIgnored private var configurationProvider: (@MainActor @Sendable () -> CLIInstallerConfiguration)?
   @ObservationIgnored private let recoveryURL: URL
 
   public init(configuration: CLIInstallerConfiguration = .production) {
     service = CLIInstallerService(configuration: configuration)
     recoveryURL = configuration.documentationURL
+  }
+
+  public convenience init(configurationProvider: @escaping @MainActor @Sendable () -> CLIInstallerConfiguration) {
+    self.init(configuration: configurationProvider())
+    self.configurationProvider = configurationProvider
+  }
+
+  private func refreshConfiguration() async {
+    if let configurationProvider, let concrete = service as? CLIInstallerService {
+      await concrete.updateConfiguration(configurationProvider())
+    }
   }
 
   public init(
@@ -27,6 +40,7 @@ public final class CLIInstallerController {
     phase = .checkingLocal
 
     do {
+      await refreshConfiguration()
       let plan = try await service.check(progress: apply)
       phase = .ready(plan)
     } catch {
@@ -43,7 +57,8 @@ public final class CLIInstallerController {
   }
 
   public func compatibleLocalInstallationForAgentSetup() async -> CLIInstallation? {
-    await service.compatibleLocalInstallationForAgentSetup()
+    await refreshConfiguration()
+    return await service.compatibleLocalInstallationForAgentSetup()
   }
 
   private func install(forAgentSetup: Bool) async -> CLIInstallResult {
@@ -60,6 +75,7 @@ public final class CLIInstallerController {
 
     phase = .checkingLocal
     do {
+      await refreshConfiguration()
       let outcome: CLIServiceInstallOutcome
       if forAgentSetup {
         outcome = try await service.installForAgentSetup(progress: apply)
@@ -67,6 +83,7 @@ public final class CLIInstallerController {
         outcome = try await service.install(progress: apply)
       }
       phase = .installed(outcome.installation)
+      onInstallationChanged?(outcome.installation)
       return outcome.didInstall
         ? .installed(outcome.installation)
         : .alreadyInstalled(outcome.installation)

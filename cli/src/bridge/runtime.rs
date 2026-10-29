@@ -127,6 +127,11 @@ fn reconcile_replayed_queue_delivery(
     Ok(())
 }
 
+pub(super) struct DeferredInbound {
+    pub record: InboundRecord,
+    pub _activity: super::update_activity::Lease,
+}
+
 #[derive(Clone)]
 pub(super) struct InboundRoute {
     pub store: Arc<BridgeStore>,
@@ -145,7 +150,7 @@ pub(super) struct InboundRoute {
     pub attachment_cache_dir: PathBuf,
     pub owner_control: Option<Arc<OwnerControl>>,
     pub accept_messages_after: i64,
-    pub deferred_inbound_tx: tokio::sync::mpsc::Sender<InboundRecord>,
+    pub deferred_inbound_tx: tokio::sync::mpsc::Sender<DeferredInbound>,
     pub pending_voice_messages: Arc<std::sync::Mutex<HashSet<(i64, i64)>>>,
     pub claude_history: Option<ClaudeHistoryRuntime>,
     pub control_lane: Arc<tokio::sync::Semaphore>,
@@ -955,6 +960,7 @@ async fn inbound_from_message(
             let pending_voice_messages = route.pending_voice_messages.clone();
             let event_id = record.event_id.clone();
             let deferred_event_id = event_id.clone();
+            let Some(activity) = super::update_activity::global().enter() else { return Some(record); };
             tokio::spawn(async move {
                 tokio::time::sleep(VOICE_TRANSCRIPT_WAIT).await;
                 if !pending_voice_messages
@@ -968,7 +974,7 @@ async fn inbound_from_message(
                     );
                     return;
                 }
-                if sender.send(record).await.is_err() {
+                if sender.send(DeferredInbound { record, _activity: activity }).await.is_err() {
                     log::trace!(
                         target: "inline::bridge::media",
                         "phase=voice_wait_abandoned event_id={deferred_event_id:?} reason=runtime_closed"

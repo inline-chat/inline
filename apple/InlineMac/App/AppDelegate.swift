@@ -168,6 +168,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupGlobalHotkeys()
     GridFloatingCallController.shared.start(rooms: dependencies.grid)
     setupNotificationsSoundSetting()
+    dependencies.cliUpdates.start()
     launchAtLoginController.start()
     TimezoneManager.shared.start()
 #if SPARKLE

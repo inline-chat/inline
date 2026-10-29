@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct UpdatesSettingsDetailView: View {
+  @Environment(CLIUpdateController.self) private var cliUpdates
 #if SPARKLE
   @Environment(UpdateController.self) private var updates
 #endif
@@ -18,8 +19,40 @@ struct UpdatesSettingsDetailView: View {
         )
       }
       #endif
+      cliUpdateSection
     }
     .settingsFormStyle()
+    .task { await cliUpdates.refresh(automatic: false) }
+  }
+
+  @ViewBuilder
+  private var cliUpdateSection: some View {
+    @Bindable var cliUpdates = cliUpdates
+    if cliUpdates.hasInstallation {
+      Section {
+        if cliUpdates.canManage {
+          Toggle(isOn: $cliUpdates.automaticUpdatesEnabled) {
+            SettingsRowLabel("Update Inline CLI Automatically", description: "Keeps the command-line tool and agent bridge on the latest release for your channel.")
+          }
+        }
+        LabeledContent("CLI Status") {
+          Text(cliUpdates.statusText).foregroundStyle(.secondary)
+        }
+        if let version = cliUpdates.versionText { SettingsDetailText(text: version) }
+        if cliUpdates.homebrewManaged {
+          SettingsDetailText(text: "Homebrew manages the Terminal CLI. Managed agent bridges update separately.")
+          Text("brew upgrade --cask inline").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+        }
+        if let failure = cliUpdates.failureText { SettingsDetailText(text: failure) }
+        if cliUpdates.canManage {
+          Button(cliUpdates.updateAvailable && !cliUpdates.automaticUpdatesEnabled ? "Update CLI" : "Check Now") {
+            if cliUpdates.updateAvailable && !cliUpdates.automaticUpdatesEnabled { cliUpdates.applyNow() }
+            else { cliUpdates.checkNow() }
+          }
+          .disabled(cliUpdates.isBusy)
+        }
+      } header: { SettingsSectionHeader("Inline CLI") }
+    }
   }
 
   #if SPARKLE
@@ -153,7 +186,9 @@ private extension SoftwareUpdatePhase {
 #if SPARKLE
   UpdatesSettingsDetailView()
     .environment(UpdateController())
+    .environment(CLIUpdateController(installer: .init(), channel: { .stable }))
 #else
   UpdatesSettingsDetailView()
+    .environment(CLIUpdateController(installer: .init(), channel: { .stable }))
 #endif
 }
