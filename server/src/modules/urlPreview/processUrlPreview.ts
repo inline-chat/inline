@@ -13,6 +13,7 @@ import {
   type PreviewRoute,
   type AuthenticatedPreviewResult,
   type UrlPreviewResult,
+  type PreviewDiagnostic,
 } from "@inline-chat/url-preview"
 import {
   MessageEntity_Type,
@@ -43,6 +44,7 @@ import {
   getFreshPreviewCache,
   touchPreviewCache,
   upsertPreviewCache,
+  previewImageRetryMs,
 } from "@in/server/modules/urlPreview/cache"
 import { resolvePreviewAuthCandidates } from "@in/server/modules/urlPreview/auth"
 import { isSpaceUrlPreviewExcluded } from "@in/server/modules/urlPreview/exclusions"
@@ -246,6 +248,7 @@ export async function resolveUrlPreview(input: ResolveUrlPreviewInput): Promise<
       maxDescriptionLength,
       maxTitleLength,
       maxSiteNameLength,
+      onDiagnostic: previewDiagnostics(previewRoute.url, { chatId: input.chatId }),
     }).catch(() => null)
     if (!metadata) {
       return cached ? resolvedPreviewFromCache(cached, previewRoute.url) : null
@@ -330,14 +333,8 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
       maxDescriptionLength,
       maxTitleLength,
       maxSiteNameLength,
-    }).catch((error) => {
-      log.warn("Failed to fetch URL preview metadata", {
-        error,
-        messageId: input.message.messageId,
-        chatId: input.chatId,
-      })
-      return null
-    })
+      onDiagnostic: previewDiagnostics(previewRoute.url, { chatId: input.chatId, messageId: input.message.messageId }),
+    }).catch(() => null)
     if (!metadata) {
       if (cached) {
         await insertCachedPreviewAttachment(input, previewRoute, cached)
@@ -360,7 +357,7 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
     const cache = await upsertPreviewCache({ metadata: resolvedMetadata, photoId, authorPhotoId }).catch((error) => {
       log.warn("Failed to write URL preview cache", {
         error,
-        url: resolvedMetadata.url,
+        host: previewLogHost(resolvedMetadata.url),
         messageId: input.message.messageId,
         chatId: input.chatId,
       })
@@ -379,7 +376,7 @@ export async function processUrlPreview(input: ProcessUrlPreviewInput): Promise<
   } catch (error) {
     log.warn("Failed to process URL preview", {
       error,
-      url: previewRouteUrl(previewRoute),
+      host: previewLogHost(previewRouteUrl(previewRoute)),
       messageId: input.message.messageId,
       chatId: input.chatId,
     })
@@ -415,7 +412,12 @@ function shouldRefetchCachedPreview(cache: DbUrlPreviewCache, url: string): bool
     return false
   }
 
-  if (cache.photoId == null && cache.imageUrl != null && cache.fetchedAt < previewImageFallbackFetchedAt) {
+  // Retry a missing poster without discarding the cached text card: a failed
+  // refresh can still attach that card while the origin is unavailable.
+  if (
+    cache.photoId == null && cache.imageUrl != null &&
+    (cache.fetchedAt < previewImageFallbackFetchedAt || Date.now() - cache.fetchedAt.getTime() >= previewImageRetryMs)
+  ) {
     return true
   }
 
@@ -694,6 +696,18 @@ function previewLogHost(url: string): string | undefined {
     return new URL(url).hostname.toLowerCase()
   } catch {
     return undefined
+  }
+}
+
+function previewDiagnostics(
+  url: string,
+  context: { chatId?: number; messageId?: number } = {},
+): (diagnostic: PreviewDiagnostic) => void {
+  const host = previewLogHost(url)
+  return (diagnostic) => {
+    const attributes = { host, ...context, ...diagnostic }
+    if (diagnostic.outcome === "error") log.warn("URL preview fetch failed", attributes)
+    else log.info("URL preview fetch completed", attributes)
   }
 }
 
@@ -1154,7 +1168,7 @@ async function loadProcessedAttachment(attachmentId: number): Promise<ProcessedM
 
 async function getOrSavePreviewImage(url: string, currentUserId: number): Promise<number | null> {
   const cachedPhotoId = await getCachedPreviewPhotoId(url).catch((error) => {
-    log.warn("Failed to read URL preview image cache", { error, url: previewImageLogUrl(url) })
+    log.warn("Failed to read URL preview image cache", { error, host: previewLogHost(url) })
     return null
   })
   if (cachedPhotoId) {
@@ -1204,6 +1218,7 @@ async function downloadAndSavePreviewImage(url: string, currentUserId: number): 
     const image = await fetchBinary(url, {
       maxBytes: maxImageBytes,
       allowedContentTypes: previewImageTypes,
+      onDiagnostic: previewDiagnostics(url),
     })
     if (!image) {
       return null
@@ -1217,24 +1232,12 @@ async function downloadAndSavePreviewImage(url: string, currentUserId: number): 
     const result = await uploadPhoto(file, { userId: currentUserId })
     return Number(result.photoId)
   } catch (error) {
-    log.warn("Failed to download URL preview image", { error, url: previewImageLogUrl(url) })
+    log.warn("Failed to store URL preview image", {
+      host: previewLogHost(url),
+      errorType: error instanceof Error ? error.name : "UnknownError",
+    })
     return null
   }
-}
-
-function previewImageLogUrl(url: string): string {
-  try {
-    const parsed = new URL(url)
-    const host = parsed.hostname.toLowerCase()
-    if (host === "api-cdn.figma.com" && parsed.pathname.startsWith("/resize/thumbnails/")) {
-      parsed.search = ""
-      return parsed.toString()
-    }
-  } catch {
-    return url
-  }
-
-  return url
 }
 
 async function pushInsertedPreviewAttachment(
@@ -1332,7 +1335,7 @@ async function acquirePreviewSlot(input: ProcessUrlPreviewInput): Promise<(() =>
 
   if (queuedPreviewJobs.length >= maxQueuedPreviewJobs) {
     log.warn("Dropping URL preview because the preview queue is full", {
-      url: input.previewRoute ? previewRouteUrl(input.previewRoute) : input.previewUrl,
+      host: previewLogHost(input.previewRoute ? previewRouteUrl(input.previewRoute) : input.previewUrl ?? ""),
       messageId: input.message.messageId,
       chatId: input.chatId,
       activePreviewJobs,

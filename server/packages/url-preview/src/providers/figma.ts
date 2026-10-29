@@ -13,6 +13,7 @@ import { normalizeMetadataUrl } from "../normalize.js"
 import { asFiniteNumber, asString, cleanField } from "../text.js"
 import type { FetchUrlPreviewOptions, UrlPreviewResult } from "../types.js"
 import type { UrlPreviewProvider } from "./types.js"
+import { UrlPreviewError } from "../errors.js"
 
 const FIGMA_OEMBED_URL = "https://www.figma.com/api/oembed"
 
@@ -48,7 +49,8 @@ async function fetchFigmaPreview(
   })
 
   if (!response.response.ok) {
-    return null
+    void response.response.body?.cancel().catch(() => undefined)
+    throw new UrlPreviewError("Figma returned an error", "http_status", response.response.status)
   }
 
   const text = await readResponseText(response.response, 128 * 1024)

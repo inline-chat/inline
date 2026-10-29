@@ -19,6 +19,7 @@ import { cleanField, hostLabel } from "../text.js"
 import type { FetchUrlPreviewOptions, PreviewMedia, UrlPreviewResult } from "../types.js"
 import { fetchVideoMetadata, type VideoMetadata } from "../videoMetadata.js"
 import { previewLayout, textCardLayout } from "../layout.js"
+import { UrlPreviewError } from "../errors.js"
 
 export async function fetchGenericPreview(
   originalUrl: string,
@@ -34,7 +35,8 @@ export async function fetchGenericPreview(
   })
 
   if (!response.response.ok) {
-    return null
+    void response.response.body?.cancel().catch(() => undefined)
+    throw new UrlPreviewError("Preview server returned an error", "http_status", response.response.status)
   }
 
   const contentType = response.response.headers.get("content-type")?.toLowerCase() ?? ""

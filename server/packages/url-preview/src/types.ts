@@ -150,6 +150,17 @@ export type FetchUrlPreviewOptions = {
   maxDescriptionLength?: number
   maxSiteNameLength?: number
   userAgent?: string
+  /** Best-effort diagnostics contain no page URL, content, or upstream error text. */
+  onDiagnostic?: (diagnostic: PreviewDiagnostic) => void
+}
+
+export type PreviewDiagnostic = {
+  stage: "provider" | "generic" | "image"
+  provider: PreviewProvider
+  outcome: "success" | "empty" | "error" | "blocked"
+  code?: string
+  status?: number
+  elapsedMs: number
 }
 
 export type FetchBinaryOptions = {
@@ -160,6 +171,7 @@ export type FetchBinaryOptions = {
   maxBytes?: number
   allowedContentTypes?: readonly string[]
   userAgent?: string
+  onDiagnostic?: (diagnostic: PreviewDiagnostic) => void
 }
 
 export type FetchBinaryResult = {

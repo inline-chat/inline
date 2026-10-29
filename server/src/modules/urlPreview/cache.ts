@@ -10,6 +10,7 @@ import { and, desc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm"
 import { contentEncryptionWritesEnabled, contentLookup } from "../encryption/contentEncryption"
 
 const cacheTtlMs = 7 * 24 * 60 * 60 * 1000
+export const previewImageRetryMs = 60_000
 
 export function hashPreviewUrl(url: string): Buffer {
   return hashUrl(url, contentEncryptionWritesEnabled() ? 1 : 0)

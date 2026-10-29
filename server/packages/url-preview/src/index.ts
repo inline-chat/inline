@@ -2,6 +2,7 @@ import { fetchGenericPreview } from "./providers/generic.js"
 import { previewProviders } from "./providers/index.js"
 import { normalizePreviewUrl } from "./normalize.js"
 import type { FetchUrlPreviewOptions, UrlPreviewResult } from "./types.js"
+import { previewErrorDiagnostic, reportPreviewDiagnostic } from "./diagnostics.js"
 
 export { UrlPreviewError } from "./errors.js"
 export {
@@ -63,6 +64,7 @@ export type {
   PreviewMediaType,
   PreviewPhotoMedia,
   PreviewProvider,
+  PreviewDiagnostic,
   UrlPreviewResult,
 } from "./types.js"
 
@@ -72,6 +74,9 @@ export async function fetchUrlPreview(
 ): Promise<UrlPreviewResult | null> {
   const normalized = normalizePreviewUrl(targetUrl)
   if (!normalized) {
+    reportPreviewDiagnostic(options, {
+      stage: "generic", provider: "generic", outcome: "blocked", code: "invalid_url", elapsedMs: 0,
+    })
     return null
   }
 
@@ -80,9 +85,30 @@ export async function fetchUrlPreview(
       continue
     }
 
-    const preview = await provider.fetch(normalized, options).catch(() => null)
-    return preview ?? (provider.exclusive ? null : fetchGenericPreview(normalized, options))
+    const preview = await attempt("provider", provider.name, () => provider.fetch(normalized, options)).catch(() => null)
+    return preview ?? (provider.exclusive ? null : attempt("generic", "generic", () => fetchGenericPreview(normalized, options)))
   }
 
-  return fetchGenericPreview(normalized, options)
+  return attempt("generic", "generic", () => fetchGenericPreview(normalized, options))
+
+  async function attempt(
+    stage: "provider" | "generic",
+    provider: UrlPreviewResult["provider"],
+    run: () => Promise<UrlPreviewResult | null>,
+  ): Promise<UrlPreviewResult | null> {
+    const startedAt = Date.now()
+    try {
+      const preview = await run()
+      reportPreviewDiagnostic(options, {
+        stage, provider, outcome: preview ? "success" : "empty", elapsedMs: Date.now() - startedAt,
+        ...(!preview ? { code: "no_metadata" } : {}),
+      })
+      return preview
+    } catch (error) {
+      reportPreviewDiagnostic(options, {
+        stage, provider, outcome: "error", elapsedMs: Date.now() - startedAt, ...previewErrorDiagnostic(error),
+      })
+      throw error
+    }
+  }
 }

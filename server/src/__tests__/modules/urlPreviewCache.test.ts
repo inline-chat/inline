@@ -298,7 +298,7 @@ describe("URL preview cache", () => {
     expect(attachment?.linkEmbed?.description).toBe('Fish & chips "safe" \u00a9')
   })
 
-  it("tries fallback metadata images and refreshes stale image-less cache rows", async () => {
+  it("keeps the card and fallback poster when a Cap-style thumbnail redirects to a private address", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers(
       "URL Preview Image Fallback",
       ["preview-image-fallback@example.com"],
@@ -337,7 +337,7 @@ describe("URL preview cache", () => {
       },
     })
     const staleCache = await upsertPreviewCache({
-      now: new Date("2026-07-12T10:00:00.000Z"),
+      now: new Date(Date.now() - 120_000),
       photoId: null,
       metadata: {
         url: "https://example.com/recording",
@@ -365,7 +365,10 @@ describe("URL preview cache", () => {
         return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } })
       }
       if (url === primaryImageUrl) {
-        return new Response("not an image", { headers: { "content-type": "text/plain" } })
+        return new Response(null, {
+          status: 302,
+          headers: { location: "http://0.0.0.0:3000/api/video/og?videoId=abc" },
+        })
       }
       throw new Error(`Unexpected URL preview fetch: ${url}`)
     }) as unknown as typeof fetch
@@ -394,6 +397,34 @@ describe("URL preview cache", () => {
       .where(eq(schema.urlPreview.cacheId, staleCache.id))
       .limit(1)
     expect(preview?.photoId).toBe(fallbackPhoto.id)
+  })
+
+  it("retains the cached text card when a later thumbnail-recovery request fails", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Preview Recovery", ["preview-recovery@example.com"])
+    const user = users[0]
+    if (!space || !user) throw new Error("Failed to create preview recovery fixtures")
+    const chat = await testUtils.createChat(space.id, "Preview Thread", "thread", true, user.id)
+    if (!chat) throw new Error("Failed to create preview recovery chat")
+    const url = "https://example.com/failed-thumbnail"
+    const message = await testUtils.createTestMessage({ chatId: chat.id, fromId: user.id, messageId: 1, text: url })
+    const cached = await upsertPreviewCache({
+      now: new Date(Date.now() - 120_000), photoId: null,
+      metadata: { url, finalUrl: url, title: "Recording", provider: "generic", imageUrl: "https://example.com/poster.png" },
+    })
+    let requests = 0
+    globalThis.fetch = Object.assign(async () => { requests++; throw new Error("Temporary upstream failure") }, {
+      preconnect: originalFetch.preconnect,
+    })
+    await processUrlPreview({
+      message, previewUrl: url, chatId: chat.id, currentUserId: user.id,
+      inputPeer: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+    })
+    expect(requests).toBe(1)
+    const [preview] = await db.select().from(schema.urlPreview).where(eq(schema.urlPreview.cacheId, cached.id)).limit(1)
+    expect(preview).toBeDefined()
+    expect(preview?.title).not.toBeNull()
+    expect(preview?.photoId).toBeNull()
+    expect(await getFreshPreviewCache(url)).not.toBeNull()
   })
 
   it("recalculates cached large preview display per message URL count", async () => {

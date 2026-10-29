@@ -1,6 +1,6 @@
 import { DEFAULT_TIMEOUT_MS, DEFAULT_USER_AGENT } from "../constants.js"
 import { UrlPreviewError } from "../errors.js"
-import { readResponseText } from "../network.js"
+import { abortable, boundResponse, readResponseText } from "../network.js"
 import type { AuthPreviewOptions } from "./types.js"
 
 export class ProviderFetchError extends UrlPreviewError {
@@ -25,6 +25,20 @@ export type ProviderJsonFetchOptions = AuthPreviewOptions & {
 const defaultMaxResponseBytes = 512 * 1024
 
 export async function fetchProviderJson(input: string, options: ProviderJsonFetchOptions): Promise<unknown> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+  try {
+    return await fetchProviderJsonWithinDeadline(input, options, controller.signal)
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function fetchProviderJsonWithinDeadline(
+  input: string,
+  options: ProviderJsonFetchOptions,
+  signal: AbortSignal,
+): Promise<unknown> {
   const fetchImpl = options.fetchImpl ?? fetch
   const maxRedirects = options.maxRedirects ?? 2
   let url = normalizeAllowedProviderUrl(input, options.allowedHosts)
@@ -61,24 +75,21 @@ export async function fetchProviderJson(input: string, options: ProviderJsonFetc
   throw new ProviderFetchError("Provider returned too many redirects", "too_many_redirects")
 
   async function fetchProviderOnce(targetUrl: string, fetchOptions: ProviderJsonFetchOptions): Promise<Response> {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), fetchOptions.timeoutMs ?? DEFAULT_TIMEOUT_MS)
-
-    try {
-      return await fetchImpl(targetUrl, {
-        method: fetchOptions.method,
-        body: fetchOptions.body,
-        redirect: "manual",
-        signal: controller.signal,
-        headers: {
-          Accept: "application/json",
-          "User-Agent": fetchOptions.userAgent ?? DEFAULT_USER_AGENT,
-          ...fetchOptions.headers,
-        },
-      })
-    } finally {
-      clearTimeout(timeout)
-    }
+    const pending = fetchImpl(targetUrl, {
+      method: fetchOptions.method,
+      body: fetchOptions.body,
+      redirect: "manual",
+      signal,
+      headers: {
+        Accept: "application/json",
+        "User-Agent": fetchOptions.userAgent ?? DEFAULT_USER_AGENT,
+        ...fetchOptions.headers,
+      },
+    })
+    void pending.then((response) => {
+      if (signal.aborted) void response.body?.cancel().catch(() => undefined)
+    }, () => undefined)
+    return boundResponse(await abortable(pending, signal), signal, () => undefined)
   }
 }
 

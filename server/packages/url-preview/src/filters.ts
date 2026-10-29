@@ -30,6 +30,7 @@ const sensitiveQueryKeys = new Set([
   "challenge",
   "client-secret",
   "code",
+  "confirm",
   "confirmation",
   "email-token",
   "id-token",
@@ -59,12 +60,14 @@ const sensitiveQueryTokens = new Set([
   "bearer",
   "challenge",
   "code",
+  "confirm",
   "confirmation",
   "invite",
   "invitation",
   "jwt",
   "key",
   "magic",
+  "magiclink",
   "nonce",
   "oauth",
   "oauth2",
@@ -130,6 +133,7 @@ const sensitivePathTokens = new Set([
   "invitation",
   "login",
   "magic",
+  "magiclink",
   "oauth",
   "oauth2",
   "oidc",
@@ -156,6 +160,11 @@ const safeQueryKeys = new Set([
   "v",
 ])
 
+const actionQueryKeys = new Set(["action", "mode", "type"])
+const redirectQueryKeys = new Set([
+  "url", "next", "redirect", "redirect-url", "redirect-uri", "return", "return-to", "continue",
+])
+
 export function filterPreviewUrl(url: URL): UrlFilterResult {
   const hostname = stripIpv6Brackets(url.hostname).toLowerCase()
   if (isBlockedHostname(hostname)) {
@@ -178,7 +187,7 @@ export function filterPreviewUrl(url: URL): UrlFilterResult {
 }
 
 export function isBlockedHostname(hostname: string): boolean {
-  const host = stripIpv6Brackets(hostname).toLowerCase()
+  const host = stripIpv6Brackets(hostname).toLowerCase().replace(/\.+$/, "")
   return (
     host === "localhost" ||
     localHostSuffixes.some((suffix) => host.endsWith(suffix)) ||
@@ -198,11 +207,10 @@ export function isBlockedIp(ip: string): boolean {
   return true
 }
 
-function hasSensitiveQuery(url: URL): boolean {
+function hasSensitiveQuery(url: URL, depth = 0): boolean {
   for (const [key, value] of url.searchParams) {
     const normalizedKey = normalizeToken(key)
-    const normalizedValue = value.trim()
-    if (!normalizedKey || !normalizedValue || safeQueryKeys.has(normalizedKey)) {
+    if (!normalizedKey || safeQueryKeys.has(normalizedKey)) {
       continue
     }
 
@@ -212,6 +220,27 @@ function hasSensitiveQuery(url: URL): boolean {
 
     if (tokenParts(normalizedKey).some((part) => sensitiveQueryTokens.has(part))) {
       return true
+    }
+
+    // Firebase and other email-action handlers can carry their operation in a
+    // value (e.g. mode=verifyEmail), with an otherwise unrecognizable opaque key.
+    if (actionQueryKeys.has(normalizedKey)) {
+      const action = normalizeToken(value)
+      if (sensitivePathSegments.has(action) || tokenParts(action).some((part) => sensitivePathTokens.has(part))) {
+        return true
+      }
+    }
+
+    // Inspect explicit redirect destinations before contacting a shortener or
+    // tracking endpoint. The network layer also checks every actual redirect.
+    if (redirectQueryKeys.has(normalizedKey) && value.trim()) {
+      if (depth >= 2) return true
+      try {
+        const destination = new URL(value, url)
+        if (hasSensitivePath(destination) || hasSensitiveQuery(destination, depth + 1)) return true
+      } catch {
+        // The network layer rejects malformed redirect targets if they are used.
+      }
     }
   }
   return false
@@ -288,6 +317,9 @@ function isBlockedIpv6(ip: string): boolean {
   }
 
   return (
+    // Outside global unicast (2000::/3), IPv6 includes deprecated site-local
+    // and IPv4-compatible forms as well as other special-purpose networks.
+    (bytes[0]! & 0xe0) !== 0x20 ||
     (bytes[0]! & 0xfe) === 0xfc ||
     (bytes[0] === 0xfe && (bytes[1]! & 0xc0) === 0x80) ||
     bytes[0] === 0xff ||

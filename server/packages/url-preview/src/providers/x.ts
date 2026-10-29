@@ -7,7 +7,7 @@ import {
   DEFAULT_TITLE_LENGTH,
   DEFAULT_USER_AGENT,
 } from "../constants.js"
-import { isBlockedIp } from "../filters.js"
+import { UrlPreviewError } from "../errors.js"
 import { parseJsonObject } from "../json.js"
 import { defaultLookup, fetchWithRedirects, readResponseText, readResponseTextPrefix } from "../network.js"
 import { normalizeMetadataUrl } from "../normalize.js"
@@ -61,7 +61,7 @@ async function fetchXPreview(
     return null
   }
 
-  const text = await readResponseText(response, 256 * 1024).catch(() => null)
+  const text = await readResponseText(response, 256 * 1024)
   const data = text ? objectValue(parseJsonObject(text)) : null
   if (!data || asString(data["__typename"]) !== "Tweet") {
     return null
@@ -129,30 +129,23 @@ function xArticle(data: Record<string, unknown>, options: FetchUrlPreviewOptions
     : null
 }
 
-async function fetchXEndpoint(endpoint: URL, options: FetchUrlPreviewOptions): Promise<Response | null> {
-  const lookup = options.lookup ?? defaultLookup
-  const addresses = await lookup(endpoint.hostname).catch(() => [])
-  if (addresses.length === 0 || addresses.some((address) => isBlockedIp(address.address))) {
-    return null
+async function fetchXEndpoint(endpoint: URL, options: FetchUrlPreviewOptions): Promise<Response> {
+  const result = await fetchWithRedirects(endpoint.toString(), {
+    fetchImpl: options.fetchImpl ?? fetch,
+    lookup: options.lookup ?? defaultLookup,
+    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    maxRedirects: 0,
+    userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
+    accept: "application/json",
+    // The fixed X endpoint calls its public anti-scraping value a "token".
+    // It is constructed above and must not weaken filtering for message URLs.
+    trustedProviderEndpoint: endpoint.toString(),
+  })
+  if (!result.response.ok) {
+    void result.response.body?.cancel().catch(() => undefined)
+    throw new UrlPreviewError("X returned an error", "http_status", result.response.status)
   }
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
-
-  try {
-    return await (options.fetchImpl ?? fetch)(endpoint.toString(), {
-      redirect: "manual",
-      signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-        "User-Agent": options.userAgent ?? DEFAULT_USER_AGENT,
-      },
-    })
-  } catch {
-    return null
-  } finally {
-    clearTimeout(timeout)
-  }
+  return result.response
 }
 
 async function fetchXNoteTweetText(
@@ -297,7 +290,8 @@ function tweetTitle(author: string | null, screenName: string | null): string | 
 
 function tweetMedia(data: Record<string, unknown>): XMediaPreview {
   const details = arrayValue(data["mediaDetails"]).map(objectValue).filter((item) => item != null)
-  const media = details[0]
+  const fallback = objectValue(data["video"])
+  const media = details[0] ?? (fallback ? { type: "video", media_url_https: fallback["poster"] } : undefined)
   if (!media) {
     return {}
   }
@@ -323,7 +317,7 @@ function tweetMedia(data: Record<string, unknown>): XMediaPreview {
   }
 
   if (type === "video" || type === "animated_gif") {
-    const video = xVideo(media)
+    const video = xVideo(media) ?? xSyndicationVideo(fallback)
     if (!video) {
       return {
         imageUrl,
@@ -393,22 +387,39 @@ function attachedMediaUrls(data: Record<string, unknown>): string[] {
 
 function xVideo(media: Record<string, unknown>): { url: string; mimeType?: string; duration?: number } | null {
   const info = objectValue(media["video_info"])
-  const variants = arrayValue(info?.["variants"]).map(objectValue).filter((item) => item != null)
-  const mp4 = variants
-    .filter((item) => asString(item["content_type"]) === "video/mp4" && asString(item["url"]))
-    .sort((a, b) => (asFiniteNumber(b["bitrate"]) ?? 0) - (asFiniteNumber(a["bitrate"]) ?? 0))[0]
-  const fallback = mp4 ?? variants.find((item) => asString(item["url"]))
-  const url = normalizeMetadataUrl(asString(fallback?.["url"]), "https://x.com")
-  if (!url) {
+  const variants = arrayValue(info?.["variants"]).flatMap((value) => {
+    const item = objectValue(value)
+    const url = normalizeMetadataUrl(asString(item?.["url"]), "https://x.com")
+    const mimeType = asString(item?.["content_type"])?.toLowerCase()
+    if (!url || !["video/mp4", "application/x-mpegurl", "application/vnd.apple.mpegurl"].includes(mimeType ?? "")) return []
+    const dimensions = new URL(url).pathname.match(/\/(\d+)x(\d+)\//)
+    const quality = asFiniteNumber(item?.["bitrate"]) ?? (dimensions ? Number(dimensions[1]) * Number(dimensions[2]) : 0)
+    return [{ url, mimeType, quality }]
+  }).sort((a, b) => Number(b.mimeType === "video/mp4") - Number(a.mimeType === "video/mp4") || b.quality - a.quality)
+  const selected = variants[0]
+  if (!selected) {
     return null
   }
 
   const durationMs = asFiniteNumber(info?.["duration_millis"])
   return {
-    url,
-    mimeType: asString(fallback?.["content_type"]) ?? undefined,
+    url: selected.url,
+    mimeType: selected.mimeType,
     duration: durationMs == null ? undefined : Math.max(1, Math.round(durationMs / 1_000)),
   }
+}
+
+function xSyndicationVideo(video: Record<string, unknown> | null): ReturnType<typeof xVideo> {
+  if (!video) return null
+  return xVideo({
+    video_info: {
+      duration_millis: video["durationMs"],
+      variants: arrayValue(video["variants"]).map((value) => {
+        const item = objectValue(value)
+        return { url: item?.["src"], content_type: item?.["type"] }
+      }),
+    },
+  })
 }
 
 function originalWidth(media: Record<string, unknown>): number | undefined {
