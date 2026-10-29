@@ -337,10 +337,10 @@ if ls "${OUTPUT_DIR}"/*.dmg >/dev/null 2>&1; then
   CREATE_DMG_OUTPUT_DIR=$(mktemp -d "${OUTPUT_DIR}/.create-dmg.XXXXXX")
 fi
 
-create-dmg \
-  --identity="${MACOS_CERTIFICATE_NAME}" \
+node "${ROOT_DIR}/scripts/macos/dmg/create-dmg.mjs" \
   "${APP_PATH}" \
-  "${CREATE_DMG_OUTPUT_DIR}"
+  "${CREATE_DMG_OUTPUT_DIR}/Inline.dmg" \
+  "${MACOS_CERTIFICATE_NAME}"
 
 if [[ -f "${DMG_PATH}" ]]; then
   if [[ "${OVERWRITE_DMG}" == "1" ]]; then

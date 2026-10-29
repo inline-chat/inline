@@ -1,0 +1,38 @@
+<!doctype html>
+<!--
+  Source for background.png and background@2x.png (660x400pt, the window size in create-dmg.mjs).
+  Regenerate both after editing:
+    chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    "$chrome" --headless=new --hide-scrollbars --window-size=660,400 --force-device-scale-factor=1 --screenshot=background.png "file://$PWD/background.html"
+    "$chrome" --headless=new --hide-scrollbars --window-size=660,400 --force-device-scale-factor=2 --screenshot=background@2x.png "file://$PWD/background.html"
+  Icons sit centered at (180,170) and (480,170); the chevrons sit between them.
+-->
+<html><head><meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 660px; height: 400px; overflow: hidden; }
+  body {
+    background:
+    radial-gradient(85% 70% at 50% 112%,rgba(255,255,255,0.8) 0%,rgba(255,255,255,0) 100%),
+    radial-gradient(90% 16% at 35% 30%,rgba(244,244,248,0.55) 0%,rgba(244,244,248,0) 100%),
+    radial-gradient(95% 18% at 65% 62%,rgba(246,246,249,0.49500000000000005) 0%,rgba(246,246,249,0) 100%),
+    radial-gradient(80% 14% at 45% 84%,rgba(255,255,255,0.6050000000000001) 0%,rgba(255,255,255,0) 100%),
+    radial-gradient(60% 80% at 12% 10%,rgba(255,255,255,0.45) 0%,rgba(255,255,255,0) 70%),
+    radial-gradient(55% 75% at 92% 95%,rgba(213,215,227,0.75) 0%,rgba(213,215,227,0) 70%),
+    radial-gradient(50% 60% at 85% 8%,rgba(233,228,239,1) 0%,rgba(233,228,239,0) 70%),
+    radial-gradient(45% 60% at 0% 0%,rgba(218,220,229,0.7) 0%,rgba(218,220,229,0) 70%),
+    radial-gradient(35% 60% at 0% 60%,rgba(224,225,233,0.7) 0%,rgba(224,225,233,0) 70%),
+    radial-gradient(35% 60% at 100% 50%,rgba(222,223,233,0.7) 0%,rgba(222,223,233,0) 70%),
+    #E6E7EC;
+  }
+  svg { position: absolute; inset: 0; }
+</style></head>
+<body>
+<svg width="660" height="400" style="opacity:.09;mix-blend-mode:multiply">
+  <filter id="grain"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 1 0"/></filter>
+  <rect width="660" height="400" filter="url(#grain)"/>
+</svg>
+<svg width="660" height="400" viewBox="0 0 660 400" fill="none" stroke="rgb(52,53,60)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+  
+<path d="M304.26 156L310.74 165.5Q315.74 170 310.74 174.5L304.26 184" stroke-opacity="0.18"/>  <path d="M324.26 156L330.74 165.5Q335.74 170 330.74 174.5L324.26 184" stroke-opacity="0.4"/>  <path d="M344.26 156L350.74 165.5Q355.74 170 350.74 174.5L344.26 184" stroke-opacity="0.68"/>
+</svg>
+</body></html>
