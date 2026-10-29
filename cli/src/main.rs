@@ -621,6 +621,7 @@ impl Command {
                 BridgeCommand::Start => "bridge_start",
                 BridgeCommand::Stop => "bridge_stop",
                 BridgeCommand::Restart => "bridge_restart",
+                BridgeCommand::Rollback => "bridge_rollback",
                 BridgeCommand::Doctor => "bridge_doctor",
                 BridgeCommand::Logs { .. } => "bridge_logs",
                 BridgeCommand::Uninstall => "bridge_uninstall",
@@ -710,6 +711,8 @@ enum BridgeCommand {
     Stop,
     #[command(about = "Restart the background bridge")]
     Restart,
+    #[command(about = "Restore the previous bridge runtime after active work finishes")]
+    Rollback,
     #[command(about = "Check the bridge installation")]
     Doctor,
     #[command(about = "Show recent bounded bridge logs")]
@@ -2931,6 +2934,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 BridgeCommand::Restart => {
                     bridge::restart(&config, cli.json, json_format).await?;
                 }
+                BridgeCommand::Rollback => bridge::rollback(&config, cli.json, json_format)?,
                 BridgeCommand::Doctor => {
                     bridge::doctor(&config, cli.json, json_format).await?;
                 }

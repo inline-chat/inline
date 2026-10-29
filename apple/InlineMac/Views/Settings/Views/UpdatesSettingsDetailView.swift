@@ -39,9 +39,17 @@ struct UpdatesSettingsDetailView: View {
           Text(cliUpdates.statusText).foregroundStyle(.secondary)
         }
         if let version = cliUpdates.versionText { SettingsDetailText(text: version) }
+        if let bridgeVersions = cliUpdates.bridgeVersionText { SettingsDetailText(text: bridgeVersions) }
+        if !cliUpdates.canManage && !cliUpdates.homebrewManaged {
+          SettingsDetailText(text: "A writable, managed CLI installation is required for automatic updates.")
+        }
         if cliUpdates.homebrewManaged {
           SettingsDetailText(text: "Homebrew manages the Terminal CLI. Managed agent bridges update separately.")
           Text("brew upgrade --cask inline").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+        }
+        if cliUpdates.bridgeMigrationRequired {
+          SettingsDetailText(text: "Once active agent work finishes, run this command to enable bridge auto-updates:")
+          Text("inline bridge restart").font(.system(.caption, design: .monospaced)).textSelection(.enabled)
         }
         if let failure = cliUpdates.failureText { SettingsDetailText(text: failure) }
         if cliUpdates.canManage {

@@ -73,13 +73,24 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
         try run(operationID: operationID, installation: installation, arguments: operation.arguments, timeout: 180)
       }.value
       try Task.checkCancellation()
-      guard output.status == 0 else { throw failure(from: output) }
+      guard output.status == 0 else {
+        if Self.isUnsupportedUpdateEngine(status: output.status, standardError: output.standardError) {
+          throw CLIUpdateFailure.unsupportedEngine
+        }
+        throw failure(from: output)
+      }
       let status = try JSONDecoder().decode(CLIUpdateStatus.self, from: output.standardOutput)
       guard status.schemaVersion == 1 else {
         throw CLIInstallerFailure(kind: .invalidManifest, title: "CLI Update Required", message: "This CLI uses an unsupported update protocol.", recoveryURL: Self.documentationURL)
       }
       return status
     } onCancel: { self.cancel() }
+  }
+
+  static func isUnsupportedUpdateEngine(status: Int32, standardError: Data) -> Bool {
+    let text = String(decoding: standardError, as: UTF8.self)
+    return status == 2 && text.contains("status")
+      && (text.contains("unexpected argument") || text.contains("unrecognized subcommand"))
   }
 
   public func discover(installation: CLIInstallation) async throws -> AgentHarnessDiscovery {

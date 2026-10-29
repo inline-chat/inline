@@ -390,7 +390,21 @@ pub async fn perform(
             );
         }
     }
-    result?;
+    if let Err(error) = result {
+        return if background {
+            status(config)
+        } else {
+            Err(error)
+        };
+    }
+    store.edit(|state| {
+        state.last_success = Some(current_epoch_seconds());
+        state.failure = None;
+        state.failure_since = None;
+        state.retry_at = None;
+        state.consecutive_failures = 0;
+        Ok(())
+    })?;
     status(config)
 }
 
@@ -411,11 +425,6 @@ async fn perform_inner(
             .accepted
             .insert(channel.as_str().into(), release.clone());
         state.latest = Some(release.clone());
-        state.last_success = Some(current_epoch_seconds());
-        state.failure = None;
-        state.failure_since = None;
-        state.retry_at = None;
-        state.consecutive_failures = 0;
         Ok(())
     })?;
     if !newer(&selected.version, env!("CARGO_PKG_VERSION"))? {
@@ -494,11 +503,12 @@ async fn stage_release(
         if artifact.version == release.version
             && artifact.sha256 == target.sha256
             && artifact.executable == executable
-            && file_hash(&executable)? == artifact.executable_sha256
+            && file_hash(&executable).is_ok_and(|hash| hash == artifact.executable_sha256)
         {
             return Ok(artifact);
         }
-        return Err(UpdateError::Verification("cache_identity"));
+        // Re-download a damaged cache from the authenticated target. Atomic
+        // replacement retains open handles and never edits account data.
     }
     let temporary = create_temp_dir()?;
     let archive = temporary.path().join("inline.tar.gz");
@@ -613,7 +623,10 @@ pub(crate) fn retain_running_binary(store: &Store) -> Result<Artifact, UpdateErr
         bridge_schema_version: compatibility().bridge_schema_version,
         minimum_reader_schema_version: compatibility().minimum_reader_schema_version,
     };
-    store::atomic_json(&directory.join("receipt.json"), &artifact)?;
+    if !directory.join("receipt.json").is_file() {
+        store::atomic_json(&directory.join("receipt.json"), &artifact)?;
+    }
+    validate_cached(store, &artifact)?;
     Ok(artifact)
 }
 
