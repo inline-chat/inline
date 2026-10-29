@@ -69,7 +69,8 @@ struct GridContent: View {
   let grid: InlineProtocol.Grid?
   let isLoading: Bool
   let didFailLoading: Bool
-  let hasLocalAdmission: Bool
+  let localRoomID: Int64?
+  let roomIdentity: (Int64) -> Int64
   let isJoiningDisabled: Bool
   let audioLevel: (Int64) -> Float
   let isScreenSharing: (GridAvatar) -> Bool
@@ -85,32 +86,39 @@ struct GridContent: View {
   let onSetLocked: (Int64, Bool) -> Void
   let onDelete: (Int64) -> Void
 
+  /// Your face is one view across rooms, so switching flies it over.
+  @Namespace private var faces
+
   var body: some View {
     ScrollView {
       if let grid {
-        GridRoomFlowLayout(spacing: 12, lineSpacing: 12) {
-          ForEach(grid.rooms, id: \.id) { room in
-            GridRoomCard(
-              room: room,
-              isCurrent: hasLocalAdmission && grid.hasCurrentRoomID && grid.currentRoomID == room.id,
-              isJoiningDisabled: isJoiningDisabled,
-              audioLevel: audioLevel,
-              isScreenSharing: isScreenSharing,
-              connectionState: connectionState,
-              onJoin: { onJoin(room.id) },
-              onLeave: onLeave,
-              onToggleMicrophone: onToggleMicrophone,
-              onOpenScreenShare: onOpenScreenShare,
-              onStopScreenShare: onStopScreenShare,
-              onSetTitle: { onSetTitle(room.id, $0) },
-              onSetLocked: { onSetLocked(room.id, $0) },
-              onDelete: { onDelete(room.id) }
-            )
+        GridGlassGroup(spacing: 12) {
+          GridRoomFlowLayout(spacing: 12, lineSpacing: 12) {
+            ForEach(grid.rooms.map { (roomIdentity($0.id), $0) }, id: \.0) { item in
+              let room = item.1
+              GridRoomCard(
+                room: room,
+                isCurrent: localRoomID == room.id || room.isLocalPlaceholder,
+                isJoiningDisabled: isJoiningDisabled,
+                faces: faces,
+                audioLevel: audioLevel,
+                isScreenSharing: isScreenSharing,
+                connectionState: connectionState,
+                onJoin: { onJoin(room.id) },
+                onLeave: onLeave,
+                onToggleMicrophone: onToggleMicrophone,
+                onOpenScreenShare: onOpenScreenShare,
+                onStopScreenShare: onStopScreenShare,
+                onSetTitle: { onSetTitle(room.id, $0) },
+                onSetLocked: { onSetLocked(room.id, $0) },
+                onDelete: { onDelete(room.id) }
+              )
+            }
+            GridCreateRoomCard(action: onCreate)
+              .disabled(isJoiningDisabled)
           }
-          GridCreateRoomCard(action: onCreate)
-            .disabled(isJoiningDisabled)
         }
-        .animation(.smoothSnappy, value: grid.rooms.map(\.id))
+        .animation(GridMotion.move, value: grid.gridLayoutKey)
       } else if isLoading {
         ProgressView()
           .controlSize(.small)
@@ -150,19 +158,17 @@ private struct GridCreateRoomCard: View {
 
   var body: some View {
     Button(action: action) {
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
-        .fill(.quaternary.opacity(0.5))
-        .overlay {
-          Image(systemName: "plus")
-            .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(.secondary)
-        }
+      Image(systemName: "plus")
+        .font(.system(size: 14, weight: .medium))
+        .foregroundStyle(.secondary)
         .frame(width: 68, height: 68)
+        .gridRoomGlass(isCurrent: false, accent: Color(nsColor: Theme.accentColor))
     }
-    .buttonStyle(.plain)
+    .buttonStyle(GridPressStyle(pressedScale: 0.9))
+    .gridHoverLift()
     .help("Create and join a room")
     .accessibilityLabel("Create and join a Grid room")
-    .transition(.scale(scale: 0.82).combined(with: .opacity))
+    .transition(.gridRoom)
   }
 }
 
@@ -170,6 +176,7 @@ private struct GridRoomCard: View {
   let room: GridRoom
   let isCurrent: Bool
   let isJoiningDisabled: Bool
+  let faces: Namespace.ID
   let audioLevel: (Int64) -> Float
   let isScreenSharing: (GridAvatar) -> Bool
   let connectionState: GridMediaConnectionStatus
@@ -192,6 +199,7 @@ private struct GridRoomCard: View {
         GridRoomSurface(
           room: room,
           isCurrent: true,
+          faces: faces,
           audioLevel: audioLevel,
           isScreenSharing: isScreenSharing,
           connectionState: connectionState,
@@ -205,6 +213,7 @@ private struct GridRoomCard: View {
           GridRoomSurface(
             room: room,
             isCurrent: false,
+            faces: faces,
             audioLevel: audioLevel,
             isScreenSharing: isScreenSharing,
             connectionState: .disconnected,
@@ -214,23 +223,27 @@ private struct GridRoomCard: View {
             onStopScreenShare: onStopScreenShare
           )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(GridPressStyle())
+        .gridHoverLift()
         .disabled(room.locked || isJoiningDisabled)
       }
 
-      GridRoomOptionsMenu(
-        locked: room.locked,
-        canLock: isCurrent,
-        canDelete: room.avatars.isEmpty,
-        onRename: beginRenaming,
-        onSetLocked: onSetLocked,
-        onDelete: onDelete
-      )
-      .opacity(isHovered ? 1 : 0)
-      .scaleEffect(isHovered ? 1 : 0.82)
-      .padding(3)
-      .animation(.smoothSnappy, value: isHovered)
-      .allowsHitTesting(isHovered)
+      // A room still being made has nothing to name, lock or delete yet.
+      if !room.isLocalPlaceholder {
+        GridRoomOptionsMenu(
+          locked: room.locked,
+          canLock: isCurrent,
+          canDelete: room.avatars.isEmpty,
+          onRename: beginRenaming,
+          onSetLocked: onSetLocked,
+          onDelete: onDelete
+        )
+        .opacity(isHovered ? 1 : 0)
+        .scaleEffect(isHovered ? 1 : 0.82)
+        .padding(3)
+        .animation(.smoothSnappy, value: isHovered)
+        .allowsHitTesting(isHovered)
+      }
     }
     .frame(width: roomWidth, height: 68)
     .overlay(alignment: .top) {
@@ -241,7 +254,7 @@ private struct GridRoomCard: View {
             .lineLimit(1)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background(.regularMaterial, in: Capsule())
+            .gridRoomTagGlass()
         }
         .buttonStyle(.plain)
         .help("Rename room")
@@ -252,7 +265,7 @@ private struct GridRoomCard: View {
     .onHover { isHovered = $0 }
     .animation(.smoothSnappy, value: room.hasTitle ? room.title : "")
     .animation(.smoothSnappy, value: room.locked)
-    .transition(.scale(scale: 0.82).combined(with: .opacity))
+    .transition(.gridRoom)
     .alert("Name Room", isPresented: $isRenaming) {
       TextField("Room name", text: $titleDraft)
       Button("Cancel", role: .cancel) {}
@@ -267,18 +280,18 @@ private struct GridRoomCard: View {
     isRenaming = true
   }
 
+  /// One slot per face; a full room stops growing and its last slot shows "+N".
   private var roomWidth: CGFloat {
-    let visibleCount = min(room.avatars.count, GridRoomAvatars.maximumVisibleAvatarCount)
-    guard visibleCount > 1 else { return 68 }
-    let avatarGrowth = CGFloat(visibleCount - 1) * 53
-    let overflowGrowth: CGFloat = room.avatars.count > visibleCount ? 32 : 0
-    return 68 + avatarGrowth + overflowGrowth
+    let slots = min(room.avatars.count, GridRoomAvatars.maximumVisibleAvatarCount)
+    guard slots > 1 else { return 68 }
+    return 68 + CGFloat(slots - 1) * 53
   }
 }
 
 private struct GridRoomSurface: View {
   let room: GridRoom
   let isCurrent: Bool
+  let faces: Namespace.ID
   let audioLevel: (Int64) -> Float
   let isScreenSharing: (GridAvatar) -> Bool
   let connectionState: GridMediaConnectionStatus
@@ -288,11 +301,11 @@ private struct GridRoomSurface: View {
   let onStopScreenShare: () -> Void
 
   var body: some View {
-    RoundedRectangle(cornerRadius: 16, style: .continuous)
-      .fill(isCurrent ? Color(nsColor: Theme.accentColor).opacity(0.12) : Color.primary.opacity(0.045))
+    Color.clear
       .overlay {
         GridRoomAvatars(
           avatars: room.avatars,
+          faces: faces,
           allowsLocalControls: isCurrent,
           audioLevel: audioLevel,
           isScreenSharing: isScreenSharing,
@@ -324,14 +337,7 @@ private struct GridRoomSurface: View {
         .font(.system(size: 8, weight: .semibold))
         .padding(7)
       }
-      .overlay {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-          .stroke(
-            isCurrent ? Color(nsColor: Theme.accentColor).opacity(0.55) : Color.primary.opacity(0.07),
-            lineWidth: 1
-          )
-      }
-      .contentShape(.rect(cornerRadius: 16))
+      .gridRoomGlass(isCurrent: isCurrent, accent: Color(nsColor: Theme.accentColor))
   }
 }
 
@@ -381,6 +387,7 @@ private struct GridRoomAvatars: View {
   static let maximumVisibleAvatarCount = 5
 
   let avatars: [GridAvatar]
+  let faces: Namespace.ID
   let allowsLocalControls: Bool
   let audioLevel: (Int64) -> Float
   let isScreenSharing: (GridAvatar) -> Bool
@@ -404,7 +411,8 @@ private struct GridRoomAvatars: View {
           onOpenScreenShare: { onOpenScreenShare(avatar) },
           onStopScreenShare: onStopScreenShare
         )
-        .transition(.scale(scale: 0.76).combined(with: .opacity))
+        .matchedGeometryEffect(id: avatar.user.id, in: faces)
+        .transition(.gridFace)
       }
       if hiddenAvatarCount > 0 {
         if hiddenScreenSharingAvatars.isEmpty {
@@ -443,7 +451,7 @@ private struct GridRoomAvatars: View {
   }
 
   private var visibleAvatars: [GridAvatar] {
-    Array(avatars.prefix(Self.maximumVisibleAvatarCount))
+    GridRoomFaces.visible(avatars, slots: Self.maximumVisibleAvatarCount)
   }
 
   private var hiddenAvatarCount: Int {
@@ -451,16 +459,20 @@ private struct GridRoomAvatars: View {
   }
 
   private var hiddenScreenSharingAvatars: [GridAvatar] {
-    Array(avatars.dropFirst(Self.maximumVisibleAvatarCount))
-      .filter(isScreenSharing)
+    let shown = Set(visibleAvatars.map(\.user.id))
+    return avatars.filter { !shown.contains($0.user.id) && isScreenSharing($0) }
   }
 
+  /// Takes a face's slot, so a full room reads as one more face, not a badge.
   private var overflowLabel: some View {
     Text("+\(hiddenAvatarCount)")
-      .font(.system(size: 9, weight: .semibold).monospacedDigit())
-      .frame(width: 28, height: 28)
-      .background(.regularMaterial, in: Circle())
-      .transition(.scale(scale: 0.76).combined(with: .opacity))
+      .font(.system(size: 13, weight: .semibold).monospacedDigit())
+      .foregroundStyle(.secondary)
+      .frame(width: 45, height: 45)
+      .background(Color.primary.opacity(0.08), in: Circle())
+      .padding(2)
+      .contentTransition(.numericText())
+      .transition(.gridFace)
   }
 }
 
@@ -489,7 +501,7 @@ private struct GridSpeakingAvatar: View {
             size: 45
           )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(GridPressStyle(pressedScale: 0.86))
         .help(helpText)
       } else {
         GridAvatarImage(

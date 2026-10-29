@@ -46,9 +46,9 @@ struct GridRoomsView: View {
     return store.orderedHomeSpaces.first?.spaceID
   }
 
+  /// Rooms stay live while a change is at the server; the newest tap wins.
   private var canCreateRoom: Bool {
-    !store.membershipMutationInFlight && store.callTransferEnabled
-      && store.currentCall?.ownedByCurrentSession != false
+    store.callTransferEnabled && store.currentCall?.ownedByCurrentSession != false
   }
 
   var body: some View {
@@ -261,8 +261,12 @@ enum GridLocalCall: Equatable {
     }
   }
 
-  var isClaimingRoom: Bool {
-    if case .claiming(.join, _, _) = self { true } else { false }
+  /// Your microphone and Leave work from the tap on a room, not after the server answers.
+  var joiningOrActiveSpaceID: Int64? {
+    switch self {
+      case let .claiming(.join, spaceID, _), let .active(spaceID, _, _): spaceID
+      case .none, .claiming, .paused, .elsewhere: nil
+    }
   }
 
   /// Shown as the Mac's small pulsing dot, never as text.
@@ -363,39 +367,40 @@ private struct GridRoomList: View {
   let canCreateRoom: Bool
   let onViewShare: (GridAvatar, InlineRTCScreenShare) -> Void
 
+  /// Your face is one view across rooms, so switching flies it over.
+  @Namespace private var faces
+
   var body: some View {
     let call = GridLocalCall(store: store)
-    // A new room has no id until the server makes it; the add tile stands in.
-    let isCreatingRoom = call.isClaimingRoom && call.localRoomID == nil && call.spaceID == spaceID
     ScrollView {
       if let grid = store.grid(spaceID: spaceID) {
         // Rooms keep the server's order, as on the Mac: they never jump.
-        GridRoomFlowLayout(spacing: 10) {
-          ForEach(grid.rooms, id: \.id) { room in
-            GridRoomCapsule(store: store, call: call, room: room, onViewShare: onViewShare)
-          }
-          Button {
-            store.createAndJoin(spaceID: spaceID)
-          } label: {
-            Group {
-              if isCreatingRoom {
-                ProgressView()
-              } else {
-                Image(systemName: "plus")
-              }
+        GridGlassGroup(spacing: 12) {
+          GridRoomFlowLayout(spacing: 12) {
+            ForEach(grid.rooms.map { (store.displayIdentity(roomID: $0.id), $0) }, id: \.0) { item in
+              GridRoomCapsule(store: store, call: call, room: item.1, faces: faces, onViewShare: onViewShare)
+                .transition(.gridRoom)
             }
-            .font(.body.weight(.medium))
-            .foregroundStyle(.secondary)
-            .frame(width: 58, height: 58)
-            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            // A new room shows at once as a stand-in with you in it.
+            Button {
+              store.createAndJoin(spaceID: spaceID)
+            } label: {
+              Image(systemName: "plus")
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: GridRoomCapsule.roomSize, height: GridRoomCapsule.roomSize)
+                .gridRoomGlass(isCurrent: false, accent: .accentColor)
+            }
+            .buttonStyle(GridPressStyle(pressedScale: 0.9))
+            .disabled(!canCreateRoom)
+            .accessibilityLabel("Create and join a Grid room")
           }
-          .buttonStyle(.plain)
-          .disabled(!canCreateRoom)
-          .accessibilityLabel("Create and join a Grid room")
         }
-        .padding(16)
-        .animation(.smooth(duration: 0.25), value: grid.rooms.map(\.id))
+        // Room names sit on the top edge, as on the Mac.
+        .padding(.horizontal, 16)
+        .padding(.top, 20)
+        .padding(.bottom, 16)
+        .animation(GridMotion.move, value: grid.gridLayoutKey)
       } else if store.failedLoadSpaceIDs.contains(spaceID) {
         ContentUnavailableView {
           Label("Couldn't load rooms", systemImage: "wifi.exclamationmark")
@@ -416,15 +421,20 @@ private struct GridRoomCapsule: View {
   let store: GridRoomService
   let call: GridLocalCall
   let room: GridRoom
+  let faces: Namespace.ID
   let onViewShare: (GridAvatar, InlineRTCScreenShare) -> Void
   @State private var isRenaming = false
   @State private var draftTitle = ""
 
+  /// Faces fit four to a room on any iPhone; a fuller room shows "+N" in the last slot.
   private static let visibleAvatarCount = 4
+  /// Your face with its microphone ring; rooms are sized from it.
+  static let faceSize: CGFloat = 56
+  static let roomSize: CGFloat = faceSize + 16
 
   /// You are in this room on this iPhone, or joining it.
   private var isCurrent: Bool {
-    call.localRoomID == room.id
+    call.localRoomID == room.id || room.isLocalPlaceholder
   }
 
   private var holdsCallElsewhere: Bool {
@@ -436,32 +446,39 @@ private struct GridRoomCapsule: View {
 
   private var isDisabled: Bool {
     if holdsCallElsewhere {
-      return store.membershipMutationInFlight || !store.callTransferEnabled
+      return !store.callTransferEnabled
     }
-    return store.membershipMutationInFlight || !store.callTransferEnabled || room.locked
-      || store.currentCall?.ownedByCurrentSession == false
+    return !store.callTransferEnabled || room.locked || store.currentCall?.ownedByCurrentSession == false
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
+    Group {
+      if isCurrent {
+        surface
+      } else {
+        Button(action: join) { surface }
+          .buttonStyle(GridPressStyle())
+          .disabled(isDisabled)
+      }
+    }
+    // A room still being made has nothing to name, lock or delete yet.
+    .contextMenu {
+      if !room.isLocalPlaceholder { roomMenu }
+    }
+    .overlay(alignment: .top) {
       if let name = GridRoomTitle.name(of: room) {
         Text(name)
-          .font(.caption2.weight(.medium))
-          .foregroundStyle(.secondary)
+          .font(.caption.weight(.medium))
           .lineLimit(1)
-          .padding(.leading, 6)
+          .padding(.horizontal, 7)
+          .padding(.vertical, 2)
+          .gridRoomTagGlass()
+          .offset(y: -10)
+          .allowsHitTesting(false)
+          .transition(.scale(scale: 0.88).combined(with: .opacity))
       }
-      Group {
-        if isCurrent {
-          faces
-        } else {
-          Button(action: join) { faces }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
-        }
-      }
-      .contextMenu { roomMenu }
     }
+    .sensoryFeedback(.impact(weight: .light), trigger: isCurrent) { _, isCurrent in isCurrent }
     .accessibilityElement(children: .contain)
     .accessibilityLabel(accessibilityLabel)
     .alert("Name Room", isPresented: $isRenaming) {
@@ -474,15 +491,10 @@ private struct GridRoomCapsule: View {
     }
   }
 
-  private var faces: some View {
-    HStack(spacing: 6) {
-      if room.avatars.isEmpty {
-        Image(systemName: "person")
-          .font(.body)
-          .foregroundStyle(.tertiary)
-          .frame(width: 42, height: 42)
-      }
-      ForEach(room.avatars.prefix(Self.visibleAvatarCount), id: \.user.id) { avatar in
+  private var surface: some View {
+    let visible = GridRoomFaces.visible(room.avatars, slots: Self.visibleAvatarCount)
+    return HStack(spacing: 6) {
+      ForEach(visible, id: \.user.id) { avatar in
         GridRoomFace(
           store: store,
           call: call,
@@ -490,35 +502,33 @@ private struct GridRoomCapsule: View {
           isCurrentRoom: isCurrent,
           onViewShare: onViewShare
         )
-        .transition(.scale(scale: 0.76).combined(with: .opacity))
+        .matchedGeometryEffect(id: avatar.user.id, in: faces)
+        .transition(.gridFace)
       }
-      if room.avatars.count > Self.visibleAvatarCount {
-        Text("+\(room.avatars.count - Self.visibleAvatarCount)")
-          .font(.caption.monospacedDigit().weight(.medium))
+      if room.avatars.count > visible.count {
+        // Takes a face's slot, so a full room reads as one more face, not a badge.
+        Text("+\(room.avatars.count - visible.count)")
+          .font(.subheadline.monospacedDigit().weight(.semibold))
           .foregroundStyle(.secondary)
-          .frame(minWidth: 24)
+          .frame(width: Self.faceSize, height: Self.faceSize)
+          .background(Color.primary.opacity(0.08), in: Circle())
+          .contentTransition(.numericText())
+          .transition(.gridFace)
       }
     }
     .padding(8)
-    .background(
-      isCurrent ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.05),
-      in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-    )
-    .overlay {
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .strokeBorder(isCurrent ? Color.accentColor.opacity(0.55) : .clear, lineWidth: 1)
-    }
+    .frame(minWidth: Self.roomSize, minHeight: Self.roomSize)
     .overlay(alignment: .bottomTrailing) {
       if room.locked {
         Image(systemName: "lock.fill")
-          .font(.system(size: 8, weight: .semibold))
+          .font(.system(size: 9, weight: .semibold))
           .foregroundStyle(.secondary)
-          .padding(6)
+          .padding(7)
+          .transition(.scale.combined(with: .opacity))
       }
     }
-    .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    .animation(.smooth(duration: 0.25), value: room.avatars.map(\.user.id))
-    .animation(.smooth(duration: 0.25), value: isCurrent)
+    .gridRoomGlass(isCurrent: isCurrent, accent: .accentColor)
+    .animation(GridMotion.move, value: room.locked)
   }
 
   private func join() {
@@ -586,7 +596,7 @@ private struct GridRoomFace: View {
   }
 
   var body: some View {
-    if isYouHere, case let .active(spaceID, _, _) = call {
+    if isYouHere, let spaceID = call.joiningOrActiveSpaceID {
       GridMicrophoneToggle(store: store, spaceID: spaceID) { _ in face }
         .accessibilityHint("Mutes or unmutes your microphone")
     } else {
@@ -600,7 +610,7 @@ private struct GridRoomFace: View {
     let shares = isCurrentRoom ? store.screenShares(avatar: avatar) : []
     let user = InlineKit.User(from: avatar.user)
 
-    return UserAvatar(user: user, size: 42)
+    return UserAvatar(user: user, size: GridRoomCapsule.faceSize - 4)
       .padding(2)
       .overlay {
         Circle()
@@ -801,13 +811,12 @@ struct GridMicrophoneToggle<Label: View>: View {
   private var isOn: Bool { store.media.isMicrophoneEnabled }
 
   private var isInCall: Bool {
-    guard case let .active(callSpaceID, _, _) = GridLocalCall(store: store) else { return false }
-    return callSpaceID == spaceID
+    GridLocalCall(store: store).joiningOrActiveSpaceID == spaceID
   }
 
   var body: some View {
     Button(action: toggle) { label(isOn) }
-      .buttonStyle(.plain)
+      .buttonStyle(GridPressStyle(pressedScale: 0.86))
       .disabled(!isInCall)
       .accessibilityLabel(isOn ? String(localized: "Mute microphone") : String(localized: "Unmute microphone"))
       .onChange(of: store.media.microphonePermission) { _, permission in
@@ -904,7 +913,7 @@ struct GridLeaveButton: View {
         icon.background(Color.primary.opacity(0.08), in: Circle())
       }
     }
-    .buttonStyle(.plain)
+    .buttonStyle(GridPressStyle(pressedScale: 0.86))
     .accessibilityLabel("Leave Grid room")
   }
 }
@@ -976,7 +985,7 @@ private struct GridRoomFlowLayout: Layout {
     var rowHeight: CGFloat = 0
     var row: [(LayoutSubview, CGSize, CGFloat)] = []
 
-    // Bottom-align each row so named rooms (with a label above) line up.
+    // Bottom-align each row so rooms of any height share a baseline.
     func flush() {
       for (view, size, rowX) in row {
         view.place(at: CGPoint(x: rowX, y: y + rowHeight - size.height), proposal: ProposedViewSize(size))
