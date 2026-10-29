@@ -219,7 +219,6 @@ struct GridView: View {
       onSetTranscription: { enabled, destination in
         setTranscription(roomID: room.id, enabled: enabled, destination: destination)
       },
-      onOpenRoomThread: { openRoomThread(roomID: room.id) },
       onOpenTranscript: {
         guard let chatID = room.transcriptChatID else { return }
         dependencies?.requestOpenChat(peer: .thread(id: chatID))
@@ -239,8 +238,6 @@ struct GridView: View {
     switch notice.retry {
       case let .setTranscription(enabled, destination):
         setTranscription(roomID: notice.roomID, enabled: enabled, destination: destination)
-      case .openRoomThread:
-        openRoomThread(roomID: notice.roomID)
     }
   }
 
@@ -258,18 +255,6 @@ struct GridView: View {
         try await store.setTranscription(room: room, enabled: enabled, destination: destination)
       } catch {
         showTranscriptionNotice(.setTranscription(enabled: enabled, destination: destination), roomID: roomID)
-      }
-    }
-  }
-
-  private func openRoomThread(roomID: Int64) {
-    transcriptionNotice = nil
-    Task {
-      do {
-        let chatID = try await store.openRoomThread(roomID: roomID)
-        dependencies?.requestOpenChat(peer: .thread(id: chatID))
-      } catch {
-        showTranscriptionNotice(.openRoomThread, roomID: roomID)
       }
     }
   }

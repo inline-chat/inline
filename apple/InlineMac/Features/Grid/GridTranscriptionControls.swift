@@ -2,15 +2,16 @@ import InlineKit
 import InlineProtocol
 import SwiftUI
 
-/// Transcription as one split control in the Grid media pill: the icon starts
-/// or stops capture, and the chevron holds the less frequent actions. Room
-/// snapshots own capture state; this view only presents it. Place it with
-/// `.id(room.id)` so the earlier-transcript list never outlives its room.
+/// Transcription as one split control in the Grid media pill: the icon (or
+/// ⌥T) starts or stops capture, and the chevron holds the less frequent
+/// actions. Each start opens a new transcript thread; continuing an earlier one
+/// is explicit. Room snapshots own capture state; this view only presents it.
+/// Place it with `.id(room.id)` so the earlier-transcript list never outlives
+/// its room.
 struct GridTranscriptionControl: View {
   let room: GridRoom
   let isBusy: Bool
   let onSetTranscription: (Bool, GridTranscriptionRequest.Destination) -> Void
-  let onOpenRoomThread: () -> Void
   let onOpenTranscript: () -> Void
   let onListTranscripts: () async throws -> [GridTranscriptDestinationInfo]
 
@@ -30,14 +31,13 @@ struct GridTranscriptionControl: View {
 
   private var controls: some View {
     HStack(spacing: 0) {
-      Button {
-        onSetTranscription(!room.canStopTranscription, .last)
-      } label: {
+      Button(action: toggle) {
         icon
       }
       .buttonStyle(.plain)
       .disabled(!canToggle)
-      .help(toggleHelp)
+      .keyboardShortcut("t", modifiers: .option)
+      .help("\(toggleHelp) (⌥T)")
       .accessibilityLabel(toggleHelp)
 
       Rectangle()
@@ -92,13 +92,9 @@ struct GridTranscriptionControl: View {
   private var menuContent: some View {
     Button("Open Transcript", systemImage: "doc.text", action: onOpenTranscript)
       .disabled(room.transcriptChatID == nil)
-    Button("Open Room Thread", systemImage: "bubble.left.and.bubble.right", action: onOpenRoomThread)
-      .disabled(!ownsMembership)
     Divider()
-    Button("New Transcript", systemImage: "plus") {
-      onSetTranscription(true, .new)
-    }
-    .disabled(!canStart)
+    Button(room.transcriptionControlTitle, systemImage: room.canStopTranscription ? "stop.fill" : "plus", action: toggle)
+      .disabled(!canToggle)
     Menu {
       earlierTranscriptsMenuContent
     } label: {
@@ -129,6 +125,11 @@ struct GridTranscriptionControl: View {
           }
         }
     }
+  }
+
+  /// A start always opens a new thread, so each run reads as its own transcript.
+  private func toggle() {
+    onSetTranscription(!room.canStopTranscription, .new)
   }
 
   private var accent: Color {
@@ -217,7 +218,6 @@ private extension GridTranscriptDestinationInfo {
 struct GridTranscriptionNotice: Equatable {
   enum Retry: Equatable {
     case setTranscription(enabled: Bool, destination: GridTranscriptionRequest.Destination)
-    case openRoomThread
   }
 
   let retry: Retry
@@ -233,7 +233,6 @@ struct GridTranscriptionNotice: Equatable {
     switch retry {
       case .setTranscription(enabled: true, destination: _): "Transcription couldn’t start"
       case .setTranscription(enabled: false, destination: _): "Transcription couldn’t stop"
-      case .openRoomThread: "Room thread couldn’t open"
     }
   }
 

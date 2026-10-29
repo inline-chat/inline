@@ -77,6 +77,10 @@ final class GridFloatingCallController {
         NSApp.activate(ignoringOtherApps: true)
         MainWindowOpenCoordinator.shared.openWindow(.grid(spaceID: spaceID))
       },
+      onOpenTranscript: { chatID in
+        NSApp.activate(ignoringOtherApps: true)
+        MainWindowOpenCoordinator.shared.openWindow(.chat(peer: .thread(id: chatID)))
+      },
       onSizeChange: { [weak self] size in
         // Resize outside SwiftUI's layout pass to avoid constraint cycles.
         DispatchQueue.main.async { self?.resize(to: size) }
@@ -433,6 +437,7 @@ struct GridFloatingCallView: View {
   let rooms: GridRoomService
   let presentation: GridFloatingCallPresentation
   let onOpenGrid: (Int64) -> Void
+  let onOpenTranscript: (Int64) -> Void
   let onSizeChange: (CGSize) -> Void
 
   private static var usesWindowGlass: Bool {
@@ -468,6 +473,15 @@ struct GridFloatingCallView: View {
       .help("Open Grid")
       .modifier(GridFloatingCallFold(isFolded: folded, depth: 0))
 
+      // The room's disclosure while it's transcribed, for everyone in it.
+      if room.transcriptionIsRunning {
+        GridFloatingCallTranscriptGlyph(room: room) {
+          if let chatID = room.transcriptChatID { onOpenTranscript(chatID) }
+        }
+        .modifier(GridFloatingCallFold(isFolded: folded, depth: 1))
+        .transition(.scale(scale: 0.76).combined(with: .opacity))
+      }
+
       GridFloatingCallButton(
         systemName: rooms.media.isMicrophoneEnabled ? "mic.fill" : "mic.slash.fill",
         isActive: rooms.media.isMicrophoneEnabled,
@@ -491,6 +505,7 @@ struct GridFloatingCallView: View {
       }
       .modifier(GridFloatingCallFold(isFolded: folded, depth: 0))
     }
+    .animation(.smoothSnappy, value: room.transcriptionIsRunning)
     .coordinateSpace(.named(GridFloatingCallFold.space))
     .padding(.leading, 8)
     .padding(.trailing, 5)
@@ -593,6 +608,37 @@ private struct GridFloatingCallAvatar: View {
 
   private var isSpeaking: Bool {
     audioLevel > 0.02
+  }
+}
+
+/// A small accent glyph, not a control: starting and stopping stay in Grid's
+/// media pill. A click opens the transcript.
+private struct GridFloatingCallTranscriptGlyph: View {
+  let room: GridRoom
+  let onOpen: () -> Void
+
+  var body: some View {
+    Button(action: onOpen) {
+      Group {
+        if room.transcription.state == .gridTranscriptionActive {
+          Image(systemName: "captions.bubble.fill")
+            .font(.system(size: 12, weight: .medium))
+        } else {
+          GridScreenShareActivityIndicator(tint: accent, size: 11)
+        }
+      }
+      .foregroundStyle(accent)
+      .frame(width: 24, height: 30)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .disabled(room.transcriptChatID == nil)
+    .help("This room is being transcribed. Open transcript")
+    .accessibilityLabel("This room is being transcribed. Open transcript")
+  }
+
+  private var accent: Color {
+    Color(nsColor: Theme.accentColor)
   }
 }
 
