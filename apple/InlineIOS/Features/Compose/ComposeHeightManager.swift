@@ -54,7 +54,8 @@ extension ComposeView {
     let inputHeight = textView.isHidden ? Self.minHeight : textViewHeightByContentHeight(contentHeight)
     let embedHeight = embedContainerHeightConstraint?.constant ?? 0
     let attachmentHeight = attachmentContainerHeightConstraint?.constant ?? 0
-    let newHeight = inputHeight + embedHeight + attachmentHeight
+    let agentRowHeight = isAgentLayout ? Self.agentRowExtraHeight : 0
+    let newHeight = inputHeight + embedHeight + attachmentHeight + agentRowHeight
     guard abs(composeHeightConstraint.constant - newHeight) > 1 else { return }
 
     composeHeightConstraint.constant = newHeight
@@ -94,18 +95,24 @@ extension ComposeView {
 
   }
 
+  /// The empty compose's height: the bar, plus the agent row in the card.
+  var restingHeight: CGFloat {
+    Self.minHeight + (isAgentLayout ? Self.agentRowExtraHeight : 0)
+  }
+
   func resetHeight(animated: Bool = true) {
+    let height = restingHeight
     if animated {
       UIView.animate(withDuration: 0.2) {
-        self.composeHeightConstraint.constant = Self.minHeight
+        self.composeHeightConstraint.constant = height
         self.superview?.layoutIfNeeded()
       }
     } else {
-      composeHeightConstraint.constant = Self.minHeight
+      composeHeightConstraint.constant = height
       superview?.layoutIfNeeded()
     }
     onHeightChange?(
-      Self.minHeight,
+      height,
       animated
         ? .animated(duration: 0.2, timingParameters: nil)
         : .immediate

@@ -157,6 +157,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       }
       updateEmbedState(animated: false)
       updateVoiceAvailability(animated: false)
+      configureAgentChain()
     }
   }
   var chatId: Int64? {
@@ -164,6 +165,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       if oldValue != chatId { cancelPendingAttachmentsForDestinationChange() }
       updateEmbedState(animated: false)
       updateVoiceAvailability(animated: false)
+      configureAgentChain()
     }
   }
   var spaceId: Int64? {
@@ -195,7 +197,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   lazy var composeAndButtonContainer = makeComposeAndButtonContainer()
   lazy var attachmentScrollView = makeAttachmentScrollView()
   lazy var attachmentStackView = makeAttachmentStackView()
-  private lazy var voiceViewModel = ComposeVoiceRecordingViewModel()
+  private(set) lazy var voiceViewModel = ComposeVoiceRecordingViewModel()
   private lazy var voiceInputHostingController: UIHostingController<ComposeVoiceInputView> = {
     let controller = UIHostingController(rootView: ComposeVoiceInputView(
       viewModel: voiceViewModel,
@@ -232,6 +234,19 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   private var currentEmbedMessageId: Int64?
   private var currentEmbedMode: ComposeEmbedViewContent.Mode?
   private var currentEmbedMessageChatId: Int64?
+
+  // Agent card (ComposeView+Agent.swift)
+  var agentChain: ComposeAgentChainModel?
+  var agentCancellables: Set<AnyCancellable> = []
+  var isAgentLayout = false
+  let agentRowState = ComposeAgentRowState()
+  lazy var agentRowHostingController = makeAgentRowHostingController()
+  var agentRowView: UIView { agentRowHostingController.view }
+  var textViewBottomToContentConstraint: NSLayoutConstraint?
+  var textViewBottomToAgentRowConstraint: NSLayoutConstraint?
+  var textViewTrailingToSendConstraint: NSLayoutConstraint?
+  var textViewTrailingToContentConstraint: NSLayoutConstraint?
+  let agentPopoverDelegate = ComposeAgentPopoverDelegate()
 
   // MARK: - Initialization
 
@@ -394,6 +409,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     composeContent.addSubview(sendButton)
     composeContent.addSubview(voiceButton)
     composeContent.addSubview(voiceInputView)
+    composeContent.addSubview(agentRowView)
 
     setupInitialHeight()
     setupConstraints()
@@ -433,6 +449,22 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     attachmentContainerHeightConstraint = attachmentHeightConstraint
     self.composeLeadingToPlusConstraint = composeLeadingToPlusConstraint
     self.composeLeadingExpandedConstraint = composeLeadingExpandedConstraint
+
+    // Chat layout: the text runs to the send button and the bottom edge.
+    // Agent layout: the text spans the card and sits on the agent row.
+    let textViewBottomToContent = textView.bottomAnchor.constraint(equalTo: composeContent.bottomAnchor)
+    let textViewBottomToAgentRow = textView.bottomAnchor.constraint(equalTo: agentRowView.topAnchor)
+    let textViewTrailingToSend = textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -12)
+    let textViewTrailingToContent = textView.trailingAnchor.constraint(
+      equalTo: composeContent.trailingAnchor,
+      constant: -composeHorizontalInset
+    )
+    textViewBottomToAgentRow.isActive = false
+    textViewTrailingToContent.isActive = false
+    textViewBottomToContentConstraint = textViewBottomToContent
+    textViewBottomToAgentRowConstraint = textViewBottomToAgentRow
+    textViewTrailingToSendConstraint = textViewTrailingToSend
+    textViewTrailingToContentConstraint = textViewTrailingToContent
 
     NSLayoutConstraint.activate([
       composeHeightConstraint,
@@ -480,8 +512,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       // TextView constraints within container
       textView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: composeHorizontalInset),
       textView.topAnchor.constraint(equalTo: attachmentScrollView.bottomAnchor, constant: 3),
-      textView.bottomAnchor.constraint(equalTo: composeContent.bottomAnchor),
-      textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -12),
+      textViewBottomToContent,
+      textViewTrailingToSend,
+
+      // Agent row: from the leading edge to the send button, on the send
+      // button's baseline. Hidden outside the agent layout.
+      agentRowView.leadingAnchor.constraint(equalTo: composeContent.leadingAnchor, constant: 4),
+      agentRowView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -2),
+      agentRowView.centerYAnchor.constraint(equalTo: sendButton.centerYAnchor),
+      agentRowView.heightAnchor.constraint(equalToConstant: Self.agentRowHeight),
 
       // SendButton constraints within container
       sendButton.trailingAnchor.constraint(equalTo: composeContent.trailingAnchor, constant: -composeControlTrailingInset),
@@ -789,7 +828,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     voiceInputView.isHidden = !voiceActive
     textView.isHidden = voiceActive
-    updateComposeWidth(showsSideButton: !voiceActive, animated: animated)
+    applyAgentLayout(agentLayoutIsWanted, animated: animated)
+    updateComposeWidth(showsSideButton: showsOutsidePlusButton, animated: animated)
     updateTrailingControlVisibility(controlState, animated: animated)
 
     if voiceActive {
@@ -804,7 +844,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     updateHeight(animated: animated)
   }
 
-  private func updateComposeWidth(showsSideButton: Bool, animated: Bool) {
+  func updateComposeWidth(showsSideButton: Bool, animated: Bool) {
     guard let composeLeadingToPlusConstraint, let composeLeadingExpandedConstraint else {
       plusButton.isHidden = !showsSideButton
       plusButton.alpha = showsSideButton ? 1 : 0
@@ -853,7 +893,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       self.layoutIfNeeded()
     } completion: { [weak self] _ in
       guard let self else { return }
-      let showsSideButton = !self.isVoiceActive
+      let showsSideButton = self.showsOutsidePlusButton
       self.plusButton.alpha = showsSideButton ? 1 : 0
       self.plusButton.isHidden = !showsSideButton
       self.plusButton.isUserInteractionEnabled = showsSideButton
@@ -1586,6 +1626,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   @objc private func handleReplyStateChange() {
     updateEmbedState(animated: true)
+    updateAgentReplyTarget()
   }
 
   @objc private func handleForwardStateChange() {
@@ -1756,6 +1797,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func removeObservers() {
+    tearDownAgentChain()
     voicePhaseObserver?.cancel()
     voicePhaseObserver = nil
     sceneObserverTokens.forEach { NotificationCenter.default.removeObserver($0) }
@@ -1768,6 +1810,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   /// Resets text view typing attributes and related state
   func resetTextViewState() {
     textView.resetTypingAttributesToDefault()
+    updateAgentDraftTarget()
 
     DispatchQueue.main.async { [weak self] in
       self?.textView.updateTypingAttributesIfNeeded()
@@ -1822,7 +1865,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let heightBeforeClear = composeHeightConstraint.constant
     let shouldDeferSendHeightReset = heightBehavior == .coordinatedSendAnimation
       && shouldAnimateHeightReset
-      && abs(heightBeforeClear - Self.minHeight) > 1
+      && abs(heightBeforeClear - restingHeight) > 1
     pendingSendAnimationHeightChange = shouldDeferSendHeightReset
     SendMessageAnimationDiagnostics.event(
       "compose reset-full heightBehavior=\(heightBehavior.debugName) shouldCoordinateHeight=\(heightBehavior == .coordinatedSendAnimation) preview=\(didPrepareSendAnimationPreview) shouldDeferHeight=\(shouldDeferSendHeightReset) shouldAnimateHeightReset=\(shouldAnimateHeightReset) hadAttachments=\(hadAttachments) heightBefore=\(String(format: "%.1f", heightBeforeClear)) minHeight=\(String(format: "%.1f", Self.minHeight))"
@@ -1861,7 +1904,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   ) {
     autocompleteManager?.dismissCompletion()
     let heightBeforeClear = composeHeightConstraint.constant
-    let shouldAnimateHeight = shouldCoordinateSendAnimationReset && abs(heightBeforeClear - Self.minHeight) > 1
+    let shouldAnimateHeight = shouldCoordinateSendAnimationReset && abs(heightBeforeClear - restingHeight) > 1
     pendingSendAnimationHeightChange = shouldAnimateHeight
     SendMessageAnimationDiagnostics.event(
       "compose reset-text-only shouldCoordinateHeight=\(shouldCoordinateSendAnimationReset) preview=\(didPrepareSendAnimationPreview) shouldAnimateHeight=\(shouldAnimateHeight) heightBefore=\(String(format: "%.1f", heightBeforeClear)) minHeight=\(String(format: "%.1f", Self.minHeight))"

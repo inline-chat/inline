@@ -152,6 +152,12 @@ struct ChatView: View {
     }
   }
 
+  /// An agent DM's working folder for the header, from its bridge's settings.
+  private var agentFolderTitle: String? {
+    guard fullChatViewModel.peerUser?.bot == true else { return nil }
+    return botChatSettingsCoordinator.selectedState.document?.folderTitle
+  }
+
   var body: some View {
     ZStack(alignment: .top) {
       chatContent
@@ -232,6 +238,7 @@ struct ChatView: View {
               router: router,
               fullChatViewModel: fullChatViewModel,
               realtimeState: realtimeState,
+              agentFolderTitle: agentFolderTitle,
               onOpenSpace: onOpenSpace,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
@@ -246,6 +253,7 @@ struct ChatView: View {
               router: router,
               fullChatViewModel: fullChatViewModel,
               realtimeState: realtimeState,
+              agentFolderTitle: agentFolderTitle,
               onOpenSpace: onOpenSpace,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )

@@ -11,6 +11,18 @@ public enum AttachmentPickerRecentMediaChangeUserInfo {
   public static let localIdentifiersKey = "localIdentifiers"
 }
 
+/// The agent controls switch, offered only while the draft would reach an
+/// agent. Off keeps Compose as the plain bar in every chat.
+public struct AttachmentPickerAgentControls {
+  public let isShown: Bool
+  public let setShown: (Bool) -> Void
+
+  public init(isShown: Bool, setShown: @escaping (Bool) -> Void) {
+    self.isShown = isShown
+    self.setShown = setShown
+  }
+}
+
 public struct AttachmentPickerActions {
   public let showCommands: () -> Void
   public let isCommandsEnabled: Bool
@@ -20,6 +32,7 @@ public struct AttachmentPickerActions {
   public let openRecentItem: (AttachmentPickerModel.RecentItem) -> Void
   public let openRecentItems: ([AttachmentPickerModel.RecentItem]) -> Void
   public let manageLimitedAccess: () -> Void
+  public let agentControls: AttachmentPickerAgentControls?
 
   public init(
     showCommands: @escaping () -> Void,
@@ -29,7 +42,8 @@ public struct AttachmentPickerActions {
     openFiles: @escaping () -> Void,
     openRecentItem: @escaping (AttachmentPickerModel.RecentItem) -> Void,
     openRecentItems: @escaping ([AttachmentPickerModel.RecentItem]) -> Void,
-    manageLimitedAccess: @escaping () -> Void
+    manageLimitedAccess: @escaping () -> Void,
+    agentControls: AttachmentPickerAgentControls? = nil
   ) {
     self.showCommands = showCommands
     self.isCommandsEnabled = isCommandsEnabled
@@ -39,11 +53,13 @@ public struct AttachmentPickerActions {
     self.openRecentItem = openRecentItem
     self.openRecentItems = openRecentItems
     self.manageLimitedAccess = manageLimitedAccess
+    self.agentControls = agentControls
   }
 }
 
 public struct AttachmentPickerSheet: View {
   @State private var model: AttachmentPickerModel
+  @State private var showsAgentControls = false
 
   private let actions: AttachmentPickerActions
 
@@ -53,6 +69,7 @@ public struct AttachmentPickerSheet: View {
     recentLimit: Int = AttachmentPickerModel.defaultRecentLimit
   ) {
     _model = State(initialValue: AttachmentPickerModel(recentLimit: recentLimit))
+    _showsAgentControls = State(initialValue: actions.agentControls?.isShown ?? false)
     self.actions = actions
   }
 
@@ -161,6 +178,28 @@ public struct AttachmentPickerSheet: View {
         action: actions.openFiles
       )
       .background(Color.clear)
+
+      if let agentControls = actions.agentControls {
+        Toggle(isOn: $showsAgentControls) {
+          HStack(spacing: 14) {
+            Image(systemName: "slider.horizontal.3")
+              .font(.system(size: 20, weight: .regular))
+              .foregroundStyle(.primary)
+              .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Agent Controls")
+                .font(.body.weight(.regular))
+              Text("Model, reasoning and folder in the compose")
+                .font(.footnote.weight(.regular))
+                .foregroundStyle(.secondary)
+            }
+          }
+        }
+        .padding(.horizontal, 6)
+        .onChange(of: showsAgentControls) { _, shown in
+          agentControls.setShown(shown)
+        }
+      }
     }
     .padding(.horizontal, 20)
   }
