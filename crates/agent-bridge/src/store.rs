@@ -1145,6 +1145,40 @@ impl BridgeStore {
         .transpose()
     }
 
+    /// The session most recently bound to a chat, in whichever workspace.
+    pub fn latest_binding_for_chat(
+        &self,
+        installation_id: &crate::InstallationId,
+        chat_id: i64,
+    ) -> StoreResult<Option<(crate::WorkspaceId, ProviderId, ProviderSessionId)>> {
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        let raw = connection
+            .query_row(
+                "SELECT workspace_id, provider_id, provider_session_id
+                 FROM session_bindings
+                 WHERE installation_id = ?1 AND chat_id = ?2
+                 ORDER BY updated_at DESC
+                 LIMIT 1",
+                params![installation_id.as_str(), chat_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        raw.map(|(workspace, provider, session)| {
+            Ok((
+                parse_workspace_id(workspace)?,
+                parse_provider_id(provider)?,
+                parse_provider_session_id(session)?,
+            ))
+        })
+        .transpose()
+    }
+
     pub(crate) fn get_binding_with_configuration(
         &self,
         key: &BindingKey,

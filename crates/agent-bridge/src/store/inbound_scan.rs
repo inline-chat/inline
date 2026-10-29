@@ -262,6 +262,40 @@ impl BridgeStore {
         )?;
         Ok(changed)
     }
+
+    /// Like `stage_interrupted_inbound_for_installation`, for queued turns
+    /// too: used when another runtime takes over this installation and will
+    /// never run what this store accepted. Queued turns are staged as started
+    /// so the same final-send recovery answers them.
+    pub fn stage_unfinished_inbound_for_installation(
+        &self,
+        installation_id: &InstallationId,
+        failure: &str,
+        final_text: &str,
+    ) -> StoreResult<usize> {
+        if final_text.is_empty() {
+            return Err(StoreError::InvalidInboundFinalText);
+        }
+        let connection = self.connection.lock().expect("bridge store poisoned");
+        let changed = connection.execute(
+            "UPDATE inbound_directions SET
+                state = 'started', started_at = COALESCE(started_at, accepted_at),
+                lease_expires_at = NULL,
+                terminal_state = 'failed', terminal_text = ?3, terminal_failure = ?2
+             WHERE installation_id = ?1 AND state IN ('accepted', 'started')
+               AND terminal_state IS NULL
+               AND NOT EXISTS (
+                    SELECT 1 FROM session_pickers
+                    WHERE session_pickers.installation_id = inbound_directions.installation_id
+                      AND session_pickers.origin_event_id = inbound_directions.event_id
+                      AND session_pickers.state IN (
+                          'publishing', 'active', 'opening', 'retryable', 'completed'
+                      )
+               )",
+            params![installation_id.as_str(), failure, final_text],
+        )?;
+        Ok(changed)
+    }
 }
 
 #[cfg(test)]
@@ -410,6 +444,72 @@ mod tests {
                 .pending_inbound_final_sends(&installation())
                 .expect("pending after commit")
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_runtime_switch_answers_queued_and_started_turns_once() {
+        let store = BridgeStore::open_in_memory().expect("store");
+        store
+            .accept_inbound(&inbound("running", 10, 10))
+            .expect("running");
+        store
+            .accept_inbound(&inbound("queued", 10, 11))
+            .expect("queued");
+        store
+            .accept_inbound(&inbound("other", 20, 12))
+            .expect("other");
+        store
+            .take_next_inbound(&binding(10), 20)
+            .expect("take running");
+        store
+            .take_next_inbound(&binding(20), 20)
+            .expect("take other");
+        assert!(store.complete_inbound("other").expect("complete other"));
+
+        let stage = || {
+            store.stage_unfinished_inbound_for_installation(
+                &installation(),
+                "runtime switched",
+                "Send it again.",
+            )
+        };
+        assert_eq!(stage().expect("stage"), 2);
+        assert_eq!(stage().expect("stage again"), 0);
+        let pending = store
+            .pending_inbound_final_sends(&installation())
+            .expect("pending");
+        let mut events = pending
+            .iter()
+            .map(|record| record.event_id.as_str())
+            .collect::<Vec<_>>();
+        events.sort_unstable();
+        assert_eq!(events, ["queued", "running"]);
+        assert!(
+            pending
+                .iter()
+                .all(|record| record.final_text == "Send it again.")
+        );
+        for record in &pending {
+            assert!(
+                store
+                    .commit_inbound_final_send(&record.event_id)
+                    .expect("commit")
+            );
+        }
+        assert!(
+            store
+                .get_inbound("queued")
+                .expect("lookup")
+                .is_some_and(
+                    |record| record.state == InboundState::Failed && record.started_at == Some(11)
+                )
+        );
+        assert!(
+            store
+                .take_next_inbound(&binding(10), 30)
+                .expect("nothing left")
+                .is_none()
         );
     }
 

@@ -313,6 +313,49 @@ fn binding_round_trips() {
 }
 
 #[test]
+fn latest_binding_for_chat_picks_the_newest_workspace() {
+    let store = BridgeStore::open_in_memory().expect("store");
+    let provider = ProviderId::new("codex").expect("provider id");
+    let other = BindingKey {
+        workspace_id: WorkspaceId::new("workspace-2").expect("workspace id"),
+        ..binding()
+    };
+    store
+        .put_binding(
+            &binding(),
+            &provider,
+            &ProviderSessionId::new("thread-old").expect("session id"),
+            10,
+        )
+        .expect("put old binding");
+    store
+        .put_binding(
+            &other,
+            &provider,
+            &ProviderSessionId::new("thread-new").expect("session id"),
+            20,
+        )
+        .expect("put new binding");
+    let installation = binding().installation_id;
+    assert_eq!(
+        store
+            .latest_binding_for_chat(&installation, 42)
+            .expect("latest"),
+        Some((
+            other.workspace_id,
+            provider,
+            ProviderSessionId::new("thread-new").expect("session id")
+        ))
+    );
+    assert_eq!(
+        store
+            .latest_binding_for_chat(&installation, 43)
+            .expect("none"),
+        None
+    );
+}
+
+#[test]
 fn inbound_acceptance_is_atomic_and_idempotent() {
     let store = BridgeStore::open_in_memory().expect("store");
     let record = inbound("event-1", 10);
