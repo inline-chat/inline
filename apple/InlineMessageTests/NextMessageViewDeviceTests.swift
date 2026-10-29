@@ -2307,6 +2307,8 @@ struct NextMessageViewDeviceTests {
     ) async throws {
       let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
       window = UIWindow(windowScene: scene)
+      // The list uses the light theme; don't let a phone in dark mode mix in dark system colors.
+      window.overrideUserInterfaceStyle = .light
       let controller = UIViewController()
       window.rootViewController = controller
       controller.view.backgroundColor = .systemBackground
