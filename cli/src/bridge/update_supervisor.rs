@@ -275,6 +275,8 @@ async fn local_trial(
     }
 }
 
+// Keep the activation boundary's process, storage and control dependencies explicit.
+#[allow(clippy::too_many_arguments)]
 async fn activate(
     state: &mut Activation,
     candidate: Artifact,
@@ -358,20 +360,20 @@ async fn activate(
 }
 
 fn recover_interrupted(state: &mut Activation, paths: &BridgePaths, channel: &str) {
-    if state.phase == "trial" {
-        if let Some(candidate) = state.candidate.clone() {
-            reject(state, &candidate, "interrupted_trial");
-            // The persisted trial already selects the previous runtime. A
-            // full disk must not prevent that runtime from starting on reboot.
-            let _ = atomic_json(&journal(paths), state);
-            crate::telemetry::report_update(
-                "rolled_back",
-                channel,
-                &candidate.version,
-                &state.current.version,
-                "interrupted_trial",
-            );
-        }
+    if state.phase == "trial"
+        && let Some(candidate) = state.candidate.clone()
+    {
+        reject(state, &candidate, "interrupted_trial");
+        // The persisted trial already selects the previous runtime. A
+        // full disk must not prevent that runtime from starting on reboot.
+        let _ = atomic_json(&journal(paths), state);
+        crate::telemetry::report_update(
+            "rolled_back",
+            channel,
+            &candidate.version,
+            &state.current.version,
+            "interrupted_trial",
+        );
     }
 }
 

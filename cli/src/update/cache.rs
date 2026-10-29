@@ -36,12 +36,10 @@ fn collect_before(store: &Store, cutoff: SystemTime) -> Result<(), UpdateError> 
     if let (Ok(exe), Ok(root)) = (
         std::env::current_exe().and_then(fs::canonicalize),
         fs::canonicalize(&store.root),
-    ) {
-        if let Ok(relative) = exe.strip_prefix(root.join("versions")) {
-            if let Some(hash) = relative.components().next() {
-                keep.insert(hash.as_os_str().to_string_lossy().into_owned());
-            }
-        }
+    ) && let Ok(relative) = exe.strip_prefix(root.join("versions"))
+        && let Some(hash) = relative.components().next()
+    {
+        keep.insert(hash.as_os_str().to_string_lossy().into_owned());
     }
     let Some(data) = store.root.parent() else {
         return Ok(());
