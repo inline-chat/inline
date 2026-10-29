@@ -21,7 +21,9 @@ struct GridRoomFacesTests {
   func yourFaceStaysInView() {
     let visible = GridRoomFaces.visible(faces(count: 9, youAt: 8), slots: 4)
     #expect(visible.map(\.user.id) == [1, 2, 9])
-    #expect(visible.contains(where: \.ownedByCurrentSession))
+    // A plain value: `#expect` can't decompose a call that takes a key path.
+    let showsYou = visible.contains(where: \.ownedByCurrentSession)
+    #expect(showsYou)
   }
 
   private func faces(count: Int, youAt: Int? = nil) -> [GridAvatar] {
