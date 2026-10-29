@@ -81,24 +81,7 @@ public actor CLIInstallerService: CLIInstalling {
   public func managedUpdateInstallation() -> CLIInstallation? {
     let dataRoot = fileManager.homeDirectoryForCurrentUser.appending(path: ".local/share/inline")
     let runtime = dataRoot.appending(path: "runtime/versions", directoryHint: .isDirectory)
-    var candidates: [URL] = []
-    let accounts = dataRoot.appending(path: "bridge/accounts", directoryHint: .isDirectory)
-    if let directories = try? fileManager.contentsOfDirectory(at: accounts, includingPropertiesForKeys: nil) {
-      for directory in directories {
-        let journal = directory.appending(path: "activation.json")
-        guard let data = try? Data(contentsOf: journal), data.count < 512 * 1_024,
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let current = object["current"] as? [String: Any],
-              let path = current["executable"] as? String else { continue }
-        candidates.append(URL(fileURLWithPath: path))
-      }
-    }
-    if let data = try? Data(contentsOf: dataRoot.appending(path: "runtime/update.json")), data.count < 512 * 1_024,
-       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-       let stage = object["staged"] as? [String: Any], let path = stage["executable"] as? String {
-      candidates.insert(URL(fileURLWithPath: path), at: 0)
-    }
-    for candidate in candidates {
+    for candidate in Self.managedUpdateCandidates(in: dataRoot, fileManager: fileManager) {
       guard candidate.standardizedFileURL.path.hasPrefix(runtime.standardizedFileURL.path + "/"),
             candidate.resolvingSymlinksInPath() == candidate.standardizedFileURL,
             (try? verifySignature(of: candidate)) != nil,
@@ -106,6 +89,30 @@ public actor CLIInstallerService: CLIInstalling {
       return CLIInstallation(executableURL: candidate, version: version, source: .inline, isOnPath: false)
     }
     return nil
+  }
+
+  // Discovery never authorizes execution; the caller verifies every candidate.
+  static func managedUpdateCandidates(in dataRoot: URL, fileManager: FileManager = .default) -> [URL] {
+    var candidates: [URL] = []
+    let bridge = dataRoot.appending(path: "bridge", directoryHint: .isDirectory)
+    let accounts = bridge.appending(path: "accounts", directoryHint: .isDirectory)
+    var directories = (try? fileManager.contentsOfDirectory(at: accounts, includingPropertiesForKeys: nil)) ?? []
+    directories += ((try? fileManager.contentsOfDirectory(at: bridge, includingPropertiesForKeys: nil)) ?? [])
+      .filter { $0.lastPathComponent != "accounts" }
+    for directory in directories {
+      let journal = directory.appending(path: "activation.json")
+      guard let data = try? Data(contentsOf: journal), data.count < 512 * 1_024,
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let current = object["current"] as? [String: Any],
+            let path = current["executable"] as? String else { continue }
+      candidates.append(URL(fileURLWithPath: path))
+    }
+    if let data = try? Data(contentsOf: dataRoot.appending(path: "runtime/update.json")), data.count < 512 * 1_024,
+       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let stage = object["staged"] as? [String: Any], let path = stage["executable"] as? String {
+      candidates.insert(URL(fileURLWithPath: path), at: 0)
+    }
+    return candidates
   }
 
   private func install(
