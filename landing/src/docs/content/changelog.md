@@ -7,6 +7,44 @@ Release notes for Inline apps, developer tools, and integrations.
 
 > [Download the latest Inline apps](/download).
 
+## October 30, 2026
+
+[macOS 0.2 tip, build 6319](https://public-assets.inline.chat/mac/tip/6319/Inline.dmg) · [iOS TestFlight build 1392](https://testflight.apple.com/join/FkC3f7fz) · [CLI 0.7.19-alpha.8](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.19-alpha.8)
+
+### New
+
+- 📌 Pin **several messages** in a chat. The header steps through them on iOS and macOS, and **Unpin All** clears them in one go.
+- ⚡️ Switching and joining **Grid rooms** is faster, with refreshed glass rooms on iOS and macOS.
+- 📝 **Transcribe Grid calls** in Pro spaces. Start it from the call dock on iOS, or from the call pill on macOS. Each transcript lands in a thread named after the room and start time, and it keeps up through network drops.
+- 🤖 Chatting with an agent on iOS now uses a **compose card** where you pick the model, reasoning level and folder, see context usage, and stop or resume a turn.
+- 💬 Messages on iOS use a new message view with rich formatting such as headings, lists and code, and smoother streaming agent replies.
+
+### Quality of life improvements
+
+- Your iPhone no longer buzzes for a chat you're actively in on your Mac.
+- **Only mentions** notifications now really mean only mentions. Replies and reply-thread activity stay quiet.
+- Mark all open chats as read from the cleanup menu on macOS.
+- Restyled voice messages on iOS, plus a live progress ring for file downloads.
+- Chat date separators on iOS only turn to glass while pinned to the top.
+- Inline links now use `inline://`. Old `in://` links keep working.
+- A new install window when you open the macOS download.
+
+### Better tools and APIs for agents and hackers
+
+- [CLI](/docs/cli) **0.7.19-alpha.8**: `inline plugin install` now adds the Inline plugin to **Claude Code** as well as Codex.
+- The CLI can now update its background agent bridge between turns, with signed releases and automatic recovery if an update fails. After upgrading, run `inline bridge restart` once when your agents are idle.
+- The CLI has an **alpha channel**. Run `inline update --channel alpha` to try new agent features early. Agent plugins install from the same channel as the CLI.
+- Bots that send too fast now get a Telegram-style **flood wait** instead of a server error. The [Bot API](/docs/bot-api) answers `429` with `retry_after`, so your bot knows exactly how long to wait.
+
+### Fixes
+
+- Fixed short delays catching up on messages after a brief disconnect.
+- Fixed reactions picked from the message menu on iOS landing in the wrong place.
+- Fixed a crash when drawing blurred headers on some iPhones.
+- Improved server reliability under heavy load.
+
+---
+
 ## October 27, 2026
 
 ### New
