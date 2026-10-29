@@ -453,9 +453,11 @@ mod tests {
         store
             .accept_inbound(&inbound("running", 10, 10))
             .expect("running");
-        store
-            .accept_inbound(&inbound("queued", 10, 11))
-            .expect("queued");
+        let queued = InboundRecord {
+            message_id: 11,
+            ..inbound("queued", 10, 11)
+        };
+        assert!(store.accept_inbound(&queued).expect("queued"));
         store
             .accept_inbound(&inbound("other", 20, 12))
             .expect("other");
