@@ -1,5 +1,11 @@
 import { it, expect, describe, test } from "bun:test"
-import { isValid6DigitCode, isValidEmail, validateIanaTimezone, validateUpToFourSegementSemver } from "./validate"
+import { isValid6DigitCode, isValidEmail, validateCliVersion, validateIanaTimezone, validateUpToFourSegementSemver } from "./validate"
+
+test("CLI SemVer accepts channel releases without relaxing numeric version fields", () => {
+  for (const version of ["0.7.18", "0.7.19-alpha.7", "1.2.3-rc.1+build.2"]) expect(validateCliVersion(version)).toBe(true)
+  for (const version of ["1", "1.2.3.4", "01.2.3", "1.2.3-alpha.01", "1.2.3\n", "v1.2.3", "1.2.3;command"]) expect(validateCliVersion(version)).toBe(false)
+  expect(validateUpToFourSegementSemver("0.7.19-alpha.7")).toBe(false)
+})
 
 describe("validate timezones", () => {
   it("validates iana timezone", async () => {

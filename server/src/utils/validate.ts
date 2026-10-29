@@ -49,6 +49,12 @@ export const validateUpToFourSegementSemver = (version: string): boolean => {
   return true
 }
 
+/** CLI releases use SemVer, independently of numeric Apple/OS versions. */
+export const validateCliVersion = (version: string): boolean => {
+  if (version.length > 64 || /\s/.test(version)) return false
+  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(version)
+}
+
 export const validateIanaTimezone = (timezone: string): boolean => {
   if (!timezone) {
     return false

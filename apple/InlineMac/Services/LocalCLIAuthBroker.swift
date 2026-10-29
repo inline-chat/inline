@@ -42,7 +42,7 @@ enum LocalCLIAuthBroker {
           let deviceID = response.deviceID,
           isValidDeviceID(deviceID),
           let clientVersion = response.clientVersion,
-          isValidVersion(clientVersion),
+          isValidCLIVersion(clientVersion),
           let verificationCode = response.verificationCode,
           isValidVerificationCode(verificationCode),
           isValidDeviceName(response.deviceName),
@@ -183,6 +183,14 @@ enum LocalCLIAuthBroker {
 
   private static func isValidOptionalVersion(_ value: String?) -> Bool {
     value.map(isValidVersion) ?? true
+  }
+
+  private static func isValidCLIVersion(_ value: String) -> Bool {
+    guard value.utf8.count <= 64 else { return false }
+    return value.range(
+      of: #"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"#,
+      options: .regularExpression
+    )?.upperBound == value.endIndex
   }
 
   private static func isValidVersion(_ value: String) -> Bool {

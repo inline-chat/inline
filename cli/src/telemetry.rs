@@ -576,6 +576,46 @@ fn safe_code(value: &str) -> String {
     }
 }
 
+fn update_event(
+    outcome: &str,
+    channel: &str,
+    from: &str,
+    to: &str,
+    stage: &str,
+) -> sentry::protocol::Event<'static> {
+    let mut event = sentry::protocol::Event {
+        level: if matches!(outcome, "failed" | "rolled_back" | "repair_required") {
+            sentry::Level::Error
+        } else {
+            sentry::Level::Info
+        },
+        ..Default::default()
+    };
+    for (name, value) in [
+        ("surface", "update"),
+        ("outcome", outcome),
+        ("channel", channel),
+        ("stage", stage),
+        ("from_version", from),
+        ("to_version", to),
+    ] {
+        event.tags.insert(name.into(), value.into());
+    }
+    event
+}
+
+pub(crate) fn report_update(outcome: &str, channel: &str, from: &str, to: &str, stage: &str) {
+    let event = update_event(outcome, channel, from, to, stage);
+    let key = format!(
+        "update_{}_{}_{}_{}",
+        safe_code(outcome),
+        safe_code(stage),
+        safe_code(channel),
+        to
+    );
+    capture_once_per_window(key, event);
+}
+
 fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protocol::Event<'static> {
     // Reconstruct instead of blacklisting: future integrations/scope changes
     // cannot silently add usernames, request bodies, breadcrumbs, or stacks.
@@ -583,10 +623,11 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
         .tags
         .get("surface")
         .map(String::as_str)
-        .filter(|surface| matches!(*surface, "bridge" | "process"));
+        .filter(|surface| matches!(*surface, "bridge" | "process" | "update"));
     let message = match surface {
         Some("bridge") => BRIDGE_RUNTIME_MESSAGE,
         Some("process") => PANIC_MESSAGE,
+        Some("update") => "Inline CLI update",
         _ => COMMAND_FAILURE_MESSAGE,
     };
     let mut safe = sentry::protocol::Event {
@@ -595,6 +636,8 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
         message: Some(message.into()),
         level: if surface == Some("process") {
             sentry::Level::Fatal
+        } else if surface == Some("update") && event.level == sentry::Level::Info {
+            sentry::Level::Info
         } else {
             sentry::Level::Error
         },
@@ -611,9 +654,23 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
         "command",
         "limit_unit",
         "panic_location",
+        "outcome",
+        "channel",
+        "stage",
     ] {
         if let Some(value) = event.tags.get(name) {
             safe.tags.insert(name.into(), safe_code(value));
+        }
+    }
+    if surface == Some("update") {
+        for name in ["from_version", "to_version"] {
+            if let Some(value) = event
+                .tags
+                .get(name)
+                .filter(|value| value.len() <= 64 && semver::Version::parse(value).is_ok())
+            {
+                safe.tags.insert(name.into(), value.clone());
+            }
         }
     }
     if let Some(failure_text) = event
@@ -635,7 +692,14 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
     safe.tags.insert("os".into(), std::env::consts::OS.into());
     safe.tags
         .insert("arch".into(), std::env::consts::ARCH.into());
-    safe.fingerprint = if surface.is_some() {
+    safe.fingerprint = if surface == Some("update") {
+        vec![
+            "inline_cli_update".into(),
+            safe.tags.get("outcome").cloned().unwrap_or_default().into(),
+            safe.tags.get("stage").cloned().unwrap_or_default().into(),
+        ]
+        .into()
+    } else if surface.is_some() {
         let mut fingerprint = vec![
             "inline-cli".into(),
             safe.tags.get("surface").cloned().unwrap_or_default().into(),
@@ -679,6 +743,64 @@ fn allowlisted_event(event: sentry::protocol::Event<'static>) -> sentry::protoco
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn update_events_keep_success_levels_and_semver_but_strip_private_scope() {
+        for (outcome, level) in [
+            ("staged", sentry::Level::Info),
+            ("activated", sentry::Level::Info),
+            ("rolled_back", sentry::Level::Error),
+        ] {
+            let mut event = update_event(
+                outcome,
+                "alpha",
+                "0.7.19-alpha.7",
+                "0.7.19-alpha.8+build.1",
+                "committed",
+            );
+            event.message = Some("private chat and /Users/someone/path".into());
+            event
+                .tags
+                .insert("private_path".into(), "/Users/someone/path".into());
+            event.extra.insert("auth_token".into(), "secret".into());
+            let safe = allowlisted_event(event);
+            assert_eq!(safe.level, level);
+            assert_eq!(safe.tags["to_version"], "0.7.19-alpha.8+build.1");
+            assert_eq!(safe.tags["from_version"], "0.7.19-alpha.7");
+            let encoded = serde_json::to_string(&safe).unwrap();
+            assert!(!encoded.contains("private"));
+            assert!(!encoded.contains("secret"));
+            assert_eq!(safe.message.as_deref(), Some("Inline CLI update"));
+        }
+    }
+
+    #[test]
+    #[ignore = "requires an explicitly injected Sentry DSN; sends three qualification events"]
+    fn live_update_outcomes() {
+        let _guard = init().expect("inject INLINE_CLI_SENTRY_DSN for live qualification");
+        let version = format!("0.0.0-qualification.{}", unix_now());
+        for (outcome, stage) in [
+            ("staged", "verified"),
+            ("activated", "committed"),
+            ("rolled_back", "candidate_exit"),
+        ] {
+            let id = sentry::capture_event(update_event(
+                outcome,
+                "alpha",
+                env!("CARGO_PKG_VERSION"),
+                &version,
+                stage,
+            ));
+            assert!(!id.is_nil());
+            println!("sentry update qualification {outcome} {id}");
+        }
+        assert!(
+            sentry::Hub::current()
+                .client()
+                .unwrap()
+                .flush(Some(Duration::from_secs(15)))
+        );
+    }
 
     #[test]
     fn explicit_opt_out_is_case_and_whitespace_insensitive() {

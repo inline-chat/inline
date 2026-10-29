@@ -62,6 +62,26 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     self.configuration = configuration
   }
 
+  public func update(
+    installation: CLIInstallation,
+    operation: CLIUpdateOperation
+  ) async throws -> CLIUpdateStatus {
+    let operationID = try beginOperation()
+    defer { finishOperation(operationID) }
+    return try await withTaskCancellationHandler {
+      let output = try await Task.detached(priority: .utility) { [self] in
+        try run(operationID: operationID, installation: installation, arguments: operation.arguments, timeout: 180)
+      }.value
+      try Task.checkCancellation()
+      guard output.status == 0 else { throw failure(from: output) }
+      let status = try JSONDecoder().decode(CLIUpdateStatus.self, from: output.standardOutput)
+      guard status.schemaVersion == 1 else {
+        throw CLIInstallerFailure(kind: .invalidManifest, title: "CLI Update Required", message: "This CLI uses an unsupported update protocol.", recoveryURL: Self.documentationURL)
+      }
+      return status
+    } onCancel: { self.cancel() }
+  }
+
   public func discover(installation: CLIInstallation) async throws -> AgentHarnessDiscovery {
     let operationID = try beginOperation()
     defer { finishOperation(operationID) }
@@ -526,6 +546,10 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     if let telemetry = environment["INLINE_CLI_TELEMETRY"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
        ["off", "0", "false"].contains(telemetry) {
       sanitized["INLINE_CLI_TELEMETRY"] = "off"
+    }
+    if let disabled = environment["INLINE_DISABLE_AUTOUPDATE"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+       ["1", "true", "on"].contains(disabled) {
+      sanitized["INLINE_DISABLE_AUTOUPDATE"] = "1"
     }
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     let standardPaths = [

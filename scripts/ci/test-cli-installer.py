@@ -22,7 +22,7 @@ class InstallerTest(unittest.TestCase):
             tools.mkdir()
             # Deliberately omit jq by default to exercise minimal Linux images.
             for name in ["mktemp", "tar", "gzip", "install", "shasum", "sha256sum", "curl", "dirname",
-                         "mkdir", "cat", "tr", "sed", "head", "grep", "rm", "mv"] + (["jq"] if jq else []):
+                         "mkdir", "cat", "tr", "sed", "head", "grep", "rm", "mv", "wc", "openssl", "chmod", "sleep"] + (["jq"] if jq else []):
                 executable = shutil.which(name)
                 if executable:
                     (tools / name).symlink_to(executable)
@@ -35,7 +35,7 @@ class InstallerTest(unittest.TestCase):
             )
             for name in ["uname", "ldd"]:
                 (tools / name).chmod(0o755)
-            payload = b'#!/bin/sh\necho "inline fixture"\n'
+            payload = b'#!/bin/sh\necho "inline 1.2.3"\n'
             archive = root / "inline.tar.gz"
             with tarfile.open(archive, "w:gz") as tar:
                 info = tarfile.TarInfo("inline")
@@ -46,7 +46,7 @@ class InstallerTest(unittest.TestCase):
             digest = hashlib.sha256(archive.read_bytes()).hexdigest()
             manifest = root / "manifest.json"
             manifest.write_text(json.dumps({"version": "1.2.3", "targets": {target: {
-                "url": archive.as_uri(), "sha256": '0' * 64 if bad_checksum else digest,
+                "url": archive.as_uri(), "sha256": '0' * 64 if bad_checksum else digest, "size": archive.stat().st_size,
             }}}))
             # Neither .local nor bin exists yet, as on a fresh server account.
             destination = root / "home" / ".local" / "bin"

@@ -1642,3 +1642,77 @@ fn version_six_approval_action_chat_is_backfilled_to_origin() {
     assert_eq!(record.message_id, Some(9));
     assert_eq!(record.origin_status_message_id, None);
 }
+
+#[test]
+fn updater_old_new_old_keeps_live_receipts_and_accepts_only_declared_additive_schema() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("bridge.sqlite");
+    {
+        let old = BridgeStore::open(&path).unwrap();
+        assert!(old.claim_event("before-update", 1).unwrap());
+        old.accept_inbound(&inbound("queued-before-update", 2))
+            .unwrap();
+    }
+    // A future release expands the store without changing old-column meaning.
+    // It publishes its reader contract before the atomic SQLite migration.
+    fs::write(
+        reader_contract_path(&path),
+        serde_json::to_vec(&ReaderContract {
+            schema_version: 31,
+            minimum_reader_schema_version: 30,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    {
+        let newer = Connection::open(&path).unwrap();
+        newer.execute_batch("BEGIN IMMEDIATE; ALTER TABLE processed_events ADD COLUMN future_metadata TEXT; PRAGMA user_version = 31; INSERT INTO processed_events(event_id, accepted_at) VALUES('acknowledged-by-new', 3); COMMIT;").unwrap();
+    }
+    {
+        let restored = BridgeStore::open(&path).unwrap();
+        assert!(!restored.claim_event("before-update", 4).unwrap());
+        assert!(!restored.claim_event("acknowledged-by-new", 4).unwrap());
+        assert!(restored.claim_event("after-rollback", 5).unwrap());
+        assert_eq!(
+            restored
+                .get_inbound("queued-before-update")
+                .unwrap()
+                .unwrap()
+                .state,
+            InboundState::Accepted
+        );
+    }
+    let reopened = BridgeStore::open(&path).unwrap();
+    assert!(!reopened.claim_event("after-rollback", 6).unwrap());
+    drop(reopened);
+    // A breaking reader barrier, a stale contract, or a missing contract never
+    // permits an unsafe rollback merely because the SQL happens to open.
+    for contract in [
+        Some(ReaderContract {
+            schema_version: 31,
+            minimum_reader_schema_version: 31,
+        }),
+        Some(ReaderContract {
+            schema_version: 30,
+            minimum_reader_schema_version: 30,
+        }),
+        None,
+    ] {
+        if let Some(contract) = contract {
+            fs::write(
+                reader_contract_path(&path),
+                serde_json::to_vec(&contract).unwrap(),
+            )
+            .unwrap();
+        } else {
+            fs::remove_file(reader_contract_path(&path)).unwrap();
+        }
+        assert!(matches!(
+            BridgeStore::open(&path),
+            Err(StoreError::UnsupportedSchemaVersion {
+                found: 31,
+                supported: 30
+            })
+        ));
+    }
+}

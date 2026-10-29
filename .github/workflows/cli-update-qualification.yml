@@ -1,0 +1,71 @@
+name: CLI Update Qualification
+
+on:
+  push:
+    branches: [main, codex/cli-auto-update]
+    paths:
+      - 'cli/**'
+      - 'crates/agent-bridge/**'
+      - 'apple/InlineMacUI/**'
+      - 'scripts/cli-release-signing*'
+      - 'scripts/ci/test-cli-update-swift.sh'
+      - '.github/workflows/cli-update-qualification.yml'
+  pull_request:
+    paths:
+      - 'cli/**'
+      - 'crates/agent-bridge/**'
+      - 'apple/InlineMacUI/**'
+      - 'scripts/cli-release-signing*'
+      - 'scripts/ci/test-cli-update-swift.sh'
+      - '.github/workflows/cli-update-qualification.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-update-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    name: Update, drain, rollback and telemetry (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
+    environment: cli
+    timeout-minutes: 45
+    env:
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v6
+      - run: bash scripts/ci/ensure-public-workspaces.sh
+      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - name: Test updater and both bridge generations
+        run: cargo test --locked -j 2 -p inline-cli -p inline-agent-bridge
+      - name: Verify signing, publication and installer contracts
+        run: |
+          bun --no-env-file test scripts/release-cli.test.ts scripts/cli-release-signing.test.ts scripts/ci/cli-release-version.test.ts
+          python3 scripts/ci/test-cli-installer.py
+      - name: Compile and test Mac installer/update protocol
+        if: runner.os == 'macOS'
+        run: bash scripts/ci/test-cli-update-swift.sh
+      - name: Prove Sentry ingestion from the real SDK
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          INLINE_CLI_SENTRY_DSN: ${{ secrets.INLINE_CLI_SENTRY_DSN }}
+        run: |
+          test -n "$INLINE_CLI_SENTRY_DSN"
+          export INLINE_DATA_DIR="$RUNNER_TEMP/inline-updater-telemetry"
+          mkdir -p "$INLINE_DATA_DIR"
+          cargo test --locked -p inline-cli --bin inline telemetry::tests::live_update_outcomes -- --ignored --exact --nocapture

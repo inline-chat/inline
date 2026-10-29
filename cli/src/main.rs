@@ -466,6 +466,13 @@ enum Command {
             help = "Follow this release channel from now on: stable, or alpha for prereleases"
         )]
         channel: Option<update::UpdateChannel>,
+        #[arg(
+            long,
+            help = "Run without prompts or elevation; respects automatic-update policy"
+        )]
+        background: bool,
+        #[command(subcommand)]
+        command: Option<UpdateAction>,
     },
     #[command(about = "Print diagnostic information about this CLI")]
     Doctor,
@@ -620,6 +627,7 @@ impl Command {
                 BridgeCommand::Workspace { .. } => "bridge_workspace",
                 BridgeCommand::Operators { .. } => "bridge_operators",
                 BridgeCommand::Run(_) => "bridge_run",
+                BridgeCommand::Supervise(_) => "bridge_supervise",
                 BridgeCommand::ProviderHost(_) => "bridge_provider_host",
                 BridgeCommand::InlineToolsMcp => "bridge_inline_tools_mcp",
                 BridgeCommand::Dev { .. } => "bridge_dev",
@@ -726,6 +734,8 @@ enum BridgeCommand {
     #[command(hide = true)]
     Run(BridgeRunArgs),
     #[command(hide = true)]
+    Supervise(BridgeRunArgs),
+    #[command(hide = true)]
     ProviderHost(BridgeProviderHostArgs),
     #[command(hide = true)]
     InlineToolsMcp,
@@ -733,6 +743,24 @@ enum BridgeCommand {
     Dev {
         #[command(subcommand)]
         command: BridgeDevCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum UpdateAction {
+    Status,
+    Config {
+        #[arg(long, value_parser = ["on", "off"])]
+        auto: Option<String>,
+        #[arg(long, value_enum, conflicts_with = "app_channel")]
+        channel: Option<update::UpdateChannel>,
+        #[arg(long, value_enum)]
+        app_channel: Option<update::UpdateChannel>,
+        #[arg(
+            long,
+            help = "Register this explicitly installed executable for managed updates"
+        )]
+        register: bool,
     },
 }
 
@@ -2701,17 +2729,49 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
     }
     let config = Config::load();
     if let Command::Update {
-        check: true,
+        check,
         channel,
+        command,
+        background,
     } = &cli.command
     {
-        let local_db = LocalDb::new(config.state_path.clone(), config.api_base_url.clone());
-        let channel = update::select_channel(&local_db, *channel)?;
-        let check = update::check_update(&config, channel).await?;
-        if cli.json {
-            output::print_json(&check, json_format)?;
+        if let Some(action) = command {
+            match action {
+                UpdateAction::Status => output::print_json(&update::status(&config)?, json_format)?,
+                UpdateAction::Config {
+                    auto,
+                    channel,
+                    app_channel,
+                    register,
+                } => {
+                    update::configure(
+                        &config,
+                        auto.as_deref().map(|value| value == "on"),
+                        app_channel.or(*channel),
+                        app_channel.is_some(),
+                        *register,
+                    )?;
+                    output::print_json(&update::status(&config)?, json_format)?;
+                }
+            }
         } else {
-            update::print_update_check(&check);
+            let local_db = LocalDb::new(config.state_path.clone(), config.api_base_url.clone());
+            let selected = update::select_channel(&local_db, *channel)?;
+            if *check {
+                let result = update::check_update(&config, selected).await?;
+                if cli.json {
+                    output::print_json(&result, json_format)?;
+                } else {
+                    update::print_update_check(&result);
+                }
+            } else {
+                let result = update::perform(&config, selected, *background).await?;
+                if cli.json {
+                    output::print_json(&result, json_format)?;
+                } else {
+                    println!("Inline CLI update: {}", result.state.outcome);
+                }
+            }
         }
         return Ok(());
     }
@@ -2736,7 +2796,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
             | Command::Agents { .. }
             | Command::Bridge { .. }
     );
-    let update_handle = if skip_update_check || cli.json || !io::stdout().is_terminal() {
+    let update_handle = if skip_update_check {
         None
     } else {
         update::spawn_update_check(&config, &local_db, cli.json)
@@ -2920,6 +2980,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .await?;
                     }
                 },
+                BridgeCommand::Supervise(args) => {
+                    bridge::supervise_service(args.config).await?;
+                }
                 BridgeCommand::Run(args) => {
                     bridge::run_service(args.config, args.trace || cfg!(debug_assertions)).await?;
                 }
@@ -3074,12 +3137,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                 }
             },
-            Command::Update { channel, .. } => {
-                let channel = update::select_channel(&local_db, channel)?;
-                if let Some(updated_binary) = update::run_update(&config, channel, cli.json).await? {
-                    bridge::refresh_after_update(&config, &updated_binary).await?;
-                }
-            }
+            Command::Update { .. } => unreachable!("updates dispatch before authentication"),
             Command::Doctor => {
                 let output = build_doctor_output(&config, &auth_store, &local_db);
                 if cli.json {
@@ -6361,7 +6419,8 @@ mod cli_parsing_tests {
             cli.command,
             Command::Update {
                 check: false,
-                channel: None
+                channel: None,
+                ..
             }
         ));
         let cli = Cli::try_parse_from(["inline", "upgrade", "--check", "--json"]).unwrap();

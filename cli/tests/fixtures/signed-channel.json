@@ -1,0 +1,33 @@
+{
+  "description": "public RFC 8032 test seed; never trusted by production",
+  "keys": {
+    "fixture": "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
+  },
+  "envelope": {
+    "payload": "eyJmb3JtYXRWZXJzaW9uIjoxLCJjaGFubmVsIjoiYWxwaGEiLCJnZW5lcmF0aW9uIjoxNzkzMjc1MjAwMDAwLCJ2ZXJzaW9uIjoiMS4yLjMtYWxwaGEuNCIsInNvdXJjZVNoYSI6ImFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJicmlkZ2VTY2hlbWFWZXJzaW9uIjozMCwibWluaW11bVJlYWRlclNjaGVtYVZlcnNpb24iOjMwLCJzdXBlcnZpc29yUHJvdG9jb2wiOjEsInJlcXVpcmVkQmFzZWxpbmUiOm51bGwsInRhcmdldHMiOnsieDg2XzY0LXVua25vd24tbGludXgtZ251Ijp7InVybCI6Imh0dHBzOi8vZXhhbXBsZS5pbnZhbGlkL2lubGluZS50YXIuZ3oiLCJzaGEyNTYiOiJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiIiwic2l6ZSI6MTIzNDV9fX0=",
+    "signatures": [
+      {
+        "keyId": "fixture",
+        "signature": "RY6ZYc5x9LVawvbmSsBTWRqRQuXm0PzLwi6dVSdd5O+sRaHR3FWL6XPCYCZlTee0zTsfBWEaswNIqyOOZ2SHDQ=="
+      }
+    ]
+  },
+  "release": {
+    "formatVersion": 1,
+    "channel": "alpha",
+    "generation": 1793275200000,
+    "version": "1.2.3-alpha.4",
+    "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "bridgeSchemaVersion": 30,
+    "minimumReaderSchemaVersion": 30,
+    "supervisorProtocol": 1,
+    "requiredBaseline": null,
+    "targets": {
+      "x86_64-unknown-linux-gnu": {
+        "url": "https://example.invalid/inline.tar.gz",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "size": 12345
+      }
+    }
+  }
+}

@@ -145,6 +145,7 @@ jobs:
       - name: Preflight
         id: config
         env:
+          INLINE_CLI_MANIFEST_SIGNING_KEY: ${{ secrets.INLINE_CLI_MANIFEST_SIGNING_KEY }}
           TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
           INLINE_HOMEBREW_DEPLOY_KEY: ${{ secrets.INLINE_HOMEBREW_DEPLOY_KEY }}
           PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
@@ -167,6 +168,7 @@ jobs:
           BUILD_ONLY: ${{ github.event.inputs.build_only }}
         run: |
           set -euo pipefail
+          bun --no-env-file scripts/release-cli.ts signing-preflight
           release_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
           if [[ -z "${release_version}" ]]; then
             echo "Could not read CLI workspace version." >&2
@@ -782,6 +784,7 @@ jobs:
       - name: Publish CLI Release
         id: publish
         env:
+          INLINE_CLI_MANIFEST_SIGNING_KEY: ${{ secrets.INLINE_CLI_MANIFEST_SIGNING_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INLINE_HOMEBREW_TAP_PATH: ${{ github.workspace }}/homebrew-inline
           PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}

@@ -22,18 +22,25 @@ public actor CLIInstallerService: CLIInstalling {
     let standardError: String
   }
 
-  private let configuration: CLIInstallerConfiguration
+  private var configuration: CLIInstallerConfiguration
+  private let requiresSignedManifest: Bool
   private let fileManager: FileManager
   private let session: URLSession
 
   public init(
     configuration: CLIInstallerConfiguration = .production,
     fileManager: FileManager = .default,
-    session: URLSession = .shared
+    session: URLSession = .shared,
+    requiresSignedManifest: Bool = false
   ) {
     self.configuration = configuration
+    self.requiresSignedManifest = requiresSignedManifest
     self.fileManager = fileManager
     self.session = session
+  }
+
+  public func updateConfiguration(_ configuration: CLIInstallerConfiguration) {
+    self.configuration = configuration
   }
 
   public func check(progress: @escaping CLIInstallerProgress) async throws -> CLIInstallPlan {
@@ -60,6 +67,37 @@ public actor CLIInstallerService: CLIInstalling {
       in: strictlyVerifiedLocalInstallations(),
       minimumVersion: Self.minimumAgentSetupVersion
     )
+  }
+
+  /// Finds a retained engine when a package manager owns the shell launcher.
+  public func managedUpdateInstallation() -> CLIInstallation? {
+    let dataRoot = fileManager.homeDirectoryForCurrentUser.appending(path: ".local/share/inline")
+    let runtime = dataRoot.appending(path: "runtime/versions", directoryHint: .isDirectory)
+    var candidates: [URL] = []
+    let accounts = dataRoot.appending(path: "bridge/accounts", directoryHint: .isDirectory)
+    if let directories = try? fileManager.contentsOfDirectory(at: accounts, includingPropertiesForKeys: nil) {
+      for directory in directories {
+        let journal = directory.appending(path: "activation.json")
+        guard let data = try? Data(contentsOf: journal), data.count < 512 * 1_024,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let current = object["current"] as? [String: Any],
+              let path = current["executable"] as? String else { continue }
+        candidates.append(URL(fileURLWithPath: path))
+      }
+    }
+    if let data = try? Data(contentsOf: dataRoot.appending(path: "runtime/update.json")), data.count < 512 * 1_024,
+       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+       let stage = object["staged"] as? [String: Any], let path = stage["executable"] as? String {
+      candidates.insert(URL(fileURLWithPath: path), at: 0)
+    }
+    for candidate in candidates {
+      guard candidate.standardizedFileURL.path.hasPrefix(runtime.standardizedFileURL.path + "/"),
+            candidate.resolvingSymlinksInPath() == candidate.standardizedFileURL,
+            (try? verifySignature(of: candidate)) != nil,
+            let version = try? readVersion(at: candidate) else { continue }
+      return CLIInstallation(executableURL: candidate, version: version, source: .inline, isOnPath: false)
+    }
+    return nil
   }
 
   private func install(
@@ -203,9 +241,18 @@ public actor CLIInstallerService: CLIInstalling {
   private func fetchRelease() async throws -> CLIRelease {
     var data: Data
     var response: URLResponse
+    var isSigned = false
     do {
-      (data, response) = try await session.data(from: configuration.manifestURL)
-      if let fallbackURL = configuration.fallbackManifestURL,
+      if configuration.manifestURL.host == "public-assets.inline.chat" {
+        let signedURL = URL(string: "https://public-assets.inline.chat/cli/channels/\(configuration.channel.rawValue).json")!
+        (data, response) = try await session.data(from: signedURL)
+        if (response as? HTTPURLResponse)?.statusCode == 404, !requiresSignedManifest {
+          (data, response) = try await session.data(from: configuration.manifestURL)
+        } else { isSigned = true }
+      } else {
+        (data, response) = try await session.data(from: configuration.manifestURL)
+      }
+      if !isSigned, let fallbackURL = configuration.fallbackManifestURL,
          (response as? HTTPURLResponse)?.statusCode == 404 {
         (data, response) = try await session.data(from: fallbackURL)
       }
@@ -221,6 +268,12 @@ public actor CLIInstallerService: CLIInstalling {
     try validateHTTPResponse(response, maximumBytes: Int64(configuration.maximumManifestBytes))
     guard data.count <= configuration.maximumManifestBytes else {
       throw invalidManifest("The release manifest was unexpectedly large.")
+    }
+
+    if isSigned {
+      data = try CLIReleaseVerification.payload(in: data, channel: configuration.channel)
+    } else if requiresSignedManifest {
+      throw invalidManifest("Automatic CLI updates require signed release metadata.")
     }
 
     let manifest: ReleaseManifest
@@ -578,10 +631,9 @@ public actor CLIInstallerService: CLIInstalling {
   /// from before channel support reject the flag, and the app still offers
   /// the next alpha when it checks.
   private func rememberChannel(for executableURL: URL) {
-    guard configuration.channel == .alpha else { return }
     _ = try? runProcess(
       executableURL: executableURL,
-      arguments: ["update", "--check", "--channel", configuration.channel.rawValue, "--json"]
+      arguments: ["update", "config", "--app-channel", configuration.channel.rawValue, "--register", "--json"]
     )
   }
 

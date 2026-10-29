@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { appendFile, copyFile, mkdir, readFile, realpath, rm, stat, writeFile } from "fs/promises";
 import { basename, dirname, join, resolve } from "path";
 import { parseCliReleaseTag } from "./ci/cli-release-version";
+import { authenticatedChannelVersion, releaseSigner, signedChannel, type Channel } from "./cli-release-signing";
 
 const rootDir = resolve(import.meta.dir, "..");
 const cliDir = join(rootDir, "cli");
@@ -40,6 +41,12 @@ const homebrewTargets = {
 
 async function main() {
   const command = process.argv[2] ?? "release";
+
+  if (command === "signing-preflight") {
+    await releaseSigner();
+    console.log("CLI manifest signer matches the shipped public key.");
+    return;
+  }
 
   if (command === "release") {
     parseCliReleaseTag(requireEnv("INLINE_CLI_RELEASE_TAG"));
@@ -315,8 +322,10 @@ async function publishArtifacts(
   prefix: string,
   context: ReleaseContext,
 ) {
+  await releaseSigner();
   await ensureReleaseReceipt(r2, prefix, context);
   await runPackageManifest(r2, publicBaseUrl, prefix, context);
+  await prepareSignedManifests(r2, prefix, context);
   const bundlePath = join(context.releaseDir, `inline-cli-v${context.version}-bundle.tar.gz`);
   const bundleKey = `${prefix}/v${context.version}/${basename(bundlePath)}`;
   if (await r2.file(bundleKey).exists()) {
@@ -327,7 +336,45 @@ async function publishArtifacts(
   }
   await publishGitHubRelease(context);
   await publishStableEntryPoints(r2, prefix, context);
+  await publishSignedChannels(r2, publicBaseUrl, prefix, context);
   await writeOutputs({ outcome: publicationChanged ? "published" : "already-current", reason: publicationChanged ? "release publication completed" : "all published content already matches" });
+}
+
+function signedReleaseChannels(version: string): Channel[] { return isPrereleaseVersion(version) ? ["alpha"] : ["stable", "alpha"]; }
+
+async function prepareSignedManifests(r2: S3Client, prefix: string, context: ReleaseContext) {
+  const manifest = JSON.parse(await readFile(join(context.releaseDir, "manifest.json"), "utf8"));
+  for (const channel of signedReleaseChannels(context.version)) {
+    const signed = await signedChannel(manifest, channel);
+    await writeReleaseObject(r2, `${prefix}/v${context.version}/channel.${channel}.json`, new TextEncoder().encode(signed), "application/json");
+    await writeFile(join(context.releaseDir, `channel.${channel}.json`), signed);
+  }
+}
+
+export function shouldAdvanceSignedChannel(current: { version: string; sourceSha: string; generation: number } | null, next: { version: string; sourceSha: string; generation: number }): boolean {
+  if (!current) return true;
+  const order = Bun.semver.order(current.version, next.version);
+  if (order > 0) return false;
+  if (order === 0 && current.sourceSha !== next.sourceSha) throw new Error("Signed channel version already belongs to another source");
+  if (next.generation < current.generation) throw new Error("Signed channel generation must not decrease");
+  return true;
+}
+
+async function publishSignedChannels(r2: S3Client, publicBaseUrl: string, prefix: string, context: ReleaseContext) {
+  const channels = signedReleaseChannels(context.version);
+  for (const channel of channels) {
+    const key = `${prefix}/channels/${channel}.json`;
+    const signed = await readFile(join(context.releaseDir, `channel.${channel}.json`));
+    const next = await authenticatedChannelVersion(signed.toString("utf8"), channel);
+    const current = await r2.file(key).exists() ? await authenticatedChannelVersion(await r2.file(key).text(), channel) : null;
+    if (!shouldAdvanceSignedChannel(current, next)) continue;
+    await r2.file(key).write(signed, { type: "application/json" });
+    const response = await fetch(`${publicBaseUrl}/${key}?verify=${Date.now()}`, { signal: AbortSignal.timeout(15_000), cache: "no-store" });
+    if (!response.ok) throw new Error("Signed channel public readback failed");
+    const publicCopy = await response.text();
+    const verified = await authenticatedChannelVersion(publicCopy, channel);
+    if (verified.version !== context.version || verified.sourceSha !== context.sourceSha || publicCopy !== signed.toString("utf8")) throw new Error("Signed channel publication verification failed");
+  }
 }
 
 export async function publishStableEntryPoints(r2: S3Client, prefix: string, context: ReleaseContext) {
@@ -658,6 +705,10 @@ async function createBundle(context: ReleaseContext) {
 
   const manifestPath = join(context.releaseDir, "manifest.json");
   await copyFile(manifestPath, join(bundleWorkDir, "manifest.json"));
+  for (const channel of signedReleaseChannels(context.version)) {
+    await copyFile(join(context.releaseDir, `channel.${channel}.json`), join(bundleWorkDir, `channel.${channel}.json`));
+  }
+  await copyFile(join(cliDir, "release-keys.json"), join(bundleWorkDir, "release-keys.json"));
   await copyFile(join(cliDir, "install.sh"), join(bundleWorkDir, "install.sh"));
 
   for (const target of context.targets) {
@@ -922,6 +973,7 @@ function githubReleaseAssetPaths(context: ReleaseContext): string[] {
   }
 
   assets.push(join(context.releaseDir, `inline-cli-v${context.version}-bundle.tar.gz`));
+  for (const channel of signedReleaseChannels(context.version)) assets.push(join(context.releaseDir, `channel.${channel}.json`));
   return assets;
 }
 

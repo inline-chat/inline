@@ -264,7 +264,7 @@ async fn until(mut condition: impl FnMut() -> bool) {
     .expect("no progress");
 }
 
-fn spawn_work(runtime: &Runtime, cleanup: &mut Cleanup) -> mpsc::Sender<Command> {
+fn spawn_work(runtime: &Runtime, cleanup: &mut Cleanup) -> crate::bridge::v2::work::CommandSender {
     let handle = work::spawn(
         runtime.agent.clone(),
         9,

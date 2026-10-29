@@ -169,6 +169,7 @@ impl OwnerCalls for OwnerConnection {
 
 pub(crate) struct Runtime {
     config: V2Config,
+    startup_activity: Option<crate::bridge::update_activity::Lease>,
     /// Keep v1's durable receipts authoritative after opting in.
     legacy_store: Option<Arc<inline_agent_bridge::BridgeStore>>,
     agent: Arc<Agent>,
@@ -268,6 +269,7 @@ impl Runtime {
         });
         Ok(Self {
             config,
+            startup_activity: None,
             legacy_store: None,
             agent,
             access,
@@ -300,6 +302,14 @@ impl Runtime {
         self
     }
 
+    pub(crate) fn with_startup_activity(
+        mut self,
+        activity: crate::bridge::update_activity::Lease,
+    ) -> Self {
+        self.startup_activity = Some(activity);
+        self
+    }
+
     /// Lets threads pick their folder, among these and the harness's.
     pub(crate) fn with_folders(mut self, source: FolderSource) -> Self {
         self.folder_source = Some(source);
@@ -320,6 +330,7 @@ impl Runtime {
         }
         self.recover().await;
         self.publish_capabilities().await;
+        self.startup_activity.take();
         let mut heartbeat = tokio::time::interval(self.heartbeat().await);
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         tokio::pin!(shutdown);
@@ -346,7 +357,8 @@ impl Runtime {
                         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     }
                 }
-                delivery = events.recv_delivery() => {
+                delivery = events.recv_delivery(), if !crate::bridge::update_activity::global().draining() => {
+                    let Some(_delivery_activity) = crate::bridge::update_activity::global().enter() else { continue; };
                     let Some(delivery) = delivery else {
                         break Err("Inline bot event stream closed".to_owned());
                     };

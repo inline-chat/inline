@@ -47,6 +47,7 @@ let package = Package(
     .target(
       name: "InlineCLIInstaller",
       dependencies: [],
+      resources: [.process("Resources")],
       swiftSettings: swiftSettings
     ),
 

@@ -28,6 +28,7 @@ final class UpdateController {
     didSet {
       guard channel != oldValue else { return }
       UserDefaults.standard.set(channel.rawValue, forKey: Self.channelDefaultsKey)
+      onChannelChanged?()
       guard didStart else { return }
       updater.resetUpdateCycle()
       log.info("Update channel set to \(channel.rawValue)")
@@ -72,6 +73,7 @@ final class UpdateController {
   @ObservationIgnored private var manualCheckInProgress = false
   @ObservationIgnored private var retryAfterCurrentCycle = false
   @ObservationIgnored private var didStart = false
+  @ObservationIgnored var onChannelChanged: (() -> Void)?
   private let log = Log.scoped("UpdateController")
 
   init() {

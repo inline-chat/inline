@@ -129,7 +129,12 @@ pub(super) fn render_launch_agent_plist(
     let values = [
         service_binary.to_string(),
         "bridge".to_string(),
-        "run".to_string(),
+        if super::super::update_supervisor::enabled(paths) {
+            "supervise"
+        } else {
+            "run"
+        }
+        .to_string(),
         "--config".to_string(),
         config.to_string(),
     ];
@@ -211,7 +216,12 @@ pub(super) fn render_systemd_user_unit(
     let exec_start = [
         service_binary.to_string(),
         "bridge".to_string(),
-        "run".to_string(),
+        if super::super::update_supervisor::enabled(paths) {
+            "supervise"
+        } else {
+            "run"
+        }
+        .to_string(),
         "--config".to_string(),
         config.to_string(),
     ]

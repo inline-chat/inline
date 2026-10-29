@@ -297,9 +297,43 @@ pub(crate) enum SessionOp {
     Undo,
 }
 
+struct AdmittedCommand {
+    command: Command,
+    _lease: crate::bridge::update_activity::Lease,
+}
+#[derive(Clone)]
+pub(crate) struct CommandSender(mpsc::Sender<AdmittedCommand>);
+#[derive(Clone)]
+pub(crate) struct WeakCommandSender(mpsc::WeakSender<AdmittedCommand>);
+impl CommandSender {
+    pub(crate) async fn send(
+        &self,
+        command: Command,
+    ) -> Result<(), mpsc::error::SendError<Command>> {
+        let Some(lease) = crate::bridge::update_activity::global().enter() else {
+            return Err(mpsc::error::SendError(command));
+        };
+        self.0
+            .send(AdmittedCommand {
+                command,
+                _lease: lease,
+            })
+            .await
+            .map_err(|error| mpsc::error::SendError(error.0.command))
+    }
+    fn downgrade(&self) -> WeakCommandSender {
+        WeakCommandSender(self.0.downgrade())
+    }
+}
+impl WeakCommandSender {
+    pub(crate) fn upgrade(&self) -> Option<CommandSender> {
+        self.0.upgrade().map(CommandSender)
+    }
+}
+
 /// The main loop's handle on one work.
 pub(crate) struct WorkHandle {
-    pub tx: mpsc::Sender<Command>,
+    pub tx: CommandSender,
     pub phase: watch::Receiver<WorkPhase>,
     /// Inline's ID for the work, once connected; 0 before.
     pub agent_session_id: Arc<AtomicI64>,
@@ -328,6 +362,7 @@ pub(crate) fn spawn(
     thread_settings: SettingsChange,
 ) -> WorkHandle {
     let (tx, rx) = mpsc::channel(64);
+    let tx = CommandSender(tx);
     let commands = tx.downgrade();
     let (phase_tx, phase) = watch::channel(if known.native.is_some() {
         WorkPhase::Idle
@@ -384,6 +419,7 @@ pub(crate) fn spawn(
         reported: None,
         working_due: None,
         phase: phase_tx,
+        update_busy: crate::bridge::update_activity::global().key(),
         started_ms: now_ms(),
         passive: PassiveBatch::new(chat_id),
         title: None,
@@ -468,7 +504,7 @@ struct Actor {
     agent: Arc<Agent>,
     chat_id: i64,
     /// This actor's own command channel, for tool bindings.
-    commands: mpsc::WeakSender<Command>,
+    commands: WeakCommandSender,
     /// Where output goes; moves into a subthread (spec §5.2).
     publication: Publication,
     /// The status card left in the parent after a move: (chat, message).
@@ -511,6 +547,7 @@ struct Actor {
     /// is not shown.
     working_due: Option<tokio::time::Instant>,
     phase: watch::Sender<WorkPhase>,
+    update_busy: crate::bridge::update_activity::BusyKey,
     started_ms: u64,
     /// Messages observed since the agent last took input (spec §5.1).
     passive: PassiveBatch,
@@ -544,7 +581,7 @@ struct Actor {
 }
 
 impl Actor {
-    async fn run(mut self, mut rx: mpsc::Receiver<Command>) {
+    async fn run(mut self, mut rx: mpsc::Receiver<AdmittedCommand>) {
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -553,10 +590,22 @@ impl Actor {
             tokio::select! {
                 command = rx.recv() => {
                     let Some(command) = command else { break };
+                    let AdmittedCommand { command, _lease } = command;
                     self.command(command).await;
+                    self.publish_phase();
                 }
-                envelope = next_envelope(&mut self.events) => match envelope {
-                    Some(envelope) => self.envelope(envelope).await,
+                envelope = next_envelope(&mut self.events), if !crate::bridge::update_activity::global().draining() => match envelope {
+                    Some(envelope) => {
+                        // Native events can arrive with an idle session attached.
+                        // Hold them across a cancelled drain rather than drop them.
+                        let lease = loop {
+                            if let Some(lease) = crate::bridge::update_activity::global().maintenance() { break lease; }
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        };
+                        self.envelope(envelope).await;
+                        self.publish_phase();
+                        drop(lease);
+                    },
                     None => {
                         // The stream ended: the process exited or the
                         // connection closed.
@@ -566,9 +615,11 @@ impl Actor {
                     }
                 },
                 _ = tick.tick() => {
+                    let Some(_tick_activity) = crate::bridge::update_activity::global().maintenance() else { continue; };
                     self.flush_outbox().await;
                     self.event(HoldEvent::Tick).await;
                     self.consider_now().await;
+                    self.publish_phase();
                 }
                 _ = sleep_until(next_edit) => self.flush_edits(false).await,
                 _ = sleep_until(next_working) => {}
@@ -3119,6 +3170,19 @@ impl Actor {
     }
 
     fn publish_phase(&self) {
+        self.update_busy.set(
+            !self.inputs.is_empty()
+                || !self.uncertain.is_empty()
+                || self.turn.is_some()
+                || self.waiting.is_some()
+                || !self.outbox.is_empty()
+                || !self.edits.is_empty()
+                || !self
+                    .unsaved
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .is_empty(),
+        );
         let phase = if self.paused {
             WorkPhase::Paused
         } else if self.turn.is_some() {
@@ -3813,7 +3877,7 @@ pub(crate) mod recovery_tests {
         let output_mode = OutputMode::Detailed;
         let thread_settings = SettingsChange::default();
         let (tx, _rx) = mpsc::channel(64);
-        let commands = tx.downgrade();
+        let commands = CommandSender(tx).downgrade();
         let (phase_tx, _phase) = watch::channel(WorkPhase::Idle);
         let agent_session_id = Arc::new(AtomicI64::new(1));
         let outbox = agent
@@ -3865,6 +3929,7 @@ pub(crate) mod recovery_tests {
             reported: None,
             working_due: None,
             phase: phase_tx,
+            update_busy: crate::bridge::update_activity::global().key(),
             started_ms: now_ms(),
             passive: PassiveBatch::new(chat_id),
             title: None,
