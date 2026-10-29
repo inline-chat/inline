@@ -1,8 +1,10 @@
 @testable import InlineIOS
 @testable import InlineKit
 @testable import TextProcessing
+import AVFAudio
 import GRDB
 import InlineProtocol
+import SwiftUI
 import Testing
 import UIKit
 
@@ -223,7 +225,150 @@ struct ComposeAgentDeviceTests {
     Attachment.record(Array(try #require(sheet.pngData())), named: "agent-compose-\(style == .dark ? "dark" : "light").png")
   }
 
+  @Test("Model and reasoning open native menus")
+  func rowMenus() async throws {
+    let agent = try await Self.agent()
+    guard !agent.isFriendly else { return }
+    let host = try Host()
+    defer { host.close() }
+    host.window.makeKey()
+    let compose = host.makeCompose(peer: .user(id: agent.id))
+    try await settle()
+    Attachment.record(Self.dumpHierarchy(compose.agentRowView), named: "row-hierarchy.txt")
+    let controls = Self.menuControls(in: compose.agentRowView)
+    #expect(controls.count >= 2, "menu controls in the row: \(controls.count)")
+    var report: [String] = []
+    for (index, control) in controls.enumerated() {
+      control.performPrimaryAction()
+      try await settle()
+      report.append("control \(index) ax=\(control.accessibilityLabel ?? "-") menu shown=\(host.showsContextMenu())")
+      Attachment.record(host.screenPNG(), named: "row-menu-\(index).png")
+      control.contextMenuInteraction?.dismissMenu()
+      try await settle()
+    }
+    Attachment.record(report.joined(separator: "\n"), named: "row-menus.txt")
+    #expect(compose.isAgentLayout)
+  }
+
+  @Test("Usage opens as a popover above the row")
+  func usagePopover() async throws {
+    let agent = try await Self.agent()
+    guard !agent.isFriendly else { return }
+    let host = try Host()
+    defer { host.close() }
+    host.window.makeKey()
+    let compose = host.makeCompose(peer: .user(id: agent.id))
+    try await settle()
+    let row = compose.agentRowView.convert(compose.agentRowView.bounds, to: nil)
+    compose.presentAgentUsage(from: CGRect(x: row.maxX - 32, y: row.minY, width: 32, height: row.height))
+    try await settle()
+    let presented = try #require(host.window.rootViewController?.presentedViewController)
+    let frame = presented.view.convert(presented.view.bounds, to: nil)
+    Attachment.record("popover \(frame) row \(row) controller \(Swift.type(of: presented.presentationController))", named: "usage.txt")
+    Attachment.record(host.screenPNG(), named: "usage-popover.png")
+    #expect(presented.presentationController is UIPopoverPresentationController)
+    // A popover, not an iPhone sheet: narrower than the screen and above the row.
+    #expect(frame.width < host.window.bounds.width - 20, "popover \(frame)")
+    #expect(frame.maxY <= row.minY + 1, "popover \(frame) row \(row)")
+    presented.dismiss(animated: false)
+    try await settle()
+  }
+
+  @Test("Header folder opens a folder menu", arguments: [UIUserInterfaceStyle.light, .dark])
+  func headerFolderMenu(style: UIUserInterfaceStyle) async throws {
+    let host = try Host(style: style)
+    defer { host.close() }
+    host.window.makeKey()
+    let folder = ChatAgentFolder(
+      title: "inline",
+      options: [
+        AgentConfigurationOption(id: "inline", label: "inline", description: "~/dev/inline-chat"),
+        AgentConfigurationOption(id: "noor", label: "noor", description: "~/dev"),
+        AgentConfigurationOption(id: "secret-sauce", label: "secret-sauce", description: "~/dev/inline-chat"),
+      ],
+      selection: "inline"
+    )
+    var selected: [String] = []
+    let controller = UIHostingController(rootView: VStack(alignment: .leading, spacing: 0) {
+      Text("Claude").font(.body).fontWeight(.medium)
+      ChatToolbarFolderSubtitle(folder: folder, onSelect: { selected.append($0) })
+    }.padding(.horizontal, 16))
+    controller.safeAreaRegions = []
+    controller.view.backgroundColor = .clear
+    controller.view.frame = CGRect(x: 0, y: 120, width: host.root.bounds.width, height: 56)
+    host.root.addSubview(controller.view)
+    try await settle()
+    Attachment.record(Self.dumpHierarchy(controller.view), named: "header-folder-hierarchy-\(style.rawValue).txt")
+    let control = try #require(Self.menuControls(in: controller.view).first, "no folder menu control")
+    control.performPrimaryAction()
+    try await settle()
+    Attachment.record("menu shown=\(host.showsContextMenu())", named: "header-folder-\(style.rawValue).txt")
+    Attachment.record(host.screenPNG(), named: "header-folder-menu-\(style == .dark ? "dark" : "light").png")
+    control.contextMenuInteraction?.dismissMenu()
+    try await settle()
+    #expect(selected.isEmpty)
+  }
+
+  @Test("Voice from the card returns to the card")
+  func voiceFromCard() async throws {
+    let agent = try await Self.agent()
+    guard !agent.isFriendly else { return }
+    guard AVAudioApplication.shared.recordPermission == .granted else {
+      Attachment.record("skipped: microphone permission \(AVAudioApplication.shared.recordPermission.rawValue)", named: "voice.txt")
+      return
+    }
+    let host = try Host()
+    defer { host.close() }
+    host.window.makeKey()
+    let compose = host.makeCompose(peer: .user(id: agent.id))
+    try await settle()
+    #expect(compose.isAgentLayout)
+
+    let start = Task { await compose.voiceViewModel.start(peerId: .user(id: agent.id)) }
+    for _ in 0 ..< 30 where compose.voiceViewModel.phase != .recording {
+      try await Task.sleep(for: .milliseconds(100))
+    }
+    try await settle()
+    let phase = compose.voiceViewModel.phase
+    Attachment.record("phase \(phase)\n\(Self.describe(compose))", named: "voice.txt")
+    Attachment.record(host.png(compose), named: "voice-recording.png")
+    if phase == .recording {
+      // Voice takes the whole compose; the card's row and outside plus stay out.
+      #expect(!compose.isAgentLayout)
+      #expect(compose.agentRowView.isHidden || compose.agentRowView.alpha == 0)
+      #expect(!Self.hits(compose.agentRunButton, in: compose))
+    }
+
+    compose.voiceViewModel.cancel()
+    _ = await start.value
+    try await settle()
+    #expect(compose.voiceViewModel.phase == .idle)
+    #expect(compose.isAgentLayout)
+    #expect(abs(compose.composeHeightConstraint.constant - compose.restingHeight) < 1)
+    try Self.expectCardGeometry(compose)
+    Attachment.record(host.png(compose), named: "voice-after.png")
+  }
+
   // MARK: Helpers
+
+  static func menuControls(in view: UIView) -> [UIControl] {
+    var found: [UIControl] = []
+    if let control = view as? UIControl, control.showsMenuAsPrimaryAction, !control.isHidden {
+      found.append(control)
+    }
+    for subview in view.subviews { found += menuControls(in: subview) }
+    return found.sorted { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
+  }
+
+  static func dumpHierarchy(_ view: UIView, depth: Int = 0) -> String {
+    var line = String(repeating: "  ", count: depth) + "\(Swift.type(of: view)) \(view.frame)"
+    if view.isHidden { line += " hidden" }
+    if let control = view as? UIControl { line += " control menuPrimary=\(control.showsMenuAsPrimaryAction)" }
+    let interactions = view.interactions.map { "\(Swift.type(of: $0))" }
+    if !interactions.isEmpty { line += " interactions=\(interactions)" }
+    if let label = view.accessibilityLabel { line += " ax=\(label)" }
+    return ([line] + view.subviews.map { dumpHierarchy($0, depth: depth + 1) }).joined(separator: "\n")
+  }
 
   /// Not a real user; a DM peer that is never an Agent.
   static let personID: Int64 = 9_100_917
@@ -359,7 +504,28 @@ struct ComposeAgentDeviceTests {
     }
 
     func close() {
+      window.rootViewController?.presentedViewController?.dismiss(animated: false)
       window.isHidden = true
+    }
+
+    /// Every window of the scene, back to front, so menus and popovers show.
+    func screenPNG() -> [UInt8] {
+      guard let scene = window.windowScene else { return [] }
+      let windows = scene.windows.filter { !$0.isHidden }.sorted { $0.windowLevel < $1.windowLevel }
+      let image = UIGraphicsImageRenderer(bounds: scene.coordinateSpace.bounds).image { _ in
+        for window in windows {
+          window.drawHierarchy(in: window.frame, afterScreenUpdates: true)
+        }
+      }
+      return Array(image.pngData() ?? Data())
+    }
+
+    /// Whether a context menu is on screen in any of the scene's windows.
+    func showsContextMenu() -> Bool {
+      func search(_ view: UIView) -> Bool {
+        "\(Swift.type(of: view))".contains("ContextMenu") || view.subviews.contains(where: search)
+      }
+      return window.windowScene?.windows.contains { !$0.isHidden && search($0) } ?? false
     }
 
     /// Pinned to the bottom like the chat screen, without drafts or sends.
