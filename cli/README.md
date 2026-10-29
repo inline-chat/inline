@@ -4,7 +4,7 @@ Install the Inline CLI and have Claude/Codex interact with it.
 
 For setup failures, repeat the command with `--verbose` (twice for trace detail).
 See [diagnostics and optional error reporting](docs/diagnostics.md).
-Official binaries report metadata-only command, bridge-runtime, and panic failures to Sentry. Set
+Official binaries report metadata-only command, bridge-runtime, updater outcomes, and panic failures to Sentry. Set
 `INLINE_CLI_TELEMETRY=off` to disable reporting. Command arguments, message contents,
 credentials, local paths, and raw errors are not sent.
 
@@ -23,8 +23,11 @@ brew install --cask inline
 curl -fsSL https://inline.chat/cli/install.sh | sh
 ```
 
-Supports macOS and Linux (x86_64/aarch64, glibc and musl). Set
-`INLINE_INSTALL_DIR` to choose a custom install directory.
+Supports Apple-silicon macOS and Linux (x86_64/aarch64, glibc and musl).
+New script installations use `~/.local/bin`. Set `INLINE_INSTALL_DIR` to choose
+an explicit user-writable destination. The script preserves existing symlinks
+and package-manager installations and never invokes sudo. Linux bootstrap
+requires OpenSSL 3; macOS also verifies Inline’s Developer ID signature.
 
 ### Check for updates
 
@@ -55,15 +58,76 @@ remembered for later updates and update notices; with `--check` it saves the
 choice without installing. Without a saved choice, a prerelease build
 follows `alpha` and a stable build follows `stable`. Switching to `stable` never
 downgrades a newer alpha. The Mac app installs from `alpha` on its Tip channel.
-`INLINE_RELEASE_MANIFEST_URL` overrides both channels.
+A deliberate CLI channel choice takes precedence over the app. To resume following
+the app, use `inline update config --follow-app --app-channel alpha` (Tip) or
+`--app-channel stable` (Beta). The effective channel also preserves alpha bridge
+defaults when an alpha feed moves onto its succeeding stable release.
 
-Updates stream downloads to private temporary storage and verify the checksum
-and optional manifest size before extraction; downloads are limited to 512 MiB.
-When installing without elevation across filesystems, the CLI stages a complete
-replacement beside the destination before renaming it into place. Temporary
-download files are cleaned up on normal success and failure paths.
-Homebrew installations can use `brew upgrade --cask inline` to keep Homebrew in
-charge of the installed version.
+### Automatic updates and bridge recovery
+
+```bash
+inline update status --json
+inline update config --register        # explicitly enroll the invoking CLI
+inline update config --auto off
+inline update config --auto on
+```
+
+Automatic updates default to on for managed installations. The Mac app’s Updates
+settings controls the same machine-local preference, independently of app
+updates. A bridge checks shortly after starting and then hourly; ordinary CLI
+use and the app also check when due. Checks and downloads share locks and retry
+with backoff. Turning updates off cancels pending activation before shutdown.
+Developer builds, release-URL overrides, and `INLINE_DISABLE_AUTOUPDATE=1` disable
+background maintenance. `INLINE_CLI_TELEMETRY=off` also covers updater events.
+
+The engine verifies a pinned Ed25519 signature, channel, immutable release
+identity, SHA-256 and exact byte size before selecting a release. Transfers stay
+on HTTPS and are limited to 100 MiB; extraction permits one regular executable
+of at most 200 MiB. Mac downloads additionally require Inline’s Developer ID.
+A bounded version probe runs from the final private version path. Only explicitly
+owned launchers are replaced, using an atomic rename. Homebrew retains ownership
+of its shell CLI (`brew upgrade --cask inline`); a managed private bridge can
+update independently.
+
+New bridge setups install a retained supervisor. It stages software while agents
+work, then closes admission only after accepted work, questions, approvals and
+receipts have settled. Two minutes of quiet normally precede activation; after
+24 hours waiting, that quiet delay is removed, but active or queued work still
+prevents shutdown. Routine automatic activations are at least six hours apart.
+The old workload stops before the candidate starts. A locally responsive
+60-second trial commits the candidate; startup failures, interrupted trials and
+repeated crashes restore the previous runtime. Cloud outages and provider
+sign-in problems are separate from local startup health. Update failures keep
+the retained repair worker available, including when the selected runtime
+cannot execute. Recovery uses the live delivery database and never restores an
+old authentication file or stale receipts.
+
+Existing services enroll on an explicit normal restart after agent work finishes:
+
+```bash
+inline bridge restart
+inline bridge rollback                 # request the recorded previous runtime
+```
+
+A manual restart runs the invoking upgraded CLI even with automatic updates off.
+Rollback waits for a safe boundary, is limited to the recorded compatible previous
+runtime, and quarantines the version it replaces. Status lists pending and running
+bridge versions. The version cache retains active, previous, pending and supervisor
+runtimes; unreferenced verified copies older than seven days are collected.
+
+Remote Linux installs need a persistent writable data directory and a systemd user
+manager that survives logout. Check `inline bridge doctor --json`; enable linger
+for the service user through the host’s normal administration if needed. Container
+image or package-manager upgrades remain owned by that deployment method.
+
+`INLINE_RELEASE_MANIFEST_URL` is an explicit mirror/development override. A
+read-only `--check` may describe legacy unsigned mirror metadata and returns
+`verified: false`; installation still requires signed metadata. Signature failures
+never fall back to unsigned automatic installation. Signed feeds do not expire;
+highest accepted generations and release identities prevent replay/downgrade on an
+established install, while a CDN withholding newer metadata remains an availability
+limitation. Sustained discovery failures and rollback/repair outcomes are reported
+through the existing scrubbed Sentry client.
 
 ## (Optional) Install the Inline skill for Codex
 

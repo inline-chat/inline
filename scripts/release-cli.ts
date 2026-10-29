@@ -335,8 +335,10 @@ async function publishArtifacts(
     await writeReleaseObject(r2, bundleKey, new Uint8Array(await readFile(bundlePath)), "application/gzip");
   }
   await publishGitHubRelease(context);
-  await publishStableEntryPoints(r2, prefix, context);
   await publishSignedChannels(r2, publicBaseUrl, prefix, context);
+  // New bootstrap scripts require the signed feed. Advance them only after
+  // the public feed is verified, including the first signed stable release.
+  await publishStableEntryPoints(r2, prefix, context);
   await writeOutputs({ outcome: publicationChanged ? "published" : "already-current", reason: publicationChanged ? "release publication completed" : "all published content already matches" });
 }
 
@@ -368,7 +370,7 @@ async function publishSignedChannels(r2: S3Client, publicBaseUrl: string, prefix
     const next = await authenticatedChannelVersion(signed.toString("utf8"), channel);
     const current = await r2.file(key).exists() ? await authenticatedChannelVersion(await r2.file(key).text(), channel) : null;
     if (!shouldAdvanceSignedChannel(current, next)) continue;
-    await r2.file(key).write(signed, { type: "application/json" });
+    await writeReleaseObject(r2, key, signed, "application/json", false);
     const response = await fetch(`${publicBaseUrl}/${key}?verify=${Date.now()}`, { signal: AbortSignal.timeout(15_000), cache: "no-store" });
     if (!response.ok) throw new Error("Signed channel public readback failed");
     const publicCopy = await response.text();

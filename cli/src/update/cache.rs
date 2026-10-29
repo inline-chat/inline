@@ -152,6 +152,8 @@ mod tests {
             store::private_dir(&dir).unwrap();
             let executable = dir.join("inline");
             fs::write(&executable, [id]).unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
             let artifact = Artifact {
                 version: format!("1.0.{id}"),
                 target: "fixture".into(),
