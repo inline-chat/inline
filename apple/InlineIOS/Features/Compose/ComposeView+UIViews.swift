@@ -42,6 +42,9 @@ private final class ComposeGlassGroupView: UIView {
     guard !isHidden, alpha > 0, isUserInteractionEnabled else { return nil }
 
     for view in contentView.subviews.reversed() {
+      // A hidden side circle (the agent stop circle when idle) overlaps the
+      // send button; it must not swallow touches meant for the capsule.
+      guard !view.isHidden, view.alpha > 0.01 else { continue }
       let convertedPoint = convert(point, to: view)
       guard view.point(inside: convertedPoint, with: event) else { continue }
 
@@ -68,7 +71,7 @@ private final class ComposeGlassGroupView: UIView {
   }
 }
 
-private final class ComposePlusGlassButton: UIVisualEffectView {
+final class ComposePlusGlassButton: UIVisualEffectView {
   private enum Constants {
     static let hitTargetExpansion: CGFloat = 4
     static let cornerRadius: CGFloat = 21
@@ -91,7 +94,7 @@ private final class ComposePlusGlassButton: UIVisualEffectView {
     }
   }
 
-  init() {
+  init(systemImage: String = "plus", pointSize: CGFloat = 16, accessibilityLabel: String = "Add") {
     if #available(iOS 26.0, *) {
       let glassEffect = UIGlassEffect(style: .regular)
       glassEffect.isInteractive = true
@@ -101,7 +104,15 @@ private final class ComposePlusGlassButton: UIVisualEffectView {
       backgroundColor = .secondarySystemBackground
     }
 
-    setup()
+    setup(systemImage: systemImage, pointSize: pointSize, accessibilityLabel: accessibilityLabel)
+  }
+
+  /// Swaps the glyph in place, e.g. stop and resume on the agent run circle.
+  func setSymbol(_ systemImage: String, pointSize: CGFloat, accessibilityLabel: String) {
+    imageView.image = UIImage(systemName: systemImage)?.withConfiguration(
+      UIImage.SymbolConfiguration(pointSize: pointSize, weight: .medium)
+    )
+    self.accessibilityLabel = accessibilityLabel
   }
 
   @available(*, unavailable)
@@ -146,20 +157,17 @@ private final class ComposePlusGlassButton: UIVisualEffectView {
     super.touchesCancelled(touches, with: event)
   }
 
-  private func setup() {
+  private func setup(systemImage: String, pointSize: CGFloat, accessibilityLabel: String) {
     translatesAutoresizingMaskIntoConstraints = false
     isUserInteractionEnabled = true
     layer.cornerRadius = Constants.cornerRadius
     layer.cornerCurve = .continuous
     layer.masksToBounds = true
     isAccessibilityElement = true
-    accessibilityLabel = "Add"
     accessibilityTraits = .button
 
     imageView.translatesAutoresizingMaskIntoConstraints = false
-    imageView.image = UIImage(systemName: "plus")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
-    )
+    setSymbol(systemImage, pointSize: pointSize, accessibilityLabel: accessibilityLabel)
     imageView.tintColor = .secondaryLabel
     imageView.contentMode = .center
     contentView.addSubview(imageView)
@@ -288,6 +296,21 @@ extension ComposeView {
     }
     button.onTap = { [weak self] in
       self?.plusTapped()
+    }
+    return button
+  }
+
+  /// Stop or resume beside the bar while an agent's turn runs and the agent
+  /// card is not showing; inside the card the row has its own circle.
+  func makeAgentRunButton() -> ComposePlusGlassButton {
+    let button = ComposePlusGlassButton(systemImage: "stop.fill", pointSize: 13, accessibilityLabel: "Stop")
+    button.isHidden = true
+    button.alpha = 0
+    button.onTouchDown = { [weak self] in
+      self?.buttonTouchDown()
+    }
+    button.onTap = { [weak self] in
+      self?.agentChain?.toggleRun()
     }
     return button
   }

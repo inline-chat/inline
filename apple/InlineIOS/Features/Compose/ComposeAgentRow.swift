@@ -104,6 +104,21 @@ struct ComposeAgentRow: View {
       }
     }
     .lineLimit(1)
+    // Labels arrive as settings load and the first turn starts; ease them in
+    // rather than letting the row jump.
+    .animation(.easeOut(duration: 0.18), value: rowShape)
+  }
+
+  /// Which optional pieces the row shows, so it animates only when they change.
+  private var rowShape: [Bool] {
+    [
+      model.botUserInfo != nil,
+      model.isBeforeFirstTurn && model.projectTitle != nil && !model.projectOptions.isEmpty,
+      model.modelTitle != nil,
+      model.reasoningTitle != nil,
+      showsUsage,
+      model.runWork != nil,
+    ]
   }
 
   /// Usage is the agent owner's; it shows once the bridge reported some.
