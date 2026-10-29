@@ -4,12 +4,6 @@ import InlineKit
 import SwiftUI
 import UIKit
 
-extension Notification.Name {
-  /// An agent DM's folder as Compose knows it, including a choice made in
-  /// Compose before the first turn. `userInfo`: "peer" and "title".
-  static let composeAgentFolderDidChange = Notification.Name("composeAgentFolderDidChange")
-}
-
 /// The agent card.
 ///
 /// While the draft would reach an Agent in Detailed mode, Compose becomes a
@@ -123,7 +117,6 @@ extension ComposeView {
     agentRowState.model = nil
     agentRowState.isAvailable = false
     agentRunWork = nil
-    agentFolderTitle = nil
     applyAgentLayout(false, animated: false)
     updateAgentRunCircle(animated: false)
   }
@@ -150,27 +143,9 @@ extension ComposeView {
     return try? AppDatabase.shared.reader.read { db in try User.fetchOne(db, id: id) }
   }
 
-  /// Settings, grants and controlling state changed: refresh what reads them
-  /// outside SwiftUI.
+  /// Grants and controlling state changed; the UIKit stop circle reads them.
   private func agentModelDidChange() {
     updateAgentRunCircle(animated: window != nil)
-    publishAgentFolder()
-  }
-
-  /// The header shows an agent DM's folder; Compose knows a choice made here
-  /// before the header's own settings copy does.
-  private func publishAgentFolder() {
-    guard let agentChain, let peerId,
-          agentChain.target?.reason == .directMessage,
-          let title = agentChain.projectTitle,
-          title != agentFolderTitle
-    else { return }
-    agentFolderTitle = title
-    NotificationCenter.default.post(
-      name: .composeAgentFolderDidChange,
-      object: nil,
-      userInfo: ["peer": peerId, "title": title]
-    )
   }
 
   // MARK: Layout

@@ -10,7 +10,8 @@ struct ChatToolbarLeadingView: View {
   let onOpenSpace: (Int64) -> Void
   let onOpenChatInfo: (SpaceChatItem) -> Void
   /// An agent DM's working folder, shown when nothing else fills the subtitle.
-  let agentFolderTitle: String?
+  let agentFolder: ChatAgentFolder?
+  let onSelectAgentFolder: (String) -> Void
 
   @ObservedObject private var fullChatViewModel: FullChatViewModel
   private let realtimeState: RealtimeState
@@ -23,11 +24,13 @@ struct ChatToolbarLeadingView: View {
     router: Router,
     fullChatViewModel: FullChatViewModel,
     realtimeState: RealtimeState,
-    agentFolderTitle: String? = nil,
+    agentFolder: ChatAgentFolder? = nil,
+    onSelectAgentFolder: @escaping (String) -> Void = { _ in },
     onOpenSpace: @escaping (Int64) -> Void,
     onOpenChatInfo: @escaping (SpaceChatItem) -> Void
   ) {
-    self.agentFolderTitle = agentFolderTitle
+    self.agentFolder = agentFolder
+    self.onSelectAgentFolder = onSelectAgentFolder
     self.peerId = peerId
     self.contextSpaceId = contextSpaceId
     self.router = router
@@ -128,8 +131,8 @@ struct ChatToolbarLeadingView: View {
       return .breadcrumb(toolbarContext, reference: reference)
     }
 
-    if let agentFolderTitle, !agentFolderTitle.isEmpty {
-      return .folder(agentFolderTitle)
+    if let agentFolder, !agentFolder.title.isEmpty {
+      return .folder(agentFolder)
     }
 
     return .empty
@@ -173,7 +176,8 @@ struct ChatToolbarLeadingView: View {
         realtimeState: realtimeState,
         onOpenChatInfo: openChatInfo,
         onOpenSpace: openSpace,
-        onOpenParentThread: openParentThread
+        onOpenParentThread: openParentThread,
+        onSelectAgentFolder: onSelectAgentFolder
       )
       .id(peerId)
       .layoutPriority(1)
@@ -247,12 +251,20 @@ private struct ChatToolbarHeaderButtonStyle: ButtonStyle {
   }
 }
 
+/// An agent DM's folder in the header subtitle, with the folders the Agent
+/// can switch to.
+struct ChatAgentFolder: Equatable {
+  let title: String
+  let options: [AgentConfigurationOption]
+  let selection: String?
+}
+
 enum ChatSubtitle: Equatable {
   case connectionState(String)
   case composeAction(ComposeActionPresentation)
   case timezone(String)
   case breadcrumb(ReplyThreadToolbarContext, reference: ThreadReference?)
-  case folder(String)
+  case folder(ChatAgentFolder)
   case empty
 
   var transitionID: String {
@@ -272,8 +284,8 @@ enum ChatSubtitle: Equatable {
         context.parent?.title ?? "",
         reference?.label ?? "",
       ].joined(separator: ":")
-    case let .folder(title):
-      "folder:\(title)"
+    case let .folder(folder):
+      "folder:\(folder.title)"
     case .empty:
       "empty"
     }
@@ -290,6 +302,7 @@ private struct ChatToolbarTitleStack: View {
   let onOpenChatInfo: () -> Void
   let onOpenSpace: (ReplyThreadToolbarContext.SpaceLink) -> Void
   let onOpenParentThread: (ReplyThreadToolbarContext.ParentLink) -> Void
+  let onSelectAgentFolder: (String) -> Void
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @ObservedObject private var realtimeState: RealtimeState
@@ -305,7 +318,8 @@ private struct ChatToolbarTitleStack: View {
     realtimeState: RealtimeState,
     onOpenChatInfo: @escaping () -> Void,
     onOpenSpace: @escaping (ReplyThreadToolbarContext.SpaceLink) -> Void,
-    onOpenParentThread: @escaping (ReplyThreadToolbarContext.ParentLink) -> Void
+    onOpenParentThread: @escaping (ReplyThreadToolbarContext.ParentLink) -> Void,
+    onSelectAgentFolder: @escaping (String) -> Void
   ) {
     self.title = title
     self.showsInlineTeamBadge = showsInlineTeamBadge
@@ -316,6 +330,7 @@ private struct ChatToolbarTitleStack: View {
     self.onOpenChatInfo = onOpenChatInfo
     self.onOpenSpace = onOpenSpace
     self.onOpenParentThread = onOpenParentThread
+    self.onSelectAgentFolder = onSelectAgentFolder
     _realtimeState = ObservedObject(wrappedValue: realtimeState)
     _activityState = State(initialValue: ComposeActions.shared.activityState(for: peerId))
   }
@@ -382,7 +397,8 @@ private struct ChatToolbarTitleStack: View {
         ChatToolbarSubtitleContent(
           subtitle: subtitle,
           onOpenSpace: onOpenSpace,
-          onOpenParentThread: onOpenParentThread
+          onOpenParentThread: onOpenParentThread,
+          onSelectAgentFolder: onSelectAgentFolder
         )
         .id(subtitle.transitionID)
         .offset(y: -2)
@@ -398,6 +414,7 @@ private struct ChatToolbarSubtitleContent: View {
   let subtitle: ChatSubtitle
   let onOpenSpace: (ReplyThreadToolbarContext.SpaceLink) -> Void
   let onOpenParentThread: (ReplyThreadToolbarContext.ParentLink) -> Void
+  let onSelectAgentFolder: (String) -> Void
 
   @ViewBuilder
   var body: some View {
@@ -415,11 +432,65 @@ private struct ChatToolbarSubtitleContent: View {
         onOpenSpace: onOpenSpace,
         onOpenParentThread: onOpenParentThread
       )
-    case let .folder(title):
-      Label(title, systemImage: "folder")
-        .labelStyle(ChatToolbarFolderLabelStyle())
+    case let .folder(folder):
+      ChatToolbarFolderSubtitle(folder: folder, onSelect: onSelectAgentFolder)
     case .empty:
       EmptyView()
+    }
+  }
+}
+
+/// The folder; a native menu of the Agent's folders when it offers a choice.
+private struct ChatToolbarFolderSubtitle: View {
+  let folder: ChatAgentFolder
+  let onSelect: (String) -> Void
+
+  var body: some View {
+    if folder.options.isEmpty {
+      label
+    } else {
+      Menu {
+        ForEach(folder.options) { option in
+          Button {
+            onSelect(option.id)
+          } label: {
+            if option.id == folder.selection {
+              Label {
+                optionText(option)
+              } icon: {
+                Image(systemName: "checkmark")
+              }
+            } else {
+              optionText(option)
+            }
+          }
+        }
+      } label: {
+        HStack(spacing: 3) {
+          label
+          Image(systemName: "chevron.down")
+            .font(.system(size: 8, weight: .semibold))
+            .foregroundStyle(.secondary)
+        }
+        .contentShape(Rectangle())
+      }
+      .menuOrder(.fixed)
+      .buttonStyle(.plain)
+      .accessibilityLabel("Folder")
+      .accessibilityValue(folder.title)
+    }
+  }
+
+  private var label: some View {
+    Label(folder.title, systemImage: "folder")
+      .labelStyle(ChatToolbarFolderLabelStyle())
+  }
+
+  @ViewBuilder
+  private func optionText(_ option: AgentConfigurationOption) -> some View {
+    Text(option.label)
+    if let description = option.description, !description.isEmpty {
+      Text(description)
     }
   }
 }

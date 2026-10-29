@@ -250,7 +250,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   lazy var agentRunButton = makeAgentRunButton()
   /// The run state last delivered by the model's publisher.
   var agentRunWork: AgentWorkState?
-  var agentFolderTitle: String?
   var composeTrailingToEdgeConstraint: NSLayoutConstraint?
   var composeTrailingToRunConstraint: NSLayoutConstraint?
 
