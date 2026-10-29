@@ -60,7 +60,6 @@ struct ChatView: View {
   @State private var userGroupMentionTarget: UserGroupMentionTarget?
   @State private var botAgentMentionTarget: BotAgentMentionTarget?
   @State private var botChatSettingsCoordinator: BotChatSettingsCoordinator
-  @State private var composeAgentFolderTitle: String?
   @State private var isBotChatSettingsPresented = false
   @State private var translationPlacement: ChatTranslationPlacement
   @State private var presentedChatInfo: SpaceChatItem?
@@ -153,21 +152,19 @@ struct ChatView: View {
     }
   }
 
-  /// Compose's folder for this chat's agent; split out of `body` to keep its
-  /// modifier chain within the type checker's budget.
-  private var composeAgentFolderChanges: AnyPublisher<String?, Never> {
-    let peer = peerId
-    return NotificationCenter.default.publisher(for: .composeAgentFolderDidChange)
-      .filter { ($0.userInfo?["peer"] as? Peer) == peer }
-      .map { $0.userInfo?["title"] as? String }
-      .eraseToAnyPublisher()
+  /// An agent DM's working folder for the header. Compose keeps its own
+  /// settings copy; both see a change confirmed through either.
+  private var agentFolder: ChatAgentFolder? {
+    guard fullChatViewModel.peerUser?.bot == true,
+          let document = botChatSettingsCoordinator.selectedState.document,
+          let title = document.folderTitle
+    else { return nil }
+    return ChatAgentFolder(title: title, options: document.folderOptions, selection: document.selectedFolderID)
   }
 
-  /// An agent DM's working folder for the header: Compose's copy first,
-  /// since it carries a folder picked there before the first turn.
-  private var agentFolderTitle: String? {
-    guard fullChatViewModel.peerUser?.bot == true else { return nil }
-    return composeAgentFolderTitle ?? botChatSettingsCoordinator.selectedState.document?.folderTitle
+  private func selectAgentFolder(_ id: String) {
+    guard let itemID = botChatSettingsCoordinator.selectedState.document?.folderItemID else { return }
+    botChatSettingsCoordinator.invoke(itemID: itemID, value: .string(id))
   }
 
   var body: some View {
@@ -250,7 +247,8 @@ struct ChatView: View {
               router: router,
               fullChatViewModel: fullChatViewModel,
               realtimeState: realtimeState,
-              agentFolderTitle: agentFolderTitle,
+              agentFolder: agentFolder,
+              onSelectAgentFolder: selectAgentFolder,
               onOpenSpace: onOpenSpace,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
@@ -265,7 +263,8 @@ struct ChatView: View {
               router: router,
               fullChatViewModel: fullChatViewModel,
               realtimeState: realtimeState,
-              agentFolderTitle: agentFolderTitle,
+              agentFolder: agentFolder,
+              onSelectAgentFolder: selectAgentFolder,
               onOpenSpace: onOpenSpace,
               onOpenChatInfo: { presentedChatInfo = $0 }
             )
@@ -296,7 +295,6 @@ struct ChatView: View {
       else { return }
       translationPlacement = .toolbar
     }
-    .onReceive(composeAgentFolderChanges) { composeAgentFolderTitle = $0 }
     .sheet(isPresented: $isBotChatSettingsPresented) {
       BotChatSettingsSheet(coordinator: botChatSettingsCoordinator)
     }
@@ -316,7 +314,6 @@ struct ChatView: View {
     .onChange(of: peerId) { _, newPeer in
       guard !preview else { return }
       isBotChatSettingsPresented = false
-      composeAgentFolderTitle = nil
       botChatSettingsCoordinator.cancel()
       botChatSettingsCoordinator = BotChatSettingsCoordinator(peer: newPeer)
       translationPlacement = TranslationState.shared.isTranslationEnabled(for: newPeer) ? .toolbar : .moreMenu

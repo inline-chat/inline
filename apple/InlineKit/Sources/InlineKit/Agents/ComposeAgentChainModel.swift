@@ -344,17 +344,7 @@ public final class ComposeAgentChainModel: ObservableObject {
     case .agentThread:
       return threadModel.canEditProject ? (threadModel.catalog?.projects ?? []) : []
     case .agentSettings:
-      if let item = settingsDocument?.item(ComposeAgentSettingsItem.project), case let .select(_, options) = item.control {
-        return options.filter { !$0.isDisabled }.map {
-          AgentConfigurationOption(id: $0.value, label: $0.label, description: $0.description)
-        }
-      }
-      if let folder = settingsDocument?.item(ComposeAgentSettingsItem.folder)?.control.folderPresentation {
-        return folder.recentFolders.filter { !$0.isDisabled }.map {
-          AgentConfigurationOption(id: $0.value, label: $0.label, description: $0.parentHint)
-        }
-      }
-      return []
+      return settingsDocument?.folderOptions ?? []
     case nil:
       return []
     }
@@ -373,10 +363,7 @@ public final class ComposeAgentChainModel: ObservableObject {
     case .agentThread:
       return threadModel.effectiveProjectID
     case .agentSettings:
-      if let item = settingsDocument?.item(ComposeAgentSettingsItem.project), case let .select(value, _) = item.control {
-        return value
-      }
-      return settingsDocument?.item(ComposeAgentSettingsItem.folder)?.control.folderPresentation?.selectedFolder.value
+      return settingsDocument?.selectedFolderID
     case nil:
       return nil
     }
@@ -473,12 +460,8 @@ public final class ComposeAgentChainModel: ObservableObject {
       guard let context = threadModel.contextSelectingProject(id) else { return }
       threadModel.performUpdate(context, using: updateAgentContext)
     case .agentSettings:
-      guard let id else { return }
-      if settingsDocument?.item(ComposeAgentSettingsItem.project) != nil {
-        settings?.invoke(itemID: ComposeAgentSettingsItem.project, value: .string(id))
-      } else {
-        settings?.invoke(itemID: ComposeAgentSettingsItem.folder, value: .string(id))
-      }
+      guard let id, let itemID = settingsDocument?.folderItemID else { return }
+      settings?.invoke(itemID: itemID, value: .string(id))
     case nil:
       break
     }
@@ -660,6 +643,35 @@ public extension BotChatSettingsModel.Document {
     }
     // Bridge v2 shows its working folder read-only.
     if case let .info(text, _)? = folder?.control { return text }
+    return nil
+  }
+
+  /// The folders the Agent can switch to; empty when the folder is read-only.
+  var folderOptions: [AgentConfigurationOption] {
+    if let item = item(ComposeAgentSettingsItem.project), case let .select(_, options) = item.control {
+      return options.filter { !$0.isDisabled }.map {
+        AgentConfigurationOption(id: $0.value, label: $0.label, description: $0.description)
+      }
+    }
+    if let folder = item(ComposeAgentSettingsItem.folder)?.control.folderPresentation {
+      return folder.recentFolders.filter { !$0.isDisabled }.map {
+        AgentConfigurationOption(id: $0.value, label: $0.label, description: $0.parentHint)
+      }
+    }
+    return []
+  }
+
+  var selectedFolderID: String? {
+    if let item = item(ComposeAgentSettingsItem.project), case let .select(value, _) = item.control {
+      return value
+    }
+    return item(ComposeAgentSettingsItem.folder)?.control.folderPresentation?.selectedFolder.value
+  }
+
+  /// The item a folder choice is written to.
+  var folderItemID: String? {
+    if item(ComposeAgentSettingsItem.project) != nil { return ComposeAgentSettingsItem.project }
+    if item(ComposeAgentSettingsItem.folder) != nil { return ComposeAgentSettingsItem.folder }
     return nil
   }
 }
