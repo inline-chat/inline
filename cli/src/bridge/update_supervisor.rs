@@ -25,6 +25,8 @@ use tokio::process::{Child, Command};
 pub(super) struct Activation {
     pub schema_version: u32,
     pub current: Artifact,
+    #[serde(default)]
+    pub supervisor: Option<Artifact>,
     pub previous: Option<Artifact>,
     pub candidate: Option<Artifact>,
     pub phase: String,
@@ -54,34 +56,106 @@ fn data_root(paths: &BridgePaths) -> Result<PathBuf, UpdateError> {
         .ok_or_else(|| std::io::Error::other("missing runtime root").into())
 }
 
-pub(super) fn enroll(paths: &BridgePaths) -> Result<(), UpdateError> {
+pub(super) fn enroll(paths: &BridgePaths) -> Result<Artifact, UpdateError> {
     let store = Store::new(&data_root(paths)?);
+    crate::update::store::private_dir(&store.root)?;
+    let _versions = crate::update::store::blocking_lock(&store.root.join("versions.lock"))?;
     let artifact = update::retain_running_binary(&store)?;
-    if enabled(paths) {
-        let current: Activation = read_json(&journal(paths))?;
-        if update::newer(&artifact.version, &current.current.version)? {
-            store.edit(|state| {
-                state.staged = Some(artifact);
-                state.outcome = "staged".into();
-                Ok(())
-            })?;
-        }
-    } else {
+    if !enabled(paths) {
         atomic_json(
             &journal(paths),
             &Activation {
                 schema_version: 1,
-                current: artifact,
+                current: artifact.clone(),
+                supervisor: Some(artifact.clone()),
                 previous: None,
                 candidate: None,
                 phase: "committed".into(),
                 last_activation: None,
-                rejected: Vec::new(),
+                rejected: vec![],
                 failure: None,
             },
         )?;
     }
+    // A locally invoked build is explicit authority for this service. It must
+    // never become an automatically selected candidate for sibling accounts.
+    Ok(artifact)
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartupRequest {
+    from: String,
+    candidate: Artifact,
+}
+fn startup_path(paths: &BridgePaths) -> PathBuf {
+    paths.root.join("startup.json")
+}
+
+pub(super) fn request_restart(
+    paths: &BridgePaths,
+    candidate: &Artifact,
+) -> Result<(), UpdateError> {
+    let state: Activation = read_json(&journal(paths))?;
+    if candidate.executable_sha256 == state.current.executable_sha256
+        || update::newer(&state.current.version, &candidate.version)?
+    {
+        return Ok(());
+    }
+    if candidate.minimum_reader_schema_version > state.current.bridge_schema_version {
+        return Err(UpdateError::Verification("storage_maintenance_required"));
+    }
+    atomic_json(
+        &startup_path(paths),
+        &StartupRequest {
+            from: state.current.sha256,
+            candidate: candidate.clone(),
+        },
+    )
+}
+
+pub(super) fn request_start(paths: &BridgePaths) -> Result<(), UpdateError> {
+    if enabled(paths) {
+        atomic_json(&paths.root.join("resume.json"), &())?;
+    }
     Ok(())
+}
+
+async fn start_selected(
+    state: &mut Activation,
+    paths: &BridgePaths,
+    store: &Store,
+    secrets: &super::AccountBridgeSecrets,
+    channel: &str,
+    policy: TrialPolicy,
+) -> Result<Child, UpdateError> {
+    if let Ok(request) = read_json::<StartupRequest>(&startup_path(paths)) {
+        if request.from == state.current.sha256
+            && !update::newer(&state.current.version, &request.candidate.version)?
+        {
+            // Explicit restart has already stopped the old OS service. Trial
+            // the invoking CLI even when automatic updates are disabled.
+            let result = activate(
+                state,
+                request.candidate,
+                None,
+                paths,
+                store,
+                secrets,
+                channel,
+                policy,
+                false,
+            )
+            .await;
+            let _ = fs::remove_file(startup_path(paths));
+            if let Ok(child) = result {
+                return Ok(child);
+            }
+        } else {
+            let _ = fs::remove_file(startup_path(paths));
+        }
+    }
+    launch(&state.current, paths, store)
 }
 
 fn launch(artifact: &Artifact, paths: &BridgePaths, store: &Store) -> Result<Child, UpdateError> {
@@ -398,7 +472,15 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
         return Err("unsupported activation journal".into());
     }
     recover_interrupted(&mut state, &paths, read_policy(&store).channel.as_str())?;
-    let fallback_engine = update::retain_running_binary(&store)?;
+    let fallback_engine = {
+        let _versions = crate::update::store::blocking_lock(&store.root.join("versions.lock"))?;
+        let engine = update::retain_running_binary(&store)?;
+        if state.supervisor.as_ref() != Some(&engine) {
+            state.supervisor = Some(engine.clone());
+            atomic_json(&journal(&paths), &state)?;
+        }
+        engine
+    };
     if update::validate_cached(&store, &state.current).is_err() {
         let broken = state.current.clone();
         state.current = state
@@ -416,7 +498,16 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
             "runtime_identity",
         );
     }
-    let mut child = launch(&state.current, &paths, &store).ok();
+    let mut child = start_selected(
+        &mut state,
+        &paths,
+        &store,
+        &secrets,
+        read_policy(&store).channel.as_str(),
+        TRIAL,
+    )
+    .await
+    .ok();
     let mut terminate = Box::pin(super::wait_for_termination());
     let mut poll = tokio::time::interval(Duration::from_secs(3));
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -506,6 +597,12 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                 }
                 next_start = now + Duration::from_secs(10);
             }
+        }
+        if paths.root.join("resume.json").is_file()
+            && fs::remove_file(paths.root.join("resume.json")).is_ok()
+        {
+            parked = false;
+            next_start = now;
         }
         let policy = read_policy(&store);
         let rollback = rollback_candidate(&state, &paths);
@@ -613,15 +710,17 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                     }
                 }
             } else {
-                let _ =
-                    service::control_request(&paths, &secrets, ControlCommand::CancelUpdate).await;
                 if state.candidate.is_some() {
+                    let _ =
+                        service::control_request(&paths, &secrets, ControlCommand::CancelUpdate)
+                            .await;
                     let _ = pending(&mut state, None, "committed", &paths);
                 }
             }
         } else {
-            let _ = service::control_request(&paths, &secrets, ControlCommand::CancelUpdate).await;
             if state.candidate.is_some() {
+                let _ =
+                    service::control_request(&paths, &secrets, ControlCommand::CancelUpdate).await;
                 let _ = pending(&mut state, None, "committed", &paths);
             }
         }
@@ -703,6 +802,7 @@ mod tests {
         fn state(&self, current: Artifact) -> Activation {
             Activation {
                 schema_version: 1,
+                supervisor: Some(current.clone()),
                 current,
                 previous: None,
                 candidate: None,
@@ -885,6 +985,33 @@ mod tests {
         assert_eq!(state.failure.as_deref(), Some("activation_journal"));
         f.assert_account_unchanged();
         stop_with_timeout(&mut restored, &f.paths, &f.secrets, QUICK.stop)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn update_explicit_restart_uses_the_invoking_runtime_even_when_automatic_updates_are_off()
+    {
+        let f = Fixture::new();
+        let old = f.artifact("old");
+        let requested = f.artifact("healthy");
+        f.store
+            .edit(|s| {
+                s.auto_update = false;
+                Ok(())
+            })
+            .unwrap();
+        let mut state = f.state(old);
+        atomic_json(&journal(&f.paths), &state).unwrap();
+        request_restart(&f.paths, &requested).unwrap();
+        let mut child = start_selected(&mut state, &f.paths, &f.store, &f.secrets, "alpha", QUICK)
+            .await
+            .unwrap();
+        assert_eq!(state.current, requested);
+        assert!(!startup_path(&f.paths).exists());
+        assert!(!f.store.read().unwrap().auto_update);
+        f.assert_account_unchanged();
+        stop_with_timeout(&mut child, &f.paths, &f.secrets, QUICK.stop)
             .await
             .unwrap();
     }

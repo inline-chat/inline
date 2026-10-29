@@ -761,6 +761,12 @@ enum UpdateAction {
         app_channel: Option<update::UpdateChannel>,
         #[arg(
             long,
+            requires = "app_channel",
+            help = "Explicitly resume following the app channel"
+        )]
+        follow_app: bool,
+        #[arg(
+            long,
             help = "Register this explicitly installed executable for managed updates"
         )]
         register: bool,
@@ -2745,8 +2751,12 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     auto,
                     channel,
                     app_channel,
+                    follow_app,
                     register,
                 } => {
+                    if *follow_app {
+                        update::follow_app(&config, app_channel.expect("required by clap"))?;
+                    }
                     update::configure(
                         &config,
                         auto.as_deref().map(|value| value == "on"),

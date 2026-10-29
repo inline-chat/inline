@@ -25,6 +25,7 @@ public enum CLIUpdateOperation: Sendable {
   case status
   case configure(enabled: Bool?, appChannel: CLIUpdateChannel, register: Bool)
   case background
+  case followApp(CLIUpdateChannel)
   case apply
 
   var arguments: [String] {
@@ -35,6 +36,7 @@ public enum CLIUpdateOperation: Sendable {
         + (enabled.map { ["--auto", $0 ? "on" : "off"] } ?? [])
         + (register ? ["--register"] : [])
     case .background: ["update", "--background", "--json"]
+    case let .followApp(channel): ["update", "config", "--follow-app", "--app-channel", channel.rawValue, "--json"]
     case .apply: ["update", "--json"]
     }
   }
@@ -42,4 +44,15 @@ public enum CLIUpdateOperation: Sendable {
 
 public enum CLIUpdateFailure: Error, Sendable, Equatable {
   case unsupportedEngine
+}
+
+public struct CLIUpdateCheck: Decodable, Sendable {
+  public let latestVersion: String
+  public let updateAvailable: Bool
+  public let supported: Bool
+  enum CodingKeys: String, CodingKey {
+    case latestVersion = "latest_version"
+    case updateAvailable = "update_available"
+    case supported
+  }
 }

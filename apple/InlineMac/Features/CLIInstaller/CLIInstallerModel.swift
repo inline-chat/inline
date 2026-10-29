@@ -139,7 +139,7 @@ final class CLIInstallerModel {
 
 extension CLIUpdateChannel {
   /// Tip installs CLI alphas so features that span the app and CLI arrive
-  /// together. Read at launch; a channel switch applies after relaunch.
+  /// together. Read at operation time so channel switches apply immediately.
   @MainActor
   static var matchingAppUpdates: CLIUpdateChannel {
 #if SPARKLE

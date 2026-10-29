@@ -1195,6 +1195,21 @@ pub(crate) struct BridgeUpdateStatus {
     pub phase: String,
 }
 
+pub(crate) fn is_service_entry_point(data: &Path, executable: &Path) -> bool {
+    if executable.starts_with(data.join("bridge")) {
+        return true;
+    }
+    // Older installations share this private path with their service. Keep
+    // that guard fixed after enrollment; a side-by-side CLI without a legacy
+    // service at this path can still be explicitly managed.
+    executable == data.join("bin/inline")
+        && data
+            .join("bridge")
+            .join(INSTALLATION_ID)
+            .join("config.json")
+            .is_file()
+}
+
 pub(crate) fn update_statuses(config: &Config) -> Vec<BridgeUpdateStatus> {
     let root = config.data_dir.join("bridge");
     let mut roots = vec![BridgePaths::legacy(config).root];

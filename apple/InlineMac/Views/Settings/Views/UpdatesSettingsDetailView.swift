@@ -39,6 +39,10 @@ struct UpdatesSettingsDetailView: View {
           Text(cliUpdates.statusText).foregroundStyle(.secondary)
         }
         if let version = cliUpdates.versionText { SettingsDetailText(text: version) }
+        if cliUpdates.canManage && !cliUpdates.followsAppChannel {
+          Button("Use App Update Channel") { cliUpdates.useAppChannel() }
+            .disabled(cliUpdates.isBusy)
+        }
         if let bridgeVersions = cliUpdates.bridgeVersionText { SettingsDetailText(text: bridgeVersions) }
         if !cliUpdates.canManage && !cliUpdates.homebrewManaged {
           SettingsDetailText(text: "A writable, managed CLI installation is required for automatic updates.")

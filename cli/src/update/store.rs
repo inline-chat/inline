@@ -98,7 +98,7 @@ impl Store {
         body: impl FnOnce(&mut State) -> Result<T, UpdateError>,
     ) -> Result<T, UpdateError> {
         private_dir(&self.root)?;
-        let _lock = lock(&self.root.join("settings.lock"))?;
+        let _lock = blocking_lock(&self.root.join("settings.lock"))?;
         let mut state = self.read()?;
         let result = body(&mut state)?;
         atomic_json(&self.root.join("update.json"), &state)?;
@@ -127,7 +127,7 @@ pub fn private_dir(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-pub fn lock(path: &Path) -> Result<File, UpdateError> {
+fn open_lock(path: &Path) -> Result<File, UpdateError> {
     if fs::symlink_metadata(path).is_ok_and(|m| !m.is_file()) {
         return Err(UpdateError::Verification("unsafe_lock"));
     }
@@ -138,8 +138,18 @@ pub fn lock(path: &Path) -> Result<File, UpdateError> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
-    let file = options.open(path)?;
+    Ok(options.open(path)?)
+}
+
+pub fn lock(path: &Path) -> Result<File, UpdateError> {
+    let file = open_lock(path)?;
     file.try_lock().map_err(|_| UpdateError::Busy)?;
+    Ok(file)
+}
+
+pub fn blocking_lock(path: &Path) -> Result<File, UpdateError> {
+    let file = open_lock(path)?;
+    file.lock()?;
     Ok(file)
 }
 
@@ -191,15 +201,22 @@ mod tests {
             .unwrap();
         let before = fs::read(store.root.join("update.json")).unwrap();
         let held = lock(&store.root.join("settings.lock")).unwrap();
-        assert!(matches!(
-            store.edit(|state| {
-                state.auto_update = true;
-                Ok(())
-            }),
-            Err(UpdateError::Busy)
-        ));
+        let writer_store = store.clone();
+        let writer = std::thread::spawn(move || {
+            writer_store
+                .edit(|state| {
+                    state.auto_update = true;
+                    state.revision += 1;
+                    Ok(())
+                })
+                .unwrap()
+        });
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert!(!writer.is_finished());
         assert_eq!(fs::read(store.root.join("update.json")).unwrap(), before);
         drop(held);
-        assert!(!store.read().unwrap().auto_update);
+        writer.join().unwrap();
+        assert!(store.read().unwrap().auto_update);
+        assert_eq!(store.read().unwrap().revision, 2);
     }
 }

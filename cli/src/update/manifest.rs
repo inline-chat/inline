@@ -95,6 +95,10 @@ fn validate(release: &Release, channel: UpdateChannel, depth: usize) -> Result<(
     if release.format_version != 1
         || release.channel != channel
         || release.supervisor_protocol != 1
+        || version.to_string().len() > 64
+        || release.bridge_schema_version == 0
+        || release.minimum_reader_schema_version == 0
+        || release.targets.len() > 16
         || depth > 4
         || release.generation == 0
         || release.source_sha.len() != 40

@@ -47,7 +47,11 @@ docker exec --user hermes -e HOME=/opt/data/home -e INLINE_PLUGIN_TELEMETRY=0 -e
     if test -f /tmp/inline-smoke/inline-candidate; then
       install -m 755 /tmp/inline-smoke/inline-candidate /opt/data/.local/bin/inline
     else
-      INLINE_INSTALL_DIR=/opt/data/.local/bin sh /tmp/inline-smoke/install.sh
+      # This matrix lane deliberately installs the pre-updater published CLI.
+      # Keep its explicit legacy mirror contract until the first signed stable
+      # release; automatic installation never uses this override.
+      INLINE_RELEASE_MANIFEST_URL=https://public-assets.inline.chat/cli/manifest.json \
+        INLINE_INSTALL_DIR=/opt/data/.local/bin sh /tmp/inline-smoke/install.sh
     fi
     if test -f /tmp/inline-smoke/inline-candidate; then
       # Regression: Umbrel docker exec can omit Hermes from PATH, even though

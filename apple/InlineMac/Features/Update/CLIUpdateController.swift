@@ -16,6 +16,7 @@ final class CLIUpdateController {
   private(set) var failureText: String?
   private(set) var bridgeMigrationRequired = false
   private(set) var bridgeVersionText: String?
+  private(set) var followsAppChannel = true
   @ObservationIgnored private var terminalVersion: String?
   var automaticUpdatesEnabled = true {
     didSet {
@@ -52,6 +53,7 @@ final class CLIUpdateController {
     schedule = Task { [weak self] in
       try? await Task.sleep(for: .seconds(120))
       while !Task.isCancelled {
+        guard self != nil else { return }
         await self?.refresh(automatic: true)
         try? await Task.sleep(for: .seconds(300))
       }
@@ -66,14 +68,31 @@ final class CLIUpdateController {
 
   func checkNow() {
     Task {
-      guard !isBusy else { return }
-      await installer.refresh()
-      if case let .ready(plan) = installer.phase {
-        updateAvailable = plan.disposition == .update
+      guard !isBusy, let installation else { return }
+      isBusy = true
+      do {
+        let check = try await CLIAgentSetupRunner(configuration: .production(channel: channel())).checkUpdate(installation: installation)
+        updateAvailable = check.updateAvailable
+        statusText = check.updateAvailable ? "Update Available" : "Up to Date"
+        isBusy = false
+        if automaticUpdatesEnabled { nextCheck = .distantPast; await refresh(automatic: true, manual: true) }
+      } catch {
+        isBusy = false
+        failureText = "The CLI couldn’t check for updates. The working version was kept; retry later."
       }
-      if automaticUpdatesEnabled { nextCheck = .distantPast; await refresh(automatic: true, manual: true) }
-      else if updateAvailable { statusText = "Update Available" }
-      else { await refresh(automatic: false) }
+    }
+  }
+
+  func useAppChannel() {
+    Task {
+      guard !isBusy, let installation else { return }
+      isBusy = true
+      do {
+        show(try await run(.followApp(channel()), at: installation))
+        nextCheck = .distantPast
+        isBusy = false
+        await refresh(automatic: true)
+      } catch { isBusy = false; failureText = "The channel change will need a retry." }
     }
   }
 
@@ -164,6 +183,7 @@ final class CLIUpdateController {
     automaticUpdatesEnabled = (UserDefaults.standard.object(forKey: Self.pendingKey) as? Bool) ?? status.autoUpdate
     readingStatus = false
     versionText = "CLI \(terminalVersion ?? status.currentVersion) · \(status.channel.capitalized)"
+    followsAppChannel = status.followsApp
     let bridgeVersions = Set(status.bridges?.compactMap(\.version) ?? []).sorted()
     bridgeVersionText = bridgeVersions.isEmpty ? nil : "Running bridges: \(bridgeVersions.joined(separator: ", "))"
     failureText = status.failure.map { stage in
