@@ -387,7 +387,7 @@ mod tests {
             99,
         )
         .expect("caption content");
-        assert_eq!(normalized.text, "😀 show [@Dena](in://user/123) this");
+        assert_eq!(normalized.text, "😀 show [@Dena](inline://user/123) this");
         assert_eq!(normalized.attachments.len(), 1);
     }
 }

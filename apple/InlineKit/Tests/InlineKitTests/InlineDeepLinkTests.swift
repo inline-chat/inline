@@ -7,14 +7,14 @@ import Testing
 struct InlineDeepLinkTests {
   @Test("builds canonical deep link URLs")
   func buildsCanonicalURLs() {
-    #expect(InlineDeepLink.user(id: 12).url?.absoluteString == "in://user/12")
-    #expect(InlineDeepLink.chat(id: 34).url?.absoluteString == "in://chat/34")
-    #expect(InlineDeepLink.message(chatId: 34, messageId: 56).url?.absoluteString == "in://chat/34/message/56")
-    #expect(InlineDeepLink.message(chatId: 34, messageId: 56).url(scheme: "inline")?.absoluteString == "inline://chat/34/message/56")
-    #expect(InlineDeepLink.publicSpace(handle: "TownHall").url?.absoluteString == "in://join/public/TownHall")
+    #expect(InlineDeepLink.user(id: 12).url?.absoluteString == "inline://user/12")
+    #expect(InlineDeepLink.chat(id: 34).url?.absoluteString == "inline://chat/34")
+    #expect(InlineDeepLink.message(chatId: 34, messageId: 56).url?.absoluteString == "inline://chat/34/message/56")
+    #expect(InlineDeepLink.message(chatId: 34, messageId: 56).url(scheme: "in")?.absoluteString == "in://chat/34/message/56")
+    #expect(InlineDeepLink.publicSpace(handle: "TownHall").url?.absoluteString == "inline://join/public/TownHall")
     #expect(
       InlineDeepLink.spaceInvite(token: "iv1_abcdefghijklmnopqrstuvwxyz0123456789_ABCDEF").url?.absoluteString ==
-        "in://join/invite/iv1_abcdefghijklmnopqrstuvwxyz0123456789_ABCDEF"
+        "inline://join/invite/iv1_abcdefghijklmnopqrstuvwxyz0123456789_ABCDEF"
     )
     #expect(InlineDeepLink.chat(id: 34).url(scheme: "https") == nil)
   }

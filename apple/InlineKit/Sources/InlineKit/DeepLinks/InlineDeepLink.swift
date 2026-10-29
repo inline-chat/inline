@@ -2,7 +2,7 @@ import Foundation
 
 public enum InlineDeepLink: Equatable, Sendable {
   public static let configurationKey = "InlineURLScheme"
-  public static let defaultScheme = "in"
+  public static let defaultScheme = "inline"
   public static let productionSchemes: Set<String> = ["in", "inline"]
   public static let debugSchemes: Set<String> = ["inline-dev", "inline-debug", "inline-debug-2"]
   public static let supportedSchemes: Set<String> = {
@@ -14,7 +14,7 @@ public enum InlineDeepLink: Equatable, Sendable {
   }()
 
   /// The build-configured scheme used when creating links and OAuth callbacks.
-  /// `in` remains the canonical fallback and all shipped aliases remain readable.
+  /// `inline` is the canonical fallback and all shipped aliases, including `in`, remain readable.
   public static var configuredScheme: String {
     guard let configured = Bundle.main.object(forInfoDictionaryKey: configurationKey) as? String else {
       return defaultScheme

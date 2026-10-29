@@ -171,7 +171,7 @@ async fn admitted_direction_keeps_the_request_and_stable_inline_links() {
         .await
         .expect("admission")
         .expect("direction");
-    let expected = "hi 😀 ask [@Dena](in://user/123) about [Planning](in://chat/456)";
+    let expected = "hi 😀 ask [@Dena](inline://user/123) about [Planning](inline://chat/456)";
     assert_eq!(record.direction.text, expected);
     route
         .store

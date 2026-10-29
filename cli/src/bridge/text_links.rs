@@ -10,7 +10,7 @@ pub(super) fn inline_mention(label: &str, user_id: i64, agent_id: Option<i64>) -
     } else {
         format!("@{label}")
     };
-    let mut target = format!("in://user/{user_id}");
+    let mut target = format!("inline://user/{user_id}");
     if let Some(agent_id) = agent_id.filter(|id| *id > 0) {
         target.push_str(&format!("?agent_id={agent_id}"));
     }
@@ -70,7 +70,7 @@ pub(super) fn render_inline_text(
                     if chat_id <= 0 {
                         return None;
                     }
-                    markdown_link(label, &format!("in://chat/{chat_id}"))
+                    markdown_link(label, &format!("inline://chat/{chat_id}"))
                 }
                 "TYPE_GROUP_MENTION" => {
                     let group_id = entity.group_id?.get();
@@ -206,10 +206,10 @@ pub(super) mod tests {
         ];
         assert_eq!(
             render_inline_text(text, &entities, Some(99)),
-            "😀 ask [@Dena](in://user/123) about [Planning](in://chat/456)"
+            "😀 ask [@Dena](inline://user/123) about [Planning](inline://chat/456)"
         );
         // Conversation history keeps the mention, so the quoted addressing survives.
-        assert!(render_inline_text(text, &entities, None).contains("[@Mo’s Codex](in://user/99)"));
+        assert!(render_inline_text(text, &entities, None).contains("[@Mo’s Codex](inline://user/99)"));
     }
 
     #[test]
@@ -222,7 +222,7 @@ pub(super) mod tests {
             let entities = [entity(text, "@Mo’s Codex", "TYPE_MENTION", 99)];
             assert!(
                 render_inline_text(text, &entities, Some(99))
-                    .contains("[@Mo’s Codex](in://user/99)")
+                    .contains("[@Mo’s Codex](inline://user/99)")
             );
         }
         let text = "@Mo’s Codex hi";
@@ -230,7 +230,7 @@ pub(super) mod tests {
         let entities = [entity(text, "@Mo’s Codex", "TYPE_MENTION", 98)];
         assert_eq!(
             render_inline_text(text, &entities, Some(99)),
-            "[@Mo’s Codex](in://user/98) hi"
+            "[@Mo’s Codex](inline://user/98) hi"
         );
     }
 
@@ -240,10 +240,10 @@ pub(super) mod tests {
         let mut agent = entity(text, "@Data [Analyst]", "TYPE_MENTION", 123);
         agent.agent_id = Some(InlineId::new(7));
         let mut message = entity(text, "this message", "TYPE_TEXT_URL", 0);
-        message.value = Some("in://chat/456/message/9".to_string());
+        message.value = Some("inline://chat/456/message/9".to_string());
         assert_eq!(
             render_inline_text(text, &[agent, message], None),
-            "ask [@Data \\[Analyst\\]](in://user/123?agent_id=7) about [this message](in://chat/456/message/9)"
+            "ask [@Data \\[Analyst\\]](inline://user/123?agent_id=7) about [this message](inline://chat/456/message/9)"
         );
     }
 
@@ -277,7 +277,7 @@ pub(super) mod tests {
     fn preserves_group_identity_and_literal_label_and_destination_bytes() {
         assert_eq!(
             inline_mention("a ==B==", 123, None),
-            "[@a \\=\\=B\\=\\=](in://user/123)"
+            "[@a \\=\\=B\\=\\=](inline://user/123)"
         );
         let text = "ask @eng and @A &amp; B about First\n\nSecond";
         let entities = [
@@ -287,7 +287,7 @@ pub(super) mod tests {
         ];
         assert_eq!(
             render_inline_text(text, &entities, None),
-            "ask [@eng](inline://group/8) and [@A \\&amp; B](in://user/123) about [First&#10;&#10;Second](in://chat/456)"
+            "ask [@eng](inline://group/8) and [@A \\&amp; B](inline://user/123) about [First&#10;&#10;Second](inline://chat/456)"
         );
         let mut link = entity("doc", "doc", "TYPE_TEXT_URL", 0);
         link.value = Some("https://example.com/a(b)?x=&amp;&y=1".to_string());

@@ -124,6 +124,19 @@ struct CLIAgentSetupRunnerTests {
     #expect(result.readiness == nil)
   }
 
+  @Test("accepts either production scheme for the bot link")
+  func acceptsProductionSchemesForBotLink() throws {
+    let setup = { (openURL: String) in
+      Data(
+        #"{"protocolVersion":1,"ok":true,"action":"agents.setup","status":"ready","documentationUrl":"https://inline.chat/docs/agents","openUrl":"\#(openURL)","target":"codex","family":"bridge","instance":"codex-example","bot":{"id":42,"username":"codex_bot","name":"Codex"},"service":{"kind":"inline_bridge","action":"started","ready":true,"status":"running"}}"#.utf8
+      )
+    }
+
+    #expect(try CLIAgentSetupRunner.parseSetup(setup("inline://user/42")).bot.id == 42)
+    #expect(throws: (any Error).self) { try CLIAgentSetupRunner.parseSetup(setup("inline-dev://user/42")) }
+    #expect(throws: (any Error).self) { try CLIAgentSetupRunner.parseSetup(setup("inline://user/43")) }
+  }
+
   @Test("decodes progress events and the final streamed result")
   func decodesStreamedSetup() throws {
     let event = Data(
