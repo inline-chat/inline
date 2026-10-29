@@ -23,7 +23,7 @@ private struct MessageContextMenuLabRepresentable: UIViewControllerRepresentable
   func updateUIViewController(_ controller: MessageContextMenuLabController, context: Context) {}
 }
 
-final class MessageContextMenuLabController: UIViewController {
+final class MessageContextMenuLabController: UIViewController, UIContextMenuInteractionDelegate {
   private struct Row {
     var message: FullMessage
     var isFirstInGroup = true
@@ -38,12 +38,13 @@ final class MessageContextMenuLabController: UIViewController {
   private var rows: [Row] = []
   private let cache = TextLayoutCache()
   private var laidOutWidth: CGFloat = 0
-  private var keyboardHeight: CGFloat = 0
 
   private var configuration = MessageContextMenuConfiguration.standard
   private var usesLivePreview = true
   private var showsReactions = true
   private var isSlow = false
+  /// Opens UIKit's own menu with the same actions, for side-by-side checks.
+  private var usesSystemMenu = false
   private var menu: MessageContextMenuController?
   private var press: (index: Int, scale: CGFloat)?
   private let feedback = UIImpactFeedbackGenerator(style: .medium)
@@ -53,6 +54,7 @@ final class MessageContextMenuLabController: UIViewController {
   private lazy var previewItem = UIBarButtonItem(title: "", style: .plain, target: self, action: #selector(togglePreview))
   private lazy var reactionsItem = UIBarButtonItem(title: "", style: .plain, target: self, action: #selector(toggleReactions))
   private lazy var speedItem = UIBarButtonItem(title: "", style: .plain, target: self, action: #selector(toggleSpeed))
+  private lazy var systemItem = UIBarButtonItem(title: "", style: .plain, target: self, action: #selector(toggleSystemMenu))
   private lazy var keyboardItem = UIBarButtonItem(
     image: UIImage(systemName: "keyboard"), style: .plain, target: self, action: #selector(toggleKeyboard)
   )
@@ -74,7 +76,10 @@ final class MessageContextMenuLabController: UIViewController {
     keyboardField.frame = CGRect(x: -100, y: -100, width: 10, height: 10)
     view.addSubview(keyboardField)
 
-    toolbar.items = [styleItem, .flexibleSpace(), previewItem, .flexibleSpace(), reactionsItem, .flexibleSpace(), speedItem, .flexibleSpace(), keyboardItem]
+    toolbar.items = [
+      systemItem, .flexibleSpace(), styleItem, .flexibleSpace(), previewItem, .flexibleSpace(),
+      reactionsItem, .flexibleSpace(), speedItem, .flexibleSpace(), keyboardItem,
+    ]
     updateItems()
 
     rows = Self.catalog()
@@ -85,7 +90,7 @@ final class MessageContextMenuLabController: UIViewController {
 
     let hold = MessageContextMenuHoldGesture(target: self, action: #selector(handleHold(_:)))
     hold.acceptsTouch = { [weak self] point in
-      guard let self, menu == nil else { return false }
+      guard let self, menu == nil, !usesSystemMenu else { return false }
       return rowIndex(at: point) != nil
     }
     hold.onPressBegan = { [weak self] point in
@@ -102,13 +107,7 @@ final class MessageContextMenuLabController: UIViewController {
     }
     scrollView.addGestureRecognizer(hold)
     holdGesture = hold
-
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(keyboardWillChangeFrame(_:)),
-      name: UIResponder.keyboardWillChangeFrameNotification,
-      object: nil
-    )
+    scrollView.addInteraction(UIContextMenuInteraction(delegate: self))
     let traits: [UITrait] = [UITraitUserInterfaceStyle.self, UITraitPreferredContentSizeCategory.self]
     registerForTraitChanges(traits) { (controller: MessageContextMenuLabController, _: UITraitCollection) in
       controller.layoutRows()
@@ -248,12 +247,41 @@ final class MessageContextMenuLabController: UIViewController {
       ),
       configuration: configuration
     )
+    // As in the chat: the keyboard goes away while the menu is open and comes back after.
+    let restoresKeyboard = keyboardField.isFirstResponder
     controller.onDidDismiss = { [weak self, weak controller] in
       guard let self, menu === controller else { return }
       menu = nil
+      if restoresKeyboard { keyboardField.becomeFirstResponder() }
     }
     menu = controller
-    controller.present(in: window, keyboardHeight: keyboardHeight)
+    if restoresKeyboard { keyboardField.resignFirstResponder() }
+    controller.present(from: window)
+  }
+
+  // MARK: - System menu
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    configurationForMenuAtLocation location: CGPoint
+  ) -> UIContextMenuConfiguration? {
+    guard usesSystemMenu, let index = rowIndex(at: location) else { return nil }
+    let message = rows[index].message
+    return UIContextMenuConfiguration(identifier: index as NSNumber, previewProvider: nil) { [weak self] _ in
+      self?.makeMenu(for: message, includesTextCopy: true)
+    }
+  }
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    configuration: UIContextMenuConfiguration,
+    highlightPreviewForItemWithIdentifier identifier: any NSCopying
+  ) -> UITargetedPreview? {
+    guard let index = identifier as? Int, rows.indices.contains(index) else { return nil }
+    let bubble = rows[index].view.bubbleContentView
+    let parameters = UIPreviewParameters()
+    parameters.backgroundColor = .clear
+    return UITargetedPreview(view: bubble, parameters: parameters)
   }
 
   /// The chat's menu shape with handlers that only report the pick.
@@ -346,10 +374,16 @@ final class MessageContextMenuLabController: UIViewController {
   // MARK: - Knobs
 
   private func updateItems() {
+    systemItem.title = usesSystemMenu ? "System" : "Custom"
     styleItem.title = configuration.style.platter == .glass ? "Glass" : "Material"
     previewItem.title = usesLivePreview ? "Live" : "Bitmap"
     reactionsItem.title = showsReactions ? "Reactions" : "No Reactions"
     speedItem.title = isSlow ? "Slow" : "Normal"
+  }
+
+  @objc private func toggleSystemMenu() {
+    usesSystemMenu.toggle()
+    updateItems()
   }
 
   @objc private func toggleStyle() {
@@ -376,6 +410,7 @@ final class MessageContextMenuLabController: UIViewController {
     configuration.motion.springDuration = standard.springDuration * factor
     configuration.motion.backgroundDuration = standard.backgroundDuration * factor
     configuration.motion.dismissDuration = standard.dismissDuration * factor
+    configuration.motion.pageSpringDuration = standard.pageSpringDuration * factor
     // The hold times the press itself, so it needs the slowed motion too.
     holdGesture?.motion = configuration.motion
     updateItems()
@@ -389,13 +424,32 @@ final class MessageContextMenuLabController: UIViewController {
     }
   }
 
-  @objc private func keyboardWillChangeFrame(_ notification: Notification) {
-    guard let window = view.window,
-          let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-    else { return }
-    let keyboard = window.convert(frame, from: window.screen.coordinateSpace)
-    keyboardHeight = keyboard.minY < window.bounds.maxY ? window.bounds.maxY - keyboard.minY : 0
+  #if DEBUG
+  /// Opens the custom menu on a catalog row from device tests, as a finished hold would.
+  @discardableResult
+  func openMenuForTesting(row index: Int) -> MessageContextMenuController? {
+    guard rows.indices.contains(index) else { return nil }
+    presentMenu(for: index, pressedScale: 1)
+    return menu
   }
+
+  var catalogCountForTesting: Int { rows.count }
+
+  func focusKeyboardForTesting() -> Bool {
+    keyboardField.becomeFirstResponder()
+  }
+
+  var isKeyboardFocusedForTesting: Bool { keyboardField.isFirstResponder }
+
+  /// Stretches every timing by `factor`, so screenshots catch transitions mid-flight.
+  func slowDownForTesting(by factor: Double) {
+    let standard = MessageContextMenuMotion.standard
+    configuration.motion.springDuration = standard.springDuration * factor
+    configuration.motion.backgroundDuration = standard.backgroundDuration * factor
+    configuration.motion.dismissDuration = standard.dismissDuration * factor
+    configuration.motion.pageSpringDuration = standard.pageSpringDuration * factor
+  }
+  #endif
 
   // MARK: - Catalog
 

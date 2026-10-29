@@ -1995,26 +1995,23 @@ private extension MessagesCollectionView {
         customContextMenu = nil
         collectionView.contextMenuPhase = .idle
         collectionView.updateContentInsetsAfterContextMenuIfNeeded()
+        // Refocuses the composer if the menu put the keyboard away; the list keeps its place.
         collectionView.onContextMenuDidEnd?()
-        // The keyboard never moved for this menu, so there's no viewport to restore.
-        if collectionView.isKeyboardVisible, !collectionView.isReactionPickerPresented {
-          collectionView.cancelContextMenuKeyboardRestoration()
-        }
         flushDeferredNextUpdates()
       }
 
       customContextMenu = controller
-      collectionView.cancelContextMenuKeyboardRestoration()
       collectionView.contextMenuPhase = .presented
       _ = collectionView.stopComposeInsetAnimationAtPresentation()
+      // Notes whether the composer has focus, so it gets it back when the menu closes.
       collectionView.onContextMenuWillDisplay?()
-      // The list measures the keyboard's overlap with itself; the menu needs its reach from the
-      // window's bottom.
-      let viewport = collectionView.convert(collectionView.bounds, to: window)
-      let keyboardHeight = collectionView.isKeyboardVisible
-        ? max(0, window.bounds.maxY - (viewport.maxY - collectionView.keyboardHeight))
-        : 0
-      controller.present(in: window, keyboardHeight: keyboardHeight)
+      // iOS 27 draws the keyboard over every app window and leaves it out of screen snapshots, so
+      // nothing can cover it. Like UIKit's own menu, this one puts it away while it's open.
+      if collectionView.isKeyboardVisible {
+        collectionView.preserveContextMenuViewportForKeyboardRestoration()
+        window.endEditing(true)
+      }
+      controller.present(from: window)
       return true
     }
 
@@ -4416,7 +4413,9 @@ private extension MessagesCollectionView {
       reactionPickerPresentation = ReactionEmojiPickerPresentation(
         picker: picker,
         presenter: presenter,
-        over: collectionView.isContextMenuInteractionActive ? sourceWindow : nil,
+        // Over the custom menu's own window when it's open, so the sheet shows above it.
+        over: customContextMenu?.presentationWindow
+          ?? (collectionView.isContextMenuInteractionActive ? sourceWindow : nil),
         tintColor: theme.primary.uiColor,
         onDismiss: { [weak self, weak collectionView] in
           self?.reactionPickerPresentation = nil
