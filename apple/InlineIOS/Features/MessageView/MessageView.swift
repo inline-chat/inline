@@ -358,7 +358,8 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   }
 
   func performMessageGestureAction(_ action: MessageGestureAction) {
-    guard let message = content?.message else { return }
+    guard let content, !content.context.isThreadAnchor else { return }
+    let message = content.message
     MessageViewActions.perform(action, on: message, onReactionsMenu: onReactionsMenu)
   }
 
@@ -483,7 +484,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   }
 
   @objc private func handleAcknowledgementTap() {
-    guard let message = content?.message else { return }
+    guard let message = content?.message, content?.context.isThreadAnchor == false else { return }
     MessageViewActions.toggleAcknowledgement(on: message)
   }
 

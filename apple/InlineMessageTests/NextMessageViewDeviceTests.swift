@@ -1290,6 +1290,51 @@ struct NextMessageViewDeviceTests {
     #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(20).joined(separator: "\n"))")
   }
 
+  @Test("A thread's parent draws with the next view, without its thread summary, and animates reactions in place")
+  func threadAnchor() async throws {
+    var failures: [String] = []
+    for outgoing in [false, true] {
+      var parent = try #require(Self.kinds(outgoing: outgoing).first { $0.0 == "thread summary" }?.1)
+      parent.message.messageId = 500
+      parent.message.chatId = 9_019
+      parent.message.peerUserId = 9_019
+      let fixture = try await ListFixture(count: 3, anchor: parent)
+      defer { fixture.close() }
+      try await fixture.settle(milliseconds: 400)
+      let label = outgoing ? "outgoing" : "incoming"
+      let cells = { fixture.list.visibleCells.compactMap { $0 as? MessageCollectionViewCell }.filter { $0.displayMode == .threadAnchor } }
+      guard let cell = cells().first else {
+        // The anchor sits above the newest rows; bring it into view.
+        failures.append("\(label): no anchor row on screen")
+        continue
+      }
+      guard cell.showsNextMessageView, let view = cell.nextMessageView, let layout = view.layout else {
+        failures.append("\(label): the anchor still uses the current view")
+        continue
+      }
+      if view.blockViews["thread"] != nil || layout.frame(.block("thread")) != nil {
+        failures.append("\(label): the anchor shows its own thread summary")
+      }
+      failures += Self.placementProblems(view, layout).map { "\(label): \($0)" }
+      var update = parent
+      update.reactions = Self.reactions(2, on: parent)
+      let before = cell.bounds.height
+      fixture.publisher.publisher.send(.update(.init(message: update, animated: true, peer: fixture.peer)))
+      try await fixture.settle(milliseconds: 600)
+      guard let after = cell.nextMessageView, let planned = after.layout else {
+        failures.append("\(label): the anchor lost its view")
+        continue
+      }
+      if after.reactionViews.count != 2 { failures.append("\(label): \(after.reactionViews.count) pills after the update") }
+      if cell.bounds.height <= before { failures.append("\(label): the row didn't grow (\(before) → \(cell.bounds.height))") }
+      if abs(cell.bounds.height - planned.size.height) > 0.5 {
+        failures.append("\(label): row \(cell.bounds.height) vs plan \(planned.size.height)")
+      }
+      failures += Self.placementProblems(after, planned).map { "\(label): \($0)" }
+    }
+    #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.joined(separator: "\n"))")
+  }
+
   @Test("A reaction pill pops in, slides its avatars, rolls its count and recolors on the row's curve")
   func reactionPillMotion() async throws {
     let stage = try Stage()
@@ -2186,6 +2231,7 @@ struct NextMessageViewDeviceTests {
     init(
       count: Int,
       implementation: MessageViewImplementation = .next,
+      anchor: FullMessage? = nil,
       customize: (Int, inout FullMessage) -> Void = { _, _ in }
     ) async throws {
       let scene = try #require(UIApplication.shared.connectedScenes.first as? UIWindowScene)
@@ -2214,6 +2260,7 @@ struct NextMessageViewDeviceTests {
         peer: peer, reversed: true,
         initialState: .init(
           messages: rows,
+          threadAnchor: .resolved(anchor),
           loadedWindowMetadata: MessagesProgressiveViewModel.unknownLoadedWindowMetadata(for: rows)
         ),
         database: database, publisher: publisher
