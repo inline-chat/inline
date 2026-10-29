@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test"
 import { generateKeyPairSync, verify } from "node:crypto"
-import { APP, GROUP, WORKFLOW, appleClient, ensureSourceTag, makeToken, publicationReceipt, publish, reusableRun } from "./ios-early-testers.mjs"
+import { APP, GROUP, WORKFLOW, AppleAPIError, appleClient, ensureSourceTag, makeToken, publicationReceipt, publish, reusableRun } from "./ios-early-testers.mjs"
 
 const sha = "a".repeat(40)
 const run = { id: "run", attributes: { sourceCommit: { commitSha: sha }, executionProgress: "COMPLETE", completionStatus: "SUCCEEDED" } }
@@ -160,6 +160,60 @@ describe("internal iOS release boundary", () => {
     } } })
     await expect(publish({ api: unresolved.api, sha, qualify: () => {}, log: () => {} })).rejects.toThrow("source differs")
     expect(unresolved.mutations).toEqual([])
+  })
+  it("recovers a run created despite a 500 response without submitting it twice", async () => {
+    const f = fixture()
+    let reads = 0
+    let creates = 0
+    let pauses = 0
+    const api = async (path: string, data?: unknown) => {
+      if (path.includes("/gitReferences?")) return { data: [{ id: "tag-ref", attributes: { canonicalName: `refs/tags/ios-early-testers/${sha}` } }] }
+      if (path === "/v1/ciBuildRuns" && data) { creates++; throw new AppleAPIError(500, path) }
+      if (path.includes("/buildRuns?")) return { data: ++reads < 3 ? [] : [run] }
+      return f.api(path, data)
+    }
+    const result = await publish({ api, sha, qualify: () => {}, sourceTag: async () => `refs/tags/ios-early-testers/${sha}`, pause: async () => { pauses++ }, log: () => {} })
+    expect(result.run).toBe("run")
+    expect(creates).toBe(1)
+    expect(pauses).toBe(2)
+  })
+  it("reports an unreconciled build request without replaying it or distributing another source", async () => {
+    for (const status of [500, undefined, 403]) {
+      const f = fixture()
+      let creates = 0
+      let pauses = 0
+      const api = async (path: string, data?: unknown) => {
+        if (path.includes("/gitReferences?")) return { data: [{ id: "tag-ref", attributes: { canonicalName: `refs/tags/ios-early-testers/${sha}` } }] }
+        if (path === "/v1/ciBuildRuns" && data) { creates++; throw new AppleAPIError(status, path) }
+        if (path.includes("/buildRuns?")) return { data: [{ ...run, attributes: { ...run.attributes, sourceCommit: { commitSha: "b".repeat(40) } } }] }
+        return f.api(path, data)
+      }
+      await expect(publish({ api, sha, qualify: () => {}, sourceTag: async () => `refs/tags/ios-early-testers/${sha}`, pause: async () => { pauses++ }, log: () => {} })).rejects.toThrow(status === 403 ? "Apple API 403" : "no reusable Xcode Cloud run became visible")
+      expect(creates).toBe(1)
+      expect(pauses).toBe(status === 403 ? 0 : 3)
+      expect(f.mutations).toEqual([])
+    }
+  })
+  it("retries transient reads with bounded backoff and never retries writes or authorization failures", async () => {
+    const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" })
+    const env = { ASC_KEY_ID: "id", ASC_ISSUER_ID: "issuer", ASC_PRIVATE_KEY: pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString() }
+    const delays: number[] = []
+    const statuses = [503, 429, 200]
+    const api = appleClient(env, async () => Response.json({ data: [] }, { status: statuses.shift(), headers: { "Retry-After": "5" } }), async (ms: number) => { delays.push(ms) })
+    expect(await api("/v1/ciBuildRuns/run")).toEqual({ data: [] })
+    expect(delays).toEqual([5000, 5000])
+    for (const [method, status, expectedCalls] of [["GET", 503, 4], ["GET", 403, 1], ["POST", 500, 1], ["PATCH", 503, 1]] as const) {
+      let calls = 0
+      const failing = appleClient(env, async () => { calls++; return new Response("private provider details", { status }) }, async () => {})
+      await expect(failing("/v1/ciBuildRuns", method === "GET" ? undefined : { data: {} }, method)).rejects.toThrow(`Apple API ${status}: /v1/ciBuildRuns`)
+      expect(calls).toBe(expectedCalls)
+    }
+    let calls = 0
+    const transport = appleClient(env, async () => { calls++; throw new Error("private request details") }, async () => {})
+    await expect(transport("/v1/ciBuildRuns", { data: {} })).rejects.toThrow("Apple API request failed: /v1/ciBuildRuns")
+    expect(calls).toBe(1)
+    const throttled = appleClient(env, async () => new Response("", { status: 429, headers: { "Retry-After": "120" } }), async () => { throw new Error("must not retry before provider delay") })
+    await expect(throttled("/v1/ciBuildRuns")).rejects.toThrow("Apple API 429")
   })
   it("signs short lived Apple JWTs without disclosing credentials to pagination hosts", async () => {
     const pair = generateKeyPairSync("ec", { namedCurve: "prime256v1" })

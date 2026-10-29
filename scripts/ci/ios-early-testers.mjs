@@ -27,22 +27,46 @@ export function makeToken(env, now = Math.floor(Date.now() / 1000)) {
   return `${body}.${sign("sha256", Buffer.from(body), { key, dsaEncoding: "ieee-p1363" }).toString("base64url")}`
 }
 
+export class AppleAPIError extends Error {
+  constructor(status, path) {
+    super(`Apple API ${status ?? "request failed"}: ${path}`)
+    this.status = status
+    this.retryable = status == null || status === 429 || (status >= 500 && status <= 599)
+  }
+}
+
 /** @param {(url: URL, options: { method: string, body?: string }) => Promise<Response>} fetcher */
-export function appleClient(env, fetcher = fetch) {
+export function appleClient(env, fetcher = fetch, pause = sleep) {
   return async (path, data, method = data ? "POST" : "GET") => {
     const url = new URL(path, ROOT)
     if (url.origin !== ROOT || !url.pathname.startsWith("/v1/")) throw new Error("Unexpected Apple API URL")
     if (!["GET", "POST", "PATCH"].includes(method) || (method === "GET" && data) || (method !== "GET" && !data)) {
       throw new Error("Unexpected Apple API method or body")
     }
-    // Do not log JWTs, private keys, request headers, or provider error bodies.
-    const response = await fetcher(url, {
-      method, redirect: "error", signal: AbortSignal.timeout(60_000),
-      headers: { Authorization: `Bearer ${makeToken(env)}`, "Content-Type": "application/json" },
-      ...(data ? { body: JSON.stringify(data) } : {}),
-    })
-    if (!response.ok) throw new Error(`Apple API ${response.status}: ${url.pathname}`)
-    return response.status === 204 ? {} : response.json()
+    for (let attempt = 0; ; attempt++) {
+      // Do not log JWTs, private keys, request headers, or provider error bodies.
+      const options = {
+        method, redirect: "error", signal: AbortSignal.timeout(60_000),
+        headers: { Authorization: `Bearer ${makeToken(env)}`, "Content-Type": "application/json" },
+        ...(data ? { body: JSON.stringify(data) } : {}),
+      }
+      let response
+      try {
+        response = await fetcher(url, options)
+      } catch {
+        // A transport error can contain request details. Keep diagnostics bounded.
+      }
+      if (response?.ok) return response.status === 204 ? {} : response.json()
+      const error = new AppleAPIError(response?.status, url.pathname)
+      // A failed write may already have taken effect. Never replay it here.
+      if (method !== "GET" || !error.retryable || attempt === 3) throw error
+      const retryAfter = response?.headers.get("Retry-After")
+      const providerDelay = retryAfter && (/^\d+$/.test(retryAfter)
+        ? Number(retryAfter) * 1_000 : Date.parse(retryAfter) - Date.now())
+      const delay = Math.max(2_000 * 2 ** attempt, Number.isFinite(providerDelay) ? providerDelay : 0)
+      if (delay > 60_000) throw error
+      await pause(delay)
+    }
   }
 }
 
@@ -211,11 +235,25 @@ export async function publish({ api, sha, qualify, sourceTag = ensureSourceTag, 
     }
     await qualify()
     // Pin an immutable tag: main may advance before Apple clones the source.
-    run = (await api("/v1/ciBuildRuns", { data: { type: "ciBuildRuns", relationships: {
-      workflow: { data: { type: "ciWorkflows", id: WORKFLOW } },
-      sourceBranchOrTag: { data: { type: "scmGitReferences", id: source.id } },
-    } } })).data
-    log(`Started Xcode Cloud run ${run.id} for ${sha}`)
+    try {
+      run = (await api("/v1/ciBuildRuns", { data: { type: "ciBuildRuns", relationships: {
+        workflow: { data: { type: "ciWorkflows", id: WORKFLOW } },
+        sourceBranchOrTag: { data: { type: "scmGitReferences", id: source.id } },
+      } } })).data
+      log(`Started Xcode Cloud run ${run.id} for ${sha}`)
+    } catch (error) {
+      if (!(error instanceof AppleAPIError) || !error.retryable) throw error
+      log(`${error.message}; checking whether Apple created the exact-source run before returning the error`)
+      // Creation can succeed even when the response is lost or returns 5xx.
+      // Allow the new run's source to resolve, without issuing a second POST.
+      for (let attempt = 0; attempt < 3 && !run; attempt++) {
+        await wait()
+        const current = await list(api, `/v1/ciWorkflows/${WORKFLOW}/buildRuns?sort=-number&limit=100`)
+        run = reusableRun(current, sha, now())
+      }
+      if (!run) throw new Error(`${error.message}; no reusable Xcode Cloud run became visible for ${sha}. Build request failed before an archive could be monitored; inspect Xcode Cloud service/account status. The next publisher run will check existing builds before requesting another.`)
+      log(`Recovered Xcode Cloud run ${run.id} for ${sha}`)
+    }
   } else log(`Resuming Xcode Cloud run ${run.id} for ${sha}`)
   while (true) {
     run = (await api(`/v1/ciBuildRuns/${run.id}`)).data
