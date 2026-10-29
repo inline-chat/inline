@@ -596,24 +596,42 @@ fn publish_staged(
         }
         state.staged = Some(artifact.clone());
         state.outcome = "staged".into();
-        for (path, old_hash) in &mut state.launchers {
+        for (path, receipt) in &mut state.launchers {
             if installation_method(path, store) != "managed" || !owned_regular_file(path) {
                 continue;
             }
             let Ok(actual) = file_hash(path) else {
                 continue;
             };
+            let known = if actual == artifact.executable_sha256 {
+                Some(store::Launcher {
+                    sha256: actual.clone(),
+                    version: artifact.version.clone(),
+                })
+            } else if actual == receipt.sha256 {
+                Some(receipt.clone())
+            } else {
+                cached_launcher(store, &actual)
+            };
+            let Some(known) = known else { continue };
+            // An older bridge's worker can stage an upgrade for itself without
+            // rolling a manually upgraded Terminal CLI backwards.
+            if newer(&known.version, &artifact.version)? {
+                *receipt = known;
+                continue;
+            }
             let same_permissions = fs::metadata(path)
                 .ok()
                 .zip(fs::metadata(&artifact.executable).ok())
                 .is_some_and(|(installed, staged)| installed.permissions() == staged.permissions());
-            if actual == artifact.executable_sha256 && same_permissions {
-                // A prior rename may have succeeded before its receipt write.
-                *old_hash = actual;
-            } else if &actual == old_hash || verified_cached_hash(store, &actual) {
+            if actual != artifact.executable_sha256 || !same_permissions {
                 copy_binary_atomically(&artifact.executable, path)?;
-                *old_hash = artifact.executable_sha256.clone();
             }
+            // A prior rename may have succeeded before its receipt write.
+            *receipt = store::Launcher {
+                sha256: artifact.executable_sha256.clone(),
+                version: artifact.version.clone(),
+            };
         }
         Ok(true)
     })
@@ -637,14 +655,16 @@ fn owned_regular_file(path: &Path) -> bool {
     }
 }
 
-fn verified_cached_hash(store: &Store, hash: &str) -> bool {
-    let Ok(entries) = fs::read_dir(store.root.join("versions")) else {
-        return false;
-    };
-    entries.filter_map(Result::ok).any(|entry| {
-        store::read_json::<Artifact>(&entry.path().join("receipt.json")).is_ok_and(|known| {
-            known.executable_sha256 == hash && validate_cached(store, &known).is_ok()
-        })
+fn cached_launcher(store: &Store, hash: &str) -> Option<store::Launcher> {
+    let entries = fs::read_dir(store.root.join("versions")).ok()?;
+    entries.filter_map(Result::ok).find_map(|entry| {
+        let known: Artifact = store::read_json(&entry.path().join("receipt.json")).ok()?;
+        (known.executable_sha256 == hash && validate_cached(store, &known).is_ok()).then_some(
+            store::Launcher {
+                sha256: known.executable_sha256,
+                version: known.version,
+            },
+        )
     })
 }
 
@@ -777,7 +797,13 @@ fn enroll_current(store: &Store) -> Result<(), UpdateError> {
     let hash = file_hash(&path)?;
     store.edit(|state| {
         // Explicit registration also repairs receipts after a manual upgrade.
-        state.launchers.insert(path, hash);
+        state.launchers.insert(
+            path,
+            store::Launcher {
+                sha256: hash,
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+        );
         Ok(())
     })
 }
@@ -954,10 +980,20 @@ mod tests {
         };
         store
             .edit(|state| {
-                state.launchers.insert(owned.clone(), file_hash(&owned)?);
-                state
-                    .launchers
-                    .insert(changed.clone(), file_hash(&changed)?);
+                state.launchers.insert(
+                    owned.clone(),
+                    store::Launcher {
+                        sha256: file_hash(&owned)?,
+                        version: "1.0.0".into(),
+                    },
+                );
+                state.launchers.insert(
+                    changed.clone(),
+                    store::Launcher {
+                        sha256: file_hash(&changed)?,
+                        version: "1.0.0".into(),
+                    },
+                );
                 Ok(())
             })
             .unwrap();
@@ -980,7 +1016,13 @@ mod tests {
     #[test]
     fn updater_recovers_a_launcher_rename_that_preceded_a_failed_receipt_write() {
         use std::os::unix::fs::PermissionsExt;
-        for (advance, missing_permissions) in [(false, false), (false, true), (true, false)] {
+        for (target, missing_permissions, receipt_lost) in [
+            (0, false, true),
+            (0, false, false),
+            (1, false, true),
+            (1, true, true),
+            (2, false, true),
+        ] {
             let root = tempfile::tempdir().unwrap();
             let store = Store::new(root.path());
             let make = |bytes: &[u8], version: &str| {
@@ -1004,6 +1046,7 @@ mod tests {
             };
             let installed = make(b"verified v2", "2.0.0");
             let next = make(b"verified v3", "3.0.0");
+            let older = make(b"verified v1", "1.0.0");
             let launcher = root.path().join("inline");
             fs::copy(&installed.executable, &launcher).unwrap();
             if missing_permissions {
@@ -1011,22 +1054,43 @@ mod tests {
             }
             store
                 .edit(|state| {
-                    state
-                        .launchers
-                        .insert(launcher.clone(), "lost-v1-receipt".into());
+                    state.launchers.insert(
+                        launcher.clone(),
+                        store::Launcher {
+                            sha256: if receipt_lost {
+                                older.executable_sha256.clone()
+                            } else {
+                                installed.executable_sha256.clone()
+                            },
+                            version: if receipt_lost {
+                                "1.0.0".into()
+                            } else {
+                                installed.version.clone()
+                            },
+                        },
+                    );
                     Ok(())
                 })
                 .unwrap();
-            let wanted = if advance { &next } else { &installed };
+            let wanted = match target {
+                0 => &older,
+                1 => &installed,
+                _ => &next,
+            };
+            let expected = if target == 0 { &installed } else { wanted };
             assert!(publish_staged(&store, wanted, true, 0).unwrap());
-            assert_eq!(file_hash(&launcher).unwrap(), wanted.executable_sha256);
+            assert_eq!(file_hash(&launcher).unwrap(), expected.executable_sha256);
             assert_ne!(
                 fs::metadata(&launcher).unwrap().permissions().mode() & 0o111,
                 0
             );
             assert_eq!(
-                store.read().unwrap().launchers[&launcher],
-                wanted.executable_sha256
+                store.read().unwrap().launchers[&launcher].sha256,
+                expected.executable_sha256
+            );
+            assert_eq!(
+                store.read().unwrap().launchers[&launcher].version,
+                expected.version
             );
         }
     }

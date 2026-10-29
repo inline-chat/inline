@@ -8,6 +8,13 @@ use std::{
 };
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Launcher {
+    pub sha256: String,
+    pub version: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct State {
     pub schema_version: u32,
@@ -16,7 +23,7 @@ pub struct State {
     pub follows_app: bool,
     pub channel_override: bool,
     pub revision: u64,
-    pub launchers: BTreeMap<PathBuf, String>,
+    pub launchers: BTreeMap<PathBuf, Launcher>,
     pub highest_generation: BTreeMap<String, u64>,
     pub latest: Option<Release>,
     pub accepted: BTreeMap<String, Release>,
