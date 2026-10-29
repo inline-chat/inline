@@ -134,6 +134,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let launchSpan = PerformanceTrace.begin("ApplicationDidFinish", category: .launch)
     defer { launchSpan.end() }
 
+    AgentControlErrors.report = { ToastCenter.shared.showError($0) }
     let servicesSpan = PerformanceTrace.begin("LaunchServicesInit", category: .launch)
     initializeServices()
     servicesSpan.end()
