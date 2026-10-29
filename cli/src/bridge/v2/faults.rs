@@ -126,6 +126,8 @@ struct FakeHarness {
     opened: Mutex<Vec<OpenSpec>>,
     /// Folders the harness knows, as Codex lists its projects.
     folders: Mutex<Vec<CatalogFolder>>,
+    /// Sessions a resume does not find.
+    missing: Mutex<Vec<String>>,
 }
 
 impl HarnessDriver for FakeHarness {
@@ -165,8 +167,15 @@ impl HarnessDriver for FakeHarness {
     }
 
     fn open<'a>(&'a self, spec: OpenSpec) -> HarnessFuture<'a, Arc<dyn Session>, OpenError> {
+        let missing = matches!(&spec.mode, OpenMode::Resume { session }
+            if self.missing.lock().unwrap().iter().any(|id| id == session.as_str()));
         self.opened.lock().unwrap().push(spec);
-        Box::pin(async move { Ok(self.session.clone() as Arc<dyn Session>) })
+        Box::pin(async move {
+            if missing {
+                return Err(OpenError::NotFound);
+            }
+            Ok(self.session.clone() as Arc<dyn Session>)
+        })
     }
 }
 
@@ -216,6 +225,7 @@ fn fixture(unknown_first: bool) -> (Runtime, Arc<FakeHarness>, Cleanup) {
         session,
         opened: Mutex::new(vec![]),
         folders: Mutex::new(vec![]),
+        missing: Mutex::new(vec![]),
     });
     (runtime(&mut cleanup, harness.clone()), harness, cleanup)
 }
@@ -271,6 +281,7 @@ fn spawn_work(runtime: &Runtime, cleanup: &mut Cleanup) -> crate::bridge::v2::wo
         Known {
             agent_session_id: Some(1),
             native: Some(ProviderSessionId::new("fault-session").unwrap()),
+            from_v1: false,
         },
         OutputMode::Detailed,
         SettingsChange::default(),
@@ -723,4 +734,74 @@ async fn a_session_inline_knows_keeps_its_folder_with_no_work_here() {
         .await;
     assert_eq!(runtime.thread_folder(9), runtime.config.folder);
     assert!(harness.opened.lock().unwrap().is_empty());
+}
+
+/// A runtime that knows v1's session `session` for chat 9, in the harness's
+/// other folder: (runtime, harness, cleanup, other folder).
+fn v1_fixture(session: &str) -> (Runtime, Arc<FakeHarness>, Cleanup, PathBuf) {
+    let (runtime, harness, cleanup, _own, other) = folder_fixture(Arc::new(NoSessionYet));
+    let v1 = super::super::folders::FolderSource::listing(
+        &cleanup.dir.join("v1.sqlite"),
+        "faults",
+        &[&other],
+    );
+    v1.store
+        .put_binding(
+            &inline_agent_bridge::BindingKey {
+                installation_id: v1.installation_id.clone(),
+                chat_id: 9,
+                workspace_id: crate::bridge::workspace_id(&other).unwrap(),
+            },
+            &ProviderId::new("codex").unwrap(),
+            &ProviderSessionId::new(session).unwrap(),
+            10,
+        )
+        .unwrap();
+    (runtime.with_legacy_store(v1.store), harness, cleanup, other)
+}
+
+fn opened_modes(harness: &FakeHarness) -> Vec<String> {
+    harness
+        .opened
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|spec| match &spec.mode {
+            OpenMode::Start => "start".to_owned(),
+            OpenMode::Resume { session } => format!("resume {session}"),
+            OpenMode::Fork { session, .. } => format!("fork {session}"),
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_thread_v1_served_goes_on_in_its_session_and_folder() {
+    let (mut runtime, harness, mut cleanup, other) = v1_fixture("fault-session");
+    runtime.ensure_work(9, None).await.unwrap();
+    let (id, command) = input(&runtime, 93);
+    runtime.works[&9].tx.send(command).await.unwrap();
+    until(|| state(&runtime, &id) == Some(InputState::Accepted)).await;
+    assert_eq!(opened_modes(&harness), ["resume fault-session"]);
+    assert_eq!(harness.opened.lock().unwrap()[0].folder, other);
+    // Inline now knows the session, so later lookups find it there.
+    until(|| runtime.works[&9].agent_session_id() == Some(1)).await;
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
+async fn a_v1_session_that_does_not_reopen_gives_way_to_a_fresh_one() {
+    let (mut runtime, harness, mut cleanup, _other) = v1_fixture("gone-session");
+    harness
+        .missing
+        .lock()
+        .unwrap()
+        .push("gone-session".to_owned());
+    runtime.ensure_work(9, None).await.unwrap();
+    let (id, command) = input(&runtime, 94);
+    runtime.works[&9].tx.send(command).await.unwrap();
+    until(|| state(&runtime, &id) == Some(InputState::Accepted)).await;
+    assert_eq!(opened_modes(&harness), ["resume gone-session", "start"]);
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 1);
+    until(|| runtime.works[&9].agent_session_id() == Some(1)).await;
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
 }

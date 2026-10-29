@@ -348,6 +348,8 @@ impl WorkHandle {
 pub(crate) struct Known {
     pub agent_session_id: Option<i64>,
     pub native: Option<ProviderSessionId>,
+    /// The session is v1's for this thread, not yet recorded in Inline.
+    pub from_v1: bool,
 }
 
 /// Starts the actor for one work.
@@ -394,6 +396,7 @@ pub(crate) fn spawn(
         parent_card_text: None,
         agent_session_id: agent_session_id.clone(),
         native: known.native,
+        native_from_v1: known.from_v1,
         session: None,
         events: None,
         probe: None,
@@ -509,6 +512,8 @@ struct Actor {
     parent_card_text: Option<(ParentCard, i64)>,
     agent_session_id: Arc<AtomicI64>,
     native: Option<ProviderSessionId>,
+    /// `native` came from v1 and Inline does not know it yet.
+    native_from_v1: bool,
     hold: HoldMachine,
     session: Option<Arc<dyn Session>>,
     /// Behind a mutex only so the actor is `Sync`; polled through `get_mut`.
@@ -1496,6 +1501,9 @@ impl Actor {
     }
 
     async fn open(&mut self, mode: OpenMode) -> Result<(), OpenFailure> {
+        if self.native_from_v1 && matches!(mode, OpenMode::Resume { .. }) {
+            return self.open_from_v1(mode).await;
+        }
         let fresh = !matches!(mode, OpenMode::Resume { .. });
         let session = match self.open_session(mode.clone()).await {
             // The native session is gone. A new session belongs in a new
@@ -1513,15 +1521,41 @@ impl Actor {
         self.adopt(session, fresh).await
     }
 
+    /// The session v1 left for this thread goes on here. One that does not
+    /// reopen, or that Inline already gave another thread, is replaced by a
+    /// fresh session rather than asking for /new: the thread never had a v2
+    /// session to lose. A session held elsewhere still waits for its holder.
+    async fn open_from_v1(&mut self, mode: OpenMode) -> Result<(), OpenFailure> {
+        let failure = match self.open_session(mode).await {
+            Ok(session) => match self.adopt(session, false).await {
+                Ok(()) => return Ok(()),
+                Err(OpenFailure::Other(message)) => message,
+                Err(held) => return Err(held),
+            },
+            Err(OpenFailure::Other(message)) => message,
+            Err(held) => return Err(held),
+        };
+        log::warn!(
+            target: "inline::bridge::v2",
+            "v1 session for chat {} did not reopen, starting a fresh one: {failure}",
+            self.chat_id
+        );
+        self.native = None;
+        self.native_from_v1 = false;
+        let session = self.open_session(OpenMode::Start).await?;
+        self.adopt(session, true).await
+    }
+
     /// Makes an opened session this work's: records it in Inline, binds its
     /// tools, settles inputs whose delivery was unknown, and brings its
     /// title and settings up to date.
     async fn adopt(&mut self, session: Arc<dyn Session>, fresh: bool) -> Result<(), OpenFailure> {
         let native = session.key().session.clone();
-        if fresh || self.native.as_ref() != Some(&native) {
+        if fresh || self.native_from_v1 || self.native.as_ref() != Some(&native) {
             self.connect(&native).await.map_err(OpenFailure::Other)?;
             // A fork or a fresh start replaces the work's session.
             self.unbind_tools();
+            self.native_from_v1 = false;
         }
         self.native = Some(native);
         self.attach(session);

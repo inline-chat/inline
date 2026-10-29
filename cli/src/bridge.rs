@@ -3369,6 +3369,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
                 .into());
             }
         };
+    settle_v1_leftovers(&bot, &legacy_store, &installation.installation_id).await;
     let runtime = v2::runtime::Runtime::new(
         v2::runtime::V2Config {
             vocabulary,
@@ -3418,6 +3419,35 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         }
     };
     runtime.run(&mut inline_events, shutdown).await
+}
+
+/// v2 never runs what v1 accepted, so v1's open work is closed the way a v1
+/// restart would: queued and interrupted turns get a "send it again" answer,
+/// open approval and question cards expire, and staged answers go out. Once
+/// done, later starts find nothing left. A failure here never stops v2.
+async fn settle_v1_leftovers(bot: &InlineClient, store: &BridgeStore, installation_id: &str) {
+    let result: Result<(), Box<dyn std::error::Error>> = async {
+        let installation_id = InstallationId::new(installation_id.to_owned())?;
+        store.stage_unfinished_inbound_for_installation(
+            &installation_id,
+            "bridge moved to v2 before the turn finished",
+            "This didn't finish before the bridge was updated. Send it again if you still want it.",
+        )?;
+        recover_provider_inbox(
+            bot,
+            store,
+            &installation_id,
+            InterruptionKind::BridgeRestart,
+        )
+        .await
+    }
+    .await;
+    if let Err(error) = result {
+        eprintln!(
+            "Could not close work left from before bridge v2: {}",
+            safe_diagnostic(&error.to_string())
+        );
+    }
 }
 
 fn publishes_initial_provider_catalog(provider_id: &str) -> bool {

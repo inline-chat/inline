@@ -1158,7 +1158,8 @@ impl Runtime {
             .await?;
         let known = result
             .connection
-            .is_some_and(|connection| !connection.session_ref.is_empty());
+            .is_some_and(|connection| !connection.session_ref.is_empty())
+            || self.v1_session(chat_id).is_some();
         self.known_sessions.insert(chat_id, known);
         Ok(known)
     }
@@ -2331,12 +2332,32 @@ impl Runtime {
             })
             .await
             .map_err(|error| format!("could not look up this thread's work: {error}"))?;
+        let mut settings = self
+            .thread_settings
+            .get(&chat_id)
+            .cloned()
+            .unwrap_or_default();
         let known = match result.connection {
             Some(connection) if !connection.session_ref.is_empty() => Known {
                 agent_session_id: connection.agent_session.map(|session| session.id),
                 native: Some(ProviderSessionId::new(connection.session_ref)?),
+                from_v1: false,
             },
-            _ => Known::default(),
+            // Inline knows no work here: a thread v1 served goes on in its
+            // session and folder.
+            _ => match self.v1_session(chat_id) {
+                Some((native, folder)) => {
+                    if settings.folder.is_none() {
+                        settings.folder = folder;
+                    }
+                    Known {
+                        agent_session_id: None,
+                        native: Some(native),
+                        from_v1: true,
+                    }
+                }
+                None => Known::default(),
+            },
         };
         let mode = self.effective_mode(participation);
         // A new work here takes the chat back from one that moved out.
@@ -2346,18 +2367,30 @@ impl Runtime {
         self.known_sessions.remove(&chat_id);
         self.works.insert(
             chat_id,
-            super::work::spawn(
-                self.agent.clone(),
-                chat_id,
-                known,
-                mode,
-                self.thread_settings
-                    .get(&chat_id)
-                    .cloned()
-                    .unwrap_or_default(),
-            ),
+            super::work::spawn(self.agent.clone(), chat_id, known, mode, settings),
         );
         Ok(())
+    }
+
+    /// The native session and folder v1 kept for a thread it served before
+    /// this bridge moved to v2.
+    fn v1_session(&self, chat_id: i64) -> Option<(ProviderSessionId, Option<PathBuf>)> {
+        let store = self.legacy_store.as_ref()?;
+        let installation =
+            inline_agent_bridge::InstallationId::new(self.config.installation_id.clone()).ok()?;
+        let (workspace_id, _, native) = store
+            .latest_binding_for_chat(&installation, chat_id)
+            .map_err(|error| {
+                log::warn!(target: "inline::bridge::v2", "cannot read v1 sessions: {error}");
+            })
+            .ok()??;
+        let folder = store
+            .workspace(&installation, &workspace_id)
+            .ok()
+            .flatten()
+            .map(|workspace| workspace.path)
+            .filter(|path| path.is_dir());
+        Some((native, folder))
     }
 
     /// `/new`: a new Inline thread under this chat with a fresh native session.
