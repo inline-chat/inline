@@ -8,10 +8,12 @@ public enum MessageViewImplementation: Equatable, Sendable {
 public enum NextMessageViewFeature {
   public static let preferenceKey = "experimental.iosNextMessageView"
 
+  /// The next view is the default. Builds that show debug tools can turn it off to compare.
   public static func selectedImplementation(
     defaults: UserDefaults = .standard,
-    isExperimentAvailable: Bool = true
+    allowsOverride: Bool = true
   ) -> MessageViewImplementation {
-    isExperimentAvailable && defaults.bool(forKey: preferenceKey) ? .next : .legacy
+    guard allowsOverride, defaults.object(forKey: preferenceKey) as? Bool == false else { return .next }
+    return .legacy
   }
 }

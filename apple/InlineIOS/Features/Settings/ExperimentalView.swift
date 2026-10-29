@@ -12,7 +12,7 @@ struct ExperimentalView: View {
   private var richMessageCopyEditingEnabled = false
 
   @AppStorage(NextMessageViewFeature.preferenceKey)
-  private var nextMessageViewEnabled = false
+  private var nextMessageViewEnabled = true
 
   var body: some View {
     List {
@@ -59,7 +59,7 @@ struct ExperimentalView: View {
         } header: {
           Text("Developer Tools")
         } footer: {
-          Text("Uses the next iOS message view as it is built. Until then, chats use the current view. Reopen the chat after changing this setting.")
+          Text("The next message view is on by default. Turn it off to compare with the previous view. Reopen the chat after changing this setting.")
         }
       }
     }
