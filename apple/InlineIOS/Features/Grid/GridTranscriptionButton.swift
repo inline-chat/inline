@@ -1,3 +1,4 @@
+import InlineGrid
 import InlineKit
 import InlineProtocol
 import SwiftUI
