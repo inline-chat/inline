@@ -181,18 +181,16 @@ pub fn configure(
         if let Some(enabled) = enabled {
             state.auto_update = enabled;
         }
-        if let Some(channel) = channel {
-            if !app || !state.channel_override {
-                if state.channel != channel {
-                    state.last_attempt = None;
-                    state.retry_at = None;
-                }
-                if state.channel != channel {
-                    state.staged = None;
-                }
-                state.channel = channel;
-                state.follows_app = app;
+        if let Some(channel) = channel
+            && (!app || !state.channel_override)
+        {
+            if state.channel != channel {
+                state.last_attempt = None;
+                state.retry_at = None;
+                state.staged = None;
             }
+            state.channel = channel;
+            state.follows_app = app;
         }
 
         if !app && channel.is_some() {
@@ -256,9 +254,9 @@ fn check_due(state: &store::State, now: i64, interval: i64) -> bool {
     if let Some(retry) = state.retry_at {
         return now >= retry;
     }
-    !state
+    state
         .last_attempt
-        .is_some_and(|at| now.saturating_sub(at) < interval)
+        .is_none_or(|at| now.saturating_sub(at) >= interval)
 }
 
 #[derive(Deserialize)]
@@ -614,10 +612,10 @@ fn next_release<'a>(
     release: &'a manifest::Release,
     current: &str,
 ) -> Result<&'a manifest::Release, UpdateError> {
-    if let Some(baseline) = &release.required_baseline {
-        if newer(&baseline.version, current)? {
-            return next_release(baseline, current);
-        }
+    if let Some(baseline) = &release.required_baseline
+        && newer(&baseline.version, current)?
+    {
+        return next_release(baseline, current);
     }
     Ok(release)
 }
@@ -629,20 +627,19 @@ async fn stage_release(
 ) -> Result<Artifact, UpdateError> {
     let directory = store.root.join("versions").join(&target.sha256);
     let executable = directory.join("inline");
-    if let Ok(artifact) = store::read_json::<Artifact>(&directory.join("receipt.json")) {
-        if artifact.version == release.version
-            && artifact.sha256 == target.sha256
-            && artifact.executable == executable
-            && file_hash(&executable).is_ok_and(|hash| hash == artifact.executable_sha256)
-            && verify_executable(&executable, &release.version)
-                .await
-                .is_ok()
-        {
-            return Ok(artifact);
-        }
-        // Re-download a damaged cache from the authenticated target. Atomic
-        // replacement retains open handles and never edits account data.
+    if let Ok(artifact) = store::read_json::<Artifact>(&directory.join("receipt.json"))
+        && artifact.version == release.version
+        && artifact.sha256 == target.sha256
+        && artifact.executable == executable
+        && file_hash(&executable).is_ok_and(|hash| hash == artifact.executable_sha256)
+        && verify_executable(&executable, &release.version)
+            .await
+            .is_ok()
+    {
+        return Ok(artifact);
     }
+    // Re-download a damaged cache from the authenticated target. Atomic
+    // replacement retains open handles and never edits account data.
     let temporary = create_temp_dir()?;
     let archive = temporary.path().join("inline.tar.gz");
     download_file(
@@ -967,9 +964,11 @@ mod tests {
 
     #[test]
     fn updater_retry_deadline_takes_precedence_over_normal_check_interval() {
-        let mut state = store::State::default();
-        state.last_attempt = Some(100);
-        state.retry_at = Some(400);
+        let mut state = store::State {
+            last_attempt: Some(100),
+            retry_at: Some(400),
+            ..Default::default()
+        };
         assert!(!check_due(&state, 399, CHECK_INTERVAL));
         assert!(check_due(&state, 400, CHECK_INTERVAL));
         state.retry_at = None;
