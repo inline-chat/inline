@@ -554,7 +554,7 @@ async fn perform_inner(
         state.latest = Some(release.clone());
         Ok(())
     })?;
-    if !newer(&selected.version, env!("CARGO_PKG_VERSION"))? {
+    if !needs_release_staging(&store.read()?, &selected.version, env!("CARGO_PKG_VERSION"))? {
         store.edit(|state| {
             state.outcome = "current".into();
             Ok(())
@@ -582,6 +582,26 @@ async fn perform_inner(
     Ok(())
 }
 
+fn needs_release_staging(
+    state: &store::State,
+    release: &str,
+    current: &str,
+) -> Result<bool, UpdateError> {
+    if newer(release, current)? {
+        return Ok(true);
+    }
+    // A bridge worker may already run the release whose public launcher failed
+    // to install. Retry that launcher without selecting an older runtime.
+    Ok(Version::parse(release)?
+        .cmp_precedence(&Version::parse(current)?)
+        .is_eq()
+        && (state.failure.as_deref() == Some("installation")
+            || state
+                .launchers
+                .values()
+                .any(|receipt| newer(release, &receipt.version).unwrap_or(false))))
+}
+
 // Policy and pointer changes share the short settings transaction. The slow
 // network, extraction and executable probes have already completed.
 fn publish_staged(
@@ -590,12 +610,13 @@ fn publish_staged(
     background: bool,
     revision: u64,
 ) -> Result<bool, UpdateError> {
-    store.edit(|state| {
+    let (published, failure) = store.edit(|state| {
         if state.revision != revision || (background && !state.auto_update) {
-            return Ok(false);
+            return Ok((false, None));
         }
         state.staged = Some(artifact.clone());
         state.outcome = "staged".into();
+        let mut failure = None;
         for (path, receipt) in &mut state.launchers {
             if installation_method(path, store) != "managed" || !owned_regular_file(path) {
                 continue;
@@ -624,8 +645,11 @@ fn publish_staged(
                 .ok()
                 .zip(fs::metadata(&artifact.executable).ok())
                 .is_some_and(|(installed, staged)| installed.permissions() == staged.permissions());
-            if actual != artifact.executable_sha256 || !same_permissions {
-                copy_binary_atomically(&artifact.executable, path)?;
+            if (actual != artifact.executable_sha256 || !same_permissions)
+                && let Err(error) = copy_binary_atomically(&artifact.executable, path)
+            {
+                failure.get_or_insert(error);
+                continue;
             }
             // A prior rename may have succeeded before its receipt write.
             *receipt = store::Launcher {
@@ -633,8 +657,14 @@ fn publish_staged(
                 version: artifact.version.clone(),
             };
         }
-        Ok(true)
-    })
+        // One unwritable launcher must not hold back private bridges or discard
+        // receipts for other launchers that were successfully replaced.
+        Ok((true, failure))
+    })?;
+    if let Some(error) = failure {
+        return Err(error.into());
+    }
+    Ok(published)
 }
 
 fn owned_regular_file(path: &Path) -> bool {
@@ -1011,6 +1041,74 @@ mod tests {
         assert_eq!(fs::read(&owned).unwrap(), b"new");
         assert_eq!(fs::read(&changed).unwrap(), b"installed-by-another-owner");
         assert_eq!(store.read().unwrap().staged, Some(artifact));
+    }
+
+    #[test]
+    fn updater_launcher_failure_keeps_bridge_staging_and_other_launchers_recoverable() {
+        use std::os::unix::fs::PermissionsExt;
+        // Hosted Mac/Linux qualification runs unprivileged. Root bypasses the
+        // filesystem permission failure this regression deliberately exercises.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::new(root.path());
+        let blocked_directory = root.path().join("blocked");
+        fs::create_dir(&blocked_directory).unwrap();
+        let blocked = blocked_directory.join("inline");
+        let writable = root.path().join("inline");
+        let candidate = root.path().join("candidate");
+        fs::write(&candidate, b"verified new executable").unwrap();
+        fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755)).unwrap();
+        for path in [&blocked, &writable] {
+            fs::write(path, b"working old executable").unwrap();
+        }
+        let artifact = Artifact {
+            version: "2.0.0".into(),
+            target: "fixture".into(),
+            sha256: "b".repeat(64),
+            executable_sha256: file_hash(&candidate).unwrap(),
+            executable: candidate,
+            bridge_schema_version: 30,
+            minimum_reader_schema_version: 30,
+        };
+        store
+            .edit(|state| {
+                for path in [&blocked, &writable] {
+                    state.launchers.insert(
+                        path.clone(),
+                        store::Launcher {
+                            sha256: file_hash(path)?,
+                            version: "1.0.0".into(),
+                        },
+                    );
+                }
+                Ok(())
+            })
+            .unwrap();
+        fs::set_permissions(&blocked_directory, fs::Permissions::from_mode(0o555)).unwrap();
+        let result = publish_staged(&store, &artifact, true, 0);
+        // Restore permissions before assertions so the fixture always cleans up.
+        fs::set_permissions(&blocked_directory, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(result, Err(UpdateError::Io(_))));
+        let partial = store.read().unwrap();
+        assert_eq!(partial.staged.as_ref(), Some(&artifact));
+        assert_eq!(fs::read(&blocked).unwrap(), b"working old executable");
+        assert_eq!(file_hash(&writable).unwrap(), artifact.executable_sha256);
+        assert_eq!(partial.launchers[&blocked].version, "1.0.0");
+        assert_eq!(partial.launchers[&writable].version, artifact.version);
+        assert_eq!(fs::read_dir(&blocked_directory).unwrap().count(), 1);
+        // The bridge can now run v2. Its v2 worker must still repair the v1
+        // launcher, while an older feed must never select a downgrade.
+        assert!(needs_release_staging(&partial, "2.0.0", "2.0.0").unwrap());
+        assert!(!needs_release_staging(&partial, "2.0.0", "3.0.0").unwrap());
+        assert!(publish_staged(&store, &artifact, true, 0).unwrap());
+        let repaired = store.read().unwrap();
+        for path in [&blocked, &writable] {
+            assert_eq!(file_hash(path).unwrap(), artifact.executable_sha256);
+            assert_eq!(repaired.launchers[path].version, artifact.version);
+        }
+        assert!(!needs_release_staging(&repaired, "2.0.0", "2.0.0").unwrap());
     }
 
     #[test]
