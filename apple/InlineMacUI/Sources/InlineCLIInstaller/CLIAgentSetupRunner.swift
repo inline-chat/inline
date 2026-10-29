@@ -87,6 +87,19 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     } onCancel: { self.cancel() }
   }
 
+  public func checkUpdate(installation: CLIInstallation) async throws -> CLIUpdateCheck {
+    let operationID = try beginOperation()
+    defer { finishOperation(operationID) }
+    return try await withTaskCancellationHandler {
+      let output = try await Task.detached(priority: .utility) { [self] in
+        try run(operationID: operationID, installation: installation, arguments: ["update", "--check", "--json"], timeout: 30)
+      }.value
+      try Task.checkCancellation()
+      guard output.status == 0 else { throw failure(from: output) }
+      return try JSONDecoder().decode(CLIUpdateCheck.self, from: output.standardOutput)
+    } onCancel: { self.cancel() }
+  }
+
   static func isUnsupportedUpdateEngine(status: Int32, standardError: Data) -> Bool {
     let text = String(decoding: standardError, as: UTF8.self)
     return status == 2 && text.contains("status")

@@ -21,6 +21,7 @@ use tokio::{
     task::JoinHandle,
 };
 
+mod cache;
 pub mod manifest;
 pub mod store;
 mod transfer;
@@ -111,6 +112,7 @@ pub struct UpdateCheck {
     target: String,
     supported: bool,
     update_available: bool,
+    verified: bool,
 }
 
 pub fn select_channel(
@@ -123,9 +125,18 @@ pub fn select_channel(
     if requested.is_none() && store.root.join("update.json").exists() {
         return Ok(saved.channel);
     }
-    let legacy = db.load()?.update_channel;
+    let legacy = db.load().ok().and_then(|state| state.update_channel);
+    if requested.is_none() {
+        return Ok(UpdateChannel::resolve(legacy, env!("CARGO_PKG_VERSION")));
+    }
     store.edit(|state| {
-        state.channel = UpdateChannel::resolve(requested.or(legacy), env!("CARGO_PKG_VERSION"));
+        let channel = UpdateChannel::resolve(requested.or(legacy), env!("CARGO_PKG_VERSION"));
+        if state.channel != channel {
+            state.staged = None;
+            state.last_attempt = None;
+            state.retry_at = None;
+        }
+        state.channel = channel;
         if requested.is_some() {
             state.follows_app = false;
             state.channel_override = true;
@@ -143,6 +154,20 @@ pub fn configure(
     register: bool,
 ) -> Result<store::State, UpdateError> {
     let store = Store::new(&config.data_dir);
+    if !store.root.join("update.json").exists() {
+        // Read the legacy channel best-effort without ever saving the account
+        // file. Old app and terminal channel choices had the same storage.
+        let db = LocalDb::new(config.state_path.clone(), config.api_base_url.clone());
+        if let Some(channel) = db.load().ok().and_then(|state| state.update_channel) {
+            store.edit(|state| {
+                if !store.root.join("update.json").exists() {
+                    state.channel = channel;
+                    state.channel_override = true;
+                }
+                Ok(())
+            })?;
+        }
+    }
     if register {
         enroll_current(&store)?;
     }
@@ -185,6 +210,21 @@ pub fn configure(
             state.revision += 1;
         }
         Ok(state.clone())
+    })
+}
+
+pub fn follow_app(config: &Config, channel: UpdateChannel) -> Result<(), UpdateError> {
+    Store::new(&config.data_dir).edit(|state| {
+        state.channel_override = false;
+        state.follows_app = true;
+        if state.channel != channel {
+            state.staged = None;
+            state.retry_at = None;
+            state.last_attempt = None;
+        }
+        state.channel = channel;
+        state.revision += 1;
+        Ok(())
     })
 }
 
@@ -236,8 +276,12 @@ pub(crate) fn automatic_allowed() -> bool {
     !cfg!(debug_assertions)
         && !Config::release_manifest_overridden()
         && std::env::var_os("INLINE_RELEASE_BASE_URL").is_none()
-        && !std::env::var("INLINE_DISABLE_AUTOUPDATE")
-            .is_ok_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "on"))
+        && !std::env::var("INLINE_DISABLE_AUTOUPDATE").is_ok_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "on"
+            )
+        })
 }
 
 fn manifest_url(config: &Config, channel: UpdateChannel) -> Result<String, UpdateError> {
@@ -297,6 +341,17 @@ async fn fetch_release(
             return Err(UpdateError::Verification("release_rollback"));
         }
     }
+    if let Some(previous) = state
+        .accepted
+        .get(channel.as_str())
+        .filter(|old| old.version == release.version)
+    {
+        let mut identity = previous.clone();
+        identity.generation = release.generation;
+        if identity != release {
+            return Err(UpdateError::Verification("manifest_identity"));
+        }
+    }
     Ok(release)
 }
 
@@ -304,6 +359,9 @@ pub async fn check_update(
     config: &Config,
     channel: UpdateChannel,
 ) -> Result<UpdateCheck, UpdateError> {
+    if Config::release_manifest_overridden() {
+        return check_explicit_mirror(config, channel).await;
+    }
     let release = fetch_release(config, channel).await?;
     Ok(UpdateCheck {
         channel,
@@ -313,8 +371,65 @@ pub async fn check_update(
         supported: release.targets.contains_key(current_target()),
         update_available: newer(&release.version, env!("CARGO_PKG_VERSION"))?
             && release.targets.contains_key(current_target()),
+        verified: true,
     })
 }
+// Preserve the read-only developer mirror contract of --check. A legacy
+// advertised version is explicitly unverified; installation/background paths
+// never call this helper and still require pinned signatures over HTTPS.
+async fn check_explicit_mirror(
+    config: &Config,
+    channel: UpdateChannel,
+) -> Result<UpdateCheck, UpdateError> {
+    let client = client_info::http_client_builder()
+        .timeout(Duration::from_secs(10))
+        .build()?;
+    let mut response = client
+        .get(manifest_url(config, channel)?)
+        .send()
+        .await?
+        .error_for_status()?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if bytes.len() + chunk.len() > manifest::MAX_MANIFEST_BYTES {
+            return Err(UpdateError::Verification("manifest_size"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let (version, supported, verified) = if value.get("payload").is_some() {
+        let release = manifest::verify(&bytes, channel)?;
+        let supported = release.targets.contains_key(current_target());
+        (release.version, supported, true)
+    } else {
+        let version = value
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(UpdateError::Verification("manifest_contract"))?;
+        if version.len() > 64 {
+            return Err(UpdateError::Verification("manifest_contract"));
+        }
+        Version::parse(version)?;
+        (
+            version.to_owned(),
+            value
+                .get("targets")
+                .and_then(|targets| targets.get(current_target()))
+                .is_some(),
+            false,
+        )
+    };
+    Ok(UpdateCheck {
+        channel,
+        current_version: env!("CARGO_PKG_VERSION").into(),
+        latest_version: version.clone(),
+        target: current_target().into(),
+        supported,
+        update_available: supported && newer(&version, env!("CARGO_PKG_VERSION"))?,
+        verified,
+    })
+}
+
 pub fn print_update_check(check: &UpdateCheck) {
     if check.update_available {
         println!(
@@ -358,11 +473,22 @@ pub async fn perform(
         Err(UpdateError::Busy) if background => return status(config),
         Err(error) => return Err(error),
     };
-    let revision = store.read()?.revision;
-    store.edit(|state| {
+    let revision = store.edit(|state| {
+        if !store.root.join("update.json").exists() {
+            state.channel = channel;
+        }
+        if state.channel != channel
+            || (background
+                && (!state.auto_update || !check_due(state, current_epoch_seconds(), 3600)))
+        {
+            return Ok(None);
+        }
         state.last_attempt = Some(current_epoch_seconds());
-        Ok(())
+        Ok(Some(state.revision))
     })?;
+    let Some(revision) = revision else {
+        return status(config);
+    };
     let result = perform_inner(config, &store, channel, background, revision).await;
     if let Err(error) = &result {
         let now = current_epoch_seconds();
@@ -443,6 +569,7 @@ async fn perform_inner(
         enroll_current(store)?;
     }
     if publish_staged(store, &artifact, background, revision)? {
+        let _ = cache::collect(store);
         crate::telemetry::report_update(
             "staged",
             channel.as_str(),
@@ -526,8 +653,11 @@ async fn stage_release(
     extract_archive(&archive, &extraction)?;
     let stage = stage_binary(&extraction.join("inline"), temporary.path())?;
     verify_executable(&stage, &release.version).await?;
-    store::private_dir(&directory)?;
-    copy_binary_atomically(&stage, &executable)?;
+    {
+        let _versions = store::blocking_lock(&store.root.join("versions.lock"))?;
+        store::private_dir(&directory)?;
+        copy_binary_atomically(&stage, &executable)?;
+    }
     verify_executable(&executable, &release.version).await?;
     let artifact = Artifact {
         version: release.version.clone(),
@@ -582,7 +712,10 @@ pub fn installation_method(path: &Path, store: &Store) -> &'static str {
 fn enroll_current(store: &Store) -> Result<(), UpdateError> {
     let path = std::env::current_exe()?;
     if path.starts_with(&store.root)
-        || path.components().any(|part| part.as_os_str() == "bridge")
+        || store
+            .root
+            .parent()
+            .is_some_and(|data| crate::bridge::is_service_entry_point(data, &path))
         || installation_method(&path, store) == "homebrew"
     {
         return Ok(());
@@ -720,7 +853,15 @@ pub fn spawn_update_check(config: &Config, _db: &LocalDb, _json: bool) -> Option
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    let _ = command.spawn();
+    if let Ok(mut child) = command.spawn() {
+        // Long-lived MCP callers reap the worker; short-lived callers can exit
+        // immediately without keeping a Tokio blocking worker alive.
+        let _ = std::thread::Builder::new()
+            .name("inline-update-reaper".into())
+            .spawn(move || {
+                let _ = child.wait();
+            });
+    }
     None
 }
 pub async fn finish_update_check(handle: Option<JoinHandle<()>>) {
@@ -763,6 +904,7 @@ mod tests {
         fs::write(&changed, "installed-by-another-owner").unwrap();
         let mut config = Config::load();
         config.data_dir = root.path().to_path_buf();
+        config.state_path = root.path().join("state.json");
         let before = store.read().unwrap().revision;
         configure(&config, Some(false), None, false, false).unwrap();
         assert!(!publish_staged(&store, &artifact, true, before).unwrap());
@@ -780,6 +922,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut config = Config::load();
         config.data_dir = root.path().to_path_buf();
+        config.state_path = root.path().join("state.json");
         let first =
             configure(&config, Some(true), Some(UpdateChannel::Alpha), true, false).unwrap();
         let same = configure(&config, None, Some(UpdateChannel::Alpha), true, false).unwrap();
@@ -792,6 +935,12 @@ mod tests {
         assert_eq!(app.channel, UpdateChannel::Stable);
         assert!(!app.follows_app);
         assert!(!app.auto_update);
+        follow_app(&config, UpdateChannel::Alpha).unwrap();
+        let following = store::Store::new(root.path()).read().unwrap();
+        assert!(following.follows_app);
+        assert!(!following.channel_override);
+        assert_eq!(following.channel, UpdateChannel::Alpha);
+        assert!(!following.auto_update);
     }
 
     #[test]

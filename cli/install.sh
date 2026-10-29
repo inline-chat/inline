@@ -75,7 +75,8 @@ else
   printf '%s' "$PUBLIC_KEY" | openssl base64 -d -A > "$work/public.der"
   printf 'inline-cli-channel-v1\000' > "$work/signed"
   cat "$work/manifest.json" >> "$work/signed"
-  if openssl pkey -pubin -inform DER -in "$work/public.der" -noout >/dev/null 2>&1; then
+  if openssl pkey -pubin -inform DER -in "$work/public.der" -noout >/dev/null 2>&1 \
+    && openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then
     openssl pkeyutl -verify -pubin -keyform DER -inkey "$work/public.der" -rawin \
       -in "$work/signed" -sigfile "$work/signature" >/dev/null 2>&1 \
       || error 'CLI release verification failed. The existing installation was kept; retry later.'
@@ -84,7 +85,7 @@ else
     # Inline's strict Developer ID identity before executing anything.
     log 'Using macOS Developer ID verification for this manual install (system crypto lacks Ed25519).'
   else
-    error 'This installer needs OpenSSL with Ed25519 support (OpenSSL 1.1.1 or newer). Install it and retry.'
+    error 'This installer needs OpenSSL with Ed25519 support (OpenSSL 3 or newer). Install it and retry.'
   fi
 fi
 
@@ -165,7 +166,12 @@ install -m 0755 "$work/inline" "$replacement"
 mv -f "$replacement" "$destination"
 replacement=''
 # Auth files are not rewritten; an explicit opt-out in updater state survives.
-"$destination" update config --channel "$CHANNEL" --register --json >/dev/null \
-  || log "Installed. To enroll updates, run: $destination update config --register"
+if [ -n "${INLINE_CLI_CHANNEL:-}" ]; then
+  "$destination" update config --channel "$CHANNEL" --register --json >/dev/null \
+    || log "Installed. To enroll updates, run: $destination update config --register"
+else
+  "$destination" update config --register --json >/dev/null \
+    || log "Installed. To enroll updates, run: $destination update config --register"
+fi
 log "Installed inline v$version to $destination"
 case ":$PATH:" in *":$install_dir:"*) ;; *) log "Add $install_dir to PATH to run inline from your shell.";; esac

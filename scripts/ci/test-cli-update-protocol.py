@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(prefix="inline-update-protocol-") as directory:
     state = root / "state.json"
     auth.write_bytes(b"authentication sentinel\n")
     state.write_bytes(b"account and receipts sentinel\n")
-    env = {**os.environ, "INLINE_DATA_DIR": str(root), "INLINE_CLI_TELEMETRY": "off", "INLINE_DISABLE_AUTOUPDATE": "1"}
+    env = {**os.environ, "INLINE_DATA_DIR": str(root), "INLINE_CLI_TELEMETRY": "off", "INLINE_DISABLE_AUTOUPDATE": "1", "INLINE_STATE_PATH": str(state), "INLINE_SECRETS_PATH": str(auth)}
     def call(*args):
         return json.loads(subprocess.check_output([str(binary), *args, "--json"], env=env, timeout=15))
     configured = call("update", "config", "--auto", "off", "--app-channel", "alpha")
@@ -23,6 +23,11 @@ with tempfile.TemporaryDirectory(prefix="inline-update-protocol-") as directory:
     revision = configured["revision"]
     repeated = call("update", "config", "--app-channel", "alpha")
     assert repeated["revision"] == revision
+    call("update", "config", "--channel", "stable")
+    manual = call("update", "config", "--app-channel", "alpha")
+    assert manual["channel"] == "stable" and manual["followsApp"] is False
+    following = call("update", "config", "--follow-app", "--app-channel", "alpha")
+    assert following["channel"] == "alpha" and following["followsApp"] is True
     background = call("update", "--background")
     assert background["autoUpdate"] is False
     assert background["lastAttempt"] is None

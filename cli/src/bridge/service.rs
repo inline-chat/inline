@@ -325,7 +325,8 @@ pub(super) fn install_service(
     account: &AccountBridgeConfig,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     validate_service_paths(paths, account)?;
-    super::update_supervisor::enroll(paths)?;
+    let runtime = super::update_supervisor::enroll(paths)?;
+    super::update_supervisor::request_restart(paths, &runtime)?;
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         let _ = (paths, account);
@@ -384,6 +385,7 @@ pub(super) async fn start_service(
     secrets: &AccountBridgeSecrets,
 ) -> Result<(), Box<dyn std::error::Error>> {
     validate_service_paths(paths, account)?;
+    super::update_supervisor::request_start(paths)?;
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         let _ = (paths, account, secrets);
@@ -490,7 +492,8 @@ pub(super) async fn restart_service(
 ) -> Result<(), Box<dyn std::error::Error>> {
     validate_service_paths(paths, account)?;
     let legacy = !super::update_supervisor::enabled(paths);
-    super::update_supervisor::enroll(paths)?;
+    let runtime = super::update_supervisor::enroll(paths)?;
+    super::update_supervisor::request_restart(paths, &runtime)?;
     if legacy {
         install_stable_binary(&paths.installed_binary)?;
     }
