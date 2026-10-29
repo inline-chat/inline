@@ -21,6 +21,7 @@ final class CLIUpdateController {
   var automaticUpdatesEnabled = true {
     didSet {
       guard !readingStatus, automaticUpdatesEnabled != oldValue else { return }
+      if !automaticUpdatesEnabled && bootstrapIsAutomatic { bootstrapTask?.cancel() }
       UserDefaults.standard.set(automaticUpdatesEnabled, forKey: Self.pendingKey)
       Task { await persistPreference() }
     }
@@ -32,6 +33,8 @@ final class CLIUpdateController {
   @ObservationIgnored private var readingStatus = false
   @ObservationIgnored private var schedule: Task<Void, Never>?
   @ObservationIgnored private var nextCheck = Date.distantPast
+  @ObservationIgnored private var bootstrapTask: Task<CLIServiceInstallOutcome, Error>?
+  @ObservationIgnored private var bootstrapIsAutomatic = false
   private static let pendingKey = "cliAutomaticUpdatesPending"
 
   init(installer: CLIInstallerController, channel: @escaping @MainActor @Sendable () -> CLIUpdateChannel) {
@@ -149,13 +152,25 @@ final class CLIUpdateController {
       nextCheck = Date().addingTimeInterval(60 * 60)
       do {
         let bootstrap = CLIInstallerService(configuration: .production(channel: channel()), requiresSignedManifest: true)
-        let outcome = try await bootstrap.install(progress: { _ in })
+        bootstrapIsAutomatic = !manual
+        let task = Task { try await bootstrap.install(progress: { _ in }) }
+        bootstrapTask = task
+        defer { bootstrapTask = nil; bootstrapIsAutomatic = false }
+        let outcome = try await withTaskCancellationHandler {
+          try await task.value
+        } onCancel: { task.cancel() }
         self.installation = outcome.installation
         let status = try await run(.configure(enabled: UserDefaults.standard.object(forKey: Self.pendingKey) as? Bool, appChannel: channel(), register: true), at: outcome.installation)
         UserDefaults.standard.removeObject(forKey: Self.pendingKey)
         show(status)
       } catch {
-        failureText = "The working CLI was kept. Retry when the CLI release is available."
+        if error is CancellationError {
+          statusText = "Automatic CLI Updates Off"
+          failureText = nil
+          return
+        }
+        failureText = (error as? CLIInstallerFailure)?.message
+          ?? "The working CLI was kept. Retry when the CLI release is available."
         statusText = "CLI Update Deferred"
         reportFailure(stage: "bootstrap")
       }
