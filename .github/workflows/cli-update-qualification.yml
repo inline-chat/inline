@@ -4,19 +4,41 @@ on:
   push:
     branches: [main]
     paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
       - 'cli/**'
-      - 'crates/agent-bridge/**'
+      - 'crates/**'
+      - 'vendor/**'
+      - 'proto/**'
       - 'apple/InlineMacUI/**'
-      - 'scripts/cli-release-signing*'
+      - 'scripts/release-cli*'
+      - 'scripts/cli-release-*'
+      - 'scripts/ci/assert-release-commit.mjs'
+      - 'scripts/ci/release-tag.test.ts'
+      - 'scripts/ci/cli-release-version*'
       - 'scripts/ci/test-cli-update-*'
+      - 'scripts/ci/test-cli-installer.py'
+      - '.github/workflows/cli-release.yml'
       - '.github/workflows/cli-update-qualification.yml'
   pull_request:
     paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
       - 'cli/**'
-      - 'crates/agent-bridge/**'
+      - 'crates/**'
+      - 'vendor/**'
+      - 'proto/**'
       - 'apple/InlineMacUI/**'
-      - 'scripts/cli-release-signing*'
+      - 'scripts/release-cli*'
+      - 'scripts/cli-release-*'
+      - 'scripts/ci/assert-release-commit.mjs'
+      - 'scripts/ci/release-tag.test.ts'
+      - 'scripts/ci/cli-release-version*'
       - 'scripts/ci/test-cli-update-*'
+      - 'scripts/ci/test-cli-installer.py'
+      - '.github/workflows/cli-release.yml'
       - '.github/workflows/cli-update-qualification.yml'
   workflow_dispatch:
 
@@ -56,7 +78,7 @@ jobs:
         run: cargo test --locked -j 2 -p inline-cli -p inline-agent-bridge
       - name: Verify signing, publication and installer contracts
         run: |
-          bun --no-env-file test scripts/release-cli.test.ts scripts/cli-release-signing.test.ts scripts/ci/cli-release-version.test.ts
+          bun --no-env-file test scripts/release-cli.test.ts scripts/cli-release-signing.test.ts scripts/ci/cli-release-version.test.ts scripts/ci/release-tag.test.ts
           python3 scripts/ci/test-cli-installer.py
           python3 scripts/ci/test-cli-update-protocol.py
       - name: Compile and test Mac installer/update protocol

@@ -2379,7 +2379,7 @@ async fn run_provider_installation(
                 )? {
                     continue;
                 }
-                let Some(update_lease) = update_activity::global().enter() else { break; };
+                let Some(_update_lease) = update_activity::global().enter() else { break; };
                 match bridge_store.session_picker_thread_gate(
                     &pending_binding.installation_id,
                     pending_binding.chat_id,

@@ -168,7 +168,9 @@ jobs:
           BUILD_ONLY: ${{ github.event.inputs.build_only }}
         run: |
           set -euo pipefail
-          bun --no-env-file scripts/release-cli.ts signing-preflight
+          if [[ -f scripts/cli-release-signing.ts ]]; then
+            bun --no-env-file scripts/release-cli.ts signing-preflight
+          fi
           release_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
           if [[ -z "${release_version}" ]]; then
             echo "Could not read CLI workspace version." >&2

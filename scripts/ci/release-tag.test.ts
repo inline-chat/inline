@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { PACKAGE_CONFIGS, canonicalSemver, parseReleaseTag } from "./release-tag.mjs"
-import { qualifyRelease, REQUIRED_JOBS } from "./assert-release-commit.mjs"
+import { CLI_UPDATE_JOBS, qualifyRelease, REQUIRED_JOBS } from "./assert-release-commit.mjs"
 import { checkInternalDependencies, validateSourceManifest } from "./npm-release-preflight.mjs"
 
 describe("immutable release tag identity", () => {
@@ -30,7 +30,7 @@ describe("immutable release tag identity", () => {
 })
 
 describe("release main qualification through real Git", () => {
-  let directory: string, checkout: string, candidate: string, newer: string, offMain: string
+  let directory: string, checkout: string, candidate: string, updaterCandidate: string, newer: string, offMain: string
   const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0" }
   const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
   beforeAll(() => {
@@ -51,6 +51,11 @@ describe("release main qualification through real Git", () => {
     candidate = commit("selected source")
     git(source, "tag", "-a", "protocol-v1.2.3-alpha.1", "-m", "selected", candidate)
     git(source, "tag", "cli-v2.3.4", candidate)
+    mkdirSync(path.join(source, "cli"))
+    writeFileSync(path.join(source, "cli/update-compatibility.json"), "{}")
+    git(source, "add", "cli/update-compatibility.json")
+    updaterCandidate = commit("CLI updater contract")
+    git(source, "tag", "cli-v2.3.5", updaterCandidate)
     newer = commit("trusted main advanced")
     git(source, "push", "origin", "main", "--tags")
     git(source, "checkout", "-b", "off-main", candidate)
@@ -97,6 +102,49 @@ describe("release main qualification through real Git", () => {
   it("uses surface jobs instead of unrelated Apple/server/global failures", () => {
     expect(gate({ surface: "cli", tag: "cli-v2.3.4", api: api("cli", [run(10, { conclusion: "failure" })]) })).toMatchObject({ sha: candidate })
     expect(() => gate({ api: api("npm", [run()], "Packed consumer (Node 20)") })).toThrow("Packed consumer")
+  })
+
+  const updaterRun = (extra = {}, id = 20) => run(id, { head_sha: updaterCandidate, ...extra })
+  const updaterApi = (runs = [updaterRun()], jobs = CLI_UPDATE_JOBS.map((name) => ({ name, status: "completed", conclusion: "success" }))) => (resource: string) => {
+    if (resource.includes("workflows/cli-update-qualification.yml/")) return { workflow_runs: runs }
+    if (resource.includes("actions/runs/20/") || resource.includes("actions/runs/21/")) return { jobs }
+    return api("cli", [run(10, { head_sha: updaterCandidate })])(resource)
+  }
+  const updaterGate = (extra = {}) => gate({ tag: "cli-v2.3.5", commit: updaterCandidate, surface: "cli", api: updaterApi(), ...extra })
+
+  it("requires updater qualification on both operating systems for the exact new CLI source", () => {
+    expect(updaterGate()).toMatchObject({ sha: updaterCandidate, outcome: "qualified" })
+    for (const name of CLI_UPDATE_JOBS) {
+      const jobs = CLI_UPDATE_JOBS.map((job) => ({ name: job, status: "completed", conclusion: job === name ? "failure" : "success" }))
+      expect(() => updaterGate({ api: updaterApi([updaterRun()], jobs) })).toThrow(name)
+      expect(() => updaterGate({ api: updaterApi([updaterRun()], jobs.filter((job) => job.name !== name)) })).toThrow(name)
+    }
+  })
+
+  it("defers CLI publication until its latest trusted main updater run completes", () => {
+    for (const runs of [[], [updaterRun({ head_sha: candidate })], [updaterRun({ event: "pull_request" })],
+      [updaterRun({ head_branch: "other" })], [updaterRun({ head_repository: { full_name: "attacker/inline" } })],
+      [updaterRun(), updaterRun({ status: "in_progress" }, 21)]]) {
+      try {
+        updaterGate({ api: updaterApi(runs) })
+        throw new Error("Accepted an unqualified updater")
+      } catch (error: any) {
+        expect(error.outcome).toBe("deferred")
+        expect(error.message).toContain("CLI update qualification")
+      }
+    }
+  })
+
+  it("preserves older CLI retries but fails closed if candidate metadata cannot be read", () => {
+    const requests: string[] = []
+    expect(gate({ tag: "cli-v2.3.4", surface: "cli", api: (resource: string) => {
+      requests.push(resource); return api("cli")(resource)
+    } })).toMatchObject({ sha: candidate })
+    expect(requests.every((resource) => !resource.includes("cli-update-qualification"))).toBe(true)
+    expect(() => updaterGate({ runGit: (...args: string[]) => {
+      if (args[0] === "ls-tree") throw new Error("candidate metadata unavailable")
+      return git(checkout, ...args)
+    } })).toThrow("candidate metadata unavailable")
   })
 })
 
