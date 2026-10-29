@@ -117,4 +117,25 @@ struct ContextMenuLayoutTests {
     let bar = try #require(result.accessory)
     #expect(grid.isAligned(bar))
   }
+
+  @Test("The accessory pins below the top inset over a tall message and follows a short one")
+  func pinnedAccessory() throws {
+    let bar = CGSize(width: 300, height: 52)
+    let tall = plan(source: CGRect(x: 16, y: 100, width: 300, height: 900), accessory: bar)
+    // Opened at the bottom, the bubble's top is far above the screen: the bar stays on screen.
+    let opened = try #require(tall.pinnedAccessory(atContentOffsetY: tall.contentOffsetY))
+    #expect(opened.isOverContent)
+    #expect(opened.frame.minY == 55) // 47 safe area + 8 inset
+    // Scrolled to the top, it sits above the bubble again.
+    let top = try #require(tall.pinnedAccessory(atContentOffsetY: 0))
+    #expect(!top.isOverContent)
+    #expect(top.frame.maxY == tall.preview.minY - 8)
+
+    let short = plan(source: CGRect(x: 16, y: 400, width: 200, height: 60), accessory: bar)
+    let shown = try #require(short.pinnedAccessory(atContentOffsetY: 0))
+    #expect(!shown.isOverContent)
+    #expect(shown.frame == short.accessory)
+    #expect(short.pinnedAccessory(atContentOffsetY: 0) != nil)
+    #expect(plan(source: CGRect(x: 16, y: 400, width: 200, height: 60)).pinnedAccessory(atContentOffsetY: 0) == nil)
+  }
 }
