@@ -247,8 +247,10 @@ final class MessageContextMenuLabController: UIViewController, UIContextMenuInte
       ),
       configuration: configuration
     )
-    // As in the chat: the keyboard goes away while the menu is open and comes back after.
-    let restoresKeyboard = keyboardField.isFirstResponder
+    // As in the chat: over the keyboard when its window is reachable, else the keyboard goes away
+    // while the menu is open and comes back after.
+    let keyboardWindow = keyboardField.isFirstResponder ? KeyboardHostWindow.find(covering: window) : nil
+    let restoresKeyboard = keyboardField.isFirstResponder && keyboardWindow == nil
     controller.onDidDismiss = { [weak self, weak controller] in
       guard let self, menu === controller else { return }
       menu = nil
@@ -256,7 +258,7 @@ final class MessageContextMenuLabController: UIViewController, UIContextMenuInte
     }
     menu = controller
     if restoresKeyboard { keyboardField.resignFirstResponder() }
-    controller.present(from: window)
+    controller.present(from: window, overKeyboardIn: keyboardWindow)
   }
 
   // MARK: - System menu

@@ -1979,8 +1979,11 @@ private extension MessagesCollectionView {
         customContextMenu = nil
         collectionView.contextMenuPhase = .idle
         collectionView.updateContentInsetsAfterContextMenuIfNeeded()
+        let wasOverKeyboard = controller?.isOverKeyboard == true
         // Refocuses the composer if the menu put the keyboard away; the list keeps its place.
         collectionView.onContextMenuDidEnd?()
+        // Over the keyboard nothing moved, so there's no viewport to restore.
+        if wasOverKeyboard { collectionView.cancelContextMenuKeyboardRestoration() }
         flushDeferredNextUpdates()
       }
 
@@ -1989,13 +1992,15 @@ private extension MessagesCollectionView {
       _ = collectionView.stopComposeInsetAnimationAtPresentation()
       // Notes whether the composer has focus, so it gets it back when the menu closes.
       collectionView.onContextMenuWillDisplay?()
-      // iOS 27 draws the keyboard over every app window and leaves it out of screen snapshots, so
-      // nothing can cover it. Like UIKit's own menu, this one puts it away while it's open.
-      if collectionView.isKeyboardVisible {
+      // With the keyboard up the menu draws inside the keyboard's window, over the keyboard, and
+      // the composer keeps focus, as in Telegram. Without that window (iOS 27 draws the keyboard
+      // over every app window), it puts the keyboard away like UIKit's menu.
+      let keyboardWindow = collectionView.isKeyboardVisible ? KeyboardHostWindow.find(covering: window) : nil
+      if collectionView.isKeyboardVisible, keyboardWindow == nil {
         collectionView.preserveContextMenuViewportForKeyboardRestoration()
         window.endEditing(true)
       }
-      controller.present(from: window)
+      controller.present(from: window, overKeyboardIn: keyboardWindow)
       return true
     }
 
@@ -4397,8 +4402,9 @@ private extension MessagesCollectionView {
       reactionPickerPresentation = ReactionEmojiPickerPresentation(
         picker: picker,
         presenter: presenter,
-        // Over the custom menu's own window when it's open, so the sheet shows above it.
-        over: customContextMenu?.presentationWindow
+        // Over the custom menu's own window when it's open, so the sheet shows above it; a menu
+        // in the keyboard's window moves out of it first.
+        over: customContextMenu?.moveToOwnWindow()
           ?? (collectionView.isContextMenuInteractionActive ? sourceWindow : nil),
         tintColor: theme.primary.uiColor,
         onDismiss: { [weak self, weak collectionView] in

@@ -108,16 +108,17 @@ struct MessageContextMenuDeviceTests {
     tall.dismiss(animated: false)
     try await Task.sleep(for: .seconds(0.5))
 
-    // Keyboard up: the menu puts it away while it's open and brings it back when it closes.
+    // Keyboard up: the menu draws over it in its window and the field keeps focus, or, without
+    // that window, puts it away and brings it back when it closes.
     #expect(lab.focusKeyboardForTesting())
     try await Task.sleep(for: .seconds(1.2))
     let keyed = try #require(lab.openMenuForTesting(row: 6))
     try await Task.sleep(for: .seconds(4))
-    report.append("keyboard: focused while open \(lab.isKeyboardFocusedForTesting) menu level \(keyed.presentationWindow?.windowLevel.rawValue ?? -1)")
-    #expect(!lab.isKeyboardFocusedForTesting)
+    report.append("keyboard: over keyboard \(keyed.isOverKeyboard) focused while open \(lab.isKeyboardFocusedForTesting)")
+    #expect(lab.isKeyboardFocusedForTesting == keyed.isOverKeyboard)
 
     // A sheet over the menu, like the emoji picker, gets a keyboard of its own on top.
-    if let scene = stage.window.windowScene, let menuWindow = keyed.presentationWindow {
+    if let scene = stage.window.windowScene, let menuWindow = keyed.moveToOwnWindow() {
       let sheetWindow = UIWindow(windowScene: scene)
       sheetWindow.windowLevel = UIWindow.Level(rawValue: menuWindow.windowLevel.rawValue + 1)
       let root = UIViewController()
