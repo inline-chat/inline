@@ -32,6 +32,13 @@ struct CLIUpdateTests {
     #expect(throws: (any Error).self) { try CLIReleaseVerification.payload(in: JSONEncoder().encode(vector.envelope), channel: .alpha, keys: vector.keys) }
   }
 
+  @Test("legacy bootstrap is limited to a rejected updater subcommand")
+  func distinguishesLegacyEngineFromAnUpdaterFailure() {
+    #expect(CLIAgentSetupRunner.isUnsupportedUpdateEngine(status: 2, standardError: Data("error: unexpected argument 'status' found".utf8)))
+    #expect(!CLIAgentSetupRunner.isUnsupportedUpdateEngine(status: 1, standardError: Data("release status verification failed".utf8)))
+    #expect(!CLIAgentSetupRunner.isUnsupportedUpdateEngine(status: 2, standardError: Data("invalid update state".utf8)))
+  }
+
   @Test("app protocol carries opt-out and pending bridge state without touching auth")
   func decodesUpdateState() throws {
     let data = Data(#"{"schemaVersion":1,"autoUpdate":false,"channel":"alpha","followsApp":true,"currentVersion":"0.7.19-alpha.8","installationMethod":"managed","automaticUpdatesAvailable":true,"outcome":"staged","failure":null,"staged":{"version":"0.7.19-alpha.9"},"retryAt":null,"bridges":[{"version":"0.7.19-alpha.8","candidateVersion":"0.7.19-alpha.9","phase":"waiting_for_idle"}]}"#.utf8)

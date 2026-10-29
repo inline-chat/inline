@@ -1427,6 +1427,27 @@ pub async fn stop(
     print_provider_statuses(&results, json, json_format)
 }
 
+pub fn rollback(
+    config: &Config,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let loaded = load_installation(config)?;
+    let version = update_supervisor::request_rollback(
+        &loaded.paths,
+        &crate::update::Store::new(&config.data_dir),
+    )?;
+    if json {
+        output::print_json(
+            &serde_json::json!({"status":"rollback_requested", "version":version}),
+            json_format,
+        )?;
+    } else {
+        println!("Bridge rollback to {version} queued. Active work will finish first.");
+    }
+    Ok(())
+}
+
 pub async fn restart(
     config: &Config,
     json: bool,
@@ -2297,6 +2318,12 @@ async fn run_provider_installation(
         );
     }
 
+    let durable_update_work = update_activity::global().key();
+    durable_update_work.set(
+        !bridge_store
+            .pending_inbound_bindings(&binding.installation_id, 1)?
+            .is_empty(),
+    );
     drop(startup_activity);
     let run_result: Result<(), Box<dyn std::error::Error>> = async {
         const TURN_EVENT_QUEUE_CAPACITY: usize = 32;
@@ -2313,6 +2340,7 @@ async fn run_provider_installation(
         let mut scan_cursor = None;
 
         let loop_result: Result<(), Box<dyn std::error::Error>> = 'runtime: loop {
+            durable_update_work.set(!bridge_store.pending_inbound_bindings(&binding.installation_id, 1)?.is_empty());
             let candidates = bridge_store.pending_inbound_bindings_after(
                 &binding.installation_id,
                 scan_cursor,
@@ -2336,6 +2364,7 @@ async fn run_provider_installation(
                 )? {
                     continue;
                 }
+                let Some(update_lease) = update_activity::global().enter() else { break; };
                 match bridge_store.session_picker_thread_gate(
                     &pending_binding.installation_id,
                     pending_binding.chat_id,

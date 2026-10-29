@@ -39,3 +39,7 @@ public enum CLIUpdateOperation: Sendable {
     }
   }
 }
+
+public enum CLIUpdateFailure: Error, Sendable, Equatable {
+  case unsupportedEngine
+}

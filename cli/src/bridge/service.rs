@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use std::os::unix::fs::FileTypeExt;
 
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 #[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::watch;
@@ -223,7 +223,7 @@ async fn handle_control_connection(
     shutdown_tx: watch::Sender<bool>,
 ) -> io::Result<()> {
     let (reader, mut writer) = stream.into_split();
-    let mut reader = BufReader::new(reader);
+    let mut reader = BufReader::new(reader.take(8 * 1024 + 1));
     let mut request = String::new();
     let read = tokio::time::timeout(CONTROL_TIMEOUT, reader.read_line(&mut request))
         .await
@@ -1298,13 +1298,16 @@ pub(super) async fn control_request(
     bytes.push(b'\n');
     stream.write_all(&bytes).await?;
     stream.shutdown().await?;
-    let mut reader = BufReader::new(stream);
+    let mut reader = BufReader::new(stream.take(64 * 1024 + 1));
     let mut response = String::new();
     tokio::time::timeout(CONTROL_TIMEOUT, reader.read_line(&mut response))
         .await
         .map_err(|_| {
             io::Error::new(io::ErrorKind::TimedOut, "bridge control response timed out")
         })??;
+    if response.len() > 64 * 1024 {
+        return Err(io::Error::other("bridge control response too large").into());
+    }
     let response: ControlResponse = serde_json::from_str(&response)?;
     if response.version != CONTROL_VERSION || response.status == "unauthorized" {
         return Err(io::Error::new(

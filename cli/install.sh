@@ -132,7 +132,15 @@ if [ "$os" = Darwin ]; then
 fi
 "$work/inline" --version > "$work/version" &
 probe=$!
-(sleep 10; kill -TERM "$probe" 2>/dev/null || true; sleep 1; kill -KILL "$probe" 2>/dev/null || true) &
+(
+  trap - EXIT
+  sleep 10 & alarm=$!
+  trap 'kill "$alarm" 2>/dev/null || true; exit' TERM INT
+  wait "$alarm"
+  kill -TERM "$probe" 2>/dev/null || true
+  sleep 1
+  kill -KILL "$probe" 2>/dev/null || true
+) >/dev/null 2>&1 &
 watchdog=$!
 probe_status=0
 wait "$probe" || probe_status=$?

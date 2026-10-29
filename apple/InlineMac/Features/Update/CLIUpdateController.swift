@@ -14,6 +14,9 @@ final class CLIUpdateController {
   private(set) var homebrewManaged = false
   private(set) var updateAvailable = false
   private(set) var failureText: String?
+  private(set) var bridgeMigrationRequired = false
+  private(set) var bridgeVersionText: String?
+  @ObservationIgnored private var terminalVersion: String?
   var automaticUpdatesEnabled = true {
     didSet {
       guard !readingStatus, automaticUpdatesEnabled != oldValue else { return }
@@ -82,6 +85,7 @@ final class CLIUpdateController {
     defer { isBusy = false }
     let localService = CLIInstallerService(configuration: .production(channel: channel()))
     let publicInstallation = await installer.compatibleLocalInstallationForAgentSetup()
+    terminalVersion = publicInstallation?.version
     installation = await localService.managedUpdateInstallation() ?? publicInstallation
     guard let installation else {
       hasInstallation = false; canManage = false; statusText = "CLI Not Installed"; return
@@ -94,21 +98,27 @@ final class CLIUpdateController {
       let status = try await run(.status, at: installation)
       supportsEngine = true
       show(status)
-      guard canManage else { return }
+      guard installation.source == .inline else { statusText = "Managed by Homebrew"; return }
       let pending = UserDefaults.standard.object(forKey: Self.pendingKey) as? Bool
       let configured = try await run(.configure(enabled: pending, appChannel: channel(), register: installation.source == .inline), at: installation)
       if pending != nil { UserDefaults.standard.removeObject(forKey: Self.pendingKey) }
       show(configured)
+      canManage = configured.installationMethod == "managed"
+        || (configured.bridges?.contains { $0.phase != "migration_required" } ?? false)
+      guard canManage else { statusText = "CLI Managed Externally"; return }
       guard automatic, (automaticUpdatesEnabled || manual), manual || Date() >= nextCheck else { return }
       statusText = "Checking for CLI Updates"
       let updated = try await run(manual ? .apply : .background, at: installation)
       show(updated)
       nextCheck = updated.retryAt.map { Date(timeIntervalSince1970: Double($0)) } ?? Date().addingTimeInterval(6 * 60 * 60)
     } catch {
-      if supportsEngine {
+      if supportsEngine || (error as? CLIUpdateFailure) != .unsupportedEngine {
         statusText = "CLI Update Will Retry"
         failureText = "The working version was kept. Check the connection and retry."
-        nextCheck = Date().addingTimeInterval(60 * 60)
+        if let status = try? await run(.status, at: installation) {
+          show(status)
+          nextCheck = status.retryAt.map { Date(timeIntervalSince1970: Double($0)) } ?? Date().addingTimeInterval(60 * 60)
+        } else { nextCheck = Date().addingTimeInterval(60 * 60) }
         reportFailure(stage: "engine")
         return
       }
@@ -153,11 +163,24 @@ final class CLIUpdateController {
     readingStatus = true
     automaticUpdatesEnabled = (UserDefaults.standard.object(forKey: Self.pendingKey) as? Bool) ?? status.autoUpdate
     readingStatus = false
-    versionText = "\(status.currentVersion) · \(status.channel.capitalized)"
-    failureText = status.failure.map { _ in "The working version was kept. The update will retry automatically." }
+    versionText = "CLI \(terminalVersion ?? status.currentVersion) · \(status.channel.capitalized)"
+    let bridgeVersions = Set(status.bridges?.compactMap(\.version) ?? []).sorted()
+    bridgeVersionText = bridgeVersions.isEmpty ? nil : "Running bridges: \(bridgeVersions.joined(separator: ", "))"
+    failureText = status.failure.map { stage in
+      switch stage {
+      case "signature", "checksum", "codesign", "manifest_identity", "manifest_replay", "release_rollback":
+        "The release couldn’t be verified. The working version was kept; retry later."
+      case "installation":
+        "The working version was kept. Check free space and installation permissions, then retry."
+      default:
+        "The working version was kept. The update will retry automatically."
+      }
+    }
     let phases = status.bridges?.map(\.phase) ?? []
-    if phases.contains("migration_required") { statusText = "Bridge Update Ready — Restart When Agents Finish" }
+    bridgeMigrationRequired = phases.contains("migration_required")
+    if bridgeMigrationRequired { statusText = "Bridge Update Ready — Restart When Agents Finish" }
     else if phases.contains("waiting_for_idle") { statusText = "Waiting for Agents to Finish" }
+    else if phases.contains("maintenance_required") { statusText = "Bridge Update Needs Maintenance" }
     else if phases.contains("trial") { statusText = "Starting Updated Bridge" }
     else if phases.contains("rolled_back") { statusText = "Previous Bridge Version Restored" }
     else if status.failure != nil { statusText = "CLI Update Will Retry" }

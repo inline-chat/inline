@@ -146,11 +146,17 @@ async fn stop_with_timeout(
     Ok(())
 }
 
-fn reject(state: &mut Activation, candidate: &Artifact, reason: &str) {
-    state.rejected.push(candidate.sha256.clone());
+fn quarantine(state: &mut Activation, hash: &str) {
+    if !state.rejected.iter().any(|old| old == hash) {
+        state.rejected.push(hash.into());
+    }
     if state.rejected.len() > 32 {
         state.rejected.remove(0);
     }
+}
+
+fn reject(state: &mut Activation, candidate: &Artifact, reason: &str) {
+    quarantine(state, &candidate.sha256);
     state.candidate = None;
     state.phase = "rolled_back".into();
     state.failure = Some(reason.into());
@@ -204,6 +210,7 @@ async fn activate(
     secrets: &super::AccountBridgeSecrets,
     channel: &str,
     policy: TrialPolicy,
+    rollback: bool,
 ) -> Result<Child, UpdateError> {
     update::validate_cached(store, &candidate)?;
     if candidate.minimum_reader_schema_version > state.current.bridge_schema_version {
@@ -222,13 +229,27 @@ async fn activate(
                 match local_trial(&mut child, &candidate, paths, secrets, policy).await {
                     Ok(()) => {
                         let from = state.current.version.clone();
-                        state.previous = Some(state.current.clone());
-                        state.current = candidate;
-                        state.candidate = None;
-                        state.phase = "committed".into();
-                        state.failure = None;
-                        state.last_activation = Some(unix_now());
-                        atomic_json(&journal(paths), state)?;
+                        let mut committed = state.clone();
+                        committed.previous = if rollback {
+                            None
+                        } else {
+                            Some(state.current.clone())
+                        };
+                        if rollback {
+                            quarantine(&mut committed, &state.current.sha256);
+                        }
+                        committed.current = candidate.clone();
+                        committed.candidate = None;
+                        committed.phase = "committed".into();
+                        committed.failure = None;
+                        committed.last_activation = Some(unix_now());
+                        if atomic_json(&journal(paths), &committed).is_err() {
+                            failure = "activation_journal";
+                            let _ =
+                                stop_with_timeout(&mut child, paths, secrets, policy.stop).await;
+                            break;
+                        }
+                        *state = committed;
                         crate::telemetry::report_update(
                             "activated",
                             channel,
@@ -249,7 +270,9 @@ async fn activate(
         tokio::time::sleep(policy.retry).await;
     }
     reject(state, &candidate, failure);
-    atomic_json(&journal(paths), state)?;
+    // Recovery still runs if the disk became full/read-only during probation.
+    // The persisted trial already identifies the old selection for a reboot.
+    let _ = atomic_json(&journal(paths), state);
     crate::telemetry::report_update(
         "rolled_back",
         channel,
@@ -288,11 +311,77 @@ fn pending(
     paths: &BridgePaths,
 ) -> Result<(), UpdateError> {
     if state.candidate.as_ref() != candidate || state.phase != phase {
-        state.candidate = candidate.cloned();
-        state.phase = phase.into();
-        atomic_json(&journal(paths), state)?;
+        let mut next = state.clone();
+        next.candidate = candidate.cloned();
+        next.phase = phase.into();
+        atomic_json(&journal(paths), &next)?;
+        *state = next;
     }
     Ok(())
+}
+
+#[derive(Deserialize, Serialize)]
+struct RollbackRequest {
+    from: String,
+    to: String,
+}
+fn rollback_path(paths: &BridgePaths) -> PathBuf {
+    paths.root.join("rollback.json")
+}
+
+pub(super) fn request_rollback(paths: &BridgePaths, store: &Store) -> Result<String, UpdateError> {
+    let state: Activation = read_json(&journal(paths))?;
+    let previous = state
+        .previous
+        .as_ref()
+        .ok_or(UpdateError::Verification("no_previous_runtime"))?;
+    update::validate_cached(store, previous)?;
+    if state.current.minimum_reader_schema_version > previous.bridge_schema_version
+        || state.rejected.contains(&previous.sha256)
+    {
+        return Err(UpdateError::Verification("rollback_compatibility"));
+    }
+    atomic_json(
+        &rollback_path(paths),
+        &RollbackRequest {
+            from: state.current.sha256,
+            to: previous.sha256.clone(),
+        },
+    )?;
+    Ok(previous.version.clone())
+}
+
+fn rollback_candidate(state: &Activation, paths: &BridgePaths) -> Option<Artifact> {
+    let request: RollbackRequest = read_json(&rollback_path(paths)).ok()?;
+    state
+        .previous
+        .as_ref()
+        .filter(|old| {
+            request.from == state.current.sha256
+                && request.to == old.sha256
+                && !state.rejected.contains(&old.sha256)
+                && state.current.minimum_reader_schema_version <= old.bridge_schema_version
+        })
+        .cloned()
+}
+
+fn read_policy(store: &Store) -> crate::update::store::State {
+    match store.read() {
+        Ok(state) => state,
+        Err(_) => {
+            crate::telemetry::report_update(
+                "repair_required",
+                "unknown",
+                env!("CARGO_PKG_VERSION"),
+                "unknown",
+                "update_state",
+            );
+            crate::update::store::State {
+                auto_update: false,
+                ..Default::default()
+            }
+        }
+    }
 }
 
 pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
@@ -308,7 +397,7 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
     if state.schema_version != 1 {
         return Err("unsupported activation journal".into());
     }
-    recover_interrupted(&mut state, &paths, store.read()?.channel.as_str())?;
+    recover_interrupted(&mut state, &paths, read_policy(&store).channel.as_str())?;
     let fallback_engine = update::retain_running_binary(&store)?;
     if update::validate_cached(&store, &state.current).is_err() {
         let broken = state.current.clone();
@@ -321,7 +410,7 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
         atomic_json(&journal(&paths), &state)?;
         crate::telemetry::report_update(
             "repair_required",
-            store.read()?.channel.as_str(),
+            read_policy(&store).channel.as_str(),
             &broken.version,
             &state.current.version,
             "runtime_identity",
@@ -351,13 +440,17 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
             .is_some_and(|child| child.try_wait().ok().flatten().is_some())
         {
             worker = None;
+            if let Some(retry) = read_policy(&store).retry_at {
+                next_check = now
+                    + Duration::from_secs(retry.saturating_sub(unix_now() as i64).max(0) as u64);
+            }
             if parked {
                 parked = false;
             }
         }
         if now >= next_check {
             next_check = now + Duration::from_secs(60 * 60 + rand::random::<u64>() % 600);
-            if worker.is_none() && update::automatic_allowed() && store.read()?.auto_update {
+            if worker.is_none() && update::automatic_allowed() && read_policy(&store).auto_update {
                 // Use a retained, verified engine; a broken candidate must not disable repair.
                 let executable = if update::validate_cached(&store, &state.current).is_ok() {
                     &state.current.executable
@@ -392,10 +485,10 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                         let failed = state.current.clone();
                         reject(&mut state, &failed, "crash_loop");
                         state.current = previous;
-                        atomic_json(&journal(&paths), &state)?;
+                        let _ = atomic_json(&journal(&paths), &state);
                         crate::telemetry::report_update(
                             "rolled_back",
-                            store.read()?.channel.as_str(),
+                            read_policy(&store).channel.as_str(),
                             &failed.version,
                             &state.current.version,
                             "crash_loop",
@@ -403,7 +496,7 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                     } else {
                         crate::telemetry::report_update(
                             "repair_required",
-                            store.read()?.channel.as_str(),
+                            read_policy(&store).channel.as_str(),
                             &state.current.version,
                             &state.current.version,
                             "crash_loop",
@@ -414,19 +507,25 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                 next_start = now + Duration::from_secs(10);
             }
         }
-        let policy = store.read()?;
-        if update::automatic_allowed() && policy.auto_update {
-            if let Some(candidate) = policy.staged.filter(|candidate| {
-                !state.rejected.contains(&candidate.sha256)
-                    && update::newer(&candidate.version, &state.current.version).unwrap_or(false)
+        let policy = read_policy(&store);
+        let rollback = rollback_candidate(&state, &paths);
+        let manual = rollback.is_some();
+        if manual || (update::automatic_allowed() && policy.auto_update) {
+            if let Some(candidate) = rollback.or_else(|| {
+                policy.staged.clone().filter(|candidate| {
+                    !state.rejected.contains(&candidate.sha256)
+                        && update::newer(&candidate.version, &state.current.version)
+                            .unwrap_or(false)
+                })
             }) {
                 let throttled = state
                     .last_activation
                     .is_some_and(|at| unix_now().saturating_sub(at) < 6 * 60 * 60);
                 if candidate.minimum_reader_schema_version > state.current.bridge_schema_version {
-                    pending(&mut state, Some(&candidate), "maintenance_required", &paths)?;
-                } else if !throttled {
-                    pending(&mut state, Some(&candidate), "waiting_for_idle", &paths)?;
+                    let _ = pending(&mut state, Some(&candidate), "maintenance_required", &paths);
+                } else if (manual || !throttled)
+                    && pending(&mut state, Some(&candidate), "waiting_for_idle", &paths).is_ok()
+                {
                     if let Some(current) = &mut child {
                         let ready = service::control_request(
                             &paths,
@@ -440,10 +539,10 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                         });
                         // A preference change always wins before stopping a working process.
                         if ready && {
-                            let latest = store.read()?;
-                            latest.revision == policy.revision && latest.auto_update
+                            let latest = read_policy(&store);
+                            manual || (latest.revision == policy.revision && latest.auto_update)
                         } {
-                            child = activate(
+                            let activated = activate(
                                 &mut state,
                                 candidate,
                                 Some(current),
@@ -452,9 +551,38 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                                 &secrets,
                                 policy.channel.as_str(),
                                 TRIAL,
+                                manual,
                             )
-                            .await
-                            .ok();
+                            .await;
+                            if manual {
+                                let _ = fs::remove_file(rollback_path(&paths));
+                            }
+                            match activated {
+                                Ok(updated) => child = Some(updated),
+                                Err(_) => {
+                                    // A failed preflight or journal write must not
+                                    // drop the still-working process handle.
+                                    let _ = service::control_request(
+                                        &paths,
+                                        &secrets,
+                                        ControlCommand::CancelUpdate,
+                                    )
+                                    .await;
+                                    if child
+                                        .as_mut()
+                                        .is_some_and(|c| c.try_wait().ok().flatten().is_some())
+                                    {
+                                        child = None;
+                                    }
+                                    crate::telemetry::report_update(
+                                        "repair_required",
+                                        policy.channel.as_str(),
+                                        &state.current.version,
+                                        &state.current.version,
+                                        "activation",
+                                    );
+                                }
+                            }
                             parked = false;
                             crash_times.clear();
                         } else if ready {
@@ -475,22 +603,26 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                             &secrets,
                             policy.channel.as_str(),
                             TRIAL,
+                            manual,
                         )
                         .await
                         .ok();
+                        if manual {
+                            let _ = fs::remove_file(rollback_path(&paths));
+                        }
                     }
                 }
             } else {
                 let _ =
                     service::control_request(&paths, &secrets, ControlCommand::CancelUpdate).await;
                 if state.candidate.is_some() {
-                    pending(&mut state, None, "committed", &paths)?;
+                    let _ = pending(&mut state, None, "committed", &paths);
                 }
             }
         } else {
             let _ = service::control_request(&paths, &secrets, ControlCommand::CancelUpdate).await;
             if state.candidate.is_some() {
-                pending(&mut state, None, "committed", &paths)?;
+                let _ = pending(&mut state, None, "committed", &paths);
             }
         }
         if child.is_none() && !parked && now >= next_start {
@@ -506,10 +638,10 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     const QUICK: TrialPolicy = TrialPolicy {
         probation: Duration::from_millis(75),
-        deadline: Duration::from_secs(1),
+        deadline: Duration::from_secs(3),
         poll: Duration::from_millis(10),
         retry: Duration::from_millis(10),
-        stop: Duration::from_millis(100),
+        stop: Duration::from_secs(1),
     };
 
     struct Fixture {
@@ -619,6 +751,9 @@ mod tests {
             if behavior == "hang" { std::future::pending::<()>().await; }
             let _ = fs::remove_file(&paths.control_socket);
             let listener = tokio::net::UnixListener::bind(&paths.control_socket).unwrap();
+            if behavior == "journal_failure" {
+                fs::remove_file(journal(&paths)).unwrap(); fs::create_dir(journal(&paths)).unwrap();
+            }
             loop {
                 let (stream, _) = listener.accept().await.unwrap();
                 let (read, mut write) = stream.into_split(); let mut read = BufReader::new(read); let mut request = String::new();
@@ -656,6 +791,7 @@ mod tests {
             &f.secrets,
             "alpha",
             QUICK,
+            false,
         )
         .await
         .unwrap();
@@ -704,6 +840,7 @@ mod tests {
                 &f.secrets,
                 "alpha",
                 QUICK,
+                false,
             )
             .await
             .unwrap();
@@ -720,6 +857,84 @@ mod tests {
                 .await
                 .unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn update_journal_failure_after_start_still_restores_the_previous_process() {
+        let f = Fixture::new();
+        let old = f.artifact("old");
+        let candidate = f.artifact("journal_failure");
+        let mut state = f.state(old.clone());
+        let mut child = launch(&old, &f.paths, &f.store).unwrap();
+        ready(&mut child, &f, &old).await;
+        let mut restored = activate(
+            &mut state,
+            candidate,
+            Some(&mut child),
+            &f.paths,
+            &f.store,
+            &f.secrets,
+            "alpha",
+            QUICK,
+            false,
+        )
+        .await
+        .unwrap();
+        ready(&mut restored, &f, &old).await;
+        assert_eq!(state.current, old);
+        assert_eq!(state.failure.as_deref(), Some("activation_journal"));
+        f.assert_account_unchanged();
+        stop_with_timeout(&mut restored, &f.paths, &f.secrets, QUICK.stop)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn update_manual_rollback_is_limited_to_recorded_previous_and_quarantines_the_replaced_runtime()
+     {
+        let f = Fixture::new();
+        let old = f.artifact("old");
+        let current = f.artifact("healthy");
+        let mut state = f.state(current.clone());
+        state.previous = Some(old.clone());
+        atomic_json(&journal(&f.paths), &state).unwrap();
+        request_rollback(&f.paths, &f.store).unwrap();
+        assert_eq!(rollback_candidate(&state, &f.paths), Some(old.clone()));
+        let mut child = launch(&current, &f.paths, &f.store).unwrap();
+        ready(&mut child, &f, &current).await;
+        let mut restored = activate(
+            &mut state,
+            old.clone(),
+            Some(&mut child),
+            &f.paths,
+            &f.store,
+            &f.secrets,
+            "alpha",
+            QUICK,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(state.current, old);
+        assert!(state.previous.is_none());
+        assert!(state.rejected.contains(&current.sha256));
+        assert!(
+            rollback_candidate(&state, &f.paths).is_none(),
+            "a stale request cannot roll back a different selection"
+        );
+        f.assert_account_unchanged();
+        stop_with_timeout(&mut restored, &f.paths, &f.secrets, QUICK.stop)
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn update_corrupt_preferences_disable_maintenance_without_failing_the_workload() {
+        let f = Fixture::new();
+        crate::update::store::private_dir(&f.store.root).unwrap();
+        fs::write(f.store.root.join("update.json"), "{torn").unwrap();
+        assert!(!read_policy(&f.store).auto_update);
+        f.assert_account_unchanged();
     }
 
     #[test]
