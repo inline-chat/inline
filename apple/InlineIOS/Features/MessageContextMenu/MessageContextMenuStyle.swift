@@ -1,8 +1,8 @@
 import InlineMessageLayout
 import UIKit
 
-/// Metrics of the platform menu the custom menu imitates: Liquid Glass on iOS 26, the blurred
-/// platter before it.
+/// Metrics of the platform menu the custom menu imitates: Liquid Glass on iOS 26 and later
+/// (measured from UIKit's own menu on iOS 27.2), the blurred platter before it.
 struct MessageContextMenuStyle {
   enum Platter {
     /// iOS 26: a glass platter, leading icons, rounded row highlight, lines between sections.
@@ -28,20 +28,36 @@ struct MessageContextMenuStyle {
   var sectionSpacing: CGFloat
   /// Horizontal inset of the highlighted row's fill; zero fills the row edge to edge.
   var highlightInset: CGFloat
+  var highlightCornerRadius: CGFloat = 20
+  var minimumRowHeight: CGFloat = 44
+  /// Inset of the line between sections, from both sides.
+  var separatorInset: CGFloat = 0
+  /// Thickness of the line between sections; nil draws a hairline.
+  var separatorThickness: CGFloat?
 
   var iconsLead: Bool { platter == .glass }
 
-  static let glass = MessageContextMenuStyle(
-    platter: .glass,
-    cornerRadius: 24,
-    verticalPadding: 10,
-    rowSideInset: 18,
-    rowVerticalInset: 11,
-    iconTitleSpacing: 10,
-    showsRowSeparators: false,
-    sectionSpacing: 13,
-    highlightInset: 10
-  )
+  /// UIKit's menu on iOS 27.2: 250 wide, 42-point rows, 10 above the first row and below the
+  /// last, icons centered 40 from the leading edge, titles at 64, 28 to the trailing edge, and
+  /// sections 21 apart with a 1-point line inset 24.
+  static let glass: MessageContextMenuStyle = {
+    var style = MessageContextMenuStyle(
+      platter: .glass,
+      cornerRadius: 28,
+      verticalPadding: 10,
+      rowSideInset: 28,
+      rowVerticalInset: 10,
+      iconTitleSpacing: 12,
+      showsRowSeparators: false,
+      sectionSpacing: 21,
+      highlightInset: 10
+    )
+    style.iconSlotWidth = 24
+    style.minimumRowHeight = 42
+    style.separatorInset = 24
+    style.separatorThickness = 1
+    return style
+  }()
 
   static let material = MessageContextMenuStyle(
     platter: .material,
@@ -84,16 +100,20 @@ struct MessageContextMenuStyle {
   var rowSeparatorColor: UIColor { .separator }
 
   var sectionSeparatorColor: UIColor {
-    UIColor.label.withAlphaComponent(platter == .glass ? 0.12 : 0.07)
+    UIColor.label.withAlphaComponent(platter == .glass ? 0.08 : 0.07)
   }
 
+  /// The menu's container. On iOS 26 it is interactive glass, so it answers touches the way the
+  /// system menu does; its corners come from the glass so its edge highlight isn't clipped.
   func makePlatter() -> UIVisualEffectView {
-    let view: UIVisualEffectView
     if #available(iOS 26.0, *), platter == .glass {
-      view = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
-    } else {
-      view = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
+      let glass = UIGlassEffect(style: .regular)
+      glass.isInteractive = true
+      let view = UIVisualEffectView(effect: glass)
+      view.cornerConfiguration = .corners(radius: .fixed(Double(cornerRadius)))
+      return view
     }
+    let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
     view.layer.cornerRadius = cornerRadius
     view.layer.cornerCurve = .continuous
     view.clipsToBounds = true
@@ -112,6 +132,8 @@ struct MessageContextMenuMotion {
   var springDamping: CGFloat = 104
   var backgroundDuration: Double = 0.2
   var dismissDuration: Double = 0.2
+  /// Opening a submenu and changing rows: Telegram's 0.45 s page spring, without bounce.
+  var pageSpringDuration: Double = 0.45
 
   static let standard = MessageContextMenuMotion()
 
@@ -126,7 +148,8 @@ struct MessageContextMenuMotion {
 struct MessageContextMenuConfiguration {
   var style = MessageContextMenuStyle.current
   var motion = MessageContextMenuMotion.standard
-  var layoutMetrics = ContextMenuLayout.Metrics.standard
+  /// UIKit puts its menu 16 below the lifted bubble.
+  var layoutMetrics = ContextMenuLayout.Metrics(previewMenuSpacing: 16)
   /// Blur behind the menu; nil leaves only the dim.
   var backgroundBlur: UIBlurEffect.Style? = .systemUltraThinMaterial
   var dimColor = UIColor { traits in

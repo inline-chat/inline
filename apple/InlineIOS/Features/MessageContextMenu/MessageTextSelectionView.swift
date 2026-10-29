@@ -68,6 +68,12 @@ final class MessageTextSelectionView: UIView, UIGestureRecognizerDelegate {
     setSelection(nil)
   }
 
+  #if DEBUG
+  func selectForTesting(_ range: NSRange) {
+    setSelection(layout.selectionRange(from: range.location, to: NSMaxRange(range)))
+  }
+  #endif
+
   /// True when `point` (in this view's coordinates) is on a handle, so the scroll view under
   /// the menu leaves the drag to the handle.
   func isHandle(at point: CGPoint) -> Bool {

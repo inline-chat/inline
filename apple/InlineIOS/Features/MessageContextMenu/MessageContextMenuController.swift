@@ -3,23 +3,27 @@ import UIKit
 
 /// Inline's own message context menu, after Telegram iOS's context controller.
 ///
-/// The bubble lifts out of the chat into an overlay over the window: a blur and dim, then one
-/// scrolling column with the reaction bar, the bubble and the actions. A bubble taller than the
-/// screen scrolls with its menu, opening at the bottom so the actions show. The preview can be
-/// a live message view, and its text can be selected. The keyboard is left alone; the column
-/// fits above it, so the chat underneath never moves.
+/// The bubble lifts out of the chat into the menu's own window, one level above the scene's
+/// windows: a blur and dim, then one scrolling column with the bubble and the actions, and the
+/// reaction bar pinned on screen above it. A bubble taller than the screen scrolls with its
+/// menu, opening at the bottom so the actions show, while the reaction bar stays below the top
+/// inset over the message. The window never becomes key, so the chat's first responder is the
+/// host's to manage; iOS 27 draws the keyboard over every app window, so hosts put it away
+/// while the menu is open, as UIKit's menu does. The preview can be a live message view, and
+/// its text can be selected.
 @MainActor
-final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate {
+final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate, UIScrollViewDelegate {
   struct Source {
     /// Draws the bubble: a live message view or a bitmap, sized to `frame`.
     var preview: UIView
-    /// The bubble's frame in window coordinates, without the press shrink.
+    /// The bubble's frame in the source window's coordinates, without the press shrink.
     var frame: CGRect
     /// The press shrink on the source as the menu opens; the preview grows from it.
     var pressedScale: CGFloat = 1
     var alignment: ContextMenuLayout.Alignment
     var selectableText: SelectableText?
-    /// The bubble's frame now, in window coordinates, for the flight back; nil once it's gone.
+    /// The bubble's frame now, in the source window's coordinates, for the flight back; nil once
+    /// it's gone.
     var currentFrame: () -> CGRect?
     var setHidden: (Bool) -> Void
   }
@@ -46,11 +50,14 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
   /// The menu is gone and the source shows again.
   var onDidDismiss: (() -> Void)?
   private(set) var isDismissing = false
+  /// The menu's window. Anything presented over the open menu, like the emoji picker, goes in a
+  /// window above this one.
+  private(set) var presentationWindow: UIWindow?
 
   private let source: Source
   private let content: Content
   private let configuration: MessageContextMenuConfiguration
-  private weak var window: UIWindow?
+  private weak var sourceWindow: UIWindow?
 
   private let overlay = OverlayView()
   private let blurView = UIVisualEffectView(effect: nil)
@@ -62,6 +69,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
   private var selectionView: MessageTextSelectionView?
   private var safeInsets = ContextMenuLayout.Insets.zero
   private var plan: ContextMenuLayout.Result?
+  private var isAccessoryOverContent = false
   private var selectionState: (hasSelection: Bool, selectsAll: Bool) = (false, false)
   private var holdStart: CGPoint?
   private var isTrackingHold = false
@@ -72,16 +80,32 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
     self.content = content
     self.configuration = configuration
     actionsView = MessageContextMenuActionsView(menu: content.menu(false), style: configuration.style)
+    actionsView.motion = configuration.motion
     super.init()
   }
 
   // MARK: - Presenting
 
-  /// Shows the menu over `window`. `keyboardHeight` is how far the keyboard reaches up from the
-  /// window's bottom; the column stays above it.
-  func present(in window: UIWindow, keyboardHeight: CGFloat) {
-    self.window = window
-    overlay.frame = window.bounds
+  /// Shows the menu over the windows of `sourceWindow`'s scene.
+  func present(from sourceWindow: UIWindow) {
+    guard let scene = sourceWindow.windowScene else { return }
+    self.sourceWindow = sourceWindow
+    let window = MessageContextMenuWindow(windowScene: scene)
+    let topLevel = scene.windows.filter { !$0.isHidden }.map(\.windowLevel.rawValue).max() ?? 0
+    window.windowLevel = UIWindow.Level(rawValue: max(topLevel, sourceWindow.windowLevel.rawValue) + 1)
+    window.overrideUserInterfaceStyle = sourceWindow.traitCollection.userInterfaceStyle
+    window.tintColor = sourceWindow.tintColor
+    window.backgroundColor = .clear
+    let root = UIViewController()
+    root.view.backgroundColor = .clear
+    window.rootViewController = root
+    window.frame = sourceWindow.frame
+    // Shown before the content goes in, so the root view has its final size for the layout.
+    window.isHidden = false
+    root.view.frame = window.bounds
+    presentationWindow = window
+
+    overlay.frame = root.view.bounds
     overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     overlay.accessibilityViewIsModal = true
     overlay.onEscape = { [weak self] in
@@ -91,6 +115,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
     overlay.onSizeChange = { [weak self] in
       self?.dismiss(animated: false)
     }
+    root.view.addSubview(overlay)
 
     blurView.frame = overlay.bounds
     blurView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -102,24 +127,21 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
     overlay.addSubview(blurView)
     overlay.addSubview(dimView)
 
-    let keyboard = max(0, keyboardHeight)
-    scrollView.frame = CGRect(x: 0, y: 0, width: window.bounds.width, height: window.bounds.height - keyboard)
+    scrollView.frame = overlay.bounds
+    scrollView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     scrollView.contentInsetAdjustmentBehavior = .never
     scrollView.showsVerticalScrollIndicator = false
     scrollView.delaysContentTouches = false
     scrollView.canCancelContentTouches = true
+    scrollView.delegate = self
     scrollView.blocksPan = { [weak self] point in
       guard let self, let selectionView else { return false }
       return selectionView.isHandle(at: scrollView.convert(point, to: selectionView))
     }
     overlay.addSubview(scrollView)
-    let safe = window.safeAreaInsets
-    safeInsets = ContextMenuLayout.Insets(
-      top: safe.top,
-      left: safe.left,
-      bottom: keyboard > 0 ? 0 : safe.bottom,
-      right: safe.right
-    )
+    // The same screen as the source, whose safe area is already known.
+    let safe = sourceWindow.safeAreaInsets
+    safeInsets = ContextMenuLayout.Insets(top: safe.top, left: safe.left, bottom: safe.bottom, right: safe.right)
 
     previewHost.frame = CGRect(origin: .zero, size: source.frame.size)
     source.preview.frame = previewHost.bounds
@@ -136,6 +158,12 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
     }
     scrollView.addSubview(previewHost)
 
+    actionsView.onSelect = { [weak self] row in self?.select(row) }
+    actionsView.onLayoutChange = { [weak self] in self?.layOutForNewMenuSize() }
+    actionsView.prepareFeedback()
+    scrollView.addSubview(actionsView)
+
+    // Over the column, so it stays on screen while the column scrolls.
     if let accessory = content.accessory {
       accessory.translatesAutoresizingMaskIntoConstraints = false
       accessoryHost.addSubview(accessory)
@@ -143,38 +171,42 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
         accessory.centerXAnchor.constraint(equalTo: accessoryHost.centerXAnchor),
         accessory.centerYAnchor.constraint(equalTo: accessoryHost.centerYAnchor),
       ])
-      scrollView.addSubview(accessoryHost)
+      accessoryHost.layer.shadowColor = UIColor.black.cgColor
+      accessoryHost.layer.shadowRadius = 16
+      accessoryHost.layer.shadowOffset = CGSize(width: 0, height: 4)
+      accessoryHost.layer.shadowOpacity = 0
+      overlay.addSubview(accessoryHost)
     }
-
-    actionsView.onSelect = { [weak self] row in self?.select(row) }
-    actionsView.onContentSizeChange = { [weak self] in self?.relayout(animated: true) }
-    actionsView.prepareFeedback()
-    scrollView.addSubview(actionsView)
 
     let tap = UITapGestureRecognizer(target: self, action: #selector(handleBackgroundTap))
     tap.delegate = self
     scrollView.addGestureRecognizer(tap)
 
-    window.addSubview(overlay)
-    let plan = makePlan(sourceInViewport: source.frame)
+    let sourceFrame = viewportRect(fromSource: source.frame)
+    let plan = makePlan(sourceInViewport: sourceFrame)
     apply(plan, updatesOffset: true)
     source.setHidden(true)
-    animateIn(plan)
+    animateIn(plan, from: sourceFrame)
 
     UIAccessibility.post(notification: .screenChanged, argument: actionsView.firstRow)
   }
 
+  /// `rect` in the source window's coordinates, in the menu's viewport.
+  private func viewportRect(fromSource rect: CGRect) -> CGRect {
+    guard let presentationWindow, let sourceWindow else { return rect }
+    return overlay.convert(presentationWindow.convert(rect, from: sourceWindow), from: presentationWindow)
+  }
+
   private var availableWidth: CGFloat {
-    let width = window?.bounds.width ?? scrollView.bounds.width
-    return max(0, width - safeInsets.left - safeInsets.right - configuration.layoutMetrics.sideInset * 2)
+    max(0, overlay.bounds.width - safeInsets.left - safeInsets.right - configuration.layoutMetrics.sideInset * 2)
   }
 
   private func makePlan(sourceInViewport: CGRect) -> ContextMenuLayout.Result {
     let menuSize = actionsView.sizeThatFits(CGSize(width: availableWidth, height: .greatestFiniteMagnitude))
     let accessorySize = content.accessory.map { $0.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize) }
-    let scale = window?.screen.scale ?? 3
+    let scale = presentationWindow?.screen.scale ?? 3
     return ContextMenuLayout.plan(ContextMenuLayout.Input(
-      viewport: scrollView.bounds.size,
+      viewport: overlay.bounds.size,
       safeInsets: safeInsets,
       source: sourceInViewport,
       menuSize: menuSize,
@@ -195,13 +227,31 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
     previewHost.untransformedFrame = plan.preview
     actionsView.layer.anchorPoint = plan.menuAnchor
     actionsView.untransformedFrame = plan.menu
-    if let frame = plan.accessory {
-      accessoryHost.layer.anchorPoint = CGPoint(x: plan.menuAnchor.x, y: 1)
-      accessoryHost.untransformedFrame = frame
-    }
+    accessoryHost.layer.anchorPoint = CGPoint(x: plan.menuAnchor.x, y: 1)
+    layOutAccessory(animated: false)
   }
 
-  private func animateIn(_ plan: ContextMenuLayout.Result) {
+  /// Keeps the reaction bar on screen as the column scrolls, with a shadow while the message
+  /// is under it.
+  private func layOutAccessory(animated: Bool) {
+    guard accessoryHost.superview != nil,
+          let pinned = plan?.pinnedAccessory(atContentOffsetY: scrollView.contentOffset.y)
+    else { return }
+    accessoryHost.untransformedFrame = pinned.frame
+    guard pinned.isOverContent != isAccessoryOverContent else { return }
+    isAccessoryOverContent = pinned.isOverContent
+    let opacity: Float = pinned.isOverContent ? 0.18 : 0
+    if animated {
+      let animation = CABasicAnimation(keyPath: "shadowOpacity")
+      animation.fromValue = accessoryHost.layer.presentation()?.shadowOpacity ?? accessoryHost.layer.shadowOpacity
+      animation.toValue = opacity
+      animation.duration = 0.25
+      accessoryHost.layer.add(animation, forKey: "shadowOpacity")
+    }
+    accessoryHost.layer.shadowOpacity = opacity
+  }
+
+  private func animateIn(_ plan: ContextMenuLayout.Result, from sourceFrame: CGRect) {
     let motion = configuration.motion
     let blur = configuration.backgroundBlur.map { UIBlurEffect(style: $0) }
     let animated = [previewHost, actionsView, accessoryHost]
@@ -226,7 +276,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
     }
 
     // Everything rides from where the bubble was in the chat.
-    let start = plan.contentRect(fromViewport: source.frame)
+    let start = plan.contentRect(fromViewport: sourceFrame)
     let delta = CGPoint(x: start.midX - plan.preview.midX, y: start.midY - plan.preview.midY)
     let offset = NSValue(cgPoint: delta)
     let zero = NSValue(cgPoint: .zero)
@@ -237,36 +287,28 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
       )
     }
 
-    for (view, initialScale) in [(actionsView as UIView, 0.01), (accessoryHost, 0.2)] where view.superview != nil {
-      view.alpha = 0
-      UIView.animate(withDuration: 0.08, delay: 0, options: [.allowUserInteraction]) { view.alpha = 1 }
-      view.layer.addContextMenuSpring("transform.scale", from: initialScale, to: 1.0, additive: false, motion: motion)
-      view.layer.addContextMenuSpring("position", from: offset, to: zero, additive: true, motion: motion)
+    actionsView.alpha = 0
+    UIView.animate(withDuration: 0.08, delay: 0, options: [.allowUserInteraction]) { self.actionsView.alpha = 1 }
+    actionsView.layer.addContextMenuSpring("transform.scale", from: 0.01, to: 1.0, additive: false, motion: motion)
+    actionsView.layer.addContextMenuSpring("position", from: offset, to: zero, additive: true, motion: motion)
+
+    if accessoryHost.superview != nil {
+      accessoryHost.alpha = 0
+      UIView.animate(withDuration: 0.08, delay: 0, options: [.allowUserInteraction]) { self.accessoryHost.alpha = 1 }
+      accessoryHost.layer.addContextMenuSpring("transform.scale", from: 0.2, to: 1.0, additive: false, motion: motion)
+      // A pinned bar grows in place; one above the bubble rides with it.
+      if !isAccessoryOverContent {
+        accessoryHost.layer.addContextMenuSpring("position", from: offset, to: zero, additive: true, motion: motion)
+      }
     }
   }
 
-  /// Lays the column out again after the menu changed size, keeping the bubble where it is
-  /// unless the menu no longer fits under it.
-  private func relayout(animated: Bool) {
+  /// Lays the column out for the menu's new size, keeping the bubble where it is unless the
+  /// menu no longer fits under it. Runs inside the menu's own animation.
+  private func layOutForNewMenuSize() {
     guard !isDismissing, plan != nil else { return }
     let current = previewHost.untransformedFrame.offsetBy(dx: 0, dy: -scrollView.contentOffset.y)
-    let plan = makePlan(sourceInViewport: current)
-    let changes = { [self] in
-      apply(plan, updatesOffset: true)
-      actionsView.layoutIfNeeded()
-    }
-    if animated, !UIAccessibility.isReduceMotionEnabled {
-      UIView.animate(
-        springDuration: 0.35,
-        bounce: 0,
-        initialSpringVelocity: 0,
-        delay: 0,
-        options: [.beginFromCurrentState, .allowUserInteraction],
-        animations: changes
-      )
-    } else {
-      changes()
-    }
+    apply(makePlan(sourceInViewport: current), updatesOffset: true)
   }
 
   // MARK: - Dismissing
@@ -282,12 +324,17 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
     let finish = { [self] in
       source.setHidden(false)
       overlay.removeFromSuperview()
-      onDidDismiss?()
+      presentationWindow?.isHidden = true
+      presentationWindow?.rootViewController = nil
+      presentationWindow = nil
+      // Actions first, as UIKit's menu does: one that presents a sheet takes focus before the
+      // host would give it back to the composer.
       let actions = pendingActions
       pendingActions.removeAll()
       actions.forEach { $0() }
+      onDidDismiss?()
     }
-    guard animated, overlay.window != nil else {
+    guard animated, presentationWindow?.isHidden == false else {
       finish()
       return
     }
@@ -297,7 +344,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
     }
     let target = UIAccessibility.isReduceMotionEnabled
       ? nil
-      : source.currentFrame().map { scrollView.convert($0, from: nil) }
+      : source.currentFrame().map { scrollView.convert(viewportRect(fromSource: $0), from: overlay) }
     UIView.animate(
       withDuration: configuration.motion.dismissDuration,
       delay: 0,
@@ -328,10 +375,19 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
     let point = touch.location(in: scrollView)
     if actionsView.frame.contains(point) { return false }
-    if accessoryHost.superview != nil, accessoryHost.frame.contains(point) { return false }
     // With a selection, a tap on the bubble clears it instead of closing the menu.
     if previewHost.frame.contains(point), selectionView?.hasSelection == true { return false }
     return true
+  }
+
+  // MARK: - Scrolling
+
+  func scrollViewDidScroll(_ scrollView: UIScrollView) {
+    layOutAccessory(animated: true)
+  }
+
+  func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+    actionsView.cancelTracking()
   }
 
   // MARK: - Actions
@@ -356,15 +412,16 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
 
   // MARK: - Hold tracking
 
-  /// Where the opening hold's finger was when the menu opened, in window coordinates. Movement
-  /// from here decides whether the finger slid onto an action.
+  /// Where the opening hold's finger was when the menu opened, in the source window's
+  /// coordinates. Movement from here decides whether the finger slid onto an action.
   func beginHold(at point: CGPoint) {
     holdStart = point
     isTrackingHold = false
   }
 
-  /// The opening hold's finger moved, in window coordinates. Once it has really moved, the row
-  /// under it highlights, unless the column scrolls (then the finger has to lift first).
+  /// The opening hold's finger moved, in the source window's coordinates. Once it has really
+  /// moved, the row under it highlights, unless the column scrolls (then the finger has to lift
+  /// first).
   func trackHold(at point: CGPoint) {
     guard !isDismissing, plan?.isScrollable == false else { return }
     guard let start = holdStart else {
@@ -375,7 +432,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
       isTrackingHold = true
     }
     guard isTrackingHold else { return }
-    let local = actionsView.convert(point, from: nil)
+    let local = actionsView.convert(viewportRect(fromSource: CGRect(origin: point, size: .zero)).origin, from: overlay)
     actionsView.highlightRow(at: actionsView.bounds.contains(local) ? local : nil, feedback: true)
   }
 
@@ -425,9 +482,22 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate 
     }
     return actions
   }
+
+  #if DEBUG
+  /// Drives the menu from device tests.
+  var actionsViewForTesting: MessageContextMenuActionsView { actionsView }
+  var selectionViewForTesting: MessageTextSelectionView? { selectionView }
+  var scrollViewForTesting: UIScrollView { scrollView }
+  var accessoryHostForTesting: UIView { accessoryHost }
+  #endif
 }
 
 // MARK: - Views
+
+/// The menu's window. It never becomes key, so the first responder under it stays the host's.
+private final class MessageContextMenuWindow: UIWindow {
+  override var canBecomeKey: Bool { false }
+}
 
 private final class OverlayView: UIView {
   var onSizeChange: (() -> Void)?
