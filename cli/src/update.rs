@@ -597,14 +597,54 @@ fn publish_staged(
         state.staged = Some(artifact.clone());
         state.outcome = "staged".into();
         for (path, old_hash) in &mut state.launchers {
-            if installation_method(path, store) == "managed"
-                && file_hash(path).ok().as_ref() == Some(old_hash)
-            {
+            if installation_method(path, store) != "managed" || !owned_regular_file(path) {
+                continue;
+            }
+            let Ok(actual) = file_hash(path) else {
+                continue;
+            };
+            let same_permissions = fs::metadata(path)
+                .ok()
+                .zip(fs::metadata(&artifact.executable).ok())
+                .is_some_and(|(installed, staged)| installed.permissions() == staged.permissions());
+            if actual == artifact.executable_sha256 && same_permissions {
+                // A prior rename may have succeeded before its receipt write.
+                *old_hash = actual;
+            } else if &actual == old_hash || verified_cached_hash(store, &actual) {
                 copy_binary_atomically(&artifact.executable, path)?;
                 *old_hash = artifact.executable_sha256.clone();
             }
         }
         Ok(true)
+    })
+}
+
+fn owned_regular_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        metadata.uid() == unsafe { libc::geteuid() }
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+fn verified_cached_hash(store: &Store, hash: &str) -> bool {
+    let Ok(entries) = fs::read_dir(store.root.join("versions")) else {
+        return false;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        store::read_json::<Artifact>(&entry.path().join("receipt.json")).is_ok_and(|known| {
+            known.executable_sha256 == hash && validate_cached(store, &known).is_ok()
+        })
     })
 }
 
@@ -736,7 +776,8 @@ fn enroll_current(store: &Store) -> Result<(), UpdateError> {
     }
     let hash = file_hash(&path)?;
     store.edit(|state| {
-        state.launchers.entry(path).or_insert(hash);
+        // Explicit registration also repairs receipts after a manual upgrade.
+        state.launchers.insert(path, hash);
         Ok(())
     })
 }
@@ -934,6 +975,60 @@ mod tests {
         assert_eq!(fs::read(&owned).unwrap(), b"new");
         assert_eq!(fs::read(&changed).unwrap(), b"installed-by-another-owner");
         assert_eq!(store.read().unwrap().staged, Some(artifact));
+    }
+
+    #[test]
+    fn updater_recovers_a_launcher_rename_that_preceded_a_failed_receipt_write() {
+        use std::os::unix::fs::PermissionsExt;
+        for (advance, missing_permissions) in [(false, false), (false, true), (true, false)] {
+            let root = tempfile::tempdir().unwrap();
+            let store = Store::new(root.path());
+            let make = |bytes: &[u8], version: &str| {
+                let hash = bytes_to_hex(&Sha256::digest(bytes));
+                let directory = store.root.join("versions").join(&hash);
+                store::private_dir(&directory).unwrap();
+                let executable = directory.join("inline");
+                fs::write(&executable, bytes).unwrap();
+                fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+                let artifact = Artifact {
+                    version: version.into(),
+                    target: "fixture".into(),
+                    sha256: hash.clone(),
+                    executable_sha256: hash,
+                    executable,
+                    bridge_schema_version: 30,
+                    minimum_reader_schema_version: 30,
+                };
+                store::atomic_json(&directory.join("receipt.json"), &artifact).unwrap();
+                artifact
+            };
+            let installed = make(b"verified v2", "2.0.0");
+            let next = make(b"verified v3", "3.0.0");
+            let launcher = root.path().join("inline");
+            fs::copy(&installed.executable, &launcher).unwrap();
+            if missing_permissions {
+                fs::set_permissions(&launcher, fs::Permissions::from_mode(0o600)).unwrap();
+            }
+            store
+                .edit(|state| {
+                    state
+                        .launchers
+                        .insert(launcher.clone(), "lost-v1-receipt".into());
+                    Ok(())
+                })
+                .unwrap();
+            let wanted = if advance { &next } else { &installed };
+            assert!(publish_staged(&store, wanted, true, 0).unwrap());
+            assert_eq!(file_hash(&launcher).unwrap(), wanted.executable_sha256);
+            assert_ne!(
+                fs::metadata(&launcher).unwrap().permissions().mode() & 0o111,
+                0
+            );
+            assert_eq!(
+                store.read().unwrap().launchers[&launcher],
+                wanted.executable_sha256
+            );
+        }
     }
 
     #[test]
