@@ -102,7 +102,11 @@ public enum ContextMenuLayout {
     public var contentOffsetY: CGFloat
     public var preview: CGRect
     public var menu: CGRect
+    /// The accessory's place above the bubble, in content coordinates. It doesn't scroll with
+    /// the column: `pinnedAccessory(atContentOffsetY:)` gives where it shows.
     public var accessory: CGRect?
+    /// The highest the accessory goes on screen: below the top inset.
+    public var accessoryMinY: CGFloat
     /// The point of the menu that stays put while it scales in, in unit coordinates: the
     /// top corner on the aligned side, where it meets the bubble.
     public var menuAnchor: CGPoint
@@ -111,6 +115,17 @@ public enum ContextMenuLayout {
     /// Where `rect`, in viewport coordinates, sits in content coordinates at the initial offset.
     public func contentRect(fromViewport rect: CGRect) -> CGRect {
       rect.offsetBy(dx: 0, dy: contentOffsetY)
+    }
+
+    /// Where the accessory shows, in viewport coordinates, with the column scrolled to
+    /// `offsetY`: above the bubble while there's room, else pinned below the top inset over the
+    /// message, the way Telegram keeps its reaction bar on screen. `isOverContent` says the
+    /// message is under it.
+    public func pinnedAccessory(atContentOffsetY offsetY: CGFloat) -> (frame: CGRect, isOverContent: Bool)? {
+      guard let accessory else { return nil }
+      let natural = accessory.offsetBy(dx: 0, dy: -offsetY)
+      guard natural.minY < accessoryMinY else { return (natural, false) }
+      return (CGRect(origin: CGPoint(x: natural.minX, y: accessoryMinY), size: natural.size), true)
     }
   }
 
@@ -174,6 +189,7 @@ public enum ContextMenuLayout {
       preview: preview,
       menu: menu,
       accessory: accessory,
+      accessoryMinY: grid.round(safe.top + metrics.topInset),
       menuAnchor: CGPoint(x: input.alignment == .left ? 0 : 1, y: 0),
       isScrollable: isScrollable
     )
