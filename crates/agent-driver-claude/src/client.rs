@@ -1151,10 +1151,28 @@ mod tests {
         let path = dir.join("fake-claude");
         std::fs::write(
             &path,
-            format!("#!/bin/sh\necho $$ > \"$PID_FILE\"\n{body}\n"),
+            format!(
+                "#!/bin/sh\n[ -n \"$FAKE_PROBE\" ] && exit 0\necho $$ > \"$PID_FILE\"\n{body}\n"
+            ),
         )
         .unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A parallel test's fork can briefly hold the script open for writing
+        // (Linux ETXTBSY). Once one exec succeeds no writer is left.
+        for _ in 0..100 {
+            match std::process::Command::new(&path)
+                .env("FAKE_PROBE", "1")
+                .status()
+            {
+                Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                result => {
+                    result.unwrap();
+                    break;
+                }
+            }
+        }
         let mut options = LaunchOptions::new(&path, dir);
         options
             .env
