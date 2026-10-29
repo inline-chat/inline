@@ -50,6 +50,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.0'
+      - name: Install test dependencies
+        run: bun install --frozen-lockfile
       - name: Test updater and both bridge generations
         run: cargo test --locked -j 2 -p inline-cli -p inline-agent-bridge
       - name: Verify signing, publication and installer contracts
