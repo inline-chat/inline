@@ -3832,6 +3832,7 @@ pub(crate) mod recovery_tests {
         let known = Known {
             agent_session_id: Some(1),
             native: Some(ProviderSessionId::new("fault-session").unwrap()),
+            from_v1: false,
         };
         let output_mode = OutputMode::Detailed;
         let thread_settings = SettingsChange::default();
@@ -3866,6 +3867,7 @@ pub(crate) mod recovery_tests {
             parent_card_text: None,
             agent_session_id: agent_session_id.clone(),
             native: known.native,
+            native_from_v1: known.from_v1,
             session: None,
             events: None,
             probe: None,
