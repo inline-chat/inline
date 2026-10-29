@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Fiber } from "effect"
 import { InlineError } from "@in/server/types/errors"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 import {
   BotOperationFailure,
   BotPublicError,
@@ -99,6 +100,25 @@ describe("Bot operation error classification", () => {
       )
 
       expect(failure).toBeInstanceOf(BotPublicError)
+    }),
+  )
+
+  it.effect("answers send pacing as a public Telegram-style FLOOD with its wait", () =>
+    Effect.gen(function* () {
+      const operations = makeBotOperations(
+        handlers(() => Promise.reject(RealtimeRpcError.RateLimit(3))),
+      )
+      const failure = yield* Effect.flip(
+        operations.getMe({ currentUserId: 1, currentSessionId: 2, ip: undefined }),
+      )
+
+      expect(failure).toBeInstanceOf(BotPublicError)
+      expect(failure).toMatchObject({
+        error: "FLOOD",
+        errorCode: 429,
+        retryAfterSeconds: 3,
+        description: "Too Many Requests: retry after 3",
+      })
     }),
   )
 

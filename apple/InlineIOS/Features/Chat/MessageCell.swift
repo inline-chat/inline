@@ -1558,17 +1558,19 @@ extension MessageCollectionViewCell {
     let avatar: MessageLayoutInput.Avatar = threadIncoming ? (showsCellAvatar ? .visible : .reserved) : .none
     // A streaming message keeps its time hidden and grows by revealed lines.
     let pacer = MessageStreamPacer.shared
+    var context = MessageRowContext(
+      rowWidth: width,
+      isFirstInGroup: firstInGroup,
+      isLastInGroup: lastInGroup,
+      showsName: threadIncoming && firstInGroup,
+      avatar: avatar,
+      theme: theme,
+      traits: traitCollection
+    )
+    context.isThreadAnchor = displayMode == .threadAnchor
     return MessageViewContent.make(
       message,
-      context: MessageRowContext(
-        rowWidth: width,
-        isFirstInGroup: firstInGroup,
-        isLastInGroup: lastInGroup,
-        showsName: threadIncoming && firstInGroup,
-        avatar: avatar,
-        theme: theme,
-        traits: traitCollection
-      ),
+      context: context,
       footer: pacer.isStreaming(message.id) ? .reserved : .visible,
       revealedLength: pacer.revealedLength(for: message.id)
     )

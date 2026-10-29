@@ -64,6 +64,13 @@ An empty diagnostic `targets` input builds the normal five targets:
 Homebrew contract, agent package, and Umbrel checks. Local Rust release builds
 are not required.
 
+## Bridge runtime in alpha
+
+CLI alpha builds use bridge v2 by default for Codex and Claude Code. No local
+opt-in is needed. `INLINE_BRIDGE_V2=off` restores v1 for rollback; a provider
+list such as `INLINE_BRIDGE_V2=codex` enables only those providers. Stable builds
+retain v1 by default, and ACP providers (OpenCode and Amp) continue to use v1.
+
 ## Codex runtime freshness
 
 Before every Inline CLI release, update the Codex runtime used by the bridge to

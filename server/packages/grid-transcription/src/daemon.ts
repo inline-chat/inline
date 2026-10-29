@@ -4,10 +4,13 @@ import { LEASE_MS, RUN_DURATION_MS, WorkerControlClient, RunControlClient, type 
 import { TranscriptionError, type Model } from "./protocol.js"
 import { SileroModel } from "./silero.js"
 import { NativeRoomSupervisor, type NativeExitReceipt, type StopReason } from "./supervisor.js"
+import { batchTranscriber } from "./batch.js"
+import { SpoolRecovery } from "./recovery.js"
+import { spoolConfig, TurnSpool, type SpoolConfig } from "./spool.js"
 import { monotonicMilliseconds } from "./watchdog.js"
 
 export type WorkerConfig = Readonly<{ apiBaseUrl: string; sharedSecret: string; workerId: string; model: Model; apiKey?: string;
-  slot?: number }>
+  slot?: number; spool?: SpoolConfig }>
 /** Rooms one worker process captures at once. Each room gets its own daemon, boot identity and native child. */
 export function workerRoomCount(environment: Readonly<Record<string, string | undefined>>): number {
   const raw = environment.GRID_TRANSCRIPTION_ROOMS ?? "2"
@@ -117,7 +120,8 @@ export class WorkerDaemon {
       }
       const identity = { runId: run.runId, claimEpoch: run.claimEpoch, generation: run.generation }
       const ready = this.supervisor.start({ identity, requestedAtMs, leaseMs: run.leaseMs, expiresAtMs,
-        payload: { run, apiBaseUrl: this.config.apiBaseUrl, apiKey: this.config.apiKey, expiresAtMs } })
+        payload: { run, apiBaseUrl: this.config.apiBaseUrl, apiKey: this.config.apiKey, expiresAtMs,
+          ...(this.config.spool ? { spool: this.config.spool } : {}) } })
       const exit = this.supervisor.exitReceipt
       if (!exit) throw new TranscriptionError("protocol")
       owned.exit = exit
@@ -225,14 +229,24 @@ export class WorkerDaemon {
 
 export async function runDaemon(): Promise<void> {
   try {
+    const spool = spoolConfig(process.env)
     const daemons = Array.from({ length: workerRoomCount(process.env) },
-      (_, index) => new WorkerDaemon({ ...workerConfig(process.env), slot: index + 1 }))
+      (_, index) => new WorkerDaemon({ ...workerConfig(process.env), slot: index + 1, ...(spool ? { spool } : {}) }))
+    const base = workerConfig(process.env)
+    // One recovery loop per process drains speech that outlived its live turn or room process.
+    const recovery = spool ? new SpoolRecovery({
+      spool: new TurnSpool(spool), transcribe: batchTranscriber(),
+      api: new WorkerControlClient(base.apiBaseUrl, base.sharedSecret, base.workerId),
+      apiKey: (model) => model === "meeting" ? process.env.SONIOX_API_KEY : process.env.OPENAI_API_KEY,
+    }) : undefined
     const shutdown = () => {
-      void Promise.all(daemons.map((daemon) => daemon.shutdown())).then(() => process.exit(0)).catch(() => process.exit(1))
+      void Promise.all([...daemons.map((daemon) => daemon.shutdown()), recovery?.stop()])
+        .then(() => process.exit(0)).catch(() => process.exit(1))
     }
     process.on("SIGTERM", shutdown)
     process.on("SIGINT", shutdown)
     await Promise.all(daemons.map((daemon) => daemon.start()))
+    recovery?.start()
     // Coarse state only. No provider errors, room metadata, audio, text or credentials are logged.
     process.stdout.write("Grid transcription worker initialized\n")
   } catch {

@@ -1,5 +1,4 @@
 
-import CoreImage.CIFilterBuiltins
 import QuartzCore
 import SwiftUI
 import UIKit
@@ -82,17 +81,42 @@ open class VariableBlurUIView: UIVisualEffectView {
     // `super.traitCollectionDidChange(previousTraitCollection)` crashes the app
   }
 
-  private func makeGradientImage(width: CGFloat = 100, height: CGFloat = 100, startOffset: CGFloat, direction: VariableBlurDirection) -> CGImage { // much lower resolution might be acceptable
-    let ciGradientFilter = CIFilter.linearGradient()
-//        let ciGradientFilter =  CIFilter.smoothLinearGradient()
-    ciGradientFilter.color0 = CIColor.black
-    ciGradientFilter.color1 = CIColor.clear
-    ciGradientFilter.point0 = CGPoint(x: 0, y: height)
-    ciGradientFilter.point1 = CGPoint(x: 0, y: startOffset * height) // small negative value looks better with vertical lines
+  /// Masks keyed by shape. Built once with Core Graphics: a cold `CIContext`
+  /// on the main thread can block long enough for the watchdog to kill the app.
+  private static var gradientImages: [GradientKey: CGImage] = [:]
+
+  private struct GradientKey: Hashable {
+    let startOffset: CGFloat
+    let blurredBottom: Bool
+  }
+
+  private func makeGradientImage(width: CGFloat = 100, height: CGFloat = 100, startOffset: CGFloat, direction: VariableBlurDirection) -> CGImage? { // much lower resolution might be acceptable
+    var start = CGPoint(x: 0, y: height)
+    var end = CGPoint(x: 0, y: startOffset * height) // small negative value looks better with vertical lines
     if case .blurredBottomClearTop = direction {
-      ciGradientFilter.point0.y = 0
-      ciGradientFilter.point1.y = height - ciGradientFilter.point1.y
+      start.y = 0
+      end.y = height - end.y
     }
-    return CIContext().createCGImage(ciGradientFilter.outputImage!, from: CGRect(x: 0, y: 0, width: width, height: height))!
+    let key = GradientKey(startOffset: startOffset, blurredBottom: direction == .blurredBottomClearTop)
+    if let cached = Self.gradientImages[key] { return cached }
+
+    // Bitmap contexts share Core Image's bottom-left origin, so the points above carry over.
+    guard let context = CGContext(
+      data: nil,
+      width: Int(width),
+      height: Int(height),
+      bitsPerComponent: 8,
+      bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ), let gradient = CGGradient(
+      colorsSpace: CGColorSpaceCreateDeviceRGB(),
+      colors: [CGColor(red: 0, green: 0, blue: 0, alpha: 1), CGColor(red: 0, green: 0, blue: 0, alpha: 0)] as CFArray,
+      locations: [0, 1]
+    ) else { return nil }
+    context.drawLinearGradient(gradient, start: start, end: end, options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+    let image = context.makeImage()
+    Self.gradientImages[key] = image
+    return image
   }
 }

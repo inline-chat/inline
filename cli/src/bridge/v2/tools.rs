@@ -73,6 +73,9 @@ pub(crate) struct Tools {
     folders: Mutex<HashMap<String, PathBuf>>,
     /// Messages this bot sent, so replies to them address it.
     sent: Arc<Mutex<HashSet<i64>>>,
+    /// Follow choices made here or by /follow, newest wins, so intake sees
+    /// them on the next message.
+    follows: Mutex<HashMap<i64, bool>>,
 }
 
 impl Tools {
@@ -83,11 +86,21 @@ impl Tools {
             works: Mutex::new(HashMap::new()),
             folders: Mutex::new(HashMap::new()),
             sent: Arc::new(Mutex::new(HashSet::new())),
+            follows: Mutex::new(HashMap::new()),
         })
     }
 
     pub(crate) fn sent(&self) -> Arc<Mutex<HashSet<i64>>> {
         self.sent.clone()
+    }
+
+    /// This bot's latest follow choice for `chat`, made in this run.
+    pub(crate) fn follow_choice(&self, chat: i64) -> Option<bool> {
+        self.follows.lock().expect("follows").get(&chat).copied()
+    }
+
+    pub(crate) fn record_follow(&self, chat: i64, follow: bool) {
+        self.follows.lock().expect("follows").insert(chat, follow);
     }
 
     pub(crate) fn configuration(self: &Arc<Self>) -> HostToolConfiguration {
@@ -414,6 +427,7 @@ impl Tools {
                 }
             }
             "create_chat" => self.create_chat(arguments, call).await,
+            "follow_thread" => self.follow_thread(arguments, chat).await,
             "start_subthread" => {
                 let Some(title) = string_arg(arguments, "title", 200) else {
                     return HostToolResult::failure("title is required.");
@@ -453,6 +467,73 @@ impl Tools {
             "ask_teammate" => self.ask_teammate(arguments, work.chat, call).await,
             _ => HostToolResult::failure("Unknown Inline tool."),
         }
+    }
+
+    /// Reads or changes this bot's own follow mode in a thread, as Hermes and
+    /// OpenClaw's follow tools do, and reports what Inline reads back.
+    async fn follow_thread(&self, arguments: &Value, chat: i64) -> HostToolResult {
+        use inline_client::DialogFollowMode;
+        let mode = match arguments
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("status")
+        {
+            "status" => None,
+            "follow" => Some(DialogFollowMode::Following),
+            "unfollow" => Some(DialogFollowMode::Unfollowed),
+            _ => return HostToolResult::failure("action is status, follow or unfollow."),
+        };
+        let Ok(result) = api::get_chat(&self.config.bot, chat).await else {
+            return HostToolResult::failure("Inline chat is unavailable to this agent.");
+        };
+        let direct = result
+            .chat
+            .as_ref()
+            .and_then(|chat| chat.peer_id.as_ref())
+            .is_some_and(|peer| matches!(peer.r#type, Some(proto::peer::Type::User(_))));
+        if direct {
+            return HostToolResult::failure(
+                "Direct messages are always answered; there is nothing to follow.",
+            );
+        }
+        let mut read = result.dialog.and_then(|dialog| dialog.follow_mode);
+        if let Some(mode) = mode {
+            let following = mode == DialogFollowMode::Following;
+            if self
+                .config
+                .bot
+                .update_dialog_follow_mode(inline_client::UpdateDialogFollowModeRequest {
+                    chat_id: InlineId::new(chat),
+                    mode,
+                })
+                .await
+                .is_err()
+            {
+                return HostToolResult::failure("Inline could not change the follow mode.");
+            }
+            self.record_follow(chat, following);
+            read = api::get_chat(&self.config.bot, chat)
+                .await
+                .ok()
+                .and_then(|result| result.dialog)
+                .and_then(|dialog| dialog.follow_mode);
+        }
+        let state = match read.and_then(|mode| proto::DialogFollowMode::try_from(mode).ok()) {
+            Some(proto::DialogFollowMode::Following) => "following",
+            Some(proto::DialogFollowMode::Unfollowed) => "unfollowed",
+            _ => "default",
+        };
+        if let Some(mode) = mode {
+            let expected = if mode == DialogFollowMode::Following {
+                "following"
+            } else {
+                "unfollowed"
+            };
+            if state != expected {
+                return HostToolResult::failure("Inline did not confirm the change.");
+            }
+        }
+        HostToolResult::success(json!({"chat_id": chat, "follow_mode": state}).to_string())
     }
 
     async fn current_context(&self, chat: i64) -> HostToolResult {
@@ -849,6 +930,10 @@ pub(crate) fn specs() -> Vec<HostToolSpec> {
             "ask_teammate",
             "Ask a person or agent in this work's thread a question, mentioning them.",
         ),
+        (
+            "follow_thread",
+            "Check, start or stop following a thread (default: this work's thread), only when a person asked. Following: you answer every message there from people with access. Unfollowed: only mentions and replies to you.",
+        ),
     ];
     read.into_iter()
         .map(|(name, description)| spec(name, description, true))
@@ -962,6 +1047,13 @@ fn input_schema(name: &str) -> Value {
                 "confirmed_intent": intent,
             }),
             &["path", "kind", "confirmed_intent"],
+        ),
+        "follow_thread" => (
+            json!({
+                "chat_id": chat_id,
+                "action": {"type": "string", "enum": ["status", "follow", "unfollow"]},
+            }),
+            &["action"],
         ),
         "ask_teammate" => (
             json!({

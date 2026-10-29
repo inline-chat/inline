@@ -12,7 +12,7 @@ struct ExperimentalView: View {
   private var richMessageCopyEditingEnabled = false
 
   @AppStorage(NextMessageViewFeature.preferenceKey)
-  private var nextMessageViewEnabled = false
+  private var nextMessageViewEnabled = true
 
   @AppStorage(MessageContextMenuFeature.preferenceKey)
   private var customContextMenuEnabled = false
@@ -70,7 +70,7 @@ struct ExperimentalView: View {
         } header: {
           Text("Developer Tools")
         } footer: {
-          Text("Next Message View uses the next iOS message view as it is built. Custom Context Menu opens Inline's own message menu: it scrolls with long messages and lets you select text in the preview, best with Next Message View. Reopen the chat after changing these settings.")
+          Text("The next message view is on by default. Turn it off to compare with the previous view. Custom Context Menu opens Inline's own message menu: it scrolls with long messages and lets you select text in the preview. Reopen the chat after changing these settings.")
         }
       }
     }

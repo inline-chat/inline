@@ -13,9 +13,10 @@ use std::time::Duration;
 use inline_agent_bridge::ProviderSessionId;
 use inline_agent_bridge::group::{
     ContextAuthorRole, ContextMessage, Conversation, DEFAULT_DAILY_SPEAK_GATE_BUDGET,
-    DEFAULT_LOOP_CAP_HOPS, DailySpeakGateBudget, DayKey, Grants, GroupMessage, IntakeDecision,
-    IntakeFacts, LoopGuards, LoopVerdict, Operation, ParticipationMode, PendingInput, ReleaseCause,
-    WorkPhase, decide_intake, direct_input, origin_of,
+    DEFAULT_LOOP_CAP_HOPS, DailySpeakGateBudget, DayKey, DirectReason, Grants, GroupMessage,
+    IntakeDecision, IntakeFacts, LoopGuards, LoopVerdict, ObserveReason, Operation,
+    ParticipationMode, PendingInput, ReleaseCause, WorkPhase, decide_intake, direct_input,
+    origin_of, required_operation,
 };
 use inline_agent_bridge::harness::{
     Catalog, CatalogScope, Delivery, HarnessDriver, Input, InputContent, InputId, OutputMode,
@@ -179,6 +180,10 @@ pub(crate) struct Runtime {
     moves: Option<mpsc::UnboundedReceiver<(i64, i64)>>,
     /// Chat → whether this agent created it, so it is the agent's own thread.
     own_threads: HashMap<i64, bool>,
+    /// This bot's own follow mode per thread (`Some(true)` following,
+    /// `Some(false)` unfollowed), read from its dialog. Inline sets it by the
+    /// shared opener rule; an unknown answer is read again after a while.
+    follows: HashMap<i64, (Option<bool>, std::time::Instant)>,
     /// Chat → its model, reasoning, permissions and folder (settings and
     /// commands).
     thread_settings: HashMap<i64, SettingsChange>,
@@ -270,6 +275,7 @@ impl Runtime {
             moved,
             moves: Some(moves),
             own_threads: HashMap::new(),
+            follows: HashMap::new(),
             thread_settings,
             bound_configs,
             bound_projects: HashMap::new(),
@@ -806,6 +812,65 @@ impl Runtime {
     }
 
     /// Whether this agent created the chat (cached; a failed lookup is not).
+    /// This bot's follow mode in `chat_id`; `None` when it has made no choice.
+    async fn following(&mut self, chat_id: i64) -> Option<bool> {
+        const RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
+        // A choice the agent or /follow made in this run is the newest.
+        if let Some(choice) = self
+            .agent
+            .tools
+            .as_ref()
+            .and_then(|tools| tools.follow_choice(chat_id))
+        {
+            return Some(choice);
+        }
+        if let Some((mode, read)) = self.follows.get(&chat_id)
+            && (mode.is_some() || read.elapsed() < RECHECK)
+        {
+            return *mode;
+        }
+        let mode = match api::get_chat(&self.agent.bot, chat_id).await {
+            Ok(result) => {
+                result.dialog.and_then(|dialog| {
+                    match proto::DialogFollowMode::try_from(dialog.follow_mode?) {
+                        Ok(proto::DialogFollowMode::Following) => Some(true),
+                        Ok(proto::DialogFollowMode::Unfollowed) => Some(false),
+                        _ => None,
+                    }
+                })
+            }
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "chat={chat_id} follow lookup failed: {error}");
+                None
+            }
+        };
+        self.follows
+            .insert(chat_id, (mode, std::time::Instant::now()));
+        mode
+    }
+
+    async fn set_following(&mut self, chat_id: i64, follow: bool) -> Result<(), String> {
+        let mode = if follow {
+            inline_client::DialogFollowMode::Following
+        } else {
+            inline_client::DialogFollowMode::Unfollowed
+        };
+        self.agent
+            .bot
+            .update_dialog_follow_mode(inline_client::UpdateDialogFollowModeRequest {
+                chat_id: InlineId::new(chat_id),
+                mode,
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        self.follows
+            .insert(chat_id, (Some(follow), std::time::Instant::now()));
+        if let Some(tools) = &self.agent.tools {
+            tools.record_follow(chat_id, follow);
+        }
+        Ok(())
+    }
+
     async fn is_own_thread(&mut self, chat_id: i64) -> bool {
         if let Some(own) = self.own_threads.get(&chat_id) {
             return *own;
@@ -1328,6 +1393,7 @@ impl Runtime {
         grants: Grants,
         name: &str,
         arguments: &str,
+        mentions: &[i64],
     ) -> String {
         let item = match name {
             "model" => Some(settings::ITEM_MODEL),
@@ -1391,10 +1457,116 @@ impl Runtime {
                     .unwrap_or_else(|| "Done.".to_owned())
             }
             "status" => self.status(chat_id, actor).await,
+            "help" => help_text(&self.config.agent_name, self.config.vocabulary),
+            "plan" | "review" | "undo" => {
+                if !grants.permits(Operation::Steer) {
+                    return NO_ACCESS.to_owned();
+                }
+                let op = match (name, self.config.vocabulary) {
+                    ("plan", Vocabulary::Codex) => SessionOp::Mode(
+                        if arguments.trim().eq_ignore_ascii_case("off") {
+                            "default"
+                        } else {
+                            "plan"
+                        }
+                        .to_owned(),
+                    ),
+                    ("plan", Vocabulary::Claude)
+                        if arguments.trim().eq_ignore_ascii_case("off") =>
+                    {
+                        return "Approve or reject the plan to leave plan mode, or pick a mode with /permissions."
+                            .to_owned();
+                    }
+                    ("plan", Vocabulary::Claude) => SessionOp::Mode("plan".to_owned()),
+                    ("review", Vocabulary::Codex) => SessionOp::Review(
+                        Some(arguments.trim().to_owned()).filter(|branch| !branch.is_empty()),
+                    ),
+                    ("undo", Vocabulary::Claude) => SessionOp::Undo,
+                    (other, _) => {
+                        return format!(
+                            "/{other} isn't available with {}. Send /help for what is.",
+                            self.config.agent_name
+                        );
+                    }
+                };
+                if !self.works.contains_key(&chat_id) {
+                    return "Nothing is open in this thread yet. Send a message first.".to_owned();
+                }
+                self.ask(chat_id, |reply| Command::Session { op, reply })
+                    .await
+                    .unwrap_or_else(|| "Done.".to_owned())
+            }
+            "follow" | "unfollow" => {
+                if !grants.permits(Operation::StartWork) {
+                    return NO_ACCESS.to_owned();
+                }
+                if chat_id == self.config.dm_chat_id {
+                    return "This is our DM; I always answer here.".to_owned();
+                }
+                let follow = name == "follow";
+                match self.set_following(chat_id, follow).await {
+                    Ok(()) if follow => "Following this thread.".to_owned(),
+                    Ok(()) => "Unfollowed. I'll answer mentions and replies here.".to_owned(),
+                    Err(error) => format!("Could not change that: {error}"),
+                }
+            }
+            "allowlist" => self.allowlist(actor, arguments, mentions).await,
             other => format!(
-                "/{other} isn't available with {}. Try /status, /model, /reasoning, /permissions, /compact, /clear, /queue, /stop, /pause, /resume, /new or /release.",
+                "/{other} isn't available with {}. Send /help for what is.",
                 self.config.agent_name
             ),
+        }
+    }
+
+    /// `/allowlist`: the owner lists, adds or removes the people who may use
+    /// and steer this agent. Inline holds the list; the bridge rechecks it on
+    /// every message.
+    async fn allowlist(&mut self, actor: i64, arguments: &str, mentions: &[i64]) -> String {
+        if actor != self.config.owner_user_id {
+            return "Only the agent's owner can change who may use it.".to_owned();
+        }
+        let remove = arguments
+            .split_whitespace()
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case("remove"));
+        if mentions.is_empty() {
+            return match api::list_grants(&self.agent.bot).await {
+                Ok(result) if result.grants.is_empty() => {
+                    "Only you can use me. Add someone with /allowlist @name.".to_owned()
+                }
+                Ok(result) => {
+                    let mut names = Vec::new();
+                    for grant in result.grants {
+                        names.push(self.agent.names.of(grant.user_id).await);
+                    }
+                    format!(
+                        "People who can use me: {}. Remove someone with /allowlist remove @name.",
+                        names.join(", ")
+                    )
+                }
+                Err(error) => format!("Could not read the list: {error}"),
+            };
+        }
+        let mut done = Vec::new();
+        for &user in mentions
+            .iter()
+            .filter(|&&user| user != self.config.bot_user_id)
+        {
+            let result = if remove {
+                api::delete_grant(&self.agent.bot, user).await
+            } else {
+                api::grant_use(&self.agent.bot, user).await
+            };
+            if let Err(error) = result {
+                return format!("Could not change the list: {error}");
+            }
+            done.push(self.agent.names.of(user).await);
+        }
+        self.access.invalidate().await;
+        match (remove, done.is_empty()) {
+            (_, true) => "Mention the people to add or remove.".to_owned(),
+            (false, false) => format!("{} can now use me.", done.join(", ")),
+            (true, false) => format!("{} can no longer use me.", done.join(", ")),
         }
     }
 
@@ -1593,9 +1765,16 @@ impl Runtime {
         // subthread, `create_chat`) or that are bound to it. A shared thread it
         // was mentioned in stays a group thread, where only addressed
         // messages reach it.
+        // This bot's follow mode in the thread (Inline's opener rule,
+        // /follow or its tool). Unfollow wins, also in its own threads.
+        let followed = if chat_id == self.config.dm_chat_id {
+            None
+        } else {
+            self.following(chat_id).await
+        };
         let conversation = if chat_id == self.config.dm_chat_id {
             Conversation::Dm
-        } else if self.is_own_thread(chat_id).await {
+        } else if followed != Some(false) && self.is_own_thread(chat_id).await {
             Conversation::WorkThread
         } else {
             Conversation::Group
@@ -1658,6 +1837,34 @@ impl Runtime {
             participation: participation_mode,
             loop_verdict,
         });
+        // In a group thread it follows, every message from a person with
+        // access is for the agent; the thread stays a group thread for
+        // placement and join context.
+        let decision = match decision {
+            IntakeDecision::Observe {
+                reason: ObserveReason::Unaddressed,
+                ..
+            } if followed == Some(true)
+                && conversation == Conversation::Group
+                && !group.author.kind.is_agent()
+                && !matches!(
+                    participation_mode,
+                    Some(ParticipationMode::Muted | ParticipationMode::MentionsOnly)
+                ) =>
+            {
+                let required = required_operation(&group, work);
+                if grants.permits(required) {
+                    IntakeDecision::Act {
+                        reason: DirectReason::WorkThread,
+                        join: false,
+                        required,
+                    }
+                } else {
+                    decision
+                }
+            }
+            decision => decision,
+        };
         match decision {
             IntakeDecision::Act { join, required, .. } => {
                 if join
@@ -1719,6 +1926,15 @@ impl Runtime {
         participation: Option<proto::AgentParticipation>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let chat_id = group.chat_id;
+        // Addressing the agent can make it follow (Inline's opener rule), so
+        // an unknown follow mode is read again on the next message.
+        if self
+            .follows
+            .get(&chat_id)
+            .is_some_and(|(mode, _)| mode.is_none())
+        {
+            self.follows.remove(&chat_id);
+        }
         // A command runs once per message. The same message comes back when
         // it is edited or updated (creating a reply thread updates its
         // parent), and must not run again: a second `/new` returned the same
@@ -1750,13 +1966,35 @@ impl Runtime {
             Some("terminal") => Some(Control::Release(ReleaseCause::ContinueInTerminal)),
             _ => None,
         };
+        // The harness's own slash commands (Claude's custom commands and
+        // skills) go to it as typed; Inline's commands win a collision.
+        let forward = match group.command() {
+            Some((name, _))
+                if control.is_none() && name != "queue" && !INLINE_COMMANDS.contains(&name) =>
+            {
+                self.catalog()
+                    .await
+                    .commands
+                    .iter()
+                    .any(|command| command.name == name)
+            }
+            _ => false,
+        };
         if let Some((name, _)) = group.command()
             && control.is_none()
             && name != "queue"
+            && !forward
         {
             let arguments = command_arguments(&group.text, name);
             let answer = self
-                .command(chat_id, group.author.user_id, grants, name, arguments)
+                .command(
+                    chat_id,
+                    group.author.user_id,
+                    grants,
+                    name,
+                    arguments,
+                    &mentioned_users(group),
+                )
                 .await;
             self.reply(chat_id, group.message_id, &answer).await;
             return Ok(());
@@ -1786,14 +2024,28 @@ impl Runtime {
             } else {
                 None
             };
-        let Some(mut input) = direct_input(
-            decision,
-            group,
-            self.config.owner_user_id,
-            InputId::new(id.clone())?,
-            None,
-            context,
-        ) else {
+        let input = if forward {
+            Some(Input {
+                id: InputId::new(id.clone())?,
+                content: InputContent {
+                    text: harness_command_text(&group.text, &self.config.bot_username),
+                    attachments: Vec::new(),
+                    context,
+                },
+                origin: origin_of(group, self.config.owner_user_id),
+                delivery: Delivery::Turn,
+            })
+        } else {
+            direct_input(
+                decision,
+                group,
+                self.config.owner_user_id,
+                InputId::new(id.clone())?,
+                None,
+                context,
+            )
+        };
+        let Some(mut input) = input else {
             // A command this agent does not handle.
             return Ok(());
         };
@@ -1840,6 +2092,7 @@ impl Runtime {
                 pending,
                 message_id: group.message_id,
                 answer_reply: matches!(group.conversation, Conversation::Group),
+                reply_to: group.reply_to.as_ref().map(|reply| reply.message_id),
             })
             .await
             .is_err()
@@ -2186,6 +2439,7 @@ impl Runtime {
                     message_id: group.message_id,
                     // `/new` starts the work in its own thread.
                     answer_reply: false,
+                    reply_to: None,
                 })
                 .await;
         }
@@ -2267,6 +2521,83 @@ fn folder_label(folder: &Path) -> String {
 }
 
 /// The text after `/name` (and an optional `@bot`), trimmed.
+/// People the message mentions, in order.
+fn mentioned_users(message: &GroupMessage) -> Vec<i64> {
+    message
+        .entities
+        .iter()
+        .filter_map(|entity| match entity {
+            inline_agent_bridge::group::MessageEntity::Mention {
+                target: inline_agent_bridge::group::Mention::User { user_id },
+                ..
+            } => Some(*user_id),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Commands Inline answers itself; the harness's own commands with these
+/// names are not forwarded.
+const INLINE_COMMANDS: &[&str] = &[
+    "new",
+    "stop",
+    "pause",
+    "resume",
+    "release",
+    "terminal",
+    "queue",
+    "model",
+    "reasoning",
+    "permissions",
+    "compact",
+    "clear",
+    "status",
+    "help",
+    "follow",
+    "unfollow",
+    "allowlist",
+    "plan",
+    "review",
+    "undo",
+];
+
+/// A harness command as the person typed it, without Inline's `@bot` suffix.
+fn harness_command_text(text: &str, bot_username: &str) -> String {
+    let text = text.trim_start();
+    let (command, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+    let command = command
+        .strip_suffix(&format!("@{bot_username}"))
+        .unwrap_or(command);
+    format!("{command} {}", rest.trim()).trim_end().to_owned()
+}
+
+/// `/help`: what this agent answers to.
+fn help_text(agent_name: &str, vocabulary: Vocabulary) -> String {
+    let native = match vocabulary {
+        Vocabulary::Codex => {
+            "/plan, /plan off · Codex plan mode\n/review [branch] · Codex reviews your changes\n"
+        }
+        Vocabulary::Claude => {
+            "/plan · Claude plan mode\n/undo · undo the last turn's file changes\nClaude's own commands and skills work as you type them.\n"
+        }
+    };
+    format!(
+        "{agent_name} commands:\n\
+         /status · what I'm doing, my model and folder\n\
+         /model, /reasoning, /permissions · change them for this thread\n\
+         /stop · stop the current turn; /pause and /resume\n\
+         /queue <message> · run it after the current turn\n\
+         /compact, /clear · shrink or reset the session's context\n\
+         /new <task> · a new thread with a fresh session\n\
+         /follow, /unfollow · answer every message in this thread, or only mentions and replies\n\
+         /allowlist · who may use me (owner)\n\
+         /release · let the session go; /terminal · continue it in a terminal\n\
+         {native}"
+    )
+    .trim_end()
+    .to_owned()
+}
+
 fn command_arguments<'a>(text: &'a str, name: &str) -> &'a str {
     let lower = text.to_ascii_lowercase();
     let Some(start) = lower.find(&format!("/{name}")) else {
@@ -2348,6 +2679,35 @@ fn runtime_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn harness_commands_go_to_the_harness_as_typed_without_the_bot_suffix() {
+        assert_eq!(harness_command_text("/review", "claude_bot"), "/review");
+        assert_eq!(
+            harness_command_text("/deploy@claude_bot staging now", "claude_bot"),
+            "/deploy staging now"
+        );
+        for name in [
+            "help",
+            "follow",
+            "allowlist",
+            "plan",
+            "review",
+            "undo",
+            "compact",
+        ] {
+            assert!(INLINE_COMMANDS.contains(&name), "{name} is Inline's");
+        }
+    }
+
+    #[test]
+    fn help_names_each_harness_own_commands() {
+        let codex = help_text("Codex", Vocabulary::Codex);
+        assert!(codex.contains("/review") && !codex.contains("/undo"));
+        let claude = help_text("Claude", Vocabulary::Claude);
+        assert!(claude.contains("/undo") && claude.contains("skills"));
+        assert!(claude.contains("/allowlist") && claude.contains("/follow"));
+    }
 
     #[test]
     fn command_arguments_follow_the_command_and_its_bot() {

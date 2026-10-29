@@ -17,6 +17,41 @@ pub(crate) enum ApiError {
     UnexpectedResult(&'static str),
 }
 
+/// What to do after Inline did not take a message or an edit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Failure {
+    /// Try again later, after the server's delay when it gave one. Covers
+    /// network loss, timeouts and an unknown outcome: the same random ID
+    /// makes a repeat harmless.
+    Retry(Option<std::time::Duration>),
+    /// Inline refused it as it is (too large, invalid): the same request
+    /// fails again.
+    Refused,
+    /// The chat or message is gone.
+    Gone,
+}
+
+impl ApiError {
+    pub(crate) fn failure(&self) -> Failure {
+        use inline_client::ClientErrorCategory as Category;
+        let Self::Request(ClientRequestError::Backend(error)) = self else {
+            return Failure::Retry(None);
+        };
+        match error.category {
+            // Only a refusal of this request itself. An unsupported method or a
+            // protocol mismatch can clear after a deploy or a reconnect.
+            Category::InvalidInput => Failure::Refused,
+            Category::NotFound => Failure::Gone,
+            Category::RateLimited => Failure::Retry(
+                error
+                    .retry_after_seconds
+                    .map(std::time::Duration::from_secs),
+            ),
+            _ => Failure::Retry(None),
+        }
+    }
+}
+
 macro_rules! call {
     ($bot:expr, $method:ident, $input:expr) => {{
         match $bot
@@ -82,11 +117,11 @@ pub(crate) async fn send_doc_as(
             message: Some(doc.text.clone()),
             reply_to_msg_id: reply_to,
             random_id: Some(random_id),
-            parse_markdown: Some(false),
+            parse_markdown: Some(doc.markdown),
             send_mode: (notify == Notify::Silent)
                 .then_some(proto::MessageSendMode::ModeSilent as i32),
             actions,
-            block_content: (!doc.blocks.is_empty()).then(|| doc.block_content()),
+            block_content: (!doc.markdown && !doc.blocks.is_empty()).then(|| doc.block_content()),
             ..Default::default()
         }
     )?;
@@ -120,9 +155,9 @@ pub(crate) async fn edit_doc(
             message_id,
             peer_id: Some(chat_peer(chat_id)),
             text: doc.text.clone(),
-            parse_markdown: Some(false),
+            parse_markdown: Some(doc.markdown),
             actions,
-            block_content: Some(doc.block_content()),
+            block_content: (!doc.markdown).then(|| doc.block_content()),
             ..Default::default()
         }
     )?;
@@ -197,6 +232,35 @@ pub(crate) async fn join(bot: &InlineClient, chat_id: i64, bot_user_id: i64) -> 
             bot_user_id,
             mode: proto::AgentParticipationMode::Active as i32,
             ..Default::default()
+        }
+    )?;
+    Ok(())
+}
+
+/// Lets `user_id` use and steer this agent: what a bot may grant itself.
+pub(crate) async fn grant_use(bot: &InlineClient, user_id: i64) -> ApiResult<()> {
+    call!(
+        bot,
+        SetAgentGrant,
+        proto::SetAgentGrantInput {
+            bot_user_id: 0,
+            user_id,
+            operations: vec![
+                proto::AgentGrantOperation::Invoke as i32,
+                proto::AgentGrantOperation::Steer as i32,
+            ],
+        }
+    )?;
+    Ok(())
+}
+
+pub(crate) async fn delete_grant(bot: &InlineClient, user_id: i64) -> ApiResult<()> {
+    call!(
+        bot,
+        DeleteAgentGrant,
+        proto::DeleteAgentGrantInput {
+            bot_user_id: 0,
+            user_id,
         }
     )?;
     Ok(())
@@ -400,4 +464,47 @@ fn display_name(user: &proto::User) -> Option<String> {
     (!full.is_empty())
         .then_some(full)
         .or_else(|| user.username.clone().filter(|name| !name.trim().is_empty()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use inline_client::{BackendError, ClientErrorCategory};
+
+    fn error(category: ClientErrorCategory, retry_after: Option<u64>) -> ApiError {
+        let mut error = BackendError::new(category, "test");
+        error.retry_after_seconds = retry_after;
+        ApiError::Request(ClientRequestError::Backend(error))
+    }
+
+    #[test]
+    fn failures_say_whether_a_retry_can_help() {
+        use std::time::Duration;
+        assert_eq!(
+            error(ClientErrorCategory::InvalidInput, None).failure(),
+            Failure::Refused
+        );
+        assert_eq!(
+            error(ClientErrorCategory::NotFound, None).failure(),
+            Failure::Gone
+        );
+        assert_eq!(
+            error(ClientErrorCategory::RateLimited, Some(7)).failure(),
+            Failure::Retry(Some(Duration::from_secs(7)))
+        );
+        for category in [
+            ClientErrorCategory::Unsupported,
+            ClientErrorCategory::ProtocolMismatch,
+            ClientErrorCategory::Network,
+            ClientErrorCategory::Timeout,
+            ClientErrorCategory::CommitOutcomeUnknown,
+            ClientErrorCategory::Internal,
+        ] {
+            assert_eq!(error(category, None).failure(), Failure::Retry(None));
+        }
+        assert_eq!(
+            ApiError::UnexpectedResult("SendMessage").failure(),
+            Failure::Retry(None)
+        );
+    }
 }

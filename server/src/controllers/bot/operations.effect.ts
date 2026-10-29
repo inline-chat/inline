@@ -131,6 +131,8 @@ export class BotPublicError extends Data.TaggedError(
   readonly error: string
   readonly errorCode: number
   readonly description: string
+  /** Telegram-style `parameters.retry_after` and `Retry-After` for a FLOOD reply. */
+  readonly retryAfterSeconds?: number
 }> {
   override readonly [ErrorReporter.ignore] = true
 }
@@ -447,6 +449,17 @@ const classifyFailure = (
         return publicError(InlineError.ApiError.USER_INVALID)
       case RealtimeRpcError.Code.BAD_REQUEST:
         return publicError(InlineError.ApiError.BAD_REQUEST)
+      case RealtimeRpcError.Code.RATE_LIMIT:
+        // Pacing is an expected reply, not a server fault: answer the way
+        // Telegram's Bot API does so existing bot libraries back off.
+        return new BotPublicError({
+          error: "FLOOD",
+          errorCode: 429,
+          description: cause.retryAfterSeconds
+            ? `Too Many Requests: retry after ${cause.retryAfterSeconds}`
+            : "Too Many Requests",
+          ...(cause.retryAfterSeconds ? { retryAfterSeconds: cause.retryAfterSeconds } : {}),
+        })
       default:
         return new BotOperationFailure({
           operation,

@@ -142,7 +142,7 @@ extension MessageBlock {
         attachment: attachment
       ))
     }
-    if model.hasReplyThreadSummary, model.threadCard != nil {
+    if model.hasReplyThreadSummary, model.threadCard != nil, !context.isThreadAnchor {
       blocks.append(MessageBlock(kind: .threadSummary, input: .init(
         id: "thread",
         position: .belowText,
@@ -306,7 +306,16 @@ final class MessageBlockHostView: UIView {
           view?.setLoading(loading)
         }
       }
-      view.contextMenuProvider = { MessageViewActions.threadSummaryMenu(for: model) }
+      view.contextMenuProvider = { [weak view] in
+        MessageViewActions.threadSummaryMenu(for: model) {
+          var responder: UIResponder? = view
+          while let next = responder?.next {
+            if let controller = next as? UIViewController { return controller }
+            responder = next
+          }
+          return nil
+        }
+      }
 
     case .actions:
       let view = contentView as? MessageActionsView ?? install(MessageActionsView(), fills: true)

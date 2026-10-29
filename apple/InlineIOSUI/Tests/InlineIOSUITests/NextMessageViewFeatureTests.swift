@@ -5,31 +5,28 @@ import Testing
 
 @Suite("Next message view feature")
 struct NextMessageViewFeatureTests {
-  @Test("renderer defaults to legacy when the preference is absent")
-  func rendererDefaultsToLegacy() throws {
-    let defaults = try #require(UserDefaults(suiteName: "NextMessageViewFeatureTests.legacy.\(UUID())"))
-
-    #expect(NextMessageViewFeature.selectedImplementation(defaults: defaults) == .legacy)
-  }
-
-  @Test("renderer selects the next view only when explicitly enabled")
-  func rendererSelectsNextWhenEnabled() throws {
-    let defaults = try #require(UserDefaults(suiteName: "NextMessageViewFeatureTests.next.\(UUID())"))
-    defaults.set(true, forKey: NextMessageViewFeature.preferenceKey)
+  @Test("renderer defaults to the next view when the preference is absent")
+  func rendererDefaultsToNext() throws {
+    let defaults = try #require(UserDefaults(suiteName: "NextMessageViewFeatureTests.default.\(UUID())"))
 
     #expect(NextMessageViewFeature.selectedImplementation(defaults: defaults) == .next)
   }
 
-  @Test("renderer stays legacy when the experiment is unavailable")
-  func rendererStaysLegacyOutsideExperimentAudience() throws {
-    let defaults = try #require(UserDefaults(suiteName: "NextMessageViewFeatureTests.unavailable.\(UUID())"))
-    defaults.set(true, forKey: NextMessageViewFeature.preferenceKey)
+  @Test("renderer uses the current view only when explicitly turned off")
+  func rendererSelectsLegacyWhenDisabled() throws {
+    let defaults = try #require(UserDefaults(suiteName: "NextMessageViewFeatureTests.legacy.\(UUID())"))
+    defaults.set(false, forKey: NextMessageViewFeature.preferenceKey)
+
+    #expect(NextMessageViewFeature.selectedImplementation(defaults: defaults) == .legacy)
+  }
+
+  @Test("renderer ignores a stored opt-out where the toggle isn't offered")
+  func rendererIgnoresOptOutWithoutOverride() throws {
+    let defaults = try #require(UserDefaults(suiteName: "NextMessageViewFeatureTests.noOverride.\(UUID())"))
+    defaults.set(false, forKey: NextMessageViewFeature.preferenceKey)
 
     #expect(
-      NextMessageViewFeature.selectedImplementation(
-        defaults: defaults,
-        isExperimentAvailable: false
-      ) == .legacy
+      NextMessageViewFeature.selectedImplementation(defaults: defaults, allowsOverride: false) == .next
     )
   }
 }

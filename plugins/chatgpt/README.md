@@ -1,6 +1,6 @@
 # Inline ChatGPT plugin
 
-Connect Inline to ChatGPT to work with your chats through core MCP tools and supported Events. The repository also includes a Codex plugin with the hosted Inline MCP connection and bundled Inline skill.
+Connect Inline to ChatGPT to work with your chats through core MCP tools and supported Events. The repository also packages this directory as a Codex plugin and a Claude Code plugin with the hosted Inline MCP connection and bundled Inline skill.
 
 ## Install in ChatGPT
 
@@ -14,7 +14,7 @@ With the Inline CLI installed, use the idempotent shortcut:
 inline plugin install
 ```
 
-It invokes Codex's plugin manager and installs both this skill and the OAuth MCP definition. To inspect the exact commands without changing Codex, run `inline plugin install --dry-run`.
+It invokes the plugin manager of each detected host (Codex and Claude Code) and installs both this skill and the OAuth MCP definition. Use `--host codex` to install only into Codex. To inspect the exact commands without changing Codex, run `inline plugin install --dry-run`.
 
 To install directly through Codex instead, add Inline's public plugin marketplace:
 
@@ -31,6 +31,19 @@ codex plugin add inline@inline
 Start a new Codex session after installation so the plugin's skill and MCP tools are available. Codex will prompt you to sign in to Inline when authentication is needed.
 
 You can also open `/plugins` in Codex CLI after adding the marketplace and install Inline interactively.
+
+## Install in Claude Code
+
+The same package is a Claude Code plugin (`.claude-plugin/plugin.json`) with the same skill and MCP definition. `inline plugin install` installs it into Claude Code as well as Codex when both are detected; use `inline plugin install --host claude` for Claude Code only. To install directly instead, add Inline's marketplace and install it:
+
+```sh
+claude plugin marketplace add inline-chat/inline
+claude plugin install inline@inline-chat
+```
+
+Start a new Claude Code session, then run `/mcp` and sign in to the `inline` server. Claude Code discovers the OAuth resource from the server's protected-resource metadata, so it ignores the Codex-only `oauth_resource` setting. The marketplace is named `inline-chat` because Claude Code reserves `inline` for `--plugin-dir` session plugins.
+
+Keep `version` in `.claude-plugin/plugin.json` equal to the Codex manifest's version; `scripts/check-codex-plugin.mjs` enforces it. Validate Claude metadata locally with `claude plugin validate --strict plugins/chatgpt` and `claude plugin validate --strict .`.
 
 ## What it can do
 

@@ -341,7 +341,10 @@ export async function publishStableEntryPoints(r2: S3Client, prefix: string, con
   await publishAlphaEntryPoint(r2, prefix, context);
 }
 
-export const alphaManifestKey = (prefix: string) => `${prefix}/alpha/manifest.json`;
+// A declaration, not a const: the entry point above runs before later consts initialize.
+export function alphaManifestKey(prefix: string) {
+  return `${prefix}/alpha/manifest.json`;
+}
 
 // The alpha channel follows the newest release of any kind, so Mac Tip and
 // opted-in CLIs move from alphas onto the stable that supersedes them.

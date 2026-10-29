@@ -203,10 +203,8 @@ export async function retireUnclaimedGridTranscriptions(tx: Transaction): Promis
       .returning()
     if (!changed.length) continue
     changedSpaceIds.add(run.spaceId)
-    await tx
-      .update(gridTranscriptionSegments)
-      .set({ state: "discarded" })
-      .where(and(eq(gridTranscriptionSegments.runId, run.id), eq(gridTranscriptionSegments.state, "admitted")))
+    // A lease timeout stops capture, but already admitted speech may still be recovered
+    // from the worker's spool. Destructive history/access changes discard it separately.
     if (state === "interrupted" && (await intactDestination(tx, run)))
       await insertGridTranscriptMessage(tx, {
         chatId: run.transcriptChatId,

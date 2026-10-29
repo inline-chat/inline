@@ -857,6 +857,7 @@ mod tests {
                                 error_code: error_code as i32,
                                 code,
                                 message: "File download part timed out".into(),
+                                retry_after_seconds: 0,
                             }),
                         )
                         .await;

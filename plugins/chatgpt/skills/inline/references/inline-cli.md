@@ -133,7 +133,7 @@ User/space lookup JSON retains the existing protocol keys but returns only the r
 
 ## Install the Codex plugin
 
-When the user asks to install the full Codex integration, use `inline plugin install`. It delegates to Codex's plugin manager with fixed arguments and installs the Inline skill plus its OAuth MCP server. The operation is idempotent; inspect it first with `inline plugin install --dry-run`. Use `inline skill install` only when the user explicitly wants the standalone skill without MCP.
+When the user asks to install the full Codex or Claude Code integration, use `inline plugin install`. It delegates to each detected host's plugin manager with fixed arguments and installs the Inline skill plus its OAuth MCP server; pass `--host codex` or `--host claude` to target one host. The operation is idempotent; inspect it first with `inline plugin install --dry-run`. In Claude Code, the user signs in to the `inline` server with `/mcp` in a new session. Use `inline skill install` only when the user explicitly wants the standalone skill without MCP.
 
 ## Bulk and local recipes
 

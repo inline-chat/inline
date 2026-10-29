@@ -671,6 +671,8 @@ final class SyncTests {
     let config = RealtimeConfigStore.initialSyncConfig()
     #expect(config.lastSyncSafetyGapSeconds == SyncConfig.default.lastSyncSafetyGapSeconds)
     #expect(config.maxConcurrentBucketFetches == SyncConfig.default.maxConcurrentBucketFetches)
+    #expect(config.liveGapGraceMilliseconds == 300)
+    #expect(SyncConfig.default.liveGapGraceMilliseconds == 0)
   }
 
   @Test("bucket commits dynamically dispatch through the apply-updates owner")
@@ -869,6 +871,157 @@ final class SyncTests {
       await client.getCallCount() > 0
     }
     #expect(fetchStarted == false)
+    #expect(await client.getCallCount() == 0)
+  }
+
+  @Test("out-of-order live updates that fill within the grace need no catch-up")
+  func outOfOrderLiveGapFillsDuringGrace() async {
+    let storage = InMemorySyncStorage()
+    let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 20, seq: 5))
+    let apply = RecordingApplyUpdates()
+    let client = FakeProtocolClient(responses: [])
+    let config = SyncConfig(lastSyncSafetyGapSeconds: 15, liveGapGraceMilliseconds: 300)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    await sync.process(updates: [makeChatInfoUpdate(seq: 7, date: 22)])
+    await sync.process(updates: [makeChatInfoUpdate(seq: 6, date: 21)])
+
+    #expect(await waitForCondition { await storage.getBucketState(for: .chat(peer: peer)).seq == 7 })
+    #expect(await waitForCondition { await sync.getStats().liveGapGracesCovered == 1 })
+    #expect(await apply.appliedUpdates.map(\.seq) == [6, 7])
+    #expect(await client.getCallCount() == 0)
+    await sync.prepareForTermination()
+  }
+
+  @Test("a live gap that never fills fetches once after the grace")
+  func unfilledLiveGapFetchesAfterGrace() async {
+    let storage = InMemorySyncStorage()
+    let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 20, seq: 5))
+    let client = FakeProtocolClient(responses: [], methodResponses: [
+      .getUpdates: [makeGetUpdatesResult(
+        seq: 7,
+        date: 22,
+        updates: [makeChatInfoUpdate(seq: 6, date: 21), makeChatInfoUpdate(seq: 7, date: 22)],
+        final: true,
+        resultType: .slice
+      )],
+    ])
+    let config = SyncConfig(lastSyncSafetyGapSeconds: 15, liveGapGraceMilliseconds: 400)
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: config)
+
+    await sync.process(updates: [makeChatInfoUpdate(seq: 7, date: 22)])
+    try? await Task.sleep(for: .milliseconds(50))
+    #expect(await client.getCallCount() == 0)
+
+    #expect(await waitForCondition { await storage.getBucketState(for: .chat(peer: peer)).seq == 7 })
+    #expect(await client.getCalledMethods() == [.getUpdates])
+    #expect(await sync.getStats().liveGapGracesFetched == 1)
+    await sync.prepareForTermination()
+  }
+
+  @Test("a live gap wider than the grace window fetches immediately")
+  func wideLiveGapFetchesWithoutGrace() async {
+    let storage = InMemorySyncStorage()
+    let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 20, seq: 5))
+    let client = FakeProtocolClient(responses: [], methodResponses: [
+      .getUpdates: [makeGetUpdatesResult(seq: 10, date: 30, updates: [], final: true, resultType: .empty)],
+    ])
+    // A long grace proves the wide gap never waited for it.
+    let config = SyncConfig(lastSyncSafetyGapSeconds: 15, liveGapGraceMilliseconds: 5_000)
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: config)
+
+    await sync.process(updates: [makeChatInfoUpdate(seq: 10, date: 30)])
+
+    #expect(await waitForCondition(timeout: .seconds(2)) { await client.getCallCount() == 1 })
+    #expect(await sync.getStats().liveGapGracesFetched == 0)
+    await sync.prepareForTermination()
+  }
+
+  @Test("later out-of-order arrivals do not extend the grace deadline")
+  func liveGapGraceDeadlineIsFixed() async {
+    let storage = InMemorySyncStorage()
+    let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 20, seq: 5))
+    let client = FakeProtocolClient(responses: [], methodResponses: [
+      .getUpdates: [makeGetUpdatesResult(
+        seq: 8,
+        date: 23,
+        updates: [
+          makeChatInfoUpdate(seq: 6, date: 21),
+          makeChatInfoUpdate(seq: 7, date: 22),
+          makeChatInfoUpdate(seq: 8, date: 23),
+        ],
+        final: true,
+        resultType: .slice
+      )],
+    ])
+    let config = SyncConfig(lastSyncSafetyGapSeconds: 15, liveGapGraceMilliseconds: 1_000)
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: config)
+    let clock = ContinuousClock()
+    let openedAt = clock.now
+
+    await sync.process(updates: [makeChatInfoUpdate(seq: 7, date: 22)])
+    try? await Task.sleep(for: .milliseconds(900))
+    // Still missing seq 6; this arrival must not restart the one-second wait.
+    await sync.process(updates: [makeChatInfoUpdate(seq: 8, date: 23)])
+
+    #expect(await waitForCondition(timeout: .seconds(3)) { await client.getCallCount() == 1 })
+    #expect(clock.now - openedAt < .milliseconds(1_600))
+    #expect(await waitForCondition { await storage.getBucketState(for: .chat(peer: peer)).seq == 8 })
+    await sync.prepareForTermination()
+  }
+
+  @Test("a live gap during discovery fetches without waiting")
+  func liveGapDuringDiscoverySkipsGrace() async {
+    let storage = InMemorySyncStorage()
+    await storage.setState(SyncState(lastSyncDate: 10))
+    let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 20, seq: 5))
+    let client = FakeProtocolClient(responses: [], gateFirstCall: true, methodResponses: [
+      .getUpdatesState: [makeGetUpdatesStateResult(date: 60, updatesFound: false)],
+      .getUpdates: [makeGetUpdatesResult(
+        seq: 7,
+        date: 22,
+        updates: [makeChatInfoUpdate(seq: 6, date: 21), makeChatInfoUpdate(seq: 7, date: 22)],
+        final: true,
+        resultType: .slice
+      )],
+    ])
+    let config = SyncConfig(lastSyncSafetyGapSeconds: 15, liveGapGraceMilliseconds: 5_000)
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: config)
+
+    await sync.acceptedSessionOpened(sessionID: 1)
+    await client.waitForFirstCallStarted()
+    await sync.process(updates: [makeChatInfoUpdate(seq: 7, date: 22)])
+
+    #expect(await waitForCondition(timeout: .seconds(2)) {
+      await client.getCalledMethods().contains(.getUpdates)
+    })
+    await client.releaseFirstCall()
+    #expect(await waitForCondition { await storage.getBucketState(for: .chat(peer: peer)).seq == 7 })
+    #expect(await sync.getStats().liveGapGracesFetched == 0)
+    await sync.prepareForTermination()
+  }
+
+  @Test("termination during the live grace issues no fetch")
+  func terminationCancelsLiveGrace() async {
+    let storage = InMemorySyncStorage()
+    let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 20, seq: 5))
+    let client = FakeProtocolClient(responses: [], methodResponses: [
+      .getUpdates: [makeGetUpdatesResult(seq: 7, date: 22, updates: [], final: true, resultType: .empty)],
+    ])
+    let config = SyncConfig(lastSyncSafetyGapSeconds: 15, liveGapGraceMilliseconds: 200)
+    let sync = Sync(applyUpdates: RecordingApplyUpdates(), syncStorage: storage, client: client, config: config)
+
+    await sync.process(updates: [makeChatInfoUpdate(seq: 7, date: 22)])
+    try? await Task.sleep(for: .milliseconds(50))
+    await sync.prepareForTermination()
+
+    try? await Task.sleep(for: .milliseconds(400))
     #expect(await client.getCallCount() == 0)
   }
 

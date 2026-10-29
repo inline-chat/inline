@@ -10,13 +10,19 @@ public struct SyncConfig: Sendable {
   /// This is intentionally global: each bucket already coalesces fetches, but many buckets can still
   /// fetch in parallel (e.g. after `getUpdatesState` signals).
   public var maxConcurrentBucketFetches: Int
+  /// How long a warm bucket waits for live delivery to fill a small gap of
+  /// out-of-order updates before it asks the server (Telegram waits ~0.5s).
+  /// Zero disables it; the app turns it on through `RealtimeConfigStore`.
+  public var liveGapGraceMilliseconds: Int
 
   public init(
     lastSyncSafetyGapSeconds: Int64,
-    maxConcurrentBucketFetches: Int = 4
+    maxConcurrentBucketFetches: Int = 4,
+    liveGapGraceMilliseconds: Int = 0
   ) {
     self.lastSyncSafetyGapSeconds = lastSyncSafetyGapSeconds
     self.maxConcurrentBucketFetches = max(1, maxConcurrentBucketFetches)
+    self.liveGapGraceMilliseconds = max(0, liveGapGraceMilliseconds)
   }
 
   public static let `default` = SyncConfig(lastSyncSafetyGapSeconds: 15)
@@ -87,6 +93,10 @@ public struct SyncStats: Sendable {
   public var bucketApplySuperseded: Int64 = 0
   public var bucketFetchTooLong: Int64
   public var bucketFetchFollowups: Int64
+  /// Live gaps whose short grace ended with live delivery filling them.
+  public var liveGapGracesCovered: Int64 = 0
+  /// Graces that still needed a catch-up fetch afterwards.
+  public var liveGapGracesFetched: Int64 = 0
   public var realtimeBufferRecoveries: Int64
   public var bucketsTracked: Int
   public var lastDirectApplyAt: Int64
@@ -1911,7 +1921,8 @@ actor Sync {
       client: client,
       sync: self,
       fetchLimiter: bucketFetchLimiter,
-      accountMutationToken: accountMutationToken
+      accountMutationToken: accountMutationToken,
+      liveGapGrace: .milliseconds(config.liveGapGraceMilliseconds)
     )
     buckets[key] = bucketActor
     // A queued finite target may have been satisfied by an earlier direct
@@ -2646,6 +2657,21 @@ actor Sync {
     stats.bucketFetchTooLong += 1
   }
 
+  /// Discovery must not wait: it describes work live delivery will never
+  /// resend. Only a settled session lets a live gap wait for the socket.
+  func allowsLiveGapGrace() -> Bool {
+    !isStateFetchInFlight && !isStateFetchPending && activeDiscoveryRound == nil &&
+      pendingDiscoveryRounds.isEmpty
+  }
+
+  func recordLiveGapGrace(coveredByLiveDelivery: Bool) {
+    if coveredByLiveDelivery {
+      stats.liveGapGracesCovered += 1
+    } else {
+      stats.liveGapGracesFetched += 1
+    }
+  }
+
   func recordBucketFetchFollowup() {
     stats.bucketFetchFollowups += 1
   }
@@ -3333,6 +3359,14 @@ actor BucketActor {
   private var retryTask: Task<Void, Never>?
   private var retryAttempt: Int = 0
   private var retryUsesRateLimitDelay = false
+
+  /// Live delivery usually fills a gap of a few sequences within moments of an
+  /// out-of-order arrival. A warm, idle bucket waits this long first so it
+  /// doesn't fetch a page the socket was about to deliver.
+  private static let liveGapGraceMaxSequences: Int64 = 3
+  private let liveGapGrace: Duration
+  private var liveGapGraceTask: Task<Void, Never>?
+  private var liveGapGraceGeneration: UInt64 = 0
   private var reportedInvalidEnvelopeFingerprints: Set<String> = []
   private var reportedInvalidEnvelopeOverflow = false
   private var isInvalidated: Bool = false
@@ -3367,8 +3401,10 @@ actor BucketActor {
     sync: Sync?,
     fetchLimiter: FetchLimiter,
     accountMutationToken: AuthAccountMutationToken?,
+    liveGapGrace: Duration = .zero,
     sleepBeforeRetry: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
   ) {
+    self.liveGapGrace = liveGapGrace
     self.key = key
     self.seq = seq
     self.date = date
@@ -3610,8 +3646,80 @@ actor BucketActor {
       return
     }
 
+    // An out-of-order arrival a few sequences ahead usually fills from the
+    // socket (Telegram waits ~0.5s). Hints never wait: the server sends one
+    // only after its own live grace, so no live update follows it.
+    if fetchSeqEnd == nil, !hasLatestDemand, liveGapGraceTask == nil, liveGapGrace > .zero,
+       let sync, await sync.allowsLiveGapGrace()
+    {
+      // That check suspended this actor; a drain may have filled the gap.
+      guard !bufferedRealtimeUpdates.isEmpty || hasLatestDemand || (fetchSeqEnd.map { $0 > seq } ?? false)
+      else { return }
+      if fetchSeqEnd == nil, scheduleLiveGapGraceIfEligible() { return }
+    } else if liveGapGraceTask != nil, fetchSeqEnd == nil, !hasLatestDemand,
+              let maxBuffered = bufferedRealtimeUpdates.keys.max(),
+              maxBuffered - seq <= Self.liveGapGraceMaxSequences
+    {
+      // A later arrival inside the window keeps the original deadline.
+      return
+    }
+
     needsFetch = true
     Task { await self.fetchNewUpdates() }
+  }
+
+  /// Schedules one graced fetch when the bucket is warm, idle and at most a
+  /// few sequences behind. The deadline is fixed when the gap opens; later
+  /// arrivals never extend it. Returns false when the caller must fetch now.
+  private func scheduleLiveGapGraceIfEligible() -> Bool {
+    guard liveGapGrace > .zero, !isInvalidated, seq > 0,
+          !isFetching, !isDrainingRealtime, retryTask == nil, pendingUserRepair == nil,
+          !hasLatestDemand
+    else { return false }
+    let target = max(fetchSeqEnd ?? seq, bufferedRealtimeUpdates.keys.max() ?? seq)
+    guard target > seq, target - seq <= Self.liveGapGraceMaxSequences else { return false }
+    if liveGapGraceTask != nil { return true }
+    liveGapGraceGeneration &+= 1
+    let generation = liveGapGraceGeneration
+    let grace = liveGapGrace
+    log.trace("waiting \(grace) for live delivery before catch-up for bucket \(key)")
+    liveGapGraceTask = Task { [weak self] in
+      do {
+        try await Task.sleep(for: grace)
+      } catch {
+        return
+      }
+      await self?.finishLiveGapGrace(generation: generation)
+    }
+    return true
+  }
+
+  private func cancelLiveGapGrace() {
+    liveGapGraceTask?.cancel()
+    liveGapGraceTask = nil
+    liveGapGraceGeneration &+= 1
+  }
+
+  private func finishLiveGapGrace(generation: UInt64) async {
+    guard generation == liveGapGraceGeneration else { return }
+    liveGapGraceTask = nil
+    guard !isInvalidated else { return }
+    let stillBehind = !bufferedRealtimeUpdates.isEmpty || hasLatestDemand ||
+      (fetchSeqEnd.map { $0 > seq } ?? false)
+    if stillBehind {
+      if let sync {
+        await sync.recordLiveGapGrace(coveredByLiveDelivery: false)
+      }
+      await fetchNewUpdates()
+      return
+    }
+    // Live delivery filled the gap. Report the cursor so anything waiting on
+    // this bucket resolves exactly as it would after a fetch.
+    fetchSeqEnd = nil
+    if let sync {
+      await sync.recordLiveGapGrace(coveredByLiveDelivery: true)
+      await sync.bucketDidAdvance(key: key, state: BucketState(date: date, seq: seq))
+    }
   }
 
   /// Hint from the server about the latest seq for this bucket at the time it detected changes.
@@ -3868,6 +3976,8 @@ actor BucketActor {
     // If we had a scheduled retry, cancel it since we're actively attempting a fetch now.
     retryTask?.cancel()
     retryTask = nil
+    // This pass owns the gap now; a pending grace would only add a follow-up.
+    cancelLiveGapGrace()
 
     var finishedWithoutRetry = true
     var scheduleBackgroundFollowUp = false
@@ -4559,6 +4669,7 @@ actor BucketActor {
   func invalidate() async {
     guard !isInvalidated else { return }
     isInvalidated = true
+    cancelLiveGapGrace()
     let scheduledRetry = retryTask
     retryTask = nil
     scheduledRetry?.cancel()

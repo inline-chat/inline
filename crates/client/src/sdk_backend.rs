@@ -5129,6 +5129,25 @@ fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
         } if message.starts_with("Unsupported RPC method:") => {
             BackendError::new(ClientErrorCategory::Unsupported, friendly)
         }
+        // The chat, message or peer is gone.
+        RealtimeError::RpcError {
+            code,
+            error_name,
+            friendly,
+            ..
+        } if code == 404 || is_not_found_error_name(&error_name) => {
+            BackendError::new(ClientErrorCategory::NotFound, friendly)
+        }
+        // The server refused the request itself (too large, invalid): a
+        // retry of the same request fails the same way.
+        RealtimeError::RpcError {
+            code,
+            error_name,
+            friendly,
+            ..
+        } if code == 400 || is_invalid_input_error_name(&error_name) => {
+            BackendError::new(ClientErrorCategory::InvalidInput, friendly)
+        }
         RealtimeError::RpcError { friendly, .. } => {
             BackendError::new(ClientErrorCategory::Internal, friendly)
         }
@@ -5231,6 +5250,18 @@ fn rate_limited_backend_error(message: String) -> BackendError {
         Some(seconds) => error.with_retry_after_seconds(seconds),
         None => error,
     }
+}
+
+/// Requests the server refuses as they are: a retry fails the same way.
+fn is_invalid_input_error_name(name: &str) -> bool {
+    matches!(name.trim().to_ascii_uppercase().as_str(), "BAD_REQUEST")
+}
+
+fn is_not_found_error_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_uppercase().as_str(),
+        "PEER_ID_INVALID" | "MESSAGE_ID_INVALID" | "CHAT_ID_INVALID"
+    )
 }
 
 fn is_rate_limit_error_name(name: &str) -> bool {
@@ -6713,6 +6744,34 @@ mod tests {
         })
         .unwrap_err();
         assert_eq!(error.category, ClientErrorCategory::ProtocolMismatch);
+    }
+
+    #[test]
+    fn refused_requests_are_invalid_input_and_missing_targets_not_found() {
+        let refused = realtime_error_to_backend(RealtimeError::RpcError {
+            code: 400,
+            error_code: proto::rpc_error::Code::BadRequest as i32,
+            error_name: "BAD_REQUEST".to_string(),
+            message: "Bad request".to_string(),
+            friendly: "Bad request (HTTP 400)".to_string(),
+        });
+        assert_eq!(refused.category, ClientErrorCategory::InvalidInput);
+        let gone = realtime_error_to_backend(RealtimeError::RpcError {
+            code: 400,
+            error_code: proto::rpc_error::Code::MessageIdInvalid as i32,
+            error_name: "MESSAGE_ID_INVALID".to_string(),
+            message: "Message ID is invalid".to_string(),
+            friendly: "Message ID is invalid (HTTP 400)".to_string(),
+        });
+        assert_eq!(gone.category, ClientErrorCategory::NotFound);
+        let unavailable = realtime_error_to_backend(RealtimeError::RpcError {
+            code: 500,
+            error_code: proto::rpc_error::Code::InternalError as i32,
+            error_name: "INTERNAL_ERROR".to_string(),
+            message: "Internal error".to_string(),
+            friendly: "Internal error (HTTP 500)".to_string(),
+        });
+        assert_eq!(unavailable.category, ClientErrorCategory::Internal);
     }
 
     #[test]

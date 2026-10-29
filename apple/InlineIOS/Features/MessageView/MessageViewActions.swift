@@ -202,12 +202,11 @@ enum MessageViewActions {
     }
   }
 
-  /// The thread summary's long-press menu. Deleting a subthread stays in the current view's
-  /// menu for now.
-  static func threadSummaryMenu(for message: Message) -> UIMenu {
+  /// The thread summary's long-press menu. A subthread can also be deleted from here.
+  static func threadSummaryMenu(for message: Message, presenter: @escaping () -> UIViewController?) -> UIMenu {
     let isDisabled = message.status == .sending || message.status == .failed
     let attributes: UIMenuElement.Attributes = isDisabled ? [.disabled] : []
-    return UIMenu(children: [
+    var actions: [UIMenuElement] = [
       UIAction(
         title: message.isSubthreadPlacement ? "Open Subthread" : "Open Thread",
         image: UIImage(systemName: "arrow.turn.down.right"),
@@ -222,7 +221,32 @@ enum MessageViewActions {
         image: UIImage(systemName: "tray.and.arrow.down"),
         attributes: attributes
       ) { _ in ReplyThreadNavigator.addToInbox(message: message) },
-    ])
+    ]
+    if message.isSubthreadPlacement {
+      actions.append(UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
+        confirmDelete(message, from: presenter())
+      })
+    }
+    return UIMenu(children: actions)
+  }
+
+  /// Same confirmation as the current view's subthread Delete.
+  private static func confirmDelete(_ message: Message, from presenter: UIViewController?) {
+    guard let presenter else { return }
+    let alert = UIAlertController(
+      title: "Delete Message",
+      message: "Are you sure you want to delete this message?",
+      preferredStyle: .alert
+    )
+    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+    alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { _ in
+      _ = Transactions.shared.mutate(transaction: .deleteMessage(.init(
+        messageIds: [message.messageId],
+        peerId: message.peerId,
+        chatId: message.chatId
+      )))
+    })
+    presenter.present(alert, animated: true)
   }
 
   /// Scrolls to the message a reply quotes.

@@ -148,6 +148,7 @@ async fn serve(listener: TcpListener, failure: Failure) -> Observed {
                                 error_code: proto::rpc_error::Code::BadRequest as i32,
                                 code: 400,
                                 message: "invalid upload metadata".into(),
+                                retry_after_seconds: 0,
                             }),
                         )
                         .await;

@@ -148,10 +148,13 @@ fn plugin_dry_run_is_local_and_shows_fixed_install_commands() {
     assert!(output.stderr.is_empty());
     let plan: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(plan["status"], "dry_run");
-    assert_eq!(plan["pluginId"], "inline@inline");
-    assert_eq!(plan["includes"], serde_json::json!(["skill", "oauth_mcp"]));
+    let codex = &plan["hosts"][0];
+    assert_eq!(codex["host"], "codex");
+    assert_eq!(codex["pluginId"], "inline@inline");
+    assert_eq!(codex["includes"], serde_json::json!(["skill", "oauth_mcp"]));
+    assert_eq!(plan["hosts"][1]["host"], "claude");
     assert_eq!(
-        plan["commands"],
+        codex["commands"],
         serde_json::json!([
             [
                 "codex",
@@ -194,7 +197,15 @@ esac
 "#).unwrap();
         std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o700)).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_inline"))
-            .args(["plugin", "install", "--json", "--compact"])
+            // Only the fixture host, so a real Claude Code on the machine is never touched.
+            .args([
+                "plugin",
+                "install",
+                "--host",
+                "codex",
+                "--json",
+                "--compact",
+            ])
             .env("INLINE_CODEX_BIN", &codex)
             .env(
                 "CODEX_FIXTURE_FORMAT",
@@ -213,15 +224,17 @@ esac
         assert!(output.stderr.is_empty());
         let installed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(installed["status"], "installed");
+        let codex = &installed["hosts"][0];
+        assert_eq!(codex["host"], "codex");
         if json_output {
-            assert_eq!(installed["version"], "0.1.0");
-            assert_eq!(installed["marketplaceAlreadyAdded"], true);
+            assert_eq!(codex["version"], "0.1.0");
+            assert_eq!(codex["marketplaceAlreadyAdded"], true);
         } else {
-            assert!(installed.get("version").is_none());
-            assert!(installed.get("marketplaceAlreadyAdded").is_none());
+            assert!(codex.get("version").is_none());
+            assert!(codex.get("marketplaceAlreadyAdded").is_none());
         }
         assert!(!String::from_utf8_lossy(&output.stdout).contains("/private/fixture"));
-        assert!(installed.get("installedPath").is_none());
+        assert!(codex.get("installedPath").is_none());
         assert!(!directory.path().join("unused-secrets").exists());
     }
 }

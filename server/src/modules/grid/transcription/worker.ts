@@ -54,6 +54,13 @@ const finalSchema = Schema.Struct({
   text: Schema.String.check(Schema.isMaxLength(32768)),
 })
 const stoppedSchema = Schema.Struct({ reason: Schema.optional(boundedString(80)) })
+const lateFinalSchema = Schema.Struct({
+  workerId: boundedString(80),
+  segmentId: Schema.String.check(Schema.isUUID()),
+  text: Schema.String.check(Schema.isMaxLength(32768)),
+})
+/** Spooled speech may be transcribed after its run ends, through outages and worker restarts. */
+const LATE_FINAL_WINDOW_MS = 24 * 60 * 60 * 1000
 const tokenSchema = Schema.Struct({
   runId: Schema.String.check(Schema.isUUID()),
   epoch: Schema.Int.check(Schema.isGreaterThan(0)),
@@ -173,12 +180,92 @@ async function readBody(request: Request): Promise<unknown> {
 export async function handleGridTranscriptionWorkerRequest(request: Request): Promise<Response> {
   const config = transcriptionConfig()
   const action = new URL(request.url).pathname.split("/").at(-1)
-  if (!config.secret || config.secret.length < 32 || (!config.enabled && action !== "stopped" && action !== "claim"))
+  if (!config.secret || config.secret.length < 32 || (!config.enabled && action !== "stopped" && action !== "claim" && action !== "late"))
     return Response.json({ error: "unavailable" }, { status: 503 })
   if (request.method !== "POST") return new Response(null, { status: 405 })
   if (Number(request.headers.get("content-length") ?? 0) > 262144) return new Response(null, { status: 413 })
   try {
     const token = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? ""
+    if (action === "late") {
+      if (!equal(token, config.secret)) throw new WorkerRequestError(401)
+      const input = Schema.decodeUnknownSync(lateFinalSchema)(await readBody(request))
+      if (Buffer.byteLength(input.text, "utf8") > 32768) throw new WorkerRequestError(413)
+      const saved = await db.transaction(async (tx) => {
+        const [target] = await tx
+          .select({
+            runId: gridTranscriptionSegments.runId,
+            chatId: gridTranscriptionRuns.transcriptChatId,
+            parentId: gridTranscriptionRuns.destinationParentChatId,
+          })
+          .from(gridTranscriptionSegments)
+          .innerJoin(gridTranscriptionRuns, eq(gridTranscriptionRuns.id, gridTranscriptionSegments.runId))
+          .where(eq(gridTranscriptionSegments.id, input.segmentId))
+          .limit(1)
+        // Unknown speech has nothing to publish; only transport/auth errors make a worker keep it.
+        if (!target) return { messageId: null }
+        // History mutations lock chats before runs. Do the same here.
+        await tx
+          .select({ id: chats.id })
+          .from(chats)
+          .where(inArray(chats.id, [target.parentId, target.chatId]))
+          .orderBy(asc(chats.id))
+          .for("update")
+        const [run] = await tx
+          .select()
+          .from(gridTranscriptionRuns)
+          .where(eq(gridTranscriptionRuns.id, target.runId))
+          .for("update")
+          .limit(1)
+        const [segment] = await tx
+          .select()
+          .from(gridTranscriptionSegments)
+          .where(eq(gridTranscriptionSegments.id, input.segmentId))
+          .for("update")
+          .limit(1)
+        if (!run || !segment) return { messageId: null }
+        if (segment.state !== "admitted") return { messageId: segment.messageId }
+        const [member] = await tx
+          .select({ id: members.id })
+          .from(members)
+          .where(and(eq(members.spaceId, run.spaceId), eq(members.userId, segment.speakerUserId)))
+          .limit(1)
+        const [space] = await tx
+          .select({ id: spaces.id })
+          .from(spaces)
+          .where(and(eq(spaces.id, run.spaceId), isNull(spaces.deleted)))
+          .limit(1)
+        // Privacy retirements (cleared history, revoked access, deleted chats) already discard
+        // admitted speech; these checks also cover a speaker who left or a retired destination.
+        const allowed =
+          !!member &&
+          !!space &&
+          segment.admittedAt.getTime() > Date.now() - LATE_FINAL_WINDOW_MS &&
+          (await intactDestination(tx, run))
+        if (!allowed || !input.text.trim()) {
+          await tx
+            .update(gridTranscriptionSegments)
+            .set({ state: "discarded" })
+            .where(eq(gridTranscriptionSegments.id, segment.id))
+          return { messageId: null }
+        }
+        const inserted = await insertGridTranscriptMessage(tx, {
+          chatId: run.transcriptChatId,
+          actorUserId: run.actorUserId,
+          runId: run.id,
+          segmentId: segment.id,
+          speakerUserId: segment.speakerUserId,
+          kind: "turn",
+          text: input.text.trim(),
+          date: segment.admittedAt,
+        })
+        await tx
+          .update(gridTranscriptionSegments)
+          .set({ state: "finalized", messageId: inserted.message.messageId })
+          .where(eq(gridTranscriptionSegments.id, segment.id))
+        return { messageId: inserted.message.messageId }
+      })
+      return Response.json({ messageId: saved.messageId })
+    }
     if (action === "heartbeat" || action === "claim") {
       if (!equal(token, config.secret)) throw new WorkerRequestError(401)
       const raw = await readBody(request)
@@ -480,9 +567,7 @@ export async function handleGridTranscriptionWorkerRequest(request: Request): Pr
           .where(and(eq(members.spaceId, run.spaceId), eq(members.userId, segment.speakerUserId)))
           .limit(1)
         const current = await captureAuthority(tx, run)
-        const allowed =
-          !!member &&
-          current.valid &&
+        const live =
           !!run.leaseExpiresAt &&
           run.leaseExpiresAt.getTime() > Date.now() &&
           run.expiresAt.getTime() > Date.now() &&
@@ -492,6 +577,9 @@ export async function handleGridTranscriptionWorkerRequest(request: Request): Pr
               run.interruptionReason === "user_stop" &&
               !!run.stopRequestedAt &&
               Date.now() - run.stopRequestedAt.getTime() <= 5000))
+        // A run that ended keeps the turn admitted for the worker's spooled late path.
+        if (!live) throw new WorkerRequestError(409)
+        const allowed = live && !!member && current.valid
         if (!allowed || !input.text.trim()) {
           await tx
             .update(gridTranscriptionSegments)
@@ -545,6 +633,7 @@ export async function handleGridTranscriptionWorkerRequest(request: Request): Pr
               kind: run.interruptionReason === "user_stop" ? "stopped" : "interrupted",
               text: run.interruptionReason === "user_stop" ? "Transcription stopped" : "Transcription interrupted",
             })
+          // Unfinished admitted turns stay admitted: the worker's spool delivers them as late finals.
           await tx
             .update(gridTranscriptionRuns)
             .set({
@@ -552,10 +641,6 @@ export async function handleGridTranscriptionWorkerRequest(request: Request): Pr
               revision: sql`${gridTranscriptionRuns.revision} + 1`,
             })
             .where(eq(gridTranscriptionRuns.id, run.id))
-          await tx
-            .update(gridTranscriptionSegments)
-            .set({ state: "discarded" })
-            .where(and(eq(gridTranscriptionSegments.runId, run.id), eq(gridTranscriptionSegments.state, "admitted")))
         }
         return run.spaceId
       })

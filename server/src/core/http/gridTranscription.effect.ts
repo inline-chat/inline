@@ -3,7 +3,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { handleGridTranscriptionWorkerRequest } from "../../modules/grid/transcription/worker"
 import { webResponseToHttpServerResponse } from "./webResponse"
 
-export const gridTranscriptionWorkerPaths = ["heartbeat", "claim", "renew", "admit", "final", "stopped"].map(
+export const gridTranscriptionWorkerPaths = ["heartbeat", "claim", "renew", "admit", "final", "stopped", "late"].map(
   (action) => `/_internal/grid-transcription/${action}` as const,
 )
 

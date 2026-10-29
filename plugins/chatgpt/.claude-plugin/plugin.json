@@ -1,0 +1,15 @@
+{
+  "name": "inline",
+  "version": "0.2.0",
+  "description": "Find scoped work chats, read and summarize threads, ask teammates, create child threads, and send or forward messages in Inline.",
+  "author": {
+    "name": "Inline",
+    "url": "https://inline.chat"
+  },
+  "homepage": "https://inline.chat/docs",
+  "repository": "https://github.com/inline-chat/inline",
+  "license": "Apache-2.0",
+  "keywords": ["inline", "chat", "work chat", "messaging", "threads", "collaboration", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
+}

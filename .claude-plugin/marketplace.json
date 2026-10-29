@@ -1,0 +1,19 @@
+{
+  "name": "inline-chat",
+  "owner": {
+    "name": "Inline",
+    "url": "https://inline.chat"
+  },
+  "metadata": {
+    "description": "Inline plugins for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "inline",
+      "source": "./plugins/chatgpt",
+      "description": "Work with Inline chats, threads, and messages through the hosted Inline MCP server and the Inline skill.",
+      "category": "communication",
+      "homepage": "https://inline.chat/docs"
+    }
+  ]
+}

@@ -6,6 +6,7 @@ import { TranscriptionError } from "./protocol.js"
 import { SileroModel } from "./silero.js"
 import { TrackWorker, type SpeechConnection } from "./track-worker.js"
 import type { ProviderOptions } from "./socket.js"
+import { TurnSpool, type SpoolConfig } from "./spool.js"
 import { monotonicMilliseconds } from "./watchdog.js"
 
 type OwnedMicrophone = {
@@ -17,6 +18,7 @@ export type RoomWorkerOptions = Readonly<{
   run: ClaimedRun; identity: CaptureIdentity; requestedAtMs: number; leaseMs: number; expiresAtMs: number;
   apiBaseUrl: string; apiKey: string; apiTimeoutMs?: number;
   onFailure: (error: TranscriptionError) => void;
+  spool?: SpoolConfig;
   // Trusted local qualification injection; the daemon never accepts endpoints over IPC.
   connectProvider?: (options: ProviderOptions) => Promise<SpeechConnection>;
 }>
@@ -35,7 +37,10 @@ export class RoomWorker {
   private connected: Promise<void> | undefined
   private stopPromise: Promise<void> | undefined
 
+  private readonly spool: TurnSpool | undefined
+
   constructor(private readonly options: RoomWorkerOptions) {
+    this.spool = options.spool ? new TurnSpool(options.spool) : undefined
     this.authority = new CaptureAuthority({
       identity: options.identity, requestedAtMs: options.requestedAtMs, leaseMs: options.leaseMs,
       expiresAtMs: options.expiresAtMs, microphones: [], now: monotonicMilliseconds,
@@ -145,6 +150,7 @@ export class RoomWorker {
       participantIdentity: grant.identity, trackSid: grant.trackSid, api: this.api,
       detector: this.model.detector(sampleRate),
       ...(this.options.connectProvider ? { connect: this.options.connectProvider } : {}),
+      ...(this.spool ? { spool: this.spool } : {}),
       assertRunAuthority: () => this.authority.assertCurrent(this.options.identity),
       assertMicrophone: () => {
         const current = this.eligible(publication, participant)

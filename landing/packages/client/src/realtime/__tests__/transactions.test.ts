@@ -284,6 +284,7 @@ describe("realtime transactions", () => {
             code: 400,
             errorCode: RpcError_Code.BAD_REQUEST,
             message: "SEND_FAILED",
+            retryAfterSeconds: 0,
           },
         },
       }),

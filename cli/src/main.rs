@@ -475,7 +475,7 @@ enum Command {
         command: SkillCommand,
     },
     #[command(
-        about = "Install Inline's Codex plugin (skill + OAuth MCP)",
+        about = "Install Inline's Codex or Claude Code plugin (skill + OAuth MCP)",
         visible_alias = "plugins"
     )]
     Plugin {
@@ -673,11 +673,13 @@ enum SkillCommand {
 #[derive(Subcommand)]
 enum PluginCommand {
     #[command(
-        about = "Install the Inline plugin from its public Codex marketplace",
-        after_help = "The plugin bundles both the Inline skill and OAuth MCP server.\nThe operation is idempotent and safe to repeat."
+        about = "Install the Inline plugin from its public Codex and Claude Code marketplaces",
+        after_help = "The plugin bundles both the Inline skill and OAuth MCP server.\nWithout --host, it installs into every detected host.\nThe operation is idempotent and safe to repeat."
     )]
     Install {
-        #[arg(long, help = "Print the Codex commands without changing configuration")]
+        #[arg(long, value_enum, help = "Install only into this host")]
+        host: Option<plugin::PluginHost>,
+        #[arg(long, help = "Print the host commands without changing configuration")]
         dry_run: bool,
     },
 }
@@ -2692,10 +2694,10 @@ fn is_interactive_terminal() -> bool {
 async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Error>> {
     let json_format = output::resolve_json_format(cli.pretty, cli.compact);
     if let Command::Plugin {
-        command: PluginCommand::Install { dry_run },
+        command: PluginCommand::Install { host, dry_run },
     } = &cli.command
     {
-        return plugin::install_for_codex(*dry_run, cli.json, json_format).await;
+        return plugin::install(*host, *dry_run, cli.json, json_format).await;
     }
     let config = Config::load();
     if let Command::Update {
@@ -7316,7 +7318,21 @@ mod cli_parsing_tests {
         assert!(matches!(
             cli.command,
             Command::Plugin {
-                command: PluginCommand::Install { dry_run: true }
+                command: PluginCommand::Install {
+                    host: None,
+                    dry_run: true
+                }
+            }
+        ));
+
+        let cli = Cli::try_parse_from(["inline", "plugin", "install", "--host", "claude"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Plugin {
+                command: PluginCommand::Install {
+                    host: Some(plugin::PluginHost::Claude),
+                    dry_run: false
+                }
             }
         ));
     }

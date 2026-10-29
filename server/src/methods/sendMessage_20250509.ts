@@ -43,6 +43,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       sendDate: Math.floor(messageDate.getTime() / 1000),
       isSticker: false,
       parseMarkdown: true,
+      paceBotSender: {},
     },
     {
       currentSessionId: context.currentSessionId,

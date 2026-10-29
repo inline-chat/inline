@@ -129,10 +129,22 @@ for (const relativePath of [
   await requireRegularFile(relativePath);
 }
 
-const publicMetadata = JSON.stringify({ marketplace, manifest, mcp });
+const claudeMarketplace = await readJson(".claude-plugin/marketplace.json");
+check(claudeMarketplace.name === "inline-chat", "Claude marketplace name must be inline-chat");
+const claudeEntry = claudeMarketplace.plugins?.find((plugin) => plugin.name === "inline");
+check(claudeEntry, "Claude marketplace must contain the inline plugin");
+check(claudeEntry.source === "./plugins/chatgpt", "Claude inline plugin source must be ./plugins/chatgpt");
+
+const claudeManifest = await readJson("plugins/chatgpt/.claude-plugin/plugin.json");
+check(claudeManifest.name === manifest.name, "Claude and Codex plugin names must match");
+check(claudeManifest.version === manifest.version, "Claude and Codex plugin versions must match");
+check(claudeManifest.skills === manifest.skills, "Claude and Codex plugin skills paths must match");
+check(claudeManifest.mcpServers === manifest.mcpServers, "Claude and Codex plugin MCP paths must match");
+
+const publicMetadata = JSON.stringify({ marketplace, manifest, mcp, claudeMarketplace, claudeManifest });
 for (const forbidden of ["test_credentials", "asdk_app_v_", "files.openai.com", "[TODO:"]) {
   check(!publicMetadata.includes(forbidden), `plugin metadata must not contain ${forbidden}`);
 }
 
 await checkSkillMirror();
-console.log("Codex plugin bundle is valid and the Inline skill mirror is current.");
+console.log("Codex and Claude plugin bundles are valid and the Inline skill mirror is current.");

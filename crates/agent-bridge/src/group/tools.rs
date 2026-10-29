@@ -83,6 +83,8 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     write("return_attachment", ToolTarget::CurrentWork, true),
     // Ask a teammate (a question mention in the current work).
     write("ask_teammate", ToolTarget::CurrentWork, false),
+    // Follow or unfollow a thread, as people do with /follow.
+    write("follow_thread", ToolTarget::Accessible, false),
 ];
 
 pub fn tool(name: &str) -> Option<&'static ToolDescriptor> {

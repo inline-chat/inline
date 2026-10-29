@@ -20,6 +20,8 @@ struct MessageRowContext: Equatable {
   var contentSizeCategory: UIContentSizeCategory
   var displayScale: CGFloat
   var isRightToLeft: Bool
+  /// The thread's parent at the top of a thread: no thread summary, Ack or message gestures.
+  var isThreadAnchor = false
 
   init(
     rowWidth: CGFloat,
@@ -78,8 +80,7 @@ struct MessageViewContent {
   /// Kinds the next view draws today. Everything else keeps the current view until it is built.
   static func supports(_ message: FullMessage, displayMode: MessageDisplayMode) -> Bool {
     let model = message.message
-    guard displayMode == .normal,
-          !model.isServiceMessage,
+    guard !model.isServiceMessage,
           model.isSticker != true,
           // The old file path and rich blocks stay with the current view for now.
           message.file == nil,
@@ -177,7 +178,7 @@ struct MessageViewContent {
       : nil
 
     let reactions = reactionModels(message, outgoing: outgoing, isEmoji: isEmoji, textColor: textColor, context: context)
-    let showsAcknowledgement = !message.acknowledgementActors.isEmpty
+    let showsAcknowledgement = !context.isThreadAnchor && !message.acknowledgementActors.isEmpty
     let acknowledgementSize = showsAcknowledgement
       ? CGSize(width: message.acknowledgementPillWidth, height: 16)
       : nil
