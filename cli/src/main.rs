@@ -452,7 +452,8 @@ enum Command {
     Logout,
     #[command(
         about = "Update the CLI to the latest release",
-        visible_alias = "upgrade"
+        visible_alias = "upgrade",
+        args_conflicts_with_subcommands = true
     )]
     Update {
         #[arg(
@@ -468,7 +469,8 @@ enum Command {
         channel: Option<update::UpdateChannel>,
         #[arg(
             long,
-            help = "Run without prompts or elevation; respects automatic-update policy"
+            help = "Run without prompts or elevation; respects automatic-update policy",
+            conflicts_with_all = ["check", "channel"]
         )]
         background: bool,
         #[command(subcommand)]
@@ -6424,6 +6426,23 @@ mod cli_parsing_tests {
         ];
         filter_messages_by_list_options(&mut messages, &args);
         assert_eq!(messages.iter().map(|m| m.id).collect::<Vec<_>>(), [2]);
+    }
+
+    #[test]
+    fn update_inspection_flags_cannot_be_ignored_by_a_mutating_subcommand() {
+        for args in [
+            vec!["inline", "update", "--check", "config", "--auto", "on"],
+            vec!["inline", "update", "--channel", "alpha", "status"],
+            vec!["inline", "update", "--background", "--check"],
+            vec!["inline", "update", "--background", "--channel", "alpha"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+        assert!(Cli::try_parse_from(["inline", "--json", "update", "status"]).is_ok());
+        assert!(
+            Cli::try_parse_from(["inline", "update", "config", "--auto", "off", "--json"]).is_ok()
+        );
+        assert!(Cli::try_parse_from(["inline", "update", "--background", "--json"]).is_ok());
     }
 
     #[test]
