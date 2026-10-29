@@ -130,8 +130,11 @@ struct GridPendingMembershipTests {
       try await fixture.enableTransferForPublicActions()
 
       fixture.service.createAndJoin(spaceID: 42)
-      let standIn = try #require(fixture.service.grid(spaceID: 42)?.rooms.first(where: \.isLocalPlaceholder))
-      #expect(standIn.avatars.contains(where: \.ownedByCurrentSession))
+      // Plain values: `#expect` can't decompose calls that take a key path.
+      let placeholder = fixture.service.grid(spaceID: 42)?.rooms.first(where: \.isLocalPlaceholder)
+      let standIn = try #require(placeholder)
+      let ownsStandIn = standIn.avatars.contains(where: \.ownedByCurrentSession)
+      #expect(ownsStandIn)
       #expect(ownedRoomID(fixture.service) == standIn.id)
 
       try await eventuallyGridAuthority { control.submissions.count == 1 }
