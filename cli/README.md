@@ -111,7 +111,7 @@ inline bridge rollback                 # request the recorded previous runtime
 
 A manual restart runs the invoking upgraded CLI even with automatic updates off.
 Rollback waits for a safe boundary, is limited to the recorded compatible previous
-runtime, and quarantines the version it replaces. Status lists pending and running
+runtime, and quarantines the version it replaces. Status lists selected and pending
 bridge versions. The version cache retains active, previous, pending and supervisor
 runtimes; unreferenced verified copies older than seven days are collected.
 

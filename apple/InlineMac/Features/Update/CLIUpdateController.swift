@@ -146,6 +146,10 @@ final class CLIUpdateController {
       }
       guard canManage else { statusText = "Managed by Homebrew"; return }
       // Legacy CLIs cannot expose the engine. Bootstrap only from signed metadata.
+      let disabled = ProcessInfo.processInfo.environment["INLINE_DISABLE_AUTOUPDATE"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+      if automatic && !manual && ["1", "true", "on"].contains(disabled ?? "") {
+        statusText = "Automatic Updates Unavailable in This Environment"; return
+      }
       guard automatic, automaticUpdatesEnabled || manual, manual || Date() >= nextCheck else {
         statusText = "CLI Update Support Required"; return
       }
@@ -163,6 +167,7 @@ final class CLIUpdateController {
         let status = try await run(.configure(enabled: UserDefaults.standard.object(forKey: Self.pendingKey) as? Bool, appChannel: channel(), register: true), at: outcome.installation)
         UserDefaults.standard.removeObject(forKey: Self.pendingKey)
         show(status)
+        report(outcome: "bootstrapped", stage: "bootstrap", version: status.currentVersion)
       } catch {
         if error is CancellationError {
           statusText = "Automatic CLI Updates Off"
@@ -172,7 +177,13 @@ final class CLIUpdateController {
         failureText = (error as? CLIInstallerFailure)?.message
           ?? "The working CLI was kept. Retry when the CLI release is available."
         statusText = "CLI Update Deferred"
-        reportFailure(stage: "bootstrap")
+        let stage: String
+        switch (error as? CLIInstallerFailure)?.kind {
+        case .network: stage = "bootstrap_network"
+        case .invalidSignature, .checksumMismatch, .invalidManifest, .invalidArchive: stage = "bootstrap_verification"
+        default: stage = "bootstrap_installation"
+        }
+        reportFailure(stage: stage)
       }
     }
   }
@@ -200,7 +211,7 @@ final class CLIUpdateController {
     versionText = "CLI \(terminalVersion ?? status.currentVersion) · \(status.channel.capitalized)"
     followsAppChannel = status.followsApp
     let bridgeVersions = Set(status.bridges?.compactMap(\.version) ?? []).sorted()
-    bridgeVersionText = bridgeVersions.isEmpty ? nil : "Running bridges: \(bridgeVersions.joined(separator: ", "))"
+    bridgeVersionText = bridgeVersions.isEmpty ? nil : "Bridge versions: \(bridgeVersions.joined(separator: ", "))"
     failureText = status.failure.map { stage in
       switch stage {
       case "signature", "checksum", "codesign", "manifest_identity", "manifest_replay", "release_rollback":
@@ -225,10 +236,24 @@ final class CLIUpdateController {
     if !status.automaticUpdatesAvailable, automaticUpdatesEnabled { statusText = "Automatic Updates Unavailable in This Environment" }
   }
 
-  private func reportFailure(stage: String) {
-    let event = Event(level: .error)
-    event.message = SentryMessage(formatted: "Inline CLI update could not complete")
-    event.tags = ["surface": "cli_update", "stage": stage]
+  private func reportFailure(stage: String) { report(outcome: "failed", stage: stage) }
+
+  private func report(outcome: String, stage: String, version: String? = nil) {
+    let privacy = ProcessInfo.processInfo.environment["INLINE_CLI_TELEMETRY"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    guard !["off", "0", "false"].contains(privacy ?? "") else { return }
+    let key = "cliUpdateReport.\(outcome).\(stage)"
+    let now = Date()
+    if let last = UserDefaults.standard.object(forKey: key) as? Date,
+       last <= now, now.timeIntervalSince(last) < 24 * 60 * 60 { return }
+    UserDefaults.standard.set(now, forKey: key)
+    let event = Event(level: outcome == "failed" ? .error : .info)
+    event.message = SentryMessage(formatted: "Inline CLI update")
+    var tags = ["surface": "cli_update", "outcome": outcome, "stage": stage]
+    if let version, version.utf8.count <= 64,
+       version.utf8.allSatisfy({ (48 ... 57).contains($0) || (65 ... 90).contains($0) || (97 ... 122).contains($0) || [43, 45, 46].contains($0) }) {
+      tags["cli_version"] = version
+    }
+    event.tags = tags
     SentrySDK.capture(event: event)
   }
 }

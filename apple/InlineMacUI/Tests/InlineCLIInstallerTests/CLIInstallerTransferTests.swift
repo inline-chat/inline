@@ -62,6 +62,7 @@ struct CLIInstallerTransferTests {
     let root = URL(fileURLWithPath: "/tmp").appending(path: "inline-transfer-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root.appending(path: "bin"), withIntermediateDirectories: false)
     let outside = root.appending(path: "outside")
     try Data("must survive".utf8).write(to: outside)
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: outside.path)
