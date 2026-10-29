@@ -82,6 +82,18 @@ final class BotChatSettingsDocumentCache {
     fileprivate let value: UInt64
   }
 
+  /// A confirmed document, so every coordinator for the peer shows it, not
+  /// only the one that loaded or changed it.
+  struct Accepted: Sendable {
+    let accountID: Int64
+    let peer: Peer
+    let botID: Int64
+    let document: BotChatSettingsModel.Document
+    let updatedAt: Date
+  }
+
+  let accepted = PassthroughSubject<Accepted, Never>()
+
   private struct Key: Hashable {
     let accountID: Int64
     let peer: Peer
@@ -125,6 +137,9 @@ final class BotChatSettingsDocumentCache {
     return Snapshot(document: entry.document, updatedAt: entry.updatedAt)
   }
 
+  /// Returns false when a newer write already landed, so the caller can
+  /// show that instead.
+  @discardableResult
   func store(
     _ document: BotChatSettingsModel.Document,
     accountID: Int64?,
@@ -132,17 +147,17 @@ final class BotChatSettingsDocumentCache {
     botID: Int64,
     updatedAt: Date = Date(),
     writeToken: WriteToken? = nil
-  ) {
-    guard let accountID else { return }
+  ) -> Bool {
+    guard let accountID else { return true }
     pruneExpired(now: updatedAt)
     let key = Key(accountID: accountID, peer: peer, botID: botID)
     var writeState = writeStates[key] ?? .init()
     let acceptedValue: UInt64
     if let writeToken {
-      guard writeState.activeValues.remove(writeToken.value) != nil else { return }
+      guard writeState.activeValues.remove(writeToken.value) != nil else { return false }
       guard writeToken.value >= writeState.latestAcceptedValue else {
         finishWriteState(writeState, for: key)
-        return
+        return false
       }
       acceptedValue = writeToken.value
     } else {
@@ -157,6 +172,8 @@ final class BotChatSettingsDocumentCache {
     )
     finishWriteState(writeState, for: key)
     trimToLimit()
+    accepted.send(Accepted(accountID: accountID, peer: peer, botID: botID, document: document, updatedAt: updatedAt))
+    return true
   }
 
   func beginWrite(accountID: Int64?, peer: Peer, botID: Int64) -> WriteToken? {
@@ -266,6 +283,7 @@ public final class BotChatSettingsCoordinator {
   @ObservationIgnored private var mutationQueue: [BotChatSettingsQueuedMutation] = []
   @ObservationIgnored private var confirmedDocumentByBotID: [Int64: BotChatSettingsModel.Document] = [:]
   @ObservationIgnored private var discoveryObservation: AnyCancellable?
+  @ObservationIgnored private var cacheObservation: AnyCancellable?
   @ObservationIgnored private var hasReceivedDiscoverySnapshot = false
   @ObservationIgnored private var nextTraceID = 1
   // TODO(bot-chat-settings): observe bot-initiated capability and document invalidations after V1.
@@ -321,6 +339,11 @@ public final class BotChatSettingsCoordinator {
     self.transientMutationRetryDelay = transientMutationRetryDelay
     self.documentCache = documentCache
     self.accountID = accountID
+    // The chat header and Compose each keep a coordinator for the same peer;
+    // a change confirmed through one reaches the other.
+    cacheObservation = documentCache?.accepted.sink { [weak self] accepted in
+      self?.adoptAcceptedDocument(accepted)
+    }
   }
 
   public var isToolbarVisible: Bool { !bots.isEmpty }
@@ -844,15 +867,36 @@ public final class BotChatSettingsCoordinator {
   ) -> Date {
     let updatedAt = Date()
     confirmedDocumentByBotID[botID] = document
-    documentCache?.store(
+    let isLatest = documentCache?.store(
       document,
       accountID: accountID,
       peer: peer,
       botID: botID,
       updatedAt: updatedAt,
       writeToken: cacheWriteToken
-    )
+    ) ?? true
+    // Another coordinator confirmed a newer document while this one was in
+    // flight; keep that one.
+    if !isLatest, let newer = documentCache?.snapshot(accountID: accountID, peer: peer, botID: botID) {
+      confirmedDocumentByBotID[botID] = newer.document
+      return newer.updatedAt
+    }
     return updatedAt
+  }
+
+  private func adoptAcceptedDocument(_ accepted: BotChatSettingsDocumentCache.Accepted) {
+    let botID = accepted.botID
+    guard accepted.accountID == accountID,
+          accepted.peer == peer,
+          stateByBotID[botID] != nil,
+          confirmedDocumentByBotID[botID] != accepted.document,
+          // Our own change in flight answers with a newer document.
+          !hasPendingMutation(for: botID)
+    else { return }
+    confirmedDocumentByBotID[botID] = accepted.document
+    stateByBotID[botID]?.lastUpdatedAt = accepted.updatedAt
+    stateByBotID[botID]?.problem = nil
+    rebuildPresentation(for: botID)
   }
 
   private func finishQueuedMutation(

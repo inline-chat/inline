@@ -406,6 +406,81 @@ struct BotChatSettingsCoordinatorTests {
     #expect(reopened.selectedState.surfaceStatus == nil)
   }
 
+  @Test("a change confirmed by one coordinator reaches another for the same peer")
+  func confirmedChangeReachesSiblingCoordinator() async {
+    let cache = BotChatSettingsDocumentCache()
+    func makeCoordinator(peer: Peer) -> BotChatSettingsCoordinator {
+      BotChatSettingsCoordinator(
+        peer: peer,
+        discoveryFetcher: { _ in discoveryResult() },
+        settingsRequester: { _, _ in documentResponse(revision: "one", replyThreads: "auto") },
+        itemInvoker: { _, _, _, _, _ in documentResponse(revision: "two", replyThreads: "on") },
+        retryDelays: [],
+        transientMutationRetryDelay: .milliseconds(0),
+        documentCache: cache,
+        accountID: 900
+      )
+    }
+    let header = makeCoordinator(peer: .thread(id: 77))
+    let compose = makeCoordinator(peer: .thread(id: 77))
+    let otherChat = makeCoordinator(peer: .thread(id: 78))
+    for coordinator in [header, compose, otherChat] {
+      await coordinator.warmUp()
+      await waitUntil { coordinator.selectedState.document?.revision == "one" }
+    }
+
+    header.invoke(itemID: "reply-threads", value: .string("on"))
+    await waitUntil { compose.selectedState.document?.revision == "two" }
+
+    #expect(replyThreadsValue(in: compose.selectedState.document) == "on")
+    #expect(compose.selectedState.pendingItemIDs.isEmpty)
+    #expect(otherChat.selectedState.document?.revision == "one")
+  }
+
+  @Test("an older refresh does not replace a newer change confirmed elsewhere")
+  func olderRefreshKeepsSiblingChange() async {
+    let cache = BotChatSettingsDocumentCache()
+    let request = SettingsRequestGate()
+    let header = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in discoveryResult() },
+      settingsRequester: { _, _ in await request.wait() },
+      itemInvoker: { _, _, _, _, _ in documentResponse(revision: "unused") },
+      retryDelays: [],
+      transientMutationRetryDelay: .milliseconds(0),
+      documentCache: cache,
+      accountID: 900
+    )
+    let compose = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in discoveryResult() },
+      settingsRequester: { _, _ in documentResponse(revision: "one", replyThreads: "auto") },
+      itemInvoker: { _, _, _, _, _ in documentResponse(revision: "two", replyThreads: "on") },
+      retryDelays: [],
+      transientMutationRetryDelay: .milliseconds(0),
+      documentCache: cache,
+      accountID: 900
+    )
+
+    await header.warmUp()
+    await waitUntilAsync { await request.count == 1 }
+    await request.resolve(with: documentResponse(revision: "one", replyThreads: "auto"))
+    await waitUntil { header.selectedState.document?.revision == "one" }
+    await compose.warmUp()
+    await waitUntil { compose.selectedState.document?.revision == "one" }
+
+    header.refreshSelected()
+    await waitUntilAsync { await request.count == 2 }
+    compose.invoke(itemID: "reply-threads", value: .string("on"))
+    await waitUntil { header.selectedState.document?.revision == "two" }
+
+    await request.resolve(with: documentResponse(revision: "one", replyThreads: "auto"))
+    await waitUntil { header.selectedState.isRefreshing == false }
+
+    #expect(header.selectedState.document?.revision == "two")
+    #expect(replyThreadsValue(in: header.selectedState.document) == "on")
+  }
+
   @Test("keeps a cached document when revalidation is unreachable")
   func cachedDocumentSurvivesFailedRevalidation() async throws {
     let cache = BotChatSettingsDocumentCache()
