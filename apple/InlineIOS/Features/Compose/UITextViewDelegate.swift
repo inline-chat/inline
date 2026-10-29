@@ -42,6 +42,7 @@ extension ComposeView: UITextViewDelegate {
     // Placeholder Visibility & Attachment Checks
     (textView as? ComposeTextView)?.showPlaceholder(isEmpty)
     updateSendButtonVisibility()
+    updateAgentDraftTarget()
 
     if isEmpty {
       clearDraft()

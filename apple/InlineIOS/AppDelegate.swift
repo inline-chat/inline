@@ -36,6 +36,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    AgentControlErrors.report = { ToastManager.shared.showToast($0, type: .error) }
     // One-time refresh attempt on launch (covers normal unlocked launches).
     Task {
       await Auth.shared.refreshFromStorage()

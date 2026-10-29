@@ -9,6 +9,8 @@ struct ChatToolbarLeadingView: View {
   private let router: Router
   let onOpenSpace: (Int64) -> Void
   let onOpenChatInfo: (SpaceChatItem) -> Void
+  /// An agent DM's working folder, shown when nothing else fills the subtitle.
+  let agentFolderTitle: String?
 
   @ObservedObject private var fullChatViewModel: FullChatViewModel
   private let realtimeState: RealtimeState
@@ -21,9 +23,11 @@ struct ChatToolbarLeadingView: View {
     router: Router,
     fullChatViewModel: FullChatViewModel,
     realtimeState: RealtimeState,
+    agentFolderTitle: String? = nil,
     onOpenSpace: @escaping (Int64) -> Void,
     onOpenChatInfo: @escaping (SpaceChatItem) -> Void
   ) {
+    self.agentFolderTitle = agentFolderTitle
     self.peerId = peerId
     self.contextSpaceId = contextSpaceId
     self.router = router
@@ -122,6 +126,10 @@ struct ChatToolbarLeadingView: View {
 
     if let toolbarContext, toolbarContext.hasBreadcrumb {
       return .breadcrumb(toolbarContext, reference: reference)
+    }
+
+    if let agentFolderTitle, !agentFolderTitle.isEmpty {
+      return .folder(agentFolderTitle)
     }
 
     return .empty
@@ -244,6 +252,7 @@ enum ChatSubtitle: Equatable {
   case composeAction(ComposeActionPresentation)
   case timezone(String)
   case breadcrumb(ReplyThreadToolbarContext, reference: ThreadReference?)
+  case folder(String)
   case empty
 
   var transitionID: String {
@@ -263,6 +272,8 @@ enum ChatSubtitle: Equatable {
         context.parent?.title ?? "",
         reference?.label ?? "",
       ].joined(separator: ":")
+    case let .folder(title):
+      "folder:\(title)"
     case .empty:
       "empty"
     }
@@ -404,9 +415,26 @@ private struct ChatToolbarSubtitleContent: View {
         onOpenSpace: onOpenSpace,
         onOpenParentThread: onOpenParentThread
       )
+    case let .folder(title):
+      Label(title, systemImage: "folder")
+        .labelStyle(ChatToolbarFolderLabelStyle())
     case .empty:
       EmptyView()
     }
+  }
+}
+
+private struct ChatToolbarFolderLabelStyle: LabelStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    HStack(spacing: 3) {
+      configuration.icon
+        .font(.system(size: 10, weight: .medium))
+      configuration.title
+        .lineLimit(1)
+        .truncationMode(.middle)
+    }
+    .font(.caption)
+    .foregroundStyle(.secondary)
   }
 }
 

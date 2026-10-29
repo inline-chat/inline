@@ -60,6 +60,7 @@ extension ComposeView {
 
       textView.showPlaceholder(false)
       updateSendButtonVisibility()
+      updateAgentDraftTarget()
       updateHeight()
 
       // Start timer since we now have text content

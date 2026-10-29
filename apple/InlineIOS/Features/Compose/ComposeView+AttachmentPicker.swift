@@ -1,4 +1,5 @@
 import InlineIOSUI
+import InlineKit
 import Photos
 import SwiftUI
 import UIKit
@@ -41,7 +42,8 @@ extension ComposeView: UIAdaptivePresentationControllerDelegate {
           },
           manageLimitedAccess: { [weak self] in
             self?.presentLimitedLibraryManager()
-          }
+          },
+          agentControls: self.attachmentPickerAgentControls()
         )
       )
 
@@ -64,6 +66,16 @@ extension ComposeView: UIAdaptivePresentationControllerDelegate {
 
       self.attachmentPickerViewController = controller
       presenter.present(controller, animated: true)
+    }
+  }
+
+  /// Offered only while the draft would reach an Agent; remembered for
+  /// every chat, like the Mac's plus menu item.
+  private func attachmentPickerAgentControls() -> AttachmentPickerAgentControls? {
+    guard let agentChain, agentChain.isEligible else { return nil }
+    return AttachmentPickerAgentControls(isShown: !agentChain.isHidden) { [weak agentChain] shown in
+      guard let agentChain, agentChain.isHidden == shown else { return }
+      agentChain.toggleHidden()
     }
   }
 
@@ -139,7 +151,7 @@ extension ComposeView: UIAdaptivePresentationControllerDelegate {
     dismissAttachmentPicker(animated: animated, completion: completion)
   }
 
-  private func attachmentPickerPresenter() -> UIViewController? {
+  func attachmentPickerPresenter() -> UIViewController? {
     guard let windowScene = window?.windowScene,
           let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow })
     else {
