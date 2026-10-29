@@ -209,7 +209,9 @@ pub(super) mod tests {
             "😀 ask [@Dena](inline://user/123) about [Planning](inline://chat/456)"
         );
         // Conversation history keeps the mention, so the quoted addressing survives.
-        assert!(render_inline_text(text, &entities, None).contains("[@Mo’s Codex](inline://user/99)"));
+        assert!(
+            render_inline_text(text, &entities, None).contains("[@Mo’s Codex](inline://user/99)")
+        );
     }
 
     #[test]

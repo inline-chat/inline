@@ -393,7 +393,9 @@ mod tests {
         let context = build_turn_context(&route, &record).await.expect("context");
         let prompt = &context.conversation;
         assert!(prompt.contains("[Mo (replied-to message)] Earlier context"));
-        assert!(prompt.contains("ask [@Dena](inline://user/123) about [Planning](inline://chat/456)"));
+        assert!(
+            prompt.contains("ask [@Dena](inline://user/123) about [Planning](inline://chat/456)")
+        );
         assert!(prompt.contains("[Conversation] Agent bridge planning private thread"));
         assert!(!prompt.contains("fix it"));
         assert!(prompt.contains("untrusted conversation content"));
