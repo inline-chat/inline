@@ -39,6 +39,27 @@ struct CLIUpdateTests {
     #expect(!CLIAgentSetupRunner.isUnsupportedUpdateEngine(status: 2, standardError: Data("invalid update state".utf8)))
   }
 
+  @Test("managed discovery includes legacy services and account services behind Homebrew")
+  func discoversBothServiceLayouts() throws {
+    let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let legacy = root.appending(path: "runtime/versions/legacy/inline")
+    let account = root.appending(path: "runtime/versions/account/inline")
+    let staged = root.appending(path: "runtime/versions/staged/inline")
+    for (directory, executable) in [("bridge/legacy", legacy), ("bridge/accounts/42", account)] {
+      let location = root.appending(path: directory)
+      try FileManager.default.createDirectory(at: location, withIntermediateDirectories: true)
+      try JSONSerialization.data(withJSONObject: ["current": ["executable": executable.path]])
+        .write(to: location.appending(path: "activation.json"))
+    }
+    try FileManager.default.createDirectory(at: root.appending(path: "runtime"), withIntermediateDirectories: true)
+    try JSONSerialization.data(withJSONObject: ["staged": ["executable": staged.path]])
+      .write(to: root.appending(path: "runtime/update.json"))
+    let candidates = CLIInstallerService.managedUpdateCandidates(in: root)
+    #expect(candidates.first == staged)
+    #expect(Set(candidates) == Set([staged, account, legacy]))
+  }
+
   @Test("app protocol carries opt-out and pending bridge state without touching auth")
   func decodesUpdateState() throws {
     let data = Data(#"{"schemaVersion":1,"autoUpdate":false,"channel":"alpha","followsApp":true,"currentVersion":"0.7.19-alpha.8","installationMethod":"managed","automaticUpdatesAvailable":true,"outcome":"staged","failure":null,"staged":{"version":"0.7.19-alpha.9"},"retryAt":null,"bridges":[{"version":"0.7.19-alpha.8","candidateVersion":"0.7.19-alpha.9","phase":"waiting_for_idle"}]}"#.utf8)
