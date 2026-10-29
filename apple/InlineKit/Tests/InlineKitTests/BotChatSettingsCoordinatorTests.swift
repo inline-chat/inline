@@ -409,7 +409,7 @@ struct BotChatSettingsCoordinatorTests {
   @Test("a change confirmed by one coordinator reaches another for the same peer")
   func confirmedChangeReachesSiblingCoordinator() async {
     let cache = BotChatSettingsDocumentCache()
-    func makeCoordinator(peer: Peer) -> BotChatSettingsCoordinator {
+    func makeCoordinator(peer: InlineKit.Peer) -> BotChatSettingsCoordinator {
       BotChatSettingsCoordinator(
         peer: peer,
         discoveryFetcher: { _ in discoveryResult() },
