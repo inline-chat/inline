@@ -75,27 +75,21 @@ Support status:
 - Hermes Agent: beta.
 - OpenClaw: experimental.
 
-## Bridge v2 alpha
+## Native Codex and Claude bridge
 
-[CLI `0.7.19-alpha.7`](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.19-alpha.7)
-uses the native Codex and Claude bridge by default. Download the archive for your
-platform from that prerelease and verify its published checksum, then run
-`inline update --channel alpha` to keep following alpha releases. The macOS app's
-Tip channel also installs CLI alphas. The normal installer and Homebrew remain
-on the stable release.
+Codex and Claude Code run on the native bridge (v2). Each thread has one native
+session per agent, with work state, settings, approval and question
+interactions, and controls. OpenCode and Amp keep using the previous bridge.
 
-No environment override is needed. Restart an existing bridge at an idle
-boundary with `inline bridge restart`, using the new binary, and check its
+Upgrading from an earlier CLI needs no setup. After `inline update`, existing
+conversations continue in their Codex or Claude session, or start a fresh one
+when that session is no longer on the machine. A Homebrew or manual
+upgrade reaches the background bridge after `inline bridge restart`; check the
 installed binary and provider paths with `inline bridge doctor --json`.
-For rollback, set `INLINE_BRIDGE_V2=off` in the **bridge service's environment**
+
+To roll back, set `INLINE_BRIDGE_V2=off` in the **bridge service's environment**
 and restart it; a variable set only in your terminal does not reach an existing
 background service.
-
-Each thread has one native session per agent, with work state, settings,
-approval/question interactions, and controls. OpenCode and Amp keep using v1.
-Some iOS interaction presentation and native session browsing are still in
-progress. Test in a controlled conversation and retain the existing bridge
-state and previous binary for recovery.
 
 ## Verify
 

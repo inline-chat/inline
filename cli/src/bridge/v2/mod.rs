@@ -1,4 +1,4 @@
-//! Bridge v2: the session-contract runtime, default for Codex and Claude in alpha.
+//! Bridge v2: the session-contract runtime, default for Codex and Claude.
 //!
 //! Other providers stay on v1; INLINE_BRIDGE_V2 can select providers or roll back.
 
