@@ -59,6 +59,8 @@ final class MessagesCollectionView: UICollectionView {
 
   var onContextMenuWillDisplay: (() -> Void)?
   var onContextMenuDidEnd: (() -> Void)?
+  /// Menu lifecycle events in order, for the device lab.
+  var onContextMenuEvent: ((String) -> Void)?
 
   func preserveContextMenuViewportForKeyboardRestoration() {
     // Capture before the menu hides the keyboard; focus restoration must not
@@ -1615,15 +1617,26 @@ private extension MessagesCollectionView {
         }
         collectionView.contextMenuConfiguration = configuration
         collectionView.contextMenuPhase = .presented
-        // UIKit lifts the live bubble, then swaps to the bitmap preview. Its completion arrives
-        // about a second later; the swap is done well before a reaction can be tapped.
+        // UIKit holds the live bubble from the lift until its present animation completes, about a
+        // second after opening, even though the bitmap preview shows much earlier. A row that
+        // changes before then flies back clipped to its old outline until the menu's completion.
         contextMenuShowsOwnPreview = false
-        let showsOwnPreview = { [weak self, weak collectionView] in
-          guard collectionView?.contextMenuConfiguration === configuration,
-                collectionView?.contextMenuPhase == .presented else { return }
-          self?.contextMenuShowsOwnPreview = true
+        let releasesSource = { [weak self, weak collectionView] in
+          guard let self, let collectionView, collectionView.contextMenuConfiguration === configuration,
+                collectionView.contextMenuPhase == .presented else { return }
+          contextMenuShowsOwnPreview = true
+          collectionView.onContextMenuEvent?("presented")
+          // Updates held since the lift, a reaction picked early among them, land under the menu now.
+          flushDeferredNextUpdates()
+          if let pending = pendingMenuReaction {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: pending.dismiss)
+          }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (animator == nil ? 0 : 0.45), execute: showsOwnPreview)
+        if let animator {
+          animator.addCompletion(releasesSource)
+        } else {
+          releasesSource()
+        }
         contextMenuSourceItem = contextMenuPreview?.configuration === configuration ? contextMenuPreview?.item : nil
         updateContextMenuSourceVisibility(in: collectionView)
         collectionView.stopComposeInsetAnimationAtPresentation()
@@ -1647,6 +1660,7 @@ private extension MessagesCollectionView {
         identifierView.removeFromSuperview()
       }
 
+      (collectionView as? MessagesCollectionView)?.onContextMenuEvent?("willEnd")
       guard let collectionView = collectionView as? MessagesCollectionView,
             collectionView.contextMenuConfiguration === configuration else { return }
       // Release geometry before replay, but keep background taps suspended
@@ -1666,6 +1680,7 @@ private extension MessagesCollectionView {
       let completion = { [weak self, weak collectionView] in
         guard let collectionView,
               collectionView.contextMenuConfiguration === configuration else { return }
+        collectionView.onContextMenuEvent?("completion")
         self?.contextMenuSourceItem = nil
         self?.updateContextMenuSourceVisibility(in: collectionView)
         collectionView.onContextMenuDidEnd?()
@@ -1708,6 +1723,7 @@ private extension MessagesCollectionView {
     }
 
     private func dismissContextMenuIfNeeded() {
+      (currentCollectionView as? MessagesCollectionView)?.onContextMenuEvent?("dismissMenu")
       collectionContextMenu?.dismissMenu()
       customContextMenu?.dismiss()
     }
@@ -4528,11 +4544,11 @@ private extension MessagesCollectionView {
 
     /// Picks a reaction from the open menu. The menu stays up until the row has the reaction (the
     /// optimistic write takes a few milliseconds), so the returning preview lands on the reacted
-    /// bubble instead of the reaction animating in a second later, after UIKit's completion.
+    /// bubble instead of the reaction animating in a second later, after UIKit's completion. A
+    /// reaction picked while UIKit still holds the bubble waits for it to let go first.
     func reactFromContextMenu(messageStableId: Int64, toggle: () -> Void) {
-      guard contextMenuShowsOwnPreview,
-            let collectionView = currentCollectionView as? MessagesCollectionView,
-            collectionView.contextMenuPhase == .presented
+      guard let collectionView = currentCollectionView as? MessagesCollectionView,
+            collectionView.contextMenuPhase == .presented, customContextMenu == nil
       else {
         dismissContextMenuIfNeeded()
         toggle()
@@ -4540,13 +4556,15 @@ private extension MessagesCollectionView {
       }
       pendingMenuReaction?.dismiss.cancel()
       let dismiss = DispatchWorkItem { [weak self] in
+        guard self?.pendingMenuReaction?.stableId == messageStableId else { return }
         self?.pendingMenuReaction = nil
         self?.dismissContextMenuIfNeeded()
       }
       pendingMenuReaction = (messageStableId, dismiss)
       toggle()
-      // If the write is slow, close anyway; the update then replays after the menu.
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: dismiss)
+      // If the write is slow, close anyway; the update then replays after the menu. Before UIKit
+      // lets go of the bubble, the wait starts when it does, with a cap in case it never reports.
+      DispatchQueue.main.asyncAfter(deadline: .now() + (contextMenuShowsOwnPreview ? 0.25 : 1.5), execute: dismiss)
     }
 
     private func toggleReaction(
@@ -5305,6 +5323,7 @@ private extension MessagesCollectionView {
       // Pair the native lift with its real destination. Returning another
       // detached bitmap here leaves UIKit suppressing the original source
       // while the returning preview fades away, producing a blank slot.
+      (collectionView as? MessagesCollectionView)?.onContextMenuEvent?("dismissalPreview")
       contextMenuSourceItem = nil
       updateContextMenuSourceVisibility(in: collectionView)
       return liveTargetedPreview(for: cell)
