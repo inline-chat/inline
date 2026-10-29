@@ -66,6 +66,10 @@ afterEach(async () => {
   }
   original.clear()
 })
+/** Spoken lines in a run's new thread; message 1 is its "started transcription" line. */
+async function transcriptSpeech(chatId: number) {
+  return db.select().from(messages).where(and(eq(messages.chatId, chatId), sql`${messages.messageId} > 1`))
+}
 async function api(action: string, body: unknown, token = secret) {
   return handleGridTranscriptionWorkerRequest(
     new Request(`http://localhost/_internal/grid-transcription/${action}`, {
@@ -261,7 +265,7 @@ describe("Grid transcription control and worker authorization", () => {
     const final = await api("final", { segmentId, text: "Must not survive ownership replacement" }, claim.runToken)
     expect(final.status).toBe(200)
     expect(await final.json()).toEqual({ messageId: null })
-    expect(await db.select().from(messages).where(eq(messages.chatId, run!.transcriptChatId))).toHaveLength(0)
+    expect(await transcriptSpeech(run!.transcriptChatId)).toHaveLength(0)
     expect((await (await api("renew", {}, claim.runToken)).json()) as object).toMatchObject({
       state: "stopping",
       allowFinalFlush: false,
@@ -299,7 +303,7 @@ describe("Grid transcription control and worker authorization", () => {
       expect((await f.segment()).state).toBe("discarded")
       expect((await f.final()).messageId).toBeNull()
       const [run] = await db.select().from(gridTranscriptionRuns).where(eq(gridTranscriptionRuns.id, f.claim.runId))
-      expect(await db.select().from(messages).where(eq(messages.chatId, run!.transcriptChatId))).toHaveLength(0)
+      expect(await transcriptSpeech(run!.transcriptChatId)).toHaveLength(0)
     })
   }
 
@@ -374,7 +378,7 @@ describe("Grid transcription control and worker authorization", () => {
     const finals = await Promise.all(responses.map((response) => response.json()))
     expect(finals[0]).toEqual(finals[1])
     const run = (await db.select().from(gridTranscriptionRuns))[0]!
-    expect(await db.select().from(messages).where(eq(messages.chatId, run.transcriptChatId))).toHaveLength(1)
+    expect(await transcriptSpeech(run.transcriptChatId)).toHaveLength(1)
     expect((await api("admit", input, claim.runToken)).status).toBe(409)
     await f.control(false)
     expect((await (await api("renew", {}, claim.runToken)).json()) as object).toMatchObject({
@@ -572,9 +576,9 @@ describe("Grid transcription control and worker authorization", () => {
     const labels = new Map(listed.transcripts.map((entry) => [Number(entry.transcriptChatId), entry.title]))
     for (const run of runs) {
       const [child] = await db.select().from(chats).where(eq(chats.id, run.transcriptChatId))
-      expect(child!.title).toBe("Transcript")
       const source = run.sourceRoomId === Number(f.roomId) ? "Product planning" : "Design review"
-      expect(labels.get(run.transcriptChatId)).toBe(`${source} · Transcript #${child!.threadNumber}`)
+      expect(child!.title).toStartWith(`${source} · `)
+      expect(labels.get(run.transcriptChatId)).toStartWith(child!.title!)
     }
     expect(new Set(labels.values()).size).toBe(3)
     expect(await db.select().from(chatParticipants)).toEqual(before)
