@@ -506,7 +506,10 @@ pub async fn perform(
                 );
                 Ok(error.stage() != "network" || now - since >= 24 * 60 * 60)
             })
-            .unwrap_or(false);
+            // Full/read-only storage must not also hide an installation failure.
+            // Sentry already falls back to in-process admission if its ledger
+            // cannot be written. Ordinary network failures remain quiet here.
+            .unwrap_or(error.stage() != "network");
         if report {
             crate::telemetry::report_update(
                 "failed",
