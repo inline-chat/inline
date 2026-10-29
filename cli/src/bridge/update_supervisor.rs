@@ -458,6 +458,71 @@ fn read_policy(store: &Store) -> crate::update::store::State {
     }
 }
 
+fn spawn_update_worker(current: &Artifact, fallback: &Artifact, store: &Store) -> Option<Child> {
+    for engine in [current, fallback] {
+        if update::validate_cached(store, engine).is_err() {
+            continue;
+        }
+        let mut command = Command::new(&engine.executable);
+        command
+            .args(["update", "--background", "--json"])
+            .env("INLINE_DATA_DIR", store.root.parent()?)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        if let Ok(child) = command.spawn() {
+            return Some(child);
+        }
+    }
+    None
+}
+
+fn recover_failed_launch(
+    state: &mut Activation,
+    paths: &BridgePaths,
+    store: &Store,
+    fallback: &Artifact,
+    channel: &str,
+) -> Option<Child> {
+    for candidate in state
+        .previous
+        .clone()
+        .into_iter()
+        .chain(std::iter::once(fallback.clone()))
+    {
+        if candidate.sha256 == state.current.sha256
+            || state.current.minimum_reader_schema_version > candidate.bridge_schema_version
+        {
+            continue;
+        }
+        if let Ok(child) = launch(&candidate, paths, store) {
+            let failed = state.current.clone();
+            let restored = candidate.clone();
+            state.current = restored;
+            state.previous = None;
+            reject(state, &failed, "runtime_launch");
+            let _ = atomic_json(&journal(paths), state);
+            crate::telemetry::report_update(
+                "rolled_back",
+                channel,
+                &failed.version,
+                &state.current.version,
+                "runtime_launch",
+            );
+            return Some(child);
+        }
+    }
+    crate::telemetry::report_update(
+        "repair_required",
+        channel,
+        &state.current.version,
+        &state.current.version,
+        "runtime_launch",
+    );
+    None
+}
+
 pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let paths = BridgePaths::for_config_path(&fs::canonicalize(config_path)?)?;
     super::ensure_private_dir(&paths.root)?;
@@ -481,23 +546,6 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
         }
         engine
     };
-    if update::validate_cached(&store, &state.current).is_err() {
-        let broken = state.current.clone();
-        state.current = state
-            .previous
-            .take()
-            .filter(|a| update::validate_cached(&store, a).is_ok())
-            .unwrap_or_else(|| fallback_engine.clone());
-        reject(&mut state, &broken, "runtime_identity");
-        atomic_json(&journal(&paths), &state)?;
-        crate::telemetry::report_update(
-            "repair_required",
-            read_policy(&store).channel.as_str(),
-            &broken.version,
-            &state.current.version,
-            "runtime_identity",
-        );
-    }
     let mut child = start_selected(
         &mut state,
         &paths,
@@ -542,21 +590,16 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
         if now >= next_check {
             next_check = now + Duration::from_secs(60 * 60 + rand::random::<u64>() % 600);
             if worker.is_none() && update::automatic_allowed() && read_policy(&store).auto_update {
-                // Use a retained, verified engine; a broken candidate must not disable repair.
-                let executable = if update::validate_cached(&store, &state.current).is_ok() {
-                    &state.current.executable
-                } else {
-                    &fallback_engine.executable
-                };
-                let mut command = Command::new(executable);
-                command
-                    .args(["update", "--background", "--json"])
-                    .env("INLINE_DATA_DIR", &config.data_dir)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .kill_on_drop(true);
-                worker = command.spawn().ok();
+                worker = spawn_update_worker(&state.current, &fallback_engine, &store);
+                if worker.is_none() {
+                    crate::telemetry::report_update(
+                        "repair_required",
+                        read_policy(&store).channel.as_str(),
+                        &state.current.version,
+                        &state.current.version,
+                        "update_worker",
+                    );
+                }
             }
         }
         if let Some(status) = child.as_mut().map(Child::try_wait).transpose()?.flatten() {
@@ -725,7 +768,15 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
             }
         }
         if child.is_none() && !parked && now >= next_start {
-            child = launch(&state.current, &paths, &store).ok();
+            child = launch(&state.current, &paths, &store).ok().or_else(|| {
+                recover_failed_launch(
+                    &mut state,
+                    &paths,
+                    &store,
+                    &fallback_engine,
+                    policy.channel.as_str(),
+                )
+            });
             next_start = now + Duration::from_secs(30);
         }
     }
@@ -775,12 +826,15 @@ mod tests {
         fn artifact(&self, behavior: &str) -> Artifact {
             use std::os::unix::fs::PermissionsExt;
             let quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
-            let script = format!(
+            let mut script = format!(
                 "#!/bin/sh\nexport INLINE_SUPERVISOR_FIXTURE={}\nexport INLINE_SUPERVISOR_FIXTURE_CONFIG={}\nexec {} --exact bridge::update_supervisor::tests::workload_fixture --ignored --nocapture\n",
                 quote(behavior),
                 quote(self.paths.config.to_str().unwrap()),
                 quote(std::env::current_exe().unwrap().to_str().unwrap())
             );
+            if behavior == "cannot_exec" {
+                script = script.replacen("#!/bin/sh", "#!/nonexistent/inline-interpreter", 1);
+            }
             let temp = self.paths.root.join("fixture");
             fs::write(&temp, script).unwrap();
             let hash = update::file_hash(&temp).unwrap();
@@ -844,6 +898,9 @@ mod tests {
             writeln!(f, "{line}").unwrap();
         };
         append(&format!("start {behavior}"));
+        if behavior == "worker_ok" {
+            return;
+        }
         if behavior == "crash" {
             std::process::exit(7);
         }
@@ -921,11 +978,6 @@ mod tests {
             let f = Fixture::new();
             let old = f.artifact("old");
             let candidate = f.artifact(mode);
-            if mode == "cannot_exec" {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&candidate.executable, fs::Permissions::from_mode(0o600))
-                    .unwrap();
-            }
             let mut state = f.state(old.clone());
             let mut child = launch(&old, &f.paths, &f.store).unwrap();
             ready(&mut child, &f, &old).await;
@@ -985,6 +1037,30 @@ mod tests {
         assert_eq!(state.failure.as_deref(), Some("activation_journal"));
         f.assert_account_unchanged();
         stop_with_timeout(&mut restored, &f.paths, &f.secrets, QUICK.stop)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn update_retained_engine_and_previous_runtime_recover_after_cache_permissions_change() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = Fixture::new();
+        let broken = f.artifact("healthy");
+        let previous = f.artifact("old");
+        let worker = f.artifact("worker_ok");
+        fs::set_permissions(&broken.executable, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(update::validate_cached(&f.store, &broken).is_err());
+        let mut repair =
+            spawn_update_worker(&broken, &worker, &f.store).expect("retained update engine");
+        assert!(repair.wait().await.unwrap().success());
+        let mut state = f.state(broken);
+        state.previous = Some(previous.clone());
+        let mut recovered = recover_failed_launch(&mut state, &f.paths, &f.store, &worker, "alpha")
+            .expect("working previous runtime");
+        ready(&mut recovered, &f, &previous).await;
+        assert_eq!(state.current, previous);
+        f.assert_account_unchanged();
+        stop_with_timeout(&mut recovered, &f.paths, &f.secrets, QUICK.stop)
             .await
             .unwrap();
     }

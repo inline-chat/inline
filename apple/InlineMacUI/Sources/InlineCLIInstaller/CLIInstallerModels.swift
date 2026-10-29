@@ -31,8 +31,8 @@ public struct CLIInstallerConfiguration: Sendable {
     expectedTeamIdentifier: String,
     installLocations: [URL],
     searchesEnvironmentPath: Bool = true,
-    maximumManifestBytes: Int = 1_000_000,
-    maximumArtifactBytes: Int64 = 100_000_000
+    maximumManifestBytes: Int = 256 * 1_024,
+    maximumArtifactBytes: Int64 = 100 * 1_024 * 1_024
   ) {
     self.manifestURL = manifestURL
     self.fallbackManifestURL = fallbackManifestURL

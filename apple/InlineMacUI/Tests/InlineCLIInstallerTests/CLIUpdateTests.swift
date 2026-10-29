@@ -20,7 +20,7 @@ struct CLIUpdateTests {
     if let path = ProcessInfo.processInfo.environment["INLINE_CLI_SIGNATURE_FIXTURE"] { url = URL(fileURLWithPath: path) }
     else {
       url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        .appendingPathComponent("../../../../../cli/tests/fixtures/signed-channel.json").standardizedFileURL
+        .appendingPathComponent("../../../../cli/tests/fixtures/signed-channel.json").standardizedFileURL
     }
     var vector = try JSONDecoder().decode(Vector.self, from: Data(contentsOf: url))
     let encoded = try JSONEncoder().encode(vector.envelope)

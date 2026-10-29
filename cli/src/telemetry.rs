@@ -601,6 +601,10 @@ fn update_event(
     ] {
         event.tags.insert(name.into(), value.into());
     }
+    event.tags.insert(
+        "target".into(),
+        format!("{}_{}", std::env::consts::ARCH, std::env::consts::OS),
+    );
     event
 }
 

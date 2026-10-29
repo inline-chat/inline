@@ -3193,22 +3193,86 @@ const V2_PROVIDERS: &[&str] = &["codex", "claude"];
 /// `INLINE_BRIDGE_V2=codex,claude` (or `all`) selects providers, and `off`
 /// restores v1. Stable builds keep v1 unless explicitly opted in.
 fn v2_enabled_for(provider_id: &str) -> bool {
-    v2_enabled_in(
+    let config = Config::load();
+    let store = crate::update::Store::new(&config.data_dir);
+    let channel = store
+        .root
+        .join("update.json")
+        .exists()
+        .then(|| store.read().ok().map(|state| state.channel))
+        .flatten();
+    v2_enabled_with_channel(
         env::var("INLINE_BRIDGE_V2").ok().as_deref(),
         provider_id,
         env!("CARGO_PKG_VERSION"),
+        channel,
     )
 }
 
+#[cfg(test)]
 fn v2_enabled_in(setting: Option<&str>, provider_id: &str, version: &str) -> bool {
+    v2_enabled_with_channel(setting, provider_id, version, None)
+}
+
+fn v2_enabled_with_channel(
+    setting: Option<&str>,
+    provider_id: &str,
+    version: &str,
+    channel: Option<crate::update::UpdateChannel>,
+) -> bool {
     V2_PROVIDERS.contains(&provider_id)
         && match setting {
             Some(value) => value.split(',').map(str::trim).any(|entry| {
                 entry.eq_ignore_ascii_case("all") || entry.eq_ignore_ascii_case(provider_id)
             }),
-            None => semver::Version::parse(version)
-                .is_ok_and(|version| version.pre.as_str().split('.').next() == Some("alpha")),
+            None => channel.map_or_else(
+                || {
+                    semver::Version::parse(version).is_ok_and(|version| {
+                        version.pre.as_str().split('.').next() == Some("alpha")
+                    })
+                },
+                |channel| channel == crate::update::UpdateChannel::Alpha,
+            ),
         }
+}
+
+#[cfg(test)]
+mod update_channel_tests {
+    use super::*;
+    #[test]
+    fn alpha_updates_keep_bridge_defaults_when_the_feed_moves_to_a_stable_release() {
+        use crate::update::UpdateChannel::{Alpha, Stable};
+        assert!(v2_enabled_with_channel(
+            None,
+            "codex",
+            "0.7.19",
+            Some(Alpha)
+        ));
+        assert!(v2_enabled_with_channel(
+            None,
+            "claude",
+            "0.7.19",
+            Some(Alpha)
+        ));
+        assert!(!v2_enabled_with_channel(
+            None,
+            "codex",
+            "0.7.19",
+            Some(Stable)
+        ));
+        assert!(!v2_enabled_with_channel(
+            Some("off"),
+            "codex",
+            "0.7.19",
+            Some(Alpha)
+        ));
+        assert!(!v2_enabled_with_channel(
+            None,
+            "opencode",
+            "0.7.19",
+            Some(Alpha)
+        ));
+    }
 }
 
 struct V2Launch<'a> {

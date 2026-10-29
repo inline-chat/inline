@@ -36,8 +36,13 @@ public actor CLIInstallerService: CLIInstalling {
     self.configuration = configuration
     self.requiresSignedManifest = requiresSignedManifest
     self.fileManager = fileManager
-    self.session = session
+    let network = session.configuration
+    network.timeoutIntervalForRequest = 30
+    network.timeoutIntervalForResource = 120
+    self.session = URLSession(configuration: network)
   }
+
+  deinit { session.invalidateAndCancel() }
 
   public func updateConfiguration(_ configuration: CLIInstallerConfiguration) {
     self.configuration = configuration
@@ -245,17 +250,20 @@ public actor CLIInstallerService: CLIInstalling {
     do {
       if configuration.manifestURL.host == "public-assets.inline.chat" {
         let signedURL = URL(string: "https://public-assets.inline.chat/cli/channels/\(configuration.channel.rawValue).json")!
-        (data, response) = try await session.data(from: signedURL)
+        (data, response) = try await boundedManifest(from: signedURL)
         if (response as? HTTPURLResponse)?.statusCode == 404, !requiresSignedManifest {
-          (data, response) = try await session.data(from: configuration.manifestURL)
+          (data, response) = try await boundedManifest(from: configuration.manifestURL)
         } else { isSigned = true }
       } else {
-        (data, response) = try await session.data(from: configuration.manifestURL)
+        (data, response) = try await boundedManifest(from: configuration.manifestURL)
       }
       if !isSigned, let fallbackURL = configuration.fallbackManifestURL,
          (response as? HTTPURLResponse)?.statusCode == 404 {
-        (data, response) = try await session.data(from: fallbackURL)
+        (data, response) = try await boundedManifest(from: fallbackURL)
       }
+    } catch let failure as CLIInstallerFailure {
+      try Task.checkCancellation()
+      throw failure
     } catch {
       try Task.checkCancellation()
       throw failure(
@@ -296,7 +304,8 @@ public actor CLIInstallerService: CLIInstalling {
       )
     }
 
-    guard target.url.scheme == "https" else {
+    guard target.url.scheme == "https", target.url.host != nil,
+          target.url.user == nil, target.url.password == nil else {
       throw invalidManifest("The CLI download URL was not secure.")
     }
     guard Self.isSHA256(target.sha256) else {
@@ -447,46 +456,67 @@ public actor CLIInstallerService: CLIInstalling {
     return candidates.filter { seen.insert($0.standardizedFileURL.path).inserted }
   }
 
+  private func boundedManifest(from url: URL) async throws -> (Data, URLResponse) {
+    let (bytes, response) = try await session.bytes(from: url)
+    defer { bytes.task.cancel() }
+    // Return status to fetchRelease so only its explicit manual 404 fallback
+    // can choose the legacy feed. Never buffer an error response body.
+    if let http = response as? HTTPURLResponse, !(200 ... 299).contains(http.statusCode) {
+      return (Data(), response)
+    }
+    guard response.expectedContentLength <= Int64(configuration.maximumManifestBytes) else {
+      throw invalidManifest("The release manifest was unexpectedly large.")
+    }
+    var data = Data()
+    for try await byte in bytes {
+      guard data.count < configuration.maximumManifestBytes else {
+        throw invalidManifest("The release manifest was unexpectedly large.")
+      }
+      data.append(byte)
+    }
+    return (data, response)
+  }
+
   private func download(_ release: CLIRelease, to destinationURL: URL) async throws {
-    let temporaryURL: URL
-    let response: URLResponse
     do {
-      (temporaryURL, response) = try await session.download(from: release.archiveURL)
+      let (bytes, response) = try await session.bytes(from: release.archiveURL)
+      defer { bytes.task.cancel() }
+      try validateHTTPResponse(response, maximumBytes: configuration.maximumArtifactBytes)
+      if let expected = release.size, response.expectedContentLength >= 0,
+         response.expectedContentLength != expected {
+        throw invalidArchive("The download size did not match the release manifest.")
+      }
+      guard fileManager.createFile(atPath: destinationURL.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
+        throw invalidArchive("The CLI archive could not be staged.")
+      }
+      let file = try FileHandle(forWritingTo: destinationURL)
+      defer { try? file.close() }
+      var received: Int64 = 0
+      var buffer = Data()
+      buffer.reserveCapacity(64 * 1_024)
+      for try await byte in bytes {
+        received += 1
+        guard received <= configuration.maximumArtifactBytes,
+              received <= (release.size ?? configuration.maximumArtifactBytes) else {
+          throw invalidArchive("The download exceeded the release size limit.")
+        }
+        buffer.append(byte)
+        if buffer.count == 64 * 1_024 {
+          try file.write(contentsOf: buffer)
+          buffer.removeAll(keepingCapacity: true)
+        }
+      }
+      try file.write(contentsOf: buffer)
+      try file.synchronize()
+      guard received > 0, release.size == nil || received == release.size else {
+        throw invalidArchive("The downloaded archive was incomplete.")
+      }
+    } catch let failure as CLIInstallerFailure {
+      try Task.checkCancellation()
+      throw failure
     } catch {
       try Task.checkCancellation()
-      throw failure(
-        .network,
-        title: "Couldn’t Download Inline CLI",
-        message: "The CLI archive could not be downloaded: \(error.localizedDescription)"
-      )
-    }
-
-    try validateHTTPResponse(response, maximumBytes: configuration.maximumArtifactBytes)
-    let attributes = try fileManager.attributesOfItem(atPath: temporaryURL.path)
-    let actualSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-    guard (1 ... configuration.maximumArtifactBytes).contains(actualSize) else {
-      throw failure(
-        .invalidArchive,
-        title: "Inline CLI Download Was Invalid",
-        message: "The downloaded archive had an unexpected size."
-      )
-    }
-    if let expectedSize = release.size, expectedSize != actualSize {
-      throw failure(
-        .invalidArchive,
-        title: "Inline CLI Download Was Incomplete",
-        message: "The downloaded archive size did not match the release manifest."
-      )
-    }
-
-    do {
-      try fileManager.copyItem(at: temporaryURL, to: destinationURL)
-    } catch {
-      throw failure(
-        .installationFailed,
-        title: "Couldn’t Prepare Inline CLI",
-        message: "The downloaded archive could not be staged: \(error.localizedDescription)"
-      )
+      throw failure(.network, title: "Couldn’t Download Inline CLI", message: "The CLI archive could not be downloaded. Check the connection and retry.")
     }
   }
 
@@ -555,6 +585,16 @@ public actor CLIInstallerService: CLIInstalling {
     let entries = listing.standardOutput.split(whereSeparator: \.isNewline).map(String.init)
     guard entries.count == 1, entries[0] == "inline" || entries[0] == "./inline" else {
       throw invalidArchive("The downloaded archive did not contain exactly one Inline CLI executable.")
+    }
+
+    // bsdtar on supported Macs prints numeric owner/group and size at field 5.
+    // Check the header before extraction: a hard link also looks like a regular
+    // file afterward and must never reach chmod or executable verification.
+    let details = try runProcess(executableURL: URL(fileURLWithPath: "/usr/bin/tar"), arguments: ["--numeric-owner", "-tvzf", archiveURL.path])
+    let fields = details.standardOutput.split(whereSeparator: \.isWhitespace)
+    guard details.status == 0, fields.count >= 6, fields[0].first == "-",
+          let expandedSize = Int64(fields[4]), (1 ... 200 * 1_024 * 1_024).contains(expandedSize) else {
+      throw invalidArchive("The archive must contain one regular executable within the size limit.")
     }
 
     let extractionDirectory = workDirectory.appending(path: "extracted", directoryHint: .isDirectory)

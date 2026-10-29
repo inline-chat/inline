@@ -431,6 +431,9 @@ async fn check_explicit_mirror(
 }
 
 pub fn print_update_check(check: &UpdateCheck) {
+    if !check.verified {
+        println!("Mirror metadata is unverified. Installation requires signed release metadata.");
+    }
     if check.update_available {
         println!(
             "Update available: v{} (current v{}). Run: inline update",
@@ -631,6 +634,9 @@ async fn stage_release(
             && artifact.sha256 == target.sha256
             && artifact.executable == executable
             && file_hash(&executable).is_ok_and(|hash| hash == artifact.executable_sha256)
+            && verify_executable(&executable, &release.version)
+                .await
+                .is_ok()
         {
             return Ok(artifact);
         }
@@ -756,14 +762,22 @@ pub(crate) fn retain_running_binary(store: &Store) -> Result<Artifact, UpdateErr
         bridge_schema_version: compatibility().bridge_schema_version,
         minimum_reader_schema_version: compatibility().minimum_reader_schema_version,
     };
-    if !directory.join("receipt.json").is_file() {
-        store::atomic_json(&directory.join("receipt.json"), &artifact)?;
-    }
+    store::atomic_json(&directory.join("receipt.json"), &artifact)?;
     validate_cached(store, &artifact)?;
     Ok(artifact)
 }
 
 pub(crate) fn validate_cached(store: &Store, artifact: &Artifact) -> Result<(), UpdateError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let metadata = fs::symlink_metadata(&artifact.executable)?;
+        if metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.permissions().mode() & 0o111 == 0
+        {
+            return Err(UpdateError::Verification("runtime_permissions"));
+        }
+    }
     if artifact.sha256.len() != 64
         || !artifact.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
         || artifact.executable
