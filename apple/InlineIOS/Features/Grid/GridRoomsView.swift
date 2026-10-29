@@ -519,16 +519,26 @@ private struct GridRoomCapsule: View {
     .padding(8)
     .frame(minWidth: Self.roomSize, minHeight: Self.roomSize)
     .overlay(alignment: .bottomTrailing) {
-      if room.locked {
-        Image(systemName: "lock.fill")
-          .font(.system(size: 9, weight: .semibold))
-          .foregroundStyle(.secondary)
-          .padding(7)
-          .transition(.scale.combined(with: .opacity))
+      HStack(spacing: 4) {
+        if room.transcriptionIsRunning {
+          Image(systemName: "captions.bubble.fill")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(Color.accentColor)
+            .accessibilityLabel("This room is being transcribed")
+            .transition(.scale.combined(with: .opacity))
+        }
+        if room.locked {
+          Image(systemName: "lock.fill")
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .transition(.scale.combined(with: .opacity))
+        }
       }
+      .padding(7)
     }
     .gridRoomGlass(isCurrent: isCurrent, accent: .accentColor)
     .animation(GridMotion.move, value: room.locked)
+    .animation(GridMotion.move, value: room.transcriptionIsRunning)
   }
 
   private func join() {
@@ -688,6 +698,7 @@ struct GridCallDock: View {
     .frame(maxWidth: .infinity)
     .padding(.bottom, 12)
     .animation(.smooth(duration: 0.25), value: call)
+    .modifier(GridTranscriptionSubtitle(store: store))
   }
 }
 
@@ -788,6 +799,10 @@ private struct GridLocalCallControls: View {
 
       HStack(spacing: 20) {
         GridMicrophoneButton(store: store, spaceID: spaceID, style: .large)
+        if let room = store.currentSessionRoom, room.transcriptionAvailable || room.transcriptionIsRunning {
+          GridTranscriptionButton(store: store, room: room)
+            .transition(.scale(scale: 0.8).combined(with: .opacity))
+        }
         GridNativeAudioRoutePicker(routeName: audio.currentRouteName)
           .frame(width: 52, height: 52)
           .gridGlassCircle()
