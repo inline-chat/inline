@@ -37,6 +37,9 @@ public actor CLIInstallerService: CLIInstalling {
     self.requiresSignedManifest = requiresSignedManifest
     self.fileManager = fileManager
     let network = session.configuration
+    network.httpShouldSetCookies = false
+    network.httpCookieStorage = nil
+    network.urlCredentialStorage = nil
     network.timeoutIntervalForRequest = 30
     network.timeoutIntervalForResource = 120
     self.session = URLSession(configuration: network)
@@ -690,6 +693,7 @@ public actor CLIInstallerService: CLIInstalling {
     let completion = DispatchSemaphore(value: 0)
     process.executableURL = executableURL
     process.arguments = arguments
+    process.environment = CLIAgentSetupRunner.sanitizedEnvironment(ProcessInfo.processInfo.environment)
     process.standardOutput = standardOutput
     process.standardError = standardError
     process.terminationHandler = { _ in completion.signal() }
