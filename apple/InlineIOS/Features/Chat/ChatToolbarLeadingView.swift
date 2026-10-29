@@ -441,7 +441,7 @@ private struct ChatToolbarSubtitleContent: View {
 }
 
 /// The folder; a native menu of the Agent's folders when it offers a choice.
-private struct ChatToolbarFolderSubtitle: View {
+struct ChatToolbarFolderSubtitle: View {
   let folder: ChatAgentFolder
   let onSelect: (String) -> Void
 
@@ -688,7 +688,8 @@ struct ChatSubtitlePreview: View {
       ChatToolbarSubtitleContent(
         subtitle: subtitle,
         onOpenSpace: { _ in },
-        onOpenParentThread: { _ in }
+        onOpenParentThread: { _ in },
+        onSelectAgentFolder: { _ in }
       )
       .offset(y: -2)
     }
