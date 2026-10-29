@@ -87,7 +87,10 @@ of at most 200 MiB. Mac downloads additionally require Inline’s Developer ID.
 A bounded version probe runs from the final private version path. Only explicitly
 owned launchers are replaced, using an atomic rename. Homebrew retains ownership
 of its shell CLI (`brew upgrade --cask inline`); a managed private bridge can
-update independently.
+update independently. An unwritable registered shell launcher also leaves its
+working executable in place while private bridges continue updating. Its repair
+retries after permissions or free space are restored, including when the bridge
+already runs the new version.
 
 New bridge setups install a retained supervisor. It stages software while agents
 work, then closes admission only after accepted work, questions, approvals and
