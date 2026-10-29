@@ -748,11 +748,7 @@ pub(crate) fn retain_running_binary(store: &Store) -> Result<Artifact, UpdateErr
     let source = std::env::current_exe()?;
     let hash = file_hash(&source)?;
     let directory = store.root.join("versions").join(&hash);
-    store::private_dir(&directory)?;
     let executable = directory.join("inline");
-    if !executable.exists() {
-        copy_binary_atomically(&source, &executable)?;
-    }
     let artifact = Artifact {
         version: env!("CARGO_PKG_VERSION").into(),
         target: current_target().into(),
@@ -762,6 +758,18 @@ pub(crate) fn retain_running_binary(store: &Store) -> Result<Artifact, UpdateErr
         bridge_schema_version: compatibility().bridge_schema_version,
         minimum_reader_schema_version: compatibility().minimum_reader_schema_version,
     };
+    // Ordinary service startup must not need another durable write when its
+    // retained engine is already verified, including after disk exhaustion.
+    if store::read_json::<Artifact>(&directory.join("receipt.json"))
+        .is_ok_and(|cached| cached == artifact)
+        && validate_cached(store, &artifact).is_ok()
+    {
+        return Ok(artifact);
+    }
+    store::private_dir(&directory)?;
+    if validate_cached(store, &artifact).is_err() {
+        copy_binary_atomically(&source, &artifact.executable)?;
+    }
     store::atomic_json(&directory.join("receipt.json"), &artifact)?;
     validate_cached(store, &artifact)?;
     Ok(artifact)

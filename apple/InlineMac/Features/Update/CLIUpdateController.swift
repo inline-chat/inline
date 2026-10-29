@@ -123,7 +123,7 @@ final class CLIUpdateController {
       guard installation.source == .inline else { statusText = "Managed by Homebrew"; return }
       let pending = UserDefaults.standard.object(forKey: Self.pendingKey) as? Bool
       let configured = try await run(.configure(enabled: pending, appChannel: channel(), register: installation.source == .inline), at: installation)
-      if pending != nil { UserDefaults.standard.removeObject(forKey: Self.pendingKey) }
+      clearPendingPreference(matching: pending)
       show(configured)
       canManage = configured.installationMethod == "managed"
         || (configured.bridges?.contains { $0.phase != "migration_required" } ?? false)
@@ -164,8 +164,9 @@ final class CLIUpdateController {
           try await task.value
         } onCancel: { task.cancel() }
         self.installation = outcome.installation
-        let status = try await run(.configure(enabled: UserDefaults.standard.object(forKey: Self.pendingKey) as? Bool, appChannel: channel(), register: true), at: outcome.installation)
-        UserDefaults.standard.removeObject(forKey: Self.pendingKey)
+        let pending = UserDefaults.standard.object(forKey: Self.pendingKey) as? Bool
+        let status = try await run(.configure(enabled: pending, appChannel: channel(), register: true), at: outcome.installation)
+        clearPendingPreference(matching: pending)
         show(status)
         report(outcome: "bootstrapped", stage: "bootstrap", version: status.currentVersion)
       } catch {
@@ -190,13 +191,21 @@ final class CLIUpdateController {
 
   private func persistPreference() async {
     guard let installation else { return }
+    let enabled = automaticUpdatesEnabled
     do {
-      let status = try await run(.configure(enabled: automaticUpdatesEnabled, appChannel: channel(), register: false), at: installation)
-      UserDefaults.standard.removeObject(forKey: Self.pendingKey)
+      let status = try await run(.configure(enabled: enabled, appChannel: channel(), register: false), at: installation)
+      clearPendingPreference(matching: enabled)
       show(status)
     } catch {
       // Retain intent for the first successful legacy bootstrap or subsequent retry.
       failureText = "This setting will apply when the CLI update service is available."
+    }
+  }
+
+  private func clearPendingPreference(matching enabled: Bool?) {
+    // An older in-flight operation must not clear a newer toggle's intent.
+    if let enabled, UserDefaults.standard.object(forKey: Self.pendingKey) as? Bool == enabled {
+      UserDefaults.standard.removeObject(forKey: Self.pendingKey)
     }
   }
 

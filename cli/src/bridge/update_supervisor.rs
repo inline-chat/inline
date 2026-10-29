@@ -357,15 +357,13 @@ async fn activate(
     launch(&state.current, paths, store)
 }
 
-fn recover_interrupted(
-    state: &mut Activation,
-    paths: &BridgePaths,
-    channel: &str,
-) -> Result<(), UpdateError> {
+fn recover_interrupted(state: &mut Activation, paths: &BridgePaths, channel: &str) {
     if state.phase == "trial" {
         if let Some(candidate) = state.candidate.clone() {
             reject(state, &candidate, "interrupted_trial");
-            atomic_json(&journal(paths), state)?;
+            // The persisted trial already selects the previous runtime. A
+            // full disk must not prevent that runtime from starting on reboot.
+            let _ = atomic_json(&journal(paths), state);
             crate::telemetry::report_update(
                 "rolled_back",
                 channel,
@@ -375,7 +373,6 @@ fn recover_interrupted(
             );
         }
     }
-    Ok(())
 }
 
 fn pending(
@@ -536,7 +533,7 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
     if state.schema_version != 1 {
         return Err("unsupported activation journal".into());
     }
-    recover_interrupted(&mut state, &paths, read_policy(&store).channel.as_str())?;
+    recover_interrupted(&mut state, &paths, read_policy(&store).channel.as_str());
     let fallback_engine = {
         let _versions = crate::update::store::blocking_lock(&store.root.join("versions.lock"))?;
         let engine = update::retain_running_binary(&store)?;
@@ -1147,15 +1144,38 @@ mod tests {
         let candidate = f.artifact("healthy");
         let mut state = f.state(old.clone());
         pending(&mut state, Some(&candidate), "waiting_for_idle", &f.paths).unwrap();
-        recover_interrupted(&mut state, &f.paths, "alpha").unwrap();
+        recover_interrupted(&mut state, &f.paths, "alpha");
         assert_eq!(state.candidate, Some(candidate.clone()));
         state.phase = "trial".into();
         atomic_json(&journal(&f.paths), &state).unwrap();
         let mut rebooted: Activation = read_json(&journal(&f.paths)).unwrap();
-        recover_interrupted(&mut rebooted, &f.paths, "alpha").unwrap();
+        recover_interrupted(&mut rebooted, &f.paths, "alpha");
         assert_eq!(rebooted.current, old);
         assert!(rebooted.candidate.is_none());
         assert_eq!(rebooted.failure.as_deref(), Some("interrupted_trial"));
         f.assert_account_unchanged();
+    }
+
+    #[tokio::test]
+    async fn update_reboot_can_restore_the_previous_process_when_the_journal_cannot_be_rewritten() {
+        let f = Fixture::new();
+        let old = f.artifact("old");
+        let candidate = f.artifact("healthy");
+        let mut state = f.state(old.clone());
+        state.phase = "trial".into();
+        state.candidate = Some(candidate.clone());
+        atomic_json(&journal(&f.paths), &state).unwrap();
+        let mut rebooted: Activation = read_json(&journal(&f.paths)).unwrap();
+        fs::remove_file(journal(&f.paths)).unwrap();
+        fs::create_dir(journal(&f.paths)).unwrap();
+        recover_interrupted(&mut rebooted, &f.paths, "alpha");
+        let mut restored = launch(&rebooted.current, &f.paths, &f.store).unwrap();
+        ready(&mut restored, &f, &old).await;
+        assert!(rebooted.rejected.contains(&candidate.sha256));
+        assert_eq!(rebooted.failure.as_deref(), Some("interrupted_trial"));
+        f.assert_account_unchanged();
+        stop_with_timeout(&mut restored, &f.paths, &f.secrets, QUICK.stop)
+            .await
+            .unwrap();
     }
 }
