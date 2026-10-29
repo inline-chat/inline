@@ -29,6 +29,7 @@ final class CLIUpdateController {
 
   @ObservationIgnored private let installer: CLIInstallerController
   @ObservationIgnored private let channel: @MainActor @Sendable () -> CLIUpdateChannel
+  @ObservationIgnored private let coordinator = CLIUpdateCoordinator()
   @ObservationIgnored private var installation: CLIInstallation?
   @ObservationIgnored private var readingStatus = false
   @ObservationIgnored private var schedule: Task<Void, Never>?
@@ -66,7 +67,13 @@ final class CLIUpdateController {
 
   func channelChanged() {
     nextCheck = .distantPast
-    Task { await refresh(automatic: true) }
+    Task {
+      if let installation,
+         let status = try? await run(.configure(enabled: nil, appChannel: channel(), register: false), at: installation) {
+        show(status)
+      }
+      await refresh(automatic: true)
+    }
   }
 
   func checkNow() {
@@ -210,10 +217,14 @@ final class CLIUpdateController {
   }
 
   private func run(_ operation: CLIUpdateOperation, at installation: CLIInstallation) async throws -> CLIUpdateStatus {
-    try await CLIAgentSetupRunner(configuration: .production(channel: channel())).update(installation: installation, operation: operation)
+    let configuration = CLIInstallerConfiguration.production(channel: channel())
+    return try await coordinator.run(operation) {
+      try await CLIAgentSetupRunner(configuration: configuration).update(installation: installation, operation: operation)
+    }
   }
 
   private func show(_ status: CLIUpdateStatus) {
+    guard coordinator.accepts(status) else { return }
     readingStatus = true
     automaticUpdatesEnabled = (UserDefaults.standard.object(forKey: Self.pendingKey) as? Bool) ?? status.autoUpdate
     readingStatus = false
