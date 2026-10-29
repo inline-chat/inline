@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/chatgpt-plugin.yml'
       - '.agents/plugins/**'
+      - '.claude-plugin/**'
       - 'plugins/chatgpt/**'
       - 'skills/inline/**'
       - 'packages/mcp/**'
@@ -24,6 +25,7 @@ on:
     paths:
       - '.github/workflows/chatgpt-plugin.yml'
       - '.agents/plugins/**'
+      - '.claude-plugin/**'
       - 'plugins/chatgpt/**'
       - 'skills/inline/**'
       - 'packages/mcp/**'
