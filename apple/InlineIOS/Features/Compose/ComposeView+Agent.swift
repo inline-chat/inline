@@ -111,9 +111,14 @@ extension ComposeView {
     updateAgentReplyTarget()
   }
 
-  func tearDownAgentChain() {
+  /// Cancels the model's work without touching layout; safe from deinit.
+  func stopAgentChain() {
     agentCancellables.removeAll()
     agentChain?.stop()
+  }
+
+  func tearDownAgentChain() {
+    stopAgentChain()
     agentChain = nil
     agentRowState.model = nil
     agentRowState.isAvailable = false

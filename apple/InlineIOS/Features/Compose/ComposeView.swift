@@ -1820,7 +1820,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func removeObservers() {
-    tearDownAgentChain()
+    // Called from deinit: stop the model only. Layout code there would make
+    // weak references to a deallocating view, which aborts.
+    stopAgentChain()
     voicePhaseObserver?.cancel()
     voicePhaseObserver = nil
     sceneObserverTokens.forEach { NotificationCenter.default.removeObserver($0) }

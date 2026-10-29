@@ -2,6 +2,7 @@
 @testable import InlineKit
 @testable import TextProcessing
 import GRDB
+import InlineProtocol
 import Testing
 import UIKit
 
@@ -233,19 +234,46 @@ struct ComposeAgentDeviceTests {
     let isFriendly: Bool
   }
 
-  /// The first local bot with a cached configuration catalog. Read-only.
+  static let agentID: Int64 = 9_200_001
+
+  /// A harness Agent seeded into the test process's own in-memory database
+  /// (AppDatabase.shared is never the user's data under tests): a bot user
+  /// and its cached configuration catalog, as a bridge publishes them.
   static func agent() async throws -> Agent {
-    let bots = try AppDatabase.shared.reader.read { db in
-      try User.fetchAll(db).filter(\.bot)
+    let catalog = InlineProtocol.AgentConfigurationCatalog.with {
+      $0.models = .with {
+        $0.options = [
+          .with { $0.id = "opus"; $0.label = "Opus 5.5"; $0.reasoningEffortIds = ["low", "medium", "high"]; $0.defaultReasoningEffortID = "high" },
+          .with { $0.id = "sonnet"; $0.label = "Sonnet 5.5"; $0.reasoningEffortIds = ["low", "medium", "high"] },
+        ]
+        $0.defaultModelID = "opus"
+      }
+      $0.reasoning = .with {
+        $0.options = [
+          .with { $0.id = "low"; $0.label = "Low" },
+          .with { $0.id = "medium"; $0.label = "Medium" },
+          .with { $0.id = "high"; $0.label = "High" },
+        ]
+      }
     }
-    let bot = try #require(
-      bots.first { AgentConfigurationCatalogStore.shared.cachedSnapshot(botUserID: $0.id)?.models?.isEmpty == false },
-      "No harness Agent with a cached catalog on this device"
-    )
+    let payload = try catalog.serializedData()
+    let bot = User(from: InlineProtocol.User.with {
+      $0.id = agentID
+      $0.firstName = "Claude"
+      $0.bot = true
+    })
+    try await AppDatabase.shared.dbWriter.write { db in
+      try bot.save(db)
+      try db.execute(
+        sql: "INSERT OR REPLACE INTO agentConfigurationCatalog (botUserId, payload, fetchedAt) VALUES (?, ?, ?)",
+        arguments: [agentID, payload, Date()]
+      )
+    }
+    #expect(AgentConfigurationCatalogStore.shared.cachedSnapshot(botUserID: agentID)?.models?.count == 2)
     // The draft target resolver reads bots from the memory cache.
-    await ObjectCache.shared.ensure(.user(bot.id))
-    let friendly = AgentWorkStateStore.shared.outputMode(peer: .user(id: bot.id), botUserID: bot.id) == .friendly
-    return Agent(id: bot.id, name: bot.firstName ?? "Agent", isFriendly: friendly)
+    await ObjectCache.shared.ensure(.user(agentID))
+    let friendly = AgentWorkStateStore.shared.outputMode(peer: .user(id: agentID), botUserID: agentID) == .friendly
+    return Agent(id: agentID, name: "Claude", isFriendly: friendly)
   }
 
   static func mention(_ agent: Agent) -> NSAttributedString {

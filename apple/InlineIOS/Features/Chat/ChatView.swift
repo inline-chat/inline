@@ -153,6 +153,16 @@ struct ChatView: View {
     }
   }
 
+  /// Compose's folder for this chat's agent; split out of `body` to keep its
+  /// modifier chain within the type checker's budget.
+  private var composeAgentFolderChanges: AnyPublisher<String?, Never> {
+    let peer = peerId
+    return NotificationCenter.default.publisher(for: .composeAgentFolderDidChange)
+      .filter { ($0.userInfo?["peer"] as? Peer) == peer }
+      .map { $0.userInfo?["title"] as? String }
+      .eraseToAnyPublisher()
+  }
+
   /// An agent DM's working folder for the header: Compose's copy first,
   /// since it carries a folder picked there before the first turn.
   private var agentFolderTitle: String? {
@@ -286,10 +296,7 @@ struct ChatView: View {
       else { return }
       translationPlacement = .toolbar
     }
-    .onReceive(NotificationCenter.default.publisher(for: .composeAgentFolderDidChange)) { notification in
-      guard notification.userInfo?["peer"] as? Peer == peerId else { return }
-      composeAgentFolderTitle = notification.userInfo?["title"] as? String
-    }
+    .onReceive(composeAgentFolderChanges) { composeAgentFolderTitle = $0 }
     .sheet(isPresented: $isBotChatSettingsPresented) {
       BotChatSettingsSheet(coordinator: botChatSettingsCoordinator)
     }

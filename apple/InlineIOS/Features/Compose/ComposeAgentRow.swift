@@ -33,9 +33,10 @@ struct ComposeAgentRow: View {
   var body: some View {
     HStack(spacing: 0) {
       Button(action: onAttach) {
+        // Matches the bar's plus so the switch reads as one control moving.
         Image(systemName: "plus")
-          .font(.system(size: 19, weight: .regular))
-          .foregroundStyle(.primary)
+          .font(.system(size: 17, weight: .medium))
+          .foregroundStyle(.secondary)
           .frame(width: 34, height: 32)
           .contentShape(Rectangle())
       }
@@ -172,12 +173,16 @@ private struct ComposeAgentOptionMenu: View {
       .foregroundStyle(.secondary)
       .padding(.horizontal, 7)
       .frame(height: 32)
-      .frame(maxWidth: 120)
+      .frame(maxWidth: 112, alignment: .leading)
       .contentShape(Rectangle())
     }
     .menuOrder(.fixed)
     .buttonStyle(.plain)
-    .disabled(isDisabled)
+    // Hug the title, like the Mac's labels; long titles truncate at 112 pt.
+    .fixedSize(horizontal: true, vertical: false)
+    // Not `.disabled`: its dimming would flash as settings load. Until they
+    // can be edited the label just doesn't open.
+    .allowsHitTesting(!isDisabled)
     .accessibilityLabel(accessibilityName)
     .accessibilityValue(title)
   }
