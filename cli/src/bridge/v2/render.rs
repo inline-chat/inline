@@ -40,13 +40,8 @@ pub(crate) enum Vocabulary {
 pub(crate) enum RenderOp {
     /// Create (first time) or silently edit the progress message `slot`.
     Progress { slot: u32, doc: Doc },
-    /// Last edit of progress message `slot`; it no longer changes. `full`
-    /// holds the untruncated detail of rows the message shows cut short.
-    EndProgress {
-        slot: u32,
-        doc: Doc,
-        full: Vec<FullDetail>,
-    },
+    /// Last edit of progress message `slot`; it no longer changes.
+    EndProgress { slot: u32, doc: Doc },
     /// A short Friendly update message.
     Update { doc: Doc },
     /// The final answer: a separate message that notifies.
@@ -67,13 +62,6 @@ pub(crate) enum RenderOp {
     Notice { doc: Doc },
 }
 
-/// The untruncated detail of one row whose message shows only its end.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct FullDetail {
-    pub title: String,
-    pub text: String,
-}
-
 /// One button on a card, carrying the harness's own label.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CardAction {
@@ -90,7 +78,7 @@ pub(crate) enum ActionStyle {
 }
 
 /// A row's detail in the message: the end of its output, as Codex's
-/// previews show it. Full output keeps the rest.
+/// previews show it.
 const MAX_DETAIL_CHARS: usize = 2_000;
 /// Diffs one file-change row shows before listing the remaining files by name.
 const MAX_ROW_DIFF_CHARS: usize = 8_000;
@@ -411,7 +399,6 @@ impl Renderer {
         ops.push(RenderOp::EndProgress {
             slot: slot.id,
             doc: self.ended_doc(&kept, &summary),
-            full: self.full_details(&kept),
         });
         self.next_slot += 1;
         self.turn_slots += 1;
@@ -430,20 +417,6 @@ impl Renderer {
         builder.finish()
     }
 
-    fn full_details(&self, slot: &Slot) -> Vec<FullDetail> {
-        slot.rows
-            .iter()
-            .filter_map(|row| {
-                let body = row.body.as_ref()?;
-                let text = row_full_text(body, &row.delta)?;
-                Some(FullDetail {
-                    title: row_title(self.vocabulary, self.folder.as_deref(), body).0,
-                    text,
-                })
-            })
-            .collect()
-    }
-
     fn friendly_item(&mut self, item: &Item, id: &str, ops: &mut Vec<RenderOp>) {
         let ItemUpdate::Completed { body, .. } = &item.update else {
             return;
@@ -457,7 +430,7 @@ impl Renderer {
                     self.pending_text = Some((id.to_owned(), text.clone()));
                 }
             },
-            ItemBody::Reasoning { summary, .. } if !summary.is_empty() => {
+            ItemBody::Reasoning { summary, .. } if has_text(summary) => {
                 self.flush_pending_update(ops);
                 ops.push(update(&summary.join("\n\n")));
             }
@@ -553,11 +526,7 @@ impl Renderer {
         } else {
             self.ended_doc(&slot, &summary)
         };
-        ops.push(RenderOp::EndProgress {
-            slot: id,
-            doc,
-            full: self.full_details(&slot),
-        });
+        ops.push(RenderOp::EndProgress { slot: id, doc });
     }
 
     fn slot_elapsed(&self, now: u64) -> u64 {
@@ -841,7 +810,11 @@ impl Renderer {
                 ActivityKind::Unspecified,
                 row.status,
                 |inner| {
-                    inner.code(&tail(&row.delta), None);
+                    if row.kind == ItemKind::Reasoning {
+                        inner.paragraph(&tail(&row.delta));
+                    } else {
+                        inner.code(&tail(&row.delta), None);
+                    }
                 },
             );
             return;
@@ -851,7 +824,9 @@ impl Renderer {
             ItemBody::Child { child, .. } => slot
                 .rows
                 .iter()
-                .filter(|candidate| candidate.parent.as_deref() == Some(child.id.as_str()))
+                .filter(|candidate| {
+                    candidate.parent.as_deref() == Some(child.id.as_str()) && shows(candidate)
+                })
                 .collect(),
             _ => Vec::new(),
         };
@@ -873,15 +848,28 @@ enum Fold {
     None,
 }
 
-/// Rows a message shows: an answer or a text still in doubt is not one.
+/// Rows a message shows: an answer, a text still in doubt, or thinking with
+/// no text (Claude's omitted thinking, Codex reasoning without a summary) is
+/// not one.
 fn shows(row: &Row) -> bool {
-    !(row.kind == ItemKind::Message
+    let held_message = row.kind == ItemKind::Message
         && (row.phase == Some(AgentMessagePhase::FinalAnswer)
-            || row.phase.is_none() && row.body.is_some()))
+            || row.phase.is_none() && row.body.is_some());
+    let silent_reasoning = row.kind == ItemKind::Reasoning
+        && row.delta.trim().is_empty()
+        && match &row.body {
+            Some(ItemBody::Reasoning { summary, .. }) => !has_text(summary),
+            _ => true,
+        };
+    !(held_message || silent_reasoning)
 }
 
 fn starts_phase(row: &Row) -> bool {
-    matches!(&row.body, Some(ItemBody::Reasoning { summary, .. }) if !summary.is_empty())
+    matches!(&row.body, Some(ItemBody::Reasoning { summary, .. }) if has_text(summary))
+}
+
+fn has_text(parts: &[String]) -> bool {
+    parts.iter().any(|part| !part.trim().is_empty())
 }
 
 /// Reads, searches and listings: Codex's parsed command actions, Claude's
@@ -1398,7 +1386,7 @@ fn row_detail(builder: &mut DocBuilder, body: &ItemBody, delta: &str, folder: Op
             }
         }
         ItemBody::FileChange { changes } => {
-            // Past a budget, later files list by name; Full output has all.
+            // Past a budget, later files list by name.
             let mut shown = 0;
             for change in changes {
                 let kind = match &change.change {
@@ -1477,60 +1465,6 @@ fn row_detail(builder: &mut DocBuilder, body: &ItemBody, delta: &str, folder: Op
         }
         ItemBody::Error { message } => builder.paragraph(message),
         _ => {}
-    }
-}
-
-/// A row's whole detail as plain text, when its message shows only the end.
-fn row_full_text(body: &ItemBody, delta: &str) -> Option<String> {
-    let long = |text: &str| text.chars().count() > MAX_DETAIL_CHARS;
-    match body {
-        ItemBody::Command {
-            command, output, ..
-        } => {
-            let output = output.as_deref().unwrap_or(delta);
-            long(output).then(|| format!("$ {command}\n\n{output}"))
-        }
-        ItemBody::FileChange { changes } => changes
-            .iter()
-            .any(|change| change.diff.as_deref().is_some_and(long))
-            .then(|| {
-                changes
-                    .iter()
-                    .map(|change| {
-                        format!(
-                            "--- {}\n{}",
-                            change.path.display(),
-                            change.diff.as_deref().unwrap_or("")
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            }),
-        ItemBody::Reasoning { summary, .. } => {
-            let text = if summary.is_empty() {
-                delta.to_owned()
-            } else {
-                summary.join("\n\n")
-            };
-            long(&text).then_some(text)
-        }
-        ItemBody::Tool { input, output, .. } => {
-            let input = if input.is_null() {
-                String::new()
-            } else {
-                serde_json::to_string_pretty(input).unwrap_or_default()
-            };
-            let output = output
-                .as_deref()
-                .or((!delta.is_empty()).then_some(delta))
-                .unwrap_or("");
-            (long(&input) || long(output)).then(|| format!("{input}\n\n{output}"))
-        }
-        ItemBody::Plan { text, .. } => {
-            let text = text.as_deref().or((!delta.is_empty()).then_some(delta))?;
-            long(text).then(|| text.to_owned())
-        }
-        _ => None,
     }
 }
 
@@ -1933,56 +1867,6 @@ Ran cargo test"
     }
 
     #[test]
-    fn long_output_is_kept_whole_for_the_full_output_button() {
-        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Codex, "Codex");
-        let long = format!("FIRST LINE\n{}", "x".repeat(MAX_DETAIL_CHARS + 10));
-        let ops = run(
-            &mut renderer,
-            vec![
-                (0, turn(TurnPhase::Started { inputs: vec![] })),
-                (
-                    1_000,
-                    completed(
-                        "c1",
-                        ItemBody::Command {
-                            command: "cargo test".to_owned(),
-                            cwd: None,
-                            actions: Vec::new(),
-                            output: Some(long.clone()),
-                            exit_code: Some(0),
-                            duration_ms: Some(1200),
-                        },
-                        None,
-                    ),
-                ),
-                (
-                    2_000,
-                    turn(TurnPhase::Completed {
-                        outcome: TurnOutcome::Completed,
-                        inputs_consumed: vec![],
-                        error: None,
-                        duration_ms: None,
-                    }),
-                ),
-            ],
-        );
-        let (doc, full) = ops
-            .iter()
-            .find_map(|op| match op {
-                RenderOp::EndProgress { doc, full, .. } => Some((doc, full)),
-                _ => None,
-            })
-            .expect("end");
-        assert!(
-            !doc.text.contains("FIRST LINE"),
-            "the message shows only the end"
-        );
-        assert_eq!(full.len(), 1);
-        assert!(full[0].text.contains("FIRST LINE"));
-        assert!(full[0].text.ends_with(&long));
-    }
-
-    #[test]
     fn friendly_mode_posts_only_prose_updates_then_the_answer() {
         let mut renderer = Renderer::new(OutputMode::Friendly, Vocabulary::Claude, "Claude");
         let ops = run(
@@ -2179,6 +2063,33 @@ Ran cargo test"
                 _ => None,
             })
             .expect("end")
+    }
+
+    #[test]
+    fn thinking_without_text_draws_no_row() {
+        let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+        let ops = run(
+            &mut renderer,
+            vec![
+                (0, turn(TurnPhase::Started { inputs: vec![] })),
+                (1, reasoning("m1:0", "")),
+                (2, command("toolu_1")),
+                (3, reasoning("m2:0", "Checking the diff")),
+                (4, command("toolu_2")),
+                (
+                    5,
+                    turn(TurnPhase::Completed {
+                        outcome: TurnOutcome::Completed,
+                        inputs_consumed: vec![],
+                        error: None,
+                        duration_ms: Some(5),
+                    }),
+                ),
+            ],
+        );
+        let text = ended_text(&ops);
+        assert!(!text.contains("Thinking"), "{text}");
+        assert!(text.contains("Checking the diff"), "{text}");
     }
 
     fn codex_turn(fixed: bool) -> String {

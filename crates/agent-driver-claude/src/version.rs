@@ -56,6 +56,10 @@ pub const CLIENT_COMPOSED_MIN: ClaudeVersion = ClaudeVersion::new(2, 1, 248);
 /// 2.0.32 runs a turn for it). Older CLIs get no passive delivery.
 pub const PASSIVE_MIN: ClaudeVersion = ClaudeVersion::new(2, 1, 292);
 
+/// `--thinking-display` is accepted (a hidden flag, so `--help` cannot tell;
+/// verified on 2.1.292). Older CLIs show thinking as the API sends it.
+pub const THINKING_DISPLAY_MIN: ClaudeVersion = ClaudeVersion::new(2, 1, 292);
+
 /// Protocol capabilities `system/init` advertises.
 pub mod capability {
     /// The interrupt response lists `still_queued`.

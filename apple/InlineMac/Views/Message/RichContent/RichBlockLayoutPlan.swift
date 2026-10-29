@@ -41,7 +41,8 @@ enum RichBlockTextRole: Codable, Hashable {
   case paragraph
   case heading(level: Int)
   case footer
-  case disclosureSummary(progress: Bool, expanded: Bool, activity: RichBlockActivityKind?)
+  /// `isEmpty`: nothing to disclose, so the row has no chevron and no toggle.
+  case disclosureSummary(progress: Bool, expanded: Bool, activity: RichBlockActivityKind?, isEmpty: Bool)
   case listMarker
 }
 

@@ -87,6 +87,9 @@ pub struct LaunchOptions {
     pub model: Option<String>,
     pub fallback_model: Option<String>,
     pub effort: Option<String>,
+    /// `--thinking-display` (`summarized`, `omitted`). Headless runs leave it
+    /// to the API, which omits thinking text for current models.
+    pub thinking_display: Option<String>,
     /// `None` loads the user's sources as the terminal does.
     pub setting_sources: Option<Vec<String>>,
     pub settings: Option<String>,
@@ -127,6 +130,7 @@ impl LaunchOptions {
             model: None,
             fallback_model: None,
             effort: None,
+            thinking_display: None,
             setting_sources: None,
             settings: None,
             add_dirs: Vec::new(),
@@ -221,6 +225,9 @@ impl LaunchOptions {
         }
         if let Some(effort) = &self.effort {
             args.push(format!("--effort={effort}"));
+        }
+        if let Some(display) = &self.thinking_display {
+            args.push(format!("--thinking-display={display}"));
         }
         match &self.session {
             SessionStart::New { session_id } => args.push(format!("--session-id={session_id}")),
