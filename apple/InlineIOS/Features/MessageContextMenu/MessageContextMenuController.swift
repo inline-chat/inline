@@ -3,14 +3,16 @@ import UIKit
 
 /// Inline's own message context menu, after Telegram iOS's context controller.
 ///
-/// The bubble lifts out of the chat into the menu's own window, one level above the scene's
-/// windows: a blur and dim, then one scrolling column with the bubble and the actions, and the
-/// reaction bar pinned on screen above it. A bubble taller than the screen scrolls with its
-/// menu, opening at the bottom so the actions show, while the reaction bar stays below the top
-/// inset over the message. The window never becomes key, so the chat's first responder is the
-/// host's to manage; iOS 27 draws the keyboard over every app window, so hosts put it away
-/// while the menu is open, as UIKit's menu does. The preview can be a live message view, and
-/// its text can be selected.
+/// The bubble lifts out of the chat into an overlay: a blur and dim, then one scrolling column
+/// with the bubble and the actions, and the reaction bar pinned on screen above it. A bubble
+/// taller than the screen scrolls with its menu, opening at the bottom so the actions show,
+/// while the reaction bar stays below the top inset over the message. The preview can be a live
+/// message view, and its text can be selected.
+///
+/// With the keyboard up, the overlay goes inside the keyboard's own window (`KeyboardHostWindow`),
+/// so the blur and menu cover the keyboard and the composer keeps focus, as in Telegram.
+/// Otherwise it gets a window of its own, one level above the scene's windows; that window never
+/// becomes key, so the chat's first responder stays the host's.
 @MainActor
 final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate, UIScrollViewDelegate {
   struct Source {
@@ -50,14 +52,18 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
   /// The menu is gone and the source shows again.
   var onDidDismiss: (() -> Void)?
   private(set) var isDismissing = false
-  /// The menu's window. Anything presented over the open menu, like the emoji picker, goes in a
-  /// window above this one.
+  /// The menu's own window, when it has one rather than sharing the keyboard's.
   private(set) var presentationWindow: UIWindow?
+  /// The menu draws inside the keyboard's window, over the keyboard.
+  var isOverKeyboard: Bool { hostWindow != nil && hostWindow !== presentationWindow }
 
   private let source: Source
   private let content: Content
   private let configuration: MessageContextMenuConfiguration
   private weak var sourceWindow: UIWindow?
+  /// The window the overlay is in: the keyboard's or the menu's own.
+  private weak var hostWindow: UIWindow?
+  private var keyboardObserver: NSObjectProtocol?
 
   private let overlay = OverlayView()
   private let blurView = UIVisualEffectView(effect: nil)
@@ -86,26 +92,29 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
 
   // MARK: - Presenting
 
-  /// Shows the menu over the windows of `sourceWindow`'s scene.
-  func present(from sourceWindow: UIWindow) {
+  /// Shows the menu over `sourceWindow`'s scene. With `keyboardWindow`, the window hosting a
+  /// visible keyboard, the menu draws inside it, over the keyboard.
+  func present(from sourceWindow: UIWindow, overKeyboardIn keyboardWindow: UIWindow? = nil) {
     guard let scene = sourceWindow.windowScene else { return }
     self.sourceWindow = sourceWindow
-    let window = MessageContextMenuWindow(windowScene: scene)
-    let topLevel = scene.windows.filter { !$0.isHidden }.map(\.windowLevel.rawValue).max() ?? 0
-    window.windowLevel = UIWindow.Level(rawValue: max(topLevel, sourceWindow.windowLevel.rawValue) + 1)
-    window.overrideUserInterfaceStyle = sourceWindow.traitCollection.userInterfaceStyle
-    window.tintColor = sourceWindow.tintColor
-    window.backgroundColor = .clear
-    let root = UIViewController()
-    root.view.backgroundColor = .clear
-    window.rootViewController = root
-    window.frame = sourceWindow.frame
-    // Shown before the content goes in, so the root view has its final size for the layout.
-    window.isHidden = false
-    root.view.frame = window.bounds
-    presentationWindow = window
+    let host: UIView
+    if let keyboardWindow {
+      hostWindow = keyboardWindow
+      host = keyboardWindow
+      // The keyboard's window can go away under the menu, as when the app moves to the
+      // background; the menu then moves to a window of its own.
+      keyboardObserver = NotificationCenter.default.addObserver(
+        forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated { _ = self?.moveToOwnWindow() }
+      }
+    } else {
+      host = makeOwnWindow(in: scene)
+    }
 
-    overlay.frame = root.view.bounds
+    overlay.frame = host.bounds
+    overlay.overrideUserInterfaceStyle = sourceWindow.traitCollection.userInterfaceStyle
+    overlay.tintColor = sourceWindow.tintColor
     overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     overlay.accessibilityViewIsModal = true
     overlay.onEscape = { [weak self] in
@@ -115,7 +124,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
     overlay.onSizeChange = { [weak self] in
       self?.dismiss(animated: false)
     }
-    root.view.addSubview(overlay)
+    host.addSubview(overlay)
 
     blurView.frame = overlay.bounds
     blurView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -191,10 +200,49 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
     UIAccessibility.post(notification: .screenChanged, argument: actionsView.firstRow)
   }
 
+  /// A window of the menu's own, one level above the scene's windows and never key. Returns
+  /// the view the overlay goes in.
+  private func makeOwnWindow(in scene: UIWindowScene) -> UIView {
+    let window = MessageContextMenuWindow(windowScene: scene)
+    let topLevel = scene.windows.filter { !$0.isHidden }.map(\.windowLevel.rawValue).max() ?? 0
+    window.windowLevel = UIWindow.Level(rawValue: max(topLevel, sourceWindow?.windowLevel.rawValue ?? 0) + 1)
+    window.backgroundColor = .clear
+    let root = UIViewController()
+    root.view.backgroundColor = .clear
+    window.rootViewController = root
+    window.frame = sourceWindow?.frame ?? window.frame
+    // Shown before the content goes in, so the root view has its final size for the layout.
+    window.isHidden = false
+    root.view.frame = window.bounds
+    presentationWindow = window
+    hostWindow = window
+    return root.view
+  }
+
+  /// Moves the menu out of the keyboard's window into one of its own, and returns that window.
+  /// Anything presented over the open menu, like the emoji picker, goes in a window above it: a
+  /// sheet can't show over the keyboard's window.
+  func moveToOwnWindow() -> UIWindow? {
+    if let presentationWindow { return presentationWindow }
+    guard !isDismissing, overlay.superview != nil, let scene = sourceWindow?.windowScene else { return nil }
+    removeKeyboardObserver()
+    let host = makeOwnWindow(in: scene)
+    UIView.performWithoutAnimation {
+      overlay.frame = host.bounds
+      host.addSubview(overlay)
+    }
+    return presentationWindow
+  }
+
+  private func removeKeyboardObserver() {
+    if let keyboardObserver { NotificationCenter.default.removeObserver(keyboardObserver) }
+    keyboardObserver = nil
+  }
+
   /// `rect` in the source window's coordinates, in the menu's viewport.
   private func viewportRect(fromSource rect: CGRect) -> CGRect {
-    guard let presentationWindow, let sourceWindow else { return rect }
-    return overlay.convert(presentationWindow.convert(rect, from: sourceWindow), from: presentationWindow)
+    guard let hostWindow, let sourceWindow else { return rect }
+    return overlay.convert(hostWindow.convert(rect, from: sourceWindow), from: hostWindow)
   }
 
   private var availableWidth: CGFloat {
@@ -204,7 +252,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
   private func makePlan(sourceInViewport: CGRect) -> ContextMenuLayout.Result {
     let menuSize = actionsView.sizeThatFits(CGSize(width: availableWidth, height: .greatestFiniteMagnitude))
     let accessorySize = content.accessory.map { $0.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize) }
-    let scale = presentationWindow?.screen.scale ?? 3
+    let scale = sourceWindow?.screen.scale ?? 3
     return ContextMenuLayout.plan(ContextMenuLayout.Input(
       viewport: overlay.bounds.size,
       safeInsets: safeInsets,
@@ -318,6 +366,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
     if let action { pendingActions.append(action) }
     guard !isDismissing else { return }
     isDismissing = true
+    removeKeyboardObserver()
     overlay.isUserInteractionEnabled = false
     onWillDismiss?()
 
@@ -334,7 +383,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
       actions.forEach { $0() }
       onDidDismiss?()
     }
-    guard animated, presentationWindow?.isHidden == false else {
+    guard animated, overlay.window?.isHidden == false else {
       finish()
       return
     }
