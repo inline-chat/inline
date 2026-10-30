@@ -520,11 +520,14 @@ pub(super) async fn refresh_supervisor(
     let store = crate::update::Store::new(&super::update_supervisor::data_root(paths)?);
     // Prevent another updater from staging a new selection during maintenance.
     let _installation = store.installation_lock()?;
+    let channel = store.read()?.channel;
     let (current, previous) = super::update_supervisor::refresh_selection(paths, &store)?;
     if !service_loaded(account) || !service_definition_path(&account.service_label)?.is_file() {
         return Err(io::Error::other("start the bridge before refreshing its supervisor").into());
     }
-    if crate::update::file_hash(&paths.installed_binary)? != previous.executable_sha256 {
+    let installed = crate::update::file_hash(&paths.installed_binary)?;
+    // An interrupted attempt may already have installed these verified bytes.
+    if installed != previous.executable_sha256 && installed != current.executable_sha256 {
         return Err(
             io::Error::other("installed supervisor identity changed; leaving it running").into(),
         );
@@ -545,7 +548,7 @@ pub(super) async fn refresh_supervisor(
         {
             return Err(io::Error::other("bridge selection changed; retry maintenance").into());
         }
-        install_stable_binary_from(&current.executable, &paths.installed_binary)?;
+        crate::update::copy_binary_atomically(&current.executable, &paths.installed_binary)?;
         Ok::<_, Box<dyn std::error::Error>>(())
     }
     .await;
@@ -561,8 +564,10 @@ pub(super) async fn refresh_supervisor(
         // Never replace its executable while it may be retaining its own bytes.
         let _ = control_request(paths, secrets, ControlCommand::CancelUpdate).await;
         if let Ok(stopped) = crate::update::store::lock(&paths.root.join("supervisor.lock")) {
-            let restored =
-                install_stable_binary_from(&previous.executable, &paths.installed_binary);
+            let restored = crate::update::copy_binary_atomically(
+                &previous.executable,
+                &paths.installed_binary,
+            );
             drop(stopped);
             restored?;
         }
@@ -570,7 +575,7 @@ pub(super) async fn refresh_supervisor(
         let _ = start_service(paths, account, secrets).await;
         crate::telemetry::report_update(
             "repair_required",
-            store.read()?.channel.as_str(),
+            channel.as_str(),
             &previous.version,
             &current.version,
             "supervisor_refresh",
@@ -580,7 +585,7 @@ pub(super) async fn refresh_supervisor(
     wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await?;
     crate::telemetry::report_update(
         "supervisor_refreshed",
-        store.read()?.channel.as_str(),
+        channel.as_str(),
         &previous.version,
         &current.version,
         "supervisor_refresh",

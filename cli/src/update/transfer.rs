@@ -185,7 +185,7 @@ pub(super) fn stage_binary(
     Ok(staged_path)
 }
 
-pub(super) fn copy_binary_atomically(
+pub(crate) fn copy_binary_atomically(
     staged_path: &Path,
     install_path: &Path,
 ) -> Result<(), io::Error> {
