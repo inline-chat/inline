@@ -623,6 +623,7 @@ impl Command {
                 BridgeCommand::Start => "bridge_start",
                 BridgeCommand::Stop => "bridge_stop",
                 BridgeCommand::Restart => "bridge_restart",
+                BridgeCommand::Refresh => "bridge_refresh",
                 BridgeCommand::Rollback => "bridge_rollback",
                 BridgeCommand::Doctor => "bridge_doctor",
                 BridgeCommand::Logs { .. } => "bridge_logs",
@@ -713,6 +714,8 @@ enum BridgeCommand {
     Stop,
     #[command(about = "Restart the background bridge")]
     Restart,
+    #[command(about = "Refresh the retained supervisor from the selected runtime only when idle")]
+    Refresh,
     #[command(about = "Restore the previous bridge runtime after active work finishes")]
     Rollback,
     #[command(about = "Check the bridge installation")]
@@ -2945,6 +2948,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
                 BridgeCommand::Restart => {
                     bridge::restart(&config, cli.json, json_format).await?;
+                }
+                BridgeCommand::Refresh => {
+                    bridge::refresh(&config, cli.json, json_format).await?;
                 }
                 BridgeCommand::Rollback => bridge::rollback(&config, cli.json, json_format)?,
                 BridgeCommand::Doctor => {
@@ -7926,6 +7932,7 @@ mod cli_parsing_tests {
             ("start", "start"),
             ("stop", "stop"),
             ("restart", "restart"),
+            ("refresh", "refresh"),
             ("doctor", "doctor"),
             ("uninstall", "uninstall"),
         ] {
@@ -7943,6 +7950,9 @@ mod cli_parsing_tests {
                 Command::Bridge {
                     command: BridgeCommand::Restart,
                 } => "restart",
+                Command::Bridge {
+                    command: BridgeCommand::Refresh,
+                } => "refresh",
                 Command::Bridge {
                     command: BridgeCommand::Doctor,
                 } => "doctor",

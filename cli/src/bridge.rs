@@ -1479,6 +1479,24 @@ pub async fn restart(
     ensure_provider_statuses_healthy(&results)
 }
 
+pub async fn refresh(
+    config: &Config,
+    json: bool,
+    json_format: JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let loaded = load_installation(config)?;
+    let status =
+        service::refresh_supervisor(&loaded.paths, &loaded.account, &loaded.secrets).await?;
+    if json {
+        output::print_json(&serde_json::json!({"status":status}), json_format)?;
+    } else {
+        println!(
+            "Bridge supervisor: {status}. Busy bridges are left running; retry after work finishes."
+        );
+    }
+    Ok(())
+}
+
 #[derive(Debug, Eq, PartialEq)]
 enum LoginHeal {
     Nothing,

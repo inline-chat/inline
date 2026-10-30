@@ -509,6 +509,108 @@ pub(super) async fn restart_service(
     wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await
 }
 
+/// One-shot idle maintenance. A deferred request never leaves admission closed.
+/// Neither the invoking executable nor any credentials/databases are installed.
+pub(super) async fn refresh_supervisor(
+    paths: &BridgePaths,
+    account: &AccountBridgeConfig,
+    secrets: &AccountBridgeSecrets,
+) -> Result<&'static str, Box<dyn std::error::Error>> {
+    validate_service_paths(paths, account)?;
+    let store = crate::update::Store::new(&super::update_supervisor::data_root(paths)?);
+    // Prevent another updater from staging a new selection during maintenance.
+    let _installation = store.installation_lock()?;
+    let channel = store.read()?.channel;
+    let (current, previous) = super::update_supervisor::refresh_selection(paths, &store)?;
+    if !service_loaded(account) || !service_definition_path(&account.service_label)?.is_file() {
+        return Err(io::Error::other("start the bridge before refreshing its supervisor").into());
+    }
+    let installed = crate::update::file_hash(&paths.installed_binary)?;
+    // An interrupted attempt may already have installed these verified bytes.
+    if installed != previous.executable_sha256 && installed != current.executable_sha256 {
+        return Err(
+            io::Error::other("installed supervisor identity changed; leaving it running").into(),
+        );
+    }
+    if current.executable_sha256 == previous.executable_sha256 {
+        return Ok("up_to_date");
+    }
+    let Some(ready) = prepare_idle_refresh(paths, secrets).await? else {
+        return Ok("waiting_for_idle");
+    };
+    let before_stop = async {
+        let _versions = crate::update::store::blocking_lock(&store.root.join("versions.lock"))?;
+        let selection = super::update_supervisor::refresh_selection(paths, &store)?;
+        let live = control_request(paths, secrets, ControlCommand::Status).await?;
+        if selection != (current.clone(), previous.clone())
+            || live.process_id != ready.process_id
+            || live.cli_version != current.version
+        {
+            return Err(io::Error::other("bridge selection changed; retry maintenance").into());
+        }
+        crate::update::copy_binary_atomically(&current.executable, &paths.installed_binary)?;
+        Ok::<_, Box<dyn std::error::Error>>(())
+    }
+    .await;
+    if let Err(error) = before_stop {
+        let _ = control_request(paths, secrets, ControlCommand::CancelUpdate).await;
+        return Err(error);
+    }
+    // Release the versions lock before the new parent retains its own binary.
+    // Only this already-drained process is stopped; restart cannot admit a turn
+    // between the quiet check and shutdown.
+    if let Err(error) = restart_installed_service(paths, account, secrets).await {
+        // A failed service-manager response can still mean a parent is alive.
+        // Never replace its executable while it may be retaining its own bytes.
+        let _ = control_request(paths, secrets, ControlCommand::CancelUpdate).await;
+        if let Ok(stopped) = crate::update::store::lock(&paths.root.join("supervisor.lock")) {
+            let restored = crate::update::copy_binary_atomically(
+                &previous.executable,
+                &paths.installed_binary,
+            );
+            drop(stopped);
+            restored?;
+        }
+        // Start is a no-op for an active service. Never force a second stop.
+        let _ = start_service(paths, account, secrets).await;
+        crate::telemetry::report_update(
+            "repair_required",
+            channel.as_str(),
+            &previous.version,
+            &current.version,
+            "supervisor_refresh",
+        );
+        return Err(error);
+    }
+    wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await?;
+    crate::telemetry::report_update(
+        "supervisor_refreshed",
+        channel.as_str(),
+        &previous.version,
+        &current.version,
+        "supervisor_refresh",
+    );
+    Ok("refreshed")
+}
+
+async fn prepare_idle_refresh(
+    paths: &BridgePaths,
+    secrets: &AccountBridgeSecrets,
+) -> Result<Option<ControlResponse>, Box<dyn std::error::Error>> {
+    let ready = match control_request(paths, secrets, ControlCommand::PrepareUpdate).await {
+        Ok(ready) => ready,
+        Err(error) => {
+            let _ = control_request(paths, secrets, ControlCommand::CancelUpdate).await;
+            return Err(error);
+        }
+    };
+    if ready.status != "update_ready" {
+        control_request(paths, secrets, ControlCommand::CancelUpdate).await?;
+        return Ok(None);
+    }
+    Ok(Some(ready))
+}
+
 /// Restarts an installed service so every agent retries now, without waiting
 /// for readiness. Returns false when no service is installed. Used by the
 /// self-healing triggers (login) that must not block on the bridge.
@@ -1300,7 +1402,14 @@ pub(super) async fn control_request(
     let mut bytes = serde_json::to_vec(&request)?;
     bytes.push(b'\n');
     stream.write_all(&bytes).await?;
-    stream.shutdown().await?;
+    // A fast local peer can finish and close before our write-half shutdown
+    // reaches macOS. Its valid response may already be buffered. Still require
+    // the bounded, authenticated protocol response below; EOF is not success.
+    if let Err(error) = stream.shutdown().await
+        && error.kind() != io::ErrorKind::NotConnected
+    {
+        return Err(error.into());
+    }
     let mut reader = BufReader::new(stream.take(64 * 1024 + 1));
     let mut response = String::new();
     tokio::time::timeout(CONTROL_TIMEOUT, reader.read_line(&mut response))

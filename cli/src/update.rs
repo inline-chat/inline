@@ -26,6 +26,7 @@ pub mod manifest;
 pub mod store;
 mod transfer;
 pub use store::{Artifact, Store};
+pub(crate) use transfer::copy_binary_atomically;
 use transfer::*;
 
 const MAX_UPDATE_DOWNLOAD_BYTES: u64 = 100 * 1024 * 1024;
