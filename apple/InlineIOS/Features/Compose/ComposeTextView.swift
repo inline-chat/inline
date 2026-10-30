@@ -213,6 +213,37 @@ class ComposeTextView: UITextView {
     return super.canPerformAction(action, withSender: sender)
   }
 
+  override func copy(_ sender: Any?) {
+    if !ComposeTextPasteboard.copy(textStorage, selection: selectedRange) { super.copy(sender) }
+  }
+
+  override func cut(_ sender: Any?) {
+    guard ComposeTextPasteboard.copy(textStorage, selection: selectedRange) else {
+      super.cut(sender)
+      return
+    }
+    replaceSelection(with: NSAttributedString(), actionName: "Cut")
+  }
+
+  private func replaceSelection(with replacement: NSAttributedString, actionName: String) {
+    willChangePastedLinks(in: selectedRange, replacement: replacement.string)
+    let result = ComposeThreadLinkEditing.insertAttributedText(
+      replacement,
+      into: attributedText ?? NSAttributedString(),
+      selectedRange: selectedRange,
+      textColor: UIColor.label
+    )
+    registerFormattingUndo(actionName: actionName)
+    textStorage.setAttributedString(result.attributedString)
+    selectedRange = result.selectedRange
+    resetTypingAttributesToDefault()
+    InlineTextStyle.reapply(to: textStorage)
+
+    // Programmatic text assignment bypasses the normal delegate path.
+    textDidChange()
+    delegate?.textViewDidChange?(self)
+  }
+
   override func paste(_ sender: Any?) {
     if UIPasteboard.general.image != nil {
       composeView?.handlePastedImage()
@@ -234,6 +265,13 @@ class ComposeTextView: UITextView {
       resetTypingAttributesToDefault()
       textDidChange()
       delegate?.textViewDidChange?(self)
+    } else if let pasted = ComposeTextPasteboard.attributedText(configuration: .init(
+      font: font ?? UIFont.systemFont(ofSize: 17),
+      primaryColor: UIColor.label,
+      linkColor: composeView?.linkColor ?? tintColor ?? UIColor.systemBlue,
+      convertMentionsToLink: false
+    )) {
+      replaceSelection(with: pasted, actionName: "Paste")
     } else if let string = (ExperimentalFeatureFlags.richMessageCopyEditingEnabled ? MessageTextPasteboard.markdown() : nil)
       ?? UIPasteboard.general.string ?? UIPasteboard.general.url?.absoluteString
     {

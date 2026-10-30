@@ -429,6 +429,23 @@ class ComposeNSTextView: NSTextView {
     notifyDelegateAboutFormattingChange()
   }
 
+  override func copy(_ sender: Any?) {
+    if !copySemanticSelection() { super.copy(sender) }
+  }
+
+  override func cut(_ sender: Any?) {
+    if copySemanticSelection() {
+      delete(sender)
+    } else {
+      super.cut(sender)
+    }
+  }
+
+  private func copySemanticSelection() -> Bool {
+    guard selectedRanges.count == 1, let textStorage else { return false }
+    return ComposeTextPasteboard.copy(textStorage, selection: selectedRange())
+  }
+
   override func paste(_ sender: Any?) {
     // Intercept non-text content (files/images/videos) and route through our attachment pipeline.
     if handleAttachments(from: .general, includeText: false) {
@@ -447,6 +464,17 @@ class ComposeNSTextView: NSTextView {
       attributes[.cursor] = NSCursor.pointingHand
       let linkedText = NSAttributedString(string: reference.label, attributes: attributes)
       insertText(linkedText, replacementRange: selectedRange())
+      resetTypingAttributesToDefault()
+      return
+    }
+
+    if let text = ComposeTextPasteboard.attributedText(configuration: .init(
+      font: ComposeTextEditor.font,
+      primaryColor: ComposeTextEditor.textColor,
+      linkColor: ComposeTextEditor.linkColor,
+      convertMentionsToLink: false
+    )) {
+      insertText(text, replacementRange: selectedRange())
       resetTypingAttributesToDefault()
       return
     }

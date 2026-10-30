@@ -87,6 +87,23 @@ public enum ComposeThreadLinkEditing {
     )
   }
 
+  public static func insertAttributedText(
+    _ text: NSAttributedString,
+    into attributedString: NSAttributedString,
+    selectedRange: NSRange,
+    textColor: PlatformColor
+  ) -> (attributedString: NSAttributedString, selectedRange: NSRange) {
+    let mutable = NSMutableAttributedString(attributedString: attributedString)
+    let range = clamped(selectedRange, length: mutable.length)
+    let affectedRanges = affectedThreadLinkRanges(in: mutable, changeRange: range)
+    stripThreadLinks(in: mutable, ranges: affectedRanges, textColor: textColor)
+    mutable.replaceCharacters(in: range, with: text)
+    return (
+      NSAttributedString(attributedString: mutable),
+      NSRange(location: range.location + text.length, length: 0)
+    )
+  }
+
   public static func plainTextAttributes(
     from typingAttributes: [NSAttributedString.Key: Any],
     textColor: PlatformColor
