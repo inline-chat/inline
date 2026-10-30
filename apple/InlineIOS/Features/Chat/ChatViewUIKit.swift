@@ -126,13 +126,17 @@ public class ChatContainerView: UIView {
   lazy var composeView: ComposeView = {
     let view = ComposeView()
     view.translatesAutoresizingMaskIntoConstraints = false
-    view.onHeightChange = { [weak self] newHeight, animation in
-      self?.handleComposeViewHeightChange(newHeight, animation: animation)
-    }
     view.peerId = peerId
     view.chatId = chatId
     view.spaceId = spaceId
     view.sendAnimationCoordinator = sendAnimationCoordinator
+    // An agent chat grows into its card inside the setters above. The handler
+    // reads this lazy var, which is unset until this closure returns, so
+    // subscribing any earlier re-runs the closure until the stack overflows.
+    messagesCollectionView.setInitialComposeHeight(view.composeHeightConstraint.constant)
+    view.onHeightChange = { [weak self] newHeight, animation in
+      self?.handleComposeViewHeightChange(newHeight, animation: animation)
+    }
     view.executeInlineCommand = { [weak self] action in
       guard let self else { return nil }
       switch action {

@@ -678,6 +678,13 @@ final class MessagesCollectionView: UICollectionView {
     }
   }
 
+  /// Before the first layout there is no scroll position to keep; moving to a
+  /// window applies the insets.
+  func setInitialComposeHeight(_ height: CGFloat) {
+    composeHeight = height
+    updateContentInsets()
+  }
+
   func updateComposeInset(
     composeHeight: CGFloat,
     animation: ComposeHeightChangeAnimation

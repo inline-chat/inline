@@ -55,6 +55,27 @@ struct ComposeAgentDeviceTests {
     Attachment.record(host.png(compose), named: "dm-card.png")
   }
 
+  @Test("Agent DM opens from the real chat container")
+  func agentDMOpensInChatContainer() async throws {
+    let agent = try await Self.agent()
+    // Only a card grows compose while the container's lazy view is being built.
+    try #require(!agent.isFriendly)
+    let host = try Host()
+    defer { host.close() }
+    let chat = ChatContainerView(
+      peerId: .user(id: agent.id),
+      chatId: agent.id,
+      spaceId: nil,
+      theme: ThemeManager.shared.snapshot(variant: .light)
+    )
+    chat.frame = host.root.bounds
+    host.root.addSubview(chat)
+    host.root.layoutIfNeeded()
+    #expect(chat.composeView.isAgentLayout)
+    try await settle()
+    #expect(abs(chat.composeView.composeHeightConstraint.constant - chat.composeView.restingHeight) < 1)
+  }
+
   @Test("Typing grows the card upward and keeps the row pinned")
   func typingGrows() async throws {
     let agent = try await Self.agent()
