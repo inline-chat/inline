@@ -105,6 +105,13 @@ the retained repair worker available, including when the selected runtime
 cannot execute. Recovery uses the live delivery database and never restores an
 old authentication file or stale receipts.
 
+If the activation journal is damaged, startup reports a repair action. After
+agents finish, stop any still-running bridge and run `inline bridge restart`
+with the current CLI. It keeps a private copy of a malformed/truncated journal
+and re-enrolls that invoking runtime; it does not reset account or delivery data.
+Unreadable files require access to be restored first, and a newer unknown journal
+format requires a newer CLI. A healthy running supervisor's selection is preserved.
+
 Existing services enroll on an explicit normal restart after agent work finishes:
 
 ```bash
