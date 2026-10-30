@@ -1056,7 +1056,10 @@ mod tests {
         if behavior == "crash" {
             std::process::exit(7);
         }
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
+        // Each fixture is already a separate test process. A current-thread
+        // reactor avoids multiplying a hosted runner's CPU count into hundreds
+        // of idle threads when recovery cases run concurrently.
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
             if behavior == "hang" { std::future::pending::<()>().await; }
             let _ = fs::remove_file(&paths.control_socket);
             let listener = tokio::net::UnixListener::bind(&paths.control_socket).unwrap();
