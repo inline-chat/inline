@@ -145,6 +145,30 @@ doctor --json` for the service's installed binary and provider executable;
 verify their versions separately from the shell's CLI. Readiness or `--version`
 alone does not qualify an authenticated provider turn.
 
+For an opt-in check of the transition from pre-updater releases, dispatch the
+updater qualification workflow against the candidate branch:
+
+```sh
+gh workflow run cli-update-qualification.yml --ref CANDIDATE_BRANCH \
+  -f published_upgrade_smoke=true
+```
+
+This exercises the actual `0.7.18` stable and `0.7.19-alpha.7` binaries upgrading
+to the first signed updater, then checks candidate enrollment, saved opt-outs,
+channel changes and feed failure/recovery. It uses disposable account and receipt
+files on macOS and GNU/musl Linux; it never installs or restarts a service. It is
+opt-in so public archive availability is not a new dependency of every main-push
+release gate. Existing supervisor and store tests qualify the process handoff
+and live-receipt rollback boundary separately.
+
+For the first stable updater release, publish and read back the signed stable
+feed before advancing the installer and Homebrew. The publisher already orders
+these operations. Older CLI updaters can restart bridges during their manual
+update: perform that transition while agents are idle, or use the Mac installer
+and restart the bridge separately after work finishes. A legacy installation
+enrolls with `inline update config --register` using the new executable; new
+installers do this automatically. Explicit opt-outs survive enrollment.
+
 When upgrading an existing macOS bot bridge from before 0.7.16, run `inline
 bridge restart` with the newly installed binary once after the update. This
 refreshes the service definition to Standard process policy; the older updater
