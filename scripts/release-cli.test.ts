@@ -52,6 +52,26 @@ describe("CLI release channels", () => {
 });
 
 describe("Homebrew cask release updates", () => {
+  test("updates top-level platform checksums without changing URLs or architecture restrictions", () => {
+    const modernCask = existingHomebrewCask
+      .replace(`    sha256 "${"1".repeat(64)}"\n`, "")
+      .replace(
+        `    sha256 arm64_linux:  "${"2".repeat(64)}",\n           x86_64_linux: "${"3".repeat(64)}"\n`,
+        "",
+      )
+      .replace('  version "0.7.4"', `  version "0.7.4"\n  sha256 arm:          "${"1".repeat(64)}",\n         arm64_linux:  "${"2".repeat(64)}",\n         x86_64_linux: "${"3".repeat(64)}"`);
+    const updated = updateHomebrewCaskContents(modernCask, "0.7.5", nextHomebrewHashes);
+    expect(updated).toBe(modernCask
+      .replace('version "0.7.4"', 'version "0.7.5"')
+      .replace("1".repeat(64), nextHomebrewHashes.macosArm)
+      .replace("2".repeat(64), nextHomebrewHashes.linuxArm)
+      .replace("3".repeat(64), nextHomebrewHashes.linuxIntel));
+    expect(() => validateHomebrewCaskContents(modernCask.replace("    depends_on arch: :arm64\n", "")))
+      .toThrow("restricted to Apple silicon");
+    expect(() => validateHomebrewCaskContents(modernCask.replace("arm64_linux:", "arm:")))
+      .toThrow();
+  });
+
   test("keeps platform-specific checksum keys while updating the release", () => {
     const updated = updateHomebrewCaskContents(
       existingHomebrewCask,

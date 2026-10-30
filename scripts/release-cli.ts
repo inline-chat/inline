@@ -748,9 +748,12 @@ function parseHomebrewCaskContents(contents: string): HomebrewCaskState {
   ) {
     throw new Error("Homebrew cask must keep the macOS download restricted to Apple silicon.");
   }
-  const macosArm = macosBlock.match(/^    sha256 "([a-f0-9]{64})"$/m)?.[1];
+  const topLevelHashes = contents.match(
+    /^  sha256 arm:\s+"([a-f0-9]{64})",\n\s+arm64_linux:\s+"([a-f0-9]{64})",\n\s+x86_64_linux:\s+"([a-f0-9]{64})"$/m,
+  );
+  const macosArm = topLevelHashes?.[1] ?? macosBlock.match(/^    sha256 "([a-f0-9]{64})"$/m)?.[1];
   if (!macosArm) {
-    throw new Error("Homebrew cask must define the Apple-silicon checksum inside on_macos.");
+    throw new Error("Homebrew cask must define the Apple-silicon checksum.");
   }
 
   const linuxBlock = contents.match(/^  on_linux do\n([\s\S]*?)^  end$/m)?.[1];
@@ -761,7 +764,7 @@ function parseHomebrewCaskContents(contents: string): HomebrewCaskState {
   ) {
     throw new Error("Homebrew cask must define ARM64 and x86_64 Linux downloads.");
   }
-  const linuxHashes = linuxBlock.match(
+  const linuxHashes = topLevelHashes ? [topLevelHashes[0], topLevelHashes[2], topLevelHashes[3]] : linuxBlock.match(
     /^    sha256 arm64_linux:\s+"([a-f0-9]{64})",\n\s+x86_64_linux:\s+"([a-f0-9]{64})"$/m,
   );
   if (!linuxHashes) {
@@ -797,6 +800,10 @@ export function updateHomebrewCaskContents(
 
   const updated = contents
     .replace(/^  version "[^"]+"$/m, `  version "${version}"`)
+    .replace(
+      /(^  sha256 arm:\s+)"[a-f0-9]{64}",\n(\s+arm64_linux:\s+)"[a-f0-9]{64}",\n(\s+x86_64_linux:\s+)"[a-f0-9]{64}"$/m,
+      `$1"${hashes.macosArm}",\n$2"${hashes.linuxArm}",\n$3"${hashes.linuxIntel}"`,
+    )
     .replace(
       /(^  on_macos do\n[\s\S]*?^    sha256 )"[a-f0-9]{64}"$/m,
       `$1"${hashes.macosArm}"`,
