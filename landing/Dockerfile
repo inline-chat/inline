@@ -1,6 +1,6 @@
-FROM node:26.8.2-bookworm-slim AS build-node
+FROM node:26.12.1-bookworm-slim AS build-node
 
-FROM oven/bun:1.4.0 AS base
+FROM oven/bun:1.4.4 AS base
 WORKDIR /usr/src/app
 
 FROM base AS pruner

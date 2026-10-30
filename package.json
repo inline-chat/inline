@@ -1,7 +1,7 @@
 {
   "name": "inline",
   "private": true,
-  "packageManager": "bun@1.4.0",
+  "packageManager": "bun@1.4.4",
   "workspaces": [
     "server",
     "cli",

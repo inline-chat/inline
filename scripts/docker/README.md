@@ -5,7 +5,7 @@ or `packages/mcp/Dockerfile`. All use the Bun version pinned in `package.json`.
 Both server targets keep migrations explicit and refuse to start against a
 database behind their packaged migration journal. The shared runtime target serves Bun
 directly; see [the Fly container guide](../../server/docs/fly-container.md).
-The website build stage also includes Node 26.8.2, matching CI: StyleX 0.19.1
+The website build stage also includes Node 26.12.1, matching CI: StyleX 0.19.1
 media-query compilation fails when Vite runs under Bun. Bun still installs
 dependencies and serves the release image; Node is only in the build stage.
 

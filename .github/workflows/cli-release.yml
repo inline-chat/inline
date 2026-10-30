@@ -137,7 +137,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: "1.4.0"
+          bun-version: "1.4.4"
       - name: Verify committed release version
         if: needs.select.outputs.tag != ''
         run: bun --no-env-file scripts/ci/cli-release-version.ts verify "$INLINE_CLI_RELEASE_TAG"
@@ -360,7 +360,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: "1.4.0"
+          bun-version: "1.4.4"
 
       - name: Verify committed release version
         if: needs.select.outputs.tag != ''
@@ -459,7 +459,7 @@ jobs:
         if: steps.target.outputs.selected == 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: "1.4.0"
+          bun-version: "1.4.4"
 
       - name: Verify committed release version
         if: steps.target.outputs.selected == 'true' && needs.select.outputs.tag != ''
@@ -594,7 +594,7 @@ jobs:
         if: steps.target.outputs.selected == 'true'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: "1.4.0"
+          bun-version: "1.4.4"
 
       - name: Verify committed release version
         if: steps.target.outputs.selected == 'true' && needs.select.outputs.tag != ''
@@ -728,7 +728,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: "1.4.0"
+          bun-version: "1.4.4"
       - name: Verify committed release version
         run: bun --no-env-file scripts/ci/cli-release-version.ts verify "$INLINE_CLI_RELEASE_TAG"
       - name: Read Release Channel

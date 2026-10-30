@@ -1,5 +1,5 @@
 # Build from the repository root. The worker is separate from the Bun API.
-FROM oven/bun:1.4.0 AS build
+FROM oven/bun:1.4.4 AS build
 WORKDIR /app
 COPY package.json bun.lock bunfig.toml ./
 COPY cli/package.json ./cli/package.json

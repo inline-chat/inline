@@ -14,12 +14,12 @@ const workflow = (name: string) => parse(read(`.github/workflows/${name}`)) as {
 describe("public CI contracts", () => {
   it("pins Bun and Rust to the repository toolchain policy", () => {
     const bun = JSON.parse(read("package.json")).packageManager
-    expect(bun).toBe("bun@1.4.0")
+    expect(bun).toBe("bun@1.4.4")
     expect(read("rust-toolchain.toml")).toContain('channel = "1.96.0"')
     for (const name of ["integrations.yml", "apple-validation.yml"]) {
       const source = read(`.github/workflows/${name}`)
       for (const match of source.matchAll(/bun-version:\s*['"]?([^\s'"#]+)/g)) {
-        expect(match[1], name).toBe("1.4.0")
+        expect(match[1], name).toBe("1.4.4")
       }
     }
   })

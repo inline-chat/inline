@@ -25,12 +25,12 @@ jobs:
       - name: Setup website compiler runtime
         uses: actions/setup-node@v4
         with:
-          node-version: "26.8.2"
+          node-version: "26.12.1"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.4
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -71,7 +71,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.4
 
       - name: Check Docker workspace packaging (no image builds)
         run: bun --no-env-file test scripts/docker
@@ -90,7 +90,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.4
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -154,7 +154,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.4
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -186,7 +186,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.4'
       - run: bun install --frozen-lockfile
       - name: Build OpenClaw prerequisites
         run: |
@@ -210,7 +210,7 @@ jobs:
       - name: Setup release Bun runtime
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.4'
       - name: Check isolated release and verify tracked source sidecar
         run: node plugins/hermes-agent/scripts/release-stage.mjs --prepare-only --verify-source-bundle
 
@@ -224,7 +224,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.0
+          bun-version: 1.4.4
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Build adapter dependencies
@@ -243,7 +243,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.4'
       - run: bun install --frozen-lockfile
       - name: Build dependency graph
         run: |
@@ -294,7 +294,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.4'
       - run: bun install --frozen-lockfile
       - name: Validate active workflows
         run: |
@@ -325,7 +325,7 @@ jobs:
           node-version: '26'
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.4'
       - run: bun install --frozen-lockfile
       - name: Build public integrations
         run: bun run build:integrations
@@ -353,7 +353,7 @@ jobs:
           node-version: ${{ matrix.node }}
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.4'
       - run: bun install --frozen-lockfile
       - uses: actions/download-artifact@v4
         with:
@@ -461,7 +461,7 @@ jobs:
           node-version: '26'
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.4'
       - run: bun install --frozen-lockfile
       - uses: actions/download-artifact@v4
         with:

@@ -40,7 +40,7 @@ jobs:
           node-version: '24'
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.4'
       - name: Prepare and test exact candidate adapter
         if: matrix.adapter == 'candidate'
         run: node plugins/hermes-agent/scripts/release-stage.mjs --prepare-only --verify-source-bundle --output-dir "$RUNNER_TEMP/hermes-artifact"

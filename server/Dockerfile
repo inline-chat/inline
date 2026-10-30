@@ -1,5 +1,5 @@
 # Build from the repository root. See docs/fly-container.md for a commit-only context.
-FROM oven/bun:1.4.0 AS base
+FROM oven/bun:1.4.4 AS base
 WORKDIR /usr/src/app
 
 FROM base AS pruner

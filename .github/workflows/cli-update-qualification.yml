@@ -76,7 +76,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.4'
       - name: Install test dependencies
         run: bun install --frozen-lockfile
       - name: Test updater and both bridge generations
