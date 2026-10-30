@@ -1074,7 +1074,10 @@ mod tests {
                 let command = request["command"].as_str().unwrap();
                 let status = if request["token"] != "isolated-fixture" { "unauthorized" } else if command == "shutdown" { "stopping" } else { "running" };
                 let response = serde_json::json!({"version":1,"status":status,"processId":std::process::id(),"inlineConnected":false,"providerReady":false,"detail":null,"cliVersion":env!("CARGO_PKG_VERSION")});
-                let mut bytes = serde_json::to_vec(&response).unwrap(); bytes.push(b'\n'); write.write_all(&bytes).await.unwrap(); write.shutdown().await.unwrap();
+                let mut bytes = serde_json::to_vec(&response).unwrap(); bytes.push(b'\n'); write.write_all(&bytes).await.unwrap();
+                // On macOS the client can close after reading the complete
+                // response, before this fixture shuts down its write half.
+                write.shutdown().await.unwrap_or_else(|error| assert_eq!(error.kind(), std::io::ErrorKind::NotConnected));
                 if status == "stopping" { append(&format!("stop {behavior}")); let _ = fs::remove_file(&paths.control_socket); break; }
             }
         });
