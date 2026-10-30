@@ -59,6 +59,32 @@ fn read_activation(paths: &BridgePaths) -> Result<Activation, UpdateError> {
     Ok(serde_json::from_value(value)?)
 }
 
+/// Maintenance must use the committed selection, never the invoking CLI or a
+/// candidate that is still being trialed. The caller holds the installation lock.
+pub(super) fn refresh_selection(
+    paths: &BridgePaths,
+    store: &Store,
+) -> Result<(Artifact, Artifact), UpdateError> {
+    let state = read_activation(paths).map_err(journal_failure)?;
+    let policy = store.read()?;
+    if state.candidate.is_some()
+        || !matches!(state.phase.as_str(), "committed" | "rolled_back")
+        || startup_path(paths).exists()
+        || rollback_path(paths).exists()
+        || policy.staged.as_ref().is_some_and(|candidate| {
+            update::newer(&candidate.version, &state.current.version).unwrap_or(true)
+        })
+    {
+        return Err(UpdateError::Busy);
+    }
+    let supervisor = state
+        .supervisor
+        .ok_or(UpdateError::Verification("missing_supervisor"))?;
+    update::validate_cached(store, &state.current)?;
+    update::validate_cached(store, &supervisor)?;
+    Ok((state.current, supervisor))
+}
+
 fn journal_failure(error: UpdateError) -> UpdateError {
     match error {
         UpdateError::ActivationJournal(_) => error,
@@ -119,7 +145,7 @@ fn enroll_activation(
     )
 }
 
-fn data_root(paths: &BridgePaths) -> Result<PathBuf, UpdateError> {
+pub(super) fn data_root(paths: &BridgePaths) -> Result<PathBuf, UpdateError> {
     let parent = paths
         .root
         .parent()
@@ -945,6 +971,64 @@ mod tests {
 
     // A real isolated child process. This is compiled only into the test
     // executable; production has no fixture mode or verification bypass.
+    #[test]
+    fn refresh_uses_only_committed_verified_runtime_and_preserves_recovery_history() {
+        let f = Fixture::new();
+        let parent = f.artifact("old");
+        let selected = f.artifact("healthy");
+        let mut state = f.state(selected.clone());
+        state.supervisor = Some(parent.clone());
+        state.previous = Some(parent.clone());
+        atomic_json(&journal(&f.paths), &state).unwrap();
+        let before = fs::read(journal(&f.paths)).unwrap();
+        assert_eq!(
+            refresh_selection(&f.paths, &f.store).unwrap(),
+            (selected.clone(), parent)
+        );
+        assert_eq!(fs::read(journal(&f.paths)).unwrap(), before);
+        f.assert_account_unchanged();
+        fs::write(&selected.executable, b"corrupt runtime").unwrap();
+        assert!(refresh_selection(&f.paths, &f.store).is_err());
+        assert_eq!(fs::read(journal(&f.paths)).unwrap(), before);
+    }
+
+    #[test]
+    fn refresh_refuses_pending_activation_rollback_restart_or_new_stage() {
+        let f = Fixture::new();
+        let selected = f.artifact("healthy");
+        for phase in ["trial", "waiting_for_idle", "maintenance_required"] {
+            let mut state = f.state(selected.clone());
+            state.phase = phase.into();
+            atomic_json(&journal(&f.paths), &state).unwrap();
+            assert!(matches!(
+                refresh_selection(&f.paths, &f.store),
+                Err(UpdateError::Busy)
+            ));
+        }
+        atomic_json(&journal(&f.paths), &f.state(selected.clone())).unwrap();
+        for request in [startup_path(&f.paths), rollback_path(&f.paths)] {
+            fs::write(&request, b"{}").unwrap();
+            assert!(matches!(
+                refresh_selection(&f.paths, &f.store),
+                Err(UpdateError::Busy)
+            ));
+            fs::remove_file(request).unwrap();
+        }
+        let mut next = selected;
+        next.version = "999.0.0".into();
+        f.store
+            .edit(|s| {
+                s.staged = Some(next);
+                Ok(())
+            })
+            .unwrap();
+        assert!(matches!(
+            refresh_selection(&f.paths, &f.store),
+            Err(UpdateError::Busy)
+        ));
+        f.assert_account_unchanged();
+    }
+
     #[test]
     #[ignore = "subprocess fixture invoked by updater qualification tests"]
     fn workload_fixture() {

@@ -46,6 +46,10 @@ on:
         description: Exercise released stable/alpha upgrades and feed recovery in disposable installs
         type: boolean
         default: false
+      maintenance_artifact:
+        description: Retain a macOS CLI for operator-triggered idle supervisor maintenance
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -102,3 +106,14 @@ jobs:
           export INLINE_DATA_DIR="$RUNNER_TEMP/inline-updater-telemetry"
           mkdir -p "$INLINE_DATA_DIR"
           cargo test --locked -p inline-cli --bin inline telemetry::tests::live_update_outcomes -- --ignored --exact --nocapture
+      - name: Build operator maintenance CLI
+        if: runner.os == 'macOS' && github.event_name == 'workflow_dispatch' && inputs.maintenance_artifact
+        env:
+          CARGO_PROFILE_DEV_DEBUG: '0'
+        run: cargo build --locked -j 2 -p inline-cli --bin inline
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS' && github.event_name == 'workflow_dispatch' && inputs.maintenance_artifact
+        with:
+          name: inline-macos-maintenance-cli
+          path: target/debug/inline
+          retention-days: 3
