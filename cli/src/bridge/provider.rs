@@ -156,6 +156,9 @@ pub(super) fn provider_display_name(provider_id: &str) -> Option<&'static str> {
 /// Validates the local prerequisites that Claude setup will need without
 /// installing an adapter or changing the bridge account.
 pub(super) fn preflight_claude_setup(allow_install: bool) -> Result<(), String> {
+    if super::v2_enabled_for("claude") {
+        return probe_native_claude(None).map(|_| ());
+    }
     let support = verified_acp_support("claude")?;
     let AcpDistribution::NpmAdapter(adapter) = support.distribution else {
         return Err("Claude has no verified npm adapter installation plan".to_string());
@@ -226,6 +229,9 @@ pub(super) async fn prepare_setup_provider(
         debug_assert!(runtime.capabilities().existing_turn_driver);
         return probe_configured_provider_async(provider_id, runtime.executable()).await;
     }
+    if provider_id == "claude" && super::v2_enabled_for(provider_id) {
+        return probe_native_claude(None);
+    }
     let Some(support) = provider_support(provider_id) else {
         return probe_provider(provider_id);
     };
@@ -269,6 +275,9 @@ fn probe_configured_provider_with_runtime(
     executable: &std::path::Path,
     configured_runtime: Option<&std::path::Path>,
 ) -> Result<ProviderProbe, String> {
+    if provider_id == "claude" && super::v2_enabled_for(provider_id) {
+        return probe_native_claude(Some(executable));
+    }
     if provider_id == "codex" {
         let version = probe_command(provider_id, executable, &["--version"], "Codex version")?;
         if !version.starts_with("codex-cli ") {
@@ -439,6 +448,56 @@ fn probe_configured_provider_with_runtime(
         display_name: support.display_name,
         executable: executable.to_path_buf(),
         provider_runtime,
+        version,
+    })
+}
+
+/// The user's own `claude`, which bridge v2 runs directly. An installation
+/// from before v2 still names its ACP adapter, so that path is ignored here.
+pub(super) fn native_claude_executable(
+    configured: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf, String> {
+    configured
+        .filter(|path| is_native_claude_path(path) && super::is_executable_file(path))
+        .map(std::path::Path::to_path_buf)
+        .or_else(|| super::resolve_executable(std::path::Path::new("claude")).ok())
+        .or_else(|| {
+            crate::agents::harness_search_directories()
+                .into_iter()
+                .map(|directory| directory.join("claude"))
+                .find(|candidate| super::is_executable_file(candidate))
+        })
+        .ok_or_else(|| {
+            "could not find the `claude` CLI; install Claude Code and sign in, then retry"
+                .to_string()
+        })
+}
+
+fn is_native_claude_path(path: &std::path::Path) -> bool {
+    path.file_name().is_some_and(|name| name == "claude")
+}
+
+/// Bridge v2 needs only a signed-in `claude`, not Node.js, npm, or the adapter.
+fn probe_native_claude(configured: Option<&std::path::Path>) -> Result<ProviderProbe, String> {
+    use inline_agent_driver_claude::{ClaudeVersion, harness::CORE_FLOOR};
+
+    let executable = native_claude_executable(configured)?;
+    let version = probe_command("claude", &executable, &["--version"], "Claude version")?;
+    let parsed = ClaudeVersion::parse(&version)
+        .ok_or_else(|| format!("could not read the Claude version from `{version}`"))?;
+    if !parsed.at_least(CORE_FLOOR) {
+        return Err(format!(
+            "Claude {version} is too old for this Inline bridge; update Claude Code, then retry"
+        ));
+    }
+    let label = "Claude authentication";
+    let auth = probe_command_capture_status("claude", &executable, &["auth", "status"], label)?;
+    validate_claude_auth_status(&auth, label)?;
+    Ok(ProviderProbe {
+        provider_id: "claude",
+        display_name: "Claude",
+        executable,
+        provider_runtime: None,
         version,
     })
 }
@@ -941,6 +1000,14 @@ impl ProviderLaunch {
                     .then(|| installation.executable.clone());
                 let mut descriptor = support.launch_descriptor(executable);
                 if provider_id == "claude" {
+                    if !super::v2_enabled_for(provider_id)
+                        && is_native_claude_path(&installation.executable)
+                    {
+                        return Err(
+                            "this Claude setup has no ACP adapter for the previous bridge; rerun setup with INLINE_BRIDGE_V2=off"
+                                .to_string(),
+                        );
+                    }
                     match super::adapter::verify_pinned_adapter_executable(
                         provider_id,
                         &descriptor.program,

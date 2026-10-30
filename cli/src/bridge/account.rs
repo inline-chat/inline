@@ -254,7 +254,7 @@ pub(super) fn load_installation(
     load_installed_account(config)?.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
-            "agent bridge is not installed; run `inline setup codex` (or experimental `opencode|claude|amp`) first",
+            "agent bridge is not installed; run `inline agents setup` first",
         )
         .into()
     })
@@ -841,9 +841,7 @@ pub(super) fn print_status(
         }
     } else {
         println!("Bridge: not installed");
-        println!(
-            "Run `inline setup codex` to get started. OpenCode, Claude, and Amp are experimental."
-        );
+        println!("Run `inline agents setup` to get started.");
     }
     Ok(())
 }

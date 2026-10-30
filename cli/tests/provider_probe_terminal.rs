@@ -44,13 +44,8 @@ fn pseudo_terminal() -> (OwnedFd, OwnedFd) {
 fn claude_preflight_is_noninteractive_with_and_without_a_controlling_terminal() {
     let directory = tempfile::tempdir().unwrap();
     executable(
-        &directory.path().join("node"),
-        "#!/bin/sh\nprintf 'v22.0.0'\n",
-    );
-    executable(
         &directory.path().join("claude"),
         r#"#!/bin/sh
-[ "$1 $2" = 'auth status' ] || exit 70
 if [ -t 0 ] || [ -t 1 ] || [ -t 2 ]; then
     printf 'probe inherited terminal stdio' >&2
     exit 71
@@ -59,6 +54,11 @@ if (exec 3</dev/tty) 2>/dev/null; then
     printf 'probe inherited a controlling terminal' >&2
     exit 72
 fi
+if [ "$1" = '--version' ]; then
+    printf '2.1.300 (Claude Code)\n'
+    exit 0
+fi
+[ "$1 $2" = 'auth status' ] || exit 70
 printf '{"loggedIn":true}'
 "#,
     );

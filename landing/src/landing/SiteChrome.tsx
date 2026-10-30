@@ -31,7 +31,7 @@ const FOOTER_GROUPS = [
   {
     title: "Agents",
     links: [
-      { label: "Set up agents", href: "/docs/add-inline" },
+      { label: "Set up agents", href: "/docs/agents" },
       { label: "OpenClaw", href: "/docs/openclaw" },
       { label: "Hermes Agent", href: "/docs/hermes" },
     ],

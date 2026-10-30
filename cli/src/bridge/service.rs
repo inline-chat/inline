@@ -942,10 +942,7 @@ pub(super) fn not_installed_status() -> BridgeStatus {
         process_id: None,
         inline_connected: false,
         provider_ready: false,
-        detail: Some(
-            "run `inline setup codex` first; OpenCode, Claude, and Amp setup are experimental"
-                .to_string(),
-        ),
+        detail: Some("run `inline agents setup` first".to_string()),
     }
 }
 

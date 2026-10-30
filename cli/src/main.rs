@@ -656,11 +656,11 @@ impl Command {
 
 #[derive(Subcommand)]
 enum SetupCommand {
-    #[command(about = "Set up Codex as a personal Inline bot (external beta: macOS only)")]
+    #[command(about = "Set up Codex as a personal Inline bot")]
     Codex(SetupAgentArgs),
-    #[command(about = "Set up OpenCode as an experimental personal Inline bot")]
+    #[command(about = "Set up OpenCode as a personal Inline bot")]
     Opencode(SetupAgentArgs),
-    #[command(about = "Set up Claude as an experimental personal Inline bot")]
+    #[command(about = "Set up Claude as a personal Inline bot")]
     Claude(SetupAgentArgs),
     #[command(about = "Set up Amp as an experimental personal Inline bot")]
     Amp(SetupAgentArgs),

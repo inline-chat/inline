@@ -92,17 +92,12 @@ fn preflight_errors_use_the_setup_envelope_without_running_a_provider() {
 }
 
 #[test]
-fn claude_dry_run_checks_node_auth_and_adapter_install_prerequisites() {
+fn claude_dry_run_needs_only_a_signed_in_claude() {
     let directory = tempfile::tempdir().unwrap();
     write_executable(
         &directory.path().join("claude"),
-        "#!/bin/sh\nprintf '{\"loggedIn\":true,\"authMethod\":\"claude.ai\"}\\n'\n",
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf '2.1.300 (Claude Code)\\n'; else printf '{\"loggedIn\":true,\"authMethod\":\"claude.ai\"}\\n'; fi\n",
     );
-    write_executable(
-        &directory.path().join("node"),
-        "#!/bin/sh\nprintf 'v22.12.0\\n'\n",
-    );
-    write_executable(&directory.path().join("npm"), "#!/bin/sh\nexit 97\n");
 
     let output = Command::new(env!("CARGO_BIN_EXE_inline"))
         .args([
@@ -132,8 +127,8 @@ fn claude_dry_run_checks_node_auth_and_adapter_install_prerequisites() {
     assert_eq!(payload["status"], "planned");
 
     write_executable(
-        &directory.path().join("node"),
-        "#!/bin/sh\nprintf 'v20.18.0\\n'\n",
+        &directory.path().join("claude"),
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf '2.1.300 (Claude Code)\\n'; else printf '{\"loggedIn\":false}\\n'; exit 1; fi\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_inline"))
         .args([
@@ -160,7 +155,7 @@ fn claude_dry_run_checks_node_auth_and_adapter_install_prerequisites() {
         payload["error"]["message"]
             .as_str()
             .unwrap()
-            .contains("Node.js 22 or newer")
+            .contains("not authenticated")
     );
 }
 

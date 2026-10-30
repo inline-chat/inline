@@ -393,14 +393,14 @@ private struct AgentSetupHarnessResourcesMenu: View {
           guideURL: URL(string: "https://inline.chat/docs/openclaw")!,
           instructionsURL: URL(string: "https://inline.chat/docs/openclaw.md")!,
           npmPackageURL: URL(string: "https://www.npmjs.com/package/@inline-openclaw/inline")!,
-          sourceURL: URL(string: "https://github.com/inline-chat/inline/tree/main/openclaw")!
+          sourceURL: URL(string: "https://github.com/inline-chat/inline/tree/main/plugins/openclaw")!
         )
       case "hermes":
         AgentSetupHarnessResources(
           guideURL: URL(string: "https://inline.chat/docs/hermes")!,
           instructionsURL: URL(string: "https://inline.chat/docs/hermes.md")!,
           npmPackageURL: URL(string: "https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter")!,
-          sourceURL: URL(string: "https://github.com/inline-chat/inline/tree/main/hermes-agent")!
+          sourceURL: URL(string: "https://github.com/inline-chat/inline/tree/main/plugins/hermes-agent")!
         )
       default:
         AgentSetupHarnessResources(

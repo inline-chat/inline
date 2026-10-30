@@ -36,9 +36,17 @@ Restart Codex.
 
 The plugin includes the Inline skill and MCP integration.
 
+With the CLI, this installs it into Codex and Claude Code, whichever you have:
+
+```bash
+inline plugin install
+```
+
+In Claude Code, start a new session and run `/mcp` to sign in.
+
 ## Skill
 
-If you have the CLI, run:
+If you have the CLI, this installs the standalone skill for Codex:
 
 ```bash
 inline skill install

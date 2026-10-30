@@ -267,16 +267,6 @@ pub async fn setup_provider(
         output::print_json(&result, json_format)?;
     } else {
         println!("{} is ready in Inline.", result.display_name);
-        if result.provider != "codex" {
-            println!(
-                "Experimental provider: {} is not part of the Codex-only external beta.",
-                result.provider
-            );
-        } else if !cfg!(target_os = "macos") {
-            println!(
-                "Experimental platform: the Codex external beta is currently certified only on macOS."
-            );
-        }
         println!(
             "Provider: {} ({})",
             result.provider, result.provider_version
@@ -3298,7 +3288,8 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
                 (Arc::new(harness), v2::render::Vocabulary::Codex, executable)
             }
             "claude" => {
-                let executable = resolve_executable(Path::new("claude"))?;
+                let executable = provider::native_claude_executable(Some(&installation.executable))
+                    .map_err(io::Error::other)?;
                 let mut config = inline_agent_driver_claude::harness::ClaudeHarnessConfig::new(
                     executable.clone(),
                     env!("CARGO_PKG_VERSION"),

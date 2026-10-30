@@ -131,7 +131,7 @@ All `--message-id` batch selectors accept single IDs, comma lists, ascending ran
 
 User/space lookup JSON retains the existing protocol keys but returns only the requested entity list, leaving unrelated lists empty. `--user-id` read targets may initialize a missing DM through the backend. For read-only research, find an existing DM with `chats list --type dm` and use its `--chat-id`. Create a DM explicitly only when the user asks to start/contact a conversation. These lookups cover entities present in your chat catalog; they do not establish exhaustive space membership or discover every account.
 
-## Install the Codex plugin
+## Install the Codex or Claude Code plugin
 
 When the user asks to install the full Codex or Claude Code integration, use `inline plugin install`. It delegates to each detected host's plugin manager with fixed arguments and installs the Inline skill plus its OAuth MCP server; pass `--host codex` or `--host claude` to target one host. The operation is idempotent; inspect it first with `inline plugin install --dry-run`. In Claude Code, the user signs in to the `inline` server with `/mcp` in a new session. Use `inline skill install` only when the user explicitly wants the standalone skill without MCP.
 
@@ -176,6 +176,24 @@ inline bridge logs --lines 100
 ```
 
 Use `inline <command> --help` for complete command coverage and current flags. User-facing documentation is available at `https://inline.chat/docs/cli`.
+
+## Set up a local agent as an Inline bot
+
+When the user asks to bring their local agent into Inline, follow the
+[agent guide](https://inline.chat/docs/agents.md). This is separate from the
+plugin: the plugin gives an agent Inline tools, and setup makes it a bot people
+can message. The agent must be installed and signed in on this machine.
+
+```bash
+inline agents discover --json --compact
+inline agents setup --target TARGET --dry-run --non-interactive --json
+inline agents setup --target TARGET --non-interactive --json
+```
+
+Targets are `codex`, `claude`, `opencode`, `amp`, `hermes`, and `openclaw`. Use
+`--folder PATH` for a project folder; otherwise the agent works in the home
+folder. Setup is ready when it returns `status: "ready"`, then ask the user to
+message the bot and verify a reply.
 
 ## Connect an existing Hermes on a server
 

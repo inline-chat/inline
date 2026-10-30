@@ -124,7 +124,9 @@ verification repairs older installs that still contain one, so the separately
 verified host CLI is the only executable runtime. Providers without an
 Inline-owned complete lock are
 withheld from setup. The background service never downloads or updates
-adapters. Claude currently requires Node.js 22 or newer. Claude authentication
+adapters. Claude on bridge v2 runs the host `claude` directly and needs neither
+Node.js nor an adapter; rolling back to the previous bridge needs Node.js 22 or
+newer and rerunning setup with `INLINE_BRIDGE_V2=off`. Claude authentication
 is a host setup and service-restart preflight; Inline does not advertise an
 interactive terminal-auth surface, so an expired session must be repaired with
 the Claude CLI on that host before restarting the bridge.
