@@ -143,7 +143,7 @@ Current beta provider paths:
   next steps. Idle sessions retain their private process for up to 30 minutes;
   `/release` closes it immediately.
 
-The explicit Claude and Amp setup commands install only their required adapters
+When an ACP adapter is required, setup installs only that adapter
 into immutable, private, versioned bridge directories using Inline's complete
 embedded `package-lock.json` files and `npm ci`. Inline disables package scripts
 and verifies the exact manifest, complete dependency lock, adapter version,

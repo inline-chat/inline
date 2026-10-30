@@ -9,7 +9,7 @@ Release notes for Inline apps, developer tools, and integrations.
 
 ## October 30, 2026
 
-[macOS 0.2 beta, build 6338](https://public-assets.inline.chat/mac/beta/6338/Inline.dmg) · [iOS TestFlight build 1393](https://testflight.apple.com/join/FkC3f7fz) · [CLI 0.7.19](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.19)
+[macOS 0.2 beta, build 6338](https://public-assets.inline.chat/mac/beta/6338/Inline.dmg) · [iOS TestFlight build 1393](https://testflight.apple.com/join/FkC3f7fz) · [CLI 0.7.20](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.20)
 
 ### New
 
@@ -32,6 +32,8 @@ Release notes for Inline apps, developer tools, and integrations.
 
 ### Better tools and APIs for agents and hackers
 
+- [CLI](/docs/cli) **0.7.20** adds OpenCode 2 and Amp to the dedicated agent bridge, with separate sessions per chat, tool activity, settings, Stop, and restart/resume. Existing Amp users can adopt the new adapter with `inline agents setup --target amp`. Older OpenCode installations keep their existing bridge; new setups require OpenCode 2.
+- Claude Code setup no longer requires Node or npm when using its native bridge. Stop, Pause and Resume controls are consumed once, so catch-up cannot apply an old control to the next turn.
 - [CLI](/docs/cli) **0.7.19**: `inline plugin install` now adds the Inline plugin to **Claude Code** as well as Codex.
 - The CLI can now update its background agent bridge between turns, with signed releases and automatic recovery if an update fails. For an existing bridge from an older CLI, do the first upgrade and `inline bridge restart` while your agents are idle. Later managed updates wait for work to finish.
 - The CLI has an **alpha channel**. Run `inline update --channel alpha` to try new agent features early. Agent plugins install from the same channel as the CLI.

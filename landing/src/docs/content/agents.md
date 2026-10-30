@@ -100,7 +100,18 @@ Support status:
 
 Codex and Claude Code run on the native bridge (v2). Each thread has one native
 session per agent, with work state, settings, approval and question
-interactions, and controls. OpenCode and Amp keep using the previous bridge.
+interactions, and controls.
+
+OpenCode 2 and the current verified Amp adapter also use bridge v2 through ACP,
+with a separate process and session for each chat. Existing OpenCode 0.x/1.x
+installations and older Amp adapters keep their previous bridge. New OpenCode
+setups require OpenCode 2. After upgrading the CLI, existing Amp users can
+install the new adapter with `inline agents setup --target amp`.
+
+Advertised provider commands are forwarded to the current session, including
+OpenCode `/compact`. Amp explains alternatives when compaction is unavailable.
+If an older saved session cannot be resumed, its binding stays intact; retry
+or use `/new` to explicitly start a fresh conversation.
 
 Upgrading from an earlier CLI needs no setup. Existing conversations continue
 in their Codex or Claude session, or start a fresh one when that session is no
