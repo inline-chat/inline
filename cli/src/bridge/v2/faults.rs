@@ -291,6 +291,61 @@ fn spawn_work(runtime: &Runtime, cleanup: &mut Cleanup) -> crate::bridge::v2::wo
 }
 
 #[tokio::test]
+async fn service_messages_are_skipped_but_identical_human_text_still_runs() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    let mut message = MessageRecord {
+        chat_id: InlineId::new(9),
+        message_id: InlineId::new(35),
+        sender_id: InlineId::new(1),
+        timestamp: 1,
+        is_outgoing: false,
+        content: inline_client::MessageContent::Text {
+            text: "Linked from another thread".into(),
+        },
+        reply_to_message_id: None,
+        metadata: inline_client::MessageMetadata {
+            is_service: true,
+            ..Default::default()
+        },
+        transaction: None,
+    };
+    for chat_id in [9, 10, 11] {
+        runtime.own_threads.insert(chat_id, chat_id == 10);
+        runtime
+            .follows
+            .insert(chat_id, (Some(true), std::time::Instant::now()));
+        message.chat_id = InlineId::new(chat_id);
+        tokio::time::timeout(Duration::from_millis(200), runtime.on_message(&message))
+            .await
+            .expect("service events must be skipped before any native or network call")
+            .unwrap();
+        assert!(
+            runtime
+                .agent
+                .ledger
+                .get(&input_id(2, chat_id, 35, "direct"))
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert!(runtime.works.is_empty());
+    assert!(harness.opened.lock().unwrap().is_empty());
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 0);
+
+    // The fallback wording is also valid human input; only provenance
+    // distinguishes it. The skipped notice must not occupy its input ID.
+    message.chat_id = InlineId::new(10);
+    message.metadata.is_service = false;
+    message.metadata.sender_is_bot = Some(false);
+    runtime.agent.names.remember(1, "Owner".into()).await;
+    runtime.loop_roots.insert(10, 10);
+    runtime.on_message(&message).await.unwrap();
+    cleanup.tasks.push(runtime.works.remove(&10).unwrap().task);
+    until(|| harness.session.sends.load(Ordering::SeqCst) == 1).await;
+    assert!(state(&runtime, &input_id(2, 10, 35, "direct")).is_some());
+}
+
+#[tokio::test]
 async fn v1_receipts_prevent_replayed_work_after_v2_cutover_and_restart() {
     let (first, harness, mut cleanup) = fixture(false);
     let path = cleanup.dir.join("bridge.sqlite");

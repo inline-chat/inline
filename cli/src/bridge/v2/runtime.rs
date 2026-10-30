@@ -1758,6 +1758,9 @@ impl Runtime {
         }
         if message.is_outgoing
             || message.timestamp < self.config.accept_messages_after
+            // Service notices use the actor's user ID, but are not input
+            // from that person, including in a followed or owned thread.
+            || message.metadata.is_service
             || message.metadata.agent_session.is_some()
         {
             return Ok(());

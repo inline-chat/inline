@@ -1205,6 +1205,10 @@ pub struct MessageMetadata {
     /// Whether the sender is known to be a bot from the durable user record.
     #[serde(default)]
     pub sender_is_bot: Option<bool>,
+    /// Whether Inline identified this row as a service event rather than a
+    /// message composed by its attributed sender.
+    #[serde(default)]
+    pub is_service: bool,
     /// Structured text entities with their original UTF-16 ranges.
     #[serde(default)]
     pub entities: Vec<MessageEntityRecord>,

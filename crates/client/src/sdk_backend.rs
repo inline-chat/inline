@@ -5978,6 +5978,7 @@ fn message_metadata_from_proto(message: &proto::Message) -> crate::MessageMetada
         edit_timestamp: message.edit_date,
         revision: message.rev,
         sender_is_bot: None,
+        is_service: message.service_message.is_some(),
         entities: message
             .entities
             .as_ref()
@@ -6479,6 +6480,42 @@ mod tests {
                 relation: proto::AgentSessionMessageRelation::Imported as i32,
             })
         );
+    }
+
+    #[test]
+    fn message_projection_distinguishes_service_messages_from_human_text() {
+        let mut message = proto::Message {
+            from_id: 1,
+            message: Some("Linked from another thread".into()),
+            ..Default::default()
+        };
+        assert!(!message_metadata_from_proto(&message).is_service);
+
+        // The actor and fallback text do not make any service event input.
+        // An unknown event still has the outer service-message field.
+        for event in [
+            Some(proto::message_service::Event::ThreadBacklink(
+                proto::MessageServiceThreadBacklink {
+                    source_chat_id: Some(10),
+                    source_title: Some("another thread".into()),
+                },
+            )),
+            Some(proto::message_service::Event::PinnedMessage(
+                proto::MessageServicePinnedMessage {
+                    message_id: Some(5),
+                },
+            )),
+            Some(proto::message_service::Event::GridTranscript(
+                proto::MessageServiceGridTranscript::default(),
+            )),
+            None,
+        ] {
+            message.service_message = Some(proto::MessageService { event });
+            assert!(message_metadata_from_proto(&message).is_service);
+        }
+
+        let legacy: crate::MessageMetadata = serde_json::from_str("{}").unwrap();
+        assert!(!legacy.is_service);
     }
 
     #[test]
