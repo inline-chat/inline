@@ -433,6 +433,15 @@ impl HarnessDriver for CodexHarness {
                     .unwrap_or_default();
             }
             catalog.folders = project_folders(&connection).await;
+            if let Ok(usage) = connection
+                .request(Request {
+                    method: "account/rateLimits/read",
+                    params: json!({}),
+                })
+                .await
+            {
+                catalog.usage = crate::protocol::normalize_usage_limits(&usage);
+            }
             Ok(catalog)
         })
     }

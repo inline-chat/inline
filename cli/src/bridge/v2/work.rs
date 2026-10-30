@@ -125,19 +125,7 @@ impl Agent {
     /// Keeps the latest usage a session reported. Windows merge by name and
     /// length: Claude reports its 5-hour and weekly limits one at a time.
     fn record_usage(&self, chat_id: i64, usage: &UsageUpdate) {
-        if !usage.limits.is_empty()
-            && let Ok(mut windows) = self.usage.lock()
-        {
-            for window in &usage.limits {
-                match windows.iter().position(|known| {
-                    known.label == window.label && known.window_minutes == window.window_minutes
-                }) {
-                    Some(index) => windows[index] = window.clone(),
-                    None if windows.len() < 8 => windows.push(window.clone()),
-                    None => {}
-                }
-            }
-        }
+        self.record_limits(&usage.limits);
         let used = usage.last.map(|last| last.total);
         if (used.is_some() || usage.context_window.is_some())
             && let Ok(mut contexts) = self.context.lock()
@@ -148,6 +136,22 @@ impl Agent {
             }
             if let Some(window) = usage.context_window {
                 context.window = window;
+            }
+        }
+    }
+
+    pub(super) fn record_limits(&self, limits: &[inline_agent_bridge::DriverUsageWindow]) {
+        if !limits.is_empty()
+            && let Ok(mut windows) = self.usage.lock()
+        {
+            for window in limits {
+                match windows.iter().position(|known| {
+                    known.label == window.label && known.window_minutes == window.window_minutes
+                }) {
+                    Some(index) => windows[index] = window.clone(),
+                    None if windows.len() < 8 => windows.push(window.clone()),
+                    None => {}
+                }
             }
         }
     }

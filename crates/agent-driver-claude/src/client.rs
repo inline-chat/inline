@@ -568,6 +568,10 @@ impl ClaudeClient {
             .await
     }
 
+    pub async fn get_usage(&self, timeout: Duration) -> Result<Value, ControlError> {
+        self.request(request::get_usage(), timeout).await
+    }
+
     pub async fn mcp_status(&self) -> Result<Value, ControlError> {
         self.request(request::mcp_status(), self.timeout()).await
     }

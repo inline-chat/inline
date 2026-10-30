@@ -46,6 +46,7 @@ use crate::version::{ClaudeVersion, PASSIVE_MIN, THINKING_DISPLAY_MIN, capabilit
 
 const PROVIDER: &str = "claude";
 const CATALOG_TTL: Duration = Duration::from_secs(300);
+const USAGE_TIMEOUT: Duration = Duration::from_secs(5);
 const SESSION_PAGE_SIZE: usize = 50;
 
 /// How this machine's Claude is run.
@@ -493,8 +494,10 @@ impl HarnessDriver for ClaudeHarness {
             )
             .await
             .map_err(|error| DriverError::Unavailable(error.to_string()))?;
+            // Best effort: API-key accounts and older CLIs have no plan usage.
+            let usage = client.get_usage(USAGE_TIMEOUT).await;
             client.close().await;
-            let catalog = catalog_from(&init, &self.permission_modes());
+            let mut catalog = catalog_from(&init, &self.permission_modes());
             self.state().catalogs.insert(
                 folder,
                 CachedCatalog {
@@ -502,6 +505,10 @@ impl HarnessDriver for ClaudeHarness {
                     catalog: catalog.clone(),
                 },
             );
+            // Not cached: a later listing must not repeat an old reading.
+            if let Ok(usage) = usage {
+                catalog.usage = super::mapper::plan_usage(&usage);
+            }
             Ok(catalog)
         })
     }
@@ -789,6 +796,7 @@ fn catalog_from(init: &InitializeResponse, permission_modes: &[String]) -> Catal
         // Claude keeps sessions per folder but no list of folders; reading
         // them back means reading every session file.
         folders: Vec::new(),
+        usage: Vec::new(),
     }
 }
 

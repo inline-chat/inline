@@ -14,7 +14,8 @@ use super::{
     SettingsChange, SetupReason,
 };
 use crate::{
-    DriverCommand, DriverError, DriverFuture, DriverModelOption, DriverSettingOption, ProviderId,
+    DriverCommand, DriverError, DriverFuture, DriverModelOption, DriverSettingOption,
+    DriverUsageWindow, ProviderId,
     ProviderSessionId, SessionCheckpoint, SessionPageCursor, TurnId,
 };
 
@@ -167,6 +168,9 @@ pub struct Catalog {
     /// projects). A session still opens in any folder.
     #[serde(default)]
     pub folders: Vec<CatalogFolder>,
+    /// Account usage read while listing, so it shows before a first turn.
+    #[serde(default)]
+    pub usage: Vec<DriverUsageWindow>,
 }
 
 /// A folder the harness knows, under its own name.

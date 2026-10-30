@@ -211,6 +211,9 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   @Published private(set) var agentChoicesLoadFailed = false
   @Published private(set) var selectedAgentChoiceID: String?
   @Published private(set) var agentCatalog: AgentConfigurationCatalogSnapshot?
+  /// Reads the selected Agent's account usage through its DM, as there is no
+  /// thread yet.
+  @Published private(set) var agentUsage: ComposeAgentChainModel?
   @Published private(set) var selectedProjectID: String?
   @Published private(set) var selectedModelID: String?
   @Published private(set) var selectedReasoningID: String?
@@ -588,6 +591,15 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     // The selection establishes the Chat's Agent target immediately. A catalog
     // is optional and only controls whether configuration pickers appear.
     selectedAgentChoiceID = choice.id
+    let usage = ComposeAgentChainModel(
+      peer: .user(id: choice.bot.id),
+      chatID: nil,
+      peerUser: InlineKit.User(from: choice.bot),
+      database: dependencies.database,
+      updateAgentContext: { _ in }
+    )
+    usage.start()
+    agentUsage = usage
     let saved = preferences.agentConfiguration(for: choice)
     selectedProjectID = saved.projectID
     selectedModelID = saved.modelID
@@ -638,6 +650,8 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
   private func clearAgentSelection() {
     selectedAgentChoiceID = nil
+    agentUsage?.stop()
+    agentUsage = nil
     clearAgentConfiguration()
   }
 
@@ -1475,6 +1489,10 @@ private struct AllChatsComposeAccessoryView: View {
       }
 
       Spacer(minLength: 0)
+
+      if #available(macOS 26.0, *), let usage = model.agentUsage {
+        ComposeAgentUsageButton(model: usage, showsContext: false)
+      }
 
       if let models = model.agentCatalog?.models, let title = model.modelTitle {
         AgentModelConfigurationMenu(

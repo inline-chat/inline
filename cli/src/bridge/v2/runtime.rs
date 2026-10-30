@@ -1108,6 +1108,7 @@ impl Runtime {
             .await
         {
             Ok(catalog) => {
+                self.agent.record_limits(&catalog.usage);
                 self.catalog = Some((tokio::time::Instant::now(), catalog.clone()));
                 catalog
             }

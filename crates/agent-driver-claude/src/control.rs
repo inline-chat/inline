@@ -394,6 +394,11 @@ pub mod request {
         json!({"subtype": "get_context_usage"})
     }
 
+    /// Skips the transcript scan a usage meter does not need.
+    pub fn get_usage() -> Value {
+        json!({"subtype": "get_usage", "skip_behaviors": true})
+    }
+
     pub fn mcp_status() -> Value {
         json!({"subtype": "mcp_status"})
     }
@@ -449,10 +454,6 @@ pub mod request {
 
     pub fn list_models() -> Value {
         json!({"subtype": "list_models"})
-    }
-
-    pub fn get_usage() -> Value {
-        json!({"subtype": "get_usage"})
     }
 
     pub fn get_session_cost() -> Value {

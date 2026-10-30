@@ -1392,6 +1392,7 @@ name = "inline-agent-driver-claude"
 version = "0.7.19-alpha.9"
 dependencies = [
  "base64 0.22.1",
+ "chrono",
  "futures-util",
  "inline-agent-bridge",
  "libc",

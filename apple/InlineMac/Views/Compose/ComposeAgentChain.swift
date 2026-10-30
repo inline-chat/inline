@@ -90,14 +90,21 @@ struct ComposeAgentChainBar: View {
 }
 
 /// A small ring for how full this thread's context is, with the numbers in
-/// its tooltip. Clicking it shows the account's usage limits.
+/// its tooltip. Clicking it shows the account's usage limits. With no thread
+/// yet there is no context, so the ring follows the most-used limit.
 @available(macOS 26.0, *)
-private struct ComposeAgentUsageButton: View {
+struct ComposeAgentUsageButton: View {
   @ObservedObject var model: ComposeAgentChainModel
+  var showsContext = true
   @State private var isShowingUsage = false
 
+  private var mostUsedLimit: Int? {
+    showsContext ? nil : model.usageWindows.map(\.usedPercent).max()
+  }
+
   var body: some View {
-    let fill = model.contextFill
+    let fill = showsContext ? model.contextFill : nil
+    let fraction = fill?.fraction ?? mostUsedLimit.map { Double($0) / 100 }
     Button {
       model.prepareUsage()
       isShowingUsage.toggle()
@@ -105,11 +112,11 @@ private struct ComposeAgentUsageButton: View {
       ZStack {
         Circle()
           .stroke(.quaternary, lineWidth: 2)
-        if let fill {
+        if let fraction {
           Circle()
-            .trim(from: 0, to: fill.fraction)
+            .trim(from: 0, to: fraction)
             .stroke(
-              fill.fraction >= 0.9 ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary),
+              fraction >= 0.9 ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary),
               style: StrokeStyle(lineWidth: 2, lineCap: .round)
             )
             .rotationEffect(.degrees(-90))
@@ -123,13 +130,14 @@ private struct ComposeAgentUsageButton: View {
     .inlineTooltip(
       verbatim: fill.map { "Context window: \(Int(($0.fraction * 100).rounded()))% full" } ?? "Usage",
       description: fill.map { "\(ComposeAgentTokens.text($0.used)) / \(ComposeAgentTokens.text($0.window)) tokens used" }
+        ?? mostUsedLimit.map { "Your most-used limit is at \($0)%." }
         ?? "Show usage limits.",
       placement: .above
     )
     .accessibilityLabel("Usage")
     .accessibilityValue(fill.map { "Context \(Int(($0.fraction * 100).rounded())) percent full" } ?? "")
     .popover(isPresented: $isShowingUsage, arrowEdge: .bottom) {
-      ComposeAgentUsagePopover(model: model)
+      ComposeAgentUsagePopover(model: model, showsContext: showsContext)
     }
   }
 }
@@ -138,6 +146,7 @@ private struct ComposeAgentUsageButton: View {
 @available(macOS 26.0, *)
 private struct ComposeAgentUsagePopover: View {
   @ObservedObject var model: ComposeAgentChainModel
+  let showsContext: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -153,7 +162,8 @@ private struct ComposeAgentUsagePopover: View {
   @ViewBuilder
   private var content: some View {
     let windows = model.usageWindows
-    if !windows.isEmpty || model.contextFill != nil {
+    let contextFill = showsContext ? model.contextFill : nil
+    if !windows.isEmpty || contextFill != nil {
       ForEach(windows) { window in
         track(
           title: window.title,
@@ -162,7 +172,7 @@ private struct ComposeAgentUsagePopover: View {
           fraction: Double(window.usedPercent) / 100
         )
       }
-      if let fill = model.contextFill {
+      if let fill = contextFill {
         if !windows.isEmpty { Divider() }
         track(
           title: String(localized: "Context window"),

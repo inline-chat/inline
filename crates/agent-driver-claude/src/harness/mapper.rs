@@ -1337,29 +1337,37 @@ fn result_usage(result: &ResultMessage) -> Option<UsageUpdate> {
 }
 
 fn rate_limit(info: &Value) -> Vec<Event> {
-    let label = info["rateLimitType"]
-        .as_str()
-        .unwrap_or("rate_limit")
-        .to_string();
-    let window_minutes = match label.as_str() {
-        "five_hour" => Some(300),
-        label if label.starts_with("seven_day") => Some(10_080),
-        _ => None,
-    };
-    let utilization = info["utilization"].as_f64();
     let resets_at = info["resetsAt"].as_i64();
-    let mut events = vec![Event::Usage {
-        usage: UsageUpdate {
-            limits: vec![DriverUsageWindow {
+    // Every event carries the 5-hour and weekly windows together; the top
+    // level only names the limit closest to its cap, and its utilization is
+    // absent unless that limit is near it.
+    let mut limits: Vec<DriverUsageWindow> = info["unifiedWindows"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(label, window)| {
+            Some(usage_window(
                 label,
-                used_percent: utilization
-                    .map_or(0, |value| (value * 100.0).round().clamp(0.0, 100.0) as u8),
-                window_minutes,
-                resets_at,
-            }],
-            ..UsageUpdate::default()
-        },
-    }];
+                window["utilization"].as_f64()? * 100.0,
+                window["resetsAt"].as_i64(),
+            ))
+        })
+        .collect();
+    let label = info["rateLimitType"].as_str().unwrap_or("rate_limit");
+    if let Some(utilization) = info["utilization"].as_f64()
+        && !limits.iter().any(|window| window.label == label)
+    {
+        limits.push(usage_window(label, utilization * 100.0, resets_at));
+    }
+    let mut events = Vec::new();
+    if !limits.is_empty() {
+        events.push(Event::Usage {
+            usage: UsageUpdate {
+                limits,
+                ..UsageUpdate::default()
+            },
+        });
+    }
     if info["status"] == "rejected" {
         events.push(Event::State {
             state: RunState::Waiting {
@@ -1368,6 +1376,38 @@ fn rate_limit(info: &Value) -> Vec<Event> {
         });
     }
     events
+}
+
+fn usage_window(label: &str, percent: f64, resets_at: Option<i64>) -> DriverUsageWindow {
+    DriverUsageWindow {
+        label: label.to_string(),
+        used_percent: percent.round().clamp(0.0, 100.0) as u8,
+        window_minutes: match label {
+            "five_hour" => Some(300),
+            label if label.starts_with("seven_day") => Some(10_080),
+            _ => None,
+        },
+        resets_at,
+    }
+}
+
+/// The plan limits in a `get_usage` answer, which unlike `rate_limit_event`
+/// reads percents as 0-100 and resets as ISO 8601.
+pub(crate) fn plan_usage(response: &Value) -> Vec<DriverUsageWindow> {
+    ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"]
+        .into_iter()
+        .filter_map(|label| {
+            let window = &response["rate_limits"][label];
+            Some(usage_window(
+                label,
+                window["utilization"].as_f64()?,
+                window["resets_at"]
+                    .as_str()
+                    .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
+                    .map(|time| time.timestamp()),
+            ))
+        })
+        .collect()
 }
 
 fn turn_outcome(result: &ResultMessage) -> TurnOutcome {
@@ -1589,6 +1629,64 @@ mod tests {
 
     fn message(value: Value) -> CliMessage {
         CliMessage::from_value(value)
+    }
+
+    #[test]
+    fn rate_limit_events_report_both_windows_at_their_real_usage() {
+        let events = rate_limit(&json!({
+            "status": "allowed",
+            "rateLimitType": "five_hour",
+            "resetsAt": 1793369400,
+            "unifiedWindows": {
+                "five_hour": {"utilization": 0.13, "resetsAt": 1793369400},
+                "seven_day": {"utilization": 0.54, "resetsAt": 1793685600}
+            }
+        }));
+        let [Event::Usage { usage }] = events.as_slice() else {
+            panic!("{events:?}");
+        };
+        let readings: Vec<_> = usage
+            .limits
+            .iter()
+            .map(|window| {
+                (
+                    window.label.as_str(),
+                    window.used_percent,
+                    window.window_minutes,
+                    window.resets_at,
+                )
+            })
+            .collect();
+        assert_eq!(
+            readings,
+            [
+                ("five_hour", 13, Some(300), Some(1793369400)),
+                ("seven_day", 54, Some(10_080), Some(1793685600)),
+            ]
+        );
+    }
+
+    #[test]
+    fn rate_limit_events_without_a_reading_invent_no_usage() {
+        assert!(
+            rate_limit(&json!({"status": "allowed", "rateLimitType": "five_hour"})).is_empty()
+        );
+    }
+
+    #[test]
+    fn plan_usage_reads_the_get_usage_answer() {
+        let windows = plan_usage(&json!({"rate_limits": {
+            "five_hour": {"utilization": 14, "resets_at": "2026-10-30T14:10:00.012432+00:00"},
+            "seven_day": {"utilization": 54, "resets_at": "2026-11-03T06:00:00+00:00"},
+            "seven_day_opus": null,
+            "extra_usage": {"utilization": null}
+        }}));
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].used_percent, 14);
+        assert_eq!(windows[0].window_minutes, Some(300));
+        assert_eq!(windows[1].label, "seven_day");
+        assert_eq!(windows[1].resets_at, Some(1793685600));
+        assert!(plan_usage(&json!({"rate_limits": null})).is_empty());
     }
 
     #[test]
