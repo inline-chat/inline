@@ -73,6 +73,8 @@ public enum ComposeThreadLinkEditing {
     let range = clamped(selectedRange, length: mutable.length)
     let affectedRanges = affectedThreadLinkRanges(in: mutable, changeRange: range)
     stripThreadLinks(in: mutable, ranges: affectedRanges, textColor: textColor)
+    let affectedMentions = ComposeEntityEditing.affectedMentionRanges(in: mutable, changeRange: range)
+    ComposeEntityEditing.stripMentions(in: mutable, ranges: affectedMentions, textColor: textColor)
 
     let plain = NSAttributedString(
       string: text,
@@ -97,6 +99,8 @@ public enum ComposeThreadLinkEditing {
     let range = clamped(selectedRange, length: mutable.length)
     let affectedRanges = affectedThreadLinkRanges(in: mutable, changeRange: range)
     stripThreadLinks(in: mutable, ranges: affectedRanges, textColor: textColor)
+    let affectedMentions = ComposeEntityEditing.affectedMentionRanges(in: mutable, changeRange: range)
+    ComposeEntityEditing.stripMentions(in: mutable, ranges: affectedMentions, textColor: textColor)
     mutable.replaceCharacters(in: range, with: text)
     return (
       NSAttributedString(attributedString: mutable),

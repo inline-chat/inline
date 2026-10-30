@@ -67,6 +67,55 @@ struct ComposeTextPasteboardTests {
     #expect(pasted.attribute(.mentionGroupId, at: 8, effectiveRange: nil) as? Int64 == 51)
   }
 
+  @Test("Cutting a whole mention and part of another clears the leftover")
+  func cutClearsPartialMention() {
+    let source = draft()
+    let result = ComposeThreadLinkEditing.insertAttributedText(
+      NSAttributedString(),
+      into: source,
+      selectedRange: NSRange(location: 5, length: 13),
+      textColor: .labelColor
+    )
+    #expect(result.attributedString.string == "cc @D ok")
+    #expect(result.attributedString.attribute(.mentionUserId, at: 3, effectiveRange: nil) == nil)
+    #expect(result.attributedString.attribute(.mentionAgentId, at: 3, effectiveRange: nil) == nil)
+    #expect(source.attribute(.mentionUserId, at: 3, effectiveRange: nil) as? Int64 == 41)
+
+    let sent = ProcessEntities.fromAttributedString(result.attributedString, parseMarkdown: false)
+    #expect(!sent.entities.entities.contains { $0.type == .mention })
+  }
+
+  @Test("Pasting a mention over part of another keeps only the untouched identities")
+  func pasteClearsPartialMention() {
+    let pasted = NSMutableAttributedString(string: "@Sam")
+    pasted.addAttribute(.mentionUserId, value: Int64(61), range: NSRange(location: 0, length: 4))
+    let result = ComposeThreadLinkEditing.insertAttributedText(
+      pasted,
+      into: draft(),
+      selectedRange: NSRange(location: 5, length: 2),
+      textColor: .labelColor
+    ).attributedString
+    #expect(result.string == "cc @D@Sama and @team ok")
+    #expect(result.attribute(.mentionUserId, at: 3, effectiveRange: nil) == nil)
+    #expect(result.attribute(.mentionUserId, at: 5, effectiveRange: nil) as? Int64 == 61)
+    #expect(result.attribute(.mentionUserId, at: 9, effectiveRange: nil) == nil)
+    #expect(result.attribute(.mentionGroupId, at: 15, effectiveRange: nil) as? Int64 == 51)
+  }
+
+  @Test("Plain text pasted inside a mention clears it and leaves other mentions")
+  func plainPasteClearsPartialMention() {
+    let result = ComposeThreadLinkEditing.insertPlainText(
+      "x",
+      into: draft(),
+      selectedRange: NSRange(location: 5, length: 0),
+      typingAttributes: [:],
+      textColor: .labelColor
+    ).attributedString
+    #expect(result.string == "cc @Dxena and @team ok")
+    #expect(result.attribute(.mentionUserId, at: 3, effectiveRange: nil) == nil)
+    #expect(result.attribute(.mentionGroupId, at: 14, effectiveRange: nil) as? Int64 == 51)
+  }
+
   @Test("Unknown targets paste as plain text")
   func unknownTargets() throws {
     let pasteboard = NSPasteboard.withUniqueName()

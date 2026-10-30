@@ -227,6 +227,7 @@ class ComposeTextView: UITextView {
 
   private func replaceSelection(with replacement: NSAttributedString, actionName: String) {
     willChangePastedLinks(in: selectedRange, replacement: replacement.string)
+    composeView?.draftManager.invalidateLoadedEntities(overlapping: selectedRange)
     let result = ComposeThreadLinkEditing.insertAttributedText(
       replacement,
       into: attributedText ?? NSAttributedString(),
@@ -277,6 +278,7 @@ class ComposeTextView: UITextView {
     {
       let replacedRange = selectedRange
       willChangePastedLinks(in: replacedRange, replacement: string)
+      composeView?.draftManager.invalidateLoadedEntities(overlapping: replacedRange)
       let pasteResult = ComposeThreadLinkEditing.insertPlainText(
         string,
         into: attributedText ?? NSAttributedString(),
