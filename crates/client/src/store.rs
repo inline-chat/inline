@@ -6052,6 +6052,7 @@ mod tests {
             edit_timestamp: Some(13),
             revision: Some(2),
             sender_is_bot: Some(false),
+            is_service: true,
             entities: vec![crate::MessageEntityRecord {
                 kind: "TYPE_MENTION".to_string(),
                 offset: 0,
