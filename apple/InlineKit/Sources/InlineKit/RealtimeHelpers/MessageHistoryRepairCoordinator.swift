@@ -28,9 +28,45 @@ public final class MessageHistoryRepairCoordinator {
     let older: Bool
   }
 
+  private static let latestRetryDelays: [Duration] = [.seconds(1), .seconds(5)]
+
   private var pageTasks: [PageRequest: Task<Outcome, Error>] = [:]
+  private var latestTasks: [Peer: Task<Void, Never>] = [:]
 
   private init() {}
+
+  /// Fetches a chat's newest page. A page can fail or be superseded by a send
+  /// in this chat with nothing else to ask for it, so it is tried again here.
+  public func loadLatest(peer: Peer) async {
+    await loadLatest(peer: peer, retryDelays: Self.latestRetryDelays) {
+      _ = try await Api.realtime.send(.getChatHistory(peer: peer))
+    }
+  }
+
+  func loadLatest(
+    peer: Peer,
+    retryDelays: [Duration],
+    fetch: @escaping @Sendable () async throws -> Void
+  ) async {
+    if let task = latestTasks[peer] {
+      return await task.value
+    }
+
+    let task = Task { @MainActor in
+      var remainingDelays = retryDelays[...]
+      while true {
+        do {
+          return try await fetch()
+        } catch {
+          guard let delay = remainingDelays.popFirst() else { return }
+          try? await Task.sleep(for: delay)
+        }
+      }
+    }
+    latestTasks[peer] = task
+    defer { latestTasks[peer] = nil }
+    await task.value
+  }
 
   /// The caller owns cancellation and presentation. Unlike an exact-ID lookup,
   /// this prepares neighboring rows and records their history coverage together.

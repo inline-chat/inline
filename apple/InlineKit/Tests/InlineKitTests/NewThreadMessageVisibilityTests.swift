@@ -104,9 +104,10 @@ struct NewThreadMessageVisibilityTests {
       try MessageHistoryCoverageStore.invalidateAll(db, chatId: 1)
     }
     for id in Int64(100) ... 102 { _ = try await fixture.insert(messageID: id) }
-    // Consecutive cached rows stay visible before admission, while the old
-    // rendered row remains retained across an uncertified gap.
-    try await fixture.reload(model, expecting: [1, 100, 101, 102])
+    if anchored { model.setHistoryAnchor(1) }
+    // Consecutive cached rows stay visible before admission. The chat never
+    // shows the gap: only the stretch around the anchor or the tail remains.
+    try await fixture.reload(model, expecting: anchored ? [1] : [100, 101, 102])
     #expect(!model.historyCoverage.isCertifiedContinuation(between: 1, and: 100))
     #expect(!model.historyCoverage.isCertifiedContinuation(between: 100, and: 101))
     #expect(!model.historyCoverage.isCertifiedMessage(100))
@@ -121,7 +122,6 @@ struct NewThreadMessageVisibilityTests {
         ])
       }
     }
-    if anchored { model.setHistoryAnchor(1) }
     let pending = try await fixture.insert(messageID: -456, dateOffset: 103)
     fixture.publisher.publisher.send(.add(.init(messages: [pending], peer: .thread(id: 1))))
 
@@ -149,16 +149,17 @@ struct NewThreadMessageVisibilityTests {
       #expect(try MessageHistoryCoverageStore.intersects(db, chatId: 1, lowerId: 100,
                                                       upperId: MessageHistoryHole.positiveMessageIDMax) == false)
     }
-    // The pending send was shown before the reload and stays in either window.
-    try await fixture.reload(model, expecting: anchored ? [1, -456] : [100, 101, 102, -456])
+    // The pending send belongs to the tail, so a window anchored away from it
+    // leaves it to paging.
+    try await fixture.reload(model, expecting: anchored ? [1] : [100, 101, 102, -456])
     #expect(model.historyCoverage.isAtCertifiedLiveEnd == !anchored)
     #expect(!model.historyCoverage.isCertifiedContinuation(between: 1, and: 100))
     #expect(model.historyCoverage.certifiedReadMaxID(after: 0, through: 102) == nil)
     if !anchored {
       #expect(!model.canLoadOlderFromLocal)
       #expect(model.oldestLoadedMessageId == 100)
+      #expect(model.messages.first(where: { $0.message.messageId == -456 })?.id == pending.id)
     }
-    #expect(model.messages.first(where: { $0.message.messageId == -456 })?.id == pending.id)
   }
 
   @Test("A live publication behind a reload reconciles deletion, edit and optimistic ID confirmation",

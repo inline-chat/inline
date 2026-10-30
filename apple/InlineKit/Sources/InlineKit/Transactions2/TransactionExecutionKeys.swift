@@ -16,6 +16,12 @@ extension TransactionExecutionKey {
     }
   }
 
+  /// Orders read-state changes for one conversation. These never touch message
+  /// rows, so unlike `chatMutation` they don't hold back history pages.
+  static func readState(_ peer: Peer) -> TransactionExecutionKey {
+    TransactionExecutionKey(namespace: "chat-read-state", value: peer.toString())
+  }
+
   static func spaceMutation(spaceID: Int64) -> TransactionExecutionKey {
     TransactionExecutionKey(namespace: "space-mutation", value: String(spaceID))
   }

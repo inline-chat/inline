@@ -1226,14 +1226,6 @@ class MessageListAppKit: NSViewController {
     guard !earlier.message.isServiceMessage, !later.message.isServiceMessage else { return false }
     guard earlier.message.fromId == later.message.fromId else { return false }
 
-    let earlierID = earlier.message.messageId
-    let laterID = later.message.messageId
-    if earlierID > 0, laterID > 0,
-       !chatRows.isCertifiedHistoryContinuation(between: earlierID, and: laterID)
-    {
-      return false
-    }
-
     let gapSeconds = later.message.date.timeIntervalSince(earlier.message.date)
     guard gapSeconds <= 300 else { return false }
 
