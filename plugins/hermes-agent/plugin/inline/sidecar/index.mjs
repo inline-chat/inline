@@ -18,7 +18,7 @@ var __toESM = (mod, isNodeMode, target) => {
       return cached;
   }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
   if (mod && typeof mod === "object" || typeof mod === "function") {
     for (let key of __getOwnPropNames(mod))
       if (!__hasOwnProp.call(to, key))
@@ -189,38 +189,38 @@ var require_binary_format_contract = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.WireType = exports.mergeBinaryOptions = exports.UnknownFieldHandler = undefined;
   var UnknownFieldHandler;
-  (function(UnknownFieldHandler2) {
-    UnknownFieldHandler2.symbol = Symbol.for("protobuf-ts/unknown");
-    UnknownFieldHandler2.onRead = (typeName, message, fieldNo, wireType, data) => {
-      let container = is(message) ? message[UnknownFieldHandler2.symbol] : message[UnknownFieldHandler2.symbol] = [];
+  (function(UnknownFieldHandler) {
+    UnknownFieldHandler.symbol = Symbol.for("protobuf-ts/unknown");
+    UnknownFieldHandler.onRead = (typeName, message, fieldNo, wireType, data) => {
+      let container = is(message) ? message[UnknownFieldHandler.symbol] : message[UnknownFieldHandler.symbol] = [];
       container.push({ no: fieldNo, wireType, data });
     };
-    UnknownFieldHandler2.onWrite = (typeName, message, writer) => {
-      for (let { no, wireType, data } of UnknownFieldHandler2.list(message))
+    UnknownFieldHandler.onWrite = (typeName, message, writer) => {
+      for (let { no, wireType, data } of UnknownFieldHandler.list(message))
         writer.tag(no, wireType).raw(data);
     };
-    UnknownFieldHandler2.list = (message, fieldNo) => {
+    UnknownFieldHandler.list = (message, fieldNo) => {
       if (is(message)) {
-        let all = message[UnknownFieldHandler2.symbol];
+        let all = message[UnknownFieldHandler.symbol];
         return fieldNo ? all.filter((uf) => uf.no == fieldNo) : all;
       }
       return [];
     };
-    UnknownFieldHandler2.last = (message, fieldNo) => UnknownFieldHandler2.list(message, fieldNo).slice(-1)[0];
-    const is = (message) => message && Array.isArray(message[UnknownFieldHandler2.symbol]);
+    UnknownFieldHandler.last = (message, fieldNo) => UnknownFieldHandler.list(message, fieldNo).slice(-1)[0];
+    const is = (message) => message && Array.isArray(message[UnknownFieldHandler.symbol]);
   })(UnknownFieldHandler = exports.UnknownFieldHandler || (exports.UnknownFieldHandler = {}));
   function mergeBinaryOptions(a, b) {
     return Object.assign(Object.assign({}, a), b);
   }
   exports.mergeBinaryOptions = mergeBinaryOptions;
   var WireType;
-  (function(WireType2) {
-    WireType2[WireType2["Varint"] = 0] = "Varint";
-    WireType2[WireType2["Bit64"] = 1] = "Bit64";
-    WireType2[WireType2["LengthDelimited"] = 2] = "LengthDelimited";
-    WireType2[WireType2["StartGroup"] = 3] = "StartGroup";
-    WireType2[WireType2["EndGroup"] = 4] = "EndGroup";
-    WireType2[WireType2["Bit32"] = 5] = "Bit32";
+  (function(WireType) {
+    WireType[WireType["Varint"] = 0] = "Varint";
+    WireType[WireType["Bit64"] = 1] = "Bit64";
+    WireType[WireType["LengthDelimited"] = 2] = "LengthDelimited";
+    WireType[WireType["StartGroup"] = 3] = "StartGroup";
+    WireType[WireType["EndGroup"] = 4] = "EndGroup";
+    WireType[WireType["Bit32"] = 5] = "Bit32";
   })(WireType = exports.WireType || (exports.WireType = {}));
 });
 
@@ -967,34 +967,34 @@ var require_reflection_info = __commonJS(function(exports) {
   exports.readMessageOption = exports.readFieldOption = exports.readFieldOptions = exports.normalizeFieldInfo = exports.RepeatType = exports.LongType = exports.ScalarType = undefined;
   var lower_camel_case_1 = require_lower_camel_case();
   var ScalarType;
-  (function(ScalarType2) {
-    ScalarType2[ScalarType2["DOUBLE"] = 1] = "DOUBLE";
-    ScalarType2[ScalarType2["FLOAT"] = 2] = "FLOAT";
-    ScalarType2[ScalarType2["INT64"] = 3] = "INT64";
-    ScalarType2[ScalarType2["UINT64"] = 4] = "UINT64";
-    ScalarType2[ScalarType2["INT32"] = 5] = "INT32";
-    ScalarType2[ScalarType2["FIXED64"] = 6] = "FIXED64";
-    ScalarType2[ScalarType2["FIXED32"] = 7] = "FIXED32";
-    ScalarType2[ScalarType2["BOOL"] = 8] = "BOOL";
-    ScalarType2[ScalarType2["STRING"] = 9] = "STRING";
-    ScalarType2[ScalarType2["BYTES"] = 12] = "BYTES";
-    ScalarType2[ScalarType2["UINT32"] = 13] = "UINT32";
-    ScalarType2[ScalarType2["SFIXED32"] = 15] = "SFIXED32";
-    ScalarType2[ScalarType2["SFIXED64"] = 16] = "SFIXED64";
-    ScalarType2[ScalarType2["SINT32"] = 17] = "SINT32";
-    ScalarType2[ScalarType2["SINT64"] = 18] = "SINT64";
+  (function(ScalarType) {
+    ScalarType[ScalarType["DOUBLE"] = 1] = "DOUBLE";
+    ScalarType[ScalarType["FLOAT"] = 2] = "FLOAT";
+    ScalarType[ScalarType["INT64"] = 3] = "INT64";
+    ScalarType[ScalarType["UINT64"] = 4] = "UINT64";
+    ScalarType[ScalarType["INT32"] = 5] = "INT32";
+    ScalarType[ScalarType["FIXED64"] = 6] = "FIXED64";
+    ScalarType[ScalarType["FIXED32"] = 7] = "FIXED32";
+    ScalarType[ScalarType["BOOL"] = 8] = "BOOL";
+    ScalarType[ScalarType["STRING"] = 9] = "STRING";
+    ScalarType[ScalarType["BYTES"] = 12] = "BYTES";
+    ScalarType[ScalarType["UINT32"] = 13] = "UINT32";
+    ScalarType[ScalarType["SFIXED32"] = 15] = "SFIXED32";
+    ScalarType[ScalarType["SFIXED64"] = 16] = "SFIXED64";
+    ScalarType[ScalarType["SINT32"] = 17] = "SINT32";
+    ScalarType[ScalarType["SINT64"] = 18] = "SINT64";
   })(ScalarType = exports.ScalarType || (exports.ScalarType = {}));
   var LongType;
-  (function(LongType2) {
-    LongType2[LongType2["BIGINT"] = 0] = "BIGINT";
-    LongType2[LongType2["STRING"] = 1] = "STRING";
-    LongType2[LongType2["NUMBER"] = 2] = "NUMBER";
+  (function(LongType) {
+    LongType[LongType["BIGINT"] = 0] = "BIGINT";
+    LongType[LongType["STRING"] = 1] = "STRING";
+    LongType[LongType["NUMBER"] = 2] = "NUMBER";
   })(LongType = exports.LongType || (exports.LongType = {}));
   var RepeatType;
-  (function(RepeatType2) {
-    RepeatType2[RepeatType2["NO"] = 0] = "NO";
-    RepeatType2[RepeatType2["PACKED"] = 1] = "PACKED";
-    RepeatType2[RepeatType2["UNPACKED"] = 2] = "UNPACKED";
+  (function(RepeatType) {
+    RepeatType[RepeatType["NO"] = 0] = "NO";
+    RepeatType[RepeatType["PACKED"] = 1] = "PACKED";
+    RepeatType[RepeatType["UNPACKED"] = 2] = "UNPACKED";
   })(RepeatType = exports.RepeatType || (exports.RepeatType = {}));
   function normalizeFieldInfo(field) {
     var _a, _b, _c, _d;
@@ -1567,8 +1567,8 @@ var require_reflection_json_reader = __commonJS(function(exports) {
             }
             try {
               encodeURIComponent(json);
-            } catch (e2) {
-              e2 = "invalid UTF8";
+            } catch (e) {
+              e = "invalid UTF8";
               break;
             }
             return json;
@@ -1606,9 +1606,9 @@ var require_reflection_json_writer = __commonJS(function(exports) {
       const json = {}, source = message;
       for (const field of this.fields) {
         if (!field.oneof) {
-          let jsonValue2 = this.field(field, source[field.localName], options);
-          if (jsonValue2 !== undefined)
-            json[options.useProtoFieldName ? field.name : field.jsonName] = jsonValue2;
+          let jsonValue = this.field(field, source[field.localName], options);
+          if (jsonValue !== undefined)
+            json[options.useProtoFieldName ? field.name : field.jsonName] = jsonValue;
           continue;
         }
         const group = source[field.oneof];
@@ -1857,7 +1857,7 @@ var require_reflection_binary_reader = __commonJS(function(exports) {
             (u === true ? binary_format_contract_1.UnknownFieldHandler.onRead : u)(this.info.typeName, message, fieldNo, wireType, d);
           continue;
         }
-        let target = message, repeated = field.repeat, localName = field.localName;
+        let target = message, { repeat: repeated, localName } = field;
         if (field.oneof) {
           target = target[field.oneof];
           if (target.oneofKind !== localName)
@@ -2005,7 +2005,7 @@ var require_reflection_binary_writer = __commonJS(function(exports) {
     write(message, writer, options) {
       this.prepare();
       for (const field of this.fields) {
-        let value, emitDefault, repeated = field.repeat, localName = field.localName;
+        let value, emitDefault, { repeat: repeated, localName } = field;
         if (field.oneof) {
           const group = message[field.oneof];
           if (group.oneofKind !== localName)
@@ -2270,9 +2270,9 @@ var require_reflection_merge_partial = __commonJS(function(exports) {
               Object.assign(output[name], fieldValue);
               break;
             case "message":
-              let T2 = field.V.T();
+              let T = field.V.T();
               for (let k of Object.keys(fieldValue))
-                output[name][k] = T2.create(fieldValue[k]);
+                output[name][k] = T.create(fieldValue[k]);
               break;
           }
           break;
@@ -2487,12 +2487,12 @@ var require_enum_object = __commonJS(function(exports) {
         if (arg[nam] !== num)
           return false;
       } else {
-        let num2 = arg[k];
-        if (num2 === undefined)
+        let num = arg[k];
+        if (num === undefined)
           return false;
-        if (typeof num2 !== "number")
+        if (typeof num !== "number")
           return false;
-        if (arg[num2] === undefined)
+        if (arg[num] === undefined)
           return false;
       }
     }
@@ -2784,11 +2784,11 @@ var require_buffer_util = __commonJS(function(exports, module) {
   if (!process.env.WS_NO_BUFFER_UTIL) {
     try {
       const bufferUtil = (()=>{throw new Error("Cannot require module "+"bufferutil");})();
-      module.exports.mask = function(source, mask, output, offset, length) {
+      module.exports.mask = function(source, mask2, output, offset, length) {
         if (length < 48)
-          _mask(source, mask, output, offset, length);
+          _mask(source, mask2, output, offset, length);
         else
-          bufferUtil.mask(source, mask, output, offset, length);
+          bufferUtil.mask(source, mask2, output, offset, length);
       };
       module.exports.unmask = function(buffer, mask) {
         if (buffer.length < 32)
@@ -3021,7 +3021,7 @@ var require_permessage_deflate = __commonJS(function(exports, module) {
           callback(err);
           return;
         }
-        const data2 = bufferUtil.concat(this._inflate[kBuffers], this._inflate[kTotalLength]);
+        const data = bufferUtil.concat(this._inflate[kBuffers], this._inflate[kTotalLength]);
         if (this._inflate._readableState.endEmitted) {
           this._inflate.close();
           this._inflate = null;
@@ -3032,7 +3032,7 @@ var require_permessage_deflate = __commonJS(function(exports, module) {
             this._inflate.reset();
           }
         }
-        callback(null, data2);
+        callback(null, data);
       });
     }
     _compress(data, fin, callback) {
@@ -3054,9 +3054,9 @@ var require_permessage_deflate = __commonJS(function(exports, module) {
         if (!this._deflate) {
           return;
         }
-        let data2 = bufferUtil.concat(this._deflate[kBuffers], this._deflate[kTotalLength]);
+        let data = bufferUtil.concat(this._deflate[kBuffers], this._deflate[kTotalLength]);
         if (fin) {
-          data2 = new FastBuffer(data2.buffer, data2.byteOffset, data2.length - 4);
+          data = new FastBuffer(data.buffer, data.byteOffset, data.length - 4);
         }
         this._deflate[kCallback] = null;
         this._deflate[kTotalLength] = 0;
@@ -3064,7 +3064,7 @@ var require_permessage_deflate = __commonJS(function(exports, module) {
         if (fin && this.params[`${endpoint}_no_context_takeover`]) {
           this._deflate.reset();
         }
-        callback(null, data2);
+        callback(null, data);
       });
     }
   }
@@ -3664,12 +3664,12 @@ var require_receiver = __commonJS(function(exports, module) {
         });
       }
     }
-    createError(ErrorCtor, message, prefix, statusCode, errorCode2) {
+    createError(ErrorCtor, message, prefix, statusCode, errorCode) {
       this._loop = false;
       this._errored = true;
       const err = new ErrorCtor(prefix ? `Invalid WebSocket frame: ${message}` : message);
       Error.captureStackTrace(err, this.createError);
-      err.code = errorCode2;
+      err.code = errorCode;
       err[kStatusCode] = statusCode;
       return err;
     }
@@ -4789,7 +4789,7 @@ var require_websocket = __commonJS(function(exports, module) {
     }
     const defaultPort = isSecure ? 443 : 80;
     const key = randomBytes(16).toString("base64");
-    const request = isSecure ? https.request : http.request;
+    const request3 = isSecure ? https.request : http.request;
     const protocolSet = new Set;
     let perMessageDeflate;
     opts.createConnection = opts.createConnection || (isSecure ? tlsConnect : netConnect);
@@ -4848,8 +4848,8 @@ var require_websocket = __commonJS(function(exports, module) {
         const headers = options && options.headers;
         options = { ...options, headers: {} };
         if (headers) {
-          for (const [key2, value] of Object.entries(headers)) {
-            options.headers[key2.toLowerCase()] = value;
+          for (const [key, value] of Object.entries(headers)) {
+            options.headers[key.toLowerCase()] = value;
           }
         }
       } else if (websocket.listenerCount("redirect") === 0) {
@@ -4865,12 +4865,12 @@ var require_websocket = __commonJS(function(exports, module) {
       if (opts.auth && !options.headers.authorization) {
         options.headers.authorization = "Basic " + Buffer.from(opts.auth).toString("base64");
       }
-      req = websocket._req = request(opts);
+      req = websocket._req = request3(opts);
       if (websocket._redirects) {
         websocket.emit("redirect", websocket.url, req);
       }
     } else {
-      req = websocket._req = request(opts);
+      req = websocket._req = request3(opts);
     }
     if (opts.timeout) {
       req.on("timeout", () => {
@@ -5188,9 +5188,9 @@ var require_stream = __commonJS(function(exports, module) {
         return;
       }
       let called = false;
-      ws.once("error", function error(err2) {
+      ws.once("error", function error(err) {
         called = true;
-        callback(err2);
+        callback(err);
       });
       ws.once("close", function close() {
         if (!called)
@@ -5262,11 +5262,11 @@ var require_subprotocol = __commonJS(function(exports, module) {
         }
         if (end === -1)
           end = i;
-        const protocol2 = header.slice(start, end);
-        if (protocols.has(protocol2)) {
-          throw new SyntaxError(`The "${protocol2}" subprotocol is duplicated`);
+        const protocol = header.slice(start, end);
+        if (protocols.has(protocol)) {
+          throw new SyntaxError(`The "${protocol}" subprotocol is duplicated`);
         }
-        protocols.add(protocol2);
+        protocols.add(protocol);
         start = end = -1;
       } else {
         throw new SyntaxError(`Unexpected character at index ${i}`);
@@ -6070,618 +6070,618 @@ var import_runtime2 = __toESM(require_commonjs(), 1);
 var import_runtime3 = __toESM(require_commonjs(), 1);
 var import_runtime4 = __toESM(require_commonjs(), 1);
 var ConnectionError_Reason;
-(function(ConnectionError_Reason2) {
-  ConnectionError_Reason2[ConnectionError_Reason2["REASON_UNSPECIFIED"] = 0] = "REASON_UNSPECIFIED";
-  ConnectionError_Reason2[ConnectionError_Reason2["UNAUTHORIZED"] = 1] = "UNAUTHORIZED";
-  ConnectionError_Reason2[ConnectionError_Reason2["INVALID_AUTH"] = 2] = "INVALID_AUTH";
-  ConnectionError_Reason2[ConnectionError_Reason2["SESSION_REVOKED"] = 3] = "SESSION_REVOKED";
+(function(ConnectionError_Reason) {
+  ConnectionError_Reason[ConnectionError_Reason["REASON_UNSPECIFIED"] = 0] = "REASON_UNSPECIFIED";
+  ConnectionError_Reason[ConnectionError_Reason["UNAUTHORIZED"] = 1] = "UNAUTHORIZED";
+  ConnectionError_Reason[ConnectionError_Reason["INVALID_AUTH"] = 2] = "INVALID_AUTH";
+  ConnectionError_Reason[ConnectionError_Reason["SESSION_REVOKED"] = 3] = "SESSION_REVOKED";
 })(ConnectionError_Reason || (ConnectionError_Reason = {}));
 var BotAvatar_Kind;
-(function(BotAvatar_Kind2) {
-  BotAvatar_Kind2[BotAvatar_Kind2["KIND_UNSPECIFIED"] = 0] = "KIND_UNSPECIFIED";
-  BotAvatar_Kind2[BotAvatar_Kind2["CODEX_ATLAS"] = 1] = "CODEX_ATLAS";
+(function(BotAvatar_Kind) {
+  BotAvatar_Kind[BotAvatar_Kind["KIND_UNSPECIFIED"] = 0] = "KIND_UNSPECIFIED";
+  BotAvatar_Kind[BotAvatar_Kind["CODEX_ATLAS"] = 1] = "CODEX_ATLAS";
 })(BotAvatar_Kind || (BotAvatar_Kind = {}));
 var BotPresenceState_Kind;
-(function(BotPresenceState_Kind2) {
-  BotPresenceState_Kind2[BotPresenceState_Kind2["KIND_UNSPECIFIED"] = 0] = "KIND_UNSPECIFIED";
-  BotPresenceState_Kind2[BotPresenceState_Kind2["HIDDEN"] = 1] = "HIDDEN";
-  BotPresenceState_Kind2[BotPresenceState_Kind2["IDLE"] = 2] = "IDLE";
-  BotPresenceState_Kind2[BotPresenceState_Kind2["HAPPY"] = 3] = "HAPPY";
-  BotPresenceState_Kind2[BotPresenceState_Kind2["WAVING"] = 4] = "WAVING";
-  BotPresenceState_Kind2[BotPresenceState_Kind2["JUMPING"] = 5] = "JUMPING";
-  BotPresenceState_Kind2[BotPresenceState_Kind2["FAILED"] = 6] = "FAILED";
-  BotPresenceState_Kind2[BotPresenceState_Kind2["WAITING"] = 7] = "WAITING";
-  BotPresenceState_Kind2[BotPresenceState_Kind2["RUNNING"] = 8] = "RUNNING";
-  BotPresenceState_Kind2[BotPresenceState_Kind2["REVIEW"] = 9] = "REVIEW";
+(function(BotPresenceState_Kind) {
+  BotPresenceState_Kind[BotPresenceState_Kind["KIND_UNSPECIFIED"] = 0] = "KIND_UNSPECIFIED";
+  BotPresenceState_Kind[BotPresenceState_Kind["HIDDEN"] = 1] = "HIDDEN";
+  BotPresenceState_Kind[BotPresenceState_Kind["IDLE"] = 2] = "IDLE";
+  BotPresenceState_Kind[BotPresenceState_Kind["HAPPY"] = 3] = "HAPPY";
+  BotPresenceState_Kind[BotPresenceState_Kind["WAVING"] = 4] = "WAVING";
+  BotPresenceState_Kind[BotPresenceState_Kind["JUMPING"] = 5] = "JUMPING";
+  BotPresenceState_Kind[BotPresenceState_Kind["FAILED"] = 6] = "FAILED";
+  BotPresenceState_Kind[BotPresenceState_Kind["WAITING"] = 7] = "WAITING";
+  BotPresenceState_Kind[BotPresenceState_Kind["RUNNING"] = 8] = "RUNNING";
+  BotPresenceState_Kind[BotPresenceState_Kind["REVIEW"] = 9] = "REVIEW";
 })(BotPresenceState_Kind || (BotPresenceState_Kind = {}));
 var MessageSubthread_Kind;
-(function(MessageSubthread_Kind2) {
-  MessageSubthread_Kind2[MessageSubthread_Kind2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  MessageSubthread_Kind2[MessageSubthread_Kind2["REPLY"] = 1] = "REPLY";
-  MessageSubthread_Kind2[MessageSubthread_Kind2["SUBTHREAD"] = 2] = "SUBTHREAD";
+(function(MessageSubthread_Kind) {
+  MessageSubthread_Kind[MessageSubthread_Kind["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  MessageSubthread_Kind[MessageSubthread_Kind["REPLY"] = 1] = "REPLY";
+  MessageSubthread_Kind[MessageSubthread_Kind["SUBTHREAD"] = 2] = "SUBTHREAD";
 })(MessageSubthread_Kind || (MessageSubthread_Kind = {}));
 var BlockList_Kind;
-(function(BlockList_Kind2) {
-  BlockList_Kind2[BlockList_Kind2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  BlockList_Kind2[BlockList_Kind2["UNORDERED"] = 1] = "UNORDERED";
-  BlockList_Kind2[BlockList_Kind2["ORDERED"] = 2] = "ORDERED";
+(function(BlockList_Kind) {
+  BlockList_Kind[BlockList_Kind["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  BlockList_Kind[BlockList_Kind["UNORDERED"] = 1] = "UNORDERED";
+  BlockList_Kind[BlockList_Kind["ORDERED"] = 2] = "ORDERED";
 })(BlockList_Kind || (BlockList_Kind = {}));
 var BlockDisclosure_Kind;
-(function(BlockDisclosure_Kind2) {
-  BlockDisclosure_Kind2[BlockDisclosure_Kind2["DEFAULT"] = 0] = "DEFAULT";
-  BlockDisclosure_Kind2[BlockDisclosure_Kind2["PROGRESS"] = 1] = "PROGRESS";
+(function(BlockDisclosure_Kind) {
+  BlockDisclosure_Kind[BlockDisclosure_Kind["DEFAULT"] = 0] = "DEFAULT";
+  BlockDisclosure_Kind[BlockDisclosure_Kind["PROGRESS"] = 1] = "PROGRESS";
 })(BlockDisclosure_Kind || (BlockDisclosure_Kind = {}));
 var BlockDisclosure_ActivityKind;
-(function(BlockDisclosure_ActivityKind2) {
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["REASONING"] = 1] = "REASONING";
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["EXPLORE"] = 2] = "EXPLORE";
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["READ"] = 3] = "READ";
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["SEARCH"] = 4] = "SEARCH";
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["EDIT"] = 5] = "EDIT";
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["DELETE"] = 6] = "DELETE";
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["MOVE"] = 7] = "MOVE";
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["COMMAND"] = 8] = "COMMAND";
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["WEB"] = 9] = "WEB";
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["TOOL"] = 10] = "TOOL";
-  BlockDisclosure_ActivityKind2[BlockDisclosure_ActivityKind2["AGENT"] = 11] = "AGENT";
+(function(BlockDisclosure_ActivityKind) {
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["REASONING"] = 1] = "REASONING";
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["EXPLORE"] = 2] = "EXPLORE";
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["READ"] = 3] = "READ";
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["SEARCH"] = 4] = "SEARCH";
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["EDIT"] = 5] = "EDIT";
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["DELETE"] = 6] = "DELETE";
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["MOVE"] = 7] = "MOVE";
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["COMMAND"] = 8] = "COMMAND";
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["WEB"] = 9] = "WEB";
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["TOOL"] = 10] = "TOOL";
+  BlockDisclosure_ActivityKind[BlockDisclosure_ActivityKind["AGENT"] = 11] = "AGENT";
 })(BlockDisclosure_ActivityKind || (BlockDisclosure_ActivityKind = {}));
 var BlockTable_Alignment;
-(function(BlockTable_Alignment2) {
-  BlockTable_Alignment2[BlockTable_Alignment2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  BlockTable_Alignment2[BlockTable_Alignment2["LEFT"] = 1] = "LEFT";
-  BlockTable_Alignment2[BlockTable_Alignment2["CENTER"] = 2] = "CENTER";
-  BlockTable_Alignment2[BlockTable_Alignment2["RIGHT"] = 3] = "RIGHT";
+(function(BlockTable_Alignment) {
+  BlockTable_Alignment[BlockTable_Alignment["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  BlockTable_Alignment[BlockTable_Alignment["LEFT"] = 1] = "LEFT";
+  BlockTable_Alignment[BlockTable_Alignment["CENTER"] = 2] = "CENTER";
+  BlockTable_Alignment[BlockTable_Alignment["RIGHT"] = 3] = "RIGHT";
 })(BlockTable_Alignment || (BlockTable_Alignment = {}));
 var MessageEntity_Type;
-(function(MessageEntity_Type2) {
-  MessageEntity_Type2[MessageEntity_Type2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  MessageEntity_Type2[MessageEntity_Type2["MENTION"] = 1] = "MENTION";
-  MessageEntity_Type2[MessageEntity_Type2["URL"] = 2] = "URL";
-  MessageEntity_Type2[MessageEntity_Type2["TEXT_URL"] = 3] = "TEXT_URL";
-  MessageEntity_Type2[MessageEntity_Type2["EMAIL"] = 4] = "EMAIL";
-  MessageEntity_Type2[MessageEntity_Type2["BOLD"] = 5] = "BOLD";
-  MessageEntity_Type2[MessageEntity_Type2["ITALIC"] = 6] = "ITALIC";
-  MessageEntity_Type2[MessageEntity_Type2["USERNAME_MENTION"] = 7] = "USERNAME_MENTION";
-  MessageEntity_Type2[MessageEntity_Type2["CODE"] = 8] = "CODE";
-  MessageEntity_Type2[MessageEntity_Type2["PRE"] = 9] = "PRE";
-  MessageEntity_Type2[MessageEntity_Type2["PHONE_NUMBER"] = 10] = "PHONE_NUMBER";
-  MessageEntity_Type2[MessageEntity_Type2["THREAD"] = 11] = "THREAD";
-  MessageEntity_Type2[MessageEntity_Type2["THREAD_TITLE"] = 12] = "THREAD_TITLE";
-  MessageEntity_Type2[MessageEntity_Type2["BOT_COMMAND"] = 13] = "BOT_COMMAND";
-  MessageEntity_Type2[MessageEntity_Type2["GROUP_MENTION"] = 14] = "GROUP_MENTION";
-  MessageEntity_Type2[MessageEntity_Type2["UNDERLINE"] = 15] = "UNDERLINE";
-  MessageEntity_Type2[MessageEntity_Type2["STRIKETHROUGH"] = 16] = "STRIKETHROUGH";
-  MessageEntity_Type2[MessageEntity_Type2["HIGHLIGHT"] = 17] = "HIGHLIGHT";
-  MessageEntity_Type2[MessageEntity_Type2["MATH"] = 18] = "MATH";
+(function(MessageEntity_Type) {
+  MessageEntity_Type[MessageEntity_Type["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  MessageEntity_Type[MessageEntity_Type["MENTION"] = 1] = "MENTION";
+  MessageEntity_Type[MessageEntity_Type["URL"] = 2] = "URL";
+  MessageEntity_Type[MessageEntity_Type["TEXT_URL"] = 3] = "TEXT_URL";
+  MessageEntity_Type[MessageEntity_Type["EMAIL"] = 4] = "EMAIL";
+  MessageEntity_Type[MessageEntity_Type["BOLD"] = 5] = "BOLD";
+  MessageEntity_Type[MessageEntity_Type["ITALIC"] = 6] = "ITALIC";
+  MessageEntity_Type[MessageEntity_Type["USERNAME_MENTION"] = 7] = "USERNAME_MENTION";
+  MessageEntity_Type[MessageEntity_Type["CODE"] = 8] = "CODE";
+  MessageEntity_Type[MessageEntity_Type["PRE"] = 9] = "PRE";
+  MessageEntity_Type[MessageEntity_Type["PHONE_NUMBER"] = 10] = "PHONE_NUMBER";
+  MessageEntity_Type[MessageEntity_Type["THREAD"] = 11] = "THREAD";
+  MessageEntity_Type[MessageEntity_Type["THREAD_TITLE"] = 12] = "THREAD_TITLE";
+  MessageEntity_Type[MessageEntity_Type["BOT_COMMAND"] = 13] = "BOT_COMMAND";
+  MessageEntity_Type[MessageEntity_Type["GROUP_MENTION"] = 14] = "GROUP_MENTION";
+  MessageEntity_Type[MessageEntity_Type["UNDERLINE"] = 15] = "UNDERLINE";
+  MessageEntity_Type[MessageEntity_Type["STRIKETHROUGH"] = 16] = "STRIKETHROUGH";
+  MessageEntity_Type[MessageEntity_Type["HIGHLIGHT"] = 17] = "HIGHLIGHT";
+  MessageEntity_Type[MessageEntity_Type["MATH"] = 18] = "MATH";
 })(MessageEntity_Type || (MessageEntity_Type = {}));
 var Member_Role;
-(function(Member_Role2) {
-  Member_Role2[Member_Role2["OWNER"] = 0] = "OWNER";
-  Member_Role2[Member_Role2["ADMIN"] = 1] = "ADMIN";
-  Member_Role2[Member_Role2["MEMBER"] = 2] = "MEMBER";
+(function(Member_Role) {
+  Member_Role[Member_Role["OWNER"] = 0] = "OWNER";
+  Member_Role[Member_Role["ADMIN"] = 1] = "ADMIN";
+  Member_Role[Member_Role["MEMBER"] = 2] = "MEMBER";
 })(Member_Role || (Member_Role = {}));
 var UrlPreview_MediaType;
-(function(UrlPreview_MediaType2) {
-  UrlPreview_MediaType2[UrlPreview_MediaType2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  UrlPreview_MediaType2[UrlPreview_MediaType2["ARTICLE"] = 1] = "ARTICLE";
-  UrlPreview_MediaType2[UrlPreview_MediaType2["IMAGE"] = 2] = "IMAGE";
-  UrlPreview_MediaType2[UrlPreview_MediaType2["VIDEO"] = 3] = "VIDEO";
-  UrlPreview_MediaType2[UrlPreview_MediaType2["DOCUMENT"] = 4] = "DOCUMENT";
-  UrlPreview_MediaType2[UrlPreview_MediaType2["EMBED"] = 5] = "EMBED";
+(function(UrlPreview_MediaType) {
+  UrlPreview_MediaType[UrlPreview_MediaType["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  UrlPreview_MediaType[UrlPreview_MediaType["ARTICLE"] = 1] = "ARTICLE";
+  UrlPreview_MediaType[UrlPreview_MediaType["IMAGE"] = 2] = "IMAGE";
+  UrlPreview_MediaType[UrlPreview_MediaType["VIDEO"] = 3] = "VIDEO";
+  UrlPreview_MediaType[UrlPreview_MediaType["DOCUMENT"] = 4] = "DOCUMENT";
+  UrlPreview_MediaType[UrlPreview_MediaType["EMBED"] = 5] = "EMBED";
 })(UrlPreview_MediaType || (UrlPreview_MediaType = {}));
 var MessageAttachmentExternalTask_Status;
-(function(MessageAttachmentExternalTask_Status2) {
-  MessageAttachmentExternalTask_Status2[MessageAttachmentExternalTask_Status2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  MessageAttachmentExternalTask_Status2[MessageAttachmentExternalTask_Status2["BACKLOG"] = 1] = "BACKLOG";
-  MessageAttachmentExternalTask_Status2[MessageAttachmentExternalTask_Status2["TODO"] = 2] = "TODO";
-  MessageAttachmentExternalTask_Status2[MessageAttachmentExternalTask_Status2["IN_PROGRESS"] = 3] = "IN_PROGRESS";
-  MessageAttachmentExternalTask_Status2[MessageAttachmentExternalTask_Status2["DONE"] = 4] = "DONE";
-  MessageAttachmentExternalTask_Status2[MessageAttachmentExternalTask_Status2["CANCELLED"] = 5] = "CANCELLED";
+(function(MessageAttachmentExternalTask_Status) {
+  MessageAttachmentExternalTask_Status[MessageAttachmentExternalTask_Status["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  MessageAttachmentExternalTask_Status[MessageAttachmentExternalTask_Status["BACKLOG"] = 1] = "BACKLOG";
+  MessageAttachmentExternalTask_Status[MessageAttachmentExternalTask_Status["TODO"] = 2] = "TODO";
+  MessageAttachmentExternalTask_Status[MessageAttachmentExternalTask_Status["IN_PROGRESS"] = 3] = "IN_PROGRESS";
+  MessageAttachmentExternalTask_Status[MessageAttachmentExternalTask_Status["DONE"] = 4] = "DONE";
+  MessageAttachmentExternalTask_Status[MessageAttachmentExternalTask_Status["CANCELLED"] = 5] = "CANCELLED";
 })(MessageAttachmentExternalTask_Status || (MessageAttachmentExternalTask_Status = {}));
 var Photo_Format;
-(function(Photo_Format2) {
-  Photo_Format2[Photo_Format2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  Photo_Format2[Photo_Format2["JPEG"] = 1] = "JPEG";
-  Photo_Format2[Photo_Format2["PNG"] = 2] = "PNG";
+(function(Photo_Format) {
+  Photo_Format[Photo_Format["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  Photo_Format[Photo_Format["JPEG"] = 1] = "JPEG";
+  Photo_Format[Photo_Format["PNG"] = 2] = "PNG";
 })(Photo_Format || (Photo_Format = {}));
 var RpcError_Code;
-(function(RpcError_Code2) {
-  RpcError_Code2[RpcError_Code2["UNKNOWN"] = 0] = "UNKNOWN";
-  RpcError_Code2[RpcError_Code2["BAD_REQUEST"] = 1] = "BAD_REQUEST";
-  RpcError_Code2[RpcError_Code2["UNAUTHENTICATED"] = 2] = "UNAUTHENTICATED";
-  RpcError_Code2[RpcError_Code2["RATE_LIMIT"] = 3] = "RATE_LIMIT";
-  RpcError_Code2[RpcError_Code2["INTERNAL_ERROR"] = 4] = "INTERNAL_ERROR";
-  RpcError_Code2[RpcError_Code2["PEER_ID_INVALID"] = 5] = "PEER_ID_INVALID";
-  RpcError_Code2[RpcError_Code2["MESSAGE_ID_INVALID"] = 6] = "MESSAGE_ID_INVALID";
-  RpcError_Code2[RpcError_Code2["USER_ID_INVALID"] = 7] = "USER_ID_INVALID";
-  RpcError_Code2[RpcError_Code2["USER_ALREADY_MEMBER"] = 8] = "USER_ALREADY_MEMBER";
-  RpcError_Code2[RpcError_Code2["SPACE_ID_INVALID"] = 9] = "SPACE_ID_INVALID";
-  RpcError_Code2[RpcError_Code2["CHAT_ID_INVALID"] = 10] = "CHAT_ID_INVALID";
-  RpcError_Code2[RpcError_Code2["EMAIL_INVALID"] = 11] = "EMAIL_INVALID";
-  RpcError_Code2[RpcError_Code2["PHONE_NUMBER_INVALID"] = 12] = "PHONE_NUMBER_INVALID";
-  RpcError_Code2[RpcError_Code2["SPACE_ADMIN_REQUIRED"] = 13] = "SPACE_ADMIN_REQUIRED";
-  RpcError_Code2[RpcError_Code2["SPACE_OWNER_REQUIRED"] = 14] = "SPACE_OWNER_REQUIRED";
-  RpcError_Code2[RpcError_Code2["USERNAME_INVALID"] = 15] = "USERNAME_INVALID";
-  RpcError_Code2[RpcError_Code2["USERNAME_TAKEN"] = 16] = "USERNAME_TAKEN";
-  RpcError_Code2[RpcError_Code2["FIRST_NAME_INVALID"] = 17] = "FIRST_NAME_INVALID";
-  RpcError_Code2[RpcError_Code2["URL_PREVIEW_UNAVAILABLE"] = 18] = "URL_PREVIEW_UNAVAILABLE";
-  RpcError_Code2[RpcError_Code2["AGENT_SESSION_MESSAGE_IMMUTABLE"] = 19] = "AGENT_SESSION_MESSAGE_IMMUTABLE";
-  RpcError_Code2[RpcError_Code2["SPACE_INVITE_INVALID"] = 20] = "SPACE_INVITE_INVALID";
+(function(RpcError_Code) {
+  RpcError_Code[RpcError_Code["UNKNOWN"] = 0] = "UNKNOWN";
+  RpcError_Code[RpcError_Code["BAD_REQUEST"] = 1] = "BAD_REQUEST";
+  RpcError_Code[RpcError_Code["UNAUTHENTICATED"] = 2] = "UNAUTHENTICATED";
+  RpcError_Code[RpcError_Code["RATE_LIMIT"] = 3] = "RATE_LIMIT";
+  RpcError_Code[RpcError_Code["INTERNAL_ERROR"] = 4] = "INTERNAL_ERROR";
+  RpcError_Code[RpcError_Code["PEER_ID_INVALID"] = 5] = "PEER_ID_INVALID";
+  RpcError_Code[RpcError_Code["MESSAGE_ID_INVALID"] = 6] = "MESSAGE_ID_INVALID";
+  RpcError_Code[RpcError_Code["USER_ID_INVALID"] = 7] = "USER_ID_INVALID";
+  RpcError_Code[RpcError_Code["USER_ALREADY_MEMBER"] = 8] = "USER_ALREADY_MEMBER";
+  RpcError_Code[RpcError_Code["SPACE_ID_INVALID"] = 9] = "SPACE_ID_INVALID";
+  RpcError_Code[RpcError_Code["CHAT_ID_INVALID"] = 10] = "CHAT_ID_INVALID";
+  RpcError_Code[RpcError_Code["EMAIL_INVALID"] = 11] = "EMAIL_INVALID";
+  RpcError_Code[RpcError_Code["PHONE_NUMBER_INVALID"] = 12] = "PHONE_NUMBER_INVALID";
+  RpcError_Code[RpcError_Code["SPACE_ADMIN_REQUIRED"] = 13] = "SPACE_ADMIN_REQUIRED";
+  RpcError_Code[RpcError_Code["SPACE_OWNER_REQUIRED"] = 14] = "SPACE_OWNER_REQUIRED";
+  RpcError_Code[RpcError_Code["USERNAME_INVALID"] = 15] = "USERNAME_INVALID";
+  RpcError_Code[RpcError_Code["USERNAME_TAKEN"] = 16] = "USERNAME_TAKEN";
+  RpcError_Code[RpcError_Code["FIRST_NAME_INVALID"] = 17] = "FIRST_NAME_INVALID";
+  RpcError_Code[RpcError_Code["URL_PREVIEW_UNAVAILABLE"] = 18] = "URL_PREVIEW_UNAVAILABLE";
+  RpcError_Code[RpcError_Code["AGENT_SESSION_MESSAGE_IMMUTABLE"] = 19] = "AGENT_SESSION_MESSAGE_IMMUTABLE";
+  RpcError_Code[RpcError_Code["SPACE_INVITE_INVALID"] = 20] = "SPACE_INVITE_INVALID";
 })(RpcError_Code || (RpcError_Code = {}));
 var SyncSkippedSequence_Reason;
-(function(SyncSkippedSequence_Reason2) {
-  SyncSkippedSequence_Reason2[SyncSkippedSequence_Reason2["REASON_UNSPECIFIED"] = 0] = "REASON_UNSPECIFIED";
-  SyncSkippedSequence_Reason2[SyncSkippedSequence_Reason2["IRRELEVANT_TO_BUCKET"] = 1] = "IRRELEVANT_TO_BUCKET";
-  SyncSkippedSequence_Reason2[SyncSkippedSequence_Reason2["SNAPSHOT_REPAIR_REQUIRED"] = 2] = "SNAPSHOT_REPAIR_REQUIRED";
+(function(SyncSkippedSequence_Reason) {
+  SyncSkippedSequence_Reason[SyncSkippedSequence_Reason["REASON_UNSPECIFIED"] = 0] = "REASON_UNSPECIFIED";
+  SyncSkippedSequence_Reason[SyncSkippedSequence_Reason["IRRELEVANT_TO_BUCKET"] = 1] = "IRRELEVANT_TO_BUCKET";
+  SyncSkippedSequence_Reason[SyncSkippedSequence_Reason["SNAPSHOT_REPAIR_REQUIRED"] = 2] = "SNAPSHOT_REPAIR_REQUIRED";
 })(SyncSkippedSequence_Reason || (SyncSkippedSequence_Reason = {}));
 var GetUpdatesResult_ResultType;
-(function(GetUpdatesResult_ResultType2) {
-  GetUpdatesResult_ResultType2[GetUpdatesResult_ResultType2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  GetUpdatesResult_ResultType2[GetUpdatesResult_ResultType2["EMPTY"] = 1] = "EMPTY";
-  GetUpdatesResult_ResultType2[GetUpdatesResult_ResultType2["SLICE"] = 2] = "SLICE";
-  GetUpdatesResult_ResultType2[GetUpdatesResult_ResultType2["TOO_LONG"] = 3] = "TOO_LONG";
+(function(GetUpdatesResult_ResultType) {
+  GetUpdatesResult_ResultType[GetUpdatesResult_ResultType["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  GetUpdatesResult_ResultType[GetUpdatesResult_ResultType["EMPTY"] = 1] = "EMPTY";
+  GetUpdatesResult_ResultType[GetUpdatesResult_ResultType["SLICE"] = 2] = "SLICE";
+  GetUpdatesResult_ResultType[GetUpdatesResult_ResultType["TOO_LONG"] = 3] = "TOO_LONG";
 })(GetUpdatesResult_ResultType || (GetUpdatesResult_ResultType = {}));
 var NotificationSettings_Mode;
-(function(NotificationSettings_Mode2) {
-  NotificationSettings_Mode2[NotificationSettings_Mode2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  NotificationSettings_Mode2[NotificationSettings_Mode2["ALL"] = 1] = "ALL";
-  NotificationSettings_Mode2[NotificationSettings_Mode2["NONE"] = 2] = "NONE";
-  NotificationSettings_Mode2[NotificationSettings_Mode2["MENTIONS"] = 3] = "MENTIONS";
-  NotificationSettings_Mode2[NotificationSettings_Mode2["IMPORTANT_ONLY"] = 4] = "IMPORTANT_ONLY";
-  NotificationSettings_Mode2[NotificationSettings_Mode2["ONLY_MENTIONS"] = 5] = "ONLY_MENTIONS";
+(function(NotificationSettings_Mode) {
+  NotificationSettings_Mode[NotificationSettings_Mode["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  NotificationSettings_Mode[NotificationSettings_Mode["ALL"] = 1] = "ALL";
+  NotificationSettings_Mode[NotificationSettings_Mode["NONE"] = 2] = "NONE";
+  NotificationSettings_Mode[NotificationSettings_Mode["MENTIONS"] = 3] = "MENTIONS";
+  NotificationSettings_Mode[NotificationSettings_Mode["IMPORTANT_ONLY"] = 4] = "IMPORTANT_ONLY";
+  NotificationSettings_Mode[NotificationSettings_Mode["ONLY_MENTIONS"] = 5] = "ONLY_MENTIONS";
 })(NotificationSettings_Mode || (NotificationSettings_Mode = {}));
 var DialogNotificationSettings_Mode;
-(function(DialogNotificationSettings_Mode2) {
-  DialogNotificationSettings_Mode2[DialogNotificationSettings_Mode2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  DialogNotificationSettings_Mode2[DialogNotificationSettings_Mode2["ALL"] = 1] = "ALL";
-  DialogNotificationSettings_Mode2[DialogNotificationSettings_Mode2["MENTIONS"] = 2] = "MENTIONS";
-  DialogNotificationSettings_Mode2[DialogNotificationSettings_Mode2["NONE"] = 3] = "NONE";
+(function(DialogNotificationSettings_Mode) {
+  DialogNotificationSettings_Mode[DialogNotificationSettings_Mode["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  DialogNotificationSettings_Mode[DialogNotificationSettings_Mode["ALL"] = 1] = "ALL";
+  DialogNotificationSettings_Mode[DialogNotificationSettings_Mode["MENTIONS"] = 2] = "MENTIONS";
+  DialogNotificationSettings_Mode[DialogNotificationSettings_Mode["NONE"] = 3] = "NONE";
 })(DialogNotificationSettings_Mode || (DialogNotificationSettings_Mode = {}));
 var PushContentEncryptionKey_Algorithm;
-(function(PushContentEncryptionKey_Algorithm2) {
-  PushContentEncryptionKey_Algorithm2[PushContentEncryptionKey_Algorithm2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  PushContentEncryptionKey_Algorithm2[PushContentEncryptionKey_Algorithm2["X25519_HKDF_SHA256_AES256_GCM"] = 1] = "X25519_HKDF_SHA256_AES256_GCM";
+(function(PushContentEncryptionKey_Algorithm) {
+  PushContentEncryptionKey_Algorithm[PushContentEncryptionKey_Algorithm["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  PushContentEncryptionKey_Algorithm[PushContentEncryptionKey_Algorithm["X25519_HKDF_SHA256_AES256_GCM"] = 1] = "X25519_HKDF_SHA256_AES256_GCM";
 })(PushContentEncryptionKey_Algorithm || (PushContentEncryptionKey_Algorithm = {}));
 var GetChatTranscriptInput_Mode;
-(function(GetChatTranscriptInput_Mode2) {
-  GetChatTranscriptInput_Mode2[GetChatTranscriptInput_Mode2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  GetChatTranscriptInput_Mode2[GetChatTranscriptInput_Mode2["HUMAN_READABLE"] = 1] = "HUMAN_READABLE";
+(function(GetChatTranscriptInput_Mode) {
+  GetChatTranscriptInput_Mode[GetChatTranscriptInput_Mode["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  GetChatTranscriptInput_Mode[GetChatTranscriptInput_Mode["HUMAN_READABLE"] = 1] = "HUMAN_READABLE";
 })(GetChatTranscriptInput_Mode || (GetChatTranscriptInput_Mode = {}));
 var GetChatTranscriptInput_Length;
-(function(GetChatTranscriptInput_Length2) {
-  GetChatTranscriptInput_Length2[GetChatTranscriptInput_Length2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  GetChatTranscriptInput_Length2[GetChatTranscriptInput_Length2["CONCISE"] = 1] = "CONCISE";
+(function(GetChatTranscriptInput_Length) {
+  GetChatTranscriptInput_Length[GetChatTranscriptInput_Length["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  GetChatTranscriptInput_Length[GetChatTranscriptInput_Length["CONCISE"] = 1] = "CONCISE";
 })(GetChatTranscriptInput_Length || (GetChatTranscriptInput_Length = {}));
 var GetChatTranscriptInput_Media;
-(function(GetChatTranscriptInput_Media2) {
-  GetChatTranscriptInput_Media2[GetChatTranscriptInput_Media2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  GetChatTranscriptInput_Media2[GetChatTranscriptInput_Media2["INCLUDED"] = 1] = "INCLUDED";
-  GetChatTranscriptInput_Media2[GetChatTranscriptInput_Media2["EXCLUDED"] = 2] = "EXCLUDED";
+(function(GetChatTranscriptInput_Media) {
+  GetChatTranscriptInput_Media[GetChatTranscriptInput_Media["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  GetChatTranscriptInput_Media[GetChatTranscriptInput_Media["INCLUDED"] = 1] = "INCLUDED";
+  GetChatTranscriptInput_Media[GetChatTranscriptInput_Media["EXCLUDED"] = 2] = "EXCLUDED";
 })(GetChatTranscriptInput_Media || (GetChatTranscriptInput_Media = {}));
 var GetChatTranscriptResult_StopReason;
-(function(GetChatTranscriptResult_StopReason2) {
-  GetChatTranscriptResult_StopReason2[GetChatTranscriptResult_StopReason2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  GetChatTranscriptResult_StopReason2[GetChatTranscriptResult_StopReason2["COMPLETE"] = 1] = "COMPLETE";
-  GetChatTranscriptResult_StopReason2[GetChatTranscriptResult_StopReason2["MESSAGE_LIMIT"] = 2] = "MESSAGE_LIMIT";
-  GetChatTranscriptResult_StopReason2[GetChatTranscriptResult_StopReason2["OUTPUT_LIMIT"] = 3] = "OUTPUT_LIMIT";
+(function(GetChatTranscriptResult_StopReason) {
+  GetChatTranscriptResult_StopReason[GetChatTranscriptResult_StopReason["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  GetChatTranscriptResult_StopReason[GetChatTranscriptResult_StopReason["COMPLETE"] = 1] = "COMPLETE";
+  GetChatTranscriptResult_StopReason[GetChatTranscriptResult_StopReason["MESSAGE_LIMIT"] = 2] = "MESSAGE_LIMIT";
+  GetChatTranscriptResult_StopReason[GetChatTranscriptResult_StopReason["OUTPUT_LIMIT"] = 3] = "OUTPUT_LIMIT";
 })(GetChatTranscriptResult_StopReason || (GetChatTranscriptResult_StopReason = {}));
 var UpdateNewMessageNotification_Reason;
-(function(UpdateNewMessageNotification_Reason2) {
-  UpdateNewMessageNotification_Reason2[UpdateNewMessageNotification_Reason2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  UpdateNewMessageNotification_Reason2[UpdateNewMessageNotification_Reason2["MENTION"] = 1] = "MENTION";
-  UpdateNewMessageNotification_Reason2[UpdateNewMessageNotification_Reason2["IMPORTANT"] = 2] = "IMPORTANT";
+(function(UpdateNewMessageNotification_Reason) {
+  UpdateNewMessageNotification_Reason[UpdateNewMessageNotification_Reason["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  UpdateNewMessageNotification_Reason[UpdateNewMessageNotification_Reason["MENTION"] = 1] = "MENTION";
+  UpdateNewMessageNotification_Reason[UpdateNewMessageNotification_Reason["IMPORTANT"] = 2] = "IMPORTANT";
 })(UpdateNewMessageNotification_Reason || (UpdateNewMessageNotification_Reason = {}));
 var UpdateComposeAction_ComposeAction;
-(function(UpdateComposeAction_ComposeAction2) {
-  UpdateComposeAction_ComposeAction2[UpdateComposeAction_ComposeAction2["NONE"] = 0] = "NONE";
-  UpdateComposeAction_ComposeAction2[UpdateComposeAction_ComposeAction2["TYPING"] = 1] = "TYPING";
-  UpdateComposeAction_ComposeAction2[UpdateComposeAction_ComposeAction2["UPLOADING_PHOTO"] = 2] = "UPLOADING_PHOTO";
-  UpdateComposeAction_ComposeAction2[UpdateComposeAction_ComposeAction2["UPLOADING_DOCUMENT"] = 3] = "UPLOADING_DOCUMENT";
-  UpdateComposeAction_ComposeAction2[UpdateComposeAction_ComposeAction2["UPLOADING_VIDEO"] = 4] = "UPLOADING_VIDEO";
-  UpdateComposeAction_ComposeAction2[UpdateComposeAction_ComposeAction2["RECORDING_VOICE"] = 5] = "RECORDING_VOICE";
-  UpdateComposeAction_ComposeAction2[UpdateComposeAction_ComposeAction2["WORKING"] = 6] = "WORKING";
+(function(UpdateComposeAction_ComposeAction) {
+  UpdateComposeAction_ComposeAction[UpdateComposeAction_ComposeAction["NONE"] = 0] = "NONE";
+  UpdateComposeAction_ComposeAction[UpdateComposeAction_ComposeAction["TYPING"] = 1] = "TYPING";
+  UpdateComposeAction_ComposeAction[UpdateComposeAction_ComposeAction["UPLOADING_PHOTO"] = 2] = "UPLOADING_PHOTO";
+  UpdateComposeAction_ComposeAction[UpdateComposeAction_ComposeAction["UPLOADING_DOCUMENT"] = 3] = "UPLOADING_DOCUMENT";
+  UpdateComposeAction_ComposeAction[UpdateComposeAction_ComposeAction["UPLOADING_VIDEO"] = 4] = "UPLOADING_VIDEO";
+  UpdateComposeAction_ComposeAction[UpdateComposeAction_ComposeAction["RECORDING_VOICE"] = 5] = "RECORDING_VOICE";
+  UpdateComposeAction_ComposeAction[UpdateComposeAction_ComposeAction["WORKING"] = 6] = "WORKING";
 })(UpdateComposeAction_ComposeAction || (UpdateComposeAction_ComposeAction = {}));
 var UserStatus_Status;
-(function(UserStatus_Status2) {
-  UserStatus_Status2[UserStatus_Status2["UNKNOWN"] = 0] = "UNKNOWN";
-  UserStatus_Status2[UserStatus_Status2["ONLINE"] = 1] = "ONLINE";
-  UserStatus_Status2[UserStatus_Status2["OFFLINE"] = 2] = "OFFLINE";
+(function(UserStatus_Status) {
+  UserStatus_Status[UserStatus_Status["UNKNOWN"] = 0] = "UNKNOWN";
+  UserStatus_Status[UserStatus_Status["ONLINE"] = 1] = "ONLINE";
+  UserStatus_Status[UserStatus_Status["OFFLINE"] = 2] = "OFFLINE";
 })(UserStatus_Status || (UserStatus_Status = {}));
 var BotCapability_Kind;
-(function(BotCapability_Kind2) {
-  BotCapability_Kind2[BotCapability_Kind2["KIND_UNSPECIFIED"] = 0] = "KIND_UNSPECIFIED";
-  BotCapability_Kind2[BotCapability_Kind2["CHAT_SETTINGS"] = 1] = "CHAT_SETTINGS";
-  BotCapability_Kind2[BotCapability_Kind2["AGENT_CONFIGURATION"] = 2] = "AGENT_CONFIGURATION";
+(function(BotCapability_Kind) {
+  BotCapability_Kind[BotCapability_Kind["KIND_UNSPECIFIED"] = 0] = "KIND_UNSPECIFIED";
+  BotCapability_Kind[BotCapability_Kind["CHAT_SETTINGS"] = 1] = "CHAT_SETTINGS";
+  BotCapability_Kind[BotCapability_Kind["AGENT_CONFIGURATION"] = 2] = "AGENT_CONFIGURATION";
 })(BotCapability_Kind || (BotCapability_Kind = {}));
 var BotChatSettingsInfo_Tone;
-(function(BotChatSettingsInfo_Tone2) {
-  BotChatSettingsInfo_Tone2[BotChatSettingsInfo_Tone2["TONE_UNSPECIFIED"] = 0] = "TONE_UNSPECIFIED";
-  BotChatSettingsInfo_Tone2[BotChatSettingsInfo_Tone2["NEUTRAL"] = 1] = "NEUTRAL";
-  BotChatSettingsInfo_Tone2[BotChatSettingsInfo_Tone2["SUCCESS"] = 2] = "SUCCESS";
-  BotChatSettingsInfo_Tone2[BotChatSettingsInfo_Tone2["WARNING"] = 3] = "WARNING";
-  BotChatSettingsInfo_Tone2[BotChatSettingsInfo_Tone2["ERROR"] = 4] = "ERROR";
+(function(BotChatSettingsInfo_Tone) {
+  BotChatSettingsInfo_Tone[BotChatSettingsInfo_Tone["TONE_UNSPECIFIED"] = 0] = "TONE_UNSPECIFIED";
+  BotChatSettingsInfo_Tone[BotChatSettingsInfo_Tone["NEUTRAL"] = 1] = "NEUTRAL";
+  BotChatSettingsInfo_Tone[BotChatSettingsInfo_Tone["SUCCESS"] = 2] = "SUCCESS";
+  BotChatSettingsInfo_Tone[BotChatSettingsInfo_Tone["WARNING"] = 3] = "WARNING";
+  BotChatSettingsInfo_Tone[BotChatSettingsInfo_Tone["ERROR"] = 4] = "ERROR";
 })(BotChatSettingsInfo_Tone || (BotChatSettingsInfo_Tone = {}));
 var BotChatSettingsProblem_Code;
-(function(BotChatSettingsProblem_Code2) {
-  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["CODE_UNSPECIFIED"] = 0] = "CODE_UNSPECIFIED";
-  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["UNAVAILABLE"] = 1] = "UNAVAILABLE";
-  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["INVALID_VALUE"] = 2] = "INVALID_VALUE";
-  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["STALE"] = 3] = "STALE";
-  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["FAILED"] = 4] = "FAILED";
-  BotChatSettingsProblem_Code2[BotChatSettingsProblem_Code2["UNREACHABLE"] = 5] = "UNREACHABLE";
+(function(BotChatSettingsProblem_Code) {
+  BotChatSettingsProblem_Code[BotChatSettingsProblem_Code["CODE_UNSPECIFIED"] = 0] = "CODE_UNSPECIFIED";
+  BotChatSettingsProblem_Code[BotChatSettingsProblem_Code["UNAVAILABLE"] = 1] = "UNAVAILABLE";
+  BotChatSettingsProblem_Code[BotChatSettingsProblem_Code["INVALID_VALUE"] = 2] = "INVALID_VALUE";
+  BotChatSettingsProblem_Code[BotChatSettingsProblem_Code["STALE"] = 3] = "STALE";
+  BotChatSettingsProblem_Code[BotChatSettingsProblem_Code["FAILED"] = 4] = "FAILED";
+  BotChatSettingsProblem_Code[BotChatSettingsProblem_Code["UNREACHABLE"] = 5] = "UNREACHABLE";
 })(BotChatSettingsProblem_Code || (BotChatSettingsProblem_Code = {}));
 var AuthBeginResult_Delivery;
-(function(AuthBeginResult_Delivery2) {
-  AuthBeginResult_Delivery2[AuthBeginResult_Delivery2["DELIVERY_UNSPECIFIED"] = 0] = "DELIVERY_UNSPECIFIED";
-  AuthBeginResult_Delivery2[AuthBeginResult_Delivery2["EMAIL"] = 1] = "EMAIL";
-  AuthBeginResult_Delivery2[AuthBeginResult_Delivery2["SMS"] = 2] = "SMS";
+(function(AuthBeginResult_Delivery) {
+  AuthBeginResult_Delivery[AuthBeginResult_Delivery["DELIVERY_UNSPECIFIED"] = 0] = "DELIVERY_UNSPECIFIED";
+  AuthBeginResult_Delivery[AuthBeginResult_Delivery["EMAIL"] = 1] = "EMAIL";
+  AuthBeginResult_Delivery[AuthBeginResult_Delivery["SMS"] = 2] = "SMS";
 })(AuthBeginResult_Delivery || (AuthBeginResult_Delivery = {}));
 var UploadFailure_Code;
-(function(UploadFailure_Code2) {
-  UploadFailure_Code2[UploadFailure_Code2["UPLOAD_FAILURE_CODE_UNSPECIFIED"] = 0] = "UPLOAD_FAILURE_CODE_UNSPECIFIED";
-  UploadFailure_Code2[UploadFailure_Code2["UPLOAD_FAILURE_INTEGRITY"] = 1] = "UPLOAD_FAILURE_INTEGRITY";
-  UploadFailure_Code2[UploadFailure_Code2["UPLOAD_FAILURE_INVALID_MEDIA"] = 2] = "UPLOAD_FAILURE_INVALID_MEDIA";
-  UploadFailure_Code2[UploadFailure_Code2["UPLOAD_FAILURE_PROCESSING"] = 3] = "UPLOAD_FAILURE_PROCESSING";
-  UploadFailure_Code2[UploadFailure_Code2["UPLOAD_FAILURE_STORAGE"] = 4] = "UPLOAD_FAILURE_STORAGE";
+(function(UploadFailure_Code) {
+  UploadFailure_Code[UploadFailure_Code["UPLOAD_FAILURE_CODE_UNSPECIFIED"] = 0] = "UPLOAD_FAILURE_CODE_UNSPECIFIED";
+  UploadFailure_Code[UploadFailure_Code["UPLOAD_FAILURE_INTEGRITY"] = 1] = "UPLOAD_FAILURE_INTEGRITY";
+  UploadFailure_Code[UploadFailure_Code["UPLOAD_FAILURE_INVALID_MEDIA"] = 2] = "UPLOAD_FAILURE_INVALID_MEDIA";
+  UploadFailure_Code[UploadFailure_Code["UPLOAD_FAILURE_PROCESSING"] = 3] = "UPLOAD_FAILURE_PROCESSING";
+  UploadFailure_Code[UploadFailure_Code["UPLOAD_FAILURE_STORAGE"] = 4] = "UPLOAD_FAILURE_STORAGE";
 })(UploadFailure_Code || (UploadFailure_Code = {}));
 var RequestBotFilesystemInput_Operation;
-(function(RequestBotFilesystemInput_Operation2) {
-  RequestBotFilesystemInput_Operation2[RequestBotFilesystemInput_Operation2["OPERATION_UNSPECIFIED"] = 0] = "OPERATION_UNSPECIFIED";
-  RequestBotFilesystemInput_Operation2[RequestBotFilesystemInput_Operation2["LIST"] = 1] = "LIST";
-  RequestBotFilesystemInput_Operation2[RequestBotFilesystemInput_Operation2["REGISTER_FOLDER"] = 2] = "REGISTER_FOLDER";
+(function(RequestBotFilesystemInput_Operation) {
+  RequestBotFilesystemInput_Operation[RequestBotFilesystemInput_Operation["OPERATION_UNSPECIFIED"] = 0] = "OPERATION_UNSPECIFIED";
+  RequestBotFilesystemInput_Operation[RequestBotFilesystemInput_Operation["LIST"] = 1] = "LIST";
+  RequestBotFilesystemInput_Operation[RequestBotFilesystemInput_Operation["REGISTER_FOLDER"] = 2] = "REGISTER_FOLDER";
 })(RequestBotFilesystemInput_Operation || (RequestBotFilesystemInput_Operation = {}));
 var BotFilesystemEntry_Kind;
-(function(BotFilesystemEntry_Kind2) {
-  BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["KIND_UNSPECIFIED"] = 0] = "KIND_UNSPECIFIED";
-  BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["FILE"] = 1] = "FILE";
-  BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["DIRECTORY"] = 2] = "DIRECTORY";
-  BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["SYMLINK"] = 3] = "SYMLINK";
-  BotFilesystemEntry_Kind2[BotFilesystemEntry_Kind2["OTHER"] = 4] = "OTHER";
+(function(BotFilesystemEntry_Kind) {
+  BotFilesystemEntry_Kind[BotFilesystemEntry_Kind["KIND_UNSPECIFIED"] = 0] = "KIND_UNSPECIFIED";
+  BotFilesystemEntry_Kind[BotFilesystemEntry_Kind["FILE"] = 1] = "FILE";
+  BotFilesystemEntry_Kind[BotFilesystemEntry_Kind["DIRECTORY"] = 2] = "DIRECTORY";
+  BotFilesystemEntry_Kind[BotFilesystemEntry_Kind["SYMLINK"] = 3] = "SYMLINK";
+  BotFilesystemEntry_Kind[BotFilesystemEntry_Kind["OTHER"] = 4] = "OTHER";
 })(BotFilesystemEntry_Kind || (BotFilesystemEntry_Kind = {}));
 var DialogFollowMode;
-(function(DialogFollowMode2) {
-  DialogFollowMode2[DialogFollowMode2["DIALOG_FOLLOW_MODE_UNSPECIFIED"] = 0] = "DIALOG_FOLLOW_MODE_UNSPECIFIED";
-  DialogFollowMode2[DialogFollowMode2["FOLLOWING"] = 1] = "FOLLOWING";
-  DialogFollowMode2[DialogFollowMode2["UNFOLLOWED"] = 2] = "UNFOLLOWED";
+(function(DialogFollowMode) {
+  DialogFollowMode[DialogFollowMode["DIALOG_FOLLOW_MODE_UNSPECIFIED"] = 0] = "DIALOG_FOLLOW_MODE_UNSPECIFIED";
+  DialogFollowMode[DialogFollowMode["FOLLOWING"] = 1] = "FOLLOWING";
+  DialogFollowMode[DialogFollowMode["UNFOLLOWED"] = 2] = "UNFOLLOWED";
 })(DialogFollowMode || (DialogFollowMode = {}));
 var GridTranscriptMessageKind;
-(function(GridTranscriptMessageKind2) {
-  GridTranscriptMessageKind2[GridTranscriptMessageKind2["GRID_TRANSCRIPT_TURN"] = 0] = "GRID_TRANSCRIPT_TURN";
-  GridTranscriptMessageKind2[GridTranscriptMessageKind2["GRID_TRANSCRIPT_STARTED"] = 1] = "GRID_TRANSCRIPT_STARTED";
-  GridTranscriptMessageKind2[GridTranscriptMessageKind2["GRID_TRANSCRIPT_STOPPED"] = 2] = "GRID_TRANSCRIPT_STOPPED";
-  GridTranscriptMessageKind2[GridTranscriptMessageKind2["GRID_TRANSCRIPT_INTERRUPTED"] = 3] = "GRID_TRANSCRIPT_INTERRUPTED";
-  GridTranscriptMessageKind2[GridTranscriptMessageKind2["GRID_TRANSCRIPT_LINK"] = 4] = "GRID_TRANSCRIPT_LINK";
+(function(GridTranscriptMessageKind) {
+  GridTranscriptMessageKind[GridTranscriptMessageKind["GRID_TRANSCRIPT_TURN"] = 0] = "GRID_TRANSCRIPT_TURN";
+  GridTranscriptMessageKind[GridTranscriptMessageKind["GRID_TRANSCRIPT_STARTED"] = 1] = "GRID_TRANSCRIPT_STARTED";
+  GridTranscriptMessageKind[GridTranscriptMessageKind["GRID_TRANSCRIPT_STOPPED"] = 2] = "GRID_TRANSCRIPT_STOPPED";
+  GridTranscriptMessageKind[GridTranscriptMessageKind["GRID_TRANSCRIPT_INTERRUPTED"] = 3] = "GRID_TRANSCRIPT_INTERRUPTED";
+  GridTranscriptMessageKind[GridTranscriptMessageKind["GRID_TRANSCRIPT_LINK"] = 4] = "GRID_TRANSCRIPT_LINK";
 })(GridTranscriptMessageKind || (GridTranscriptMessageKind = {}));
 var AgentSessionProvider;
-(function(AgentSessionProvider2) {
-  AgentSessionProvider2[AgentSessionProvider2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  AgentSessionProvider2[AgentSessionProvider2["CODEX"] = 1] = "CODEX";
-  AgentSessionProvider2[AgentSessionProvider2["CODEX_CLOUD"] = 2] = "CODEX_CLOUD";
-  AgentSessionProvider2[AgentSessionProvider2["CLAUDE"] = 3] = "CLAUDE";
-  AgentSessionProvider2[AgentSessionProvider2["OPEN_CODE"] = 4] = "OPEN_CODE";
-  AgentSessionProvider2[AgentSessionProvider2["AMP"] = 5] = "AMP";
+(function(AgentSessionProvider) {
+  AgentSessionProvider[AgentSessionProvider["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  AgentSessionProvider[AgentSessionProvider["CODEX"] = 1] = "CODEX";
+  AgentSessionProvider[AgentSessionProvider["CODEX_CLOUD"] = 2] = "CODEX_CLOUD";
+  AgentSessionProvider[AgentSessionProvider["CLAUDE"] = 3] = "CLAUDE";
+  AgentSessionProvider[AgentSessionProvider["OPEN_CODE"] = 4] = "OPEN_CODE";
+  AgentSessionProvider[AgentSessionProvider["AMP"] = 5] = "AMP";
 })(AgentSessionProvider || (AgentSessionProvider = {}));
 var AgentSessionMessageRole;
-(function(AgentSessionMessageRole2) {
-  AgentSessionMessageRole2[AgentSessionMessageRole2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  AgentSessionMessageRole2[AgentSessionMessageRole2["USER"] = 1] = "USER";
-  AgentSessionMessageRole2[AgentSessionMessageRole2["ASSISTANT"] = 2] = "ASSISTANT";
+(function(AgentSessionMessageRole) {
+  AgentSessionMessageRole[AgentSessionMessageRole["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  AgentSessionMessageRole[AgentSessionMessageRole["USER"] = 1] = "USER";
+  AgentSessionMessageRole[AgentSessionMessageRole["ASSISTANT"] = 2] = "ASSISTANT";
 })(AgentSessionMessageRole || (AgentSessionMessageRole = {}));
 var AgentSessionMessageRelation;
-(function(AgentSessionMessageRelation2) {
-  AgentSessionMessageRelation2[AgentSessionMessageRelation2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  AgentSessionMessageRelation2[AgentSessionMessageRelation2["IMPORTED"] = 1] = "IMPORTED";
-  AgentSessionMessageRelation2[AgentSessionMessageRelation2["LINKED"] = 2] = "LINKED";
+(function(AgentSessionMessageRelation) {
+  AgentSessionMessageRelation[AgentSessionMessageRelation["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  AgentSessionMessageRelation[AgentSessionMessageRelation["IMPORTED"] = 1] = "IMPORTED";
+  AgentSessionMessageRelation[AgentSessionMessageRelation["LINKED"] = 2] = "LINKED";
 })(AgentSessionMessageRelation || (AgentSessionMessageRelation = {}));
 var MessageSendMode;
-(function(MessageSendMode2) {
-  MessageSendMode2[MessageSendMode2["MODE_UNSPECIFIED"] = 0] = "MODE_UNSPECIFIED";
-  MessageSendMode2[MessageSendMode2["MODE_SILENT"] = 1] = "MODE_SILENT";
+(function(MessageSendMode) {
+  MessageSendMode[MessageSendMode["MODE_UNSPECIFIED"] = 0] = "MODE_UNSPECIFIED";
+  MessageSendMode[MessageSendMode["MODE_SILENT"] = 1] = "MODE_SILENT";
 })(MessageSendMode || (MessageSendMode = {}));
 var ConnectAgentSessionState;
-(function(ConnectAgentSessionState2) {
-  ConnectAgentSessionState2[ConnectAgentSessionState2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  ConnectAgentSessionState2[ConnectAgentSessionState2["CREATED"] = 1] = "CREATED";
-  ConnectAgentSessionState2[ConnectAgentSessionState2["ALREADY_CONNECTED"] = 2] = "ALREADY_CONNECTED";
-  ConnectAgentSessionState2[ConnectAgentSessionState2["CONNECTED_ELSEWHERE"] = 3] = "CONNECTED_ELSEWHERE";
+(function(ConnectAgentSessionState) {
+  ConnectAgentSessionState[ConnectAgentSessionState["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  ConnectAgentSessionState[ConnectAgentSessionState["CREATED"] = 1] = "CREATED";
+  ConnectAgentSessionState[ConnectAgentSessionState["ALREADY_CONNECTED"] = 2] = "ALREADY_CONNECTED";
+  ConnectAgentSessionState[ConnectAgentSessionState["CONNECTED_ELSEWHERE"] = 3] = "CONNECTED_ELSEWHERE";
 })(ConnectAgentSessionState || (ConnectAgentSessionState = {}));
 var AgentSessionSyncMode;
-(function(AgentSessionSyncMode2) {
-  AgentSessionSyncMode2[AgentSessionSyncMode2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  AgentSessionSyncMode2[AgentSessionSyncMode2["HISTORY"] = 1] = "HISTORY";
-  AgentSessionSyncMode2[AgentSessionSyncMode2["LIVE"] = 2] = "LIVE";
+(function(AgentSessionSyncMode) {
+  AgentSessionSyncMode[AgentSessionSyncMode["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  AgentSessionSyncMode[AgentSessionSyncMode["HISTORY"] = 1] = "HISTORY";
+  AgentSessionSyncMode[AgentSessionSyncMode["LIVE"] = 2] = "LIVE";
 })(AgentSessionSyncMode || (AgentSessionSyncMode = {}));
 var AgentSessionMessageSyncState;
-(function(AgentSessionMessageSyncState2) {
-  AgentSessionMessageSyncState2[AgentSessionMessageSyncState2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  AgentSessionMessageSyncState2[AgentSessionMessageSyncState2["CREATED"] = 1] = "CREATED";
-  AgentSessionMessageSyncState2[AgentSessionMessageSyncState2["EDITED"] = 2] = "EDITED";
-  AgentSessionMessageSyncState2[AgentSessionMessageSyncState2["LINKED"] = 3] = "LINKED";
-  AgentSessionMessageSyncState2[AgentSessionMessageSyncState2["UNCHANGED"] = 4] = "UNCHANGED";
-  AgentSessionMessageSyncState2[AgentSessionMessageSyncState2["STALE"] = 5] = "STALE";
-  AgentSessionMessageSyncState2[AgentSessionMessageSyncState2["TOMBSTONED"] = 6] = "TOMBSTONED";
-  AgentSessionMessageSyncState2[AgentSessionMessageSyncState2["CONFLICT"] = 7] = "CONFLICT";
+(function(AgentSessionMessageSyncState) {
+  AgentSessionMessageSyncState[AgentSessionMessageSyncState["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  AgentSessionMessageSyncState[AgentSessionMessageSyncState["CREATED"] = 1] = "CREATED";
+  AgentSessionMessageSyncState[AgentSessionMessageSyncState["EDITED"] = 2] = "EDITED";
+  AgentSessionMessageSyncState[AgentSessionMessageSyncState["LINKED"] = 3] = "LINKED";
+  AgentSessionMessageSyncState[AgentSessionMessageSyncState["UNCHANGED"] = 4] = "UNCHANGED";
+  AgentSessionMessageSyncState[AgentSessionMessageSyncState["STALE"] = 5] = "STALE";
+  AgentSessionMessageSyncState[AgentSessionMessageSyncState["TOMBSTONED"] = 6] = "TOMBSTONED";
+  AgentSessionMessageSyncState[AgentSessionMessageSyncState["CONFLICT"] = 7] = "CONFLICT";
 })(AgentSessionMessageSyncState || (AgentSessionMessageSyncState = {}));
 var Method;
-(function(Method2) {
-  Method2[Method2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  Method2[Method2["GET_ME"] = 1] = "GET_ME";
-  Method2[Method2["SEND_MESSAGE"] = 2] = "SEND_MESSAGE";
-  Method2[Method2["GET_PEER_PHOTO"] = 3] = "GET_PEER_PHOTO";
-  Method2[Method2["DELETE_MESSAGES"] = 4] = "DELETE_MESSAGES";
-  Method2[Method2["GET_CHAT_HISTORY"] = 5] = "GET_CHAT_HISTORY";
-  Method2[Method2["ADD_REACTION"] = 6] = "ADD_REACTION";
-  Method2[Method2["DELETE_REACTION"] = 7] = "DELETE_REACTION";
-  Method2[Method2["EDIT_MESSAGE"] = 8] = "EDIT_MESSAGE";
-  Method2[Method2["CREATE_CHAT"] = 9] = "CREATE_CHAT";
-  Method2[Method2["GET_SPACE_MEMBERS"] = 10] = "GET_SPACE_MEMBERS";
-  Method2[Method2["DELETE_CHAT"] = 11] = "DELETE_CHAT";
-  Method2[Method2["INVITE_TO_SPACE"] = 12] = "INVITE_TO_SPACE";
-  Method2[Method2["GET_CHAT_PARTICIPANTS"] = 13] = "GET_CHAT_PARTICIPANTS";
-  Method2[Method2["ADD_CHAT_PARTICIPANT"] = 14] = "ADD_CHAT_PARTICIPANT";
-  Method2[Method2["REMOVE_CHAT_PARTICIPANT"] = 15] = "REMOVE_CHAT_PARTICIPANT";
-  Method2[Method2["TRANSLATE_MESSAGES"] = 16] = "TRANSLATE_MESSAGES";
-  Method2[Method2["GET_CHATS"] = 17] = "GET_CHATS";
-  Method2[Method2["UPDATE_USER_SETTINGS"] = 18] = "UPDATE_USER_SETTINGS";
-  Method2[Method2["GET_USER_SETTINGS"] = 19] = "GET_USER_SETTINGS";
-  Method2[Method2["SEND_COMPOSE_ACTION"] = 20] = "SEND_COMPOSE_ACTION";
-  Method2[Method2["CREATE_BOT"] = 21] = "CREATE_BOT";
-  Method2[Method2["DELETE_MEMBER"] = 22] = "DELETE_MEMBER";
-  Method2[Method2["MARK_AS_UNREAD"] = 23] = "MARK_AS_UNREAD";
-  Method2[Method2["GET_UPDATES_STATE"] = 24] = "GET_UPDATES_STATE";
-  Method2[Method2["GET_CHAT"] = 25] = "GET_CHAT";
-  Method2[Method2["GET_UPDATES"] = 26] = "GET_UPDATES";
-  Method2[Method2["UPDATE_MEMBER_ACCESS"] = 27] = "UPDATE_MEMBER_ACCESS";
-  Method2[Method2["SEARCH_MESSAGES"] = 28] = "SEARCH_MESSAGES";
-  Method2[Method2["FORWARD_MESSAGES"] = 29] = "FORWARD_MESSAGES";
-  Method2[Method2["UPDATE_CHAT_VISIBILITY"] = 30] = "UPDATE_CHAT_VISIBILITY";
-  Method2[Method2["PIN_MESSAGE"] = 31] = "PIN_MESSAGE";
-  Method2[Method2["UPDATE_CHAT_INFO"] = 32] = "UPDATE_CHAT_INFO";
-  Method2[Method2["LIST_BOTS"] = 33] = "LIST_BOTS";
-  Method2[Method2["REVEAL_BOT_TOKEN"] = 34] = "REVEAL_BOT_TOKEN";
-  Method2[Method2["MOVE_THREAD"] = 35] = "MOVE_THREAD";
-  Method2[Method2["ROTATE_BOT_TOKEN"] = 36] = "ROTATE_BOT_TOKEN";
-  Method2[Method2["UPDATE_BOT_PROFILE"] = 37] = "UPDATE_BOT_PROFILE";
-  Method2[Method2["GET_MESSAGES"] = 38] = "GET_MESSAGES";
-  Method2[Method2["UPDATE_DIALOG_NOTIFICATION_SETTINGS"] = 39] = "UPDATE_DIALOG_NOTIFICATION_SETTINGS";
-  Method2[Method2["READ_MESSAGES"] = 40] = "READ_MESSAGES";
-  Method2[Method2["REGISTER_DEVICE"] = 41] = "REGISTER_DEVICE";
-  Method2[Method2["CREATE_SUBTHREAD"] = 42] = "CREATE_SUBTHREAD";
-  Method2[Method2["GET_BOT_COMMANDS"] = 43] = "GET_BOT_COMMANDS";
-  Method2[Method2["SET_BOT_COMMANDS"] = 44] = "SET_BOT_COMMANDS";
-  Method2[Method2["GET_PEER_BOT_COMMANDS"] = 45] = "GET_PEER_BOT_COMMANDS";
-  Method2[Method2["SHOW_IN_CHAT_LIST"] = 46] = "SHOW_IN_CHAT_LIST";
-  Method2[Method2["RESERVE_CHAT_IDS"] = 47] = "RESERVE_CHAT_IDS";
-  Method2[Method2["INVOKE_MESSAGE_ACTION"] = 48] = "INVOKE_MESSAGE_ACTION";
-  Method2[Method2["ANSWER_MESSAGE_ACTION"] = 49] = "ANSWER_MESSAGE_ACTION";
-  Method2[Method2["REVOKE_SESSION"] = 50] = "REVOKE_SESSION";
-  Method2[Method2["UPDATE_DIALOG_OPEN"] = 51] = "UPDATE_DIALOG_OPEN";
-  Method2[Method2["UPDATE_DIALOG_ORDER"] = 52] = "UPDATE_DIALOG_ORDER";
-  Method2[Method2["CLEAR_CHAT_HISTORY"] = 53] = "CLEAR_CHAT_HISTORY";
-  Method2[Method2["DELETE_BOT"] = 54] = "DELETE_BOT";
-  Method2[Method2["DELETE_MESSAGE_ATTACHMENT"] = 55] = "DELETE_MESSAGE_ATTACHMENT";
-  Method2[Method2["SET_BOT_AVATAR"] = 56] = "SET_BOT_AVATAR";
-  Method2[Method2["CLEAR_BOT_AVATAR"] = 57] = "CLEAR_BOT_AVATAR";
-  Method2[Method2["GET_BOT_PRESENCE"] = 58] = "GET_BOT_PRESENCE";
-  Method2[Method2["SET_BOT_PRESENCE_STATE"] = 59] = "SET_BOT_PRESENCE_STATE";
-  Method2[Method2["UPDATE_DIALOG_FOLLOW_MODE"] = 60] = "UPDATE_DIALOG_FOLLOW_MODE";
-  Method2[Method2["GET_SESSIONS"] = 61] = "GET_SESSIONS";
-  Method2[Method2["CHECK_USERNAME"] = 62] = "CHECK_USERNAME";
-  Method2[Method2["CHANGE_USERNAME"] = 63] = "CHANGE_USERNAME";
-  Method2[Method2["UPDATE_PROFILE"] = 64] = "UPDATE_PROFILE";
-  Method2[Method2["GET_SPACE_URL_PREVIEW_EXCLUSIONS"] = 65] = "GET_SPACE_URL_PREVIEW_EXCLUSIONS";
-  Method2[Method2["ADD_SPACE_URL_PREVIEW_EXCLUSION"] = 66] = "ADD_SPACE_URL_PREVIEW_EXCLUSION";
-  Method2[Method2["REMOVE_SPACE_URL_PREVIEW_EXCLUSION"] = 67] = "REMOVE_SPACE_URL_PREVIEW_EXCLUSION";
-  Method2[Method2["GET_USER_GROUPS"] = 68] = "GET_USER_GROUPS";
-  Method2[Method2["CREATE_USER_GROUP"] = 69] = "CREATE_USER_GROUP";
-  Method2[Method2["UPDATE_USER_GROUP"] = 70] = "UPDATE_USER_GROUP";
-  Method2[Method2["DELETE_USER_GROUP"] = 71] = "DELETE_USER_GROUP";
-  Method2[Method2["GET_SPACE_SETTINGS"] = 72] = "GET_SPACE_SETTINGS";
-  Method2[Method2["TOGGLE_SPACE_GRID"] = 73] = "TOGGLE_SPACE_GRID";
-  Method2[Method2["GET_THREAD_REFERENCES"] = 74] = "GET_THREAD_REFERENCES";
-  Method2[Method2["GET_THREAD_SUBTHREADS"] = 75] = "GET_THREAD_SUBTHREADS";
-  Method2[Method2["GET_PEER_BOTS"] = 76] = "GET_PEER_BOTS";
-  Method2[Method2["GET_MY_BOT_CAPABILITIES"] = 77] = "GET_MY_BOT_CAPABILITIES";
-  Method2[Method2["SET_MY_BOT_CAPABILITIES"] = 78] = "SET_MY_BOT_CAPABILITIES";
-  Method2[Method2["REQUEST_BOT_CHAT_SETTINGS"] = 79] = "REQUEST_BOT_CHAT_SETTINGS";
-  Method2[Method2["INVOKE_BOT_CHAT_SETTINGS_ITEM"] = 80] = "INVOKE_BOT_CHAT_SETTINGS_ITEM";
-  Method2[Method2["ANSWER_BOT_CHAT_SETTINGS"] = 81] = "ANSWER_BOT_CHAT_SETTINGS";
-  Method2[Method2["GET_GRID"] = 83] = "GET_GRID";
-  Method2[Method2["CREATE_GRID_ROOM"] = 84] = "CREATE_GRID_ROOM";
-  Method2[Method2["JOIN_GRID_ROOM"] = 85] = "JOIN_GRID_ROOM";
-  Method2[Method2["LEAVE_GRID_ROOM"] = 86] = "LEAVE_GRID_ROOM";
-  Method2[Method2["SET_GRID_ROOM_TITLE"] = 87] = "SET_GRID_ROOM_TITLE";
-  Method2[Method2["SET_GRID_ROOM_LOCKED"] = 88] = "SET_GRID_ROOM_LOCKED";
-  Method2[Method2["DELETE_GRID_ROOM"] = 89] = "DELETE_GRID_ROOM";
-  Method2[Method2["PREPARE_GRID_CONNECTION"] = 90] = "PREPARE_GRID_CONNECTION";
-  Method2[Method2["SET_GRID_AVATAR_MICROPHONE_ENABLED"] = 91] = "SET_GRID_AVATAR_MICROPHONE_ENABLED";
-  Method2[Method2["GET_GRID_HOME"] = 92] = "GET_GRID_HOME";
-  Method2[Method2["CREATE_CLI_SESSION"] = 93] = "CREATE_CLI_SESSION";
-  Method2[Method2["SET_PROFILE_PHOTO"] = 94] = "SET_PROFILE_PHOTO";
-  Method2[Method2["GET_EXTERNAL_PROFILE_PHOTO"] = 95] = "GET_EXTERNAL_PROFILE_PHOTO";
-  Method2[Method2["GET_CHAT_TRANSCRIPT"] = 96] = "GET_CHAT_TRANSCRIPT";
-  Method2[Method2["SEARCH_EXTERNAL_RESOURCES"] = 97] = "SEARCH_EXTERNAL_RESOURCES";
-  Method2[Method2["JOIN_PUBLIC_SPACE"] = 98] = "JOIN_PUBLIC_SPACE";
-  Method2[Method2["COLLAPSE_HISTORY"] = 99] = "COLLAPSE_HISTORY";
-  Method2[Method2["LIST_CONNECTORS"] = 100] = "LIST_CONNECTORS";
-  Method2[Method2["PREPARE_CONNECTOR_OAUTH"] = 101] = "PREPARE_CONNECTOR_OAUTH";
-  Method2[Method2["DISCONNECT_CONNECTOR"] = 102] = "DISCONNECT_CONNECTOR";
-  Method2[Method2["SEARCH_USERS"] = 103] = "SEARCH_USERS";
-  Method2[Method2["INVITE_TO_INLINE"] = 104] = "INVITE_TO_INLINE";
-  Method2[Method2["RESOLVE_URL_PREVIEW"] = 105] = "RESOLVE_URL_PREVIEW";
-  Method2[Method2["CREATE_BOT_AGENT"] = 106] = "CREATE_BOT_AGENT";
-  Method2[Method2["GET_BOT_AGENT"] = 107] = "GET_BOT_AGENT";
-  Method2[Method2["LIST_BOT_AGENTS"] = 108] = "LIST_BOT_AGENTS";
-  Method2[Method2["CREATE_SPACE"] = 109] = "CREATE_SPACE";
-  Method2[Method2["DELETE_SPACE"] = 110] = "DELETE_SPACE";
-  Method2[Method2["LEAVE_SPACE"] = 111] = "LEAVE_SPACE";
-  Method2[Method2["GET_CONNECTOR_CONFIG"] = 112] = "GET_CONNECTOR_CONFIG";
-  Method2[Method2["SET_CONNECTOR_CONFIG"] = 113] = "SET_CONNECTOR_CONFIG";
-  Method2[Method2["CREATE_EXTERNAL_TASK"] = 114] = "CREATE_EXTERNAL_TASK";
-  Method2[Method2["UNREGISTER_DEVICE"] = 115] = "UNREGISTER_DEVICE";
-  Method2[Method2["LOG_OUT"] = 116] = "LOG_OUT";
-  Method2[Method2["CREATE_UPLOAD"] = 117] = "CREATE_UPLOAD";
-  Method2[Method2["SAVE_UPLOAD_PART"] = 118] = "SAVE_UPLOAD_PART";
-  Method2[Method2["GET_UPLOAD_STATE"] = 119] = "GET_UPLOAD_STATE";
-  Method2[Method2["FINISH_UPLOAD"] = 120] = "FINISH_UPLOAD";
-  Method2[Method2["CANCEL_UPLOAD"] = 121] = "CANCEL_UPLOAD";
-  Method2[Method2["UPDATE_SESSION"] = 122] = "UPDATE_SESSION";
-  Method2[Method2["UPDATE_DIALOG_ARCHIVED"] = 123] = "UPDATE_DIALOG_ARCHIVED";
-  Method2[Method2["CREATE_DIALOG_FOLDER"] = 124] = "CREATE_DIALOG_FOLDER";
-  Method2[Method2["UPDATE_DIALOG_FOLDER"] = 125] = "UPDATE_DIALOG_FOLDER";
-  Method2[Method2["DELETE_DIALOG_FOLDER"] = 126] = "DELETE_DIALOG_FOLDER";
-  Method2[Method2["GET_SPACE"] = 127] = "GET_SPACE";
-  Method2[Method2["CONNECT_AGENT_SESSION"] = 128] = "CONNECT_AGENT_SESSION";
-  Method2[Method2["SYNC_AGENT_SESSION_MESSAGES"] = 129] = "SYNC_AGENT_SESSION_MESSAGES";
-  Method2[Method2["GET_AGENT_SESSION"] = 130] = "GET_AGENT_SESSION";
-  Method2[Method2["UPDATE_BOT_AGENT"] = 131] = "UPDATE_BOT_AGENT";
-  Method2[Method2["DELETE_BOT_AGENT"] = 132] = "DELETE_BOT_AGENT";
-  Method2[Method2["JOIN_SPACE_BY_INVITE_TOKEN"] = 133] = "JOIN_SPACE_BY_INVITE_TOKEN";
-  Method2[Method2["GET_SPACE_INVITE_LINK"] = 134] = "GET_SPACE_INVITE_LINK";
-  Method2[Method2["SET_SPACE_INVITE_LINK_ENABLED"] = 135] = "SET_SPACE_INVITE_LINK_ENABLED";
-  Method2[Method2["GET_FILE_PART"] = 136] = "GET_FILE_PART";
-  Method2[Method2["ACKNOWLEDGE_MESSAGES"] = 137] = "ACKNOWLEDGE_MESSAGES";
-  Method2[Method2["GET_USERS"] = 138] = "GET_USERS";
-  Method2[Method2["GET_BOT_SKILLS"] = 139] = "GET_BOT_SKILLS";
-  Method2[Method2["GET_BOT_CONFIGURATION_CATALOG"] = 140] = "GET_BOT_CONFIGURATION_CATALOG";
-  Method2[Method2["UPDATE_DIALOG_TRANSLATION"] = 141] = "UPDATE_DIALOG_TRANSLATION";
-  Method2[Method2["TRANSCRIBE_VOICE_DRAFT"] = 142] = "TRANSCRIBE_VOICE_DRAFT";
-  Method2[Method2["REQUEST_BOT_FILESYSTEM"] = 143] = "REQUEST_BOT_FILESYSTEM";
-  Method2[Method2["ANSWER_BOT_FILESYSTEM"] = 144] = "ANSWER_BOT_FILESYSTEM";
-  Method2[Method2["SET_SPACE_PHOTO"] = 145] = "SET_SPACE_PHOTO";
-  Method2[Method2["MOVE_GRID_CALL_HERE"] = 146] = "MOVE_GRID_CALL_HERE";
-  Method2[Method2["OPEN_GRID_THREAD"] = 147] = "OPEN_GRID_THREAD";
-  Method2[Method2["SET_GRID_TRANSCRIPTION"] = 148] = "SET_GRID_TRANSCRIPTION";
-  Method2[Method2["LIST_GRID_TRANSCRIPTS"] = 149] = "LIST_GRID_TRANSCRIPTS";
+(function(Method) {
+  Method[Method["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  Method[Method["GET_ME"] = 1] = "GET_ME";
+  Method[Method["SEND_MESSAGE"] = 2] = "SEND_MESSAGE";
+  Method[Method["GET_PEER_PHOTO"] = 3] = "GET_PEER_PHOTO";
+  Method[Method["DELETE_MESSAGES"] = 4] = "DELETE_MESSAGES";
+  Method[Method["GET_CHAT_HISTORY"] = 5] = "GET_CHAT_HISTORY";
+  Method[Method["ADD_REACTION"] = 6] = "ADD_REACTION";
+  Method[Method["DELETE_REACTION"] = 7] = "DELETE_REACTION";
+  Method[Method["EDIT_MESSAGE"] = 8] = "EDIT_MESSAGE";
+  Method[Method["CREATE_CHAT"] = 9] = "CREATE_CHAT";
+  Method[Method["GET_SPACE_MEMBERS"] = 10] = "GET_SPACE_MEMBERS";
+  Method[Method["DELETE_CHAT"] = 11] = "DELETE_CHAT";
+  Method[Method["INVITE_TO_SPACE"] = 12] = "INVITE_TO_SPACE";
+  Method[Method["GET_CHAT_PARTICIPANTS"] = 13] = "GET_CHAT_PARTICIPANTS";
+  Method[Method["ADD_CHAT_PARTICIPANT"] = 14] = "ADD_CHAT_PARTICIPANT";
+  Method[Method["REMOVE_CHAT_PARTICIPANT"] = 15] = "REMOVE_CHAT_PARTICIPANT";
+  Method[Method["TRANSLATE_MESSAGES"] = 16] = "TRANSLATE_MESSAGES";
+  Method[Method["GET_CHATS"] = 17] = "GET_CHATS";
+  Method[Method["UPDATE_USER_SETTINGS"] = 18] = "UPDATE_USER_SETTINGS";
+  Method[Method["GET_USER_SETTINGS"] = 19] = "GET_USER_SETTINGS";
+  Method[Method["SEND_COMPOSE_ACTION"] = 20] = "SEND_COMPOSE_ACTION";
+  Method[Method["CREATE_BOT"] = 21] = "CREATE_BOT";
+  Method[Method["DELETE_MEMBER"] = 22] = "DELETE_MEMBER";
+  Method[Method["MARK_AS_UNREAD"] = 23] = "MARK_AS_UNREAD";
+  Method[Method["GET_UPDATES_STATE"] = 24] = "GET_UPDATES_STATE";
+  Method[Method["GET_CHAT"] = 25] = "GET_CHAT";
+  Method[Method["GET_UPDATES"] = 26] = "GET_UPDATES";
+  Method[Method["UPDATE_MEMBER_ACCESS"] = 27] = "UPDATE_MEMBER_ACCESS";
+  Method[Method["SEARCH_MESSAGES"] = 28] = "SEARCH_MESSAGES";
+  Method[Method["FORWARD_MESSAGES"] = 29] = "FORWARD_MESSAGES";
+  Method[Method["UPDATE_CHAT_VISIBILITY"] = 30] = "UPDATE_CHAT_VISIBILITY";
+  Method[Method["PIN_MESSAGE"] = 31] = "PIN_MESSAGE";
+  Method[Method["UPDATE_CHAT_INFO"] = 32] = "UPDATE_CHAT_INFO";
+  Method[Method["LIST_BOTS"] = 33] = "LIST_BOTS";
+  Method[Method["REVEAL_BOT_TOKEN"] = 34] = "REVEAL_BOT_TOKEN";
+  Method[Method["MOVE_THREAD"] = 35] = "MOVE_THREAD";
+  Method[Method["ROTATE_BOT_TOKEN"] = 36] = "ROTATE_BOT_TOKEN";
+  Method[Method["UPDATE_BOT_PROFILE"] = 37] = "UPDATE_BOT_PROFILE";
+  Method[Method["GET_MESSAGES"] = 38] = "GET_MESSAGES";
+  Method[Method["UPDATE_DIALOG_NOTIFICATION_SETTINGS"] = 39] = "UPDATE_DIALOG_NOTIFICATION_SETTINGS";
+  Method[Method["READ_MESSAGES"] = 40] = "READ_MESSAGES";
+  Method[Method["REGISTER_DEVICE"] = 41] = "REGISTER_DEVICE";
+  Method[Method["CREATE_SUBTHREAD"] = 42] = "CREATE_SUBTHREAD";
+  Method[Method["GET_BOT_COMMANDS"] = 43] = "GET_BOT_COMMANDS";
+  Method[Method["SET_BOT_COMMANDS"] = 44] = "SET_BOT_COMMANDS";
+  Method[Method["GET_PEER_BOT_COMMANDS"] = 45] = "GET_PEER_BOT_COMMANDS";
+  Method[Method["SHOW_IN_CHAT_LIST"] = 46] = "SHOW_IN_CHAT_LIST";
+  Method[Method["RESERVE_CHAT_IDS"] = 47] = "RESERVE_CHAT_IDS";
+  Method[Method["INVOKE_MESSAGE_ACTION"] = 48] = "INVOKE_MESSAGE_ACTION";
+  Method[Method["ANSWER_MESSAGE_ACTION"] = 49] = "ANSWER_MESSAGE_ACTION";
+  Method[Method["REVOKE_SESSION"] = 50] = "REVOKE_SESSION";
+  Method[Method["UPDATE_DIALOG_OPEN"] = 51] = "UPDATE_DIALOG_OPEN";
+  Method[Method["UPDATE_DIALOG_ORDER"] = 52] = "UPDATE_DIALOG_ORDER";
+  Method[Method["CLEAR_CHAT_HISTORY"] = 53] = "CLEAR_CHAT_HISTORY";
+  Method[Method["DELETE_BOT"] = 54] = "DELETE_BOT";
+  Method[Method["DELETE_MESSAGE_ATTACHMENT"] = 55] = "DELETE_MESSAGE_ATTACHMENT";
+  Method[Method["SET_BOT_AVATAR"] = 56] = "SET_BOT_AVATAR";
+  Method[Method["CLEAR_BOT_AVATAR"] = 57] = "CLEAR_BOT_AVATAR";
+  Method[Method["GET_BOT_PRESENCE"] = 58] = "GET_BOT_PRESENCE";
+  Method[Method["SET_BOT_PRESENCE_STATE"] = 59] = "SET_BOT_PRESENCE_STATE";
+  Method[Method["UPDATE_DIALOG_FOLLOW_MODE"] = 60] = "UPDATE_DIALOG_FOLLOW_MODE";
+  Method[Method["GET_SESSIONS"] = 61] = "GET_SESSIONS";
+  Method[Method["CHECK_USERNAME"] = 62] = "CHECK_USERNAME";
+  Method[Method["CHANGE_USERNAME"] = 63] = "CHANGE_USERNAME";
+  Method[Method["UPDATE_PROFILE"] = 64] = "UPDATE_PROFILE";
+  Method[Method["GET_SPACE_URL_PREVIEW_EXCLUSIONS"] = 65] = "GET_SPACE_URL_PREVIEW_EXCLUSIONS";
+  Method[Method["ADD_SPACE_URL_PREVIEW_EXCLUSION"] = 66] = "ADD_SPACE_URL_PREVIEW_EXCLUSION";
+  Method[Method["REMOVE_SPACE_URL_PREVIEW_EXCLUSION"] = 67] = "REMOVE_SPACE_URL_PREVIEW_EXCLUSION";
+  Method[Method["GET_USER_GROUPS"] = 68] = "GET_USER_GROUPS";
+  Method[Method["CREATE_USER_GROUP"] = 69] = "CREATE_USER_GROUP";
+  Method[Method["UPDATE_USER_GROUP"] = 70] = "UPDATE_USER_GROUP";
+  Method[Method["DELETE_USER_GROUP"] = 71] = "DELETE_USER_GROUP";
+  Method[Method["GET_SPACE_SETTINGS"] = 72] = "GET_SPACE_SETTINGS";
+  Method[Method["TOGGLE_SPACE_GRID"] = 73] = "TOGGLE_SPACE_GRID";
+  Method[Method["GET_THREAD_REFERENCES"] = 74] = "GET_THREAD_REFERENCES";
+  Method[Method["GET_THREAD_SUBTHREADS"] = 75] = "GET_THREAD_SUBTHREADS";
+  Method[Method["GET_PEER_BOTS"] = 76] = "GET_PEER_BOTS";
+  Method[Method["GET_MY_BOT_CAPABILITIES"] = 77] = "GET_MY_BOT_CAPABILITIES";
+  Method[Method["SET_MY_BOT_CAPABILITIES"] = 78] = "SET_MY_BOT_CAPABILITIES";
+  Method[Method["REQUEST_BOT_CHAT_SETTINGS"] = 79] = "REQUEST_BOT_CHAT_SETTINGS";
+  Method[Method["INVOKE_BOT_CHAT_SETTINGS_ITEM"] = 80] = "INVOKE_BOT_CHAT_SETTINGS_ITEM";
+  Method[Method["ANSWER_BOT_CHAT_SETTINGS"] = 81] = "ANSWER_BOT_CHAT_SETTINGS";
+  Method[Method["GET_GRID"] = 83] = "GET_GRID";
+  Method[Method["CREATE_GRID_ROOM"] = 84] = "CREATE_GRID_ROOM";
+  Method[Method["JOIN_GRID_ROOM"] = 85] = "JOIN_GRID_ROOM";
+  Method[Method["LEAVE_GRID_ROOM"] = 86] = "LEAVE_GRID_ROOM";
+  Method[Method["SET_GRID_ROOM_TITLE"] = 87] = "SET_GRID_ROOM_TITLE";
+  Method[Method["SET_GRID_ROOM_LOCKED"] = 88] = "SET_GRID_ROOM_LOCKED";
+  Method[Method["DELETE_GRID_ROOM"] = 89] = "DELETE_GRID_ROOM";
+  Method[Method["PREPARE_GRID_CONNECTION"] = 90] = "PREPARE_GRID_CONNECTION";
+  Method[Method["SET_GRID_AVATAR_MICROPHONE_ENABLED"] = 91] = "SET_GRID_AVATAR_MICROPHONE_ENABLED";
+  Method[Method["GET_GRID_HOME"] = 92] = "GET_GRID_HOME";
+  Method[Method["CREATE_CLI_SESSION"] = 93] = "CREATE_CLI_SESSION";
+  Method[Method["SET_PROFILE_PHOTO"] = 94] = "SET_PROFILE_PHOTO";
+  Method[Method["GET_EXTERNAL_PROFILE_PHOTO"] = 95] = "GET_EXTERNAL_PROFILE_PHOTO";
+  Method[Method["GET_CHAT_TRANSCRIPT"] = 96] = "GET_CHAT_TRANSCRIPT";
+  Method[Method["SEARCH_EXTERNAL_RESOURCES"] = 97] = "SEARCH_EXTERNAL_RESOURCES";
+  Method[Method["JOIN_PUBLIC_SPACE"] = 98] = "JOIN_PUBLIC_SPACE";
+  Method[Method["COLLAPSE_HISTORY"] = 99] = "COLLAPSE_HISTORY";
+  Method[Method["LIST_CONNECTORS"] = 100] = "LIST_CONNECTORS";
+  Method[Method["PREPARE_CONNECTOR_OAUTH"] = 101] = "PREPARE_CONNECTOR_OAUTH";
+  Method[Method["DISCONNECT_CONNECTOR"] = 102] = "DISCONNECT_CONNECTOR";
+  Method[Method["SEARCH_USERS"] = 103] = "SEARCH_USERS";
+  Method[Method["INVITE_TO_INLINE"] = 104] = "INVITE_TO_INLINE";
+  Method[Method["RESOLVE_URL_PREVIEW"] = 105] = "RESOLVE_URL_PREVIEW";
+  Method[Method["CREATE_BOT_AGENT"] = 106] = "CREATE_BOT_AGENT";
+  Method[Method["GET_BOT_AGENT"] = 107] = "GET_BOT_AGENT";
+  Method[Method["LIST_BOT_AGENTS"] = 108] = "LIST_BOT_AGENTS";
+  Method[Method["CREATE_SPACE"] = 109] = "CREATE_SPACE";
+  Method[Method["DELETE_SPACE"] = 110] = "DELETE_SPACE";
+  Method[Method["LEAVE_SPACE"] = 111] = "LEAVE_SPACE";
+  Method[Method["GET_CONNECTOR_CONFIG"] = 112] = "GET_CONNECTOR_CONFIG";
+  Method[Method["SET_CONNECTOR_CONFIG"] = 113] = "SET_CONNECTOR_CONFIG";
+  Method[Method["CREATE_EXTERNAL_TASK"] = 114] = "CREATE_EXTERNAL_TASK";
+  Method[Method["UNREGISTER_DEVICE"] = 115] = "UNREGISTER_DEVICE";
+  Method[Method["LOG_OUT"] = 116] = "LOG_OUT";
+  Method[Method["CREATE_UPLOAD"] = 117] = "CREATE_UPLOAD";
+  Method[Method["SAVE_UPLOAD_PART"] = 118] = "SAVE_UPLOAD_PART";
+  Method[Method["GET_UPLOAD_STATE"] = 119] = "GET_UPLOAD_STATE";
+  Method[Method["FINISH_UPLOAD"] = 120] = "FINISH_UPLOAD";
+  Method[Method["CANCEL_UPLOAD"] = 121] = "CANCEL_UPLOAD";
+  Method[Method["UPDATE_SESSION"] = 122] = "UPDATE_SESSION";
+  Method[Method["UPDATE_DIALOG_ARCHIVED"] = 123] = "UPDATE_DIALOG_ARCHIVED";
+  Method[Method["CREATE_DIALOG_FOLDER"] = 124] = "CREATE_DIALOG_FOLDER";
+  Method[Method["UPDATE_DIALOG_FOLDER"] = 125] = "UPDATE_DIALOG_FOLDER";
+  Method[Method["DELETE_DIALOG_FOLDER"] = 126] = "DELETE_DIALOG_FOLDER";
+  Method[Method["GET_SPACE"] = 127] = "GET_SPACE";
+  Method[Method["CONNECT_AGENT_SESSION"] = 128] = "CONNECT_AGENT_SESSION";
+  Method[Method["SYNC_AGENT_SESSION_MESSAGES"] = 129] = "SYNC_AGENT_SESSION_MESSAGES";
+  Method[Method["GET_AGENT_SESSION"] = 130] = "GET_AGENT_SESSION";
+  Method[Method["UPDATE_BOT_AGENT"] = 131] = "UPDATE_BOT_AGENT";
+  Method[Method["DELETE_BOT_AGENT"] = 132] = "DELETE_BOT_AGENT";
+  Method[Method["JOIN_SPACE_BY_INVITE_TOKEN"] = 133] = "JOIN_SPACE_BY_INVITE_TOKEN";
+  Method[Method["GET_SPACE_INVITE_LINK"] = 134] = "GET_SPACE_INVITE_LINK";
+  Method[Method["SET_SPACE_INVITE_LINK_ENABLED"] = 135] = "SET_SPACE_INVITE_LINK_ENABLED";
+  Method[Method["GET_FILE_PART"] = 136] = "GET_FILE_PART";
+  Method[Method["ACKNOWLEDGE_MESSAGES"] = 137] = "ACKNOWLEDGE_MESSAGES";
+  Method[Method["GET_USERS"] = 138] = "GET_USERS";
+  Method[Method["GET_BOT_SKILLS"] = 139] = "GET_BOT_SKILLS";
+  Method[Method["GET_BOT_CONFIGURATION_CATALOG"] = 140] = "GET_BOT_CONFIGURATION_CATALOG";
+  Method[Method["UPDATE_DIALOG_TRANSLATION"] = 141] = "UPDATE_DIALOG_TRANSLATION";
+  Method[Method["TRANSCRIBE_VOICE_DRAFT"] = 142] = "TRANSCRIBE_VOICE_DRAFT";
+  Method[Method["REQUEST_BOT_FILESYSTEM"] = 143] = "REQUEST_BOT_FILESYSTEM";
+  Method[Method["ANSWER_BOT_FILESYSTEM"] = 144] = "ANSWER_BOT_FILESYSTEM";
+  Method[Method["SET_SPACE_PHOTO"] = 145] = "SET_SPACE_PHOTO";
+  Method[Method["MOVE_GRID_CALL_HERE"] = 146] = "MOVE_GRID_CALL_HERE";
+  Method[Method["OPEN_GRID_THREAD"] = 147] = "OPEN_GRID_THREAD";
+  Method[Method["SET_GRID_TRANSCRIPTION"] = 148] = "SET_GRID_TRANSCRIPTION";
+  Method[Method["LIST_GRID_TRANSCRIPTS"] = 149] = "LIST_GRID_TRANSCRIPTS";
 })(Method || (Method = {}));
 var GridTranscriptionState;
-(function(GridTranscriptionState2) {
-  GridTranscriptionState2[GridTranscriptionState2["GRID_TRANSCRIPTION_UNSPECIFIED"] = 0] = "GRID_TRANSCRIPTION_UNSPECIFIED";
-  GridTranscriptionState2[GridTranscriptionState2["GRID_TRANSCRIPTION_STARTING"] = 1] = "GRID_TRANSCRIPTION_STARTING";
-  GridTranscriptionState2[GridTranscriptionState2["GRID_TRANSCRIPTION_ACTIVE"] = 2] = "GRID_TRANSCRIPTION_ACTIVE";
-  GridTranscriptionState2[GridTranscriptionState2["GRID_TRANSCRIPTION_STOPPING"] = 3] = "GRID_TRANSCRIPTION_STOPPING";
-  GridTranscriptionState2[GridTranscriptionState2["GRID_TRANSCRIPTION_STOPPED"] = 4] = "GRID_TRANSCRIPTION_STOPPED";
-  GridTranscriptionState2[GridTranscriptionState2["GRID_TRANSCRIPTION_INTERRUPTED"] = 5] = "GRID_TRANSCRIPTION_INTERRUPTED";
+(function(GridTranscriptionState) {
+  GridTranscriptionState[GridTranscriptionState["GRID_TRANSCRIPTION_UNSPECIFIED"] = 0] = "GRID_TRANSCRIPTION_UNSPECIFIED";
+  GridTranscriptionState[GridTranscriptionState["GRID_TRANSCRIPTION_STARTING"] = 1] = "GRID_TRANSCRIPTION_STARTING";
+  GridTranscriptionState[GridTranscriptionState["GRID_TRANSCRIPTION_ACTIVE"] = 2] = "GRID_TRANSCRIPTION_ACTIVE";
+  GridTranscriptionState[GridTranscriptionState["GRID_TRANSCRIPTION_STOPPING"] = 3] = "GRID_TRANSCRIPTION_STOPPING";
+  GridTranscriptionState[GridTranscriptionState["GRID_TRANSCRIPTION_STOPPED"] = 4] = "GRID_TRANSCRIPTION_STOPPED";
+  GridTranscriptionState[GridTranscriptionState["GRID_TRANSCRIPTION_INTERRUPTED"] = 5] = "GRID_TRANSCRIPTION_INTERRUPTED";
 })(GridTranscriptionState || (GridTranscriptionState = {}));
 var GridTranscriptDestination;
-(function(GridTranscriptDestination2) {
-  GridTranscriptDestination2[GridTranscriptDestination2["GRID_TRANSCRIPT_LAST"] = 0] = "GRID_TRANSCRIPT_LAST";
-  GridTranscriptDestination2[GridTranscriptDestination2["GRID_TRANSCRIPT_NEW"] = 1] = "GRID_TRANSCRIPT_NEW";
-  GridTranscriptDestination2[GridTranscriptDestination2["GRID_TRANSCRIPT_EXISTING"] = 2] = "GRID_TRANSCRIPT_EXISTING";
+(function(GridTranscriptDestination) {
+  GridTranscriptDestination[GridTranscriptDestination["GRID_TRANSCRIPT_LAST"] = 0] = "GRID_TRANSCRIPT_LAST";
+  GridTranscriptDestination[GridTranscriptDestination["GRID_TRANSCRIPT_NEW"] = 1] = "GRID_TRANSCRIPT_NEW";
+  GridTranscriptDestination[GridTranscriptDestination["GRID_TRANSCRIPT_EXISTING"] = 2] = "GRID_TRANSCRIPT_EXISTING";
 })(GridTranscriptDestination || (GridTranscriptDestination = {}));
 var GridConnectionUnavailableReason;
-(function(GridConnectionUnavailableReason2) {
-  GridConnectionUnavailableReason2[GridConnectionUnavailableReason2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  GridConnectionUnavailableReason2[GridConnectionUnavailableReason2["NOT_ACTIVE"] = 1] = "NOT_ACTIVE";
-  GridConnectionUnavailableReason2[GridConnectionUnavailableReason2["PROVIDER_UNAVAILABLE"] = 2] = "PROVIDER_UNAVAILABLE";
+(function(GridConnectionUnavailableReason) {
+  GridConnectionUnavailableReason[GridConnectionUnavailableReason["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  GridConnectionUnavailableReason[GridConnectionUnavailableReason["NOT_ACTIVE"] = 1] = "NOT_ACTIVE";
+  GridConnectionUnavailableReason[GridConnectionUnavailableReason["PROVIDER_UNAVAILABLE"] = 2] = "PROVIDER_UNAVAILABLE";
 })(GridConnectionUnavailableReason || (GridConnectionUnavailableReason = {}));
 var UsernameAvailability;
-(function(UsernameAvailability2) {
-  UsernameAvailability2[UsernameAvailability2["USERNAME_AVAILABILITY_UNSPECIFIED"] = 0] = "USERNAME_AVAILABILITY_UNSPECIFIED";
-  UsernameAvailability2[UsernameAvailability2["USERNAME_AVAILABLE"] = 1] = "USERNAME_AVAILABLE";
-  UsernameAvailability2[UsernameAvailability2["USERNAME_CURRENT"] = 2] = "USERNAME_CURRENT";
-  UsernameAvailability2[UsernameAvailability2["USERNAME_TAKEN"] = 3] = "USERNAME_TAKEN";
-  UsernameAvailability2[UsernameAvailability2["USERNAME_RESERVED"] = 4] = "USERNAME_RESERVED";
-  UsernameAvailability2[UsernameAvailability2["USERNAME_INVALID"] = 5] = "USERNAME_INVALID";
+(function(UsernameAvailability) {
+  UsernameAvailability[UsernameAvailability["USERNAME_AVAILABILITY_UNSPECIFIED"] = 0] = "USERNAME_AVAILABILITY_UNSPECIFIED";
+  UsernameAvailability[UsernameAvailability["USERNAME_AVAILABLE"] = 1] = "USERNAME_AVAILABLE";
+  UsernameAvailability[UsernameAvailability["USERNAME_CURRENT"] = 2] = "USERNAME_CURRENT";
+  UsernameAvailability[UsernameAvailability["USERNAME_TAKEN"] = 3] = "USERNAME_TAKEN";
+  UsernameAvailability[UsernameAvailability["USERNAME_RESERVED"] = 4] = "USERNAME_RESERVED";
+  UsernameAvailability[UsernameAvailability["USERNAME_INVALID"] = 5] = "USERNAME_INVALID";
 })(UsernameAvailability || (UsernameAvailability = {}));
 var ExternalProfileProvider;
-(function(ExternalProfileProvider2) {
-  ExternalProfileProvider2[ExternalProfileProvider2["EXTERNAL_PROFILE_PROVIDER_UNSPECIFIED"] = 0] = "EXTERNAL_PROFILE_PROVIDER_UNSPECIFIED";
-  ExternalProfileProvider2[ExternalProfileProvider2["EXTERNAL_PROFILE_PROVIDER_X"] = 1] = "EXTERNAL_PROFILE_PROVIDER_X";
+(function(ExternalProfileProvider) {
+  ExternalProfileProvider[ExternalProfileProvider["EXTERNAL_PROFILE_PROVIDER_UNSPECIFIED"] = 0] = "EXTERNAL_PROFILE_PROVIDER_UNSPECIFIED";
+  ExternalProfileProvider[ExternalProfileProvider["EXTERNAL_PROFILE_PROVIDER_X"] = 1] = "EXTERNAL_PROFILE_PROVIDER_X";
 })(ExternalProfileProvider || (ExternalProfileProvider = {}));
 var ExternalProfilePhotoStatus;
-(function(ExternalProfilePhotoStatus2) {
-  ExternalProfilePhotoStatus2[ExternalProfilePhotoStatus2["EXTERNAL_PROFILE_PHOTO_STATUS_UNSPECIFIED"] = 0] = "EXTERNAL_PROFILE_PHOTO_STATUS_UNSPECIFIED";
-  ExternalProfilePhotoStatus2[ExternalProfilePhotoStatus2["EXTERNAL_PROFILE_PHOTO_FOUND"] = 1] = "EXTERNAL_PROFILE_PHOTO_FOUND";
-  ExternalProfilePhotoStatus2[ExternalProfilePhotoStatus2["EXTERNAL_PROFILE_PHOTO_NOT_FOUND"] = 2] = "EXTERNAL_PROFILE_PHOTO_NOT_FOUND";
-  ExternalProfilePhotoStatus2[ExternalProfilePhotoStatus2["EXTERNAL_PROFILE_PHOTO_UNAVAILABLE"] = 3] = "EXTERNAL_PROFILE_PHOTO_UNAVAILABLE";
+(function(ExternalProfilePhotoStatus) {
+  ExternalProfilePhotoStatus[ExternalProfilePhotoStatus["EXTERNAL_PROFILE_PHOTO_STATUS_UNSPECIFIED"] = 0] = "EXTERNAL_PROFILE_PHOTO_STATUS_UNSPECIFIED";
+  ExternalProfilePhotoStatus[ExternalProfilePhotoStatus["EXTERNAL_PROFILE_PHOTO_FOUND"] = 1] = "EXTERNAL_PROFILE_PHOTO_FOUND";
+  ExternalProfilePhotoStatus[ExternalProfilePhotoStatus["EXTERNAL_PROFILE_PHOTO_NOT_FOUND"] = 2] = "EXTERNAL_PROFILE_PHOTO_NOT_FOUND";
+  ExternalProfilePhotoStatus[ExternalProfilePhotoStatus["EXTERNAL_PROFILE_PHOTO_UNAVAILABLE"] = 3] = "EXTERNAL_PROFILE_PHOTO_UNAVAILABLE";
 })(ExternalProfilePhotoStatus || (ExternalProfilePhotoStatus = {}));
 var PushNotificationProvider;
-(function(PushNotificationProvider2) {
-  PushNotificationProvider2[PushNotificationProvider2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  PushNotificationProvider2[PushNotificationProvider2["APNS"] = 1] = "APNS";
-  PushNotificationProvider2[PushNotificationProvider2["EXPO_ANDROID"] = 2] = "EXPO_ANDROID";
+(function(PushNotificationProvider) {
+  PushNotificationProvider[PushNotificationProvider["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  PushNotificationProvider[PushNotificationProvider["APNS"] = 1] = "APNS";
+  PushNotificationProvider[PushNotificationProvider["EXPO_ANDROID"] = 2] = "EXPO_ANDROID";
 })(PushNotificationProvider || (PushNotificationProvider = {}));
 var DeleteDialogFolderDisposition;
-(function(DeleteDialogFolderDisposition2) {
-  DeleteDialogFolderDisposition2[DeleteDialogFolderDisposition2["DELETE_DIALOG_FOLDER_DISPOSITION_UNSPECIFIED"] = 0] = "DELETE_DIALOG_FOLDER_DISPOSITION_UNSPECIFIED";
-  DeleteDialogFolderDisposition2[DeleteDialogFolderDisposition2["CLOSE_DIALOGS"] = 1] = "CLOSE_DIALOGS";
-  DeleteDialogFolderDisposition2[DeleteDialogFolderDisposition2["KEEP_DIALOGS"] = 2] = "KEEP_DIALOGS";
+(function(DeleteDialogFolderDisposition) {
+  DeleteDialogFolderDisposition[DeleteDialogFolderDisposition["DELETE_DIALOG_FOLDER_DISPOSITION_UNSPECIFIED"] = 0] = "DELETE_DIALOG_FOLDER_DISPOSITION_UNSPECIFIED";
+  DeleteDialogFolderDisposition[DeleteDialogFolderDisposition["CLOSE_DIALOGS"] = 1] = "CLOSE_DIALOGS";
+  DeleteDialogFolderDisposition[DeleteDialogFolderDisposition["KEEP_DIALOGS"] = 2] = "KEEP_DIALOGS";
 })(DeleteDialogFolderDisposition || (DeleteDialogFolderDisposition = {}));
 var GetChatHistoryMode;
-(function(GetChatHistoryMode2) {
-  GetChatHistoryMode2[GetChatHistoryMode2["HISTORY_MODE_UNSPECIFIED"] = 0] = "HISTORY_MODE_UNSPECIFIED";
-  GetChatHistoryMode2[GetChatHistoryMode2["HISTORY_MODE_LATEST"] = 1] = "HISTORY_MODE_LATEST";
-  GetChatHistoryMode2[GetChatHistoryMode2["HISTORY_MODE_OLDER"] = 2] = "HISTORY_MODE_OLDER";
-  GetChatHistoryMode2[GetChatHistoryMode2["HISTORY_MODE_NEWER"] = 3] = "HISTORY_MODE_NEWER";
-  GetChatHistoryMode2[GetChatHistoryMode2["HISTORY_MODE_AROUND"] = 4] = "HISTORY_MODE_AROUND";
+(function(GetChatHistoryMode) {
+  GetChatHistoryMode[GetChatHistoryMode["HISTORY_MODE_UNSPECIFIED"] = 0] = "HISTORY_MODE_UNSPECIFIED";
+  GetChatHistoryMode[GetChatHistoryMode["HISTORY_MODE_LATEST"] = 1] = "HISTORY_MODE_LATEST";
+  GetChatHistoryMode[GetChatHistoryMode["HISTORY_MODE_OLDER"] = 2] = "HISTORY_MODE_OLDER";
+  GetChatHistoryMode[GetChatHistoryMode["HISTORY_MODE_NEWER"] = 3] = "HISTORY_MODE_NEWER";
+  GetChatHistoryMode[GetChatHistoryMode["HISTORY_MODE_AROUND"] = 4] = "HISTORY_MODE_AROUND";
 })(GetChatHistoryMode || (GetChatHistoryMode = {}));
 var ThreadReferenceKind;
-(function(ThreadReferenceKind2) {
-  ThreadReferenceKind2[ThreadReferenceKind2["THREAD_REFERENCE_KIND_UNSPECIFIED"] = 0] = "THREAD_REFERENCE_KIND_UNSPECIFIED";
-  ThreadReferenceKind2[ThreadReferenceKind2["THREAD_LINK"] = 1] = "THREAD_LINK";
-  ThreadReferenceKind2[ThreadReferenceKind2["REPLY_THREAD"] = 2] = "REPLY_THREAD";
+(function(ThreadReferenceKind) {
+  ThreadReferenceKind[ThreadReferenceKind["THREAD_REFERENCE_KIND_UNSPECIFIED"] = 0] = "THREAD_REFERENCE_KIND_UNSPECIFIED";
+  ThreadReferenceKind[ThreadReferenceKind["THREAD_LINK"] = 1] = "THREAD_LINK";
+  ThreadReferenceKind[ThreadReferenceKind["REPLY_THREAD"] = 2] = "REPLY_THREAD";
 })(ThreadReferenceKind || (ThreadReferenceKind = {}));
 var SearchMessagesFilter;
-(function(SearchMessagesFilter2) {
-  SearchMessagesFilter2[SearchMessagesFilter2["FILTER_UNSPECIFIED"] = 0] = "FILTER_UNSPECIFIED";
-  SearchMessagesFilter2[SearchMessagesFilter2["FILTER_PHOTOS"] = 1] = "FILTER_PHOTOS";
-  SearchMessagesFilter2[SearchMessagesFilter2["FILTER_VIDEOS"] = 2] = "FILTER_VIDEOS";
-  SearchMessagesFilter2[SearchMessagesFilter2["FILTER_PHOTO_VIDEO"] = 3] = "FILTER_PHOTO_VIDEO";
-  SearchMessagesFilter2[SearchMessagesFilter2["FILTER_DOCUMENTS"] = 4] = "FILTER_DOCUMENTS";
-  SearchMessagesFilter2[SearchMessagesFilter2["FILTER_LINKS"] = 5] = "FILTER_LINKS";
-  SearchMessagesFilter2[SearchMessagesFilter2["FILTER_VOICE_MEMOS"] = 6] = "FILTER_VOICE_MEMOS";
+(function(SearchMessagesFilter) {
+  SearchMessagesFilter[SearchMessagesFilter["FILTER_UNSPECIFIED"] = 0] = "FILTER_UNSPECIFIED";
+  SearchMessagesFilter[SearchMessagesFilter["FILTER_PHOTOS"] = 1] = "FILTER_PHOTOS";
+  SearchMessagesFilter[SearchMessagesFilter["FILTER_VIDEOS"] = 2] = "FILTER_VIDEOS";
+  SearchMessagesFilter[SearchMessagesFilter["FILTER_PHOTO_VIDEO"] = 3] = "FILTER_PHOTO_VIDEO";
+  SearchMessagesFilter[SearchMessagesFilter["FILTER_DOCUMENTS"] = 4] = "FILTER_DOCUMENTS";
+  SearchMessagesFilter[SearchMessagesFilter["FILTER_LINKS"] = 5] = "FILTER_LINKS";
+  SearchMessagesFilter[SearchMessagesFilter["FILTER_VOICE_MEMOS"] = 6] = "FILTER_VOICE_MEMOS";
 })(SearchMessagesFilter || (SearchMessagesFilter = {}));
 var ExternalResourceProvider;
-(function(ExternalResourceProvider2) {
-  ExternalResourceProvider2[ExternalResourceProvider2["EXTERNAL_RESOURCE_PROVIDER_UNSPECIFIED"] = 0] = "EXTERNAL_RESOURCE_PROVIDER_UNSPECIFIED";
-  ExternalResourceProvider2[ExternalResourceProvider2["NOTION"] = 1] = "NOTION";
-  ExternalResourceProvider2[ExternalResourceProvider2["LINEAR"] = 2] = "LINEAR";
-  ExternalResourceProvider2[ExternalResourceProvider2["GITHUB"] = 3] = "GITHUB";
+(function(ExternalResourceProvider) {
+  ExternalResourceProvider[ExternalResourceProvider["EXTERNAL_RESOURCE_PROVIDER_UNSPECIFIED"] = 0] = "EXTERNAL_RESOURCE_PROVIDER_UNSPECIFIED";
+  ExternalResourceProvider[ExternalResourceProvider["NOTION"] = 1] = "NOTION";
+  ExternalResourceProvider[ExternalResourceProvider["LINEAR"] = 2] = "LINEAR";
+  ExternalResourceProvider[ExternalResourceProvider["GITHUB"] = 3] = "GITHUB";
 })(ExternalResourceProvider || (ExternalResourceProvider = {}));
 var ExternalResourceKind;
-(function(ExternalResourceKind2) {
-  ExternalResourceKind2[ExternalResourceKind2["EXTERNAL_RESOURCE_KIND_UNSPECIFIED"] = 0] = "EXTERNAL_RESOURCE_KIND_UNSPECIFIED";
-  ExternalResourceKind2[ExternalResourceKind2["PAGE"] = 1] = "PAGE";
-  ExternalResourceKind2[ExternalResourceKind2["DATABASE"] = 2] = "DATABASE";
-  ExternalResourceKind2[ExternalResourceKind2["ISSUE"] = 3] = "ISSUE";
-  ExternalResourceKind2[ExternalResourceKind2["PULL_REQUEST"] = 4] = "PULL_REQUEST";
-  ExternalResourceKind2[ExternalResourceKind2["REPOSITORY"] = 5] = "REPOSITORY";
-  ExternalResourceKind2[ExternalResourceKind2["OTHER"] = 6] = "OTHER";
+(function(ExternalResourceKind) {
+  ExternalResourceKind[ExternalResourceKind["EXTERNAL_RESOURCE_KIND_UNSPECIFIED"] = 0] = "EXTERNAL_RESOURCE_KIND_UNSPECIFIED";
+  ExternalResourceKind[ExternalResourceKind["PAGE"] = 1] = "PAGE";
+  ExternalResourceKind[ExternalResourceKind["DATABASE"] = 2] = "DATABASE";
+  ExternalResourceKind[ExternalResourceKind["ISSUE"] = 3] = "ISSUE";
+  ExternalResourceKind[ExternalResourceKind["PULL_REQUEST"] = 4] = "PULL_REQUEST";
+  ExternalResourceKind[ExternalResourceKind["REPOSITORY"] = 5] = "REPOSITORY";
+  ExternalResourceKind[ExternalResourceKind["OTHER"] = 6] = "OTHER";
 })(ExternalResourceKind || (ExternalResourceKind = {}));
 var ConnectorProvider;
-(function(ConnectorProvider2) {
-  ConnectorProvider2[ConnectorProvider2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  ConnectorProvider2[ConnectorProvider2["NOTION"] = 1] = "NOTION";
-  ConnectorProvider2[ConnectorProvider2["LINEAR"] = 2] = "LINEAR";
-  ConnectorProvider2[ConnectorProvider2["GITHUB"] = 3] = "GITHUB";
+(function(ConnectorProvider) {
+  ConnectorProvider[ConnectorProvider["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  ConnectorProvider[ConnectorProvider["NOTION"] = 1] = "NOTION";
+  ConnectorProvider[ConnectorProvider["LINEAR"] = 2] = "LINEAR";
+  ConnectorProvider[ConnectorProvider["GITHUB"] = 3] = "GITHUB";
 })(ConnectorProvider || (ConnectorProvider = {}));
 var HttpUploadKind;
-(function(HttpUploadKind2) {
-  HttpUploadKind2[HttpUploadKind2["HTTP_UPLOAD_KIND_UNSPECIFIED"] = 0] = "HTTP_UPLOAD_KIND_UNSPECIFIED";
-  HttpUploadKind2[HttpUploadKind2["PHOTO"] = 1] = "PHOTO";
-  HttpUploadKind2[HttpUploadKind2["VIDEO"] = 2] = "VIDEO";
-  HttpUploadKind2[HttpUploadKind2["DOCUMENT"] = 3] = "DOCUMENT";
-  HttpUploadKind2[HttpUploadKind2["VOICE"] = 4] = "VOICE";
+(function(HttpUploadKind) {
+  HttpUploadKind[HttpUploadKind["HTTP_UPLOAD_KIND_UNSPECIFIED"] = 0] = "HTTP_UPLOAD_KIND_UNSPECIFIED";
+  HttpUploadKind[HttpUploadKind["PHOTO"] = 1] = "PHOTO";
+  HttpUploadKind[HttpUploadKind["VIDEO"] = 2] = "VIDEO";
+  HttpUploadKind[HttpUploadKind["DOCUMENT"] = 3] = "DOCUMENT";
+  HttpUploadKind[HttpUploadKind["VOICE"] = 4] = "VOICE";
 })(HttpUploadKind || (HttpUploadKind = {}));
 var UploadKind;
-(function(UploadKind2) {
-  UploadKind2[UploadKind2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  UploadKind2[UploadKind2["PHOTO"] = 1] = "PHOTO";
-  UploadKind2[UploadKind2["VIDEO"] = 2] = "VIDEO";
-  UploadKind2[UploadKind2["DOCUMENT"] = 3] = "DOCUMENT";
-  UploadKind2[UploadKind2["VOICE"] = 4] = "VOICE";
+(function(UploadKind) {
+  UploadKind[UploadKind["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  UploadKind[UploadKind["PHOTO"] = 1] = "PHOTO";
+  UploadKind[UploadKind["VIDEO"] = 2] = "VIDEO";
+  UploadKind[UploadKind["DOCUMENT"] = 3] = "DOCUMENT";
+  UploadKind[UploadKind["VOICE"] = 4] = "VOICE";
 })(UploadKind || (UploadKind = {}));
 var UploadStatus;
-(function(UploadStatus2) {
-  UploadStatus2[UploadStatus2["UNSPECIFIED"] = 0] = "UNSPECIFIED";
-  UploadStatus2[UploadStatus2["UPLOADING"] = 1] = "UPLOADING";
-  UploadStatus2[UploadStatus2["PROCESSING"] = 2] = "PROCESSING";
-  UploadStatus2[UploadStatus2["COMPLETE"] = 3] = "COMPLETE";
-  UploadStatus2[UploadStatus2["FAILED"] = 4] = "FAILED";
-  UploadStatus2[UploadStatus2["CANCELED"] = 5] = "CANCELED";
-  UploadStatus2[UploadStatus2["EXPIRED"] = 6] = "EXPIRED";
+(function(UploadStatus) {
+  UploadStatus[UploadStatus["UNSPECIFIED"] = 0] = "UNSPECIFIED";
+  UploadStatus[UploadStatus["UPLOADING"] = 1] = "UPLOADING";
+  UploadStatus[UploadStatus["PROCESSING"] = 2] = "PROCESSING";
+  UploadStatus[UploadStatus["COMPLETE"] = 3] = "COMPLETE";
+  UploadStatus[UploadStatus["FAILED"] = 4] = "FAILED";
+  UploadStatus[UploadStatus["CANCELED"] = 5] = "CANCELED";
+  UploadStatus[UploadStatus["EXPIRED"] = 6] = "EXPIRED";
 })(UploadStatus || (UploadStatus = {}));
 
 class ClientMessage$Type extends import_runtime4.MessageType {
@@ -43156,25 +43156,25 @@ var sbox = /* @__PURE__ */ (() => {
 var invSbox = /* @__PURE__ */ sbox.map((_, j) => sbox.indexOf(j));
 var rotr32_8 = (n) => n << 24 | n >>> 8;
 var rotl32_8 = (n) => n << 8 | n >>> 24;
-function genTtable(sbox2, fn) {
-  if (sbox2.length !== 256)
+function genTtable(sbox, fn) {
+  if (sbox.length !== 256)
     throw new Error("Wrong sbox length");
-  const T0 = new Uint32Array(256).map((_, j) => fn(sbox2[j]));
+  const T0 = new Uint32Array(256).map((_, j) => fn(sbox[j]));
   const T1 = T0.map(rotl32_8);
   const T2 = T1.map(rotl32_8);
   const T3 = T2.map(rotl32_8);
   const T01 = new Uint32Array(256 * 256);
   const T23 = new Uint32Array(256 * 256);
-  const sbox22 = new Uint16Array(256 * 256);
+  const sbox2 = new Uint16Array(256 * 256);
   for (let i = 0;i < 256; i++) {
     for (let j = 0;j < 256; j++) {
       const idx = i * 256 + j;
       T01[idx] = T0[i] ^ T1[j];
       T23[idx] = T2[i] ^ T3[j];
-      sbox22[idx] = sbox2[i] << 8 | sbox2[j];
+      sbox2[idx] = sbox[i] << 8 | sbox[j];
     }
   }
-  return { sbox: sbox2, sbox2: sbox22, T0, T1, T2, T3, T01, T23 };
+  return { sbox, sbox2, T0, T1, T2, T3, T01, T23 };
 }
 var tableEncoding = /* @__PURE__ */ genTtable(sbox, (s) => mul(s, 3) << 24 | s << 16 | s << 8 | mul(s, 2));
 var tableDecoding = /* @__PURE__ */ genTtable(invSbox, (s) => mul(s, 11) << 24 | mul(s, 13) << 16 | mul(s, 9) << 8 | mul(s, 14));
@@ -43239,11 +43239,11 @@ function encrypt(xk, s0, s1, s2, s3) {
   s0 ^= xk[k++], s1 ^= xk[k++], s2 ^= xk[k++], s3 ^= xk[k++];
   const rounds = xk.length / 4 - 2;
   for (let i = 0;i < rounds; i++) {
-    const t02 = xk[k++] ^ apply0123(T01, T23, s0, s1, s2, s3);
-    const t12 = xk[k++] ^ apply0123(T01, T23, s1, s2, s3, s0);
-    const t22 = xk[k++] ^ apply0123(T01, T23, s2, s3, s0, s1);
-    const t32 = xk[k++] ^ apply0123(T01, T23, s3, s0, s1, s2);
-    s0 = t02, s1 = t12, s2 = t22, s3 = t32;
+    const t0 = xk[k++] ^ apply0123(T01, T23, s0, s1, s2, s3);
+    const t1 = xk[k++] ^ apply0123(T01, T23, s1, s2, s3, s0);
+    const t2 = xk[k++] ^ apply0123(T01, T23, s2, s3, s0, s1);
+    const t3 = xk[k++] ^ apply0123(T01, T23, s3, s0, s1, s2);
+    s0 = t0, s1 = t1, s2 = t2, s3 = t3;
   }
   const t0 = xk[k++] ^ applySbox(sbox2, s0, s1, s2, s3);
   const t1 = xk[k++] ^ applySbox(sbox2, s1, s2, s3, s0);
@@ -43257,11 +43257,11 @@ function decrypt(xk, s0, s1, s2, s3) {
   s0 ^= xk[k++], s1 ^= xk[k++], s2 ^= xk[k++], s3 ^= xk[k++];
   const rounds = xk.length / 4 - 2;
   for (let i = 0;i < rounds; i++) {
-    const t02 = xk[k++] ^ apply0123(T01, T23, s0, s3, s2, s1);
-    const t12 = xk[k++] ^ apply0123(T01, T23, s1, s0, s3, s2);
-    const t22 = xk[k++] ^ apply0123(T01, T23, s2, s1, s0, s3);
-    const t32 = xk[k++] ^ apply0123(T01, T23, s3, s2, s1, s0);
-    s0 = t02, s1 = t12, s2 = t22, s3 = t32;
+    const t0 = xk[k++] ^ apply0123(T01, T23, s0, s3, s2, s1);
+    const t1 = xk[k++] ^ apply0123(T01, T23, s1, s0, s3, s2);
+    const t2 = xk[k++] ^ apply0123(T01, T23, s2, s1, s0, s3);
+    const t3 = xk[k++] ^ apply0123(T01, T23, s3, s2, s1, s0);
+    s0 = t0, s1 = t1, s2 = t2, s3 = t3;
   }
   const t0 = xk[k++] ^ applySbox(sbox2, s0, s3, s2, s1);
   const t1 = xk[k++] ^ applySbox(sbox2, s1, s0, s3, s2);
@@ -43676,9 +43676,9 @@ var decodeInlineApplicationObject = (bytes) => {
   const reader = new TlReader(bytes.slice(4));
   if (constructor === INLINE_INVOKE_CONSTRUCTOR) {
     const layer = reader.readInt();
-    const payload2 = reader.readBytes();
+    const payload = reader.readBytes();
     reader.expectEnd();
-    return { kind: "invoke", layer, payload: payload2 };
+    return { kind: "invoke", layer, payload };
   }
   const payload = reader.readBytes();
   reader.expectEnd();
@@ -44246,9 +44246,9 @@ class InvalidEncryptedRecord extends Error {
 class RecoverableEncryptedRecordError extends Error {
   errorCode;
   fields;
-  constructor(errorCode2, fields) {
+  constructor(errorCode, fields) {
     super("Recoverable Inline Protocol record error");
-    this.errorCode = errorCode2;
+    this.errorCode = errorCode;
     this.fields = fields;
   }
 }
@@ -44635,16 +44635,16 @@ var rawDataBytes = (data) => {
   throw new InlineProtocolV3Error("protocol", "Unsupported WebSocket frame type");
 };
 var randomInt64 = (random) => {
-  const bytes2 = random(8);
-  if (bytes2.length !== 8)
+  const bytes = random(8);
+  if (bytes.length !== 8)
     throw new InlineProtocolV3Error("protocol", "CSPRNG returned an invalid value");
-  return new DataView(bytes2.buffer, bytes2.byteOffset, bytes2.byteLength).getBigInt64(0, true);
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigInt64(0, true);
 };
 var randomLowBits = (random) => {
-  const bytes2 = random(4);
-  if (bytes2.length !== 4)
+  const bytes = random(4);
+  if (bytes.length !== 4)
     throw new InlineProtocolV3Error("protocol", "CSPRNG returned an invalid value");
-  return new DataView(bytes2.buffer, bytes2.byteOffset, bytes2.byteLength).getUint32(0, true) & 1073741823;
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true) & 1073741823;
 };
 var recordPadding = (bodyLength, random) => {
   const length = 12 + (16 - (32 + bodyLength + 12) % 16) % 16;
@@ -44765,9 +44765,9 @@ class InlineProtocolV3Connection {
   async#invoke(request, onDispatched, signal) {
     const payload = RealtimeV3Request.toBinary(request);
     const result = await this.#sendContent(encodeInlineInvoke(payload), onDispatched, signal);
-    let application2;
+    let application;
     try {
-      application2 = decodeInlineApplicationObject(result);
+      application = decodeInlineApplicationObject(result);
     } catch (error) {
       if (serviceConstructor(result) === ServiceConstructor.rpcError) {
         const rpcError = decodeRpcError(result);
@@ -44780,10 +44780,10 @@ class InlineProtocolV3Connection {
       }
       throw error;
     }
-    if (application2.kind !== "result") {
+    if (application.kind !== "result") {
       throw new InlineProtocolV3Error("protocol", "Expected an Inline application result");
     }
-    return RealtimeV3Response.fromBinary(application2.payload);
+    return RealtimeV3Response.fromBinary(application.payload);
   }
   async authBegin(request) {
     const response = await this.invoke({ body: { oneofKind: "authBegin", authBegin: request } });
@@ -44871,15 +44871,15 @@ class InlineProtocolV3Connection {
     if (!authorization?.temporary || authorization.expiresAt === undefined || this.#closing)
       return;
     const boundary = authorization.expiresAt * 1000 - TEMPORARY_KEY_ROTATION_MILLISECONDS;
-    const delay3 = boundary - this.#clock.nowMilliseconds();
-    if (!Number.isFinite(delay3) || delay3 <= 0) {
+    const delay = boundary - this.#clock.nowMilliseconds();
+    if (!Number.isFinite(delay) || delay <= 0) {
       this.#markRotationDue();
       return;
     }
     const timer = setTimeout(() => {
       this.#rotationTimer = undefined;
       this.#scheduleRotationTimer();
-    }, Math.min(delay3, 2147000000));
+    }, Math.min(delay, 2147000000));
     if (typeof timer !== "number" && typeof timer.unref === "function")
       timer.unref();
     this.#rotationTimer = timer;
@@ -44981,17 +44981,17 @@ class InlineProtocolV3Connection {
     this.#sendRaw(this.#carrier.wireHeader);
   }
   async#handshake(temporary) {
-    const handshake2 = new InlineHandshakeClient({
+    const handshake = new InlineHandshakeClient({
       rsaKeys: this.#rsaKeys,
       randomBytes: this.#random,
       dc: 1
     });
-    let request = handshake2.begin(temporary);
+    let request = handshake.begin(temporary);
     for (;; ) {
       const messageId = this.#messageIds.next(Date.now(), randomLowBits(this.#random), 0);
       this.#sendPacket(encodeUnencryptedRecord(messageId, request));
       const response = decodeUnencryptedRecord(await this.#receivePacket(this.#options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS));
-      const result = handshake2.receive(response.body);
+      const result = handshake.receive(response.body);
       if ("request" in result) {
         request = result.request;
         continue;
@@ -45075,20 +45075,20 @@ class InlineProtocolV3Connection {
       const fields = await this.#receiveEncrypted();
       if (fields.sequenceNumber % 2 === 1)
         await this.#sendAcknowledgements([fields.messageId]);
-      const constructor3 = serviceConstructor(fields.body);
-      if (constructor3 === ServiceConstructor.newSessionCreated) {
+      const constructor = serviceConstructor(fields.body);
+      if (constructor === ServiceConstructor.newSessionCreated) {
         this.#setServerSalt(readInt64LE(fields.body, 20));
         continue;
       }
-      if (constructor3 === ServiceConstructor.msgsAck) {
+      if (constructor === ServiceConstructor.msgsAck) {
         decodeMsgsAck(fields.body);
         continue;
       }
-      if (constructor3 === ServiceConstructor.badMsgNotification || constructor3 === ServiceConstructor.badServerSalt) {
+      if (constructor === ServiceConstructor.badMsgNotification || constructor === ServiceConstructor.badServerSalt) {
         this.#handleBadMessage(fields.body, fields.messageId);
         continue;
       }
-      if (constructor3 === ServiceConstructor.rpcResult) {
+      if (constructor === ServiceConstructor.rpcResult) {
         const result = decodeRpcResult(fields.body);
         const pending = this.#pendingContent.get(result.requestMessageId);
         if (!pending)
@@ -45100,7 +45100,7 @@ class InlineProtocolV3Connection {
         pending.resolve({ messageId: result.requestMessageId, result: result.result });
         continue;
       }
-      if (constructor3 === ServiceConstructor.pong) {
+      if (constructor === ServiceConstructor.pong) {
         if (fields.body.length !== 20)
           throw new InlineProtocolV3Error("protocol", "Invalid pong");
         const requestMessageId = readInt64LE(fields.body, 4);
@@ -45119,9 +45119,9 @@ class InlineProtocolV3Connection {
         continue;
       }
       try {
-        const application2 = decodeInlineApplicationObject(fields.body);
-        if (application2.kind === "update") {
-          this.#options.onUpdate?.(RealtimeV3Update.fromBinary(application2.payload));
+        const application = decodeInlineApplicationObject(fields.body);
+        if (application.kind === "update") {
+          this.#options.onUpdate?.(RealtimeV3Update.fromBinary(application.payload));
         }
       } catch {}
     }
@@ -45215,14 +45215,14 @@ class InlineProtocolV3Connection {
     const authorization = this.#authorization;
     if (!authorization)
       throw new InlineProtocolV3Error("unauthorized", "Authorization-key handshake is incomplete");
-    const record2 = encryptRecord(authorization.key, "client-to-server", {
+    const record = encryptRecord(authorization.key, "client-to-server", {
       serverSalt: authorization.serverSalt,
       sessionId: this.#sessionId,
       messageId,
       sequenceNumber,
       body
     }, recordPadding(body.length, this.#random));
-    this.#sendPacket(record2, quickAck);
+    this.#sendPacket(record, quickAck);
   }
   #nextClientMessageId() {
     return this.#messageIds.next(this.#clock.nowMilliseconds(), randomLowBits(this.#random), 0);
@@ -45233,32 +45233,32 @@ class InlineProtocolV3Connection {
     this.#authorization.serverSalt = serverSalt;
   }
   #sendPacket(packet, quickAck = false) {
-    const carrier2 = this.#carrier;
-    if (!carrier2)
+    const carrier = this.#carrier;
+    if (!carrier)
       throw new InlineProtocolV3Error("closed", "Inline Protocol carrier is unavailable");
-    this.#sendRaw(carrier2.outbound.process(encodeAbridgedPacket(packet, quickAck)));
+    this.#sendRaw(carrier.outbound.process(encodeAbridgedPacket(packet, quickAck)));
   }
   async#receivePacket(timeoutMs) {
-    const carrier2 = this.#carrier;
-    if (!carrier2)
+    const carrier = this.#carrier;
+    if (!carrier)
       throw new InlineProtocolV3Error("closed", "Inline Protocol carrier is unavailable");
     for (;; ) {
       const wire = await this.#inbox.next(timeoutMs);
-      const frame = decodeAbridgedFrame(carrier2.inbound.process(wire));
+      const frame = decodeAbridgedFrame(carrier.inbound.process(wire));
       if (frame.kind === "quickAck")
         continue;
       return frame.payload;
     }
   }
-  #sendRaw(bytes2) {
+  #sendRaw(bytes) {
     const socket = this.#socket;
     if (!socket || socket.readyState !== import_websocket.default.OPEN)
       throw new InlineProtocolV3Error("closed", "Inline Protocol connection is not open");
     const bufferedAmount = Number.isFinite(socket.bufferedAmount) ? socket.bufferedAmount : 0;
-    if (bufferedAmount + bytes2.byteLength > MAXIMUM_OUTBOUND_BUFFER_BYTES) {
+    if (bufferedAmount + bytes.byteLength > MAXIMUM_OUTBOUND_BUFFER_BYTES) {
       throw new InlineProtocolV3Error("closed", `Inline Protocol outbound buffer exceeded ${MAXIMUM_OUTBOUND_BUFFER_BYTES} bytes`);
     }
-    socket.send(bytes2);
+    socket.send(bytes);
   }
 }
 
@@ -45990,9 +45990,9 @@ var reconnectPolicyForRpc = (method, input) => {
   return replaySafeRpcMethods.has(method) ? "replay-safe" : "never-replay";
 };
 var randomMessageId = () => {
-  const bytes2 = new Uint8Array(8);
-  globalThis.crypto.getRandomValues(bytes2);
-  const value = new DataView(bytes2.buffer, bytes2.byteOffset, bytes2.byteLength).getBigInt64(0, true);
+  const bytes = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(bytes);
+  const value = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigInt64(0, true);
   return value === 0n ? 1n : value;
 };
 var normalizeMessageRandomId = (value) => {
@@ -46505,8 +46505,8 @@ class InlineSdkClient {
   }
   async registerDesiredBotCapabilities() {
     if (this.botCapabilitiesRegistrationInFlight) {
-      const result2 = await this.botCapabilitiesRegistrationInFlight;
-      return this.registeredBotCapabilitiesRevision < this.desiredBotCapabilitiesRevision ? await this.registerDesiredBotCapabilities() : result2;
+      const result = await this.botCapabilitiesRegistrationInFlight;
+      return this.registeredBotCapabilitiesRevision < this.desiredBotCapabilitiesRevision ? await this.registerDesiredBotCapabilities() : result;
     }
     const capabilities = this.desiredBotCapabilities;
     if (capabilities == null)
@@ -46515,9 +46515,9 @@ class InlineSdkClient {
     const registration = this.invoke(Method.SET_MY_BOT_CAPABILITIES, {
       oneofKind: "setMyBotCapabilities",
       setMyBotCapabilities: { capabilities }
-    }).then((result2) => {
+    }).then((result) => {
       this.registeredBotCapabilitiesRevision = Math.max(this.registeredBotCapabilitiesRevision, revision);
-      return { capabilities: result2.setMyBotCapabilities.capabilities };
+      return { capabilities: result.setMyBotCapabilities.capabilities };
     });
     this.botCapabilitiesRegistrationInFlight = registration;
     let result;
@@ -47148,14 +47148,14 @@ class InlineSdkClient {
     try {
       acknowledged = this.eventStream.send(event);
     } catch (error) {
-      const bucket2 = this.bucketForEvent(event);
-      if (bucket2) {
-        this.fenceLiveCursor(bucket2);
-        this.markUpdateBucketDegraded(bucket2);
-        this.requestCatchUpAfterEventOverflow(bucket2, event);
+      const bucket = this.bucketForEvent(event);
+      if (bucket) {
+        this.fenceLiveCursor(bucket);
+        this.markUpdateBucketDegraded(bucket);
+        this.requestCatchUpAfterEventOverflow(bucket, event);
       }
       this.log.warn?.("Inbound event buffer overflow; durable cursor remains unchanged and transport will recover", {
-        bucket: bucket2 ? this.updateBucketKey(bucket2) : "none",
+        bucket: bucket ? this.updateBucketKey(bucket) : "none",
         error: extractErrorMessage(error)
       });
       this.requestRecoveryReconnect("inbound-event-buffer-overflow");
@@ -47360,8 +47360,8 @@ class InlineSdkClient {
   requestCatchUpForDegradedBucket(bucket) {
     switch (bucket.kind) {
       case "chat": {
-        const request2 = this.catchUpRequestedByChatId.get(bucket.chatId) ?? this.peerResolutionRequestedByChatId.get(bucket.chatId);
-        const updateSeq = request2 && !request2.toLatest ? request2.endSeq : undefined;
+        const request = this.catchUpRequestedByChatId.get(bucket.chatId) ?? this.peerResolutionRequestedByChatId.get(bucket.chatId);
+        const updateSeq = request && !request.toLatest ? request.endSeq : undefined;
         const peer = bucket.peer ?? this.persistedChatPeer(bucket.chatId);
         if (peer && this.isReliableChatPeer(peer)) {
           this.requestCatchUpChat({ chatId: bucket.chatId, peer, updateSeq });
@@ -47371,10 +47371,10 @@ class InlineSdkClient {
         return;
       }
       case "space": {
-        const request2 = this.catchUpRequestedBySpaceId.get(bucket.spaceId);
+        const request = this.catchUpRequestedBySpaceId.get(bucket.spaceId);
         this.requestCatchUpSpace({
           spaceId: bucket.spaceId,
-          updateSeq: request2 && !request2.toLatest ? request2.endSeq : undefined
+          updateSeq: request && !request.toLatest ? request.endSeq : undefined
         });
         return;
       }
@@ -47853,20 +47853,20 @@ class InlineSdkClient {
       });
       const payload = result.getUpdates;
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
-        const deliveredSeq2 = Number(payload.seq ?? 0n);
-        if (endSeq != null && requestEndSeq != null && deliveredSeq2 !== requestEndSeq) {
+        const deliveredSeq = Number(payload.seq ?? 0n);
+        if (endSeq != null && requestEndSeq != null && deliveredSeq !== requestEndSeq) {
           this.markUpdateBucketDegraded({ kind: "chat", chatId, peer });
           this.log.warn?.("GET_UPDATES TOO_LONG pointer did not cover the requested chat target", {
             chatId: chatId.toString(),
             requestedEndSeq: requestEndSeq,
-            deliveredSeq: deliveredSeq2
+            deliveredSeq
           });
           return true;
         }
-        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq2, requestEndSeq, endSeq);
-        const repaired = await this.repairUpdateBucketAuthoritatively({ kind: "chat", chatId, peer }, deliveredSeq2, payload.date, !shouldContinue);
+        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq, endSeq);
+        const repaired = await this.repairUpdateBucketAuthoritatively({ kind: "chat", chatId, peer }, deliveredSeq, payload.date, !shouldContinue);
         if (repaired && shouldContinue) {
-          cursor = deliveredSeq2;
+          cursor = deliveredSeq;
           continue;
         }
         return true;
@@ -48000,20 +48000,20 @@ class InlineSdkClient {
       });
       const payload = result.getUpdates;
       if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
-        const deliveredSeq2 = Number(payload.seq ?? 0n);
-        if (endSeq != null && requestEndSeq != null && deliveredSeq2 !== requestEndSeq) {
+        const deliveredSeq = Number(payload.seq ?? 0n);
+        if (endSeq != null && requestEndSeq != null && deliveredSeq !== requestEndSeq) {
           this.markUpdateBucketDegraded({ kind: "space", spaceId });
           this.log.warn?.("GET_UPDATES TOO_LONG pointer did not cover the requested space target", {
             spaceId: spaceId.toString(),
             requestedEndSeq: requestEndSeq,
-            deliveredSeq: deliveredSeq2
+            deliveredSeq
           });
           return true;
         }
-        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq2, requestEndSeq, endSeq);
-        const repaired = await this.repairUpdateBucketAuthoritatively({ kind: "space", spaceId }, deliveredSeq2, payload.date, !shouldContinue);
+        const shouldContinue = this.shouldContinueBoundedCatchUp(cursor, deliveredSeq, requestEndSeq, endSeq);
+        const repaired = await this.repairUpdateBucketAuthoritatively({ kind: "space", spaceId }, deliveredSeq, payload.date, !shouldContinue);
         if (repaired && shouldContinue) {
-          cursor = deliveredSeq2;
+          cursor = deliveredSeq;
           continue;
         }
         return true;
@@ -48858,16 +48858,16 @@ class InlineUserDirectory {
     this.onError = options.onError;
   }
   async resolve(params) {
-    const cached2 = this.getFresh(params.userId.toString());
-    if (hasDisplayIdentity(cached2))
-      return cached2;
+    const cached = this.getFresh(params.userId.toString());
+    if (hasDisplayIdentity(cached))
+      return cached;
     return (await this.resolveWithProvenance(params)).profile;
   }
   async resolveWithProvenance(params) {
     const userId = params.userId.toString();
-    const cached2 = this.getFresh(userId);
-    if (cached2?.bot != null) {
-      return { profile: cached2, provenanceVerified: true };
+    const cached = this.getFresh(userId);
+    if (cached?.bot != null) {
+      return { profile: cached, provenanceVerified: true };
     }
     if (params.direct) {
       const directoryHydrated = await this.hydrateDirectory();
@@ -48924,16 +48924,16 @@ class InlineUserDirectory {
     }
   }
   getFresh(userId) {
-    const cached2 = this.profiles.get(userId);
-    if (!cached2)
+    const cached = this.profiles.get(userId);
+    if (!cached)
       return;
-    if (cached2.expiresAt <= this.now()) {
+    if (cached.expiresAt <= this.now()) {
       this.profiles.delete(userId);
       return;
     }
     this.profiles.delete(userId);
-    this.profiles.set(userId, cached2);
-    return cached2.profile;
+    this.profiles.set(userId, cached);
+    return cached.profile;
   }
   async hydrateChat(chatId) {
     const key = chatId.toString();
@@ -49018,8 +49018,8 @@ function readBooleanProfileField(value, previous, key) {
 function readUsers(result, kind) {
   if (!result || typeof result !== "object")
     return [];
-  const record2 = result;
-  const payload = record2[kind];
+  const record = result;
+  const payload = record[kind];
   if (!payload || typeof payload !== "object")
     return [];
   const users = payload.users;
@@ -49360,8 +49360,8 @@ async function handleRequest(req, res) {
     return;
   }
   if (url.pathname === "/inbound/ack") {
-    const body2 = asRecord(await readJsonBody(req));
-    const deliveryId = readRequiredString(body2, "deliveryId");
+    const body = asRecord(await readJsonBody(req));
+    const deliveryId = readRequiredString(body, "deliveryId");
     inboundStream.acknowledge(deliveryId);
     writeJson(res, 200, { ok: true, result: {} });
     return;
@@ -49466,14 +49466,14 @@ async function handleRequest(req, res) {
   }
 }
 async function endpointSend(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const text = readOptionalString(record2, "text");
-  const replyToMsgId = readOptionalInlineId(record2, "replyToMsgId");
-  const parseMarkdown = readOptionalBoolean(record2, "parseMarkdown") ?? true;
-  const actions = parseActions(record2.actions);
-  const sendMode = readOptionalString(record2, "sendMode");
-  const media = parseSendMedia(record2.media);
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const text = readOptionalString(record, "text");
+  const replyToMsgId = readOptionalInlineId(record, "replyToMsgId");
+  const parseMarkdown = readOptionalBoolean(record, "parseMarkdown") ?? true;
+  const actions = parseActions(record.actions);
+  const sendMode = readOptionalString(record, "sendMode");
+  const media = parseSendMedia(record.media);
   if (!text && !media) {
     throw new SidecarError("send requires text or media", "bad_format");
   }
@@ -49488,12 +49488,12 @@ async function endpointSend(res, body) {
   writeJson(res, 200, { ok: true, result: { messageId: result.messageId?.toString() ?? null } });
 }
 async function endpointEdit(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const messageId = readRequiredInlineId(record2, "messageId");
-  const text = readRequiredString(record2, "text");
-  const actions = parseActions(record2.actions);
-  const parseMarkdown = readOptionalBoolean(record2, "parseMarkdown") ?? true;
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const messageId = readRequiredInlineId(record, "messageId");
+  const text = readRequiredString(record, "text");
+  const actions = parseActions(record.actions);
+  const parseMarkdown = readOptionalBoolean(record, "parseMarkdown") ?? true;
   await client.invoke(Method.EDIT_MESSAGE, {
     oneofKind: "editMessage",
     editMessage: {
@@ -49507,9 +49507,9 @@ async function endpointEdit(res, body) {
   writeJson(res, 200, { ok: true, result: { messageId: messageId.toString() } });
 }
 async function endpointDelete(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const messageId = readRequiredInlineId(record2, "messageId");
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const messageId = readRequiredInlineId(record, "messageId");
   await client.invoke(Method.DELETE_MESSAGES, {
     oneofKind: "deleteMessages",
     deleteMessages: {
@@ -49520,9 +49520,9 @@ async function endpointDelete(res, body) {
   writeJson(res, 200, { ok: true, result: { messageId: messageId.toString() } });
 }
 async function endpointTyping(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const state = readOptionalString(record2, "state") ?? "start";
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const state = readOptionalString(record, "state") ?? "start";
   if ("userId" in target) {
     writeJson(res, 200, { ok: true, result: { skipped: "typing is chat-only" } });
     return;
@@ -49538,10 +49538,10 @@ async function endpointTyping(res, body) {
   writeJson(res, 200, { ok: true, result: {} });
 }
 async function endpointPresence(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const kind = readRequiredString(record2, "kind");
-  const comment = readOptionalString(record2, "comment");
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const kind = readRequiredString(record, "kind");
+  const comment = readOptionalString(record, "comment");
   if ("chatId" in target) {
     await client.setBotPresenceState({ chatId: target.chatId, kind, ...comment ? { comment } : {} });
   } else {
@@ -49550,15 +49550,15 @@ async function endpointPresence(res, body) {
   writeJson(res, 200, { ok: true, result: {} });
 }
 async function endpointSendAttachment(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const filePath = readRequiredString(record2, "path");
-  const kind = normalizeUploadKind(readOptionalString(record2, "kind"), filePath);
-  const caption = readOptionalString(record2, "caption");
-  const parseMarkdown = readOptionalBoolean(record2, "parseMarkdown") ?? true;
-  const replyToMsgId = readOptionalInlineId(record2, "replyToMsgId");
-  const fileName = readOptionalString(record2, "fileName") || path.basename(filePath);
-  const contentType = readOptionalString(record2, "mimeType");
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const filePath = readRequiredString(record, "path");
+  const kind = normalizeUploadKind(readOptionalString(record, "kind"), filePath);
+  const caption = readOptionalString(record, "caption");
+  const parseMarkdown = readOptionalBoolean(record, "parseMarkdown") ?? true;
+  const replyToMsgId = readOptionalInlineId(record, "replyToMsgId");
+  const fileName = readOptionalString(record, "fileName") || path.basename(filePath);
+  const contentType = readOptionalString(record, "mimeType");
   const info = await statAttachment(filePath);
   if (info.size > uploadMaxBytes) {
     throw new SidecarError(`attachment exceeds Inline upload cap (${info.size} > ${uploadMaxBytes} bytes)`, "too_long");
@@ -49611,8 +49611,8 @@ function hasNodeErrorCode(error, ...codes) {
   return Boolean(error && typeof error === "object" && "code" in error && typeof error.code === "string" && codes.includes(error.code));
 }
 async function endpointChat(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
+  const record = asRecord(body);
+  const target = parseTarget(record);
   if ("userId" in target) {
     const sender = await userDirectory.resolve({ userId: target.userId, chatId: target.userId, direct: true });
     writeJson(res, 200, {
@@ -49655,9 +49655,9 @@ async function endpointChat(res, body) {
   });
 }
 async function endpointFollowMode(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const mode = readRequiredString(record2, "mode");
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const mode = readRequiredString(record, "mode");
   const followMode = mode === "following" ? DialogFollowMode.FOLLOWING : mode === "unfollowed" ? DialogFollowMode.UNFOLLOWED : null;
   if (followMode == null) {
     throw new SidecarError("mode must be following or unfollowed", "bad_format");
@@ -49672,18 +49672,18 @@ async function endpointFollowMode(res, body) {
   writeJson(res, 200, { ok: true, result: { mode } });
 }
 async function endpointMessages(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const messageIds = readInlineIdArray(record2, "messageIds", 100, true);
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const messageIds = readInlineIdArray(record, "messageIds", 100, true);
   const result = "chatId" in target ? await client.getMessages({ chatId: target.chatId, messageIds }) : await client.getMessages({ userId: target.userId, messageIds });
   const ordered = orderMessagesByRequestedIds(result.messages, messageIds);
   writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(ordered, target)) } });
 }
 async function endpointHistory(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const limit = readOptionalNumber(record2, "limit") ?? 20;
-  const anchorId = readOptionalInlineId(record2, "anchorId");
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const limit = readOptionalNumber(record, "limit") ?? 20;
+  const anchorId = readOptionalInlineId(record, "anchorId");
   const result = await client.invoke(Method.GET_CHAT_HISTORY, {
     oneofKind: "getChatHistory",
     getChatHistory: {
@@ -49697,13 +49697,13 @@ async function endpointHistory(res, body) {
   writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(messages, target)) } });
 }
 async function endpointSearch(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const query = readRequiredString(record2, "query").trim();
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const query = readRequiredString(record, "query").trim();
   if (!query)
     throw new SidecarError("search requires query", "bad_format");
-  const limit = clampResultLimit(readOptionalNumber(record2, "limit") ?? 20, 100);
-  const offsetId = readOptionalInlineId(record2, "offsetId");
+  const limit = clampResultLimit(readOptionalNumber(record, "limit") ?? 20, 100);
+  const offsetId = readOptionalInlineId(record, "offsetId");
   const result = await client.invokeUncheckedRaw(Method.SEARCH_MESSAGES, {
     oneofKind: "searchMessages",
     searchMessages: {
@@ -49718,13 +49718,13 @@ async function endpointSearch(res, body) {
   writeJson(res, 200, { ok: true, result: { messages: safeJson(await enrichMessages(messages, target)) } });
 }
 async function endpointReaction(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const messageId = readRequiredInlineId(record2, "messageId");
-  const emoji = readRequiredString(record2, "emoji").trim();
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const messageId = readRequiredInlineId(record, "messageId");
+  const emoji = readRequiredString(record, "emoji").trim();
   if (!emoji)
     throw new SidecarError("reaction requires emoji", "bad_format");
-  const remove = readOptionalBoolean(record2, "remove") ?? false;
+  const remove = readOptionalBoolean(record, "remove") ?? false;
   if (remove) {
     await client.invokeUncheckedRaw(Method.DELETE_REACTION, {
       oneofKind: "deleteReaction",
@@ -49747,9 +49747,9 @@ async function endpointReaction(res, body) {
   writeJson(res, 200, { ok: true, result: { messageId: messageId.toString(), emoji, removed: remove } });
 }
 async function endpointReactions(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const messageId = readRequiredInlineId(record2, "messageId");
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const messageId = readRequiredInlineId(record, "messageId");
   const result = "chatId" in target ? await client.getMessages({ chatId: target.chatId, messageIds: [messageId] }) : await client.getMessages({ userId: target.userId, messageIds: [messageId] });
   const message = result.messages[0] ?? null;
   const enriched = message == null ? null : (await enrichMessages([message], target))[0] ?? message;
@@ -49762,10 +49762,10 @@ async function endpointReactions(res, body) {
   });
 }
 async function endpointPin(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
-  const messageId = readRequiredInlineId(record2, "messageId");
-  const unpin = readOptionalBoolean(record2, "unpin") ?? false;
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const messageId = readRequiredInlineId(record, "messageId");
+  const unpin = readOptionalBoolean(record, "unpin") ?? false;
   await client.invokeUncheckedRaw(Method.PIN_MESSAGE, {
     oneofKind: "pinMessage",
     pinMessage: {
@@ -49777,8 +49777,8 @@ async function endpointPin(res, body) {
   writeJson(res, 200, { ok: true, result: { messageId: messageId.toString(), unpinned: unpin } });
 }
 async function endpointPins(res, body) {
-  const record2 = asRecord(body);
-  const target = parseTarget(record2);
+  const record = asRecord(body);
+  const target = parseTarget(record);
   if ("userId" in target) {
     throw new SidecarError("pins requires a chat target", "bad_format");
   }
@@ -49795,12 +49795,12 @@ async function endpointPins(res, body) {
   });
 }
 async function endpointCreateSubthread(res, body) {
-  const record2 = asRecord(body);
-  const parentChatId = readRequiredInlineId(record2, "parentChatId");
-  const parentMessageId = readOptionalInlineId(record2, "parentMessageId");
-  const title = readOptionalString(record2, "title");
-  const description = readOptionalString(record2, "description");
-  const emoji = readOptionalString(record2, "emoji");
+  const record = asRecord(body);
+  const parentChatId = readRequiredInlineId(record, "parentChatId");
+  const parentMessageId = readOptionalInlineId(record, "parentMessageId");
+  const title = readOptionalString(record, "title");
+  const description = readOptionalString(record, "description");
+  const emoji = readOptionalString(record, "emoji");
   const result = await client.invokeUncheckedRaw(Method.CREATE_SUBTHREAD, {
     oneofKind: "createSubthread",
     createSubthread: {
@@ -49823,9 +49823,9 @@ async function endpointCreateSubthread(res, body) {
   });
 }
 async function endpointAddParticipants(res, body) {
-  const record2 = asRecord(body);
-  const chatId = readRequiredInlineId(record2, "chatId");
-  const userIds = readInlineIdArray(record2, "userIds", 50, true);
+  const record = asRecord(body);
+  const chatId = readRequiredInlineId(record, "chatId");
+  const userIds = readInlineIdArray(record, "userIds", 50, true);
   const added = [];
   for (const userId of userIds) {
     await client.invokeUncheckedRaw(Method.ADD_CHAT_PARTICIPANT, {
@@ -49837,10 +49837,10 @@ async function endpointAddParticipants(res, body) {
   writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), addedUserIds: added } });
 }
 async function endpointUpdateChat(res, body) {
-  const record2 = asRecord(body);
-  const chatId = readRequiredInlineId(record2, "chatId");
-  const title = readOptionalString(record2, "title");
-  const emoji = readOptionalString(record2, "emoji");
+  const record = asRecord(body);
+  const chatId = readRequiredInlineId(record, "chatId");
+  const title = readOptionalString(record, "title");
+  const emoji = readOptionalString(record, "emoji");
   if (title === undefined && emoji === undefined) {
     throw new SidecarError("update-chat requires title or emoji", "bad_format");
   }
@@ -49853,8 +49853,8 @@ async function endpointUpdateChat(res, body) {
   writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), chat: safeJson(chat ?? null) } });
 }
 async function endpointDeleteChat(res, body) {
-  const record2 = asRecord(body);
-  const chatId = readRequiredInlineId(record2, "chatId");
+  const record = asRecord(body);
+  const chatId = readRequiredInlineId(record, "chatId");
   await client.invokeUncheckedRaw(Method.DELETE_CHAT, {
     oneofKind: "deleteChat",
     deleteChat: { peerId: inputPeerFromTarget({ chatId }) }
@@ -49862,13 +49862,13 @@ async function endpointDeleteChat(res, body) {
   writeJson(res, 200, { ok: true, result: { chatId: chatId.toString(), deleted: true } });
 }
 async function endpointCreateChat(res, body) {
-  const record2 = asRecord(body);
-  const title = readRequiredString(record2, "title");
-  const description = readOptionalString(record2, "description");
-  const emoji = readOptionalString(record2, "emoji");
-  const spaceId = readOptionalInlineId(record2, "spaceId");
-  const isPublic = readOptionalBoolean(record2, "isPublic") ?? false;
-  const participantUserIds = readInlineIdArray(record2, "participantUserIds", 50);
+  const record = asRecord(body);
+  const title = readRequiredString(record, "title");
+  const description = readOptionalString(record, "description");
+  const emoji = readOptionalString(record, "emoji");
+  const spaceId = readOptionalInlineId(record, "spaceId");
+  const isPublic = readOptionalBoolean(record, "isPublic") ?? false;
+  const participantUserIds = readInlineIdArray(record, "participantUserIds", 50);
   if (title.length > 200)
     throw new SidecarError("create-chat title is too long", "bad_format");
   if (description && description.length > 1000) {
@@ -49928,15 +49928,15 @@ async function callBotApi(methodName, method, body, query) {
   return asOptionalRecord(payload.result) ?? {};
 }
 async function endpointCreateAgent(res, body) {
-  const record2 = asRecord(body);
-  const name = readRequiredString(record2, "name");
+  const record = asRecord(body);
+  const name = readRequiredString(record, "name");
   const result = await callBotApi("createAgent", "POST", {
     name,
-    ...readOptionalString(record2, "handle") ? { handle: readOptionalString(record2, "handle") } : {},
-    ...readOptionalString(record2, "emoji") ? { emoji: readOptionalString(record2, "emoji") } : {},
-    ...readOptionalString(record2, "description") ? { description: readOptionalString(record2, "description") } : {},
-    ...readOptionalString(record2, "skill_key") ? { skill_key: readOptionalString(record2, "skill_key") } : {},
-    ...readOptionalString(record2, "instructions") ? { instructions: readOptionalString(record2, "instructions") } : {}
+    ...readOptionalString(record, "handle") ? { handle: readOptionalString(record, "handle") } : {},
+    ...readOptionalString(record, "emoji") ? { emoji: readOptionalString(record, "emoji") } : {},
+    ...readOptionalString(record, "description") ? { description: readOptionalString(record, "description") } : {},
+    ...readOptionalString(record, "skill_key") ? { skill_key: readOptionalString(record, "skill_key") } : {},
+    ...readOptionalString(record, "instructions") ? { instructions: readOptionalString(record, "instructions") } : {}
   });
   const agent = asOptionalRecord(result.agent);
   if (!agent) {
@@ -49945,8 +49945,8 @@ async function endpointCreateAgent(res, body) {
   writeJson(res, 200, { ok: true, result: { agent: safeJson(agent) } });
 }
 async function endpointGetAgent(res, body) {
-  const record2 = asRecord(body);
-  const agentId = readRequiredInlineId(record2, "agentId");
+  const record = asRecord(body);
+  const agentId = readRequiredInlineId(record, "agentId");
   const result = await callBotApi("getAgent", "GET", undefined, { agent_id: String(agentId) });
   if (!asOptionalRecord(result.agent)) {
     throw new SidecarError("Agent not found", "not_found");
@@ -49957,29 +49957,29 @@ async function endpointListAgents(res) {
   const result = await callBotApi("getMyAgents", "GET");
   writeJson(res, 200, { ok: true, result: safeJson(result) });
 }
-function readAgentPatchString(record2, key) {
-  if (!(key in record2))
+function readAgentPatchString(record, key) {
+  if (!(key in record))
     return;
-  const value = record2[key];
+  const value = record[key];
   if (typeof value !== "string") {
     throw new SidecarError(`${key} must be a string`, "bad_format");
   }
   return value.trim();
 }
 async function endpointUpdateAgent(res, body) {
-  const record2 = asRecord(body);
-  const agentId = readRequiredInlineId(record2, "agentId");
-  const name = readAgentPatchString(record2, "name");
+  const record = asRecord(body);
+  const agentId = readRequiredInlineId(record, "agentId");
+  const name = readAgentPatchString(record, "name");
   if (name !== undefined && !name) {
     throw new SidecarError("name cannot be empty", "bad_format");
   }
   const patch = {
     ...name !== undefined ? { name } : {},
-    ...agentPatchField(record2, "handle"),
-    ...agentPatchField(record2, "emoji"),
-    ...agentPatchField(record2, "description"),
-    ...agentPatchField(record2, "skill_key"),
-    ...agentPatchField(record2, "instructions")
+    ...agentPatchField(record, "handle"),
+    ...agentPatchField(record, "emoji"),
+    ...agentPatchField(record, "description"),
+    ...agentPatchField(record, "skill_key"),
+    ...agentPatchField(record, "instructions")
   };
   if (Object.keys(patch).length === 0) {
     throw new SidecarError("update-agent requires at least one field", "bad_format");
@@ -49993,13 +49993,13 @@ async function endpointUpdateAgent(res, body) {
     throw new SidecarError("update-agent returned no Agent", "unknown");
   writeJson(res, 200, { ok: true, result: { agent: safeJson(agent) } });
 }
-function agentPatchField(record2, key) {
-  const value = readAgentPatchString(record2, key);
+function agentPatchField(record, key) {
+  const value = readAgentPatchString(record, key);
   return value === undefined ? {} : { [key]: value };
 }
 async function endpointDeleteAgent(res, body) {
-  const record2 = asRecord(body);
-  const agentId = readRequiredInlineId(record2, "agentId");
+  const record = asRecord(body);
+  const agentId = readRequiredInlineId(record, "agentId");
   const result = await callBotApi("deleteAgent", "POST", { agent_id: String(agentId) });
   writeJson(res, 200, { ok: true, result: safeJson(result) });
 }
@@ -50038,26 +50038,26 @@ function senderDisplayName(sender) {
 }
 async function enrichMessages(messages, target) {
   return Promise.all(messages.map(async (message) => {
-    const record2 = asOptionalRecord(message);
-    if (!record2)
+    const record = asOptionalRecord(message);
+    if (!record)
       return message;
-    const userId = asPositiveBigInt(record2.fromId);
-    const chatId = "chatId" in target ? target.chatId : asPositiveBigInt(record2.chatId);
+    const userId = asPositiveBigInt(record.fromId);
+    const chatId = "chatId" in target ? target.chatId : asPositiveBigInt(record.chatId);
     if (!userId || !chatId)
       return message;
     const sender = await userDirectory.resolve({
       userId,
       chatId,
-      direct: "userId" in target || messagePeerIsDirect(record2)
+      direct: "userId" in target || messagePeerIsDirect(record)
     });
-    return sender ? { ...record2, sender } : message;
+    return sender ? { ...record, sender } : message;
   }));
 }
 function orderMessagesByRequestedIds(messages, requestedIds) {
   const byId = new Map;
   for (const message of messages) {
-    const record2 = asOptionalRecord(message);
-    const id = asPositiveBigInt(record2?.id);
+    const record = asOptionalRecord(message);
+    const id = asPositiveBigInt(record?.id);
     if (id && !byId.has(id.toString()))
       byId.set(id.toString(), message);
   }
@@ -50102,9 +50102,9 @@ function clampResultLimit(value, max) {
   return Math.min(value, max);
 }
 async function endpointAnswerAction(res, body) {
-  const record2 = asRecord(body);
-  const interactionId = readRequiredInlineId(record2, "interactionId");
-  const toastText = readOptionalString(record2, "toast");
+  const record = asRecord(body);
+  const interactionId = readRequiredInlineId(record, "interactionId");
+  const toastText = readOptionalString(record, "toast");
   await client.answerMessageAction({
     interactionId,
     ...toastText ? { ui: MessageActionResponseUi.create({
@@ -50114,12 +50114,12 @@ async function endpointAnswerAction(res, body) {
   writeJson(res, 200, { ok: true, result: {} });
 }
 async function endpointAnswerBotSettings(res, body) {
-  const record2 = asRecord(body);
-  if (record2.requestId == null || record2.requestId === "") {
+  const record = asRecord(body);
+  if (record.requestId == null || record.requestId === "") {
     throw new SidecarError("missing requestId", "bad_format");
   }
-  const requestId = parseUnsigned64Id(record2.requestId, "requestId");
-  const response = asRecord(record2.response);
+  const requestId = parseUnsigned64Id(record.requestId, "requestId");
+  const response = asRecord(record.response);
   await client.answerBotChatSettings({ requestId, response });
   writeJson(res, 200, { ok: true, result: {} });
 }
