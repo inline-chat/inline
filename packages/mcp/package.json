@@ -27,8 +27,8 @@
     "@inline-chat/oauth-core": "workspace:*",
     "@inline-chat/realtime-sdk": "workspace:*",
     "@inline-chat/protocol": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.26.0",
-    "zod": "^4.3.6"
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/bun": "catalog:",

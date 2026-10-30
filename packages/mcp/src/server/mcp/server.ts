@@ -4,6 +4,7 @@ import { request as httpsRequest } from "node:https"
 import { BlockList, isIP } from "node:net"
 import * as z from "zod/v4"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
+import { MAX_MCP_TOOL_INPUT_ELEMENTS } from "./request-limits"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import type { McpGrant } from "./grant"
@@ -1828,6 +1829,7 @@ export function createInlineMcpServer(params: {
       capabilities: {
         tools: { listChanged: false },
       },
+      maxToolInputElements: MAX_MCP_TOOL_INPUT_ELEMENTS,
       instructions: inlineMcpInstructions(contractVersion),
     },
   )

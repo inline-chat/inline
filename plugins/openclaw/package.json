@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@inline-chat/realtime-sdk": "0.0.19",
-    "zod": "4.4.3"
+    "zod": "4.6.7"
   },
   "peerDependencies": {
     "openclaw": ">=2026.8.2"

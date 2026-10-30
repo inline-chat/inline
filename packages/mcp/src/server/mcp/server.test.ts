@@ -4,6 +4,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
 import { createInlineMcpServer, isUnsafeRemoteAddress } from "./server"
+import { MAX_MCP_TOOL_INPUT_ELEMENTS } from "./request-limits"
 import type { EventsProxy } from "./events-proxy"
 import type { McpGrant } from "./grant"
 import { InlineAccessDeniedError } from "../inline/inline-api"
@@ -105,6 +106,31 @@ const grant: McpGrant = {
 }
 
 describe("connected account profile", () => {
+  it("rejects excessive tool input before validation or API work and keeps serving normal calls", async () => {
+    const inline = createInlineStub({})
+    const getProfile = vi.spyOn(inline, "getProfile")
+    const server = createInlineMcpServer({ grant, inline })
+    const authInfo = profileAuth()
+    const { transport, sent } = await connectAndInitialize(server, authInfo)
+    try {
+      await sendRequest(transport, {
+        jsonrpc: "2.0", id: 2, method: "tools/call",
+        params: { name: "account.profile", arguments: { values: Array(MAX_MCP_TOOL_INPUT_ELEMENTS + 1).fill(null) } },
+      }, { authInfo })
+      const rejected = await waitForResponse(sent, 2)
+      expect(JSON.stringify(rejected)).toContain("maximum of 10000 elements")
+      expect(getProfile).not.toHaveBeenCalled()
+
+      await sendRequest(transport, {
+        jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "account.profile", arguments: {} },
+      }, { authInfo })
+      expect((await waitForResponse(sent, 3)).result.structuredContent).toEqual({ id: "1" })
+      expect(getProfile).toHaveBeenCalledOnce()
+    } finally {
+      await server.close()
+    }
+  })
+
   function profileAuth(selectedGrant = grant, scopes: string[] = []): AuthInfo {
     return { ...createAuthInfo(scopes), clientId: selectedGrant.clientId, extra: { grantId: selectedGrant.id, inlineUserId: selectedGrant.inlineUserId.toString() } }
   }

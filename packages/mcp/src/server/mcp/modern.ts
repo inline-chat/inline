@@ -10,6 +10,7 @@ import {
   type JSONRPCResponse,
 } from "@modelcontextprotocol/sdk/types.js"
 import { EventsRpcError, type EventsProxy } from "./events-proxy"
+import { MAX_MCP_REQUEST_BYTES } from "./request-limits"
 
 export const MODERN_MCP_VERSION = "2026-07-28"
 const VERSION_KEY = "io.modelcontextprotocol/protocolVersion"
@@ -19,7 +20,6 @@ const LEGACY_VERSIONS = new Set(SUPPORTED_PROTOCOL_VERSIONS)
 const SDK_METHODS = new Set(["tools/list", "tools/call", "resources/list", "resources/templates/list", "resources/read"])
 const EVENT_METHODS = new Set(["events/list", "events/subscribe", "events/unsubscribe"])
 const CACHEABLE_METHODS = new Set(["server/discover", "tools/list", "resources/list", "resources/templates/list", "resources/read"])
-const MAX_REQUEST_BYTES = 40 * 1024 * 1024 // Covers the existing 25 MiB base64 upload tool.
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -66,7 +66,7 @@ class RequestTooLargeError extends EventsRpcError {
 async function readBody(req: Request): Promise<unknown> {
   if (!req.body) throw new EventsRpcError(-32700, "Missing JSON request")
   const declaredLength = req.headers.get("content-length")
-  if (declaredLength && /^\d+$/.test(declaredLength) && Number(declaredLength) > MAX_REQUEST_BYTES) {
+  if (declaredLength && /^\d+$/.test(declaredLength) && Number(declaredLength) > MAX_MCP_REQUEST_BYTES) {
     throw new RequestTooLargeError()
   }
   const reader = req.body.getReader()
@@ -77,7 +77,7 @@ async function readBody(req: Request): Promise<unknown> {
       const { done, value } = await reader.read()
       if (done) break
       size += value.byteLength
-      if (size > MAX_REQUEST_BYTES) {
+      if (size > MAX_MCP_REQUEST_BYTES) {
         await reader.cancel()
         throw new RequestTooLargeError()
       }

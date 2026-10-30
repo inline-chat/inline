@@ -1,5 +1,6 @@
 import { WebStandardStreamableHTTPServerTransport, type WebStandardStreamableHTTPServerTransportOptions } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
+import { MAX_MCP_REQUEST_BYTES } from "./request-limits"
 
 export type McpSession = {
   sessionId: string
@@ -65,6 +66,7 @@ export class McpSessionManager {
       return closeTask
     }
     const transport = new WebStandardStreamableHTTPServerTransport({
+      maxRequestBodySize: MAX_MCP_REQUEST_BYTES,
       ...params.transportOptions,
       sessionIdGenerator: () => crypto.randomUUID(),
       onsessioninitialized: async (sid: string) => {
