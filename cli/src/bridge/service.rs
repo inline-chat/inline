@@ -557,15 +557,34 @@ pub(super) async fn refresh_supervisor(
     // Only this already-drained process is stopped; restart cannot admit a turn
     // between the quiet check and shutdown.
     if let Err(error) = restart_installed_service(paths, account, secrets).await {
-        // Restore the entry point for the service manager's next launch. Start
-        // is a no-op for an active service: never kill a possibly healthy new
-        // worker merely because the service-manager response was ambiguous.
-        install_stable_binary_from(&previous.executable, &paths.installed_binary)?;
+        // A failed service-manager response can still mean a parent is alive.
+        // Never replace its executable while it may be retaining its own bytes.
         let _ = control_request(paths, secrets, ControlCommand::CancelUpdate).await;
+        if let Ok(stopped) = crate::update::store::lock(&paths.root.join("supervisor.lock")) {
+            let restored =
+                install_stable_binary_from(&previous.executable, &paths.installed_binary);
+            drop(stopped);
+            restored?;
+        }
+        // Start is a no-op for an active service. Never force a second stop.
         let _ = start_service(paths, account, secrets).await;
+        crate::telemetry::report_update(
+            "repair_required",
+            store.read()?.channel.as_str(),
+            &previous.version,
+            &current.version,
+            "supervisor_refresh",
+        );
         return Err(error);
     }
     wait_for_account_running(paths, account, secrets, READY_TIMEOUT).await?;
+    crate::telemetry::report_update(
+        "supervisor_refreshed",
+        store.read()?.channel.as_str(),
+        &previous.version,
+        &current.version,
+        "supervisor_refresh",
+    );
     Ok("refreshed")
 }
 
