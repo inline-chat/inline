@@ -15,8 +15,7 @@ use super::{
 };
 use crate::{
     DriverCommand, DriverError, DriverFuture, DriverModelOption, DriverSettingOption,
-    DriverUsageWindow, ProviderId,
-    ProviderSessionId, SessionCheckpoint, SessionPageCursor, TurnId,
+    DriverUsageWindow, ProviderId, ProviderSessionId, SessionCheckpoint, SessionPageCursor, TurnId,
 };
 
 /// Boxed future with a typed error, matching [`DriverFuture`].

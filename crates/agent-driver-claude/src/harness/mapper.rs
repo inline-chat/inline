@@ -1394,20 +1394,25 @@ fn usage_window(label: &str, percent: f64, resets_at: Option<i64>) -> DriverUsag
 /// The plan limits in a `get_usage` answer, which unlike `rate_limit_event`
 /// reads percents as 0-100 and resets as ISO 8601.
 pub(crate) fn plan_usage(response: &Value) -> Vec<DriverUsageWindow> {
-    ["five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"]
-        .into_iter()
-        .filter_map(|label| {
-            let window = &response["rate_limits"][label];
-            Some(usage_window(
-                label,
-                window["utilization"].as_f64()?,
-                window["resets_at"]
-                    .as_str()
-                    .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
-                    .map(|time| time.timestamp()),
-            ))
-        })
-        .collect()
+    [
+        "five_hour",
+        "seven_day",
+        "seven_day_opus",
+        "seven_day_sonnet",
+    ]
+    .into_iter()
+    .filter_map(|label| {
+        let window = &response["rate_limits"][label];
+        Some(usage_window(
+            label,
+            window["utilization"].as_f64()?,
+            window["resets_at"]
+                .as_str()
+                .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
+                .map(|time| time.timestamp()),
+        ))
+    })
+    .collect()
 }
 
 fn turn_outcome(result: &ResultMessage) -> TurnOutcome {
@@ -1668,9 +1673,7 @@ mod tests {
 
     #[test]
     fn rate_limit_events_without_a_reading_invent_no_usage() {
-        assert!(
-            rate_limit(&json!({"status": "allowed", "rateLimitType": "five_hour"})).is_empty()
-        );
+        assert!(rate_limit(&json!({"status": "allowed", "rateLimitType": "five_hour"})).is_empty());
     }
 
     #[test]
