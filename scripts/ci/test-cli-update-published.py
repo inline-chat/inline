@@ -47,6 +47,22 @@ def metadata(path, directory):
     return file.read_bytes()
 
 
+def baseline_manifest(version, targets, directory):
+    # Older stable releases predate versioned manifest.json publication. Their
+    # immutable GitHub assets/checksums remain available after stable advances.
+    result = {"version": version, "targets": {}}
+    for target in targets:
+        name = f"inline-cli-{version}-{target}.tar.gz"
+        url = f"https://github.com/inline-chat/inline/releases/download/cli-v{version}/{name}"
+        checksum = directory / f"{name}.sha256"
+        download(url + ".sha256", checksum, 1024)
+        parts = checksum.read_text().split()
+        assert len(parts) == 2 and parts[1].lstrip("*") == name
+        assert len(parts[0]) == 64 and all(c in "0123456789abcdef" for c in parts[0])
+        result["targets"][target] = {"url": url, "sha256": parts[0]}
+    return result
+
+
 def digest(path):
     with path.open("rb") as file:
         return hashlib.file_digest(file, "sha256").hexdigest()
@@ -160,7 +176,7 @@ def main():
         signed = metadata(f"v{FIRST_UPDATER}/channel.alpha.json", directory)
         verifier = "import {authenticatedChannelVersion} from './scripts/cli-release-signing.ts'; console.log(JSON.stringify(await authenticatedChannelVersion(await Bun.stdin.text(),'alpha')));"
         release = json.loads(command(["bun", "--no-env-file", "-e", verifier], data=signed))
-        manifests = {v: json.loads(metadata(f"v{v}/manifest.json", directory)) for v in BASELINES}
+        manifests = {v: baseline_manifest(v, targets, directory) for v in BASELINES}
         for target in targets:
             updater = released_binary(FIRST_UPDATER, target, release, directory)
             for baseline in BASELINES:
