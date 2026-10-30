@@ -1136,7 +1136,10 @@ fn bucket_key_for_update(update: &proto::Update) -> Option<SyncBucketKey> {
         | Update::DialogFollowMode(_)
         | Update::DialogCollapsedMaxId(_)
         | Update::UpdateReadMaxId(_)
-        | Update::ChatOpen(_) => Some(SyncBucketKey::User),
+        | Update::ChatOpen(_)
+        // Each control is one command. Applied outside the bucket, the cursor
+        // stays behind it and the next catch-up runs it a second time.
+        | Update::AgentSessionControl(_) => Some(SyncBucketKey::User),
         Update::NewChat(value) => value.chat.as_ref()?.peer_id.as_ref().and_then(chat_bucket),
         Update::ChatMoved(value) => value.chat.as_ref()?.peer_id.as_ref().and_then(chat_bucket),
         Update::ParticipantAdd(value) => Some(chat_key(value.chat_id)),
@@ -2252,6 +2255,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn live_agent_control_advances_the_user_bucket_and_never_replays() {
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_bucket_state(SyncBucketKey::User, SyncBucketState { seq: 5, date: 10 })
+            .await
+            .unwrap();
+        let host = FakeHost::new(Vec::new());
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        sync.process_realtime(&host, vec![agent_control_update(6, 20)])
+            .await
+            .unwrap();
+        // The next user-bucket hint has nothing left to fetch.
+        sync.process_realtime(&host, vec![user_hint(6)])
+            .await
+            .unwrap();
+
+        assert!(host.requests.lock().await.is_empty());
+        let applied = host.applied.lock().await;
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0], vec![agent_control_update(6, 20)]);
+        assert_eq!(
+            store.sync_bucket_state(SyncBucketKey::User).await.unwrap(),
+            SyncBucketState { seq: 6, date: 20 }
+        );
+    }
+
+    #[tokio::test]
+    async fn live_agent_control_behind_a_gap_applies_once_from_the_merged_page() {
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_bucket_state(SyncBucketKey::User, SyncBucketState { seq: 4, date: 10 })
+            .await
+            .unwrap();
+        // Seq 5 is an update this client applied outside the bucket.
+        let earlier = proto::Update {
+            seq: Some(5),
+            date: Some(15),
+            update: Some(proto::update::Update::AgentGrant(Default::default())),
+        };
+        let host = FakeHost::new(vec![updates_result(
+            vec![earlier.clone(), agent_control_update(6, 20)],
+            6,
+            20,
+            true,
+        )]);
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+
+        sync.process_realtime(&host, vec![agent_control_update(6, 20)])
+            .await
+            .unwrap();
+
+        let applied = host.applied.lock().await;
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0], vec![earlier, agent_control_update(6, 20)]);
+        assert_eq!(
+            store.sync_bucket_state(SyncBucketKey::User).await.unwrap(),
+            SyncBucketState { seq: 6, date: 20 }
+        );
+    }
+
+    #[tokio::test]
     async fn older_hint_does_not_drop_newer_buffered_realtime_update() {
         let store = Arc::new(InMemoryStore::new());
         let key = chat_key(7);
@@ -2913,6 +2978,22 @@ mod tests {
             date: None,
             update: Some(proto::update::Update::UserHasNewUpdates(
                 proto::UpdateUserHasNewUpdates { update_seq: seq },
+            )),
+        }
+    }
+
+    fn agent_control_update(seq: i32, date: i64) -> proto::Update {
+        proto::Update {
+            seq: Some(seq),
+            date: Some(date),
+            update: Some(proto::update::Update::AgentSessionControl(
+                proto::UpdateAgentSessionControl {
+                    interaction_id: i64::from(seq),
+                    agent_session_id: 11,
+                    op: proto::AgentSessionControl::Stop as i32,
+                    actor_user_id: 1600,
+                    chat_id: 7,
+                },
             )),
         }
     }
