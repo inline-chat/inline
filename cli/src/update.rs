@@ -558,6 +558,11 @@ async fn perform_inner(
         Ok(())
     })?;
     if !needs_release_staging(&store.read()?, &selected.version, env!("CARGO_PKG_VERSION"))? {
+        // An explicit update also enrolls an existing owned installation when
+        // there is nothing newer to download (for example after a legacy upgrade).
+        if !background {
+            enroll_current(store)?;
+        }
         store.edit(|state| {
             state.outcome = "current".into();
             Ok(())

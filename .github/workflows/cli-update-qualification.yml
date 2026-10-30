@@ -41,6 +41,11 @@ on:
       - '.github/workflows/cli-release.yml'
       - '.github/workflows/cli-update-qualification.yml'
   workflow_dispatch:
+    inputs:
+      published_upgrade_smoke:
+        description: Exercise released stable/alpha upgrades and feed recovery in disposable installs
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -81,6 +86,10 @@ jobs:
           bun --no-env-file test scripts/release-cli.test.ts scripts/cli-release-signing.test.ts scripts/ci/cli-release-version.test.ts scripts/ci/release-tag.test.ts
           python3 scripts/ci/test-cli-installer.py
           python3 scripts/ci/test-cli-update-protocol.py
+      - name: Exercise released stable and alpha upgrades
+        if: github.event_name == 'workflow_dispatch' && inputs.published_upgrade_smoke
+        timeout-minutes: 15
+        run: python3 scripts/ci/test-cli-update-published.py
       - name: Compile and test Mac installer/update protocol
         if: runner.os == 'macOS'
         run: bash scripts/ci/test-cli-update-swift.sh

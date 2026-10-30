@@ -112,6 +112,14 @@ inline bridge restart
 inline bridge rollback                 # request the recorded previous runtime
 ```
 
+For a CLI installed with an older installer or upgraded by an older CLI, run
+`inline update config --register` once with the new executable. This enrolls only
+an owned regular executable and preserves an existing automatic-update opt-out.
+The new CLI also enrolls an explicitly requested `inline update` when already
+current. Pre-updater CLI versions can restart bridges as part of their manual
+update; wait for agents to finish first, or use the Mac app installer to upgrade
+the CLI and restart the bridge separately at an idle boundary.
+
 A manual restart runs the invoking upgraded CLI even with automatic updates off.
 Rollback waits for a safe boundary, is limited to the recorded compatible previous
 runtime, and quarantines the version it replaces. Status lists selected and pending
