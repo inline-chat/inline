@@ -201,14 +201,11 @@ struct DirectChatItem: View {
     case .typing:
       TypingActivityIndicator(color: .accentColor)
     case .uploadingPhoto:
-      UploadProgressIndicator(color: .secondary)
-        .frame(width: 14)
+      UploadActivityIndicator(color: .secondary)
     case .uploadingDocument:
-      UploadProgressIndicator(color: .secondary)
-        .frame(width: 14)
+      UploadActivityIndicator(color: .secondary)
     case .uploadingVideo:
-      UploadProgressIndicator(color: .secondary)
-        .frame(width: 14)
+      UploadActivityIndicator(color: .secondary)
     case .recordingVoice:
       VoiceRecordingActivityIndicator(
         barWidth: 2.2,

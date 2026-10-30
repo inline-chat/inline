@@ -658,22 +658,19 @@ private struct ChatToolbarBreadcrumbSubtitle: View {
 
 private struct AnimatedPhotoUpload: View {
   var body: some View {
-    UploadProgressIndicator(color: .secondary)
-      .frame(width: 14)
+    UploadActivityIndicator(color: .secondary)
   }
 }
 
 private struct AnimatedDocumentUpload: View {
   var body: some View {
-    UploadProgressIndicator(color: .secondary)
-      .frame(width: 14)
+    UploadActivityIndicator(color: .secondary)
   }
 }
 
 private struct AnimatedVideoUpload: View {
   var body: some View {
-    UploadProgressIndicator(color: .secondary)
-      .frame(width: 14)
+    UploadActivityIndicator(color: .secondary)
   }
 }
 

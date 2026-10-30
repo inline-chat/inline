@@ -72,28 +72,31 @@ public struct ComposeActionActivityIndicator: View {
 
 public struct WorkingActivityIndicator: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var isRotating = false
   private let color: Color
+  private let cycleDuration: TimeInterval = 0.8
 
   public init(color: Color = .accentColor) {
     self.color = color
   }
 
+  // Driven by the clock, not a repeating animation: a repeatForever transaction also captures
+  // layout changes around the view, which makes the spinner bounce between positions.
   public var body: some View {
-    Circle()
-      .trim(from: 0.16, to: 0.86)
-      .stroke(color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-      .padding(0.75)
-      .frame(width: 12, height: 12)
-      .rotationEffect(.degrees(isRotating ? 360 : 0))
-      .animation(
-        reduceMotion ? nil : .linear(duration: 0.8).repeatForever(autoreverses: false),
-        value: isRotating
-      )
-      .onAppear { isRotating = !reduceMotion }
-      .onDisappear { isRotating = false }
-      .onChange(of: reduceMotion) { _, reduced in isRotating = !reduced }
-      .accessibilityHidden(true)
+    TimelineView(.animation(paused: reduceMotion)) { context in
+      Circle()
+        .trim(from: 0.16, to: 0.86)
+        .stroke(color, style: StrokeStyle(lineWidth: 1.25, lineCap: .round))
+        .padding(0.625)
+        .rotationEffect(.degrees(degrees(at: context.date)))
+        .transaction { $0.animation = nil }
+    }
+    .frame(width: 10, height: 10)
+    .accessibilityHidden(true)
+  }
+
+  private func degrees(at date: Date) -> Double {
+    let elapsed = date.timeIntervalSinceReferenceDate
+    return elapsed.truncatingRemainder(dividingBy: cycleDuration) / cycleDuration * 360
   }
 }
 

@@ -3118,7 +3118,6 @@ private final class SidebarNativeComposeActivityView: NSView {
     self.preview = preview
     mode = showsText ? .text : .indicator
     allowsAnimations = animatesChanges
-    lastPresentation = nil
     hasAppliedPresentation = false
     indicatorView.refreshColor()
     needsLayout = true
@@ -3159,6 +3158,7 @@ private final class SidebarNativeComposeActivityView: NSView {
 
   private func apply(_ presentation: ComposeActionPresentation?) {
     let wasVisible = isActivityVisible
+    let previousPresentation = lastPresentation
     lastPresentation = presentation
     hasAppliedPresentation = true
     let supported = presentation.flatMap { value in
@@ -3179,7 +3179,9 @@ private final class SidebarNativeComposeActivityView: NSView {
     if wasVisible != isActivityVisible {
       visibilityChanged?()
     }
+    // A fade snapshots the layer, so skip it on row refreshes that keep the same activity.
     guard allowsAnimations,
+          !(isActivityVisible && presentation == previousPresentation),
           !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     else { return }
     let transition = CATransition()
@@ -3227,6 +3229,13 @@ private final class SidebarNativeComposeIndicatorView: NSView {
     layoutIndicatorLayers()
   }
 
+  // Layer animations don't reliably survive a detached view, so restart them on return.
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    guard window != nil, action != nil else { return }
+    rebuildLayers()
+  }
+
   private func rebuildLayers() {
     indicatorLayers.forEach { $0.removeFromSuperlayer() }
     indicatorLayers.removeAll()
@@ -3246,7 +3255,7 @@ private final class SidebarNativeComposeIndicatorView: NSView {
       if kind == .working {
         shape.fillColor = nil
         shape.strokeColor = Theme.accentColor.cgColor
-        shape.lineWidth = 1.5
+        shape.lineWidth = 1.25
         shape.lineCap = .round
         shape.strokeStart = 0.16
         shape.strokeEnd = 0.86
@@ -3262,18 +3271,23 @@ private final class SidebarNativeComposeIndicatorView: NSView {
         rotation.toValue = Double.pi * 2
         rotation.duration = 0.8
         rotation.repeatCount = .infinity
+        rotation.isRemovedOnCompletion = false
         shape.add(rotation, forKey: "sidebar-working-spin")
         continue
       }
       let animation = CABasicAnimation(keyPath: kind == .typing ? "transform.translation.y" : "transform.scale.y")
       animation.fromValue = kind == .typing ? 0 : 0.45
       animation.toValue = kind == .typing ? -2 : 1
-      animation.duration = kind == .upload ? 0.8 : 0.6
+      // Autoreversed, so typing and voice match the 0.74s cycle of the shared indicators.
+      animation.duration = kind == .upload ? 0.8 : 0.37
+      animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
       animation.autoreverses = true
       animation.repeatCount = .infinity
-      animation.beginTime = CACurrentMediaTime() + Double(index) * 0.12
+      animation.isRemovedOnCompletion = false
+      animation.beginTime = CACurrentMediaTime() + Double(index) * (kind == .recordingVoice ? 0.25 : 0.1)
       shape.add(animation, forKey: "sidebar-compose-pulse")
     }
+    layoutIndicatorLayers()
     needsLayout = true
   }
 
@@ -3284,8 +3298,8 @@ private final class SidebarNativeComposeIndicatorView: NSView {
     switch kind {
     case .working:
       guard let shape = indicatorLayers.first else { return }
-      shape.frame = CGRect(x: bounds.midX - 6, y: bounds.midY - 6, width: 12, height: 12)
-      shape.path = CGPath(ellipseIn: CGRect(x: 0.75, y: 0.75, width: 10.5, height: 10.5), transform: nil)
+      shape.frame = CGRect(x: bounds.midX - 5, y: bounds.midY - 5, width: 10, height: 10)
+      shape.path = CGPath(ellipseIn: CGRect(x: 0.625, y: 0.625, width: 8.75, height: 8.75), transform: nil)
     case .typing:
       for (index, shape) in indicatorLayers.enumerated() {
         let rect = CGRect(x: CGFloat(index) * 5, y: bounds.midY - 1.5, width: 3, height: 3)
