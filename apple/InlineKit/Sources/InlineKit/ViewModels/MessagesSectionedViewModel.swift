@@ -190,16 +190,6 @@ public class MessagesSectionedViewModel {
     progressiveViewModel.setAtBottom(atBottom)
   }
 
-  public func isCertifiedHistoryContinuation(
-    between firstMessageID: Int64,
-    and secondMessageID: Int64
-  ) -> Bool {
-    historyCoverage.isCertifiedContinuation(
-      between: firstMessageID,
-      and: secondMessageID
-    )
-  }
-
   public func setHistoryAnchor(_ messageID: Int64) {
     progressiveViewModel.setHistoryAnchor(messageID)
   }

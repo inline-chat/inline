@@ -3280,14 +3280,6 @@ private extension MessagesCollectionView {
       guard earlier.message.fromId == later.message.fromId else { return false }
       guard groupCalendar.isDate(earlier.message.date, inSameDayAs: later.message.date) else { return false }
 
-      let earlierID = earlier.message.messageId
-      let laterID = later.message.messageId
-      if earlierID > 0, laterID > 0,
-         !viewModel.isCertifiedHistoryContinuation(between: earlierID, and: laterID)
-      {
-        return false
-      }
-
       let gapSeconds = later.message.date.timeIntervalSince(earlier.message.date)
       return gapSeconds >= 0 && gapSeconds <= 300
     }

@@ -26,7 +26,7 @@ public struct MarkAsUnreadTransaction: Transaction2 {
     context = Context(peerId: peerId, intentId: UUID().uuidString)
   }
 
-  public var executionKey: TransactionExecutionKey? { .peerMutation(context.peerId) }
+  public var executionKey: TransactionExecutionKey? { .readState(context.peerId) }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .markAsUnread(.with {

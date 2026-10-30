@@ -344,6 +344,7 @@ public class MessagesProgressiveViewModel {
         let hadPendingReload = reloadTask != nil
         if let changeset = applyChanges(update: update) {
           callback?(changeset)
+          loadLatestIfTailUnknown()
         }
         // An incremental publication supersedes the snapshot being read, but
         // not the database changes that reload was asked to pick up.
@@ -358,6 +359,18 @@ public class MessagesProgressiveViewModel {
     if let revision = initialState?.publicationRevision, revision != publisher.publicationRevision(for: peer) {
       scheduleReload(animated: false)
     }
+    loadLatestIfTailUnknown()
+  }
+
+  /// The list shows one continuous stretch of history, so an unknown tail is
+  /// fetched as soon as it is seen, however it appeared. A latest page ends it.
+  private func loadLatestIfTailUnknown() {
+    // The coordinator describes the shared database only.
+    guard db === AppDatabase.shared,
+          !historyCoverage.isCertifiedMessage(MessageHistoryHole.positiveMessageIDMax)
+    else { return }
+    let peer = peer
+    Task { await MessageHistoryRepairCoordinator.shared.loadLatest(peer: peer) }
   }
 
   /// A reload is reading the database, for tests of when one is scheduled.
@@ -495,7 +508,9 @@ public class MessagesProgressiveViewModel {
 
   public func setAtBottom(_ atBottom: Bool) {
     self.atBottom = atBottom && historyCoverage.isAtCertifiedLiveEnd
-    if self.atBottom {
+    // Back at the end of the cached rows, a reload follows the tail even if it
+    // is still unknown, so a message sent from here stays in the window.
+    if atBottom, !hasNewerLocalMessages {
       historyAnchorID = nil
     }
   }
@@ -910,15 +925,13 @@ public class MessagesProgressiveViewModel {
         messages = reapplyingPendingAcknowledgements(to: reloadedMessages)
         updateRange()
         let metadataRequest = beginLoadedWindowMetadataRequest()
-        // Shown rows stay while the newest history is still unknown. Once the
-        // tail is certified, rows on the far side of a gap give way to it.
-        // A send that was already shown always stays.
-        let retained = snapshot.metadata.historyCoverage.isAtCertifiedLiveEnd
-          ? Set(existingMessages.lazy.filter { $0.message.messageId <= 0 }.map(\.id))
-          : Set(existingMessages.map(\.id))
+        // Rows on the far side of a gap give way to the window being read.
+        // A send still waiting for its server ID always stays.
+        let retained = Set(existingMessages.lazy.filter { $0.message.messageId <= 0 }.map(\.id))
         _ = applyLoadedWindowMetadata(snapshot.metadata, for: metadataRequest, retainingMessageIDs: retained)
         reloadTask = nil
         callback?(.reload(animated: animated))
+        loadLatestIfTailUnknown()
       } catch is CancellationError {
         return
       } catch {
@@ -1134,9 +1147,8 @@ public class MessagesProgressiveViewModel {
       if messages.allSatisfy({ retainingMessageIDs.contains($0.id) }) { return (messages, self) }
       let component = historyCoverage.contiguousWindow(from: messages, around: anchorID)
       let componentIDs = Set(component.map(\.id))
-      // Coverage decides which cached rows to load, not whether a row already
-      // rendered through a live publication still exists. Keep those rows and
-      // expose the unknown adjacency without certifying it from materialization.
+      // Rows already on screen stay through paging, without certifying the
+      // adjacency between them.
       let projected = messages.filter { componentIDs.contains($0.id) || retainingMessageIDs.contains($0.id) }
       guard projected.count != messages.count else { return (messages, self) }
       let positiveIDs = projected.lazy.map(\.message.messageId).filter { $0 > 0 }

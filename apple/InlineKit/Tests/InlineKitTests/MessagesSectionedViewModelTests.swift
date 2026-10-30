@@ -42,7 +42,6 @@ struct MessagesSectionedViewModelOrderingTests {
 
     #expect(viewModel.historyCoverage == coverage)
     #expect(viewModel.messages.map(\.message.messageId) == [20])
-    #expect(!viewModel.isCertifiedHistoryContinuation(between: 10, and: 20))
   }
 
   @Test("collapse boundary is applied before initial sections and can be cleared")

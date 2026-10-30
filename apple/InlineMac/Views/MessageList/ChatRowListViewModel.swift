@@ -173,16 +173,6 @@ final class ChatRowListViewModel {
     progressiveViewModel.setHistoryAnchor(messageID)
   }
 
-  func isCertifiedHistoryContinuation(
-    between firstMessageID: Int64,
-    and secondMessageID: Int64
-  ) -> Bool {
-    historyCoverage.isCertifiedContinuation(
-      between: firstMessageID,
-      and: secondMessageID
-    )
-  }
-
   func setCollapsedMaxId(_ collapsedMaxId: Int64?) -> UpdateKind {
     guard self.collapsedMaxId != collapsedMaxId else { return .none }
     self.collapsedMaxId = collapsedMaxId

@@ -454,7 +454,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     _ = try? await Api.realtime.send(.getChat(peer: peer_))
 
     guard !Task.isCancelled else { return }
-    _ = try? await Api.realtime.send(.getChatHistory(peer: peer_))
+    await MessageHistoryRepairCoordinator.shared.loadLatest(peer: peer_)
   }
 
   public func refetchChatView() {
@@ -491,7 +491,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     await withTaskGroup(of: Void.self) { group in
       group.addTask {
         guard !Task.isCancelled else { return }
-        _ = try? await Api.realtime.send(.getChatHistory(peer: peer))
+        await MessageHistoryRepairCoordinator.shared.loadLatest(peer: peer)
       }
 
       group.addTask {

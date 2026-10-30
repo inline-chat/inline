@@ -28,7 +28,7 @@ public struct ReadMessagesTransaction: Transaction2 {
     )
   }
 
-  public var executionKey: TransactionExecutionKey? { .peerMutation(context.peerId) }
+  public var executionKey: TransactionExecutionKey? { .readState(context.peerId) }
   public var reconnectReplayPolicy: TransactionReconnectPolicy? {
     context.maxId == nil ? .neverReplay : .replaySafe
   }
