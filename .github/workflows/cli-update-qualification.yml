@@ -110,6 +110,7 @@ jobs:
         if: runner.os == 'macOS' && github.event_name == 'workflow_dispatch' && inputs.maintenance_artifact
         env:
           CARGO_PROFILE_DEV_DEBUG: '0'
+          INLINE_CLI_SENTRY_DSN: ${{ secrets.CLI_UPDATE_QUALIFICATION_SENTRY_DSN }}
         run: cargo build --locked -j 2 -p inline-cli --bin inline
       - uses: actions/upload-artifact@v4
         if: runner.os == 'macOS' && github.event_name == 'workflow_dispatch' && inputs.maintenance_artifact
