@@ -1014,6 +1014,15 @@ class MessageViewAppKit: NSView {
       }
       return
     }
+    if let fileLink = LocalFileLink(url: url) {
+      MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=openLocalFile")
+      let sender = fullMessage.from
+      Task { @MainActor in
+        await LocalFileLinkOpener.open(fileLink, from: sender)
+      }
+      return
+    }
+    guard url.scheme != nil else { return }
 
     log.debug("Link clicked: \(MessageGestureTrace.url(url))")
     MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=openExternal url=\(MessageGestureTrace.url(url))")

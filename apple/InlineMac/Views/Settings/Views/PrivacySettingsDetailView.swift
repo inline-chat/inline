@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PrivacySettingsDetailView: View {
   @ObservedObject private var privacy = INUserSettings.current.privacy
+  @State private var fileLinkSenders: [LocalFileLinkTrust.Sender] = []
 
   var body: some View {
     Form {
@@ -29,8 +30,24 @@ struct PrivacySettingsDetailView: View {
       } header: {
         SettingsSectionHeader("Time Zone")
       }
+
+      if !fileLinkSenders.isEmpty {
+        Section {
+          ForEach(fileLinkSenders) { sender in
+            LabeledContent(sender.name) {
+              Button("Remove") {
+                LocalFileLinkTrust.remove(id: sender.id)
+                fileLinkSenders = LocalFileLinkTrust.senders
+              }
+            }
+          }
+        } header: {
+          SettingsSectionHeader("Allowed to Open Local Files")
+        }
+      }
     }
     .settingsFormStyle()
+    .onAppear { fileLinkSenders = LocalFileLinkTrust.senders }
   }
 }
 
