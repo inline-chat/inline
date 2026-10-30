@@ -3,6 +3,41 @@ use super::*;
 
 #[cfg(unix)]
 #[tokio::test]
+async fn control_reads_complete_responses_from_fast_closing_peers() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let root = tempfile::tempdir().unwrap();
+    let paths = BridgePaths::from_root(root.path().to_path_buf(), root.path().join("inline"));
+    let secrets = AccountBridgeSecrets {
+        version: 2,
+        owner_user_id: 42,
+        control_token: "test-control".into(),
+        owner_auth: None,
+        owner_token: String::new(),
+        providers: vec![],
+    };
+    let listener = tokio::net::UnixListener::bind(&paths.control_socket).unwrap();
+    let server = tokio::spawn(async move {
+        for _ in 0..100 {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (read, mut write) = stream.into_split();
+            let mut request = String::new();
+            BufReader::new(read).read_line(&mut request).await.unwrap();
+            write.write_all(b"{\"version\":1,\"status\":\"running\",\"processId\":42,\"inlineConnected\":true,\"providerReady\":true,\"detail\":null}\n").await.unwrap();
+            // Drop immediately after writing, as the real control handler does.
+        }
+    });
+    for _ in 0..100 {
+        let response = control_request(&paths, &secrets, ControlCommand::Status)
+            .await
+            .unwrap();
+        assert_eq!(response.process_id, 42);
+        assert_eq!(response.status, "running");
+    }
+    server.await.unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn refresh_busy_and_lost_response_cancel_drain_without_shutdown() {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     for first_response in [Some("waiting_for_idle"), None] {

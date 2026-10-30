@@ -1402,7 +1402,14 @@ pub(super) async fn control_request(
     let mut bytes = serde_json::to_vec(&request)?;
     bytes.push(b'\n');
     stream.write_all(&bytes).await?;
-    stream.shutdown().await?;
+    // A fast local peer can finish and close before our write-half shutdown
+    // reaches macOS. Its valid response may already be buffered. Still require
+    // the bounded, authenticated protocol response below; EOF is not success.
+    if let Err(error) = stream.shutdown().await
+        && error.kind() != io::ErrorKind::NotConnected
+    {
+        return Err(error.into());
+    }
     let mut reader = BufReader::new(stream.take(64 * 1024 + 1));
     let mut response = String::new();
     tokio::time::timeout(CONTROL_TIMEOUT, reader.read_line(&mut response))
