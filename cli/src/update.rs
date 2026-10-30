@@ -67,6 +67,10 @@ pub enum UpdateError {
     Io(#[from] io::Error),
     #[error("another update operation is in progress")]
     Busy,
+    #[error(
+        "bridge update state needs repair ({0}); keep account and delivery files. Restore journal access/free space if needed, then run `inline bridge restart` with the current CLI after agents finish"
+    )]
+    ActivationJournal(&'static str),
     #[error("release verification failed ({0}); the working version was kept")]
     Verification(&'static str),
     #[error("missing release manifest url")]
@@ -93,6 +97,7 @@ impl UpdateError {
             Self::Http(_) => "network",
             Self::MissingBinary | Self::InvalidBinary => "archive",
             Self::Busy => "busy",
+            Self::ActivationJournal(_) => "activation_journal",
             _ => "installation",
         }
     }

@@ -42,6 +42,82 @@ fn journal(paths: &BridgePaths) -> PathBuf {
 pub(super) fn enabled(paths: &BridgePaths) -> bool {
     journal(paths).is_file()
 }
+
+fn read_activation(paths: &BridgePaths) -> Result<Activation, UpdateError> {
+    // Inspect the version before decoding required fields. A newer format may
+    // have a different shape; that must never look like damage we can reset.
+    let value: serde_json::Value = read_json(&journal(paths))?;
+    if value
+        .get("schemaVersion")
+        .is_some_and(|version| version.as_u64() != Some(1))
+    {
+        return Err(UpdateError::ActivationJournal(
+            "unsupported format; use a newer CLI",
+        ));
+    }
+    Ok(serde_json::from_value(value)?)
+}
+
+fn journal_failure(error: UpdateError) -> UpdateError {
+    match error {
+        UpdateError::ActivationJournal(_) => error,
+        UpdateError::Json(_) => UpdateError::ActivationJournal("damaged journal"),
+        _ => UpdateError::ActivationJournal("journal unavailable"),
+    }
+}
+
+fn enroll_activation(
+    paths: &BridgePaths,
+    store: &Store,
+    artifact: &Artifact,
+) -> Result<(), UpdateError> {
+    update::validate_cached(store, artifact)?;
+    match read_activation(paths) {
+        Ok(_) => return Ok(()),
+        Err(UpdateError::Json(_)) => {}
+        Err(UpdateError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(journal_failure(error)),
+    }
+    // A running parent still owns its selection even if someone damaged the
+    // journal. Do not reset it underneath an activation; require an idle stop.
+    let _repair = crate::update::store::lock(&paths.root.join("supervisor.lock"))
+        .map_err(|_| UpdateError::ActivationJournal("stop the running bridge before repair"))?;
+    // The previous parent may have finished a valid write before we got its lock.
+    match read_activation(paths) {
+        Ok(_) => return Ok(()),
+        Err(UpdateError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(UpdateError::Json(_)) => {
+            // Only an explicit setup/restart reaches here. Preserve the damaged
+            // selector before recording the invoking verified runtime. Do not
+            // restore databases/auth or guess a version from the cache. Each
+            // workload still enforces the store's minimum-reader contract.
+            let bytes = fs::read(journal(paths))?;
+            crate::update::store::atomic_bytes(
+                &paths
+                    .root
+                    .join(format!("activation.damaged-{}.json", rand::random::<u64>())),
+                &bytes,
+                0o600,
+            )?;
+        }
+        Err(error) => return Err(journal_failure(error)),
+    }
+    atomic_json(
+        &journal(paths),
+        &Activation {
+            schema_version: 1,
+            current: artifact.clone(),
+            supervisor: Some(artifact.clone()),
+            previous: None,
+            candidate: None,
+            phase: "committed".into(),
+            last_activation: None,
+            rejected: vec![],
+            failure: None,
+        },
+    )
+}
+
 fn data_root(paths: &BridgePaths) -> Result<PathBuf, UpdateError> {
     let parent = paths
         .root
@@ -61,22 +137,7 @@ pub(super) fn enroll(paths: &BridgePaths) -> Result<Artifact, UpdateError> {
     crate::update::store::private_dir(&store.root)?;
     let _versions = crate::update::store::blocking_lock(&store.root.join("versions.lock"))?;
     let artifact = update::retain_running_binary(&store)?;
-    if !enabled(paths) {
-        atomic_json(
-            &journal(paths),
-            &Activation {
-                schema_version: 1,
-                current: artifact.clone(),
-                supervisor: Some(artifact.clone()),
-                previous: None,
-                candidate: None,
-                phase: "committed".into(),
-                last_activation: None,
-                rejected: vec![],
-                failure: None,
-            },
-        )?;
-    }
+    enroll_activation(paths, &store, &artifact)?;
     // A locally invoked build is explicit authority for this service. It must
     // never become an automatically selected candidate for sibling accounts.
     Ok(artifact)
@@ -96,7 +157,7 @@ pub(super) fn request_restart(
     paths: &BridgePaths,
     candidate: &Artifact,
 ) -> Result<(), UpdateError> {
-    let state: Activation = read_json(&journal(paths))?;
+    let state = read_activation(paths).map_err(journal_failure)?;
     if candidate.executable_sha256 == state.current.executable_sha256
         || update::newer(&state.current.version, &candidate.version)?
     {
@@ -403,7 +464,7 @@ fn rollback_path(paths: &BridgePaths) -> PathBuf {
 }
 
 pub(super) fn request_rollback(paths: &BridgePaths, store: &Store) -> Result<String, UpdateError> {
-    let state: Activation = read_json(&journal(paths))?;
+    let state = read_activation(paths).map_err(journal_failure)?;
     let previous = state
         .previous
         .as_ref()
@@ -531,10 +592,16 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
     let mut config = Config::load();
     config.data_dir = data_root(&paths)?;
     config.state_path = config.data_dir.join("state.json");
-    let mut state: Activation = read_json(&journal(&paths))?;
-    if state.schema_version != 1 {
-        return Err("unsupported activation journal".into());
-    }
+    let mut state = read_activation(&paths).map_err(|error| {
+        crate::telemetry::report_update(
+            "repair_required",
+            read_policy(&store).channel.as_str(),
+            env!("CARGO_PKG_VERSION"),
+            env!("CARGO_PKG_VERSION"),
+            "activation_journal",
+        );
+        journal_failure(error)
+    })?;
     recover_interrupted(&mut state, &paths, read_policy(&store).channel.as_str());
     let fallback_engine = {
         let _versions = crate::update::store::blocking_lock(&store.root.join("versions.lock"))?;
@@ -1179,5 +1246,91 @@ mod tests {
         stop_with_timeout(&mut restored, &f.paths, &f.secrets, QUICK.stop)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn update_explicit_restart_repairs_damaged_journal_without_resetting_account_data() {
+        for damaged in [
+            b"{".as_slice(),
+            b"{\"schemaVersion\":1,",
+            b"{\"schemaVersion\":1}",
+        ] {
+            let f = Fixture::new();
+            let runtime = f.artifact("healthy");
+            let receipts = f.paths.root.join("delivered-receipts");
+            fs::write(&receipts, b"already acknowledged").unwrap();
+            fs::write(journal(&f.paths), damaged).unwrap();
+            assert!(read_activation(&f.paths).is_err());
+            enroll_activation(&f.paths, &f.store, &runtime).unwrap();
+            let repaired = read_activation(&f.paths).unwrap();
+            assert_eq!(repaired.current, runtime);
+            assert!(repaired.previous.is_none());
+            request_restart(&f.paths, &runtime).unwrap();
+            let backups: Vec<_> = fs::read_dir(&f.paths.root)
+                .unwrap()
+                .flatten()
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("activation.damaged-")
+                })
+                .collect();
+            assert_eq!(backups.len(), 1);
+            assert_eq!(fs::read(backups[0].path()).unwrap(), damaged);
+            let mut child = launch(&repaired.current, &f.paths, &f.store).unwrap();
+            ready(&mut child, &f, &runtime).await;
+            f.assert_account_unchanged();
+            assert_eq!(fs::read(&receipts).unwrap(), b"already acknowledged");
+            stop_with_timeout(&mut child, &f.paths, &f.secrets, QUICK.stop)
+                .await
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn update_journal_repair_preserves_newer_formats_and_a_running_supervisors_selection() {
+        let f = Fixture::new();
+        let runtime = f.artifact("healthy");
+        // Newer formats may omit or change fields understood by this CLI.
+        let future = br#"{"schemaVersion":2,"futureSelection":"keep"}"#;
+        fs::write(journal(&f.paths), future).unwrap();
+        assert!(matches!(
+            enroll_activation(&f.paths, &f.store, &runtime),
+            Err(UpdateError::ActivationJournal(_))
+        ));
+        assert_eq!(fs::read(journal(&f.paths)).unwrap(), future);
+        fs::write(journal(&f.paths), b"{").unwrap();
+        let parent = crate::update::store::lock(&f.paths.root.join("supervisor.lock")).unwrap();
+        assert!(matches!(
+            enroll_activation(&f.paths, &f.store, &runtime),
+            Err(UpdateError::ActivationJournal(_))
+        ));
+        assert_eq!(fs::read(journal(&f.paths)).unwrap(), b"{");
+        drop(parent);
+        enroll_activation(&f.paths, &f.store, &runtime).unwrap();
+        let before = fs::read(journal(&f.paths)).unwrap();
+        enroll_activation(&f.paths, &f.store, &f.artifact("crash")).unwrap();
+        assert_eq!(fs::read(journal(&f.paths)).unwrap(), before);
+        f.assert_account_unchanged();
+    }
+
+    #[test]
+    fn update_unreadable_journal_has_an_actionable_repair_without_overwriting_unknown_state() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let f = Fixture::new();
+        let runtime = f.artifact("healthy");
+        fs::write(journal(&f.paths), b"unreadable original").unwrap();
+        fs::set_permissions(journal(&f.paths), fs::Permissions::from_mode(0o000)).unwrap();
+        let error = enroll_activation(&f.paths, &f.store, &runtime).unwrap_err();
+        fs::set_permissions(journal(&f.paths), fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(error.to_string().contains("inline bridge restart"));
+        assert_eq!(fs::read(journal(&f.paths)).unwrap(), b"unreadable original");
+        enroll_activation(&f.paths, &f.store, &runtime).unwrap();
+        assert_eq!(read_activation(&f.paths).unwrap().current, runtime);
+        f.assert_account_unchanged();
     }
 }

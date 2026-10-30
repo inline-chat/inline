@@ -1226,7 +1226,8 @@ pub(crate) fn update_statuses(config: &Config) -> Vec<BridgeUpdateStatus> {
         .filter_map(|root| {
             if let Ok(state) = crate::update::store::read_json::<update_supervisor::Activation>(
                 &root.join("activation.json"),
-            ) {
+            ) && state.schema_version == 1
+            {
                 Some(BridgeUpdateStatus {
                     version: Some(state.current.version),
                     candidate_version: state.candidate.map(|a| a.version),
