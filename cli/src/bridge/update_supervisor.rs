@@ -49,7 +49,8 @@ fn read_activation(paths: &BridgePaths) -> Result<Activation, UpdateError> {
     let value: serde_json::Value = read_json(&journal(paths))?;
     if value
         .get("schemaVersion")
-        .is_some_and(|version| version.as_u64() != Some(1))
+        .and_then(serde_json::Value::as_u64)
+        .is_some_and(|version| version != 1)
     {
         return Err(UpdateError::ActivationJournal(
             "unsupported format; use a newer CLI",
@@ -192,6 +193,7 @@ async fn start_selected(
 ) -> Result<Child, UpdateError> {
     if let Ok(request) = read_json::<StartupRequest>(&startup_path(paths)) {
         if request.from == state.current.sha256
+            && !state.rejected.contains(&request.candidate.sha256)
             && !update::newer(&state.current.version, &request.candidate.version)?
         {
             // Explicit restart has already stopped the old OS service. Trial
@@ -1254,6 +1256,7 @@ mod tests {
             b"{".as_slice(),
             b"{\"schemaVersion\":1,",
             b"{\"schemaVersion\":1}",
+            b"{\"schemaVersion\":null}",
         ] {
             let f = Fixture::new();
             let runtime = f.artifact("healthy");
@@ -1286,6 +1289,35 @@ mod tests {
                 .await
                 .unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn update_reboot_does_not_retrial_a_rejected_manual_startup_request() {
+        let f = Fixture::new();
+        let working = f.artifact("healthy");
+        let rejected = f.artifact("crash");
+        let mut state = f.state(working.clone());
+        atomic_json(&journal(&f.paths), &state).unwrap();
+        request_restart(&f.paths, &rejected).unwrap();
+        state.phase = "trial".into();
+        state.candidate = Some(rejected.clone());
+        atomic_json(&journal(&f.paths), &state).unwrap();
+        recover_interrupted(&mut state, &f.paths, "alpha");
+        let mut child = start_selected(&mut state, &f.paths, &f.store, &f.secrets, "alpha", QUICK)
+            .await
+            .unwrap();
+        ready(&mut child, &f, &working).await;
+        assert!(state.rejected.contains(&rejected.sha256));
+        assert!(!startup_path(&f.paths).exists());
+        let trace = fs::read_to_string(f.paths.root.join("trace")).unwrap();
+        assert!(
+            !trace.contains("crash"),
+            "rejected candidate was launched: {trace}"
+        );
+        f.assert_account_unchanged();
+        stop_with_timeout(&mut child, &f.paths, &f.secrets, QUICK.stop)
+            .await
+            .unwrap();
     }
 
     #[test]
