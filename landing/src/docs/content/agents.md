@@ -68,7 +68,7 @@ inline agents setup --target codex
 
 Support status:
 
-- Codex: alpha.
+- Codex: stable.
 - Claude Code: beta.
 - OpenCode: beta.
 - Amp: experimental.
@@ -81,11 +81,19 @@ Codex and Claude Code run on the native bridge (v2). Each thread has one native
 session per agent, with work state, settings, approval and question
 interactions, and controls. OpenCode and Amp keep using the previous bridge.
 
-Upgrading from an earlier CLI needs no setup. After `inline update`, existing
-conversations continue in their Codex or Claude session, or start a fresh one
-when that session is no longer on the machine. A Homebrew or manual
-upgrade reaches the background bridge after `inline bridge restart`; check the
-installed binary and provider paths with `inline bridge doctor --json`.
+Upgrading from an earlier CLI needs no setup. Existing conversations continue
+in their Codex or Claude session, or start a fresh one when that session is no
+longer on the machine. For a bridge installed before the new updater, wait until
+your agents are idle before the first upgrade, then run `inline bridge restart`
+once using the newly installed executable.
+
+Once enrolled, managed updates wait for active work to finish. Automatic runtime
+activations are spaced at least six hours apart, so the terminal and background
+bridge can temporarily report different versions. Homebrew-owned CLI executables
+stay managed by Homebrew; the enrolled background bridge can update independently.
+Check the installed binary and provider paths with `inline bridge doctor --json`.
+If another CLI installation shadows it on PATH, use the updated executable’s
+full path for these commands.
 
 To roll back, set `INLINE_BRIDGE_V2=off` in the **bridge service's environment**
 and restart it; a variable set only in your terminal does not reach an existing

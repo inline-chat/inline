@@ -9,7 +9,7 @@ Release notes for Inline apps, developer tools, and integrations.
 
 ## October 30, 2026
 
-[macOS 0.2 tip, build 6319](https://public-assets.inline.chat/mac/tip/6319/Inline.dmg) · [iOS TestFlight build 1392](https://testflight.apple.com/join/FkC3f7fz) · [CLI 0.7.19-alpha.8](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.19-alpha.8)
+[macOS 0.2 beta, build 6338](https://public-assets.inline.chat/mac/beta/6338/Inline.dmg) · [iOS TestFlight build 1393](https://testflight.apple.com/join/FkC3f7fz) · [CLI 0.7.19](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.19)
 
 ### New
 
@@ -28,16 +28,18 @@ Release notes for Inline apps, developer tools, and integrations.
 - Chat date separators on iOS only turn to glass while pinned to the top.
 - Inline links now use `inline://`. Old `in://` links keep working.
 - A new install window when you open the macOS download.
+- Claude's five-hour and weekly limits now appear correctly in the usage meter. On macOS 26 and later, the meter is also available before you start a thread.
 
 ### Better tools and APIs for agents and hackers
 
-- [CLI](/docs/cli) **0.7.19-alpha.8**: `inline plugin install` now adds the Inline plugin to **Claude Code** as well as Codex.
-- The CLI can now update its background agent bridge between turns, with signed releases and automatic recovery if an update fails. After upgrading, run `inline bridge restart` once when your agents are idle.
+- [CLI](/docs/cli) **0.7.19**: `inline plugin install` now adds the Inline plugin to **Claude Code** as well as Codex.
+- The CLI can now update its background agent bridge between turns, with signed releases and automatic recovery if an update fails. For an existing bridge from an older CLI, do the first upgrade and `inline bridge restart` while your agents are idle. Later managed updates wait for work to finish.
 - The CLI has an **alpha channel**. Run `inline update --channel alpha` to try new agent features early. Agent plugins install from the same channel as the CLI.
 - Bots that send too fast now get a Telegram-style **flood wait** instead of a server error. The [Bot API](/docs/bot-api) answers `429` with `retry_after`, so your bot knows exactly how long to wait.
 
 ### Fixes
 
+- Codex and Claude ignore thread-link notices and other service messages instead of treating them as prompts.
 - Fixed short delays catching up on messages after a brief disconnect.
 - Fixed reactions picked from the message menu on iOS landing in the wrong place.
 - Fixed a crash when drawing blurred headers on some iPhones.
