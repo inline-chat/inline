@@ -10,6 +10,7 @@ struct EmptyRouteView: View {
   @Environment(\.nav) private var nav
   @Environment(SidebarViewModel.self) private var sidebar
   @ObservedObject private var auth = Auth.shared
+  @ObservedObject private var appSettings = AppSettings.shared
 
   var body: some View {
     @Bindable var nav = nav
@@ -36,7 +37,10 @@ struct EmptyRouteView: View {
           selectedSpaceID: nav.selectedSpaceId,
           placement: .bottom,
           focusRequested: $nav.newThreadComposeFocusRequested,
-          fillsAvailableDropSurface: true
+          fillsAvailableDropSurface: true,
+          maximumComposeWidth: appSettings.centeredChats
+            ? ChatLayoutMetrics.maximumWidth - 2 * GlassComposeLayout.sideControls.viewportHorizontalInset
+            : nil
         )
         .padding(.horizontal, 12)
         .padding(.bottom, 12)

@@ -1188,6 +1188,7 @@ private final class NewThreadGlassComposeHostView: ChatDropView {
   private var focusRequested: Binding<Bool> = .constant(false)
   private let fillsAvailableDropSurface: Bool
   private var composeHeightConstraint: NSLayoutConstraint?
+  private var composeMaximumWidthConstraint: NSLayoutConstraint?
 
   init(
     model: AllChatsNewThreadComposeModel,
@@ -1225,14 +1226,20 @@ private final class NewThreadGlassComposeHostView: ChatDropView {
     translatesAutoresizingMaskIntoConstraints = false
     compose.translatesAutoresizingMaskIntoConstraints = false
     addSubview(compose)
-    var constraints = [
-      compose.leadingAnchor.constraint(equalTo: leadingAnchor),
-      compose.trailingAnchor.constraint(equalTo: trailingAnchor),
-    ]
+    var constraints: [NSLayoutConstraint] = []
     if fillsAvailableDropSurface {
+      // The drop surface stays full-width while Compose can follow the chat column.
+      let fillWidthConstraint = compose.widthAnchor.constraint(equalTo: widthAnchor)
+      fillWidthConstraint.priority = NSLayoutConstraint.Priority(999)
+      composeMaximumWidthConstraint = compose.widthAnchor.constraint(lessThanOrEqualToConstant: 0)
       let heightConstraint = compose.heightAnchor.constraint(equalToConstant: model.composeHeight)
       composeHeightConstraint = heightConstraint
-      constraints.append(heightConstraint)
+      constraints.append(contentsOf: [
+        compose.centerXAnchor.constraint(equalTo: centerXAnchor),
+        compose.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor),
+        fillWidthConstraint,
+        heightConstraint,
+      ])
       switch placement {
         case .top:
           constraints.append(compose.topAnchor.constraint(equalTo: topAnchor))
@@ -1241,6 +1248,8 @@ private final class NewThreadGlassComposeHostView: ChatDropView {
       }
     } else {
       constraints.append(contentsOf: [
+        compose.leadingAnchor.constraint(equalTo: leadingAnchor),
+        compose.trailingAnchor.constraint(equalTo: trailingAnchor),
         compose.topAnchor.constraint(equalTo: topAnchor),
         compose.bottomAnchor.constraint(equalTo: bottomAnchor),
       ])
@@ -1260,7 +1269,8 @@ private final class NewThreadGlassComposeHostView: ChatDropView {
 
   override func hitTest(_ point: NSPoint) -> NSView? {
     guard fillsAvailableDropSurface else { return super.hitTest(point) }
-    return compose.hitTest(convert(point, to: compose))
+    // hitTest takes superview coordinates, and Compose can be inset when capped.
+    return compose.hitTest(superview.map { convert(point, from: $0) } ?? point)
   }
 
   override func viewDidMoveToWindow() {
@@ -1278,6 +1288,14 @@ private final class NewThreadGlassComposeHostView: ChatDropView {
           composeHeightConstraint.constant != height
     else { return }
     composeHeightConstraint.constant = height
+  }
+
+  func updateComposeMaximumWidth(_ width: CGFloat?) {
+    guard let composeMaximumWidthConstraint else { return }
+    if let width {
+      composeMaximumWidthConstraint.constant = width
+    }
+    composeMaximumWidthConstraint.isActive = width != nil
   }
 
   private func scheduleRequestedFocus() {
@@ -1341,6 +1359,7 @@ private struct NewThreadGlassComposeRepresentable: NSViewRepresentable {
   @Binding var focusRequested: Bool
   let placement: AllChatsNewThreadComposePlacement
   let fillsAvailableDropSurface: Bool
+  let maximumComposeWidth: CGFloat?
 
   func makeNSView(context: Context) -> NewThreadGlassComposeHostView {
     NewThreadGlassComposeHostView(
@@ -1353,6 +1372,7 @@ private struct NewThreadGlassComposeRepresentable: NSViewRepresentable {
   func updateNSView(_ nsView: NewThreadGlassComposeHostView, context: Context) {
     nsView.updateFocusRequest($focusRequested)
     nsView.updateComposeHeight(model.composeHeight)
+    nsView.updateComposeMaximumWidth(maximumComposeWidth)
   }
 }
 
@@ -1365,6 +1385,7 @@ struct AllChatsNewThreadComposeHost: View {
   let selectedSpaceID: Int64?
   let placement: AllChatsNewThreadComposePlacement
   let fillsAvailableDropSurface: Bool
+  let maximumComposeWidth: CGFloat?
 
   init(
     dependencies: AppDependencies,
@@ -1372,12 +1393,14 @@ struct AllChatsNewThreadComposeHost: View {
     selectedSpaceID: Int64?,
     placement: AllChatsNewThreadComposePlacement,
     focusRequested: Binding<Bool> = .constant(false),
-    fillsAvailableDropSurface: Bool = false
+    fillsAvailableDropSurface: Bool = false,
+    maximumComposeWidth: CGFloat? = nil
   ) {
     self.spaces = spaces
     self.selectedSpaceID = selectedSpaceID
     self.placement = placement
     self.fillsAvailableDropSurface = fillsAvailableDropSurface
+    self.maximumComposeWidth = maximumComposeWidth
     _focusRequested = focusRequested
     _model = StateObject(wrappedValue: AllChatsNewThreadComposeModel(
       dependencies: dependencies,
@@ -1407,7 +1430,8 @@ struct AllChatsNewThreadComposeHost: View {
       model: model,
       focusRequested: $focusRequested,
       placement: placement,
-      fillsAvailableDropSurface: fillsAvailableDropSurface
+      fillsAvailableDropSurface: fillsAvailableDropSurface,
+      maximumComposeWidth: maximumComposeWidth
     )
 
     if fillsAvailableDropSurface {
