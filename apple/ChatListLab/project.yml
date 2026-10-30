@@ -1,0 +1,93 @@
+name: ChatListPackageLab
+options:
+  bundleIdPrefix: research.inline
+  deploymentTarget:
+    macOS: "15.0"
+    iOS: "18.0"
+packages:
+  ChatList:
+    path: ../ChatList
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: 2487AN8AL4
+targets:
+  ChatListMacLab:
+    type: application
+    platform: macOS
+    sources: [Shared, Mac]
+    dependencies:
+      - package: ChatList
+        product: ChatListCore
+      - package: ChatList
+        product: ChatListAppKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: research.inline.ChatListLifecycleMacLab
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ChatList Mac Lab
+        INFOPLIST_KEY_NSPrincipalClass: NSApplication
+        INFOPLIST_KEY_NSHighResolutionCapable: YES
+  ChatListPhoneLab:
+    type: application
+    platform: iOS
+    sources: [Shared, Phone]
+    dependencies:
+      - package: ChatList
+        product: ChatListCore
+      - package: ChatList
+        product: ChatListUIKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: research.inline.ChatListLifecyclePhoneLab
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ChatList Phone Lab
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        TARGETED_DEVICE_FAMILY: "1,2"
+  ChatListHostTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - HostTests
+      - ../ChatList/Tests/ChatListUIKitTests
+      - ../ChatList/Tests/ChatListCoreTests/ChatListPublicationTests.swift
+    dependencies:
+      - target: ChatListPhoneLab
+      - package: ChatList
+        product: ChatListCore
+      - package: ChatList
+        product: ChatListUIKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: research.inline.ChatListLifecyclePhoneLab.HostTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ChatListPhoneLab.app/ChatListPhoneLab"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+  ChatListPhoneLabUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: ChatListPhoneLab
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: research.inline.ChatListLifecyclePhoneLab.UITests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: ChatListPhoneLab
+schemes:
+  ChatListMacLab:
+    build:
+      targets:
+        ChatListMacLab: all
+  ChatListPhoneLab:
+    build:
+      targets:
+        ChatListPhoneLab: all
+        ChatListPhoneLabUITests: [test]
+        ChatListHostTests: [test]
+    test:
+      targets: [ChatListPhoneLabUITests, ChatListHostTests]
