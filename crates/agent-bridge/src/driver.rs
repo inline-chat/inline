@@ -1521,6 +1521,12 @@ impl std::fmt::Debug for StartedTurn {
 /// caller must not infer support from the presence of a trait method. Default
 /// optional methods fail closed with [`DriverError::Unsupported`].
 pub trait AgentDriver: Send + Sync {
+    /// Optional migration advice for an existing, still-working installation.
+    /// This is informational and must not block turns or change user settings.
+    fn migration_guidance(&self) -> Option<&str> {
+        None
+    }
+
     /// Returns the driver's current, conservative capability declaration.
     fn capabilities(&self) -> DriverCapabilities;
 

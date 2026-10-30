@@ -35,12 +35,14 @@ async fn initializes_v1_maps_capabilities_and_shuts_down_cleanly() {
                 .lock()
                 .expect("initialize capture poisoned") = Some(request.clone());
             responder.respond(
-                acp::InitializeResponse::new(request.protocol_version).agent_capabilities(
-                    acp::AgentCapabilities::new().session_capabilities(
-                        acp::SessionCapabilities::new()
-                            .resume(acp::SessionResumeCapabilities::new()),
+                acp::InitializeResponse::new(request.protocol_version)
+                    .agent_info(acp::Implementation::new("opencode", "2.0.32"))
+                    .agent_capabilities(
+                        acp::AgentCapabilities::new().session_capabilities(
+                            acp::SessionCapabilities::new()
+                                .resume(acp::SessionResumeCapabilities::new()),
+                        ),
                     ),
-                ),
             )
         },
         agent_client_protocol::on_receive_request!(),
@@ -50,6 +52,7 @@ async fn initializes_v1_maps_capabilities_and_shuts_down_cleanly() {
         .await
         .expect("connect in-process ACP agent");
     let capabilities = driver.capabilities();
+    assert_eq!(driver.agent_version(), Some("2.0.32"));
     assert!(capabilities.resume_session);
     assert!(capabilities.cancel_turn);
     assert!(!capabilities.compact_session);

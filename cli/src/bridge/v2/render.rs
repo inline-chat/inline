@@ -33,6 +33,8 @@ use super::limits;
 pub(crate) enum Vocabulary {
     Codex,
     Claude,
+    OpenCode,
+    Amp,
 }
 
 /// One message operation for the runtime.
@@ -747,7 +749,7 @@ impl Renderer {
         let failed = run.iter().filter(|row| explore_failed(row)).count();
         let folder = self.folder.as_deref();
         let (title, lines) = match self.vocabulary {
-            Vocabulary::Codex => (
+            Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp => (
                 if running { "Exploring" } else { "Explored" }.to_owned(),
                 codex_explore_lines(run, folder),
             ),
@@ -1213,12 +1215,12 @@ fn row_title(
                     .iter()
                     .all(|action| !matches!(action, CommandAction::Unknown { .. }));
             match vocabulary {
-                Vocabulary::Codex if exploring => (
+                Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp if exploring => (
                     "Explored".to_owned(),
                     Some(explore_meta(actions)),
                     ActivityKind::Explore,
                 ),
-                Vocabulary::Codex => (
+                Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp => (
                     format!("Ran {}", first_line(command, 80)),
                     meta,
                     ActivityKind::Command,
@@ -1234,9 +1236,15 @@ fn row_title(
             let title = match changes.as_slice() {
                 [only] => {
                     let verb = match (vocabulary, &only.change) {
-                        (Vocabulary::Codex, FileChangeKind::Add) => "Added",
-                        (Vocabulary::Codex, FileChangeKind::Delete) => "Deleted",
-                        (Vocabulary::Codex, _) => "Edited",
+                        (
+                            Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp,
+                            FileChangeKind::Add,
+                        ) => "Added",
+                        (
+                            Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp,
+                            FileChangeKind::Delete,
+                        ) => "Deleted",
+                        (Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp, _) => "Edited",
                         (Vocabulary::Claude, FileChangeKind::Add) => "Write",
                         (Vocabulary::Claude, _) => "Edit",
                     };
@@ -1281,7 +1289,9 @@ fn row_title(
                 .find_map(|key| input.get(*key).and_then(Value::as_str))
                 .map(|argument| first_line(&relative(argument, folder), 60));
             let title = match (vocabulary, server) {
-                (Vocabulary::Codex, Some(server)) => format!("Called {server}.{name}"),
+                (Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp, Some(server)) => {
+                    format!("Called {server}.{name}")
+                }
                 _ => match argument {
                     Some(argument) => format!("{name} {argument}"),
                     None => name.clone(),
@@ -1297,7 +1307,7 @@ fn row_title(
         }
         ItemBody::Plan { .. } => (
             match vocabulary {
-                Vocabulary::Codex => "Updated Plan",
+                Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp => "Updated Plan",
                 Vocabulary::Claude => "Update Todos",
             }
             .to_owned(),
@@ -1306,7 +1316,7 @@ fn row_title(
         ),
         ItemBody::Child { action, prompt, .. } => {
             let label = match vocabulary {
-                Vocabulary::Codex => "Sub-agent",
+                Vocabulary::Codex | Vocabulary::OpenCode | Vocabulary::Amp => "Sub-agent",
                 Vocabulary::Claude => "Task",
             };
             let title = match prompt {

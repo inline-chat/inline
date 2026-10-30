@@ -8,25 +8,33 @@ use super::catalog::{AgentTarget, TARGETS, TargetDescriptor};
 pub(crate) struct InstalledTarget {
     pub(crate) descriptor: &'static TargetDescriptor,
     pub(crate) executable: PathBuf,
+    pub(crate) opencode_installations: Vec<super::opencode::OpenCodeInstallation>,
 }
 
 pub(crate) fn installed_targets() -> Vec<InstalledTarget> {
     TARGETS
         .iter()
-        .filter_map(|descriptor| {
-            find_target_executable(descriptor).map(|executable| InstalledTarget {
-                descriptor,
-                executable,
-            })
-        })
+        .filter_map(|descriptor| installed_target(descriptor.target))
         .collect()
 }
 
 pub(crate) fn installed_target(target: AgentTarget) -> Option<InstalledTarget> {
     let descriptor = target.descriptor();
+    if target == AgentTarget::Opencode {
+        let opencode_installations = super::opencode::installations();
+        let executable = super::opencode::selected(&opencode_installations)?
+            .executable
+            .clone();
+        return Some(InstalledTarget {
+            descriptor,
+            executable,
+            opencode_installations,
+        });
+    }
     find_target_executable(descriptor).map(|executable| InstalledTarget {
         descriptor,
         executable,
+        opencode_installations: Vec::new(),
     })
 }
 
@@ -182,7 +190,7 @@ fn append_version_bins(directories: &mut Vec<PathBuf>, root: &Path, suffix: &str
 }
 
 #[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
+pub(super) fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
 
     path.metadata()
@@ -190,12 +198,12 @@ fn is_executable(path: &Path) -> bool {
 }
 
 #[cfg(windows)]
-fn is_executable(path: &Path) -> bool {
+pub(super) fn is_executable(path: &Path) -> bool {
     path.is_file() || path.with_extension("exe").is_file()
 }
 
 #[cfg(not(any(unix, windows)))]
-fn is_executable(path: &Path) -> bool {
+pub(super) fn is_executable(path: &Path) -> bool {
     path.is_file()
 }
 

@@ -970,7 +970,16 @@ pub(super) async fn doctor(
     {
         Ok(probe) => Check {
             ok: true,
-            detail: if let Some(runtime) = probe.provider_runtime {
+            detail: if probe.provider_id == "opencode"
+                && inline_agent_driver_acp::parse_opencode_version(&probe.version)
+                    .is_some_and(|v| v.major == 1)
+            {
+                format!(
+                    "{} — {}",
+                    probe.version,
+                    inline_agent_driver_acp::OPENCODE_V1_GUIDANCE
+                )
+            } else if let Some(runtime) = probe.provider_runtime {
                 format!(
                     "{} via {} ({}) — {}",
                     probe.executable.display(),

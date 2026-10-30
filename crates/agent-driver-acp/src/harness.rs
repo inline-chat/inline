@@ -97,6 +97,7 @@ pub struct AcpHarness {
     provider: ProviderId,
     executable: ExecutableInfo,
     driver_version: String,
+    process_status: Option<crate::AcpProcessStatus>,
 }
 
 impl AcpHarness {
@@ -111,6 +112,47 @@ impl AcpHarness {
             provider,
             executable,
             driver_version: driver_version.into(),
+            process_status: None,
+        }
+    }
+
+    /// Owns a launched ACP epoch, including on partial runtime startup failure.
+    pub fn from_spawned(
+        spawned: crate::SpawnedAcpDriver,
+        provider: ProviderId,
+        executable: ExecutableInfo,
+        driver_version: impl Into<String>,
+    ) -> Self {
+        Self {
+            driver: Arc::new(spawned.driver),
+            provider,
+            executable,
+            driver_version: driver_version.into(),
+            process_status: Some(spawned.process_status),
+        }
+    }
+
+    pub fn process_status(&self) -> Option<crate::AcpProcessStatus> {
+        self.process_status.clone()
+    }
+
+    pub async fn shutdown(&self) -> Result<(), DriverError> {
+        self.driver.shutdown().await
+    }
+}
+
+impl Drop for AcpHarness {
+    fn drop(&mut self) {
+        if self
+            .process_status
+            .as_ref()
+            .is_some_and(|status| !status.is_finished())
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let driver = self.driver.clone();
+            runtime.spawn(async move {
+                let _ = driver.shutdown().await;
+            });
         }
     }
 }
@@ -145,13 +187,21 @@ impl HarnessDriver for AcpHarness {
             }
             let folder = scope.folder.unwrap_or_else(|| PathBuf::from("/"));
             let settings = self.driver.settings_catalog(&folder).await?;
-            let commands = match &scope.session {
-                Some(session) if self.driver.capabilities().session_commands => self
-                    .driver
-                    .session_commands(session)
+            let commands = if self.driver.capabilities().session_commands {
+                let session = match scope.session {
+                    Some(session) => session,
+                    None => {
+                        self.driver
+                            .start_session(SessionSpec { cwd: folder })
+                            .await?
+                    }
+                };
+                self.driver
+                    .session_commands(&session)
                     .await
-                    .unwrap_or_default(),
-                _ => Vec::new(),
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
             };
             Ok(Catalog {
                 models: settings.models,
@@ -222,16 +272,8 @@ impl HarnessDriver for AcpHarness {
                 session,
                 driver: self.driver.clone(),
                 instructions: spec.instructions.clone(),
+                mutation: tokio::sync::Mutex::new(()),
             });
-            inner.emit(Event::Notice(Notice {
-                level: NoticeLevel::Warning,
-                code: "reduced_mode".into(),
-                message: Some(format!(
-                    "{} runs through ACP in reduced mode",
-                    self.provider
-                )),
-                native: Value::Null,
-            }));
             Ok(Arc::new(AcpSession { inner }) as Arc<dyn Session>)
         })
     }
@@ -247,6 +289,7 @@ struct AcpState {
     answered: HashSet<String>,
     activities: HashSet<String>,
     first_turn_sent: bool,
+    released: bool,
 }
 
 struct AcpSessionInner {
@@ -257,6 +300,7 @@ struct AcpSessionInner {
     tracker: Mutex<RunStateTracker>,
     state: Mutex<AcpState>,
     instructions: Option<String>,
+    mutation: tokio::sync::Mutex<()>,
 }
 
 impl AcpSessionInner {
@@ -323,6 +367,10 @@ impl Session for AcpSession {
 
     fn send<'a>(&'a self, input: Input) -> HarnessFuture<'a, InputReceipt, SendError> {
         Box::pin(async move {
+            let _mutation = self.inner.mutation.lock().await;
+            if self.inner.state().released {
+                return Err(SendError::Rejected("session was released".into()));
+            }
             let availability = self.availability().delivery(input.delivery.kind());
             if !availability.is_supported() {
                 return Err(SendError::Unavailable(availability));
@@ -332,9 +380,8 @@ impl Session for AcpSession {
                 (Delivery::Turn, Some(active)) => Err(SendError::Busy { active }),
                 (Delivery::Turn, None) => {
                     let (options, first) = {
-                        let mut state = self.inner.state();
+                        let state = self.inner.state();
                         let first = !state.first_turn_sent;
-                        state.first_turn_sent = true;
                         (state.options.clone(), first)
                     };
                     let turn_input = turn_input(&input, self.inner.instructions.as_deref(), first);
@@ -347,6 +394,7 @@ impl Session for AcpSession {
                     let turn = started.turn_id.clone();
                     {
                         let mut state = self.inner.state();
+                        state.first_turn_sent = true;
                         state.turn = Some(turn.clone());
                         state.turn_inputs = vec![input.id.clone()];
                     }
@@ -356,27 +404,7 @@ impl Session for AcpSession {
                             inputs: vec![input.id.clone()],
                         },
                     });
-                    let inner = self.inner.clone();
-                    tokio::spawn(async move {
-                        let mut events = started.events;
-                        while let Some(event) = events.next().await {
-                            pump(&inner, event);
-                        }
-                        // The stream ended without a terminal event.
-                        let open = inner.state().turn.take();
-                        if let Some(turn) = open {
-                            let inputs = std::mem::take(&mut inner.state().turn_inputs);
-                            inner.emit(Event::Turn {
-                                turn,
-                                phase: TurnPhase::Completed {
-                                    outcome: TurnOutcome::ConnectionLost,
-                                    inputs_consumed: inputs,
-                                    error: None,
-                                    duration_ms: None,
-                                },
-                            });
-                        }
-                    });
+                    pump_stream(self.inner.clone(), turn.clone(), started.events);
                     Ok(InputReceipt {
                         input: input.id,
                         disposition: InputDisposition::Started { turn },
@@ -418,6 +446,10 @@ impl Session for AcpSession {
 
     fn control<'a>(&'a self, op: Op) -> HarnessFuture<'a, OpOutcome, OpError> {
         Box::pin(async move {
+            let _mutation = self.inner.mutation.lock().await;
+            if self.inner.state().released {
+                return Err(OpError::Rejected("session was released".into()));
+            }
             let availability = self.availability().op(op.kind());
             if !availability.is_supported() {
                 return Err(OpError::Unavailable(availability));
@@ -441,9 +473,13 @@ impl Session for AcpSession {
                         .cancel_turn(&self.inner.session, &turn)
                         .await
                         .map_err(OpError::Driver)?;
+                    complete_if_active(&self.inner, turn, TurnOutcome::Interrupted);
                     Ok(OpOutcome::accepted())
                 }
                 Op::Compact => {
+                    if self.inner.state().turn.is_some() {
+                        return Err(OpError::Rejected("a turn is already running".into()));
+                    }
                     let started = self
                         .inner
                         .driver
@@ -456,13 +492,7 @@ impl Session for AcpSession {
                         turn: turn.clone(),
                         phase: TurnPhase::Started { inputs: Vec::new() },
                     });
-                    let inner = self.inner.clone();
-                    tokio::spawn(async move {
-                        let mut events = started.events;
-                        while let Some(event) = events.next().await {
-                            pump(&inner, event);
-                        }
-                    });
+                    pump_stream(self.inner.clone(), turn.clone(), started.events);
                     Ok(OpOutcome::TurnStarted { turn })
                 }
                 Op::Settings { change, scope } => {
@@ -473,6 +503,13 @@ impl Session for AcpSession {
                         return Err(OpError::Unavailable(Availability::unavailable(
                             "only model, reasoning and permissions change here (reduced mode: ACP)",
                         )));
+                    }
+                    if let Some(mode) = change.permission_mode.as_deref() {
+                        self.inner
+                            .driver
+                            .set_session_permissions(&self.inner.session, mode)
+                            .await
+                            .map_err(OpError::Driver)?;
                     }
                     let mut state = self.inner.state();
                     if change.model.is_some() {
@@ -512,17 +549,18 @@ impl Session for AcpSession {
 
     fn release<'a>(&'a self) -> HarnessFuture<'a, Released, OpError> {
         Box::pin(async move {
+            let _mutation = self.inner.mutation.lock().await;
             let cancelled = self.live_work().interactions;
             let turn = self.inner.state().turn.clone();
             if let Some(turn) = turn {
-                let _ = self
-                    .inner
+                self.inner
                     .driver
                     .cancel_turn(&self.inner.session, &turn)
-                    .await;
+                    .await
+                    .map_err(OpError::Driver)?;
+                complete_if_active(&self.inner, turn, TurnOutcome::Interrupted);
             }
-            // The ACP agent process keeps the session loaded; nothing here
-            // proves native ownership was given up.
+            self.inner.state().released = true;
             Ok(Released {
                 key: self.inner.key.clone(),
                 outcome: ReleaseOutcome::Unsubscribed,
@@ -676,6 +714,40 @@ fn decision(index: usize, option: &ApprovalOption) -> Option<Decision> {
 
 fn item_id(id: &str) -> ItemId {
     ItemId::new(id).unwrap_or_else(|_| ItemId::new(uuid::Uuid::new_v4().to_string()).expect("uuid"))
+}
+
+fn complete_if_active(inner: &AcpSessionInner, turn: TurnId, outcome: TurnOutcome) {
+    pump(
+        inner,
+        Ok(AgentEvent::TurnCompleted {
+            turn_id: turn,
+            outcome,
+            error: None,
+            timing: Default::default(),
+        }),
+    );
+}
+
+fn pump_stream(
+    inner: Arc<AcpSessionInner>,
+    turn: TurnId,
+    mut events: inline_agent_bridge::AgentEventReceiver,
+) {
+    tokio::spawn(async move {
+        while let Some(event) = events.next().await {
+            // A cancellation barrier may already have ended this turn. Never
+            // let its late output or stream closure touch the next turn.
+            if inner.state().turn.as_ref() != Some(&turn) {
+                break;
+            }
+            let terminal = matches!(&event, Ok(AgentEvent::TurnCompleted { .. }));
+            pump(&inner, event);
+            if terminal {
+                break;
+            }
+        }
+        complete_if_active(&inner, turn, TurnOutcome::ConnectionLost);
+    });
 }
 
 fn pump(inner: &AcpSessionInner, event: inline_agent_bridge::DriverResult<AgentEvent>) {
@@ -1029,9 +1101,10 @@ fn map_event(inner: &AcpSessionInner, event: AgentEvent, native: Value) -> Vec<E
             timing,
         } => {
             let mut state = inner.state();
-            if state.turn.as_ref() == Some(&turn_id) {
-                state.turn = None;
+            if state.turn.as_ref() != Some(&turn_id) {
+                return Vec::new();
             }
+            state.turn = None;
             let questions: Vec<String> = state.questions.keys().cloned().collect();
             let approvals: Vec<String> = state.approvals.keys().cloned().collect();
             state.questions.clear();

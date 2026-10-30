@@ -2,6 +2,7 @@
 
 // src/index.ts
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import path2 from "node:path";
 import os from "node:os";
 import readline from "node:readline";
@@ -460,7 +461,7 @@ var package_default = {
 };
 
 // src/server.ts
-var PACKAGE_VERSION = package_default.version;
+var PACKAGE_VERSION = "0.8.1+e4ccce1.inline2";
 var CONFIG_PERMISSION = "permission";
 var CONFIG_AMP_MODE = "amp-mode";
 var PERMISSION_MODES = ["default", "bypass"];
@@ -530,6 +531,44 @@ function buildSessionConfigOptions(s) {
   ];
 }
 
+// Inline-owned continuity patch. Persist identity/settings only, never prompts,
+// credentials, or MCP capabilities. A resumed process receives fresh MCP bindings.
+function sessionFile(sessionId) {
+  if (!/^inline-amp-[0-9a-f-]{36}$/.test(sessionId)) throw new Error("Unknown Amp session; start a new conversation");
+  const root = process.env.AMP_ACP_SESSION_DIR;
+  if (!root || !path.isAbsolute(root)) throw new Error("Amp session storage is unavailable");
+  fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+  return path.join(root, sessionId + ".json");
+}
+function saveSession(sessionId, s) {
+  if (!process.env.AMP_ACP_SESSION_DIR) return;
+  const file = sessionFile(sessionId);
+  const temporary = file + "." + randomUUID() + ".tmp";
+  try {
+    fs.writeFileSync(temporary, JSON.stringify({ version: 1, cwd: s.cwd, threadId: s.threadId, mode: s.mode, model: s.model }), { mode: 0o600, flag: "wx", flush: true });
+    fs.renameSync(temporary, file);
+  } finally {
+    try { fs.unlinkSync(temporary); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
+}
+function restoreSession(params) {
+  const file = sessionFile(params.sessionId);
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  let saved;
+  try {
+    if (fs.fstatSync(fd).size > 16384) throw new Error("Invalid Amp session record");
+    saved = JSON.parse(fs.readFileSync(fd, "utf8"));
+  } finally { fs.closeSync(fd); }
+  const cwd = fs.realpathSync(params.cwd);
+  if (saved.version !== 1 || saved.cwd !== cwd ||
+      !(saved.threadId === null || (typeof saved.threadId === "string" && /^T-[0-9a-f-]{36}$/i.test(saved.threadId))) ||
+      !isPermissionMode(saved.mode) || !isAmpModelId(saved.model)) {
+    throw new Error("Amp session cannot be resumed in this project");
+  }
+  return { ...saved, controller: null, cancelled: false, active: false,
+    mcpConfig: convertAcpMcpServersToAmpConfig(params.mcpServers) };
+}
+
 class AmpAcpAgent {
   client;
   transport;
@@ -550,7 +589,8 @@ class AmpAcpAgent {
         version: PACKAGE_VERSION
       },
       agentCapabilities: {
-        promptCapabilities: { image: true, embeddedContext: true },
+        loadSession: !!process.env.AMP_ACP_SESSION_DIR,
+        promptCapabilities: { image: false, embeddedContext: true },
         mcpCapabilities: { http: true, sse: true }
       },
       authMethods: [
@@ -570,7 +610,7 @@ class AmpAcpAgent {
     };
   }
   async newSession(params) {
-    const sessionId = `S-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const sessionId = `inline-amp-${randomUUID()}`;
     const mcpConfig = convertAcpMcpServersToAmpConfig(params.mcpServers);
     const session = {
       threadId: null,
@@ -580,8 +620,9 @@ class AmpAcpAgent {
       mode: "default",
       model: "medium",
       mcpConfig,
-      cwd: params.cwd || process.cwd()
+      cwd: fs.realpathSync(params.cwd || process.cwd())
     };
+    saveSession(sessionId, session);
     this.sessions.set(sessionId, session);
     const result = {
       sessionId,
@@ -607,6 +648,12 @@ class AmpAcpAgent {
     });
     return result;
   }
+  async loadSession(params) {
+    if (this.sessions.get(params.sessionId)?.active) throw new Error("Amp session is busy");
+    const session = restoreSession(params);
+    this.sessions.set(params.sessionId, session);
+    return { configOptions: buildSessionConfigOptions(session) };
+  }
   async authenticate(_params) {
     if (process.env.AMP_API_KEY) {
       return {};
@@ -617,6 +664,7 @@ class AmpAcpAgent {
     const s = this.sessions.get(params.sessionId);
     if (!s)
       throw new Error("Session not found");
+    if (s.active) throw new Error("Amp session is busy");
     s.cancelled = false;
     s.active = true;
     let textInput = "";
@@ -669,16 +717,16 @@ ${chunk.resource.text}
     }
     if (s.threadId) {
       options.continue = s.threadId;
-    } else if (process.env.AMP_ACP_CONTINUE_LATEST) {
-      options.continue = true;
-      console.error("[acp] AMP_ACP_CONTINUE_LATEST set; continuing latest thread on this installation");
+
     }
     const controller = new AbortController;
     s.controller = controller;
     try {
       for await (const message of this.transport.execute({ prompt: textInput, options, signal: controller.signal })) {
         if (!s.threadId && message.session_id) {
+          if (!/^T-[0-9a-f-]{36}$/i.test(message.session_id)) throw new Error("Invalid native Amp thread identity");
           s.threadId = message.session_id;
+          saveSession(params.sessionId, s);
           console.error(`[amp] thread ${s.threadId}`);
         }
         if (message.type === "assistant" || message.type === "user") {
@@ -750,6 +798,7 @@ ${chunk.resource.text}
       default:
         throw new Error(`Unsupported config option: ${params.configId}`);
     }
+    saveSession(params.sessionId, s);
     const configOptions = buildSessionConfigOptions(s);
     try {
       await this.client.sessionUpdate({
@@ -772,6 +821,7 @@ ${chunk.resource.text}
       throw new Error(`Unsupported mode: ${params.modeId}`);
     }
     s.mode = params.modeId;
+    saveSession(params.sessionId, s);
     return {};
   }
   async readTextFile(params) {

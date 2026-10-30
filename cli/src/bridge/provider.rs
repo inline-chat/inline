@@ -176,6 +176,18 @@ pub(super) fn preflight_claude_setup(allow_install: bool) -> Result<(), String> 
 /// Verifies the exact executable setup will persist, its version surface, and
 /// the provider-owned login state without reading provider credential files.
 pub(super) fn probe_provider(provider_id: &str) -> Result<ProviderProbe, String> {
+    if provider_id == "opencode" {
+        let installations = crate::agents::opencode::installations();
+        let selected = crate::agents::opencode::selected(&installations).ok_or_else(|| {
+            "OpenCode v2 is not installed; install it from https://opencode.ai/v2/docs, then rerun `inline setup opencode`".to_string()
+        })?;
+        // Discovery and setup agree on the exact executable, including older
+        // opencode2 installs and GUI/service environments with a reduced PATH.
+        inline_agent_driver_acp::require_opencode_v2(
+            selected.version.as_deref().unwrap_or_default(),
+        )?;
+        return probe_configured_provider(provider_id, &selected.executable);
+    }
     let (display_name, executable, aliases) = if provider_id == "codex" {
         ("Codex", "codex", &[][..])
     } else {
@@ -352,11 +364,10 @@ fn probe_configured_provider_with_runtime(
             }
         },
     };
-    if provider_id == "opencode" && !looks_like_version(&version) {
-        return Err(format!(
-            "the executable at {} returned an unrecognized OpenCode version",
-            executable.display()
-        ));
+    if provider_id == "opencode" {
+        // This probe also serves existing accounts and doctor. New setup is
+        // gated separately in probe_provider before reaching authentication.
+        inline_agent_driver_acp::require_supported_opencode_version(&version)?;
     }
     let mut provider_runtime = None;
     if provider_id == "opencode" {
@@ -919,12 +930,20 @@ fn terminate_probe_process(child: &mut std::process::Child, process_id: u32) {
     }
 }
 
-fn looks_like_version(value: &str) -> bool {
-    value.trim().split('.').take(3).count() >= 2
-        && value
-            .trim()
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b' '))
+/// Bounded, credential-scrubbed inventory probe; never runs login or a model.
+pub(crate) fn opencode_version(executable: &std::path::Path) -> Option<String> {
+    let output = probe_command_output_with_timeout(
+        "opencode",
+        executable,
+        &["--version"],
+        "OpenCode version",
+        Duration::from_secs(2),
+    )
+    .ok()?;
+    output
+        .success
+        .then(|| inline_agent_driver_acp::parse_opencode_version(&output.stdout))?
+        .map(|version| version.to_string())
 }
 
 fn has_opencode_model(value: &str) -> bool {
@@ -999,8 +1018,9 @@ impl ProviderLaunch {
                 let executable = (!installation.executable.as_os_str().is_empty())
                     .then(|| installation.executable.clone());
                 let mut descriptor = support.launch_descriptor(executable);
-                if provider_id == "claude" {
-                    if !super::v2_enabled_for(provider_id)
+                if matches!(provider_id, "claude" | "amp") {
+                    if provider_id == "claude"
+                        && !super::v2_enabled_for(provider_id)
                         && is_native_claude_path(&installation.executable)
                     {
                         return Err(
@@ -1020,7 +1040,7 @@ impl ProviderLaunch {
                             ) =>
                         {
                             return Err(format!(
-                                "the configured Claude adapter failed current-pin verification: {error}; rerun setup"
+                                "the configured {provider_id} adapter failed current-pin verification: {error}; rerun setup"
                             ));
                         }
                         Err(_) => {
@@ -1091,7 +1111,19 @@ impl ProviderLaunch {
                 })
             }
             Self::Acp(descriptor) => {
-                let spawned = spawn_acp_driver(descriptor.clone(), bridge_version).await?;
+                let spawned = spawn_acp_driver(descriptor.clone(), bridge_version)
+                    .await
+                    .map_err(|error| -> Box<dyn std::error::Error> {
+                        match error {
+                            inline_agent_driver_acp::AcpLaunchError::UnsupportedOpenCodeVersion(
+                                message,
+                            ) => Box::new(crate::errors::BridgeSetupRequired::new(
+                                "opencode_version_unsupported",
+                                message,
+                            )),
+                            other => Box::new(other),
+                        }
+                    })?;
                 Ok(SpawnedProvider {
                     driver: ProviderDriver::Acp(Box::new(spawned.driver)),
                     process_status: ProviderProcessStatus::Acp(spawned.process_status),
@@ -1151,6 +1183,13 @@ pub(super) enum ProviderDriver {
 }
 
 impl AgentDriver for ProviderDriver {
+    fn migration_guidance(&self) -> Option<&str> {
+        match self {
+            Self::Codex(driver) => driver.migration_guidance(),
+            Self::Acp(driver) => driver.migration_guidance(),
+        }
+    }
+
     fn capabilities(&self) -> DriverCapabilities {
         match self {
             Self::Codex(driver) => driver.capabilities(),
@@ -1313,6 +1352,81 @@ mod tests {
     use super::*;
     use inline_agent_driver_codex::CodexPeer;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn amp_v2_requires_verified_current_pin_and_preserves_old_installs() {
+        use std::os::unix::fs::PermissionsExt;
+        let old = installation(
+            "amp",
+            "/bridge/adapters/amp/0.8.1+e4ccce1.inline1/dist/index.js",
+        );
+        assert!(!super::super::installation_uses_v2(&old).await.unwrap());
+        let AcpDistribution::EmbeddedAdapter(pin) = provider_support("amp").unwrap().distribution
+        else {
+            unreachable!()
+        };
+        let root = tempfile::tempdir().unwrap();
+        let install = root.path().join("adapters/amp").join(pin.version);
+        std::fs::create_dir_all(install.join("dist")).unwrap();
+        for (file, bytes) in [
+            (
+                "package.json",
+                include_bytes!("adapter_locks/amp/package.json").as_slice(),
+            ),
+            (
+                "package-lock.json",
+                include_bytes!("adapter_locks/amp/package-lock.json").as_slice(),
+            ),
+            (
+                "LICENSE",
+                include_bytes!("adapter_locks/amp/LICENSE").as_slice(),
+            ),
+            (
+                "dist/index.js",
+                include_bytes!("adapter_locks/amp/dist/index.js").as_slice(),
+            ),
+        ] {
+            std::fs::write(install.join(file), bytes).unwrap();
+        }
+        let executable = install.join("dist/index.js");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let current = installation("amp", executable.to_str().unwrap());
+        assert_eq!(
+            super::super::installation_uses_v2(&current).await.unwrap(),
+            super::super::v2_enabled_for("amp")
+        );
+        std::fs::write(&executable, "tampered").unwrap();
+        assert!(super::super::installation_uses_v2(&current).await.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_opencode_v1_remains_usable_even_under_the_v2_alias() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("opencode2");
+        std::fs::write(&executable, "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 1.19.4; else echo '1 credential'; fi\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(opencode_version(&executable).as_deref(), Some("1.19.4"));
+        let probe = probe_configured_provider("opencode", &executable).unwrap();
+        assert_eq!(probe.version, "1.19.4");
+        assert!(inline_agent_driver_acp::require_opencode_v2(&probe.version).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_v2_probe_accepts_prefixed_version_and_keeps_exact_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("opencode");
+        std::fs::write(&executable, "#!/bin/sh\ncase \"$1\" in\n--version) echo 'opencode v2.0.32';;\nauth) echo '0 credentials';;\nmodels) echo 'opencode/example-free';;\n*) exit 1;;\nesac\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(opencode_version(&executable).as_deref(), Some("2.0.32"));
+        let probe = probe_configured_provider("opencode", &executable).unwrap();
+        assert_eq!(probe.executable, executable);
+        assert_eq!(probe.version, "opencode v2.0.32");
+    }
 
     #[tokio::test]
     async fn codex_wrapper_preserves_provider_history_correlation() {

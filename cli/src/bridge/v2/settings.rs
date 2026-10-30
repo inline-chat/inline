@@ -137,6 +137,7 @@ pub(crate) struct DocumentFacts<'a> {
     pub folder_fixed: bool,
     /// A session is open, so it can be compacted now.
     pub can_compact: bool,
+    pub compact_supported: bool,
     /// The account's usage windows, as the harness last reported them.
     pub usage: &'a [DriverUsageWindow],
     /// This thread's context fill, once a turn reported it.
@@ -207,15 +208,17 @@ pub(crate) fn document(facts: &DocumentFacts<'_>) -> BotChatSettingsDocument {
         .map(context_item)
         .into_iter()
         .collect();
-    session.push(BotChatSettingsItem {
-        id: ITEM_COMPACT.to_owned(),
-        label: Some("Compact context".to_owned()),
-        description: Some("Summarize this thread's session to free context.".to_owned()),
-        disabled: !facts.can_compact,
-        disabled_reason: (!facts.can_compact)
-            .then(|| "Nothing is open in this thread yet.".to_owned()),
-        control: BotChatSettingsControl::Button,
-    });
+    if facts.compact_supported {
+        session.push(BotChatSettingsItem {
+            id: ITEM_COMPACT.to_owned(),
+            label: Some("Compact context".to_owned()),
+            description: Some("Summarize this thread's session to free context.".to_owned()),
+            disabled: !facts.can_compact,
+            disabled_reason: (!facts.can_compact)
+                .then(|| "Nothing is open in this thread yet.".to_owned()),
+            control: BotChatSettingsControl::Button,
+        });
+    }
     let workspace = if facts.folders.is_empty() {
         vec![BotChatSettingsItem {
             id: ITEM_FOLDER.to_owned(),
@@ -431,12 +434,13 @@ fn revision(facts: &DocumentFacts<'_>) -> String {
         .map(|model| model.value.as_str())
         .collect();
     let key = format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
         settings.model.as_deref().unwrap_or(""),
         settings.effort.as_deref().unwrap_or(""),
         settings.permission_mode.as_deref().unwrap_or(""),
         models.join(","),
         facts.can_compact,
+        facts.compact_supported,
         facts.folder_label,
         facts.folder_id.unwrap_or(""),
         facts.folder_fixed,
@@ -707,6 +711,22 @@ mod tests {
         }
     }
 
+    #[test]
+    fn unsupported_compaction_is_not_offered_even_with_an_open_session() {
+        let catalog = catalog();
+        let settings = SettingsChange::default();
+        let mut facts = facts(&catalog, &settings);
+        facts.compact_supported = false;
+        let document = document(&facts);
+        assert!(
+            !document
+                .sections
+                .iter()
+                .flat_map(|section| &section.items)
+                .any(|item| item.id == ITEM_COMPACT)
+        );
+    }
+
     fn facts<'a>(catalog: &'a Catalog, settings: &'a SettingsChange) -> DocumentFacts<'a> {
         DocumentFacts {
             catalog,
@@ -717,6 +737,7 @@ mod tests {
             folder_id: None,
             folder_fixed: false,
             can_compact: true,
+            compact_supported: true,
             usage: &[],
             context: None,
         }

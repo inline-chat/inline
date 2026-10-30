@@ -236,11 +236,14 @@ struct SessionMetadata {
     config_options: Vec<acp::SessionConfigOption>,
     modes: Option<acp::SessionModeState>,
     commands: Vec<DriverCommand>,
+    commands_received: bool,
     permission_seed_pending: bool,
 }
 
 #[derive(Debug, Default)]
 struct SessionRegistry {
+    early_commands: HashMap<String, Vec<DriverCommand>>,
+    commands_changed: Arc<tokio::sync::Notify>,
     sessions: HashMap<String, SessionMetadata>,
     prewarmed_by_cwd: HashMap<PathBuf, String>,
     prewarming_by_cwd: HashMap<PathBuf, SessionPrewarm>,
@@ -364,6 +367,8 @@ pub struct AcpDriver {
     sequence: Arc<AtomicU64>,
     epoch: Arc<str>,
     auth_methods: Arc<[String]>,
+    agent_version: Option<String>,
+    agent_name: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -383,6 +388,11 @@ impl std::fmt::Debug for AcpDriver {
 }
 
 impl AcpDriver {
+    /// Application version from the ACP initialize response, not the wire version.
+    pub fn agent_version(&self) -> Option<&str> {
+        self.agent_version.as_deref()
+    }
+
     pub(crate) fn disable_durable_session_resume(&mut self) {
         self.resume_mode = ResumeMode::Unsupported;
         self.capabilities.resume_session = false;
@@ -571,6 +581,8 @@ impl AcpDriver {
             sequence,
             epoch,
             auth_methods,
+            agent_name: response.agent_info.as_ref().map(|info| info.name.clone()),
+            agent_version: response.agent_info.map(|info| info.version),
         })
     }
 
@@ -690,13 +702,16 @@ impl AcpDriver {
             session.modes = modes;
             session.permission_seed_pending = permission_seed_pending;
         } else {
+            let early_commands = sessions.early_commands.remove(&session_id);
+            let commands_received = early_commands.is_some();
             sessions.sessions.insert(
                 session_id,
                 SessionMetadata {
                     cwd,
                     config_options,
                     modes,
-                    commands: Vec::new(),
+                    commands: early_commands.unwrap_or_default(),
+                    commands_received,
                     permission_seed_pending,
                 },
             );
@@ -843,6 +858,21 @@ impl AcpDriver {
 }
 
 impl AgentDriver for AcpDriver {
+    fn migration_guidance(&self) -> Option<&str> {
+        // Only OpenCode version forms are accepted here; the agent identity
+        // check prevents another provider's 1.x adapter version being mistaken
+        // for an OpenCode application version.
+        (self
+            .agent_name
+            .as_deref()
+            .is_some_and(|name| name.eq_ignore_ascii_case("opencode"))
+            && self
+                .agent_version()
+                .and_then(crate::parse_opencode_version)
+                .is_some_and(|version| version.major == 1))
+        .then_some(crate::OPENCODE_V1_GUIDANCE)
+    }
+
     fn capabilities(&self) -> DriverCapabilities {
         self.capabilities.clone()
     }
@@ -915,15 +945,32 @@ impl AgentDriver for AcpDriver {
         session_id: &'a ProviderSessionId,
     ) -> DriverFuture<'a, Vec<DriverCommand>> {
         Box::pin(async move {
-            self.sessions
+            let changed = self
+                .sessions
                 .lock()
                 .expect("ACP session registry poisoned")
-                .sessions
-                .get(session_id.as_str())
-                .map(|session| session.commands.clone())
-                .ok_or_else(|| {
-                    DriverError::InvalidSession("ACP session metadata is unavailable".to_string())
-                })
+                .commands_changed
+                .clone();
+            let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
+            loop {
+                // Commands are a separate notification, sometimes before the
+                // new-session response, sometimes just after it. Subscribe
+                // before reading the snapshot; bound agents that send none.
+                let notified = changed.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                let (commands, ready) = {
+                    let sessions = self.sessions.lock().expect("ACP session registry poisoned");
+                    let session = sessions.sessions.get(session_id.as_str()).ok_or_else(|| {
+                        DriverError::InvalidSession("ACP session metadata is unavailable".into())
+                    })?;
+                    (session.commands.clone(), session.commands_received)
+                };
+                if ready || tokio::time::Instant::now() >= deadline {
+                    return Ok(commands);
+                }
+                let _ = tokio::time::timeout_at(deadline, notified).await;
+            }
         })
     }
 
@@ -1407,14 +1454,18 @@ async fn handle_session_update(
         session.modes = session_modes(&update.config_options, session.modes.as_ref());
         session.config_options.clone_from(&update.config_options);
     }
-    if let acp::SessionUpdate::AvailableCommandsUpdate(update) = &notification.update
-        && let Some(session) = sessions
-            .lock()
-            .expect("ACP session registry poisoned")
-            .sessions
-            .get_mut(&session_key)
-    {
-        session.commands = available_commands(&update.available_commands);
+    if let acp::SessionUpdate::AvailableCommandsUpdate(update) = &notification.update {
+        let mut sessions = sessions.lock().expect("ACP session registry poisoned");
+        let commands = available_commands(&update.available_commands);
+        if let Some(session) = sessions.sessions.get_mut(&session_key) {
+            session.commands = commands;
+            session.commands_received = true;
+        } else if sessions.early_commands.len() < 32 {
+            sessions
+                .early_commands
+                .insert(session_key.clone(), commands);
+        }
+        sessions.commands_changed.notify_waiters();
     }
     if let acp::SessionUpdate::CurrentModeUpdate(update) = &notification.update
         && let Some(modes) = sessions
@@ -2441,6 +2492,7 @@ mod tests {
                 config_options: Vec::new(),
                 modes: None,
                 commands: Vec::new(),
+                commands_received: false,
                 permission_seed_pending: false,
             },
         );
@@ -2488,6 +2540,7 @@ mod tests {
                     ],
                 )),
                 commands: Vec::new(),
+                commands_received: false,
                 permission_seed_pending: false,
             },
         );

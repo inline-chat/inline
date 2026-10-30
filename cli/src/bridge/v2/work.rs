@@ -156,16 +156,22 @@ impl Agent {
         }
     }
 
-    fn handoff_provider(&self) -> HandoffProvider {
+    fn handoff_provider(&self) -> Option<HandoffProvider> {
         match self.vocabulary {
-            Vocabulary::Codex => HandoffProvider::Codex,
-            Vocabulary::Claude => HandoffProvider::Claude,
+            Vocabulary::Codex => Some(HandoffProvider::Codex),
+            Vocabulary::Claude => Some(HandoffProvider::Claude),
+            Vocabulary::OpenCode | Vocabulary::Amp => None,
         }
     }
 
     fn idle_release(&self) -> IdleRelease {
         match self.vocabulary {
             Vocabulary::Codex => IdleRelease::codex(None),
+            // ACP owns one private process per session. Release
+            // shuts down that process and confirms native ownership ended.
+            Vocabulary::OpenCode | Vocabulary::Amp => IdleRelease::Unsubscribe {
+                native_unload_delay_ms: 0,
+            },
             Vocabulary::Claude => {
                 IdleRelease::claude(inline_agent_bridge::group::CLAUDE_IDLE_WINDOW)
             }
@@ -1528,7 +1534,8 @@ impl Actor {
     /// The session v1 left for this thread goes on here. One that does not
     /// reopen, or that Inline already gave another thread, is replaced by a
     /// fresh session rather than asking for /new: the thread never had a v2
-    /// session to lose. A session held elsewhere still waits for its holder.
+    /// session to lose. ACP bindings are preserved on every failure instead.
+    /// A session held elsewhere still waits for its holder.
     async fn open_from_v1(&mut self, mode: OpenMode) -> Result<(), OpenFailure> {
         let failure = match self.open_session(mode).await {
             Ok(session) => match self.adopt(session, false).await {
@@ -1539,6 +1546,17 @@ impl Actor {
             Err(OpenFailure::Other(message)) => message,
             Err(held) => return Err(held),
         };
+        if matches!(
+            self.agent.vocabulary,
+            Vocabulary::OpenCode | Vocabulary::Amp
+        ) {
+            // Changing OpenCode application generations does not prove its
+            // old session IDs migrated. Preserve the binding on every failure.
+            return Err(OpenFailure::Other(format!(
+                "the saved {} session could not be resumed: {failure}. Its binding is preserved. Retry after checking the agent, or use /new for a fresh conversation",
+                self.agent.agent_name
+            )));
+        }
         log::warn!(
             target: "inline::bridge::v2",
             "v1 session for chat {} did not reopen, starting a fresh one: {failure}",
@@ -2039,9 +2057,9 @@ impl Actor {
                 missed.join(", ")
             ));
         }
-        if let Some(native) = &self.native {
+        if let (Some(native), Some(provider)) = (&self.native, self.agent.handoff_provider()) {
             match handoff_instruction(
-                self.agent.handoff_provider(),
+                provider,
                 HandoffTarget::Terminal,
                 native.as_str(),
                 Some(&self.folder()),
@@ -3831,6 +3849,22 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod recovery_tests {
     use super::*;
+    pub(crate) async fn acp_migration_preserves_unavailable_session(agent: Arc<Agent>) {
+        let mut work = actor(agent);
+        work.native_from_v1 = true;
+        let native = work.native.clone().unwrap();
+        assert!(
+            work.open(OpenMode::Resume {
+                session: native.clone()
+            })
+            .await
+            .is_err()
+        );
+        assert_eq!(work.native, Some(native));
+        assert!(work.native_from_v1);
+        assert!(work.session.is_none());
+    }
+
     fn actor(agent: Arc<Agent>) -> Actor {
         let chat_id = 9;
         let known = Known {

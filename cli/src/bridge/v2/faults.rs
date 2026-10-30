@@ -572,6 +572,40 @@ async fn pending_final_and_closed_card_recover_after_actor_restart() {
     work::recovery_tests::pending_output_survives_restart(runtime.agent.clone()).await;
 }
 
+#[tokio::test]
+async fn acp_migration_does_not_silently_replace_a_missing_v1_session() {
+    for vocabulary in [Vocabulary::OpenCode, Vocabulary::Amp] {
+        let (mut runtime, harness, _cleanup) = fixture(false);
+        Arc::get_mut(&mut runtime.agent).unwrap().vocabulary = vocabulary;
+        harness.missing.lock().unwrap().push("fault-session".into());
+        work::recovery_tests::acp_migration_preserves_unavailable_session(runtime.agent.clone())
+            .await;
+        let opened = harness.opened.lock().unwrap();
+        assert_eq!(opened.len(), 1);
+        assert!(
+            matches!(&opened[0].mode, OpenMode::Resume { session } if session.as_str() == "fault-session")
+        );
+    }
+}
+
+#[tokio::test]
+async fn acp_unsupported_commands_offer_a_useful_next_step_without_opening_a_session() {
+    for vocabulary in [Vocabulary::OpenCode, Vocabulary::Amp] {
+        let (mut runtime, harness, _cleanup) = fixture(false);
+        runtime.config.vocabulary = vocabulary;
+        let compact = runtime
+            .command(9, 1, Grants::OWNER, "compact", "", &[])
+            .await;
+        assert!(compact.contains("keep chatting") && compact.contains("/new"));
+        let terminal = runtime
+            .command(9, 1, Grants::OWNER, "terminal", "", &[])
+            .await;
+        assert!(terminal.contains("/release"));
+        assert!(!compact.contains("ACP") && !terminal.contains("ACP"));
+        assert!(harness.opened.lock().unwrap().is_empty());
+    }
+}
+
 struct UnreachableOwner;
 impl OwnerCalls for UnreachableOwner {
     fn connect(

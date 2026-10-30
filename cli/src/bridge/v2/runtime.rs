@@ -19,8 +19,8 @@ use inline_agent_bridge::group::{
     origin_of, required_operation,
 };
 use inline_agent_bridge::harness::{
-    Catalog, CatalogScope, Delivery, HarnessDriver, Input, InputContent, InputId, OutputMode,
-    RuntimeHealth, SettingsChange, SetupReason, UserId,
+    Catalog, CatalogScope, Delivery, HarnessDriver, Input, InputContent, InputId, OpKind,
+    OutputMode, RuntimeHealth, SettingsChange, SetupReason, UserId,
 };
 use inline_client::{
     AnswerBotChatSettingsRequest, AnswerMessageActionRequest, BotCapability,
@@ -96,6 +96,8 @@ impl V2Config {
         match self.vocabulary {
             Vocabulary::Codex => proto::AgentSessionProvider::Codex,
             Vocabulary::Claude => proto::AgentSessionProvider::Claude,
+            Vocabulary::OpenCode => proto::AgentSessionProvider::OpenCode,
+            Vocabulary::Amp => proto::AgentSessionProvider::Amp,
         }
     }
 }
@@ -1296,6 +1298,12 @@ impl Runtime {
             folder_id: folders.as_ref().and_then(|folders| folders.id_of(&folder)),
             folder_fixed,
             can_compact: self.works.contains_key(&chat_id),
+            compact_supported: self
+                .agent
+                .harness
+                .describe()
+                .manifest
+                .is_some_and(|manifest| manifest.availability.op(OpKind::Compact).is_supported()),
             usage: &usage,
             context,
         })
@@ -1458,6 +1466,15 @@ impl Runtime {
                 if !grants.permits(Operation::Steer) {
                     return NO_ACCESS.to_owned();
                 }
+                if matches!(
+                    self.config.vocabulary,
+                    Vocabulary::OpenCode | Vocabulary::Amp
+                ) {
+                    return format!(
+                        "{} cannot {name} this session. You can keep chatting here, or use /new for a fresh thread.",
+                        self.config.agent_name
+                    );
+                }
                 if !self.works.contains_key(&chat_id) {
                     return "Nothing is open in this thread yet.".to_owned();
                 }
@@ -1469,6 +1486,17 @@ impl Runtime {
                 self.ask(chat_id, |reply| Command::Session { op, reply })
                     .await
                     .unwrap_or_else(|| "Done.".to_owned())
+            }
+            "terminal"
+                if matches!(
+                    self.config.vocabulary,
+                    Vocabulary::OpenCode | Vocabulary::Amp
+                ) =>
+            {
+                format!(
+                    "Terminal handoff is not available for {}. Use /release to close this session, or keep chatting here.",
+                    self.config.agent_name
+                )
             }
             "status" => self.status(chat_id, actor).await,
             "help" => help_text(&self.config.agent_name, self.config.vocabulary),
@@ -1611,6 +1639,8 @@ impl Runtime {
             match self.config.vocabulary {
                 Vocabulary::Codex => "Codex",
                 Vocabulary::Claude => "Claude Code",
+                Vocabulary::OpenCode => "OpenCode",
+                Vocabulary::Amp => "Amp",
             },
             info.executable
                 .version
@@ -1980,7 +2010,14 @@ impl Runtime {
             Some("pause") => Some(Control::Pause),
             Some("resume") => Some(Control::Resume),
             Some("release") => Some(Control::Release(ReleaseCause::Command)),
-            Some("terminal") => Some(Control::Release(ReleaseCause::ContinueInTerminal)),
+            Some("terminal")
+                if !matches!(
+                    self.config.vocabulary,
+                    Vocabulary::OpenCode | Vocabulary::Amp
+                ) =>
+            {
+                Some(Control::Release(ReleaseCause::ContinueInTerminal))
+            }
             _ => None,
         };
         // The harness's own slash commands (Claude's custom commands and
@@ -2622,12 +2659,20 @@ fn harness_command_text(text: &str, bot_username: &str) -> String {
 
 /// `/help`: what this agent answers to.
 fn help_text(agent_name: &str, vocabulary: Vocabulary) -> String {
+    if matches!(vocabulary, Vocabulary::OpenCode | Vocabulary::Amp) {
+        return format!(
+            "{agent_name} commands:\n/status · current model and folder\n/model, /reasoning, /permissions · settings for this thread\n/stop · stop the current turn; /pause and /resume\n/new <task> · a new thread with a fresh session\n/follow, /unfollow · choose which messages to answer\n/allowlist · who may use me (owner)\n/release · close this session while preserving its history\nThe agent's advertised commands work as you type them."
+        );
+    }
     let native = match vocabulary {
         Vocabulary::Codex => {
             "/plan, /plan off · Codex plan mode\n/review [branch] · Codex reviews your changes\n"
         }
         Vocabulary::Claude => {
             "/plan · Claude plan mode\n/undo · undo the last turn's file changes\nClaude's own commands and skills work as you type them.\n"
+        }
+        Vocabulary::OpenCode | Vocabulary::Amp => {
+            unreachable!("ACP providers have capability-limited help above")
         }
     };
     format!(

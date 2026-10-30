@@ -84,6 +84,7 @@ use approval_ui::*;
 use copy::{BridgeNotice, failure_message, session_open_notice};
 use inline_tools::*;
 pub(crate) use provider::bridge_provider_setup_descriptors;
+pub(crate) use provider::opencode_version;
 use provider::*;
 use question_ui::*;
 use reply_threads::*;
@@ -2087,7 +2088,7 @@ async fn run_provider_installation(
     let current_workspace_id = workspace.workspace_id.clone();
     let workspace = workspace.path;
 
-    if v2_enabled_for(&installation.provider_id) {
+    if installation_uses_v2(&installation).await? {
         return run_v2_provider(V2Launch {
             installation: &installation,
             legacy_store: bridge_store.clone(),
@@ -3194,11 +3195,51 @@ async fn run_provider_installation(
     Ok(())
 }
 
-/// Providers with a v2 driver. Every other provider (ACP agents such as
-/// OpenCode) keeps running on v1, whatever `INLINE_BRIDGE_V2` says.
-const V2_PROVIDERS: &[&str] = &["codex", "claude"];
+/// OpenCode additionally requires application major version 2. Its existing
+/// v1 installations keep the legacy bridge during migration.
+const V2_PROVIDERS: &[&str] = &["codex", "claude", "opencode", "amp"];
 
-/// Codex and Claude run on v2 by default. An explicit
+fn opencode_uses_v2(setting: Option<&str>, version: &str) -> Result<bool, String> {
+    let version = inline_agent_driver_acp::require_supported_opencode_version(version)?;
+    Ok(version.major == 2 && v2_enabled_in(setting, "opencode"))
+}
+
+async fn installation_uses_v2(
+    installation: &ProviderInstallationConfig,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    if installation.provider_id == "amp" {
+        // Existing adapters lack durable ACP IDs. Keep their legacy path until
+        // explicit setup installs and verifies the updated embedded artifact.
+        let current = adapter::targets_current_pinned_adapter("amp", &installation.executable);
+        if current {
+            adapter::verify_pinned_adapter_executable("amp", &installation.executable)
+                .map_err(provider_setup_required)?;
+        } else {
+            eprintln!(
+                "Amp continues on the legacy bridge; rerun `inline setup amp` to enable bridge v2 with session continuity."
+            );
+        }
+        return Ok(current && v2_enabled_for("amp"));
+    }
+    if installation.provider_id != "opencode" {
+        return Ok(v2_enabled_for(&installation.provider_id));
+    }
+    let executable = installation.executable.clone();
+    let version = tokio::task::spawn_blocking(move || opencode_version(&executable)).await?
+        .ok_or_else(|| provider_setup_required("could not verify the configured OpenCode version; run `opencode --version` and retry"))?;
+    let use_v2 = opencode_uses_v2(env::var("INLINE_BRIDGE_V2").ok().as_deref(), &version)
+        .map_err(provider_setup_required)?;
+    eprintln!(
+        "OpenCode {version}: bridge v{}, transport=acp",
+        if use_v2 { 2 } else { 1 }
+    );
+    if inline_agent_driver_acp::parse_opencode_version(&version).is_some_and(|v| v.major == 1) {
+        eprintln!("{}", inline_agent_driver_acp::OPENCODE_V1_GUIDANCE);
+    }
+    Ok(use_v2)
+}
+
+/// Qualified Codex, Claude, OpenCode v2 and Amp run on bridge v2 by default. An explicit
 /// `INLINE_BRIDGE_V2=codex,claude` (or `all`) selects providers, and `off`
 /// restores v1 for rollback.
 fn v2_enabled_for(provider_id: &str) -> bool {
@@ -3266,6 +3307,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         folder: workspace.clone(),
         attachments_dir: attachments_dir.clone(),
     });
+    let mut owned_acp = None;
     let (harness, vocabulary, executable): (Arc<dyn HarnessDriver>, _, PathBuf) =
         match installation.provider_id.as_str() {
             "codex" => {
@@ -3299,6 +3341,33 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
                 (
                     Arc::new(harness),
                     v2::render::Vocabulary::Claude,
+                    executable,
+                )
+            }
+            "opencode" | "amp" => {
+                let ProviderLaunch::Acp(descriptor) =
+                    ProviderLaunch::from_installation(installation)
+                        .map_err(provider_setup_required)?
+                else {
+                    return Err(io::Error::other("provider launch was not ACP").into());
+                };
+                let executable = descriptor.program.clone();
+                let harness = Arc::new(
+                    inline_agent_driver_acp::IsolatedAcpHarness::connect(
+                        descriptor,
+                        env!("CARGO_PKG_VERSION"),
+                        Some(tools.configuration()),
+                    )
+                    .await?,
+                );
+                owned_acp = Some(harness.clone());
+                (
+                    harness,
+                    if installation.provider_id == "amp" {
+                        v2::render::Vocabulary::Amp
+                    } else {
+                        v2::render::Vocabulary::OpenCode
+                    },
                     executable,
                 )
             }
@@ -3358,7 +3427,12 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
             _ = wait_for_control_shutdown(&mut external_shutdown) => {}
         }
     };
-    runtime.run(&mut inline_events, shutdown).await
+    let result = runtime.run(&mut inline_events, shutdown).await;
+    if let Some(harness) = owned_acp {
+        harness.shutdown().await?;
+    }
+    result?;
+    Ok(())
 }
 
 /// v2 never runs what v1 accepted, so v1's open work is closed the way a v1

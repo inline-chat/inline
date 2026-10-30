@@ -1,6 +1,6 @@
-//! Bridge v2: the session-contract runtime, default for Codex and Claude.
+//! Bridge v2: Codex, Claude, OpenCode application v2 and qualified Amp ACP.
 //!
-//! Other providers stay on v1; INLINE_BRIDGE_V2 can select providers or roll back.
+//! OpenCode v1 and older Amp adapters stay on v1; INLINE_BRIDGE_V2 can roll back.
 
 pub(crate) mod api;
 #[cfg(test)]

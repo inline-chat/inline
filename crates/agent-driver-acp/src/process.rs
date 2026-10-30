@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 
 use agent_client_protocol::{AcpAgent, AcpAgentConfig};
-use inline_agent_bridge::{DriverError, reap_stale_process_host};
+use inline_agent_bridge::{AgentDriver, DriverError, reap_stale_process_host};
 use thiserror::Error;
 use tokio::sync::watch;
 
@@ -32,6 +32,8 @@ pub enum AcpLaunchError {
     ProviderRuntimeUnavailable(std::path::PathBuf),
     #[error("ACP agent initialization failed: {0}")]
     Initialize(#[from] DriverError),
+    #[error("{0}")]
+    UnsupportedOpenCodeVersion(String),
     #[error("ACP process host recovery failed: {0}")]
     ProcessHost(#[source] std::io::Error),
 }
@@ -104,6 +106,9 @@ pub async fn spawn_acp_driver(
     let mut driver =
         AcpDriver::connect_transport_with_output_cache(agent, bridge_version, output_cache_dir)
             .await?;
+    // Recheck the running agent: an executable can be replaced after setup,
+    // and existing manifests predate the OpenCode v2 support policy.
+    validate_provider_version(&descriptor, &driver).await?;
     if let Some(mode) = provider_default_permission_mode(&descriptor) {
         driver.set_default_permission_mode(mode);
     }
@@ -117,6 +122,20 @@ pub async fn spawn_acp_driver(
         driver,
         process_status,
     })
+}
+
+async fn validate_provider_version(
+    descriptor: &AcpLaunchDescriptor,
+    driver: &AcpDriver,
+) -> Result<(), AcpLaunchError> {
+    if descriptor.provider_id.as_str() == "opencode"
+        && let Err(error) =
+            crate::require_supported_opencode_version(driver.agent_version().unwrap_or_default())
+    {
+        let _ = driver.shutdown().await;
+        return Err(AcpLaunchError::UnsupportedOpenCodeVersion(error));
+    }
+    Ok(())
 }
 
 fn provider_default_permission_mode(descriptor: &AcpLaunchDescriptor) -> Option<&'static str> {
@@ -140,6 +159,17 @@ fn scrubbed_launch_config(descriptor: &AcpLaunchDescriptor) -> AcpAgentConfig {
         arguments.push("AMP_ACP_TRANSPORT=cli".to_string());
         arguments.push("AMP_SKIP_UPDATE_CHECK=1".to_string());
         arguments.push("CI=1".to_string());
+    }
+    if descriptor.provider_id.as_str() == "amp"
+        && let Some(parent) = descriptor
+            .process_host
+            .as_ref()
+            .and_then(|host| host.lock_file.parent())
+    {
+        arguments.push(format!(
+            "AMP_ACP_SESSION_DIR={}",
+            parent.join("amp-sessions").display()
+        ));
     }
     if let Some(process_host) = descriptor.process_host.as_ref() {
         arguments.push(process_host.executable.to_string_lossy().into_owned());
@@ -235,6 +265,38 @@ mod tests {
     use inline_agent_bridge::ProviderId;
 
     use super::*;
+
+    #[tokio::test]
+    async fn preserves_v1_but_rejects_unknown_or_future_opencode_epochs() {
+        use agent_client_protocol::{Agent, schema::v1 as acp};
+        for version in [None, Some("1.19.4"), Some("3.0.0"), Some("2.0.32")] {
+            let agent = Agent.builder().on_receive_request(
+                async move |request: acp::InitializeRequest, responder, _connection| {
+                    let mut response = acp::InitializeResponse::new(request.protocol_version);
+                    if let Some(version) = version {
+                        response =
+                            response.agent_info(acp::Implementation::new("opencode", version));
+                    }
+                    responder.respond(response)
+                },
+                agent_client_protocol::on_receive_request!(),
+            );
+            let driver = AcpDriver::connect_transport(agent, "test").await.unwrap();
+            let result =
+                validate_provider_version(&AcpLaunchDescriptor::opencode("opencode"), &driver)
+                    .await;
+            if matches!(version, Some("1.19.4" | "2.0.32")) {
+                assert!(result.is_ok());
+                driver.shutdown().await.unwrap();
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(AcpLaunchError::UnsupportedOpenCodeVersion(_))
+                ));
+                assert!(driver.lifecycle.completion.borrow().is_some());
+            }
+        }
+    }
 
     #[test]
     fn only_verified_claude_adapters_default_to_bypass_permissions() {

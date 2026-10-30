@@ -1294,22 +1294,33 @@ fn bridge_v2_flag_leaves_providers_without_a_v2_driver_on_v1() {
     assert!(v2_enabled_in(Some("all"), "codex"));
     assert!(v2_enabled_in(Some("codex, claude"), "claude"));
     assert!(!v2_enabled_in(Some("codex"), "claude"));
-    // OpenCode and other ACP agents keep running on v1.
-    assert!(!v2_enabled_in(Some("all"), "opencode"));
-    assert!(!v2_enabled_in(Some("opencode"), "opencode"));
+    // OpenCode has a v2 adapter; application-major gating happens separately.
+    assert!(v2_enabled_in(Some("all"), "opencode"));
+    assert!(v2_enabled_in(Some("opencode"), "opencode"));
 }
 
 #[test]
-fn bridge_v2_is_the_default_for_codex_and_claude_with_an_explicit_rollback() {
-    for provider in ["codex", "claude"] {
+fn bridge_v2_is_the_default_for_qualified_providers_with_an_explicit_rollback() {
+    for provider in ["codex", "claude", "opencode", "amp"] {
         assert!(v2_enabled_in(None, provider));
         for setting in ["off", "false", "0", ""] {
             assert!(!v2_enabled_in(Some(setting), provider));
         }
     }
     assert!(!v2_enabled_in(Some("codex"), "claude"));
-    for provider in ["opencode", "amp"] {
-        assert!(!v2_enabled_in(None, provider));
-        assert!(!v2_enabled_in(Some("all"), provider));
+    assert!(!v2_enabled_in(None, "unknown"));
+    assert!(!v2_enabled_in(Some("all"), "unknown"));
+}
+
+#[test]
+fn opencode_routing_preserves_v1_and_respects_v2_rollback() {
+    for setting in [None, Some("all"), Some("opencode"), Some("off")] {
+        assert!(!opencode_uses_v2(setting, "1.19.4").unwrap());
     }
+    assert!(opencode_uses_v2(None, "opencode v2.0.32").unwrap());
+    assert!(opencode_uses_v2(Some("all"), "2.0.32").unwrap());
+    assert!(!opencode_uses_v2(Some("off"), "2.0.32").unwrap());
+    assert!(!opencode_uses_v2(Some("codex"), "2.0.32").unwrap());
+    assert!(opencode_uses_v2(None, "unknown").is_err());
+    assert!(opencode_uses_v2(None, "3.0.0").is_err());
 }

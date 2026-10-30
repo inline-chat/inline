@@ -3,6 +3,7 @@ mod catalog;
 mod discovery;
 mod hermes;
 mod openclaw;
+pub(crate) mod opencode;
 mod process;
 
 use std::cell::{Cell, RefCell};
@@ -319,6 +320,21 @@ pub(crate) fn discover(
             println!("Installed agent harnesses:");
             for target in installed {
                 println!("  {} ({})", target.display_name, target.id);
+                for installation in &target.installations {
+                    let version = installation.version.as_deref().unwrap_or("unknown version");
+                    let status = match installation.support_status {
+                        opencode::OpenCodeSupport::Supported => "supported",
+                        opencode::OpenCodeSupport::MigrationRequired => "upgrade to OpenCode v2",
+                        opencode::OpenCodeSupport::Unsupported => {
+                            "unsupported; OpenCode v2 required"
+                        }
+                        opencode::OpenCodeSupport::Unknown => "could not verify version",
+                    };
+                    println!("    {version}: {status}");
+                    if let Some(url) = installation.migration_url {
+                        println!("    {url}");
+                    }
+                }
             }
         }
     }
@@ -341,6 +357,8 @@ struct AgentDiscoveryTarget {
     display_name: &'static str,
     family: TargetFamily,
     installed: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    installations: Vec<opencode::OpenCodeInstallation>,
 }
 
 fn discovery_output(installed: &[InstalledTarget]) -> AgentDiscoveryOutput {
@@ -357,6 +375,11 @@ fn discovery_output(installed: &[InstalledTarget]) -> AgentDiscoveryOutput {
                 installed: installed
                     .iter()
                     .any(|candidate| candidate.descriptor.target == descriptor.target),
+                installations: installed
+                    .iter()
+                    .find(|candidate| candidate.descriptor.target == descriptor.target)
+                    .map(|candidate| candidate.opencode_installations.clone())
+                    .unwrap_or_default(),
             })
             .collect(),
     }
@@ -520,7 +543,14 @@ pub(crate) async fn setup(
                 .await
                 .map(|_| ()),
             AgentTarget::Claude => bridge::preflight_claude_setup(!resolved.args.no_install),
-            AgentTarget::Codex | AgentTarget::Opencode | AgentTarget::Amp => Ok(()),
+            AgentTarget::Opencode => inline_agent_driver_acp::require_opencode_v2(
+                opencode::selected(&resolved.installed.opencode_installations)
+                    .and_then(|item| item.version.as_deref())
+                    .unwrap_or_default(),
+            )
+            .map(|_| ())
+            .map_err(Into::into),
+            AgentTarget::Codex | AgentTarget::Amp => Ok(()),
         };
         if let Err(error) = preflight {
             return report_setup_failure(error, target, &progress, false, json, json_format);
@@ -1282,6 +1312,7 @@ mod app_protocol_tests {
         let installed = vec![InstalledTarget {
             descriptor: AgentTarget::Codex.descriptor(),
             executable: PathBuf::from("/private/example/codex"),
+            opencode_installations: Vec::new(),
         }];
         let output = discovery_output(&installed);
         let json = serde_json::to_string(&output).expect("serialize discovery");

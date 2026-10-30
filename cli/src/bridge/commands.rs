@@ -235,6 +235,9 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
     match name {
         "help" => {
             let mut message = static_command_help(sessions.provider_id());
+            if let Some(guidance) = sessions.driver().migration_guidance() {
+                message.push_str(&format!("\n\n{guidance}"));
+            }
             if let Some(commands) = provider_catalog.as_ref()
                 && !commands.is_empty()
             {
@@ -346,6 +349,9 @@ pub(super) async fn resolve_idle_command<D: AgentDriver + 'static>(
                         "Provider usage is unavailable; the status request timed out.".to_string()
                     }
                 });
+            }
+            if let Some(guidance) = sessions.driver().migration_guidance() {
+                message.push_str(&format!("\n\n{guidance}"));
             }
             handled(message)
         }
