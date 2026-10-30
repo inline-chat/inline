@@ -543,13 +543,11 @@ pub(crate) async fn setup(
                 .await
                 .map(|_| ()),
             AgentTarget::Claude => bridge::preflight_claude_setup(!resolved.args.no_install),
-            AgentTarget::Opencode => inline_agent_driver_acp::require_opencode_v2(
-                opencode::selected(&resolved.installed.opencode_installations)
-                    .and_then(|item| item.version.as_deref())
-                    .unwrap_or_default(),
-            )
-            .map(|_| ())
-            .map_err(Into::into),
+            AgentTarget::Opencode => {
+                opencode::select_for_setup(&resolved.installed.opencode_installations)
+                    .map(|_| ())
+                    .map_err(Into::into)
+            }
             AgentTarget::Codex | AgentTarget::Amp => Ok(()),
         };
         if let Err(error) = preflight {

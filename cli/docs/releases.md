@@ -66,15 +66,56 @@ are not required.
 
 ## Bridge runtime
 
-CLI builds use bridge v2 by default for Codex and Claude Code, on every channel.
-No local opt-in is needed. `INLINE_BRIDGE_V2=off` restores v1 for rollback; a
-provider list such as `INLINE_BRIDGE_V2=codex` enables only those providers. ACP
-providers (OpenCode and Amp) continue to use v1.
+CLI builds use bridge v2 by default for Codex, Claude Code, OpenCode v2, and the
+current verified Amp adapter, on every channel. Existing OpenCode 0.x/v1 and
+older Amp adapters keep bridge v1 until the user upgrades and reruns setup.
+New OpenCode setups require application version 2; the ACP wire protocol is
+still v1. Inline does not upgrade OpenCode or rewrite its configuration.
 
-The first v2 start after an upgrade from v1 continues each v1 conversation in
-its native session and folder; a session that no longer opens is replaced by a
-fresh one. Turns v1 had queued or was running get a "send it again" reply, and
-v1 approval and question cards expire.
+In the bridge process's environment, `INLINE_BRIDGE_V2=off` selects v1 for
+rollback; a provider list such as `INLINE_BRIDGE_V2=codex` enables v2 only for
+those providers. The background bridge inherits its environment from launchd
+or systemd, not the shell running `inline bridge restart`. For a temporary
+background rollback:
+
+```sh
+# macOS
+launchctl setenv INLINE_BRIDGE_V2 off
+inline bridge restart
+
+# Linux
+systemctl --user set-environment INLINE_BRIDGE_V2=off
+inline bridge restart
+```
+
+These commands set the user service manager's environment until cleared (or
+its session ends). To return to the default, run `launchctl unsetenv
+INLINE_BRIDGE_V2` on macOS or `systemctl --user unset-environment
+INLINE_BRIDGE_V2` on Linux, then `inline bridge restart`. Setting the variable
+only on the restart command does not select the background runtime. A
+foreground `inline bridge run --config /absolute/path/to/config.json` can use
+`INLINE_BRIDGE_V2=off` directly; stop the background bridge first with
+`inline bridge stop`.
+
+After an upgrade from v1, v2 tries to continue existing conversations in their
+native sessions and folders. Codex and Claude may replace an unavailable v1
+session with a fresh one. OpenCode and Amp preserve an unavailable saved
+binding and ask the user to retry or explicitly start a new conversation with
+`/new`; old Amp adapter sessions cannot resume across processes. Turns v1 had
+queued or was running get a "send it again" reply, and v1 approval and question
+cards expire. Settings may reset to v2 defaults; migration
+does not require preserving every old setting.
+When a legacy binding matches the registered native session, its saved folder
+is retained and persisted for subsequent restarts. Explicit thread folder
+choices and bindings to a different native session take precedence.
+
+OpenCode and Amp use a private ACP process per session, retained for up to
+30 minutes of idle time. Advertised provider slash commands are forwarded as
+typed, including OpenCode `/compact`; unavailable structured operations stay
+out of settings. Native queue, passive input, session browser, and terminal
+handoff are unavailable on this route. Verify restart/resume and multiple
+turns in the same folder before qualifying these experimental providers for
+a release; an initialize handshake alone is insufficient.
 
 ## Codex runtime freshness
 

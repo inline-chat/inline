@@ -2,15 +2,15 @@
 
 pub const OPENCODE_MIGRATION_URL: &str = "https://opencode.ai/v2/docs/migrate-v1/";
 
-pub const OPENCODE_V1_GUIDANCE: &str = "OpenCode v1 continues on the legacy Inline bridge. Upgrade to OpenCode v2 using https://opencode.ai/v2/docs/migrate-v1/, then rerun `inline setup opencode` to use bridge v2. Your OpenCode configuration is not changed by Inline.";
+pub const OPENCODE_V1_GUIDANCE: &str = "OpenCode 0.x and v1 continue on the legacy Inline bridge. Upgrade to OpenCode v2 using https://opencode.ai/v2/docs/migrate-v1/, then rerun `inline setup opencode` to use bridge v2. Your OpenCode configuration is not changed by Inline.";
 
-/// Existing installations keep v1 compatibility during migration. New setup
+/// Existing installations keep 0.x/v1 compatibility during migration. New setup
 /// and the bridge v2 route use the stricter `require_opencode_v2` check.
 pub fn require_supported_opencode_version(output: &str) -> Result<semver::Version, String> {
     let version = parse_opencode_version(output).ok_or_else(|| {
         "OpenCode returned an unrecognized version; install OpenCode v2 and rerun `inline setup opencode`".to_string()
     })?;
-    if !matches!(version.major, 1 | 2) {
+    if !matches!(version.major, 0..=2) {
         return Err(format!(
             "OpenCode {version} is unsupported; install OpenCode v2 and rerun `inline setup opencode`"
         ));
@@ -45,6 +45,7 @@ mod tests {
     #[test]
     fn distinguishes_released_cli_and_agent_info_versions() {
         for (output, major) in [
+            ("0.15.0", 0),
             ("1.19.4", 1),
             ("opencode v2.0.32\n", 2),
             ("v2.2.0", 2),
@@ -63,6 +64,15 @@ mod tests {
         ] {
             assert!(parse_opencode_version(output).is_none(), "{output}");
         }
+    }
+
+    #[test]
+    fn legacy_versions_remain_supported_without_qualifying_for_v2() {
+        for version in ["0.15.0", "1.19.4"] {
+            assert!(require_supported_opencode_version(version).is_ok());
+            assert!(require_opencode_v2(version).is_err());
+        }
+        assert!(require_supported_opencode_version("3.0.0").is_err());
     }
 
     #[test]

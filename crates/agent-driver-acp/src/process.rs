@@ -267,9 +267,15 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn preserves_v1_but_rejects_unknown_or_future_opencode_epochs() {
+    async fn preserves_legacy_but_rejects_unknown_or_future_opencode_epochs() {
         use agent_client_protocol::{Agent, schema::v1 as acp};
-        for version in [None, Some("1.19.4"), Some("3.0.0"), Some("2.0.32")] {
+        for version in [
+            None,
+            Some("0.15.0"),
+            Some("1.19.4"),
+            Some("3.0.0"),
+            Some("2.0.32"),
+        ] {
             let agent = Agent.builder().on_receive_request(
                 async move |request: acp::InitializeRequest, responder, _connection| {
                     let mut response = acp::InitializeResponse::new(request.protocol_version);
@@ -285,8 +291,13 @@ mod tests {
             let result =
                 validate_provider_version(&AcpLaunchDescriptor::opencode("opencode"), &driver)
                     .await;
-            if matches!(version, Some("1.19.4" | "2.0.32")) {
+            if matches!(version, Some("0.15.0" | "1.19.4" | "2.0.32")) {
                 assert!(result.is_ok());
+                assert_eq!(
+                    driver.migration_guidance(),
+                    matches!(version, Some("0.15.0" | "1.19.4"))
+                        .then_some(crate::OPENCODE_V1_GUIDANCE),
+                );
                 driver.shutdown().await.unwrap();
             } else {
                 assert!(matches!(

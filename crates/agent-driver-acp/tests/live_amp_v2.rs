@@ -70,7 +70,7 @@ async fn reply(session: &dyn Session, id: &str, text: &str) -> String {
 #[tokio::test]
 #[ignore = "requires current pinned Amp adapter, authenticated Amp CLI and built Inline process host"]
 async fn amp_bridge_v2_retains_context_after_release_and_process_restart() {
-    tokio::time::timeout(Duration::from_secs(180), async {
+    tokio::time::timeout(Duration::from_secs(480), async {
         let root = tempfile::tempdir().unwrap();
         let folder = root.path().canonicalize().unwrap();
         let mut descriptor = provider_support("amp").unwrap().launch_descriptor(Some(
@@ -89,6 +89,14 @@ async fn amp_bridge_v2_retains_context_after_release_and_process_restart() {
         let session = harness.open(spec(OpenMode::Start, folder.clone())).await.unwrap();
         let answer = reply(session.as_ref(), "initial", "Do not use tools. Remember this marker: emerald-orbit-593. Reply exactly: inline amp v2 ready").await;
         assert!(answer.to_lowercase().contains("inline amp v2 ready"), "{answer}");
+        // Cross several bridge idle ticks before releasing, then continue the
+        // same native conversation repeatedly after the full process restart.
+        for turn in 0..3 {
+            tokio::time::sleep(Duration::from_secs(16)).await;
+            let answer = reply(session.as_ref(), &format!("warm-{turn}"),
+                "Do not use tools. Reply only with the marker you are remembering.").await;
+            assert!(answer.contains("emerald-orbit-593"), "warm turn {turn}: {answer}");
+        }
         let id = session.key().session.clone();
         assert_eq!(session.release().await.unwrap().outcome, ReleaseOutcome::NativeReleased);
         harness.shutdown().await.unwrap();
@@ -99,8 +107,14 @@ async fn amp_bridge_v2_retains_context_after_release_and_process_restart() {
         assert_eq!(resumed.key().session, id);
         let answer = reply(resumed.as_ref(), "resumed", "Do not use tools. Reply with only the marker I asked you to remember in my previous message.").await;
         assert!(answer.contains("emerald-orbit-593"), "context was lost: {answer}");
+        for turn in 0..3 {
+            if turn == 1 { tokio::time::sleep(Duration::from_secs(16)).await; }
+            let answer = reply(resumed.as_ref(), &format!("continued-{turn}"),
+                "Do not use tools. Reply only with the marker you are remembering.").await;
+            assert!(answer.contains("emerald-orbit-593"), "resumed turn {turn}: {answer}");
+        }
         assert_eq!(resumed.release().await.unwrap().outcome, ReleaseOutcome::NativeReleased);
         harness.shutdown().await.unwrap();
-        eprintln!("PASS: Amp bridge v2 catalog, settings, advertised commands, turn, native release, process restart and retained context");
+        eprintln!("PASS: Amp bridge v2 catalog, settings, advertised commands, eight turns across idle ticks and process restart, retained context and native release");
     }).await.expect("Amp live continuity timed out");
 }

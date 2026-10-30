@@ -84,6 +84,7 @@ use approval_ui::*;
 use copy::{BridgeNotice, failure_message, session_open_notice};
 use inline_tools::*;
 pub(crate) use provider::bridge_provider_setup_descriptors;
+pub(crate) use provider::opencode_startup_version;
 pub(crate) use provider::opencode_version;
 use provider::*;
 use question_ui::*;
@@ -3196,7 +3197,7 @@ async fn run_provider_installation(
 }
 
 /// OpenCode additionally requires application major version 2. Its existing
-/// v1 installations keep the legacy bridge during migration.
+/// 0.x/v1 installations keep the legacy bridge during migration.
 const V2_PROVIDERS: &[&str] = &["codex", "claude", "opencode", "amp"];
 
 fn opencode_uses_v2(setting: Option<&str>, version: &str) -> Result<bool, String> {
@@ -3225,15 +3226,15 @@ async fn installation_uses_v2(
         return Ok(v2_enabled_for(&installation.provider_id));
     }
     let executable = installation.executable.clone();
-    let version = tokio::task::spawn_blocking(move || opencode_version(&executable)).await?
-        .ok_or_else(|| provider_setup_required("could not verify the configured OpenCode version; run `opencode --version` and retry"))?;
+    let version =
+        tokio::task::spawn_blocking(move || opencode_startup_version(&executable)).await??;
     let use_v2 = opencode_uses_v2(env::var("INLINE_BRIDGE_V2").ok().as_deref(), &version)
         .map_err(provider_setup_required)?;
     eprintln!(
         "OpenCode {version}: bridge v{}, transport=acp",
         if use_v2 { 2 } else { 1 }
     );
-    if inline_agent_driver_acp::parse_opencode_version(&version).is_some_and(|v| v.major == 1) {
+    if inline_agent_driver_acp::parse_opencode_version(&version).is_some_and(|v| v.major < 2) {
         eprintln!("{}", inline_agent_driver_acp::OPENCODE_V1_GUIDANCE);
     }
     Ok(use_v2)

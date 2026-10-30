@@ -6,7 +6,7 @@ use inline_agent_bridge::harness::*;
 use inline_agent_bridge::{ProcessHostConfig, TurnOutcome};
 use inline_agent_driver_acp::{AcpLaunchDescriptor, IsolatedAcpHarness, require_opencode_v2};
 
-const LIVE_TIMEOUT: Duration = Duration::from_secs(180);
+const LIVE_TIMEOUT: Duration = Duration::from_secs(480);
 
 async fn reply(session: &dyn Session, id: &str, text: &str) -> String {
     let mut events = session.events();
@@ -116,6 +116,15 @@ async fn installed_opencode_v2_completes_and_resumes_across_processes() {
         let text = reply(session.as_ref(), "initial",
             "Do not use tools. Remember this marker for the next message: indigo-orbit-731. Reply exactly: inline acp ready").await;
         assert!(text.to_ascii_lowercase().contains("inline acp ready"), "unexpected completion: {text:?}");
+        assert!(catalog.commands.iter().any(|command| command.name == "compact"));
+        for turn in 0..3 {
+            tokio::time::sleep(Duration::from_secs(16)).await;
+            let text = reply(session.as_ref(), &format!("warm-{turn}"),
+                "Do not use tools. Reply only with the marker you are remembering.").await;
+            assert!(text.contains("indigo-orbit-731"), "warm turn {turn}: {text}");
+        }
+        // Exercise the advertised slash command, not an unsupported native API.
+        reply(session.as_ref(), "compact-command", "/compact").await;
         let native_session = session.key().session.clone();
         harness.shutdown().await.expect("shutdown first process");
         drop(session);
@@ -126,7 +135,13 @@ async fn installed_opencode_v2_completes_and_resumes_across_processes() {
         let text = reply(session.as_ref(), "resumed",
             "Do not use tools. Reply with only the marker I asked you to remember in my previous message.").await;
         assert!(text.contains("indigo-orbit-731"), "resumed session lost context: {text:?}");
+        for turn in 0..3 {
+            if turn == 1 { tokio::time::sleep(Duration::from_secs(16)).await; }
+            let text = reply(session.as_ref(), &format!("continued-{turn}"),
+                "Do not use tools. Reply only with the marker you are remembering.").await;
+            assert!(text.contains("indigo-orbit-731"), "resumed turn {turn}: {text}");
+        }
         resumed.shutdown().await.expect("shutdown resumed process");
-        eprintln!("OpenCode v2 through bridge v2 harness: catalog, turn, shutdown, cross-process resume and retained context passed");
+        eprintln!("OpenCode v2 through bridge v2 harness: catalog, nine turns including compact across idle ticks and restart, retained context passed");
     }).await.expect("OpenCode v2 smoke timed out");
 }

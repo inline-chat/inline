@@ -137,6 +137,8 @@ pub(crate) struct DocumentFacts<'a> {
     pub folder_fixed: bool,
     /// A session is open, so it can be compacted now.
     pub can_compact: bool,
+    /// The structured compact operation is supported (or not yet known for
+    /// native harnesses). A provider's `/compact` command is a separate route.
     pub compact_supported: bool,
     /// The account's usage windows, as the harness last reported them.
     pub usage: &'a [DriverUsageWindow],

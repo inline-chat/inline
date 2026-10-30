@@ -165,16 +165,17 @@ impl Agent {
     }
 
     fn idle_release(&self) -> IdleRelease {
-        match self.vocabulary {
-            Vocabulary::Codex => IdleRelease::codex(None),
-            // ACP owns one private process per session. Release
-            // shuts down that process and confirms native ownership ended.
-            Vocabulary::OpenCode | Vocabulary::Amp => IdleRelease::Unsubscribe {
-                native_unload_delay_ms: 0,
-            },
-            Vocabulary::Claude => {
-                IdleRelease::claude(inline_agent_bridge::group::CLAUDE_IDLE_WINDOW)
-            }
+        idle_release_for(self.vocabulary)
+    }
+}
+
+/// Private processes stay warm between follow-ups. Unlike Codex unsubscribe,
+/// releasing an ACP session actually terminates its process.
+fn idle_release_for(vocabulary: Vocabulary) -> IdleRelease {
+    match vocabulary {
+        Vocabulary::Codex => IdleRelease::codex(None),
+        Vocabulary::Claude | Vocabulary::OpenCode | Vocabulary::Amp => {
+            IdleRelease::claude(inline_agent_bridge::group::CLAUDE_IDLE_WINDOW)
         }
     }
 }
@@ -344,10 +345,19 @@ pub(crate) struct WorkHandle {
     pub phase: watch::Receiver<WorkPhase>,
     /// Inline's ID for the work, once connected; 0 before.
     pub agent_session_id: Arc<AtomicI64>,
+    /// The open native session whose command catalog belongs to this chat.
+    catalog_session: Arc<std::sync::Mutex<Option<ProviderSessionId>>>,
     pub task: tokio::task::JoinHandle<()>,
 }
 
 impl WorkHandle {
+    pub(crate) fn catalog_session(&self) -> Option<ProviderSessionId> {
+        if self.task.is_finished() {
+            return None;
+        }
+        self.catalog_session.lock().ok()?.clone()
+    }
+
     pub(crate) fn agent_session_id(&self) -> Option<i64> {
         Some(self.agent_session_id.load(Ordering::Acquire)).filter(|id| *id > 0)
     }
@@ -379,6 +389,7 @@ pub(crate) fn spawn(
         WorkPhase::None
     });
     let agent_session_id = Arc::new(AtomicI64::new(known.agent_session_id.unwrap_or(0)));
+    let catalog_session = Arc::new(std::sync::Mutex::new(None));
     let outbox = agent
         .ledger
         .outputs(chat_id)
@@ -406,6 +417,7 @@ pub(crate) fn spawn(
         parent_card_text: None,
         agent_session_id: agent_session_id.clone(),
         native: known.native,
+        catalog_session: catalog_session.clone(),
         native_from_v1: known.from_v1,
         session: None,
         events: None,
@@ -450,6 +462,7 @@ pub(crate) fn spawn(
         tx,
         phase,
         agent_session_id,
+        catalog_session,
         task,
     }
 }
@@ -522,6 +535,7 @@ struct Actor {
     parent_card_text: Option<(ParentCard, i64)>,
     agent_session_id: Arc<AtomicI64>,
     native: Option<ProviderSessionId>,
+    catalog_session: Arc<std::sync::Mutex<Option<ProviderSessionId>>>,
     /// `native` came from v1 and Inline does not know it yet.
     native_from_v1: bool,
     hold: HoldMachine,
@@ -620,6 +634,7 @@ impl Actor {
                         // connection closed.
                         self.events = None;
                         self.session = None;
+                        *self.catalog_session.lock().unwrap_or_else(|error| error.into_inner()) = None;
                         self.event(HoldEvent::Detached).await;
                     }
                 },
@@ -1356,6 +1371,10 @@ impl Actor {
                 // Dropping the last handle stops the process (its supervisor
                 // closes stdin, then kills and reaps it).
                 self.session = None;
+                *self
+                    .catalog_session
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = None;
                 self.events = None;
                 self.unbind_tools();
                 Some(HoldEvent::Detached)
@@ -1388,6 +1407,10 @@ impl Actor {
             },
             HoldEffect::Lost => {
                 self.session = None;
+                *self
+                    .catalog_session
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = None;
                 self.events = None;
                 self.turn = None;
                 self.unbind_tools();
@@ -1748,6 +1771,10 @@ impl Actor {
     }
 
     fn attach(&mut self, session: Arc<dyn Session>) {
+        *self
+            .catalog_session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(session.key().session.clone());
         self.events = Some(std::sync::Mutex::new(session.events()));
         self.session = Some(session);
     }
@@ -2025,6 +2052,10 @@ impl Actor {
 
     async fn released(&mut self, cause: ReleaseCause, receipts: &[ReleaseReceipt]) {
         self.session = None;
+        *self
+            .catalog_session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = None;
         self.events = None;
         self.turn = None;
         // The harness confirmed the release: the session no longer acts here.
@@ -3703,6 +3734,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn acp_followups_keep_the_process_warm_until_thirty_idle_minutes() {
+        use inline_agent_bridge::harness::LiveWork;
+        for vocabulary in [Vocabulary::OpenCode, Vocabulary::Amp] {
+            let mut hold = HoldMachine::new(idle_release_for(vocabulary));
+            hold.handle(HoldEvent::AcquireRequested { input: None }, 0);
+            hold.handle(HoldEvent::Acquired, 0);
+            // Six turns over several minutes, with the real 15-second idle ticks.
+            for turn in 0..6 {
+                let started = turn * 60_000;
+                hold.handle(
+                    HoldEvent::Activity {
+                        live: LiveWork {
+                            turn: Some(TurnId::new(format!("turn-{turn}")).unwrap()),
+                            ..Default::default()
+                        },
+                    },
+                    started,
+                );
+                hold.handle(
+                    HoldEvent::Activity {
+                        live: LiveWork::default(),
+                    },
+                    started + 1_000,
+                );
+                for tick in [15_000, 30_000, 45_000] {
+                    assert!(hold.handle(HoldEvent::Tick, started + tick).is_empty());
+                    assert!(hold.admits());
+                }
+            }
+            let last_activity = 301_000;
+            assert!(
+                hold.handle(HoldEvent::Tick, last_activity + 1_799_999)
+                    .is_empty()
+            );
+            let effects = hold.handle(HoldEvent::Tick, last_activity + 1_800_000);
+            assert!(
+                effects
+                    .iter()
+                    .any(|effect| matches!(effect, HoldEffect::CloseStdin { .. }))
+            );
+            assert!(!hold.admits());
+            // A failed close has a bounded fallback rather than an endless detach.
+            assert_eq!(
+                hold.handle(HoldEvent::Tick, last_activity + 1_810_000),
+                [HoldEffect::Kill]
+            );
+            hold.handle(HoldEvent::Detached, last_activity + 1_810_001);
+            assert!(matches!(hold.state(), HoldState::Released));
+        }
+    }
+
+    #[test]
     fn an_answer_over_the_limit_splits_at_lines_and_keeps_code_fences_whole() {
         let mut text = String::from("## Report\n\n```rust\n");
         for line in 0..12_000 {
@@ -3905,6 +3988,7 @@ pub(crate) mod recovery_tests {
             parent_card_text: None,
             agent_session_id: agent_session_id.clone(),
             native: known.native,
+            catalog_session: Arc::new(std::sync::Mutex::new(None)),
             native_from_v1: known.from_v1,
             session: None,
             events: None,

@@ -178,15 +178,10 @@ pub(super) fn preflight_claude_setup(allow_install: bool) -> Result<(), String> 
 pub(super) fn probe_provider(provider_id: &str) -> Result<ProviderProbe, String> {
     if provider_id == "opencode" {
         let installations = crate::agents::opencode::installations();
-        let selected = crate::agents::opencode::selected(&installations).ok_or_else(|| {
-            "OpenCode v2 is not installed; install it from https://opencode.ai/v2/docs, then rerun `inline setup opencode`".to_string()
-        })?;
+        let selected = crate::agents::opencode::select_for_setup(&installations)?;
         // Discovery and setup agree on the exact executable, including older
         // opencode2 installs and GUI/service environments with a reduced PATH.
-        inline_agent_driver_acp::require_opencode_v2(
-            selected.version.as_deref().unwrap_or_default(),
-        )?;
-        return probe_configured_provider(provider_id, &selected.executable);
+        return probe_opencode_setup_candidate(&selected.executable, selected.version.as_deref());
     }
     let (display_name, executable, aliases) = if provider_id == "codex" {
         ("Codex", "codex", &[][..])
@@ -218,6 +213,23 @@ pub(super) fn probe_provider(provider_id: &str) -> Result<ProviderProbe, String>
     Err(last_error.unwrap_or_else(|| {
         format!("no working authenticated {display_name} installation was found on PATH")
     }))
+}
+
+fn probe_opencode_setup_candidate(
+    executable: &std::path::Path,
+    inventory_version: Option<&str>,
+) -> Result<ProviderProbe, String> {
+    // A short inventory timeout does not establish an incompatible version.
+    // Recheck the same selected executable with the full provider budget before
+    // applying setup's strict v2 gate or attempting authentication.
+    let version = match inventory_version {
+        Some(version) => version.to_owned(),
+        None => opencode_startup_version(executable).map_err(|error| error.to_string())?,
+    };
+    inline_agent_driver_acp::require_opencode_v2(&version)?;
+    let probe = probe_configured_provider("opencode", executable)?;
+    inline_agent_driver_acp::require_opencode_v2(&probe.version)?;
+    Ok(probe)
 }
 
 pub(super) async fn prepare_setup_provider(
@@ -932,18 +944,47 @@ fn terminate_probe_process(child: &mut std::process::Child, process_id: u32) {
 
 /// Bounded, credential-scrubbed inventory probe; never runs login or a model.
 pub(crate) fn opencode_version(executable: &std::path::Path) -> Option<String> {
+    opencode_version_with_timeout(executable, Duration::from_secs(2)).ok()
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum OpenCodeVersionProbeError {
+    #[error(
+        "could not verify the configured OpenCode version: {0}; retry or run `opencode --version`"
+    )]
+    Unavailable(String),
+    #[error("OpenCode returned an unrecognized version; run `opencode --version` and retry")]
+    Unrecognized,
+}
+
+/// Startup uses the normal provider budget. A temporary failure must retry,
+/// rather than permanently parking a previously configured installation.
+pub(crate) fn opencode_startup_version(
+    executable: &std::path::Path,
+) -> Result<String, OpenCodeVersionProbeError> {
+    opencode_version_with_timeout(executable, PROVIDER_PROBE_TIMEOUT)
+}
+
+fn opencode_version_with_timeout(
+    executable: &std::path::Path,
+    timeout: Duration,
+) -> Result<String, OpenCodeVersionProbeError> {
     let output = probe_command_output_with_timeout(
         "opencode",
         executable,
         &["--version"],
         "OpenCode version",
-        Duration::from_secs(2),
+        timeout,
     )
-    .ok()?;
-    output
-        .success
-        .then(|| inline_agent_driver_acp::parse_opencode_version(&output.stdout))?
+    .map_err(OpenCodeVersionProbeError::Unavailable)?;
+    if !output.success {
+        return Err(OpenCodeVersionProbeError::Unavailable(
+            "version command failed".to_string(),
+        ));
+    }
+    inline_agent_driver_acp::parse_opencode_version(&output.stdout)
         .map(|version| version.to_string())
+        .ok_or(OpenCodeVersionProbeError::Unrecognized)
 }
 
 fn has_opencode_model(value: &str) -> bool {
@@ -1398,6 +1439,83 @@ mod tests {
         );
         std::fs::write(&executable, "tampered").unwrap();
         assert!(super::super::installation_uses_v2(&current).await.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn setup_rechecks_an_unknown_inventory_version_with_the_full_probe_budget() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("opencode");
+        std::fs::write(&executable, "#!/bin/sh\ncase \"$1\" in\n--version) sleep 2.1; echo 'opencode v2.0.32';;\nauth) echo '1 credential';;\n*) exit 1;;\nesac\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            opencode_version(&executable).is_none(),
+            "inventory is bounded at two seconds"
+        );
+        let probe = probe_opencode_setup_candidate(&executable, None)
+            .expect("setup must retry an inconclusive inventory probe");
+        assert_eq!(probe.executable, executable);
+        assert_eq!(probe.version, "opencode v2.0.32");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_startup_allows_a_version_probe_slower_than_inventory_budget() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("opencode");
+        std::fs::write(
+            &executable,
+            "#!/bin/sh\nsleep 2.2\necho 'opencode v2.0.32'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let started = Instant::now();
+        assert_eq!(opencode_startup_version(&executable).unwrap(), "2.0.32");
+        assert!(started.elapsed() > Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_version_timeout_remains_transient() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("opencode");
+        std::fs::write(&executable, "#!/bin/sh\nsleep 30\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let started = Instant::now();
+        let error = opencode_version_with_timeout(&executable, Duration::from_millis(100))
+            .expect_err("version probe must time out");
+        assert!(matches!(&error, OpenCodeVersionProbeError::Unavailable(_)));
+        assert!(error.to_string().contains("timed out"));
+        assert_eq!(
+            super::super::classify_failure(&error),
+            super::super::FailureClass::Transient,
+        );
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unrecognized_opencode_startup_version_fails_without_parking_or_fallback() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let executable = temp.path().join("opencode");
+        std::fs::write(&executable, "#!/bin/sh\necho unknown\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let installation = installation("opencode", executable.to_str().unwrap());
+        let error = super::super::installation_uses_v2(&installation)
+            .await
+            .expect_err("an unrecognized version must not pick a bridge route");
+        assert!(matches!(
+            error.downcast_ref::<OpenCodeVersionProbeError>(),
+            Some(OpenCodeVersionProbeError::Unrecognized),
+        ));
+        assert_eq!(
+            super::super::classify_failure(error.as_ref()),
+            super::super::FailureClass::Transient,
+        );
     }
 
     #[cfg(unix)]

@@ -1313,8 +1313,9 @@ fn bridge_v2_is_the_default_for_qualified_providers_with_an_explicit_rollback() 
 }
 
 #[test]
-fn opencode_routing_preserves_v1_and_respects_v2_rollback() {
+fn opencode_routing_preserves_legacy_versions_and_respects_v2_rollback() {
     for setting in [None, Some("all"), Some("opencode"), Some("off")] {
+        assert!(!opencode_uses_v2(setting, "0.15.0").unwrap());
         assert!(!opencode_uses_v2(setting, "1.19.4").unwrap());
     }
     assert!(opencode_uses_v2(None, "opencode v2.0.32").unwrap());

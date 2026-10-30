@@ -51,7 +51,7 @@ function client(env) {
 }
 
 test('pinned Amp ACP preserves identity, settings and fresh MCP bindings across epochs', { timeout: 30000 }, async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'inline-amp-continuity-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'inline-amp-continuity-')));
   const native = path.join(root, 'amp-fixture.mjs');
   fs.writeFileSync(native, `#!/usr/bin/env node
 import fs from 'node:fs';
@@ -65,7 +65,21 @@ const previous = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
 fs.writeFileSync(file, previous || prompt);
 fs.appendFileSync(process.env.AMP_FIXTURE_ROOT + '/calls', JSON.stringify({ args, id, prompt, previous }) + '\\n');
 console.log(JSON.stringify({ type: 'system', session_id: id }));
-if (prompt === 'wait') setInterval(() => {}, 1000);
+if (prompt === 'rendering-fixture') {
+  const assistant = content => console.log(JSON.stringify({ type: 'assistant', message: { content } }));
+  const user = content => console.log(JSON.stringify({ type: 'user', message: { content } }));
+  assistant([{ type: 'tool_use', id: 'shell-proof', name: 'shell_command', input: { command: 'ls -la', workdir: process.cwd() } }]);
+  user([{ type: 'tool_result', tool_use_id: 'shell-proof', content: 'README.md', is_error: false }]);
+  assistant([{ type: 'tool_use', id: 'file-proof', name: 'create_file', input: { path: process.cwd() + '/AGENTS.md', content: 'private file contents are not progress' } }]);
+  user([{ type: 'tool_result', tool_use_id: 'file-proof', content: 'Created AGENTS.md', is_error: false }]);
+  assistant([{ type: 'tool_use', id: 'failure-proof', name: 'shell_command', input: { command: 'cat missing.txt', workdir: process.cwd() } }]);
+  user([{ type: 'tool_result', tool_use_id: 'failure-proof', content: 'missing.txt: No such file', is_error: true }]);
+  assistant([{ type: 'text', text: 'Done.<suggested-re' }]);
+  assistant('plies>\\nNext step\\n</suggested-re');
+  assistant([{ type: 'text', text: 'plies>\\nKeep this <suggested-' }]);
+  console.log(JSON.stringify({ type: 'result', is_error: false }));
+}
+else if (prompt === 'wait') setInterval(() => {}, 1000);
 else {
   console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: previous || prompt }] } }));
   console.log(JSON.stringify({ type: 'result', is_error: false }));
@@ -80,7 +94,7 @@ else {
     const info = await peer.request('initialize', { protocolVersion: 1, clientCapabilities: {} });
     assert.equal(info.agentCapabilities.loadSession, true);
     assert.equal(info.agentCapabilities.promptCapabilities.image, false);
-    assert.equal(info.agentInfo.version, '0.8.1+e4ccce1.inline2');
+    assert.equal(info.agentInfo.version, '0.8.1+e4ccce1.inline3');
     return peer;
   };
   const mcp = marker => [{ name: 'inline', command: 'fixture-mcp', args: [marker], env: [] }];
@@ -104,6 +118,9 @@ else {
     const loaded = await resumed.request('session/load', { sessionId: a.sessionId, cwd: root, mcpServers: mcp('new-capability') });
     assert.equal(loaded.configOptions.find(c => c.id === 'amp-mode').currentValue, 'high');
     await prompt(resumed, a.sessionId, 'recall');
+    assert.ok(resumed.updates.some(event => event.params?.sessionId === a.sessionId
+      && event.params?.update?.availableCommands?.some(command => command.name === 'init')),
+      'resumed sessions must advertise provider commands');
     const calls = fs.readFileSync(path.join(root, 'calls'), 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(calls[2].id, calls[0].id);
     assert.notEqual(calls[1].id, calls[0].id);
@@ -122,6 +139,33 @@ else {
     resumed.notify('session/cancel', { sessionId: a.sessionId });
     assert.equal((await waiting).stopReason, 'cancelled');
     await prompt(resumed, a.sessionId, 'after-cancel');
+    const commandSession = await resumed.request('session/new', { cwd: root, mcpServers: [] });
+    await resumed.request('session/prompt', { sessionId: commandSession.sessionId, prompt: [
+      { type: 'text', text: '/init' },
+      { type: 'text', text: '\nInline trusted guide sentinel.', annotations: { audience: ['assistant'] } },
+    ] });
+    const commandCall = fs.readFileSync(path.join(root, 'calls'), 'utf8').trim().split('\n').map(JSON.parse).at(-1);
+    assert.ok(commandCall.prompt.includes('create an AGENTS.md'));
+    assert.ok(commandCall.prompt.includes('Inline trusted guide sentinel.'));
+    assert.ok(!commandCall.prompt.includes('/init'));
+    const rendering = await resumed.request('session/new', { cwd: root, mcpServers: [] });
+    await prompt(resumed, rendering.sessionId, 'rendering-fixture');
+    const rendered = resumed.updates.filter(event => event.params?.sessionId === rendering.sessionId)
+      .map(event => event.params.update);
+    const shell = rendered.find(update => update.toolCallId === 'shell-proof' && update.sessionUpdate === 'tool_call');
+    assert.equal(shell.kind, 'execute');
+    assert.equal(shell.title, 'shell_command: ls -la');
+    assert.equal(shell.rawInput.command, 'ls -la');
+    const created = rendered.find(update => update.toolCallId === 'file-proof' && update.sessionUpdate === 'tool_call');
+    assert.equal(created.kind, 'edit');
+    assert.equal(created.locations[0].path, root + '/AGENTS.md');
+    const failure = rendered.find(update => update.toolCallId === 'failure-proof' && update.sessionUpdate === 'tool_call_update');
+    assert.equal(failure.status, 'failed');
+    assert.ok(failure.content[0].content.text.includes('missing.txt: No such file'));
+    const text = rendered.filter(update => update.sessionUpdate === 'agent_message_chunk')
+      .map(update => update.content.text).join('');
+    assert.equal(text, 'Done.\nNext step\n\nKeep this <suggested-');
+    assert.ok(!text.includes('<suggested-replies>') && !text.includes('</suggested-replies>'));
     fs.writeFileSync(path.join(sessions, a.sessionId + '.json'), '{}');
     await assert.rejects(resumed.request('session/load', { sessionId: a.sessionId, cwd: root, mcpServers: [] }));
   } finally {

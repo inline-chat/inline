@@ -244,9 +244,9 @@ const AMP: AcpProviderSupport = AcpProviderSupport {
     executable_aliases: &[],
     arguments: &[],
     distribution: AcpDistribution::EmbeddedAdapter(EmbeddedAdapterDistribution {
-        version: "0.8.1+e4ccce1.inline2",
+        version: "0.8.1+e4ccce1.inline3",
         source_revision: "e4ccce1b57c7ae92d75e8ba97fc03b92d414c06a",
-        checksum: "sha256-9b662dde73feba33bc7ee700d961c47f2027e68728888ada22a570bc11112998",
+        checksum: "sha256-8a451ba07e3f911daeb9cfaa3e27c85fa2539ec41bd3dbc4f01a79d3e6222ad1",
     }),
     version_discovery: VersionDiscovery::InitializeAgentInfo,
     login_program: "amp",

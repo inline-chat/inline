@@ -88,30 +88,38 @@ Current beta provider paths:
   Codex version number alone does not.
 - **OpenCode v2 experimental:** uses native `opencode acp` through bridge v2.
   OpenCode's application version is 2; its ACP wire protocol remains v1.
-  New setups require OpenCode v2. Existing v1 installations stay on bridge v1
+  New setups require OpenCode v2. Existing 0.x and v1 installations stay on bridge v1
   with migration guidance in `/help`, `/status`, and `inline bridge doctor`.
   `INLINE_BRIDGE_V2=off` also keeps v2 installations on the legacy bridge.
   `inline agents discover --json` adds an `installations` array for OpenCode:
   each entry has `version`, `majorVersion`, `supportStatus`, and a `migrationUrl`
-  for v1, without local paths. Setup prefers verified v2, including the older
+  for 0.x/v1, without local paths. Setup prefers verified v2, including the older
   `opencode2` alias; binary names alone do not establish a version.
   Each bridge v2 session owns a private ACP process so chats in the same folder
   cannot share Inline tool bindings. Stop, settings, approvals, questions, and
   session resume use the shared bridge contract. Native queue, passive input,
   session browser, and terminal handoff are not available through this route.
+  An advertised OpenCode slash command such as `/compact` is sent unchanged to
+  OpenCode even when ACP has no equivalent structured operation. The settings
+  panel offers only supported structured operations, so this does not add a
+  Compact button. Command and model catalogs come from the thread's folder and
+  open session. Idle sessions keep their private process for up to 30 minutes;
+  `/release` closes it immediately.
   An old session that cannot resume keeps its binding and asks the user to retry
   or explicitly start a fresh conversation with `/new`.
   To migrate, follow the [OpenCode guide](https://opencode.ai/v2/docs/migrate-v1/),
   verify `opencode --version` reports 2.x, then rerun `inline setup opencode`.
   Inline does not rewrite OpenCode configuration or upgrade its installation.
-- **Claude experimental:** uses the curated
-  `@agentclientprotocol/claude-agent-acp` adapter. The pinned adapter advertises
+- **Claude experimental:** bridge v2 runs the authenticated host `claude`
+  directly. The legacy bridge uses the curated
+  `@agentclientprotocol/claude-agent-acp` adapter. That pinned adapter advertises
   durable resume, but its cross-process `session/resume` path does not currently
-  pass Inline's live reliability gate. After a bridge/provider restart, Inline
-  therefore starts a fresh Claude session and says so instead of failing the
-  first user direction or retrying an ambiguous resume. Inline advertises ACP
-  form elicitation and translates Claude `AskUserQuestion` requests into the
-  same bounded Inline question messages used by Codex. Single-select questions
+  pass Inline's live reliability gate. After a bridge/provider restart, the
+  legacy bridge therefore starts a fresh Claude session and says so instead
+  of failing the first user direction or retrying an ambiguous resume. Inline
+  advertises ACP form elicitation on that fallback and translates Claude
+  `AskUserQuestion` requests into the same bounded Inline question messages
+  used by Codex. Single-select questions
   use choice buttons; multi-select questions accept comma-separated labels and
   preserve every selected value. Arbitrary form fields that Inline cannot
   safely represent are cancelled rather than guessed; generic free-text forms
@@ -130,6 +138,10 @@ Current beta provider paths:
   pin. Old adapter sessions cannot be recovered across processes; their saved
   bindings remain intact and `/new` starts a fresh conversation. Native queue,
   passive input, session browser and terminal handoff remain unavailable.
+  Advertised Amp commands such as `/init` are sent unchanged to Amp. Commands
+  the adapter does not advertise, including `/compact`, explain the available
+  next steps. Idle sessions retain their private process for up to 30 minutes;
+  `/release` closes it immediately.
 
 The explicit Claude and Amp setup commands install only their required adapters
 into immutable, private, versioned bridge directories using Inline's complete

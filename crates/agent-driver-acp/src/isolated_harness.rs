@@ -3,21 +3,33 @@
 //! Inline session its own private ACP server so concurrent chats in the same
 //! directory cannot inherit another chat's tool capability or permission state.
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use crate::{AcpHarness, AcpLaunchDescriptor, require_opencode_v2, spawn_acp_driver};
 use inline_agent_bridge::harness::*;
-use inline_agent_bridge::{AgentDriver, DriverError, DriverFuture, HostToolConfiguration};
+use inline_agent_bridge::{
+    AgentDriver, DriverError, DriverFuture, HostToolConfiguration, ProviderSessionId,
+};
+
+const MAX_CATALOG_FOLDERS: usize = 64;
 
 pub struct IsolatedAcpHarness {
     descriptor: AcpLaunchDescriptor,
     bridge_version: String,
     tools: Option<HostToolConfiguration>,
     info: RuntimeInfo,
-    epochs: Mutex<HashMap<String, Weak<AcpHarness>>>,
+    epochs: Mutex<HashMap<String, LiveEpoch>>,
     opening: tokio::sync::Mutex<()>,
+    catalog_epoch: tokio::sync::Mutex<Option<(PathBuf, Arc<AcpHarness>)>>,
+    catalog_sessions: Mutex<HashMap<PathBuf, ProviderSessionId>>,
     stopped: AtomicBool,
+}
+
+struct LiveEpoch {
+    folder: PathBuf,
+    epoch: Weak<AcpHarness>,
 }
 
 impl IsolatedAcpHarness {
@@ -41,6 +53,8 @@ impl IsolatedAcpHarness {
             info,
             epochs: Mutex::new(HashMap::new()),
             opening: tokio::sync::Mutex::new(()),
+            catalog_epoch: tokio::sync::Mutex::new(None),
+            catalog_sessions: Mutex::new(HashMap::new()),
             stopped: AtomicBool::new(false),
         })
     }
@@ -48,13 +62,17 @@ impl IsolatedAcpHarness {
     pub async fn shutdown(&self) -> Result<(), DriverError> {
         self.stopped.store(true, Ordering::SeqCst);
         let _opening = self.opening.lock().await;
-        let epochs: Vec<_> = self
+        let mut catalog_epoch = self.catalog_epoch.lock().await;
+        let mut epochs: Vec<_> = self
             .epochs
             .lock()
             .unwrap()
             .values()
-            .filter_map(Weak::upgrade)
+            .filter_map(|entry| entry.epoch.upgrade())
             .collect();
+        if let Some((_, epoch)) = catalog_epoch.take() {
+            epochs.push(epoch);
+        }
         let mut first_error = None;
         for epoch in epochs {
             if let Err(error) = epoch.shutdown().await {
@@ -62,6 +80,50 @@ impl IsolatedAcpHarness {
             }
         }
         first_error.map_or(Ok(()), Err)
+    }
+
+    // Only tool-free probe identities enter this map. Native chat sessions
+    // must never be resumed in a process shared by folder catalog requests.
+    async fn open_catalog_epoch(&self, folder: &PathBuf) -> Result<Arc<AcpHarness>, DriverError> {
+        let epoch = launch(&self.descriptor, &self.bridge_version, None).await?;
+        let cached = self.catalog_sessions.lock().unwrap().get(folder).cloned();
+        let mode = cached.map_or(OpenMode::Start, |session| OpenMode::Resume { session });
+        let mut spec = OpenSpec {
+            mode,
+            folder: folder.clone(),
+            settings: Default::default(),
+            instructions: None,
+            title: None,
+            after: None,
+            output_mode: OutputMode::Detailed,
+        };
+        let opened = match epoch.open(spec.clone()).await {
+            Err(OpenError::NotFound) => {
+                self.catalog_sessions.lock().unwrap().remove(folder);
+                spec.mode = OpenMode::Start;
+                epoch.open(spec).await
+            }
+            result => result,
+        };
+        let session = match opened {
+            Ok(session) => session,
+            Err(error) => {
+                let _ = epoch.shutdown().await;
+                return Err(match error {
+                    OpenError::Driver(error) => error,
+                    other => DriverError::Unavailable(other.to_string()),
+                });
+            }
+        };
+        let mut sessions = self.catalog_sessions.lock().unwrap();
+        if sessions.len() >= MAX_CATALOG_FOLDERS
+            && !sessions.contains_key(folder)
+            && let Some(oldest) = sessions.keys().next().cloned()
+        {
+            sessions.remove(&oldest);
+        }
+        sessions.insert(folder.clone(), session.key().session.clone());
+        Ok(epoch)
     }
 }
 
@@ -73,7 +135,7 @@ impl Drop for IsolatedAcpHarness {
                 .lock()
                 .unwrap()
                 .values()
-                .filter_map(Weak::upgrade)
+                .filter_map(|entry| entry.epoch.upgrade())
             {
                 runtime.spawn(async move {
                     let _ = epoch.shutdown().await;
@@ -198,28 +260,78 @@ impl HarnessDriver for IsolatedAcpHarness {
         self.info.clone()
     }
 
-    fn catalog<'a>(&'a self, scope: CatalogScope) -> DriverFuture<'a, Catalog> {
+    fn catalog<'a>(&'a self, mut scope: CatalogScope) -> DriverFuture<'a, Catalog> {
         Box::pin(async move {
-            let _opening = self.opening.lock().await;
             if self.stopped.load(Ordering::SeqCst) {
                 return Err(DriverError::Unavailable("ACP harness stopped".into()));
             }
-            let existing = scope.session.as_ref().and_then(|session| {
-                self.epochs
-                    .lock()
-                    .unwrap()
-                    .get(session.as_str())
-                    .and_then(Weak::upgrade)
-            });
-            if let Some(epoch) = existing {
+            let folder = scope.folder.clone().unwrap_or_else(|| PathBuf::from("/"));
+            let existing = self
+                .epochs
+                .lock()
+                .unwrap()
+                .iter()
+                .find_map(|(session, entry)| {
+                    if (scope.folder.is_some() && entry.folder != folder)
+                        || scope
+                            .session
+                            .as_ref()
+                            .is_some_and(|requested| requested.as_str() != session)
+                    {
+                        return None;
+                    }
+                    let epoch = entry.epoch.upgrade()?;
+                    if epoch
+                        .process_status()
+                        .is_some_and(|status| status.is_finished())
+                    {
+                        return None;
+                    }
+                    Some((session.clone(), entry.folder.clone(), epoch))
+                });
+            if let Some((session, folder, epoch)) = existing {
+                scope.folder = Some(folder);
+                scope.session = Some(
+                    inline_agent_bridge::ProviderSessionId::new(session)
+                        .map_err(|error| DriverError::Protocol(error.to_string()))?,
+                );
                 return epoch.catalog(scope).await;
             }
-            // Catalog probing never receives Inline tools or another session's
-            // capability. Its private server is closed on success and failure.
-            let epoch = launch(&self.descriptor, &self.bridge_version, None).await?;
-            let result = epoch.catalog(scope).await;
-            let shutdown = epoch.shutdown().await;
-            result.and_then(|catalog| shutdown.map(|_| catalog))
+            if scope.session.is_some() {
+                return Err(DriverError::InvalidSession(
+                    "ACP session catalog is unavailable".into(),
+                ));
+            }
+            // One retained, tool-free probe keeps repeated picker reads from
+            // creating durable junk sessions. It never blocks chat opens.
+            // Switching folders replaces the probe, bounding retained processes.
+            let mut probe = self.catalog_epoch.lock().await;
+            if self.stopped.load(Ordering::SeqCst) {
+                return Err(DriverError::Unavailable("ACP harness stopped".into()));
+            }
+            if probe.as_ref().is_some_and(|(current, epoch)| {
+                current != &folder
+                    || epoch
+                        .process_status()
+                        .is_some_and(|status| status.is_finished())
+            }) && let Some((_, epoch)) = probe.take()
+            {
+                let _ = epoch.shutdown().await;
+            }
+            if probe.is_none() {
+                let epoch = self.open_catalog_epoch(&folder).await?;
+                *probe = Some((folder, epoch));
+            }
+            // A detached native session has no live metadata here. Probe the
+            // folder without attaching its conversation to this shared process.
+            scope.session = None;
+            let result = probe.as_ref().unwrap().1.catalog(scope).await;
+            if result.is_err()
+                && let Some((_, epoch)) = probe.take()
+            {
+                let _ = epoch.shutdown().await;
+            }
+            result
         })
     }
 
@@ -241,7 +353,7 @@ impl HarnessDriver for IsolatedAcpHarness {
                     .lock()
                     .unwrap()
                     .get(session.as_str())
-                    .and_then(Weak::upgrade)
+                    .and_then(|entry| entry.epoch.upgrade())
                     .is_some_and(|epoch| {
                         epoch
                             .process_status()
@@ -256,6 +368,7 @@ impl HarnessDriver for IsolatedAcpHarness {
             let epoch = launch(&self.descriptor, &self.bridge_version, self.tools.clone())
                 .await
                 .map_err(OpenError::Driver)?;
+            let folder = spec.folder.clone();
             let session = match epoch.open(spec).await {
                 Ok(session) => session,
                 Err(error) => {
@@ -264,8 +377,14 @@ impl HarnessDriver for IsolatedAcpHarness {
                 }
             };
             let mut epochs = self.epochs.lock().unwrap();
-            epochs.retain(|_, epoch| epoch.strong_count() > 0);
-            epochs.insert(session.key().session.to_string(), Arc::downgrade(&epoch));
+            epochs.retain(|_, entry| entry.epoch.strong_count() > 0);
+            epochs.insert(
+                session.key().session.to_string(),
+                LiveEpoch {
+                    folder,
+                    epoch: Arc::downgrade(&epoch),
+                },
+            );
             Ok(Arc::new(IsolatedAcpSession { session, epoch }) as Arc<dyn Session>)
         })
     }
@@ -296,10 +415,27 @@ impl Session for IsolatedAcpSession {
     }
     fn release<'a>(&'a self) -> HarnessFuture<'a, Released, OpError> {
         Box::pin(async move {
-            let mut released = self.session.release().await?;
+            let cancelled_interactions = self.session.live_work().interactions;
+            let released = self.session.release().await;
             // This process belongs to this session alone; killing/reaping it
             // confirms release without interrupting another Inline chat.
-            self.epoch.shutdown().await.map_err(OpError::Driver)?;
+            let shutdown = self.epoch.shutdown().await;
+            if !self
+                .epoch
+                .process_status()
+                .is_some_and(|status| status.is_finished())
+            {
+                shutdown.map_err(OpError::Driver)?;
+            }
+            // A cancellation or transport error cannot retain ownership after
+            // this session's process has been confirmed stopped.
+            let mut released = released.unwrap_or_else(|_| Released {
+                key: self.session.key().clone(),
+                outcome: ReleaseOutcome::NativeReleased,
+                cancelled_interactions,
+                pending_inputs: Vec::new(),
+                stopped_children: Vec::new(),
+            });
             released.outcome = ReleaseOutcome::NativeReleased;
             Ok(released)
         })

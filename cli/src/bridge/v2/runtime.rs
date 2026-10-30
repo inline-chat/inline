@@ -1068,7 +1068,7 @@ impl Runtime {
             return;
         }
         self.bound_configs.insert(chat_id, seen);
-        let catalog = self.catalog().await;
+        let catalog = self.catalog_for_chat(chat_id).await;
         let change = settings::bound(model, effort, &catalog);
         let current = self
             .thread_settings
@@ -1122,6 +1122,54 @@ impl Runtime {
                     .unwrap_or_default()
             }
         }
+    }
+
+    /// ACP commands and settings can depend on the thread's project. Do not
+    /// reuse the installation-wide catalog for a different folder.
+    async fn catalog_for_chat(&mut self, chat_id: i64) -> Catalog {
+        if !matches!(
+            self.config.vocabulary,
+            Vocabulary::OpenCode | Vocabulary::Amp
+        ) {
+            return self.catalog().await;
+        }
+        match self
+            .agent
+            .harness
+            .catalog(CatalogScope {
+                folder: Some(self.thread_folder(chat_id)),
+                session: self
+                    .works
+                    .get(&chat_id)
+                    .and_then(WorkHandle::catalog_session),
+            })
+            .await
+        {
+            Ok(catalog) => {
+                self.agent.record_limits(&catalog.usage);
+                catalog
+            }
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "chat={chat_id} catalog unavailable: {error}");
+                Catalog::default()
+            }
+        }
+    }
+
+    async fn forwards_command(&mut self, chat_id: i64, name: &str, grants: Grants) -> bool {
+        if !harness_command_candidate(
+            self.config.vocabulary,
+            self.agent.harness.describe().manifest.as_ref(),
+            name,
+        ) || (INLINE_COMMANDS.contains(&name) && !grants.permits(Operation::Steer))
+        {
+            return false;
+        }
+        self.catalog_for_chat(chat_id)
+            .await
+            .commands
+            .iter()
+            .any(|command| command.name == name)
     }
 
     /// The folders threads pick from: the agent's own, the harness's in
@@ -1298,12 +1346,11 @@ impl Runtime {
             folder_id: folders.as_ref().and_then(|folders| folders.id_of(&folder)),
             folder_fixed,
             can_compact: self.works.contains_key(&chat_id),
-            compact_supported: self
-                .agent
-                .harness
-                .describe()
-                .manifest
-                .is_some_and(|manifest| manifest.availability.op(OpKind::Compact).is_supported()),
+            compact_supported: native_operation_supported(
+                self.config.vocabulary,
+                self.agent.harness.describe().manifest.as_ref(),
+                OpKind::Compact,
+            ),
             usage: &usage,
             context,
         })
@@ -1337,7 +1384,7 @@ impl Runtime {
                 None,
             );
         }
-        let catalog = self.catalog().await;
+        let catalog = self.catalog_for_chat(chat_id).await;
         let current = self.settings_document(chat_id, &catalog).await;
         let Some((item_id, value, revision)) = invoked else {
             return BotChatSettingsResponse::Document(current);
@@ -1428,7 +1475,7 @@ impl Runtime {
                 return "Only the agent's owner, or someone they let configure it, can change that."
                     .to_owned();
             }
-            let catalog = self.catalog().await;
+            let catalog = self.catalog_for_chat(chat_id).await;
             let argument = arguments.trim();
             if argument.is_empty() {
                 return settings::describe(
@@ -1466,9 +1513,15 @@ impl Runtime {
                 if !grants.permits(Operation::Steer) {
                     return NO_ACCESS.to_owned();
                 }
-                if matches!(
+                let kind = if name == "compact" {
+                    OpKind::Compact
+                } else {
+                    OpKind::Clear
+                };
+                if !native_operation_supported(
                     self.config.vocabulary,
-                    Vocabulary::OpenCode | Vocabulary::Amp
+                    self.agent.harness.describe().manifest.as_ref(),
+                    kind,
                 ) {
                     return format!(
                         "{} cannot {name} this session. You can keep chatting here, or use /new for a fresh thread.",
@@ -1499,7 +1552,47 @@ impl Runtime {
                 )
             }
             "status" => self.status(chat_id, actor).await,
-            "help" => help_text(&self.config.agent_name, self.config.vocabulary),
+            "help" => {
+                let mut help = help_text(&self.config.agent_name, self.config.vocabulary);
+                if matches!(
+                    self.config.vocabulary,
+                    Vocabulary::OpenCode | Vocabulary::Amp
+                ) {
+                    let catalog = self.catalog_for_chat(chat_id).await;
+                    let info = self.agent.harness.describe();
+                    let commands: Vec<_> = catalog
+                        .commands
+                        .iter()
+                        .filter(|command| {
+                            harness_command_candidate(
+                                self.config.vocabulary,
+                                info.manifest.as_ref(),
+                                &command.name,
+                            )
+                        })
+                        .take(24)
+                        .collect();
+                    if !commands.is_empty() {
+                        help.push_str("\n\nProvider commands for this thread:");
+                        for command in commands {
+                            let name: String = command.name.chars().take(64).collect();
+                            help.push_str(&format!("\n/{name}"));
+                            let description: String = command
+                                .description
+                                .lines()
+                                .next()
+                                .unwrap_or_default()
+                                .chars()
+                                .take(120)
+                                .collect();
+                            if !description.is_empty() {
+                                help.push_str(&format!(" · {description}"));
+                            }
+                        }
+                    }
+                }
+                help
+            }
             "plan" | "review" | "undo" => {
                 if !grants.permits(Operation::Steer) {
                     return NO_ACCESS.to_owned();
@@ -1620,7 +1713,7 @@ impl Runtime {
             Some(WorkPhase::Running) => "Working.",
             Some(WorkPhase::Paused) => "Paused. Mention the agent or send /resume to go on.",
         };
-        let catalog = self.catalog().await;
+        let catalog = self.catalog_for_chat(chat_id).await;
         let settings = self
             .thread_settings
             .get(&chat_id)
@@ -2020,17 +2113,12 @@ impl Runtime {
             }
             _ => None,
         };
-        // The harness's own slash commands (Claude's custom commands and
-        // skills) go to it as typed; Inline's commands win a collision.
+        // Advertised commands go to the harness as typed. ACP may advertise
+        // a slash command for an operation its structured API cannot perform.
+        // Inline's controls and access/settings commands still win collisions.
         let forward = match group.command() {
-            Some((name, _))
-                if control.is_none() && name != "queue" && !INLINE_COMMANDS.contains(&name) =>
-            {
-                self.catalog()
-                    .await
-                    .commands
-                    .iter()
-                    .any(|command| command.name == name)
+            Some((name, _)) if control.is_none() => {
+                self.forwards_command(chat_id, name, grants).await
             }
             _ => false,
         };
@@ -2084,7 +2172,7 @@ impl Runtime {
                 content: InputContent {
                     text: harness_command_text(&group.text, &self.config.bot_username),
                     attachments: Vec::new(),
-                    context,
+                    context: None,
                 },
                 origin: origin_of(group, self.config.owner_user_id),
                 delivery: Delivery::Turn,
@@ -2378,6 +2466,19 @@ impl Runtime {
             .get(&chat_id)
             .cloned()
             .unwrap_or_default();
+        let legacy = self.v1_session(chat_id);
+        // Keep the folder even when Inline already knows the legacy session.
+        // Save it before adoption, so the next restart does not use the default.
+        if settings.folder.is_none()
+            && let Some((native, Some(folder))) = &legacy
+            && result.connection.as_ref().is_none_or(|connection| {
+                connection.session_ref.is_empty() || connection.session_ref == native.as_str()
+            })
+        {
+            settings.folder = Some(folder.clone());
+            self.thread_settings.insert(chat_id, settings.clone());
+            self.save_thread(chat_id);
+        }
         let known = match result.connection {
             Some(connection) if !connection.session_ref.is_empty() => Known {
                 agent_session_id: connection.agent_session.map(|session| session.id),
@@ -2386,17 +2487,12 @@ impl Runtime {
             },
             // Inline knows no work here: a thread v1 served goes on in its
             // session and folder.
-            _ => match self.v1_session(chat_id) {
-                Some((native, folder)) => {
-                    if settings.folder.is_none() {
-                        settings.folder = folder;
-                    }
-                    Known {
-                        agent_session_id: None,
-                        native: Some(native),
-                        from_v1: true,
-                    }
-                }
+            _ => match legacy {
+                Some((native, _)) => Known {
+                    agent_session_id: None,
+                    native: Some(native),
+                    from_v1: true,
+                },
                 None => Known::default(),
             },
         };
@@ -2646,6 +2742,41 @@ const INLINE_COMMANDS: &[&str] = &[
     "review",
     "undo",
 ];
+
+fn native_operation_supported(
+    vocabulary: Vocabulary,
+    manifest: Option<&inline_agent_bridge::harness::CapabilityManifest>,
+    kind: OpKind,
+) -> bool {
+    manifest.map_or(
+        // Native harnesses learn their manifest when their first session
+        // opens. An absent manifest must not remove Claude's existing UI.
+        !matches!(vocabulary, Vocabulary::OpenCode | Vocabulary::Amp),
+        |manifest| manifest.availability.op(kind).is_supported(),
+    )
+}
+
+fn harness_command_candidate(
+    vocabulary: Vocabulary,
+    manifest: Option<&inline_agent_bridge::harness::CapabilityManifest>,
+    name: &str,
+) -> bool {
+    if !INLINE_COMMANDS.contains(&name) {
+        return true;
+    }
+    if !matches!(vocabulary, Vocabulary::OpenCode | Vocabulary::Amp) {
+        return false;
+    }
+    let kind = match name {
+        "compact" => OpKind::Compact,
+        "clear" => OpKind::Clear,
+        "plan" => OpKind::Mode,
+        "review" => OpKind::Review,
+        "undo" => OpKind::RewindFiles,
+        _ => return false,
+    };
+    !native_operation_supported(vocabulary, manifest, kind)
+}
 
 /// A harness command as the person typed it, without Inline's `@bot` suffix.
 fn harness_command_text(text: &str, bot_username: &str) -> String {

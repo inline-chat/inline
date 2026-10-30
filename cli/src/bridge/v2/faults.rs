@@ -71,6 +71,7 @@ struct FakeSession {
     key: SessionKey,
     hub: EventHub,
     sends: AtomicUsize,
+    received: Mutex<Vec<Input>>,
     unknown_first: bool,
 }
 
@@ -97,6 +98,7 @@ impl Session for FakeSession {
             if self.unknown_first && n == 0 {
                 return Err(SendError::Unknown("the reply was lost".into()));
             }
+            self.received.lock().unwrap().push(input.clone());
             Ok(InputReceipt {
                 input: input.id,
                 disposition: InputDisposition::Started {
@@ -128,6 +130,8 @@ struct FakeHarness {
     folders: Mutex<Vec<CatalogFolder>>,
     /// Sessions a resume does not find.
     missing: Mutex<Vec<String>>,
+    catalog_scopes: Mutex<Vec<CatalogScope>>,
+    commands: Mutex<HashMap<PathBuf, Vec<inline_agent_bridge::DriverCommand>>>,
 }
 
 impl HarnessDriver for FakeHarness {
@@ -147,9 +151,16 @@ impl HarnessDriver for FakeHarness {
         }
     }
 
-    fn catalog<'a>(&'a self, _: CatalogScope) -> DriverFuture<'a, Catalog> {
-        Box::pin(async {
+    fn catalog<'a>(&'a self, scope: CatalogScope) -> DriverFuture<'a, Catalog> {
+        Box::pin(async move {
+            let commands = scope
+                .folder
+                .as_ref()
+                .and_then(|folder| self.commands.lock().unwrap().get(folder).cloned())
+                .unwrap_or_default();
+            self.catalog_scopes.lock().unwrap().push(scope);
             Ok(Catalog {
+                commands,
                 permission_modes: vec![DriverSettingOption {
                     value: "plan".into(),
                     label: "Plan".into(),
@@ -219,6 +230,7 @@ fn fixture(unknown_first: bool) -> (Runtime, Arc<FakeHarness>, Cleanup) {
         hub: EventHub::new(key.clone(), 32),
         key,
         sends: AtomicUsize::new(0),
+        received: Mutex::new(Vec::new()),
         unknown_first,
     });
     let harness = Arc::new(FakeHarness {
@@ -226,6 +238,8 @@ fn fixture(unknown_first: bool) -> (Runtime, Arc<FakeHarness>, Cleanup) {
         opened: Mutex::new(vec![]),
         folders: Mutex::new(vec![]),
         missing: Mutex::new(vec![]),
+        catalog_scopes: Mutex::new(vec![]),
+        commands: Mutex::new(HashMap::new()),
     });
     (runtime(&mut cleanup, harness.clone()), harness, cleanup)
 }
@@ -606,6 +620,171 @@ async fn acp_unsupported_commands_offer_a_useful_next_step_without_opening_a_ses
     }
 }
 
+#[tokio::test]
+async fn acp_advertised_commands_use_the_threads_folder_and_preserve_inline_controls() {
+    use inline_agent_bridge::{DriverCommand, DriverCommandInput};
+    for vocabulary in [Vocabulary::OpenCode, Vocabulary::Amp] {
+        let (mut runtime, harness, mut cleanup) = fixture(false);
+        runtime.config.vocabulary = vocabulary;
+        let folder = PathBuf::from("/project-with-commands");
+        runtime.thread_settings.entry(9).or_default().folder = Some(folder.clone());
+        let advertised = if vocabulary == Vocabulary::OpenCode {
+            vec!["compact", "plan", "review", "undo", "clear", "init"]
+        } else {
+            vec!["init", "review"]
+        };
+        harness.commands.lock().unwrap().insert(
+            folder.clone(),
+            advertised
+                .iter()
+                .copied()
+                .chain(["stop", "model"])
+                .map(|name| DriverCommand {
+                    name: name.into(),
+                    description: String::new(),
+                    input_hint: None,
+                    input: DriverCommandInput::None,
+                })
+                .collect(),
+        );
+        for name in &advertised {
+            assert!(
+                runtime.forwards_command(9, name, Grants::OWNER).await,
+                "{name}"
+            );
+            assert!(
+                !runtime.forwards_command(10, name, Grants::OWNER).await,
+                "{name} leaked folders"
+            );
+        }
+        for name in ["stop", "new", "model", "help", "terminal", "queue"] {
+            assert!(
+                !runtime.forwards_command(9, name, Grants::OWNER).await,
+                "{name}"
+            );
+        }
+        assert!(
+            !runtime
+                .forwards_command(9, "not-advertised", Grants::OWNER)
+                .await
+        );
+        let help = runtime.command(9, 1, Grants::OWNER, "help", "", &[]).await;
+        assert!(help.contains("Provider commands for this thread:"));
+        for name in &advertised {
+            assert!(help.contains(&format!("\n/{name}")));
+        }
+        let elsewhere = runtime.command(10, 1, Grants::OWNER, "help", "", &[]).await;
+        assert!(!elsewhere.contains("Provider commands for this thread:"));
+        if vocabulary == Vocabulary::Amp {
+            assert!(!runtime.forwards_command(9, "compact", Grants::OWNER).await);
+        }
+        assert!(
+            !runtime
+                .forwards_command(
+                    9,
+                    "review",
+                    Grants {
+                        invoke: true,
+                        ..Grants::NONE
+                    }
+                )
+                .await
+        );
+        let name = if vocabulary == Vocabulary::OpenCode {
+            "compact"
+        } else {
+            "init"
+        };
+        let text = format!("/{name}@{}", runtime.config.bot_username);
+        let message = MessageRecord {
+            chat_id: InlineId::new(9),
+            message_id: InlineId::new(901),
+            sender_id: InlineId::new(1),
+            timestamp: 1,
+            is_outgoing: false,
+            content: inline_client::MessageContent::Text { text: text.clone() },
+            reply_to_message_id: None,
+            metadata: Default::default(),
+            transaction: None,
+        };
+        let group = GroupMessage {
+            chat_id: 9,
+            message_id: 901,
+            author: inline_agent_bridge::group::Author {
+                user_id: 1,
+                display_name: "Owner".into(),
+                kind: inline_agent_bridge::group::AuthorKind::Human,
+            },
+            conversation: Conversation::Dm,
+            via: Default::default(),
+            text,
+            entities: vec![inline_agent_bridge::group::MessageEntity::Command {
+                offset: 0,
+                length: 8,
+                name: name.into(),
+                target_user_id: Some(2),
+            }],
+            reply_to: None,
+            sent_at: 1,
+        };
+        let decision = IntakeDecision::Act {
+            reason: DirectReason::Command,
+            join: false,
+            required: Operation::StartWork,
+        };
+        runtime
+            .act(
+                &message,
+                &group,
+                &decision,
+                Operation::StartWork,
+                Grants::OWNER,
+                None,
+            )
+            .await
+            .unwrap();
+        until(|| !harness.session.received.lock().unwrap().is_empty()).await;
+        {
+            let received = harness.session.received.lock().unwrap();
+            assert_eq!(received[0].content.text, format!("/{name}"));
+            assert!(received[0].content.context.is_none());
+        }
+        assert!(runtime.forwards_command(9, name, Grants::OWNER).await);
+        let scopes = harness.catalog_scopes.lock().unwrap();
+        let scope = scopes.last().unwrap();
+        assert_eq!(scope.folder.as_ref(), Some(&folder));
+        assert_eq!(
+            scope.session.as_ref().map(|session| session.as_str()),
+            Some("fault-session")
+        );
+        drop(scopes);
+        let handle = runtime.works.remove(&9).unwrap();
+        cleanup.tasks.push(handle.task);
+    }
+}
+
+#[tokio::test]
+async fn unknown_native_manifest_keeps_claudes_compact_control() {
+    let (mut runtime, _, _cleanup) = fixture(false);
+    let document = runtime.settings_document(9, &Catalog::default()).await;
+    assert!(
+        document
+            .sections
+            .iter()
+            .flat_map(|section| &section.items)
+            .any(|item| item.id == settings::ITEM_COMPACT)
+    );
+    runtime.config.vocabulary = Vocabulary::OpenCode;
+    let document = runtime.settings_document(9, &Catalog::default()).await;
+    assert!(
+        !document
+            .sections
+            .iter()
+            .flat_map(|section| &section.items)
+            .any(|item| item.id == settings::ITEM_COMPACT)
+    );
+}
+
 struct UnreachableOwner;
 impl OwnerCalls for UnreachableOwner {
     fn connect(
@@ -874,7 +1053,52 @@ async fn a_thread_v1_served_goes_on_in_its_session_and_folder() {
     assert_eq!(harness.opened.lock().unwrap()[0].folder, other);
     // Inline now knows the session, so later lookups find it there.
     until(|| runtime.works[&9].agent_session_id() == Some(1)).await;
-    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+    let task = runtime.works.remove(&9).unwrap().task;
+    task.abort();
+    let _ = task.await;
+    drop(runtime);
+    // The next process sees the registered session on Inline. Its folder
+    // survives in the v2 ledger without the legacy store attached.
+    let mut restarted = super::faults::runtime(&mut cleanup, harness.clone());
+    restarted.ensure_work(9, None).await.unwrap();
+    let (id, command) = input(&restarted, 95);
+    restarted.works[&9].tx.send(command).await.unwrap();
+    until(|| state(&restarted, &id) == Some(InputState::Accepted)).await;
+    assert_eq!(harness.opened.lock().unwrap()[1].folder, other);
+    cleanup.tasks.push(restarted.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
+async fn registered_acp_legacy_sessions_inherit_only_their_matching_folder() {
+    for vocabulary in [Vocabulary::OpenCode, Vocabulary::Amp] {
+        for (legacy_session, explicit_folder, use_legacy) in [
+            ("fault-session", false, true),
+            ("fault-session", true, false),
+            ("another-session", false, false),
+        ] {
+            let (mut runtime, harness, mut cleanup, other) = v1_fixture(legacy_session);
+            runtime.config.vocabulary = vocabulary;
+            let agent = Arc::get_mut(&mut runtime.agent).unwrap();
+            agent.owner = Arc::new(Owner);
+            agent.vocabulary = vocabulary;
+            if explicit_folder {
+                runtime.thread_settings.entry(9).or_default().folder =
+                    Some(runtime.config.folder.clone());
+            }
+            runtime.ensure_work(9, None).await.unwrap();
+            let (id, command) = input(&runtime, 96);
+            runtime.works[&9].tx.send(command).await.unwrap();
+            until(|| state(&runtime, &id) == Some(InputState::Accepted)).await;
+            let expected = if use_legacy {
+                &other
+            } else {
+                &runtime.config.folder
+            };
+            assert_eq!(&harness.opened.lock().unwrap()[0].folder, expected);
+            assert_eq!(&runtime.thread_folder(9), expected);
+            cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+        }
+    }
 }
 
 #[tokio::test]

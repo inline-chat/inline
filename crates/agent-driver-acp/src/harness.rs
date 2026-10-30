@@ -98,6 +98,7 @@ pub struct AcpHarness {
     executable: ExecutableInfo,
     driver_version: String,
     process_status: Option<crate::AcpProcessStatus>,
+    catalog_sessions: tokio::sync::Mutex<HashMap<PathBuf, ProviderSessionId>>,
 }
 
 impl AcpHarness {
@@ -113,6 +114,7 @@ impl AcpHarness {
             executable,
             driver_version: driver_version.into(),
             process_status: None,
+            catalog_sessions: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -129,6 +131,7 @@ impl AcpHarness {
             executable,
             driver_version: driver_version.into(),
             process_status: Some(spawned.process_status),
+            catalog_sessions: tokio::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -186,14 +189,23 @@ impl HarnessDriver for AcpHarness {
                 return Ok(Catalog::default());
             }
             let folder = scope.folder.unwrap_or_else(|| PathBuf::from("/"));
+            let mut catalog_sessions = self.catalog_sessions.lock().await;
             let settings = self.driver.settings_catalog(&folder).await?;
             let commands = if self.driver.capabilities().session_commands {
-                let session = match scope.session {
+                let session = match scope
+                    .session
+                    .or_else(|| catalog_sessions.get(&folder).cloned())
+                {
                     Some(session) => session,
                     None => {
-                        self.driver
-                            .start_session(SessionSpec { cwd: folder })
-                            .await?
+                        let session = self
+                            .driver
+                            .start_session(SessionSpec {
+                                cwd: folder.clone(),
+                            })
+                            .await?;
+                        catalog_sessions.insert(folder.clone(), session.clone());
+                        session
                     }
                 };
                 self.driver
@@ -260,6 +272,7 @@ impl HarnessDriver for AcpHarness {
                 hub: EventHub::new(key.clone(), DEFAULT_HUB_CAPACITY),
                 tracker: Mutex::new(RunStateTracker::new(RunState::Idle)),
                 state: Mutex::new(AcpState {
+                    first_turn_sent: matches!(spec.mode, OpenMode::Resume { .. }),
                     options: TurnOptions {
                         cwd: Some(spec.folder.clone()),
                         model: spec.settings.model.clone(),
@@ -274,6 +287,27 @@ impl HarnessDriver for AcpHarness {
                 instructions: spec.instructions.clone(),
                 mutation: tokio::sync::Mutex::new(()),
             });
+            self.catalog_sessions
+                .lock()
+                .await
+                .insert(spec.folder, inner.session.clone());
+            if let Some(status) = self.process_status.clone() {
+                let weak = Arc::downgrade(&inner);
+                tokio::spawn(async move {
+                    let _ = status.wait().await;
+                    if let Some(inner) = weak.upgrade() {
+                        let _mutation = inner.mutation.lock().await;
+                        let turn = inner.state().turn.clone();
+                        if let Some(turn) = turn {
+                            complete_if_active(&inner, turn, TurnOutcome::ConnectionLost);
+                        }
+                        inner.state().released = true;
+                        inner.emit(Event::State {
+                            state: RunState::Released,
+                        });
+                    }
+                });
+            }
             Ok(Arc::new(AcpSession { inner }) as Arc<dyn Session>)
         })
     }
@@ -394,7 +428,7 @@ impl Session for AcpSession {
                     let turn = started.turn_id.clone();
                     {
                         let mut state = self.inner.state();
-                        state.first_turn_sent = true;
+                        state.first_turn_sent |= first;
                         state.turn = Some(turn.clone());
                         state.turn_inputs = vec![input.id.clone()];
                     }
@@ -845,11 +879,8 @@ fn map_event(inner: &AcpSessionInner, event: AgentEvent, native: Value) -> Vec<E
         })],
         AgentEvent::ActivityUpsert { turn_id, activity } => {
             let body = match activity.kind {
-                ActivitySemanticKind::Execute => ItemBody::Command {
-                    command: activity
-                        .detail
-                        .clone()
-                        .unwrap_or_else(|| activity.title.clone()),
+                ActivitySemanticKind::Execute if activity.detail.is_some() => ItemBody::Command {
+                    command: activity.detail.clone().unwrap(),
                     cwd: None,
                     actions: Vec::new(),
                     output: activity.output_snapshot.clone(),
@@ -879,7 +910,11 @@ fn map_event(inner: &AcpSessionInner, event: AgentEvent, native: Value) -> Vec<E
                 _ => ItemBody::Tool {
                     name: activity.title.clone(),
                     server: None,
-                    input: json!({"details": activity.details.iter().map(|detail| json!({"label": detail.label, "value": detail.value})).collect::<Vec<_>>()}),
+                    input: if activity.details.is_empty() {
+                        Value::Null
+                    } else {
+                        json!({"details": activity.details.iter().map(|detail| json!({"label": detail.label, "value": detail.value})).collect::<Vec<_>>()})
+                    },
                     output: activity.output_snapshot.clone(),
                     error: None,
                 },

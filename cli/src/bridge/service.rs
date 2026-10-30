@@ -972,7 +972,7 @@ pub(super) async fn doctor(
             ok: true,
             detail: if probe.provider_id == "opencode"
                 && inline_agent_driver_acp::parse_opencode_version(&probe.version)
-                    .is_some_and(|v| v.major == 1)
+                    .is_some_and(|v| v.major < 2)
             {
                 format!(
                     "{} — {}",

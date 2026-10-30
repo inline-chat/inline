@@ -175,15 +175,42 @@ function convertAcpMcpServersToAmpConfig(mcpServers) {
 }
 
 // src/to-acp.ts
-function toAcpNotifications(message, sessionId) {
+function assistantTextFilter() {
+  const tags = ["<suggested-replies>", "</suggested-replies>"];
+  let pending = "";
+  return {
+    write(text) {
+      let value = pending + text;
+      pending = "";
+      for (const tag of tags) value = value.split(tag).join("");
+      // A native stream may split a wrapper across assistant text blocks.
+      for (let length = Math.min(value.length, tags[1].length - 1); length > 0; length--) {
+        if (tags.some(tag => tag.startsWith(value.slice(-length)))) {
+          pending = value.slice(-length);
+          value = value.slice(0, -length);
+          break;
+        }
+      }
+      return value;
+    },
+    flush() {
+      const value = pending;
+      pending = "";
+      return value;
+    }
+  };
+}
+function toAcpNotifications(message, sessionId, textFilter) {
   const content = message.message?.content;
   if (typeof content === "string") {
+    const text = message.type === "assistant" ? textFilter.write(content) : content;
+    if (!text) return [];
     return [
       {
         sessionId,
         update: {
           sessionUpdate: message.type === "assistant" ? "agent_message_chunk" : "user_message_chunk",
-          content: { type: "text", text: content }
+          content: { type: "text", text }
         }
       }
     ];
@@ -195,9 +222,11 @@ function toAcpNotifications(message, sessionId) {
     let update = null;
     switch (chunk.type) {
       case "text":
+        const text = message.type === "assistant" ? textFilter.write(chunk.text) : chunk.text;
+        if (!text) break;
         update = {
           sessionUpdate: message.type === "assistant" ? "agent_message_chunk" : "user_message_chunk",
-          content: { type: "text", text: chunk.text }
+          content: { type: "text", text }
         };
         break;
       case "image":
@@ -280,10 +309,12 @@ function toolCallTitle(name, input) {
   const url = stringValue(input.url);
   switch (name) {
     case "Bash":
+    case "shell_command":
       return withDetail(name, command);
     case "Read":
       return withDetail(name, path);
     case "Write":
+    case "create_file":
       return withDetail(name, path);
     case "Edit":
     case "MultiEdit":
@@ -336,6 +367,7 @@ function toolKind(name) {
     case "LS":
       return "read";
     case "Write":
+    case "create_file":
     case "Edit":
     case "MultiEdit":
       return "edit";
@@ -343,6 +375,7 @@ function toolKind(name) {
     case "Grep":
       return "search";
     case "Bash":
+    case "shell_command":
       return "execute";
     case "WebFetch":
       return "fetch";
@@ -360,6 +393,7 @@ function toolCallLocations(name, input) {
   switch (name) {
     case "Read":
     case "Write":
+    case "create_file":
     case "Edit":
     case "MultiEdit":
     case "LS":
@@ -461,7 +495,7 @@ var package_default = {
 };
 
 // src/server.ts
-var PACKAGE_VERSION = "0.8.1+e4ccce1.inline2";
+var PACKAGE_VERSION = "0.8.1+e4ccce1.inline3";
 var CONFIG_PERMISSION = "permission";
 var CONFIG_AMP_MODE = "amp-mode";
 var PERMISSION_MODES = ["default", "bypass"];
@@ -628,6 +662,10 @@ class AmpAcpAgent {
       sessionId,
       configOptions: buildSessionConfigOptions(session)
     };
+    this.publishCommands(sessionId);
+    return result;
+  }
+  publishCommands(sessionId) {
     setImmediate(async () => {
       try {
         await this.client.sessionUpdate({
@@ -646,12 +684,12 @@ class AmpAcpAgent {
         console.error("[acp] failed to send available_commands_update", e);
       }
     });
-    return result;
   }
   async loadSession(params) {
     if (this.sessions.get(params.sessionId)?.active) throw new Error("Amp session is busy");
     const session = restoreSession(params);
     this.sessions.set(params.sessionId, session);
+    this.publishCommands(params.sessionId);
     return { configOptions: buildSessionConfigOptions(session) };
   }
   async authenticate(_params) {
@@ -721,6 +759,7 @@ ${chunk.resource.text}
     }
     const controller = new AbortController;
     s.controller = controller;
+    const textFilter = assistantTextFilter();
     try {
       for await (const message of this.transport.execute({ prompt: textInput, options, signal: controller.signal })) {
         if (!s.threadId && message.session_id) {
@@ -730,7 +769,7 @@ ${chunk.resource.text}
           console.error(`[amp] thread ${s.threadId}`);
         }
         if (message.type === "assistant" || message.type === "user") {
-          for (const n of toAcpNotifications(message, params.sessionId)) {
+          for (const n of toAcpNotifications(message, params.sessionId, textFilter)) {
             try {
               await this.client.sessionUpdate(n);
             } catch (e) {
@@ -748,6 +787,11 @@ ${chunk.resource.text}
             update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `Error: ${message.error}` } }
           });
         }
+      }
+      const remainder = textFilter.flush();
+      if (remainder) {
+        await this.client.sessionUpdate({ sessionId: params.sessionId,
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: remainder } } });
       }
       return { stopReason: s.cancelled ? "cancelled" : "end_turn" };
     } catch (err) {

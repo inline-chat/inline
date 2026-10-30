@@ -293,14 +293,13 @@ fn retain_tool_call(tool_calls: &mut ToolCallSnapshots, mut call: ToolCall) {
         return;
     }
 
-    let command = if activity_kind(call.kind) == ActivitySemanticKind::Execute {
+    let presentation = native_tool_activity(&call.title, activity_kind(call.kind));
+    let command = if presentation.kind == ActivitySemanticKind::Execute {
         command_preview(call.raw_input.as_ref()).or_else(|| command_title_preview(&call.title))
     } else {
         None
     };
-    call.title = native_tool_activity(&call.title, activity_kind(call.kind))
-        .title
-        .to_string();
+    call.title = display_tool_title(&call.title, presentation.title);
     call.content.clear();
     // Retain only the already-sanitized, bounded command preview so a later
     // status-only patch can keep verbose progress useful without retaining the
@@ -383,7 +382,7 @@ fn activity_upsert(call: &ToolCall) -> Option<ActivityUpsert> {
         call.tool_call_id.to_string(),
         presentation.kind,
         activity_status(call.status),
-        presentation.title,
+        display_tool_title(&call.title, presentation.title),
     )
     // ACP's raw title, input, output, and content can carry sensitive tool data.
     // Only semantic labels, structured status/locations, and the bridge's
@@ -417,6 +416,23 @@ fn activity_upsert(call: &ToolCall) -> Option<ActivityUpsert> {
         };
         activity.with_paths(call.locations.iter().map(|location| location.path.clone()))
     })
+}
+
+fn display_tool_title(provider_title: &str, semantic_title: &str) -> String {
+    // Generic tool identities are useful, but provider-rendered arguments may
+    // contain secrets. Retain only a short identifier, never its title suffix.
+    let name = provider_title.split(':').next().unwrap_or_default();
+    if semantic_title == "Using an agent tool"
+        && !name.is_empty()
+        && name.len() <= 96
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+    {
+        name.to_owned()
+    } else {
+        semantic_title.to_owned()
+    }
 }
 
 fn activity_kind(kind: ToolKind) -> ActivitySemanticKind {
@@ -829,6 +845,46 @@ mod tests {
                 .and_then(|input| input.get("command"))
                 .and_then(serde_json::Value::as_str),
             Some("cargo test --token [redacted]")
+        );
+    }
+
+    #[test]
+    fn inferred_amp_shell_commands_keep_their_preview_on_status_only_completion() {
+        let turn = TurnId::new("amp-turn").unwrap();
+        let mut calls = ToolCallSnapshots::new();
+        session_update_events(
+            &turn,
+            &mut calls,
+            SessionUpdate::ToolCall(
+                ToolCall::new("shell", "shell_command: ls -la")
+                    .kind(ToolKind::Other)
+                    .raw_input(serde_json::json!({ "command": "ls -la", "workdir": "/tmp" })),
+            ),
+        );
+        let events = session_update_events(
+            &turn,
+            &mut calls,
+            SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "shell",
+                agent_client_protocol::schema::v1::ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::Completed),
+            )),
+        );
+        assert!(
+            matches!(events.as_slice(), [AgentEvent::ActivityUpsert { activity, .. }]
+            if activity.kind == ActivitySemanticKind::Execute && activity.detail.as_deref() == Some("ls -la"))
+        );
+    }
+
+    #[test]
+    fn generic_tool_identity_excludes_provider_argument_suffixes() {
+        assert_eq!(
+            display_tool_title("inspect_project: private content", "Using an agent tool"),
+            "inspect_project"
+        );
+        assert_eq!(
+            display_tool_title("private content", "Using an agent tool"),
+            "Using an agent tool"
         );
     }
 

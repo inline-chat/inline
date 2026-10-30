@@ -1,5 +1,6 @@
 //! Exercise the bridge v2 adapter over real ACP request/notification dispatch.
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -49,10 +50,16 @@ struct Fixture {
     harness: AcpHarness,
     driver: Arc<AcpDriver>,
     selections: Arc<Mutex<Vec<(String, String)>>>,
+    prompts: Arc<Mutex<Vec<Vec<acp::ContentBlock>>>>,
+    new_sessions: Arc<AtomicUsize>,
 }
 
 async fn fixture() -> Fixture {
     let selections = Arc::new(Mutex::new(Vec::new()));
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let prompt_capture = prompts.clone();
+    let new_sessions = Arc::new(AtomicUsize::new(0));
+    let new_session_capture = new_sessions.clone();
     let capture = selections.clone();
     let mode_capture = selections.clone();
     let cancel = Arc::new(Notify::new());
@@ -64,7 +71,8 @@ async fn fixture() -> Fixture {
                 .agent_capabilities(acp::AgentCapabilities::new().session_capabilities(
                     acp::SessionCapabilities::new().resume(acp::SessionResumeCapabilities::new()))))
         }, agent_client_protocol::on_receive_request!())
-        .on_receive_request(async |_r: acp::NewSessionRequest, responder, connection: ConnectionTo<agent_client_protocol::Client>| {
+        .on_receive_request(async move |_r: acp::NewSessionRequest, responder, connection: ConnectionTo<agent_client_protocol::Client>| {
+            new_session_capture.fetch_add(1, Ordering::SeqCst);
             connection.send_notification(acp::SessionNotification::new("ses_fixture", acp::SessionUpdate::AvailableCommandsUpdate(acp::AvailableCommandsUpdate::new(vec![acp::AvailableCommand::new("fixture-command", "Fixture command")]))))?;
             responder.respond(acp::NewSessionResponse::new("ses_fixture").config_options(options("provider/a", "low")))
         }, agent_client_protocol::on_receive_request!())
@@ -89,11 +97,28 @@ async fn fixture() -> Fixture {
         }, agent_client_protocol::on_receive_notification!())
         .on_receive_request(async move |r: acp::PromptRequest, responder, connection: ConnectionTo<agent_client_protocol::Client>| {
             let cancel = cancel.clone();
+            let prompt_capture = prompt_capture.clone();
             tokio::spawn(async move {
                 let text = r.prompt.iter().filter_map(|part| match part {
                     acp::ContentBlock::Text(t) => Some(t.text.as_str()), _ => None,
                 }).collect::<Vec<_>>().join(" ");
+                prompt_capture.lock().unwrap().push(r.prompt.clone());
                 let waiting = text.contains("wait for cancellation");
+                if text.contains("tool presentation") {
+                    for call in [
+                        acp::ToolCall::new("shell", "shell_command: ls -la").kind(acp::ToolKind::Other)
+                            .raw_input(serde_json::json!({ "command": "ls -la", "workdir": "/tmp" })),
+                        acp::ToolCall::new("without-args", "Running command").kind(acp::ToolKind::Execute),
+                        acp::ToolCall::new("generic", "inspect_project: private payload").kind(acp::ToolKind::Other),
+                    ] {
+                        let id = call.tool_call_id.clone();
+                        connection.send_notification(acp::SessionNotification::new(r.session_id.clone(),
+                            acp::SessionUpdate::ToolCall(call)))?;
+                        connection.send_notification(acp::SessionNotification::new(r.session_id.clone(),
+                            acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(id,
+                                acp::ToolCallUpdateFields::new().status(acp::ToolCallStatus::Completed)))))?;
+                    }
+                }
                 if text.contains("ask permission") {
                     let permission = connection.send_request(acp::RequestPermissionRequest::new(
                         r.session_id.clone(),
@@ -138,6 +163,8 @@ async fn fixture() -> Fixture {
         harness,
         driver,
         selections,
+        prompts,
+        new_sessions,
     }
 }
 
@@ -184,6 +211,154 @@ async fn text_started(events: &mut EventStream) {
             break;
         }
     }
+}
+
+#[tokio::test]
+async fn repeated_catalog_reads_reuse_the_folder_session() {
+    let f = fixture().await;
+    for _ in 0..3 {
+        f.harness
+            .catalog(CatalogScope {
+                folder: Some("/tmp".into()),
+                session: None,
+            })
+            .await
+            .unwrap();
+    }
+    assert_eq!(f.new_sessions.load(Ordering::SeqCst), 1);
+    let session = f.harness.open(spec(OpenMode::Start)).await.unwrap();
+    let opened = f.new_sessions.load(Ordering::SeqCst);
+    f.harness
+        .catalog(CatalogScope {
+            folder: Some("/tmp".into()),
+            session: Some(session.key().session.clone()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(f.new_sessions.load(Ordering::SeqCst), opened);
+    f.driver.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn guide_is_sent_once_and_not_prepended_to_native_commands_or_resume() {
+    let f = fixture().await;
+    let mut start = spec(OpenMode::Start);
+    start.instructions = Some("unique trusted guide".into());
+    let session = f.harness.open(start).await.unwrap();
+    let mut events = session.events();
+    let mut command = input("command", "/fixture-command");
+    command.content.context = Some(inline_agent_bridge::TurnContext {
+        instructions: "untrusted context instructions".into(),
+        conversation: "passive conversation".into(),
+    });
+    session.send(command).await.unwrap();
+    assert_eq!(completed(&mut events).await, TurnOutcome::Completed);
+    let mut resume = spec(OpenMode::Resume {
+        session: session.key().session.clone(),
+    });
+    resume.instructions = Some("unique trusted guide".into());
+    session.release().await.unwrap();
+    let resumed = f.harness.open(resume).await.unwrap();
+    let mut events = resumed.events();
+    resumed.send(input("resumed", "continue")).await.unwrap();
+    assert_eq!(completed(&mut events).await, TurnOutcome::Completed);
+    resumed
+        .send(input("resumed-again", "continue again"))
+        .await
+        .unwrap();
+    assert_eq!(completed(&mut events).await, TurnOutcome::Completed);
+    let prompts = f.prompts.lock().unwrap().clone();
+    assert!(
+        matches!(&prompts[0][0], acp::ContentBlock::Text(text) if text.text == "/fixture-command")
+    );
+    let initial_context = prompt_text(&prompts[0][1..]);
+    assert_eq!(initial_context.matches("unique trusted guide").count(), 1);
+    assert!(initial_context.contains("passive conversation"));
+    assert!(!prompt_text(&prompts[1]).contains("unique trusted guide"));
+    assert!(!prompt_text(&prompts[2]).contains("unique trusted guide"));
+    f.driver.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn unknown_slash_text_keeps_guide_and_conversation_context() {
+    let f = fixture().await;
+    let mut start = spec(OpenMode::Start);
+    start.instructions = Some("unique trusted guide".into());
+    let session = f.harness.open(start).await.unwrap();
+    let mut events = session.events();
+    let mut input = input("unknown", "/not-a-command");
+    input.content.context = Some(inline_agent_bridge::TurnContext {
+        instructions: String::new(),
+        conversation: "passive conversation".into(),
+    });
+    session.send(input).await.unwrap();
+    assert_eq!(completed(&mut events).await, TurnOutcome::Completed);
+    let prompts = f.prompts.lock().unwrap().clone();
+    assert_eq!(
+        prompts[0].len(),
+        1,
+        "ordinary prompts retain merged context compatibility"
+    );
+    let text = prompt_text(&prompts[0]);
+    assert!(text.contains("unique trusted guide"));
+    assert!(text.contains("passive conversation"));
+    assert!(text.contains("/not-a-command"));
+    f.driver.shutdown().await.unwrap();
+}
+
+fn prompt_text(blocks: &[acp::ContentBlock]) -> String {
+    blocks
+        .iter()
+        .filter_map(|block| match block {
+            acp::ContentBlock::Text(text) => Some(text.text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[tokio::test]
+async fn tool_progress_retains_real_commands_without_fabricating_arguments() {
+    let f = fixture().await;
+    let session = f.harness.open(spec(OpenMode::Start)).await.unwrap();
+    let mut events = session.events();
+    session
+        .send(input("tools", "tool presentation"))
+        .await
+        .unwrap();
+    let mut commands = Vec::new();
+    let mut tools = Vec::new();
+    loop {
+        match event(&mut events).await {
+            Event::Item(item) => {
+                if let ItemUpdate::Completed { body, .. } = item.update {
+                    match body {
+                        ItemBody::Command { command, .. } => commands.push(command),
+                        ItemBody::Tool { name, input, .. } => tools.push((name, input)),
+                        _ => {}
+                    }
+                }
+            }
+            Event::Turn {
+                phase: TurnPhase::Completed { .. },
+                ..
+            } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(commands, ["ls -la"]);
+    assert_eq!(tools.len(), 2);
+    assert!(
+        tools
+            .iter()
+            .any(|(name, input)| name == "Running command" && input.is_null())
+    );
+    assert!(
+        tools
+            .iter()
+            .any(|(name, input)| name == "inspect_project" && input.is_null())
+    );
+    f.driver.shutdown().await.unwrap();
 }
 
 #[tokio::test]
