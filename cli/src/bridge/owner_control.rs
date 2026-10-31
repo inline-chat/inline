@@ -189,6 +189,20 @@ impl OwnerControl {
         Ok(self.client.connect_agent_session(request).await?)
     }
 
+    /// Replaces the bot's command list; only its owner may.
+    pub(super) async fn set_bot_commands(
+        &self,
+        request: proto::SetBotCommandsInput,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.client
+            .invoke_rpc(
+                proto::Method::SetBotCommands,
+                proto::rpc_call::Input::SetBotCommands(request),
+            )
+            .await?;
+        Ok(())
+    }
+
     pub(super) async fn get_agent_session(
         &self,
         request: proto::GetAgentSessionInput,
