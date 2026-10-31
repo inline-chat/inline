@@ -1566,7 +1566,7 @@ fn validated_return_attachment_path(
     }
     let metadata = fs::metadata(&canonical).map_err(|_| "The local file is unavailable.")?;
     if metadata.len() == 0 || metadata.len() > MAX_RETURN_ATTACHMENT_BYTES {
-        return Err("The local file must be between 1 byte and 20 MiB.");
+        return Err("The local file must be between 1 byte and 100 MiB.");
     }
     Ok((canonical, metadata.len()))
 }

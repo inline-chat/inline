@@ -1,27 +1,23 @@
 # Local coding-agent bridge
 
-Inline's local bridge turns an installed coding agent into a private bot. The
-owner can use it in the bot DM, direct mentions, replies to the bot, and followed
-Inline threads. All requests, including bot-authored requests, pass a strict
-stable-user-ID allowlist before routing, context lookup, workspace binding, or
-provider work; it contains only the owner by default. Unauthorized messages are
-ignored silently, including DMs and commands; they cause no denial reply or
-provider work. Another bot can activate it only when it is one of this bridge's
-own provider bots or its user ID is on the allowlist, and only with an exact
-structured mention of this bot. A mention addresses a bot; it never authorizes
-one. Bot DMs, replies, followed-thread traffic,
-generic mention flags, and targeted commands without that mention stay inert.
-Bot authorship is disclosed to the coding harness, whose delivery guidance
-requires explicit handoff mentions and warns against reciprocal loops. The Rust
-bridge is bundled with the Inline CLI and runs as one per-user background
-service; agent processes and project files remain on the user's computer.
+Inline's local bridge turns an installed coding agent into a bot. The bridge is
+bundled with the Inline CLI and runs as one per-user background service. Agent
+processes and project files stay on your computer.
+
+Bridge v2 is the default for Codex, Claude, OpenCode v2 and the current pinned
+Amp adapter. Each thread has one native session per agent. See
+[Legacy bridge](#legacy-bridge) for what still runs on v1.
+
+Maturity, as the Mac setup wizard labels it: Codex is alpha, Claude and OpenCode
+are beta, Amp is experimental.
 
 ## Updates and restarts
 
-The bridge applies a staged update as soon as active work and pending
-publication finish. Open idle sessions do not block it, and there is no extra
-quiet period or cooldown between successfully staged releases. Admission closes
-atomically before the old runtime stops, so new work cannot race the handoff.
+The bridge applies a staged update once active work and pending publication
+finish and two minutes have passed since the last work. A request that has
+waited 24 hours skips the two minutes. Open idle sessions do not block it.
+Admission closes atomically before the old runtime stops, so new work cannot
+race the handoff.
 
 `inline bridge status` and `inline bridge doctor` show the running CLI version,
 the retained supervisor's version, and pending updates or rollbacks. The binary
@@ -30,11 +26,11 @@ differ from the runtime doing agent work.
 
 A deliberate `inline bridge stop` or `restart` during a candidate's startup
 probation leaves that candidate available for retry. Crashes and failed health
-checks still trigger rollback. A restart preserves native session bindings,
-thread settings, and durable delivery records. Existing sessions reopen when
-you next message them; input with an uncertain delivery is reconciled rather
-than automatically sent again. Unsent input interrupted by a manual restart
-asks you to resend it.
+checks still trigger rollback. A restart preserves thread settings and delivery
+records, and sessions reopen when you next message them. Input that was written
+to the agent but not confirmed is settled from the session when it reopens and is
+never sent again. Input that never reached the agent gets a reply asking you to
+send it again.
 
 ## Setup
 
@@ -55,600 +51,280 @@ waits for the selected provider to become ready. Repeating setup is idempotent.
 Adding a second provider preserves the first provider's bot, credentials,
 workspaces, and sessions.
 
-Without `--folder`, setup uses the user's home directory. Pass `--folder` to
-use a narrower project directory.
+Without `--folder`, setup uses your home directory, and threads without a chosen
+folder run there. Pass `--folder` to use a narrower project directory.
 
-Current beta provider paths:
+### Providers
 
-- **Codex beta:** Codex 0.146.0 and every newer capability-compatible runtime,
-  including the signed ChatGPT.app bundle, use the native app-server protocol.
-  Setup checks
-  a configured executable, `PATH`, then the signed ChatGPT application, while
-  leaving provider authentication to Codex/ChatGPT. `/sessions` and `/open`
-  list sessions for the conversation's verified project, read a bounded recent
-  snapshot (including the current paginated `thread/turns/list` form), and
-  create or reuse one titled Inline reply thread for that provider session.
-  Opening history does not claim the provider writer. `/resume` acquires the
-  exact Codex session in Inline's private app-server epoch and synchronizes
-  history before prompts are accepted. Each prompt carries a stable client
-  message ID; the existing
-  semantic turn stream, activity disclosures, approvals, questions, final-send
-  recovery, and rich Markdown projection remain the sole live path. Reopening
-  idempotently hydrates only provider turns that Inline has not already
-  completed and projected. Imported assistant Markdown goes through the same
-  server-owned rich-content parser as live answers; a partial assistant item in
-  the active tail is held back until Codex reports a stable historical turn.
+- **Codex (alpha):** uses the native app-server protocol. It needs Codex 0.146.0
+  or newer, including the runtime in the signed ChatGPT app. Newer features turn
+  on per operation when the installed Codex's protocol schema has them.
+- **Claude (beta):** runs the authenticated host `claude` directly and needs
+  neither Node.js nor an adapter. Sessions resume natively.
+- **OpenCode (beta):** runs `opencode acp` from OpenCode v2. OpenCode's application
+  version is 2; its ACP wire protocol is v1. New setups require v2. To migrate,
+  follow the [OpenCode guide](https://opencode.ai/v2/docs/migrate-v1/), check that
+  `opencode --version` reports 2.x, then rerun `inline setup opencode`. Inline does
+  not upgrade OpenCode or rewrite its configuration.
+- **Amp (experimental):** runs Inline's source-pinned ACP adapter against the exact
+  Amp executable accepted during setup. Run `inline setup amp` to install the
+  current pin.
 
-  Inline uses **sequential** continuity, not simultaneous multi-client control.
-  Running sessions remain visible with an availability label, but only
-  provider-reported idle or unloaded sessions can be adopted;
-  activity is checked again before import. Do not use another Codex client on
-  the same session while continuing it in Inline. Writer enforcement varies
-  across Codex runtimes and is not guaranteed by the shared app-server protocol.
-  If Codex explicitly rejects a resume as owned elsewhere, Inline reports that
-  condition; close the session there and use `/resume` in its linked Inline
-  thread. `/resume` validates the same session and project, refreshes bounded
-  history, and acquires it without sending a model prompt. A rejected resume
-  unsubscribes only that thread without interrupting other Inline turns. If
-  that cleanup cannot be confirmed, Inline deliberately ends and restarts the
-  whole provider epoch before accepting more work.
-  In a linked Codex thread, owner `/stop` interrupts its active turn, cancels
-  its earlier queued messages, then attempts to release Inline's private
-  provider epoch. Release waits for that turn's cleanup and succeeds only when
-  all other Inline Codex work is idle; otherwise the reply asks you to retry
-  `/stop` after the other work finishes. Wait for the release confirmation
-  before continuing in ChatGPT Desktop or Codex CLI. The durable binding and
-  Codex history stay intact. `/close` remains the idle-release alias. Use
-  `/resume` before sending again; a premature prompt receives a reminder and
-  must be resent after the ready confirmation. No Desktop launch options or
-  CLI wrappers are required.
-  The internal shared-socket observer
-  remains a dark foundation and is not part of this beta claim. Older runtimes,
-  missing required methods, and incompatible response shapes fail closed; a new
-  Codex version number alone does not.
-- **OpenCode v2 experimental:** uses native `opencode acp` through bridge v2.
-  OpenCode's application version is 2; its ACP wire protocol remains v1.
-  New setups require OpenCode v2. Existing 0.x and v1 installations stay on bridge v1
-  with migration guidance in `/help`, `/status`, and `inline bridge doctor`.
-  `INLINE_BRIDGE_V2=off` also keeps v2 installations on the legacy bridge.
-  `inline agents discover --json` adds an `installations` array for OpenCode:
-  each entry has `version`, `majorVersion`, `supportStatus`, and a `migrationUrl`
-  for 0.x/v1, without local paths. Setup prefers verified v2, including the older
-  `opencode2` alias; binary names alone do not establish a version.
-  Each bridge v2 session owns a private ACP process so chats in the same folder
-  cannot share Inline tool bindings. Stop, settings, approvals, questions, and
-  session resume use the shared bridge contract. Native queue, passive input,
-  session browser, and terminal handoff are not available through this route.
-  An advertised OpenCode slash command such as `/compact` is sent unchanged to
-  OpenCode even when ACP has no equivalent structured operation. The settings
-  panel offers only supported structured operations, so this does not add a
-  Compact button. Command and model catalogs come from the thread's folder and
-  open session. Idle sessions keep their private process for up to 30 minutes;
-  `/release` closes it immediately.
-  An old session that cannot resume keeps its binding and asks the user to retry
-  or explicitly start a fresh conversation with `/new`.
-  To migrate, follow the [OpenCode guide](https://opencode.ai/v2/docs/migrate-v1/),
-  verify `opencode --version` reports 2.x, then rerun `inline setup opencode`.
-  Inline does not rewrite OpenCode configuration or upgrade its installation.
-- **Claude experimental:** bridge v2 runs the authenticated host `claude`
-  directly. The legacy bridge uses the curated
-  `@agentclientprotocol/claude-agent-acp` adapter. That pinned adapter advertises
-  durable resume, but its cross-process `session/resume` path does not currently
-  pass Inline's live reliability gate. After a bridge/provider restart, the
-  legacy bridge therefore starts a fresh Claude session and says so instead
-  of failing the first user direction or retrying an ambiguous resume. Inline
-  advertises ACP form elicitation on that fallback and translates Claude
-  `AskUserQuestion` requests into the same bounded Inline question messages
-  used by Codex. Single-select questions
-  use choice buttons; multi-select questions accept comma-separated labels and
-  preserve every selected value. Arbitrary form fields that Inline cannot
-  safely represent are cancelled rather than guessed; generic free-text forms
-  are rejected because ACP does not identify whether their answers contain
-  secrets.
-- **Amp experimental:** uses Inline's source-revision-pinned ACP adapter in
-  direct CLI mode with the exact authenticated Amp executable accepted during
-  setup. The adapter is installed from an Inline-owned complete lock and
-  integrity-checked embedded artifact. It has authenticated real-turn,
-  host-tool-handshake, and cancellation evidence, but is not part of the
-  Codex-only external beta claim.
-  The current pinned adapter runs on bridge v2 with durable local ACP session
-  records and a private process per chat. `/model` selects Amp low/medium/high/ultra
-  modes; settings, stop, release and resume use the shared bridge UI. Older
-  installed adapters keep bridge v1 until `inline setup amp` installs the new
-  pin. Old adapter sessions cannot be recovered across processes; their saved
-  bindings remain intact and `/new` starts a fresh conversation. Native queue,
-  passive input, session browser and terminal handoff remain unavailable.
-  Advertised Amp commands such as `/init` are sent unchanged to Amp. Commands
-  the adapter does not advertise, including `/compact`, explain the available
-  next steps. Idle sessions retain their private process for up to 30 minutes;
-  `/release` closes it immediately.
+OpenCode and Amp run one private ACP process per session, so chats in the same
+folder cannot share Inline tool bindings.
 
-When an ACP adapter is required, setup installs only that adapter
-into immutable, private, versioned bridge directories using Inline's complete
-embedded `package-lock.json` files and `npm ci`. Inline disables package scripts
-and verifies the exact manifest, complete dependency lock, adapter version,
-integrity, and executable containment during setup. Service launch preserves
-older configured Claude adapters for compatibility, but does not label them as
-the current verified pin, enable current-pin-only history integration, or opt
-them into new automatic permission defaults. A verification failure inside the
-current managed adapter slot still fails closed. Amp additionally verifies the
-embedded executable bytes and pins its exact host CLI path; it disables IDE
-detection and update checks for the managed ACP process.
-Amp adapter installs omit the SDK's optional native CLI packages, and
-verification repairs older installs that still contain one, so the separately
-verified host CLI is the only executable runtime. Providers without an
-Inline-owned complete lock are
-withheld from setup. The background service never downloads or updates
-adapters. Claude on bridge v2 runs the host `claude` directly and needs neither
-Node.js nor an adapter; rolling back to the previous bridge needs Node.js 22 or
-newer and rerunning setup with `INLINE_BRIDGE_V2=off`. Claude authentication
-is a host setup and service-restart preflight; Inline does not advertise an
-interactive terminal-auth surface, so an expired session must be repaired with
-the Claude CLI on that host before restarting the bridge.
+The Amp adapter is installed into immutable, private, versioned bridge
+directories from Inline's embedded lock with `npm ci`. Package scripts and
+optional native packages are disabled. Setup verifies the manifest, lock, adapter
+version, integrity and executable path. The background service never downloads
+or updates adapters.
 
 ## Using the bot
 
-### Codex projects and existing sessions
+### Who it answers
 
-Release acceptance for restart, host sleep/network changes, and the complete
-physical-phone flow must be completed against the candidate bridge artifact.
-The behavior below describes the implementation contract, not certification
-of every Codex version or mobile surface.
+Only structured addressing counts, never words in a message:
 
-Choose the current project in Agent Settings or with `/projects` (`/folder`
-remains an alias), then run `/sessions` or `/open` in the owner bot DM. The
-picker contains only that verified project and keeps provider IDs and host paths
-out of callback payloads and messages. It includes indexed CLI, editor, and
-app-server sessions, in six-session pages. **Load Older Sessions** fetches the
-next provider batch without changing existing Open targets; up to 1,000
-sessions can be loaded per picker. Empty and duplicate catalog pages are
-skipped within a bounded request budget. Unindexed sessions, archived sessions,
-and internal subagents are not included. Completed headless `exec` sessions
-are included and can be resumed after their original process exits. Running sessions
-are shown but cannot be opened until they become idle; refresh `/sessions`
-after they finish. Session picker operations that read from Codex ask you to
-finish the active turn first; already-loaded local pages remain usable.
-Opening a choice
-pre-fills a reply-thread title from the Codex title or preview, hydrates a
-bounded recent provider snapshot, and durably pins that Inline thread to the
-same Codex session and project. Browsing is read-only; `/resume` prepares
-sequential continuation over private stdio before accepting prompts. Do not run the same
-session concurrently in another Codex client. Continuous external observation,
-simultaneous two-writer sync, and Codex mobile Remote interoperability are not
-part of this beta.
+- A DM with the bot, or the bot's own thread: every message from someone with
+  access.
+- A group thread: a mention, a reply to the bot, or `/command@bot`. If a message
+  starts with mentions of others and not this bot, it is for them.
+- A group thread it follows: every message from a person with access. `/follow` and
+  `/unfollow` change this. Inline may also set it when the bot opens a thread.
 
-Imports are bounded to 100 visible messages and 512 KiB of sanitized text.
-Inline projects user messages and final answers; historical tool activity and
-intermediate responses remain in Codex, as the linked-session status explains.
-Newer Codex runtimes hydrate summary turns through bounded item pages; older
-runtimes use compatible fallbacks. Omitted or unsupported history is marked
-incomplete instead of silently presented as a complete import.
+When the bot joins a group thread it gets up to 40 recent messages as untrusted
+context. Later messages it was not addressed by travel with its next input, also
+as untrusted context.
 
-The picker snapshot and Open intent are written to the bridge's private local
-database before the card is published. Page and Open callbacks therefore keep
-working after a bridge/provider restart, recheck owner, bot, chat, message,
-project, and expiry, and use one leased Open operation so duplicate phone taps
-cannot create competing connections. A long Open runs in a bounded control
-lane rather than the event-delivery loop. It terminalizes the card only after
-the reply-thread binding, server connection, bounded projection, and status
-identity are durable. The terminal copy says the session is linked and asks the
-user to use /resume to sync history and enable prompts; opening alone does not claim that Codex has
-resumed. Interrupted work stays retryable while the card is live. A partial
-Open that already created a target thread fails closed after expiry, so queued
-text cannot start a different ordinary session in that thread. The durable
-reply-thread anchor also identifies a remotely created child before its chat ID
-has been checkpointed; messages in that crash window are rejected with recovery
-guidance instead of being default-bound. Callback
-transport or card-edit failures do not by themselves restart Codex or interrupt
-an unrelated turn.
+On Codex, in a thread where the agent actively participates, a side call can
+decide that an unaddressed message deserves a reply. These checks have a budget
+of 1,000 per day with an **Allow more today** button. Other providers answer only
+when addressed.
 
-On capable macOS filesystems, newly selected projects are verified across
-reboots using a persistent volume and object identity. A replaced folder fails
-closed. Projects saved by an older bridge are upgraded only when their complete
-legacy filesystem identity still matches; a legacy project whose device
-identity drifted requires one explicit reselection in Agent Settings or
-`/projects` rather than silently adopting a different folder.
+### Commands
 
-A pinned session thread cannot use `/new`, `/clear`, or a project setting to
-silently become a different session. Bridge tool-contract updates also preserve
-the exact pinned Codex identity; newly created sessions receive the updated
-contract. Open another session from the bot DM instead. The release phase of
-`/stop` (or idle `/close`) releases only
-when every other Inline Codex lane in the provider epoch is idle, including
-turn preparation and session mutation; it does not interrupt running work or
-delete history. Codex can briefly report that the session is still closing
-after release; retry there in a moment. Historical Codex user input is visibly
-authored by the integration owner. An Inline-origin user-message echo is linked
-back to the original Inline row using Codex's returned `clientId`, preserving
-its real sender and text without duplication. Live input is linked only after
-Codex accepts it. Normal-turn linkage failures retry once at completion;
-steering linkage failures rely on later resync. `/resume`, or reopening from
-`/sessions`, can repair an input link when Codex retained its `clientId`,
-the matching local inbound record remains, and the item is in the bounded
-history window. This is not autonomous or unlimited recovery. A final assistant answer is also
-linked through a durable local repair record. If a restart makes the final send
-or link response uncertain, the bridge reuses the same message identity and
-repeats the idempotent link rather than losing provenance or publishing another
-answer. After a successful /resume in the current provider connection, plain messages and unqualified commands in an opened session thread
-continue that exact session; a fresh bridge store resolves the server-canonical
-thread before it creates a new one.
+| Command | What it does |
+| --- | --- |
+| `/help` | This agent's commands, its harness commands, and its sub-agents. |
+| `/status` | State, model, reasoning, permissions, folder name and harness version. |
+| `/new [task]` | A new reply thread with a fresh session, in the parent's folder. |
+| `/stop` | Stops the current turn. The session stays held and queued messages stay queued. |
+| `/pause` | Stops the turn and holds queued input. Nothing runs until `/resume` or a new message to the agent. |
+| `/resume` | Unpauses. Held input runs again in order. |
+| `/queue <message>` | Runs the message after the current turn. There is no Undo. |
+| `/model`, `/reasoning`, `/permissions` | Bare, shows choice buttons. With a value, sets it. Applies to this thread from the next message. |
+| `/plan`, `/plan off` | Plan mode. On Claude, leave it by answering the plan or with `/permissions`. |
+| `/review [branch]` | Codex reviews your uncommitted changes or the diff against a branch. |
+| `/undo` | Undoes the last turn's file changes. |
+| `/compact` | Compacts the session's context. |
+| `/clear` | Clears the session's context. |
+| `/follow`, `/unfollow` | Every message in this thread, or only mentions and replies. |
+| `/allowlist` | Who may use the agent. See [Operator allowlist](#operator-allowlist). |
+| `/release` | Lets the session go. The next message reopens it. |
+| `/terminal` | Releases the session and shows the command to continue in a terminal. |
 
-Linked Codex sessions require `/resume` after Open, release, or provider restart. The bridge marks a session ready only after both writer acquisition and history sync succeed. If a prompt is submitted before that, it stays in Inline and receives a resume reminder; it is not sent to Codex or automatically replayed. Resend it after the ready confirmation. This is a send-time check, not a native composer typing banner. Ordinary new/headless conversations are unchanged.
+`/compact`, `/clear`, `/plan`, `/review`, `/undo` and `/release` reopen an idle
+session first, including after a restart. If the thread never had a session they
+say so.
 
-### Claude projects and bounded history
+`/projects`, `/folder`, `/sessions`, `/open`, `/close`, `/history`, `/verbose` and
+`/threads` do not exist on v2. Choose the folder and output mode in Agent Settings.
+A thread is a session, and `/new` starts another one.
 
-Claude uses the same Agent Settings folder control and `/projects` picker as
-Codex, so users can safely choose among verified recent folders without
-exposing host paths in message actions. The bridge also prewarms Claude's
-workspace-scoped settings catalog for the first Agent Settings frame, bounded
-by the normal settings deadline; model, reasoning, and permission controls then
-come from the adapter's live advertised values. New Claude conversations using
-the verified current adapter default to `bypassPermissions` only when the
-adapter advertises it. New Codex threads start on Codex's own **Approve for me**
-(the workspace profile with Codex's review agent answering approvals), and a
-thread Codex opened before keeps its permissions. Codex's settings offer the
-TUI's choices with their approval policy: **Ask for approval**, **Approve for
-me**, **Full Access** (never stops to ask) and **Read Only**. An explicit bot
-permission setting always wins for either provider, and choosing **Default** on
-Codex selects Approve for me for that thread. Codex managed requirements remain
-authoritative: when they refuse the review agent a new thread asks for approval
-in the same sandbox, and when they refuse that too the error shows, so choose an
-allowed profile in the bot settings. Native Claude session continuation is not
-enabled yet.
+### Provider differences
 
-Claude's bypass preference is an Inline bridge launch default, applied once to
-a new native session. Follow-up turns preserve native permission-mode changes,
-including plan mode. An explicit permission choice updates an open idle ACP
-session before saving the preference; Codex retains its next-turn behavior.
-Settings display the saved launch preference, which may differ from the current
-native mode. Choosing the provider's literal `default` mode does not mean
-bypass. Model-dependent reasoning defaults propagate only to the same model;
-changing a model clears its previous reasoning selection.
+| | Codex | Claude | OpenCode | Amp |
+| --- | --- | --- | --- | --- |
+| Message during a turn | Steers | Steers | Waits for next turn | Waits for next turn |
+| `/queue` | Yes | Yes | No | No |
+| `/compact` | Yes | Yes | Yes | No |
+| `/clear` | No | Yes | No | No |
+| `/plan` | Yes | Yes | Build/Plan | No |
+| `/review` | Yes | No | No | No |
+| `/undo` | No | Yes | No | No |
+| `/terminal` | Yes | Yes | No | No |
 
-`/history` is the intentionally separate, owner-only local history importer: it
-opens a bounded six-row picker, imports the visible
-You/Claude branch into a private Inline reply thread, omits tool and attachment
-blocks, redacts sensitive-looking local details, and does not resume or mutate
-the original Claude session. `/sessions` and `/open` remain reserved for future
-native continuity and return an explicit unavailable message if typed.
+Some Codex rows depend on the installed version's protocol. A command the agent
+cannot do says so and points to `/help`.
 
-For Codex, `/status` also reads the current account usage windows, including
-weekly limits and reset times in UTC. Missing usage or reset data is shown as
-unavailable. Status reads are bounded and do not disconnect an active turn.
-They do not consume reset credits or expose account identity and billing data.
+### OpenCode and Amp
 
-`/compact` compacts the current Codex session. It shows progress through the
-existing Working message and reports success only after Codex completes the
-operation. `/stop` can interrupt it; new instructions queue until compaction
-finishes. Automatic compaction also shows its actual in-progress/completed
-state. Providers without compaction support retain an explicit unavailable reply.
-Agent Settings directs you to `/compact` in the conversation so progress, errors,
-and interruption remain attached to that operation.
+ACP has no way to reach a running turn, and OpenCode rejects a prompt during one.
+A message sent mid-turn gets a "reads this when its current turn ends" reply, then
+runs as the next turn. An open card stays open in this case, because a denial could
+not deliver the message anyway.
 
-Provider retries appear in progress. Terminal and command failures include a
-bounded, scrubbed provider explanation when available, such as an exhausted
-usage window or an outdated Codex installation. Unknown additive updates are
-ignored; an invalid terminal response fails visibly instead of leaving a turn
-waiting indefinitely.
+What else they can do depends on what the agent advertises:
 
-Each provider has a distinct bot and session namespace. A thread is a session
-for the selected project by default. After a brief ordering gate, the bot
-acknowledges every accepted provider direction with one silent, initially open
-`Working` disclosure. It collapses that same message with elapsed-time copy such
-as `Worked for 2m 14s`, `Stopped after 12s`, or `Failed after 8s`, then sends the
-actual result as a separate message with changed-file and check summaries. These
-ordinary messages arrive in the active conversation without quoting the
-triggering message; only message-specific queue, failure, steering, or question
-states use an explicit reply. While provider work is active, the bot publishes
-Inline's native `typing…` compose action.
-Progress and terminal-status edits are silent. The separate final answer uses
-ordinary Inline sending and your normal notification settings, so intermediate
-updates do not notify. The bridge persists the final send identity and reuses it
-after a retry or restart; the retained status plus final answer are an intentional
-two-message beta design. A failed progress edit never creates another progress
-message or prevents the final answer; after a crash the bridge resolves the
-original progress send by its stable local transaction identity before recovery.
-Normal mode keeps the Codex presentation hierarchy: exact commentary, reasoning
-summaries and content, provider progress, action rows, searches, file reads,
-commands, tool metadata, provider plan steps, compaction notices, and other
-structured activity. Reasoning and later tools are ordered sibling phases;
-adjacent read/search work is coalesced under one `Explored` disclosure. Consecutive
-successful file edits and commands share a collapsed summary such as
-`Edited files, ran a command`, with each activity retained as a distinct child.
-Commentary, reasoning, compaction, running work, and unsuccessful work separate
-these groups. File rows show relative paths where possible and completed line
-counts from Codex's supplied content or valid diff hunks; incomplete or unsupported
-diffs have no counts. Commands show a bounded `Running`/`Ran` preview while the
-complete command remains reachable in the details. Empty provider lifecycle envelopes
-create no visible row. Assistant
-item identity and phase preserve first-seen ordering, while the final answer
-remains outside progress. Normal mode stays within one bounded progress message
-and explicitly marks the unusual turn that does not fit.
+- **OpenCode:** resume, model and reasoning settings, permissions, `/plan` as
+  Build/Plan (`/plan off` returns to Build), compaction, usage and context
+  reporting, and child sessions as nested rows. Its driver can also list, fork and
+  close sessions.
+- **Amp:** resume through Inline's private session records, a model setting
+  offering Amp's low, medium, high and ultra modes, and default or bypass
+  permissions. It has no reasoning setting, plan mode, compaction, session listing,
+  fork or child rows. Images reach it as file links, not inline bytes.
 
-`/verbose` adds the privacy-sensitive diagnostic material: complete command
-output and terminal input, exact local paths and provider detail, plus one
-collapsed ordered `Provider data` appendix containing the raw Codex item
-payloads. Reasoning, summaries, and readable tool calls do not require verbose
-mode. The bridge fills the existing
-Working message to Inline's text limit of 100,000 UTF-16 units before adding a
-densely packed silent continuation, so a command or provider item never creates a new message
-by itself and no textual field is omitted. Binary generated
-images remain lossless attachments instead of being duplicated as base64 text.
-Formatting applies only structural Markdown/HTML escaping needed to keep the
-disclosures valid; this output is not a credential-redaction boundary. Recovery
-restores the same durable ledger, and switching from normal to verbose during a
-turn reveals the verbose data already retained. Missing tool completion remains
-unconfirmed even when the turn succeeds. The explicit `/verbose on` and
-`/verbose off` forms remain available for automation.
+Commands the agent advertises, such as OpenCode's own or Amp's `/init`, go to it as
+typed unless Inline handles that name itself. An idle session keeps its process for
+up to 30 minutes, and `/release` closes it at once.
 
-The progress disclosure includes a footer such as
-`Working directory: ~/dev/inline` (with the path rendered as inline code),
-instead of sending a separate working-directory message on session creation or
-resume. An actual session replacement still has its own explanatory notice.
-`/new`, `/clear`, and a successful project-folder change report the same
-working directory immediately. Paths below the host user's home are shortened
-to `~/…`; workspaces elsewhere use only their final folder name so shared chats
-do not disclose an absolute host path.
+A session that cannot be recovered keeps its binding and asks you to retry or use
+`/new`. Old Amp adapter sessions cannot resume across processes.
 
-Bridge output is parsed with Inline's supported Markdown. Shell commands use
-inline or fenced code. Changed-file paths use inline-code labels; in the
-owner's top-level private DM those labels are clickable local `file://` links.
-Outside the owner's top-level bot DM, changed files remain relative-path-only:
-the bridge never publishes an absolute host path or `file://` target to a
-thread.
+### Skills and harness commands
 
-Owner-authorized Agent Settings are available per DM or thread and share the
-same underlying state as slash commands for project, model, reasoning,
-permissions, verbosity, new session, clear, compact, queue, and stop behavior.
-Opening settings never forwards thread messages to the provider. Unsupported
-provider capabilities return a truthful status or use the durable queue; the
-bridge does not scrape an interactive terminal.
+Commands the harness reports appear in Inline's command menu after Inline's own, up
+to 100 in total. The thread's folder is checked for project commands.
 
-Bare `/model`, `/reasoning`, `/permissions`, and `/folder` commands reply with
-a silent interactive choice card. A page contains at most six choices plus
-**Back**, **More**, and **Cancel**; paging edits the same message and does not
-change a setting. The callback contains only an opaque token. Its durable local
-record binds the original actor, owner privilege where required, bot,
-installation, provider, conversation, workspace, command message, card message,
-catalog fingerprint, page, and ten-minute expiry. Every click rechecks the live
-operator policy and current catalog before the same settings mutation used by
-typed slash arguments. Stale catalogs refresh the card without selecting a
-fallback; restart recovery clears open cards. Explicit values such as
-`/model <value>` remain available when they do not collide with a provider-native
-command. Native meanings take precedence; use Agent Settings when a native
-command needs an interaction the bridge does not yet support. These settings
-remain owner-only even when another user is allowed to drive the agent.
+- **Codex:** `/skill-name` is sent as `$skill-name`.
+- **Claude:** commands and skills are sent as `/name`. Names with hyphens and colons
+  work typed in full, like `/code-review` or `/plugin:skill`, or by their menu name,
+  where other characters become underscores, like `/code_review` or `/plugin_skill`.
 
-Provider-native command catalogs declare their input as no input, freeform input,
-or a typed single-choice catalog while retaining the legacy freeform hint for a
-compatibility window. Native provider commands are not converted into ordinary
-prompts. Native commands without a verified dispatch path report that they are unavailable;
-legacy command cards cannot start a prompt instead. Catalog command names can
-contain colons and hyphens, and freeform hints are descriptive rather than an
-implicit requirement for arguments. Existing typed settings/actions remain
-available. No extra provider-command namespace is introduced.
+Inline's own commands win on Codex and Claude. A command nobody recognizes is
+reported as unavailable and is never sent as a prompt.
 
-`/threads` controls where the next top-level turn is delivered. Bare
-`/threads` shows the effective value and silent **Auto**, **On**, **Off**, and,
-when applicable, **Reset** buttons. Typed `/threads auto|on|off|reset` remains
-available. **Auto** is a real per-chat override; **Reset** removes the override
-and inherits the provider/global default. The built-in default is `auto`:
+### Sessions
 
-```toml
-[agent_bridge]
-reply_threads = "auto"
+The session is released when idle. Claude closes after 30 idle minutes. Codex is
+unsubscribed, and the app-server unloads it after its own `thread_unload_delay_secs`.
+The next message reopens it.
 
-[agent_bridge.providers.codex]
-reply_threads = "on"
-```
+If another client holds the session, the bot says so and offers **Fork here**, which
+continues in a new thread. Your message stays pending and runs once the session is
+free, if you still want it.
 
-Inline reply threads are real child chats identified by both `parent_chat_id`
-and `parent_message_id`. A turn already inside one stays there, while `/threads`
-inside that child reads and changes its direct parent's policy. A linked child
-without `parent_message_id` is an independent subthread with its own override.
-For a top-level turn, `on` creates or reuses the triggering message's anchored
-child and `off` stays in the current chat. `auto` stays flat in DMs and fresh
-chats, creates a child in a non-DM after its latest message ID passes 15, and
-also honors an explicit request such as “reply in a thread”; an explicit request
-to stay in the main chat wins. The bridge records the delivery child before
-`Working...` or provider startup; progress, questions, tools, `/stop`, final
-delivery, and restart recovery then use that child identity.
+A session keeps its folder. To work in another folder, start a new thread.
 
-Approvals appear as Inline action buttons in the conversation where the turn
-is running, including its reply thread. Only the owner can resolve them.
-A message sent while a card is open directs the agent instead of waiting behind
-it: it denies the approval or dismisses the question (a message never grants an
-approval) and then reaches the agent, as a new turn when the denial stopped the
-running one. A card Inline refuses to show is cancelled so the turn cannot wait
-on it.
-Mid-turn owner directions steer when the provider supports steering; `/queue`
-always queues explicitly and provides Undo until work starts. An uncertain
-steering response is never automatically retried as another prompt: Inline
-reports the uncertainty and resets the provider connection. ACP steering stays
-unavailable until its delivery contract is qualified.
+### Output
 
-`/stop` stops the typing indicator immediately and invokes the driver's
-idempotent cancellation barrier. For qualified drivers a successful barrier is
-terminal even when a provider races or omits its final event. At the current Claude adapter version,
-a cancelled prompt does not prove its SDK process is quiescent; strong
-per-session stop/release and native resumption remain unqualified. If the cancel
-operation has not completed within five seconds, Inline shuts down that provider epoch and restarts it instead of
-leaving the turn visibly or durably active. For Codex, cancellation also starts
-thread-wide managed-terminal cleanup immediately, repeats it after interruption
-settles to catch late registration, and verifies that Codex's terminal registry
-  is empty. The capability-probed Codex app-server contract does not provide an
-OS-process-reaped acknowledgement, so
-independently daemonized processes remain a provider limitation rather than an
-absolute cancellation guarantee.
+Output mode is set in Agent Settings, as a default for the agent and an override
+for the thread. The default is Detailed.
 
-When an agent asks up to four non-secret questions, reply directly to the
-question message. Choices accept either their number or label; multi-question
-forms take one answer per line, and multi-select numbers or labels on one line
-are comma-separated. Use numbers when a label itself contains a comma. Listed
-choices cannot be mixed with a custom answer. Use **Skip** for one question or
-reply `skip all` to decline a form without inventing an answer. ACP form
-elicitation is deliberately limited to bounded choices plus Claude's marked
-per-question custom-answer companion.
-Generic free-text and secret entry are not supported: credential forms are
-declined locally rather than passing their values through Inline messages.
+- **Detailed:** one progress message with every item the harness reports as
+  collapsible rows, sub-agent items nested, then a separate final answer. A progress
+  message continues in a new one past 80% of Inline's message limits. A steer ends
+  the current progress message.
+- **Friendly:** no progress cards. Only the harness's short prose updates, then the
+  final answer.
+
+Approvals, questions and errors are cards in both modes. Progress edits are silent;
+the final answer notifies. While a turn runs, the bot shows a working status where
+typing shows.
+
+Agent Settings also has the model, reasoning, permissions, compact, the thread's
+folder, the account's usage windows and the context window, as far as the harness
+reports them.
+
+### Permissions
+
+New Codex threads start on Codex's **Approve for me**, and a thread Codex opened
+before keeps its permissions. New Claude sessions launch with `bypassPermissions`.
+A choice in `/permissions` or Agent Settings wins for that thread. The choices come
+from the harness.
+
+### Approvals and questions
+
+Approvals are button cards in the conversation where the turn runs. The owner and
+anyone holding the Approve grant can resolve them.
+
+A question whose fields are all single-choice, with at most 8 options each, is asked
+one field at a time with buttons. Other questions are forms. You can also reply to the card, with one answer per line
+when there are several fields. Choices accept their number or label, and
+multi-select takes a comma-separated line. A reply that does not read as answers is
+a normal message to the agent. Anyone with access can answer a question.
+
+Secrets never go through chat. A form with a secret field does not accept a reply.
+
+A message sent while a card is open directs the agent instead of waiting behind it.
+It denies the approval or dismisses the question, then reaches the agent, as a new
+turn if the denial stopped the running one. A message never grants an approval. This
+needs steering, so on OpenCode and Amp the card stays open.
+
+### Agent loops
+
+An agent stops answering other agents after 1,000 agent messages in a row without a
+person, counted across the whole subthread tree. Edits to a message do not count. The
+bot posts a notice with **Allow more**, which adds 1,000 and needs the Configure
+grant. A message from a person resets the count.
 
 ### Files, photos, video, and voice
 
-Downloadable Inline media is retained as part of the provider-neutral user
-direction, including its kind, CDN URI, MIME type, file name, and byte size.
-The same bounded descriptor survives the durable inbox and explicit queue, so
-provider restarts do not silently turn an attachment into text-only work.
-If Inline first delivers a stored message before its media URL is hydrated,
-the later copy may fill an empty attachment set only while that direction is
-still accepted; it cannot overwrite prior media or mutate started work.
-Captions remain the user direction; media without a caption receives a neutral
-instruction to review the attachment. Attachment names, captions, and contents
-are always untrusted user input.
+The bridge downloads each attachment up to 100 MiB into the provider's private
+cache before delivery. If a download fails, it replies naming the file. Attachment
+names, captions and contents are always untrusted input. A voice message is delivered
+as its audio attachment.
 
-Before provider startup, the bridge downloads each HTTPS attachment once into
-the provider's private content-addressed cache with no redirects, a bounded
-timeout, integrity verification, and a 20 MiB limit. The agent receives the
-original transport descriptor plus a host-local read-only `file://` reference.
-That local URL is passive agent context, not a user-accessible link and never an
-instruction to upload. Codex receives cached photos and audio through
-app-server's native `localImage.path` and `localAudio.path` inputs; the passive
-descriptor still carries the corresponding local file URL for ordinary file
-operations. Documents and video remain explicit untrusted local resource
-descriptors. ACP providers receive native v1 `ImageContent` or `AudioContent`
-only when the negotiated prompt capabilities advertise that modality. The
-bridge also supplies the same attachment as a standard local `ResourceLink`,
-so an agent can still refer to or return the exact file when its selected model
-cannot inspect the media payload. Documents and video use `ResourceLink`
-directly. No media
-bytes, CDN URLs, captions, transcripts, or absolute cache paths are written to
-bridge logs.
+- **Codex:** images and audio arrive as native local inputs, other files as a local
+  path.
+- **Claude:** supported images and PDFs are sent inline, other files as a local path.
+- **ACP:** a standard resource link, plus image or audio bytes when the agent
+  advertises them.
 
-When the user explicitly asks to receive a file, photo, or other media, the
-agent may call `return_attachment` and must choose Inline's native `image`,
-`video`, or `file` kind from the current request. Images are returned as photos
-and videos as videos; an image becomes a document only when the user asks for a
-file or the format is not displayable media. The bridge accepts only a regular file
-inside the active workspace or its private inbound-attachment cache, rechecks
-the 20 MiB bound, validates the selected native kind against the MIME type, and
-uploads it idempotently to the current conversation. Provider retries are
-deduplicated by the authenticated direction, selected media kind, and verified
-file bytes rather than the provider's call ID. Native video uploads preserve
-Inline's verified inbound width, height, and duration when returning an
-attachment; workspace videos are probed with a bounded `ffprobe` invocation and
-fail closed instead of silently becoming documents when metadata cannot be
-verified. Every returned video also receives a bounded JPEG thumbnail generated
-with `ffmpeg`, uploaded in the same multipart request, and attached to the
-native Video. The response mapper selects the requested Video ID even though a
-thumbnail upload also returns a Photo ID. Inbound media preserves its
-user-facing file name. This makes the result available from any Inline device without
-exposing a host-local or `/tmp` path. Merely mentioning, reading, editing,
-changing, or referring to a path must not trigger this tool; the agent's normal
-answer remains text unless the user explicitly asks to receive the artifact.
-
-Provider-generated images use the same provider-neutral output boundary in the
-other direction. Codex `imageGeneration` completions are accepted only when
-the saved PNG exactly matches the bounded base64 result reported by app-server.
-ACP native agent-message images are decoded only from bounded base64 when their
-declared PNG, JPEG, WebP, or GIF MIME type matches the file signature, then
-materialized into the provider's private state directory.
-The durable final-send record stores only the absolute path, byte length, MIME
-type, safe file name, and SHA-256 digest. Delivery rechecks the regular file,
-size, digest, and matching raster signature before using Inline's idempotent photo upload,
-then sends the agent's terminal text. Recovery repeats both sends with stable
-identities, so a restart cannot duplicate or silently lose a staged image.
-
-A new voice message with no caption waits up to ten seconds for Inline's
-server-generated transcription edit. The wait is an independent timer and
-does not block other messages, chats, provider output, or `/stop`. If the edit
-arrives first, its transcript and voice resource become one initial direction.
-If the timer wins, the original audio resource is durably queued. A later edit
-to the exact source message of an active steer-capable turn is sent as a native
-steer with a revision-scoped identity claimed durably before dispatch. Replaying
-the same edit after a lost response or restart cannot submit it again; a crash
-between the claim and dispatch can leave the edit unsent. Edits to other or
-completed messages do not become new agent directions. `/stop` cancels any voice
-messages still held in that chat's transcription window, so delayed audio cannot start
-after the stop acknowledgement.
+`return_attachment` sends a local file back as native Inline media, only when a
+person asked to receive it. The file must be a regular file of at most 100 MiB inside
+the thread's folder or the attachment cache. The agent chooses `image`, `video` or
+`file`. Returned videos need `ffprobe` and `ffmpeg`.
 
 ## Inline tools for agents
 
-The bridge owns one bot-authenticated Inline tool catalog and authorization
-core; provider drivers only adapt that catalog to a verified transport. Every
-call is rebound to the accepted initiating turn, exact bot installation,
-provider session, live stable-user-ID policy, and a chat the bot can access.
-Arguments use strict per-tool schemas, results and item counts are bounded,
-calls time out, and durable provider/session/turn/call identities prevent a
-replayed mutation from running twice. Ordinary assistant answers still return
-through the bridge's durable final-message path rather than a send-message tool.
+The bridge serves 21 tools to the agent, acting as its bot. Codex gets them as
+dynamic tools, Claude in-process, and OpenCode and Amp through a private stdio MCP
+server.
 
-The initial catalog covers current context, chat/message/history lookup,
-message and chat search, reactions, pins, top-level chat creation, returning an
-explicitly requested local artifact as an Inline file, editing this bot's own
-messages, updating this bot's name, and bot presence. Mutations with meaningful
-side effects require explicit user intent; creating a public chat requires a
-second explicit public-chat intent. There is no reply-thread creation tool,
-arbitrary HTTP, raw RPC, CLI, general filesystem access, owner-token, or general
-send-message capability.
+- **Read:** `get_current_context`, `get_chat`, `get_messages`, `get_history`,
+  `read_link`, `search_messages`, `search_chats`, `list_my_threads`,
+  `get_reactions`, `list_pins`.
+- **Write:** `send_message`, `add_reaction`, `remove_reaction`, `pin_message`,
+  `unpin_message`, `edit_own_message`, `create_chat`, `start_subthread`,
+  `return_attachment`, `ask_teammate`, `follow_thread`.
 
-Compatible Codex app-server versions receive these as native `inline.*` dynamic
-tools. OpenCode, Claude, and Amp receive the same catalog through stable ACP
-v1's required stdio MCP transport. For each provider session, ACP launches the
-current Inline binary in a hidden MCP-only mode with an ephemeral capability and
-loopback port. That
-child receives no Inline credential, bot token, durable bridge state, or
-workspace mapping. The parent maps the capability back to the provider session
-and currently active turn, then invokes the same catalog and authorization core
-used by Codex. Capabilities expire with the provider epoch, calls outside an
-active turn fail closed, and the unstable MCP-over-ACP extension is not used.
+`pin_message`, `unpin_message`, `edit_own_message`, `create_chat` and
+`return_attachment` require `confirmed_intent`, which the agent sets only when a
+person asked. `create_chat` creates a private thread with the owner.
+`start_subthread` moves the work into a new subthread and leaves a status card in the
+thread. `ask_teammate` mentions someone in the work's thread.
+
+A call resolves through the session that made it, so a session that no longer acts
+for a work gets no tools. The server authorizes every request as the bot, and a link
+never broadens access. Arguments are checked against strict schemas, and results and
+run time are bounded.
 
 ## Project folders
 
-Agent Settings shows up to eight quick choices and keeps **Pick a Folder…**
-last. **Browse all projects…** opens the complete paged catalog. For Codex,
-this combines official `project/list` results, saved desktop project roots
-(including the older saved-folder format), and Inline's registered folders;
-it does not infer projects from recent sessions. `/projects` uses the same
-catalog, with up to 1,000 verified local roots. Multiple roots of one Codex
-project appear as separate folders. Remote and Cloud roots are not included.
-Discovery never changes the selected folder or replaces its saved filesystem
-identity. The most recently explicitly selected folder remains the default for
-new threads. An iPhone or another computer can switch among these projects but
-cannot browse the bridge host's filesystem.
-
-The remote iPhone controls are implemented but remain outside the initial
-macOS Codex beta certification until they pass the physical-device acceptance
-matrix.
-
-On the bridge-host Mac, Inline owns the native folder chooser and registers the
-selected path through a capability-authenticated loopback-only endpoint. The
-bridge canonicalizes and validates the directory and returns an opaque workspace
-ID. Absolute paths never travel through bot-settings payloads. The only message
-exception is an owner-DM changed-file `file://` link generated after the bridge
-has proved workspace containment.
-
-The registrar accepts both the original Mac client's `ID` JSON field spelling
-and the canonical `Id` spelling. A CLI update fixes folder picking for those
-existing Mac clients; no Mac update or server deployment is required. Saved
-catalog failures show an explicit warning while keeping local folder recovery
-available. Reopen Agent Settings after a bridge restart to refresh its capability.
-
-The CLI provides the same registry escape hatch:
+A thread's folder is a choice in Agent Settings until a session works there. The
+choices are the agent's own folder, the folders the harness knows (Codex's projects)
+and the folders registered with the bridge. Agent Settings on v2 has no folder picker,
+so register a new one on the host:
 
 ```bash
 inline bridge workspace add /path/to/project --provider codex
 inline bridge workspace list --provider codex
 ```
 
-When multiple providers are configured, pass `--provider` to choose the target.
+When multiple providers are configured, pass `--provider` to choose the target. Absolute
+paths never travel through settings payloads; the choice is an opaque ID.
 
 ## Operator allowlist
 
-The owner is always allowed and cannot be removed. Other users are rejected
-before routing, context, session, provider, or tool work unless their exact
-stable Inline user ID is allowed. Shared-chat rejection is silent; a direct
-message receives at most one generic silent rejection per bounded window. The
-global allowlist applies to every configured provider; `--provider` creates an
-exact provider override of that global list.
+The owner always has access. Everyone else needs a grant, which Inline's server holds
+and the bridge checks on every message and again after any wait. The check is by
+stable user ID. A mention never grants anything. Messages from people without access
+never start work and get no reply.
+
+The owner manages access in chat:
+
+```text
+/allowlist
+/allowlist @name
+/allowlist remove @name
+```
+
+`/allowlist` gives Invoke and Steer, per provider bot. It takes effect at once. The
+Approve and Configure grants cannot be given this way.
+
+`inline bridge operators` edits `~/.inline/config.toml`:
 
 ```bash
 inline bridge operators list
@@ -658,26 +334,9 @@ inline bridge operators add 23456 --provider claude
 inline bridge operators list --provider claude
 ```
 
-These commands update `~/.inline/config.toml`, validate unique positive IDs,
-and restart the account bridge. The equivalent configuration is:
-
-```toml
-[agent_bridge]
-allowed_user_ids = [12345]
-
-[agent_bridge.providers.claude]
-allowed_user_ids = [23456]
-```
-
-This file belongs to the current authenticated Inline user. That owner is
-implicit in the policy and need not also appear in `allowed_user_ids`.
-The owner can also send `/allowlist <user_id>` to one provider bot. Inline
-resolves and shows that user's full name and username in a confirmation card;
-only the owner's **Allow** button updates that provider's override, while
-**Cancel** leaves it unchanged. The live policy updates without restarting the
-service. Setup migrates the temporary legacy `~/.inline/config.json` policy to
-TOML when needed and retains the JSON file as a non-destructive,
-non-authoritative backup.
+On v2 this list is imported as Invoke and Steer grants only while the bot has no
+grants at all. After that, `operators` changes do not affect v2 access, including
+`remove`. Use `/allowlist remove @name`.
 
 ## Background lifecycle and diagnostics
 
@@ -686,18 +345,15 @@ The bridge starts after login and survives ordinary process/provider failures:
 - macOS uses a per-user LaunchAgent.
 - Linux uses a per-user systemd service.
 
-Linux service support is experimental for the beta until the exact artifact
-passes a real systemd-user login, reboot, diagnostics, update, and cleanup run.
+Linux service support is experimental until the exact artifact passes a real
+systemd-user login, reboot, diagnostics, update, and cleanup run.
 
 Linux starts with the user's systemd manager after login. `status` and `doctor`
 report whether linger is enabled when `loginctl` is available; setup never
 enables linger or requires headless pre-login operation.
 
 One account service supervises all configured providers. A provider restart
-does not stop other providers. Independent sessions are admitted without an
-account-wide four-run ceiling; one native session still runs one turn at a
-time. The scheduler pages pending chats so blocked older work cannot hide
-runnable work behind the first batch. Transport and event buffers remain bounded.
+does not stop other providers.
 
 Before upgrading an existing on-disk bridge database, Inline creates a
 permission-restricted sibling backup as the rollback point. If an older backup
@@ -718,15 +374,10 @@ inline bridge restart
 `status` and `doctor` report each configured provider separately. Logs are
 bounded and redact provider/protocol failures before display.
 
-Development builds enable a metadata-only trace stream automatically. It
-correlates stable Inline event/message IDs, provider session/turn IDs, RPC
-methods, normalized event kinds, tool-call IDs, durable claim outcomes, stop
-barriers, voice-wait phases, source-edit steering, attachment counts, and
-elapsed times. It never records message text, media URLs, transcripts, tool arguments or
-results, file contents, absolute workspace paths, tokens, or credentials.
-`inline bridge logs --lines 500` returns the bounded trace when diagnosing a
-beta failure. Release service builds keep trace disabled; the hidden foreground
-`bridge run --trace` switch exists for an explicitly supervised diagnostic run.
+Development builds enable trace logging automatically, and
+`inline bridge logs --lines 500` returns it. Release service builds keep trace
+disabled; the hidden foreground `bridge run --trace` switch exists for an explicitly
+supervised diagnostic run.
 
 On Unix, a bundled supervisor holds one private installation-local ownership
 lock, records its own verified group, and starts the provider in a separate
@@ -738,8 +389,7 @@ The distributed macOS CLI is signed as the stable code identity
 `chat.inline.cli`. If an explicitly selected agent workspace or a provider
 operation touches a network volume, macOS may ask once for that filesystem
 permission. Ad-hoc local development rebuilds do not have a stable signing
-identity and can prompt again after the binary changes; they are not suitable
-as the exact beta artifact.
+identity and can prompt again after the binary changes.
 
 Production bridge state lives below
 `~/.local/share/inline/bridge/accounts/<owner-user-id>/`. Each account has one
@@ -759,68 +409,60 @@ inline bridge uninstall
 
 Uninstall removes only the launchd/systemd definition and stops the background
 process. It preserves bots, credentials, registered projects, settings, and
-provider session records so a later setup can repair the installation. Whether
-the provider can resume a recorded session is capability- and
-reliability-gated; the current Claude adapter deliberately starts a fresh
-session after a process epoch changes.
+provider session records so a later setup can repair the installation.
 
 ## Troubleshooting
 
 Start with `inline bridge status`, then `inline bridge doctor`. A provider may
 be locally running while doctor reports `needs_attention` when its own CLI login
-has expired; sign in with that provider on the host and run setup again. If a
-provider is restarting, accepted directions remain queued and healthy sibling
-bots stay available. Use `inline bridge logs --lines 100` for the bounded,
-redacted host diagnostic, then `inline bridge restart` if recovery does not
-converge. Re-running `inline setup <provider>` is idempotent and repairs the
-service binary, provider record, command catalog, and background definition.
+has expired; sign in with that provider on the host and run setup again. Use
+`inline bridge logs --lines 100` for the bounded, redacted host diagnostic, then
+`inline bridge restart` if recovery does not converge. Re-running
+`inline setup <provider>` is idempotent and repairs the service binary, provider
+record, command catalog, and background definition.
 
-If **Pick a Folder…** is unavailable, use an existing recent project or run
+If a folder is missing from Agent Settings, run
 `inline bridge workspace add <path> --provider <provider>` on the named host.
-The Mac picker is intentionally unavailable from iPhone, a remote Mac, or when
-the local service-epoch probe fails.
 
 ## Local security boundary
 
-- The owner user ID is the default operator and the only approver. Additional
-  operators require an exact stable ID granted through local CLI/config or the
-  owner's `/allowlist <user_id>` confirmation card.
+- The owner always has access. Others need a grant on Inline's server, rechecked on
+  every message and after any wait. If grants cannot be read, only the owner is
+  admitted.
 - Bot credentials and the authenticated control token are stored in private
   local files and are not passed to provider processes.
 - Provider authentication stays in provider-owned stores.
 - Provider executables are resolved, probed, and persisted as exact paths.
 - Doctor probes Amp through the same persisted host CLI path used by the
   service; it does not silently substitute another `amp` found on its own PATH.
-- Curated ACP adapters require an Inline-owned complete dependency lock. Setup
-  is the only code-download boundary, installs with `npm ci`, verifies that lock
-  and the adapter integrity, and reports a new install explicitly.
+- The Amp adapter requires an Inline-owned complete dependency lock. Setup is the
+  only code-download boundary.
 - The service exposes no public network listener. The Mac folder registrar binds
   only `127.0.0.1` on an ephemeral port and requires a fresh service-epoch
   capability, exact host installation ID, and selected bot identity.
-- Workspace paths are canonicalized; filesystem root and the home directory are
-  rejected as projects.
-- A chat without a project binding gets the default project (or home) only when
-  the owner sends the message, in the owner DM, or when this bridge's own bot
-  hands off work it already admitted. Other operators and allowlisted bots
-  inherit the nearest bound parent chat's project, else the owner's most recent
-  project; they never get home. With neither, people get a notice with a Retry
-  button and bots are ignored until the owner connects the chat.
-- Shared/public chats are treated as potentially internet-visible. Admission is
-  based only on the strict stable-user-ID allowlist, never group membership.
-  Non-allowlisted human messages are excluded from provider context; approval
-  details, absolute local paths, and `file://` targets remain owner-DM-only.
-- Another bot must pass the same live user-ID allowlist and exactly mention this
-  bot. The only exemption is the other provider bots of this same local bridge,
-  which the owner provisioned on this host. Add any other bot with
-  `inline bridge operators add <bot_user_id>`; the in-chat `/allowlist` card
-  accepts people only. The check is repeated when queued work is replayed and
-  when a turn calls Inline tools, so removing an ID stops its queued work too.
-  A targeted command or reply alone does not authorize or activate it.
-  Other bot messages are ignored silently. Ordinary responses to bots are sent
-  without a structural reply or reciprocal mention; bridge-authored guidance
-  permits a bot mention only for a necessary explicit handoff. Message metadata
-  is checked first and missing bot classification falls back to Inline's stored
-  user identity.
-- `/allowlist` is the only in-chat allowlist mutation. It is provider-scoped,
-  owner-only, confirmation-gated, and rechecks the callback's user, bot, chat,
-  expiry, and durable one-shot token before changing the live policy.
+- Registered workspace paths are canonicalized; the filesystem root is rejected.
+- A thread without a chosen folder runs in the agent's folder for anyone with
+  access. If setup used your home directory, that means home, so use `--folder`
+  before granting access to others.
+- Shared chats are treated as potentially visible to others. Messages from people
+  without access never start work, but when the bot takes part in a thread they can
+  reach the agent as untrusted context.
+- Approval cards appear in the conversation where the turn runs and show the command
+  and its folder as an absolute path. Bear this in mind before running work in a
+  shared thread.
+- Progress rows show paths relative to the session's folder where possible.
+- Another bot needs a grant like anyone else and is checked the same way. It can
+  activate this bot with a mention, a reply to it or a targeted command. Being a
+  provider bot of the same bridge earns no exemption on v2.
+
+## Legacy bridge
+
+Bridge v1 still runs in three cases: `INLINE_BRIDGE_V2=off` in the bridge process's
+environment, OpenCode 0.x or v1, and Amp adapters older than the current pin. A list
+such as `INLINE_BRIDGE_V2=codex` enables v2 only for those providers. See
+[CLI releases](releases.md#bridge-runtime) for how to set this for the background
+service.
+
+v1 keeps its own commands (`/projects`, `/folder`, `/queue`, `/threads`, `/verbose`
+and `/allowlist <user_id>`) and uses the config allowlist live. Its Claude path needs
+the ACP adapter and Node.js 22 or newer, so rerun setup with `INLINE_BRIDGE_V2=off`.
