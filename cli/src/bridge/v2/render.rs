@@ -457,7 +457,12 @@ impl Renderer {
                     self.pending_text = Some((id.to_owned(), text.clone()));
                 }
             },
-            ItemBody::Reasoning { summary, .. } if has_text(summary) => {
+            // ACP agents send raw thoughts rather than summaries, too long and
+            // too rough for a person reading updates.
+            ItemBody::Reasoning { summary, .. }
+                if has_text(summary)
+                    && !matches!(self.vocabulary, Vocabulary::OpenCode | Vocabulary::Amp) =>
+            {
                 self.flush_pending_update(ops);
                 ops.push(update(&summary.join("\n\n")));
             }
@@ -716,7 +721,7 @@ impl Renderer {
             }
             let run = &rows[index..end];
             match fold {
-                Fold::Explore if self.vocabulary == Vocabulary::Codex || run.len() > 1 => {
+                Fold::Explore if self.vocabulary != Vocabulary::Claude || run.len() > 1 => {
                     self.write_explore(builder, run);
                 }
                 Fold::Command if run.len() > 1 => {

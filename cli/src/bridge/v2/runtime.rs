@@ -1699,6 +1699,14 @@ impl Runtime {
                         }
                         .to_owned(),
                     ),
+                    ("plan", Vocabulary::OpenCode) => SessionOp::Mode(
+                        if arguments.trim().eq_ignore_ascii_case("off") {
+                            "build"
+                        } else {
+                            "plan"
+                        }
+                        .to_owned(),
+                    ),
                     ("plan", Vocabulary::Claude)
                         if arguments.trim().eq_ignore_ascii_case("off") =>
                     {

@@ -188,7 +188,6 @@ pub(crate) async fn clear_actions(
             actions: Some(proto::MessageActions::default()),
             block_content: message.block_content,
             entities: message.entities,
-            ..Default::default()
         }
     )?;
     Ok(())
