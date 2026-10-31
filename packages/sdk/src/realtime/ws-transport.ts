@@ -7,9 +7,15 @@ import type { InlineSdkLogger } from "../sdk/logger.js"
 
 type ConnectionState = "idle" | "connecting" | "connected"
 
+// Covers TCP, TLS and the upgrade. Without it a network that accepts the connection and then
+// never answers (VPNs and proxies do this) leaves the client connecting forever: pings only
+// start once the socket opens, and nothing else retries.
+const defaultHandshakeTimeoutMs = 15_000
+
 export type WebSocketTransportOptions = {
   url: string
   logger?: InlineSdkLogger
+  handshakeTimeoutMs?: number
 }
 
 export class WebSocketTransport implements Transport {
@@ -17,6 +23,7 @@ export class WebSocketTransport implements Transport {
 
   private readonly url: string
   private readonly log: InlineSdkLogger
+  private readonly handshakeTimeoutMs: number
 
   private state: ConnectionState = "idle"
   private connectionAttemptNo = 0
@@ -40,6 +47,7 @@ export class WebSocketTransport implements Transport {
   constructor(options: WebSocketTransportOptions) {
     this.url = options.url
     this.log = options.logger ?? {}
+    this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? defaultHandshakeTimeoutMs
   }
 
   async start() {
@@ -148,7 +156,7 @@ export class WebSocketTransport implements Transport {
     if (this.state === "idle") return
 
     this.lastConnectStartedAt = Date.now()
-    const socket = new WebSocket(this.url)
+    const socket = new WebSocket(this.url, { handshakeTimeout: this.handshakeTimeoutMs })
     this.socket = socket
 
     socket.on("open", () => {
