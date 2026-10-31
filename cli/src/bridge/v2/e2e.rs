@@ -2396,12 +2396,10 @@ async fn claude_round_trip_through_inline() {
         bot_user_id,
         "the steered reply",
         |texts| {
+            // No tool runs, so the steer cuts the slow reply off.
             texts
                 .iter()
-                .any(|(_, text)| text.contains("E2E_CLAUDE_SLOW"))
-                && texts
-                    .iter()
-                    .any(|(_, text)| text.contains("FAKE-OK") && text.contains("E2E_CLAUDE_STEER"))
+                .any(|(_, text)| text.contains("FAKE-OK") && text.contains("E2E_CLAUDE_STEER"))
         },
     )
     .await;

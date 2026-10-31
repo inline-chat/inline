@@ -3,7 +3,7 @@
 //! | Delivery | Claude |
 //! | --- | --- |
 //! | `Turn` | user message |
-//! | `Steer` | `priority: now` / `next` |
+//! | `Steer` | `priority: now` / `next`; a person's `next` is raised to `now` by the session while no tool runs |
 //! | `Queue` | `priority: later` |
 //! | `Passive` | `shouldQuery: false` |
 //!

@@ -6,7 +6,7 @@
 //! questions wait in the control handler until [`Session::control`] answers
 //! them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
@@ -17,9 +17,10 @@ use inline_agent_bridge::harness::{
     CompatTier, DEFAULT_HUB_CAPACITY, Delivery, DeliveryKind, Envelope, Event, EventHub,
     EventStream, ExecutableInfo, ExecutableSource, ForkPoint, HarnessDriver, HarnessFuture, HeldBy,
     HeldSurface, Input, InputDisposition, InputReceipt, InteractionId, LiveWork, ModeId, Op,
-    OpError, OpKind, OpOutcome, OpenError, OpenMode, OpenSpec, OutputMode, QueueEntryId,
+    OpError, OpKind, OpOutcome, OpenError, OpenMode, OpenSpec, Origin, OutputMode, QueueEntryId,
     ReleaseOutcome, Released, RunState, RunStateTracker, RuntimeHealth, RuntimeInfo, SendError,
     Session, SessionKey, SessionPage, SessionQuery, SessionSummary, SettingsScope, SetupReason,
+    SteerPriority,
 };
 use inline_agent_bridge::{
     DriverCommand, DriverCommandInput, DriverError, DriverFuture, DriverModelOption,
@@ -38,7 +39,7 @@ use crate::client::{
     ControlHandler, IncomingCall,
 };
 use crate::control::{InitializeRequest, InitializeResponse};
-use crate::input::UserMessage;
+use crate::input::{Priority, UserMessage};
 use crate::mcp::{BoxFuture, SdkMcpServer, ToolDefinition, ToolOutput, ToolServer};
 use crate::options::{LaunchOptions, ProcessHost, SessionStart};
 use crate::sessions::SessionStore;
@@ -831,6 +832,8 @@ struct SessionInner {
     /// Set once a wait ended without any lifecycle frame: this CLI predates
     /// them, so later sends do not wait.
     lifecycle_absent: std::sync::atomic::AtomicBool,
+    /// A [`detach_for_steer`] task is running.
+    detaching: std::sync::atomic::AtomicBool,
     version: ClaudeVersion,
 }
 
@@ -965,6 +968,7 @@ impl ClaudeSession {
             acks: Mutex::new(HashMap::new()),
             lifecycle_seen: std::sync::atomic::AtomicBool::new(false),
             lifecycle_absent: std::sync::atomic::AtomicBool::new(false),
+            detaching: std::sync::atomic::AtomicBool::new(false),
             version,
         });
         *slot.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(Arc::downgrade(&inner));
@@ -1012,6 +1016,58 @@ impl ClaudeSession {
 
 /// How long a written input waits for its lifecycle frame.
 const LIFECYCLE_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How Claude Code Desktop clears the way for a steer waiting on a tool: work
+/// this old moves to the background, retrying while Claude has not registered
+/// it yet (a few seconds into a command), for a limited number of tools.
+const STEER_DETACH_MIN_AGE: std::time::Duration = std::time::Duration::from_secs(3);
+const STEER_DETACH_RETRY: std::time::Duration = std::time::Duration::from_secs(1);
+const STEER_DETACH_WINDOW: std::time::Duration = std::time::Duration::from_secs(18);
+const STEER_DETACH_MAX_TOOLS: usize = 2;
+
+/// Moves what a person's steer waits on to the background until the CLI takes
+/// the steer. Best effort: whatever stays, the steer lands when it ends.
+async fn detach_for_steer(session: Weak<SessionInner>) {
+    let deadline = tokio::time::Instant::now() + STEER_DETACH_WINDOW;
+    let mut detached = HashSet::new();
+    while tokio::time::Instant::now() < deadline && detached.len() < STEER_DETACH_MAX_TOOLS {
+        let Some(inner) = session.upgrade() else {
+            return;
+        };
+        let tools = {
+            let mapper = inner.mapper();
+            if !mapper.has_unread_steer() {
+                break;
+            }
+            mapper.detachable_tools(STEER_DETACH_MIN_AGE)
+        };
+        for tool in tools {
+            if detached.contains(&tool) {
+                continue;
+            }
+            match inner.client.background_tasks(Some(tool.as_str())).await {
+                Ok(response) if response["backgrounded"] == json!(true) => {
+                    detached.insert(tool);
+                }
+                Ok(_) => {}
+                // Background tasks are off, or the session is gone.
+                Err(_) => {
+                    inner
+                        .detaching
+                        .store(false, std::sync::atomic::Ordering::Release);
+                    return;
+                }
+            }
+        }
+        drop(inner);
+        tokio::time::sleep(STEER_DETACH_RETRY).await;
+    }
+    if let Some(inner) = session.upgrade() {
+        inner
+            .detaching
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+}
 
 fn pump_event(inner: &SessionInner, event: ClientEvent) {
     match event {
@@ -1145,14 +1201,33 @@ impl Session for ClaudeSession {
                 }
                 _ => {}
             }
-            let message = user_message(&self.inner.session_id, &input);
-            match input.delivery {
-                Delivery::Passive => self.inner.mapper().sent_passive(&input.id),
-                _ => self
-                    .inner
-                    .mapper()
-                    .sent(&input.id, matches!(input.delivery, Delivery::Turn)),
+            let mut message = user_message(&self.inner.session_id, &input);
+            // Typing while Claude works: a person's steer cuts the model at
+            // once, as Codex does, and otherwise clears the way once written.
+            let person_steer =
+                matches!(
+                    input.delivery,
+                    Delivery::Steer {
+                        priority: SteerPriority::Next,
+                        ..
+                    }
+                ) && matches!(input.origin, Origin::Owner { .. } | Origin::Teammate { .. });
+            {
+                let mut mapper = self.inner.mapper();
+                let cut = person_steer && mapper.steer_can_cut();
+                if cut {
+                    message.priority = Some(Priority::Now);
+                }
+                match &input.delivery {
+                    Delivery::Passive => mapper.sent_passive(&input.id),
+                    Delivery::Steer { priority, .. } => {
+                        mapper.sent(&input.id, false);
+                        mapper.sent_steer(&input.id, cut || *priority == SteerPriority::Now);
+                    }
+                    delivery => mapper.sent(&input.id, matches!(delivery, Delivery::Turn)),
+                }
             }
+            let wait_on_tools = person_steer && message.priority == Some(Priority::Next);
             let (ack, acked) = oneshot::channel();
             self.inner
                 .acks
@@ -1170,6 +1245,14 @@ impl Session for ClaudeSession {
                     self.inner.mapper().forget_sent(&input.id);
                 }
                 return Err(error);
+            }
+            if wait_on_tools
+                && !self
+                    .inner
+                    .detaching
+                    .swap(true, std::sync::atomic::Ordering::AcqRel)
+            {
+                tokio::spawn(detach_for_steer(Arc::downgrade(&self.inner)));
             }
             // A written line is not an accepted input: wait for Claude's own
             // lifecycle frame for this UUID.
@@ -1318,6 +1401,9 @@ impl Session for ClaudeSession {
                 }
                 _ => {}
             }
+            if let Op::Interrupt { .. } = op {
+                self.inner.mapper().stop_requested();
+            }
             match op_plan(&op) {
                 OpPlan::Control(requests) => {
                     let native = self.requests(requests).await?;
@@ -1333,11 +1419,17 @@ impl Session for ClaudeSession {
                     message.session_id = self.inner.session_id.clone();
                     let busy = self.inner.mapper().turn().is_some();
                     if busy {
-                        message = message.with_priority(crate::input::Priority::Later);
+                        message = message.with_priority(Priority::Later);
                     }
                     let id = inline_agent_bridge::harness::InputId::new(message.uuid.as_str())
                         .map_err(|error| OpError::Rejected(error.to_string()))?;
-                    self.inner.mapper().sent(&id, !busy);
+                    {
+                        let mut mapper = self.inner.mapper();
+                        mapper.sent(&id, !busy);
+                        if !busy {
+                            mapper.sent_command();
+                        }
+                    }
                     self.inner.client.send(&message).await.map_err(op_error)?;
                     let turn = TurnId::new(message.uuid.as_str())
                         .map_err(|error| OpError::Rejected(error.to_string()))?;

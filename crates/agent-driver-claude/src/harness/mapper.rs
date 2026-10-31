@@ -65,6 +65,8 @@ struct ToolItem {
     parent: Option<ChildRef>,
     body: ItemBody,
     native: Value,
+    name: String,
+    started: tokio::time::Instant,
 }
 
 /// Folds one session's frames into contract events.
@@ -96,6 +98,15 @@ pub struct ClaudeMapper {
     /// The latest top-level call's tokens: the context fill the turn's
     /// result reports.
     last_call_usage: Option<TokenUsage>,
+    /// Steers written and not yet taken by the CLI.
+    unread_steers: HashSet<String>,
+    /// The running turn was cut for a steer: its end is not a stop.
+    superseded: bool,
+    /// A top-level tool call is streaming, before its `assistant` frame.
+    tool_call_starting: bool,
+    compacting: bool,
+    /// The running turn is a native command (`/compact`, `/clear`).
+    command_turn: bool,
 }
 
 impl ClaudeMapper {
@@ -158,6 +169,60 @@ impl ClaudeMapper {
         &self.effective
     }
 
+    /// Whether a person's steer may cut the running turn with `priority: now`:
+    /// the model is working and nothing would be lost. A `now` during a tool
+    /// call aborts it (a command that just started is killed), so those steers
+    /// go as `next` and [`Self::detachable_tools`] clears the way instead. The
+    /// other blockers follow Claude Code Desktop's.
+    pub fn steer_can_cut(&self) -> bool {
+        self.turn.is_some()
+            && !self.tool_call_starting
+            && !self.compacting
+            && !self.command_turn
+            && self.pending.is_empty()
+            && self.unread_steers.is_empty()
+            && !self.main_tools().any(|_| true)
+    }
+
+    /// Records a steer written to stdin, `cut` when it stops the running turn.
+    pub fn sent_steer(&mut self, input: &InputId, cut: bool) {
+        self.unread_steers.insert(input.as_str().to_string());
+        self.superseded |= cut;
+    }
+
+    /// Whether a steer is still waiting for the CLI to take it.
+    pub fn has_unread_steer(&self) -> bool {
+        !self.unread_steers.is_empty()
+    }
+
+    /// Foreground work of the running turn at least `min_age` old that Claude
+    /// can move to the background, so a waiting steer lands without killing it.
+    pub fn detachable_tools(&self, min_age: std::time::Duration) -> Vec<String> {
+        self.main_tools()
+            .filter(|(_, tool)| {
+                matches!(tool.name.as_str(), "Bash" | "PowerShell" | "Agent" | "Task")
+                    && tool.started.elapsed() >= min_age
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    /// Records a native command that starts a turn.
+    pub fn sent_command(&mut self) {
+        self.command_turn = true;
+    }
+
+    /// A person asked to stop: the turn's end is a stop whatever was steered.
+    pub fn stop_requested(&mut self) {
+        self.superseded = false;
+    }
+
+    fn main_tools(&self) -> impl Iterator<Item = (&String, &ToolItem)> {
+        self.tools.iter().filter(|(_, tool)| {
+            tool.parent.is_none() && tool.turn.is_some() && tool.turn == self.turn
+        })
+    }
+
     /// Records an input written to stdin.
     pub fn sent(&mut self, input: &InputId, starts_turn: bool) {
         self.sent.insert(input.as_str().to_string());
@@ -171,6 +236,7 @@ impl ClaudeMapper {
     pub fn forget_sent(&mut self, input: &InputId) {
         self.sent.remove(input.as_str());
         self.passive.remove(input.as_str());
+        self.unread_steers.remove(input.as_str());
         self.awaiting_turn.retain(|waiting| waiting != input);
     }
 
@@ -226,6 +292,7 @@ impl ClaudeMapper {
                         effective: self.effective.clone(),
                     });
                 }
+                self.compacting = status.status.as_deref() == Some("compacting");
                 if status.status.is_some() || status.compact_result.is_some() {
                     events.push(notice(
                         NoticeLevel::Info,
@@ -306,6 +373,9 @@ impl ClaudeMapper {
     }
 
     fn lifecycle(&mut self, uuid: &str, state: &str) -> Vec<Event> {
+        if state != "queued" {
+            self.unread_steers.remove(uuid);
+        }
         let mut events = if matches!(state, "started" | "cancelled" | "discarded" | "refused") {
             self.dequeue(uuid)
         } else {
@@ -526,6 +596,9 @@ impl ClaudeMapper {
                     } else {
                         item
                     };
+                    if parent.is_none() {
+                        self.tool_call_starting = false;
+                    }
                     self.tools.insert(
                         id,
                         ToolItem {
@@ -533,6 +606,8 @@ impl ClaudeMapper {
                             parent: parent.clone(),
                             body,
                             native: block.clone(),
+                            name: block["name"].as_str().unwrap_or_default().to_string(),
+                            started: tokio::time::Instant::now(),
                         },
                     );
                     events.push(Event::Item(item));
@@ -684,10 +759,19 @@ impl ClaudeMapper {
             Some("message_start") => {
                 if parent_tool_use_id.is_none() {
                     events.extend(self.ensure_turn(None));
+                    self.tool_call_starting = false;
                 }
                 if let Some(id) = event["message"]["id"].as_str() {
                     self.streaming.insert(key, id.to_string());
                 }
+            }
+            Some("content_block_start")
+                if parent_tool_use_id.is_none()
+                    && event["content_block"]["type"]
+                        .as_str()
+                        .is_some_and(|kind| kind.ends_with("tool_use")) =>
+            {
+                self.tool_call_starting = true;
             }
             Some("content_block_delta") => {
                 let Some(message_id) = self.streaming.get(&key).cloned() else {
@@ -776,12 +860,17 @@ impl ClaudeMapper {
         for input in &consumed {
             self.awaiting_turn.retain(|waiting| waiting != input);
             self.facts.insert((input.as_str().to_string(), "consumed"));
+            self.unread_steers.remove(input.as_str());
             let dequeued = self.dequeue(input.as_str());
             events.extend(dequeued);
         }
         self.turn_inputs.clear();
         self.streaming.clear();
         let outcome = turn_outcome(result);
+        let superseded = std::mem::take(&mut self.superseded);
+        self.tool_call_starting = false;
+        self.compacting = false;
+        self.command_turn = false;
         let error = (outcome == TurnOutcome::Failed).then(|| result.error_text());
         // Tool calls an interrupted or failed turn left open ended with it.
         let open: Vec<String> = self
@@ -807,6 +896,12 @@ impl ClaudeMapper {
                 ));
             }
         }
+        // Cut for a steer, the turn did not stop: the steer carries on.
+        let outcome = if superseded && outcome == TurnOutcome::Interrupted {
+            TurnOutcome::Completed
+        } else {
+            outcome
+        };
         events.push(Event::Turn {
             turn,
             phase: TurnPhase::Completed {
@@ -1862,5 +1957,116 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    fn running_turn(t1: &str) -> ClaudeMapper {
+        let mut mapper = ClaudeMapper::new(None);
+        mapper.sent(&InputId::new(t1).unwrap(), true);
+        mapper.message(&message(
+            json!({"type": "command_lifecycle", "command_uuid": t1, "state": "started"}),
+        ));
+        mapper
+    }
+
+    fn steer_tool_use(id: &str, name: &str) -> Value {
+        json!({"type": "assistant", "uuid": format!("a-{id}"), "parent_tool_use_id": null,
+            "message": {"id": format!("msg-{id}"), "role": "assistant",
+                "content": [{"type": "tool_use", "id": id, "name": name, "input": {}}]}})
+    }
+
+    #[test]
+    fn a_steer_cuts_only_while_the_model_works() {
+        let t1 = "0d6a7c1e-1111-4a00-8000-000000000001";
+        let s1 = InputId::new("0d6a7c1e-1111-4a00-8000-000000000002").unwrap();
+        let mut mapper = ClaudeMapper::new(None);
+        assert!(!mapper.steer_can_cut(), "no turn runs");
+        mapper = running_turn(t1);
+        assert!(mapper.steer_can_cut());
+
+        // From the first streamed block of a tool call until its result.
+        mapper.message(&message(json!({"type": "stream_event", "event": {
+            "type": "content_block_start", "index": 0,
+            "content_block": {"type": "tool_use", "id": "toolu_1", "name": "Bash"}}})));
+        assert!(!mapper.steer_can_cut(), "a tool call is starting");
+        mapper.message(&message(steer_tool_use("toolu_1", "Bash")));
+        assert!(!mapper.steer_can_cut(), "a tool runs");
+        mapper.message(&message(json!({"type": "user", "parent_tool_use_id": null,
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_1", "content": "ok"}]}})));
+        assert!(mapper.steer_can_cut());
+
+        // A steer the CLI has not taken holds back the next one.
+        mapper.sent_steer(&s1, false);
+        assert!(!mapper.steer_can_cut());
+        assert!(mapper.has_unread_steer());
+        mapper.message(&message(
+            json!({"type": "command_lifecycle", "command_uuid": s1.as_str(), "state": "queued"}),
+        ));
+        assert!(mapper.has_unread_steer());
+        mapper.message(&message(
+            json!({"type": "command_lifecycle", "command_uuid": s1.as_str(), "state": "started"}),
+        ));
+        assert!(!mapper.has_unread_steer());
+        assert!(mapper.steer_can_cut());
+
+        // Compaction and native commands are never cut.
+        mapper.message(&message(
+            json!({"type": "system", "subtype": "status", "status": "compacting"}),
+        ));
+        assert!(!mapper.steer_can_cut());
+        mapper.message(&message(
+            json!({"type": "system", "subtype": "status", "status": null}),
+        ));
+        assert!(mapper.steer_can_cut());
+        mapper.sent_command();
+        assert!(!mapper.steer_can_cut());
+    }
+
+    #[test]
+    fn only_old_enough_commands_and_agents_are_detached() {
+        let mut mapper = running_turn("0d6a7c1e-1111-4a00-8000-000000000001");
+        mapper.message(&message(steer_tool_use("toolu_bash", "Bash")));
+        mapper.message(&message(steer_tool_use("toolu_agent", "Agent")));
+        mapper.message(&message(steer_tool_use("toolu_read", "Read")));
+        assert!(
+            mapper
+                .detachable_tools(std::time::Duration::from_secs(3600))
+                .is_empty(),
+            "too young"
+        );
+        let mut tools = mapper.detachable_tools(std::time::Duration::ZERO);
+        tools.sort();
+        assert_eq!(tools, vec!["toolu_agent", "toolu_bash"]);
+    }
+
+    fn aborted_outcome(mapper: &mut ClaudeMapper, input: &str) -> TurnOutcome {
+        let events = mapper.message(&message(
+            json!({"type": "result", "subtype": "success", "is_error": false,
+            "terminal_reason": "aborted_streaming", "user_message_uuids": [input]}),
+        ));
+        match events.last() {
+            Some(Event::Turn {
+                phase: TurnPhase::Completed { outcome, .. },
+                ..
+            }) => *outcome,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_turn_cut_for_a_steer_is_not_a_stop() {
+        let t1 = "0d6a7c1e-1111-4a00-8000-000000000001";
+        let s1 = InputId::new("0d6a7c1e-1111-4a00-8000-000000000002").unwrap();
+        let mut mapper = running_turn(t1);
+        mapper.sent_steer(&s1, true);
+        assert_eq!(aborted_outcome(&mut mapper, t1), TurnOutcome::Completed);
+
+        // Only that turn, and not when the person stopped it meanwhile.
+        let mut mapper = running_turn(t1);
+        assert_eq!(aborted_outcome(&mut mapper, t1), TurnOutcome::Interrupted);
+        let mut mapper = running_turn(t1);
+        mapper.sent_steer(&s1, true);
+        mapper.stop_requested();
+        assert_eq!(aborted_outcome(&mut mapper, t1), TurnOutcome::Interrupted);
     }
 }
