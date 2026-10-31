@@ -13,6 +13,7 @@ final class MessageRichView: UIView {
     var secondary: UIColor
     var accent: UIColor
 
+    var tertiary: UIColor { secondary.withAlphaComponent(0.72) }
     var subtleFill: UIColor { text.withAlphaComponent(0.05) }
     var codeFill: UIColor { text.withAlphaComponent(0.07) }
     var separator: UIColor { text.withAlphaComponent(0.14) }
@@ -63,10 +64,10 @@ final class MessageRichView: UIView {
       views[key] = nil
     }
     order = keys
-    // Decorations behind content: quotes first, in tree order.
+    // Decorations behind content: quotes and callouts first, in tree order.
     for key in order {
       guard let view = views[key] else { continue }
-      if view is RichQuoteView { sendSubviewToBack(view) } else { bringSubviewToFront(view) }
+      if view is RichQuoteView || view is RichCalloutView { sendSubviewToBack(view) } else { bringSubviewToFront(view) }
     }
   }
 
@@ -120,6 +121,9 @@ final class MessageRichView: UIView {
     case .image: 6
     case .album: 7
     case .disclosure: 8
+    case .statusMarker: 9
+    case .diff: 10
+    case .callout: 11
     }
   }
 
@@ -133,9 +137,20 @@ final class MessageRichView: UIView {
     case .image: RichImageView()
     case .album: RichAlbumView()
     case .disclosure: RichDisclosureView()
+    case .statusMarker: Self.makeStatusMarker()
+    case .diff: RichDiffView()
+    case .callout: RichCalloutView()
     }
     addSubview(view)
     return view
+  }
+
+  private static func makeStatusMarker() -> UIImageView {
+    let marker = UIImageView()
+    marker.contentMode = .center
+    marker.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 12, weight: .medium)
+    marker.isUserInteractionEnabled = false
+    return marker
   }
 
   private func configure(_ view: UIView, with placed: RichLayout.Placed, palette: Palette) {
@@ -161,6 +176,15 @@ final class MessageRichView: UIView {
       disclosureView?.onToggle = { [weak self] in
         self?.onDisclosureToggle?(path, !disclosure.isExpanded)
       }
+    case let .statusMarker(status):
+      let marker = view as? UIImageView
+      marker?.image = UIImage(systemName: status.symbolName)
+      marker?.tintColor = status.tint(palette)
+      marker?.accessibilityLabel = status.accessibilityName
+    case let .diff(diff):
+      (view as? RichDiffView)?.configure(diff, palette: palette)
+    case let .callout(callout):
+      (view as? RichCalloutView)?.configure(callout)
     }
   }
 }
@@ -469,12 +493,221 @@ private final class RichAlbumView: UIView {
   }
 }
 
-/// A disclosure's summary row: activity icon, title and chevron. Tapping toggles it.
+extension RichStatus {
+  fileprivate var symbolName: String {
+    switch self {
+    case .pending: "circle.dotted"
+    case .running: "circle.dashed"
+    case .waiting: "hand.raised.fill"
+    case .done: "checkmark.circle.fill"
+    case .failed: "xmark.circle.fill"
+    case .cancelled: "slash.circle"
+    }
+  }
+
+  fileprivate var accessibilityName: String {
+    switch self {
+    case .pending: String(localized: "Pending")
+    case .running: String(localized: "Running")
+    case .waiting: String(localized: "Waiting for you")
+    case .done: String(localized: "Done")
+    case .failed: String(localized: "Failed")
+    case .cancelled: String(localized: "Cancelled")
+    }
+  }
+
+  fileprivate func tint(_ palette: MessageRichView.Palette) -> UIColor {
+    switch self {
+    case .pending, .cancelled: palette.tertiary
+    case .running: palette.secondary
+    case .waiting: .systemOrange
+    case .done: .systemGreen
+    case .failed: .systemRed
+    }
+  }
+}
+
+/// A callout's tint and icon, behind its title and children.
+private final class RichCalloutView: UIView {
+  private let icon = UIImageView()
+  private var iconFrame = CGRect.zero
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    layer.cornerRadius = 8
+    layer.cornerCurve = .continuous
+    layer.borderWidth = 1
+    icon.contentMode = .center
+    icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+    addSubview(icon)
+    isUserInteractionEnabled = false
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func configure(_ callout: RichLayout.Callout) {
+    let symbol: String
+    let tint: UIColor
+    switch callout.tone {
+    case .info:
+      symbol = "info.circle.fill"
+      tint = .systemBlue
+    case .success:
+      symbol = "checkmark.circle.fill"
+      tint = .systemGreen
+    case .warning:
+      symbol = "exclamationmark.triangle.fill"
+      tint = .systemOrange
+    case .error:
+      symbol = "xmark.octagon.fill"
+      tint = .systemRed
+    }
+    backgroundColor = tint.withAlphaComponent(0.08)
+    layer.borderColor = tint.withAlphaComponent(0.22).resolvedColor(with: traitCollection).cgColor
+    icon.image = UIImage(systemName: symbol)
+    icon.tintColor = tint
+    iconFrame = callout.iconFrame
+    setNeedsLayout()
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    icon.frame = iconFrame
+  }
+}
+
+/// One file's change: a header with its path and counts over diff lines that scroll sideways.
+private final class RichDiffView: UIView {
+  private let icon = UIImageView()
+  private let pathLabel = UILabel()
+  private let countsLabel = UILabel()
+  private let copyButton = UIButton(type: .system)
+  private let scroll = UIScrollView()
+  private let body = MessageTextView()
+  private let footer = MessageTextView()
+  private var bands: [UIView] = []
+  private var diff: RichLayout.Diff?
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    layer.cornerRadius = 7
+    layer.cornerCurve = .continuous
+    clipsToBounds = true
+    icon.contentMode = .center
+    icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+    pathLabel.lineBreakMode = .byTruncatingMiddle
+    pathLabel.numberOfLines = 1
+    countsLabel.numberOfLines = 1
+    scroll.showsHorizontalScrollIndicator = false
+    scroll.alwaysBounceHorizontal = false
+    scroll.clipsToBounds = true
+    copyButton.setImage(UIImage(systemName: "doc.on.doc", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)), for: .normal)
+    copyButton.addTarget(self, action: #selector(copyDiff), for: .touchUpInside)
+    copyButton.accessibilityLabel = String(localized: "Copy diff")
+    for view in [icon, pathLabel, countsLabel, scroll, copyButton] as [UIView] {
+      addSubview(view)
+    }
+    scroll.addSubview(body)
+    scroll.addSubview(footer)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func configure(_ diff: RichLayout.Diff, palette: MessageRichView.Palette) {
+    self.diff = diff
+    backgroundColor = palette.codeFill
+    icon.image = UIImage(systemName: Self.symbolName(for: diff.change))
+    icon.tintColor = palette.secondary
+    pathLabel.attributedText = diff.path.attributedString
+    accessibilityLabel = String(localized: "Changes to \(diff.path.string)")
+    countsLabel.attributedText = diff.counts?.attributedString
+    countsLabel.isHidden = diff.counts == nil
+    copyButton.tintColor = palette.secondary
+    copyButton.isHidden = diff.copyText.isEmpty
+    body.setLayout(diff.body ?? .empty)
+    body.isHidden = diff.body == nil
+    footer.setLayout(diff.footer ?? .empty)
+    footer.isHidden = diff.footer == nil
+    scroll.isHidden = diff.body == nil && diff.footer == nil
+    while bands.count < diff.bands.count {
+      let band = UIView()
+      band.isUserInteractionEnabled = false
+      scroll.insertSubview(band, at: 0)
+      bands.append(band)
+    }
+    while bands.count > diff.bands.count {
+      bands.removeLast().removeFromSuperview()
+    }
+    for (view, band) in zip(bands, diff.bands) {
+      view.backgroundColor = (band.isAddition ? UIColor.systemGreen : UIColor.systemRed).withAlphaComponent(0.13)
+    }
+    setNeedsLayout()
+  }
+
+  private static func symbolName(for change: RichDiff.Change) -> String {
+    switch change {
+    case .added: "plus.square"
+    case .modified: "pencil.line"
+    case .deleted: "minus.square"
+    case .renamed: "arrow.right.square"
+    }
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    guard let diff else { return }
+    let header = diff.headerHeight
+    let inset: CGFloat = 10
+    icon.frame = CGRect(x: inset, y: floor((header - 14) / 2), width: 14, height: 14)
+    let copyWidth: CGFloat = copyButton.isHidden ? 0 : 26
+    copyButton.frame = CGRect(x: bounds.width - copyWidth - 2, y: 0, width: copyWidth, height: header)
+    let countsSize = countsLabel.isHidden ? CGSize.zero : countsLabel.sizeThatFits(CGSize(width: bounds.width, height: header))
+    let countsRight = copyWidth > 0 ? copyButton.frame.minX : bounds.width - inset
+    countsLabel.frame = CGRect(
+      x: countsRight - countsSize.width,
+      y: floor((header - countsSize.height) / 2),
+      width: countsSize.width,
+      height: countsSize.height
+    )
+    let pathX = icon.frame.maxX + 6
+    let pathRight = countsSize.width > 0 ? countsLabel.frame.minX - 8 : countsRight
+    pathLabel.frame = CGRect(x: pathX, y: 0, width: max(0, pathRight - pathX), height: header)
+    scroll.frame = CGRect(x: 0, y: header, width: bounds.width, height: max(0, bounds.height - header))
+    scroll.contentSize = CGSize(width: diff.contentWidth, height: scroll.bounds.height)
+    if let text = diff.body {
+      body.textFrame = CGRect(origin: diff.bodyOrigin, size: text.size)
+    }
+    if let text = diff.footer {
+      footer.textFrame = CGRect(origin: diff.footerOrigin, size: text.size)
+    }
+    for (view, band) in zip(bands, diff.bands) {
+      view.frame = band.frame
+    }
+  }
+
+  @objc private func copyDiff() {
+    guard let diff else { return }
+    UIPasteboard.general.string = diff.copyText
+    ToastManager.shared.showToast("Copied", type: .success, systemImage: "doc.on.doc")
+  }
+}
+
+/// A disclosure's summary row: activity icon, title, chevron, status and meta. Tapping toggles
+/// it when it has children.
 private final class RichDisclosureView: UIControl {
   private let title = MessageTextView()
   private let chevron = UIImageView(image: UIImage(systemName: "chevron.right", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold)))
   private let activity = UIImageView(image: UIImage(systemName: "sparkle", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)))
+  private let statusIcon = UIImageView()
+  private let meta = MessageTextView()
   private var disclosure: RichLayout.Disclosure?
+  private var activitySymbol: String?
   var onToggle: (() -> Void)?
 
   override init(frame: CGRect) {
@@ -483,7 +716,10 @@ private final class RichDisclosureView: UIControl {
     title.clipsToBounds = true
     chevron.contentMode = .center
     activity.contentMode = .center
-    for view in [title, chevron, activity] as [UIView] {
+    statusIcon.contentMode = .center
+    statusIcon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+    meta.clipsToBounds = true
+    for view in [title, chevron, activity, statusIcon, meta] as [UIView] {
       view.isUserInteractionEnabled = false
       addSubview(view)
     }
@@ -502,8 +738,26 @@ private final class RichDisclosureView: UIControl {
     chevron.tintColor = palette.secondary
     activity.tintColor = palette.secondary
     activity.isHidden = disclosure.activityFrame == nil
-    accessibilityLabel = disclosure.summary.text.string
-    accessibilityValue = disclosure.isExpanded ? "Expanded" : "Collapsed"
+    if let symbol = disclosure.activitySymbol, symbol != activitySymbol {
+      activity.image = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .medium))
+      activitySymbol = symbol
+    }
+    chevron.isHidden = !disclosure.hasChildren
+    isUserInteractionEnabled = disclosure.hasChildren
+    statusIcon.isHidden = disclosure.status == nil
+    if let status = disclosure.status {
+      statusIcon.image = UIImage(systemName: status.symbolName)
+      statusIcon.tintColor = status.tint(palette)
+    }
+    meta.setLayout(disclosure.meta ?? .empty)
+    meta.isHidden = disclosure.meta == nil
+    accessibilityLabel = [
+      disclosure.summary.text.string,
+      disclosure.status?.accessibilityName,
+      disclosure.meta?.text.string,
+    ].compactMap(\.self).joined(separator: ", ")
+    accessibilityValue = disclosure.hasChildren ? (disclosure.isExpanded ? "Expanded" : "Collapsed") : nil
+    accessibilityTraits = disclosure.hasChildren ? .button : .staticText
     if disclosure.isInProgress {
       startShimmer()
     } else {
@@ -519,6 +773,8 @@ private final class RichDisclosureView: UIControl {
     chevron.frame = disclosure.chevronFrame
     chevron.transform = disclosure.isExpanded ? CGAffineTransform(rotationAngle: .pi / 2) : .identity
     if let frame = disclosure.activityFrame { activity.frame = frame }
+    if let frame = disclosure.statusFrame { statusIcon.frame = frame }
+    if let frame = disclosure.metaFrame { meta.textFrame = frame }
   }
 
   private func startShimmer() {

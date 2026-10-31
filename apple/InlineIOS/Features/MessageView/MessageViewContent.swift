@@ -308,6 +308,15 @@ struct MessageViewContent {
       )
     )
     _ = LinkDetector.shared.applyLinkStyling(to: attributed, linkColor: linkColor)
+    // A path on the sender's machine can't open here: its label stays, as plain text.
+    var localLinks: [NSRange] = []
+    attributed.enumerateAttribute(.link, in: NSRange(location: 0, length: attributed.length)) { value, range, _ in
+      if value != nil, MessageViewActions.isLocalFileLink(value) { localLinks.append(range) }
+    }
+    for range in localLinks {
+      attributed.removeAttribute(.link, range: range)
+      attributed.addAttribute(.foregroundColor, value: textColor, range: range)
+    }
     let ready = attributed.coreTextReady(for: traits)
     bodyCache.setObject(ready, forKey: key)
     return MessageText(ready)

@@ -13,13 +13,24 @@ import struct InlineProtocol.MessageActionRow
 import struct InlineProtocol.MessageActions
 import struct InlineProtocol.MessageReplies
 import struct InlineProtocol.Block
+import struct InlineProtocol.BlockCallout
 import struct InlineProtocol.BlockCode
 import struct InlineProtocol.BlockContent
+import struct InlineProtocol.BlockDiff
 import struct InlineProtocol.BlockDisclosure
+import struct InlineProtocol.BlockField
+import struct InlineProtocol.BlockFields
+import struct InlineProtocol.BlockForm
+import struct InlineProtocol.BlockFormField
+import struct InlineProtocol.BlockFormOption
+import struct InlineProtocol.BlockFormSelect
 import struct InlineProtocol.BlockHeading
 import struct InlineProtocol.BlockList
 import struct InlineProtocol.BlockListItem
 import struct InlineProtocol.BlockQuote
+import enum InlineProtocol.BlockStatus
+import struct InlineProtocol.BlockStep
+import struct InlineProtocol.BlockSteps
 import struct InlineProtocol.BlockTable
 import struct InlineProtocol.BlockTableRow
 import struct InlineProtocol.BlockText
@@ -790,6 +801,70 @@ struct NextMessageViewDeviceTests {
     Attachment.record("checked \(nodes) rich nodes", named: "rich-lab.txt")
     #expect(nodes > 200)
     #expect(failures.isEmpty, "\(failures.count) problems:\n\(failures.prefix(30).joined(separator: "\n"))")
+  }
+
+  @Test("Agent blocks stay in the tree, even nested in a disclosure")
+  func agentBlocksKeepTheTree() throws {
+    let message = Self.agentMessage(outgoing: false, expanded: true)
+    let rich = try #require(Self.richContent(message))
+    guard case let .disclosure(disclosure) = rich.blocks[1] else {
+      Issue.record("expected a disclosure, got \(rich.blocks[1])")
+      return
+    }
+    #expect(disclosure.status == .failed)
+    #expect(disclosure.meta?.string == "exit 1")
+    guard case .diff = disclosure.children[0] else {
+      Issue.record("expected a diff, got \(disclosure.children[0])")
+      return
+    }
+    guard case .steps = rich.blocks[2], case .fields = rich.blocks[3], case .callout = rich.blocks[4], case .group = rich.blocks[5] else {
+      Issue.record("agent blocks missing: \(rich.blocks)")
+      return
+    }
+  }
+
+  @Test("A kind newer than this build keeps its text and its siblings")
+  func unknownBlockKeepsTheTree() throws {
+    var text = ""
+    func add(_ string: String) -> BlockText {
+      let start = (text as NSString).length
+      text += string + "\n"
+      var range = BlockText()
+      range.offset = Int64(start)
+      range.length = Int64((string as NSString).length)
+      return range
+    }
+    var first = Block()
+    first.kind = .paragraph(add("Before"))
+    // A block whose kind didn't decode: its text sits between its neighbors'.
+    _ = add("From the future")
+    var last = Block()
+    last.kind = .paragraph(add("After"))
+    var content = BlockContent()
+    content.blocks = [first, Block(), last]
+    var message = Self.message(7_107, text, outgoing: false, reactions: 0)
+    message.message.blockContentPayload = BlockContentPayload(content)
+
+    let rich = try #require(Self.richContent(message))
+    let strings = rich.blocks.compactMap { block -> String? in
+      if case let .text(text, _) = block { return text.string }
+      return nil
+    }
+    #expect(strings == ["Before", "From the future", "After"])
+  }
+
+  private static func richContent(_ message: FullMessage) -> MessageRichContent? {
+    MessageRichContent.make(
+      for: message,
+      body: NSAttributedString(string: message.message.text ?? "", attributes: [.font: UIFont.systemFont(ofSize: 17)]),
+      style: .init(
+        baseFont: .systemFont(ofSize: 17),
+        textColor: .label,
+        secondaryColor: .secondaryLabel,
+        traits: UITraitCollection.current
+      ),
+      expanded: [:]
+    )
   }
 
   @Test("Catalog of rich messages for review", arguments: [UIUserInterfaceStyle.light, .dark])
@@ -2102,7 +2177,78 @@ struct NextMessageViewDeviceTests {
     entities.entities = [entity]
     var fenced = Self.message(outgoing ? 7_103 : 7_104, fenceText, outgoing: outgoing, reactions: 0)
     fenced.message.entities = entities
-    return [("rich", rich), ("code fence", fenced)]
+    return [("rich", rich), ("code fence", fenced), ("agent", agentMessage(outgoing: outgoing, expanded: expanded))]
+  }
+
+  /// A coding turn as the bridge sends it: failed tool rows with diffs, a plan, an approval's
+  /// fields, a callout and a question.
+  static func agentMessage(outgoing: Bool, expanded: Bool) -> FullMessage {
+    var text = ""
+    func add(_ string: String) -> BlockText {
+      let start = (text as NSString).length
+      text += string + "\n"
+      var range = BlockText()
+      range.offset = Int64(start)
+      range.length = Int64((string as NSString).length)
+      return range
+    }
+    func block(_ kind: Block.OneOf_Kind) -> Block {
+      var block = Block()
+      block.kind = kind
+      return block
+    }
+    let intro = add("Fixing the failing test.")
+    var diff = BlockDiff()
+    diff.path = add("cli/src/bridge/v2/doc.rs")
+    diff.text = add("@@ -1,2 +1,2 @@\n fn main() {\n-    old();\n+    new();")
+    diff.change = .modified
+    diff.additions = 1
+    diff.deletions = 1
+    var disclosure = BlockDisclosure()
+    disclosure.summary = add("Edited doc.rs")
+    disclosure.meta = add("exit 1")
+    disclosure.status = .failed
+    disclosure.activityKind = .edit
+    disclosure.initiallyOpen = expanded
+    disclosure.children = [block(.diff(diff))]
+    var steps = BlockSteps()
+    let plan: [(String, BlockStatus)] = [("Find the bug", .done), ("Fix it", .running), ("Ship it", .pending)]
+    for (string, status) in plan {
+      var step = BlockStep()
+      step.text = add(string)
+      step.status = status
+      steps.steps.append(step)
+    }
+    var field = BlockField()
+    field.label = add("Command")
+    field.value = add("cargo test --workspace")
+    field.monospace = true
+    var fields = BlockFields()
+    fields.fields = [field]
+    var callout = BlockCallout()
+    callout.kind = .warning
+    callout.title = add("Heads up")
+    callout.children = [block(.paragraph(add("This touches the shared build folder.")))]
+    var option = BlockFormOption()
+    option.optionID = "yes"
+    option.label = add("Yes, go ahead")
+    var select = BlockFormSelect()
+    select.options = [option]
+    var formField = BlockFormField()
+    formField.fieldID = "answer"
+    formField.label = add("Continue?")
+    formField.kind = .select(select)
+    var form = BlockForm()
+    form.formID = "question"
+    form.fields = [formField]
+    var content = BlockContent()
+    content.blocks = [
+      block(.paragraph(intro)), block(.disclosure(disclosure)), block(.steps(steps)), block(.fields(fields)),
+      block(.callout(callout)), block(.form(form)),
+    ]
+    var message = Self.message(outgoing ? 7_105 : 7_106, text, outgoing: outgoing, reactions: 0)
+    message.message.blockContentPayload = BlockContentPayload(content)
+    return message
   }
 
   /// One message of each kind the next view draws beside plain text.

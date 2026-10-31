@@ -2176,6 +2176,7 @@ class UIMessageView: UIView {
   }
 
   private func resolveLinkURL(from value: Any?) -> URL? {
+    guard !MessageViewActions.isLocalFileLink(value) else { return nil }
     if let url = value as? URL {
       if LinkDetector.isSupportedLinkURL(url) {
         return url

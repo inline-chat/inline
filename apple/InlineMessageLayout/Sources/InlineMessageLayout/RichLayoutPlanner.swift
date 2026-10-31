@@ -5,8 +5,9 @@ import Foundation
 ///
 /// Blocks stack vertically. Lists put markers in a column, quotes inset their children, code
 /// and tables span the width and scroll sideways, images keep their aspect, and disclosures
-/// show their children only when expanded. Returns nil for content past the limits; the host
-/// then shows the plain text.
+/// show their children only when expanded. Diffs scroll sideways like code, steps put status
+/// markers in a column, fields put labels in a column, and callouts inset their children.
+/// Returns nil for content past the limits; the host then shows the plain text.
 public enum RichLayoutPlanner {
   public static func layout(
     _ blocks: [RichBlock],
@@ -153,6 +154,16 @@ private struct Builder {
       return appendAlbum(images, path: path, x: x, width: width)
     case let .disclosure(disclosure):
       return layout(disclosure: disclosure, path: path, x: x, width: width, depth: depth + 1)
+    case let .diff(diff):
+      return appendDiff(diff, path: path, x: x, width: width)
+    case let .steps(steps):
+      return appendSteps(steps, path: path, x: x, width: width, depth: depth + 1)
+    case let .fields(fields):
+      return appendFields(fields, path: path, x: x, width: width, depth: depth + 1)
+    case let .callout(callout):
+      return layout(callout: callout, path: path, x: x, width: width, depth: depth + 1)
+    case let .group(children):
+      return layout(children, parent: path, x: x, width: width, depth: depth + 1, isRightToLeft: isRightToLeft)
     }
   }
 
@@ -438,22 +449,44 @@ private struct Builder {
     let m = metrics
     let summary = typeset(disclosure.summary, width: .greatestFiniteMagnitude, isRightToLeft: disclosure.isRightToLeft)
     let activity = disclosure.hasActivityIcon ? m.disclosureActivitySide + m.disclosureActivityGap : 0
-    let viewport = max(1, width - m.disclosureChevronSide - m.disclosureChevronGap - activity)
+    let hasChildren = !disclosure.children.isEmpty
+    let chevronSide = hasChildren ? m.disclosureChevronSide : 0
+    let chevronGap = hasChildren ? m.disclosureChevronGap : 0
+    // Status and meta trail the chevron; the meta takes at most 40% of the row.
+    let meta = disclosure.meta.map(unbounded)
+    let metaWidth = min(meta?.size.width ?? 0, grid.floor(width * 0.4))
+    let glyphStatus: RichStatus? = switch disclosure.status {
+    case .waiting?, .failed?, .cancelled?: disclosure.status
+    default: nil
+    }
+    let glyphSide = glyphStatus == nil ? 0 : m.disclosureStatusSide
+    let glyphGap = glyphStatus != nil && metaWidth > 0 ? m.disclosureStatusGap : 0
+    let decorationWidth = glyphSide + glyphGap + metaWidth
+    let trailing = decorationWidth > 0 ? decorationWidth + m.disclosureTrailingGap : 0
+    let viewport = max(1, width - chevronSide - chevronGap - activity - trailing)
     let titleWidth = min(summary.lines.first?.width ?? 0, viewport)
     let height = max(summary.lines.first?.frame.height ?? 0, m.disclosureChevronSide)
-    let nodeWidth = grid.ceil(activity + titleWidth + m.disclosureChevronGap + m.disclosureChevronSide)
+    let chevronX = activity + titleWidth + chevronGap
+    let nodeWidth = grid.ceil(chevronX + chevronSide + trailing)
     let rtl = disclosure.isRightToLeft
-    // Activity icon, title, chevron in reading order; mirrored for right-to-left.
+    // Activity icon, title, chevron, status, meta in reading order; mirrored for right-to-left.
     func place(_ minX: CGFloat, _ itemWidth: CGFloat, _ itemHeight: CGFloat) -> CGRect {
       CGRect(x: rtl ? nodeWidth - minX - itemWidth : minX, y: (height - itemHeight) / 2, width: itemWidth, height: itemHeight)
     }
+    let statusX = chevronX + chevronSide + m.disclosureTrailingGap
     let node = RichLayout.Disclosure(
       summary: summary,
       titleFrame: grid.round(place(activity, titleWidth, summary.lines.first?.frame.height ?? height)),
-      chevronFrame: grid.round(place(activity + titleWidth + m.disclosureChevronGap, m.disclosureChevronSide, m.disclosureChevronSide)),
+      chevronFrame: grid.round(place(chevronX, chevronSide, chevronSide)),
       activityFrame: disclosure.hasActivityIcon ? grid.round(place(0, m.disclosureActivitySide, m.disclosureActivitySide)) : nil,
       isExpanded: disclosure.isExpanded,
-      isInProgress: disclosure.isInProgress
+      isInProgress: disclosure.isInProgress,
+      hasChildren: hasChildren,
+      activitySymbol: disclosure.activitySymbol,
+      status: glyphStatus,
+      statusFrame: glyphStatus == nil ? nil : grid.round(place(statusX, glyphSide, glyphSide)),
+      meta: metaWidth > 0 ? meta : nil,
+      metaFrame: metaWidth > 0 ? grid.round(place(statusX + glyphSide + glyphGap, metaWidth, meta?.size.height ?? 0)) : nil
     )
     let frame = CGRect(x: rtl ? x + width - nodeWidth : x, y: y, width: nodeWidth, height: grid.ceil(height))
     guard append(path, frame, .disclosure(node), anchor: rtl ? .trailing : .leading) else { return false }
@@ -462,6 +495,159 @@ private struct Builder {
     guard disclosure.isExpanded, !disclosure.children.isEmpty else { return true }
     y += m.blockSpacing
     return layout(disclosure.children, parent: path, x: x, width: width, depth: depth, isRightToLeft: rtl)
+  }
+
+  // MARK: - Agent blocks
+
+  mutating func appendDiff(_ diff: RichDiff, path: RichPath, x: CGFloat, width: CGFloat) -> Bool {
+    let m = metrics
+    let body = diff.body.map(unbounded)
+    let footer = diff.footer.map(unbounded)
+    let bodyHeight = body?.size.height ?? 0
+    let footerHeight = footer?.size.height ?? 0
+    let hasContent = body != nil || footer != nil
+    let widest = max(body?.size.width ?? 0, footer?.size.width ?? 0)
+    let contentWidth = grid.ceil(max(width, m.diffHorizontalInset * 2 + widest))
+    let height = grid.ceil(m.diffHeaderHeight + (hasContent ? m.diffVerticalInset * 2 + bodyHeight + footerHeight : 0))
+    let node = RichLayout.Diff(
+      path: diff.path,
+      counts: diff.counts,
+      change: diff.change,
+      headerHeight: m.diffHeaderHeight,
+      body: body,
+      bodyOrigin: CGPoint(x: m.diffHorizontalInset, y: m.diffVerticalInset),
+      footer: footer,
+      footerOrigin: CGPoint(x: m.diffHorizontalInset, y: m.diffVerticalInset + bodyHeight),
+      bands: body.map { diffBands($0, top: m.diffVerticalInset, width: contentWidth) } ?? [],
+      contentWidth: contentWidth,
+      copyText: diff.copyText
+    )
+    let frame = CGRect(x: x, y: y, width: width, height: height)
+    guard append(path, frame, .diff(node), anchor: .stretch) else { return false }
+    claimsMaximumWidth = true
+    y = frame.maxY
+    return true
+  }
+
+  /// Backgrounds for runs of added and removed lines. "+++" and "---" name files, not changes.
+  func diffBands(_ body: TextLayout, top: CGFloat, width: CGFloat) -> [RichLayout.Diff.Band] {
+    let string = body.text.string as NSString
+    var bands: [RichLayout.Diff.Band] = []
+    var previous: Bool?
+    for line in body.lines {
+      let source = string.substring(with: line.range)
+      let isAddition: Bool? = if source.hasPrefix("+"), !source.hasPrefix("+++") {
+        true
+      } else if source.hasPrefix("-"), !source.hasPrefix("---") {
+        false
+      } else {
+        nil
+      }
+      if let isAddition {
+        let frame = CGRect(x: 0, y: top + line.frame.minY, width: width, height: line.frame.height)
+        if previous == isAddition, let last = bands.indices.last {
+          bands[last].frame.size.height = frame.maxY - bands[last].frame.minY
+        } else {
+          bands.append(.init(frame: frame, isAddition: isAddition))
+        }
+      }
+      previous = isAddition
+    }
+    return bands
+  }
+
+  mutating func appendSteps(_ steps: RichSteps, path: RichPath, x: CGFloat, width: CGFloat, depth: Int) -> Bool {
+    guard !steps.steps.isEmpty else { return false }
+    let m = metrics
+    let rtl = steps.isRightToLeft
+    let side = m.stepMarkerSide
+    let textWidth = max(1, width - side - m.stepMarkerGap)
+    let textX = rtl ? x : x + side + m.stepMarkerGap
+    for (index, step) in steps.steps.enumerated() {
+      if index > 0 { y += m.stepSpacing }
+      let itemPath = path.appending(index)
+      let lineHeight = typeset(step.text, width: textWidth, isRightToLeft: rtl).lines.first?.frame.height ?? side
+      let markerFrame = CGRect(x: rtl ? x + width - side : x, y: y + max(0, (lineHeight - side) / 2), width: side, height: side)
+      guard append(itemPath.appending(-1), markerFrame, .statusMarker(step.status), anchor: rtl ? .trailing : .leading) else {
+        return false
+      }
+      record(markerFrame)
+      guard appendText(step.text, role: .paragraph, path: itemPath.appending(0), x: textX, width: textWidth, isRightToLeft: rtl, depth: depth) else {
+        return false
+      }
+      if let detail = step.detail {
+        y += 1
+        guard appendText(detail, role: .footer, path: itemPath.appending(1), x: textX, width: textWidth, isRightToLeft: rtl, depth: depth) else {
+          return false
+        }
+      }
+      y = max(y, markerFrame.maxY)
+    }
+    // Right-to-left rows hug the trailing edge together.
+    if rtl { claimsMaximumWidth = true }
+    return true
+  }
+
+  mutating func appendFields(_ fields: RichFields, path: RichPath, x: CGFloat, width: CGFloat, depth: Int) -> Bool {
+    guard !fields.rows.isEmpty else { return false }
+    let m = metrics
+    let rtl = fields.isRightToLeft
+    let widestLabel = fields.rows.map { unbounded($0.label).size.width }.max() ?? 1
+    let labelWidth = min(grid.ceil(widestLabel) + 1, max(60, width * 0.36), 180)
+    let valueWidth = max(1, width - labelWidth - m.fieldsLabelGap)
+    let labelX = rtl ? x + width - labelWidth : x
+    let valueX = rtl ? x : x + labelWidth + m.fieldsLabelGap
+    for (index, row) in fields.rows.enumerated() {
+      if index > 0 { y += m.fieldsRowSpacing }
+      let rowPath = path.appending(index)
+      let top = y
+      guard appendText(row.label, role: .paragraph, path: rowPath.appending(0), x: labelX, width: labelWidth, isRightToLeft: rtl, depth: depth) else {
+        return false
+      }
+      let labelBottom = y
+      y = top
+      guard appendText(row.value, role: .paragraph, path: rowPath.appending(1), x: valueX, width: valueWidth, isRightToLeft: rtl, depth: depth) else {
+        return false
+      }
+      y = max(y, labelBottom)
+    }
+    // Right-to-left rows hug the trailing edge together.
+    if rtl { claimsMaximumWidth = true }
+    return true
+  }
+
+  mutating func layout(callout: RichCallout, path: RichPath, x: CGFloat, width: CGFloat, depth: Int) -> Bool {
+    let m = metrics
+    let rtl = callout.isRightToLeft
+    let inset = m.calloutHorizontalInset
+    let side = m.calloutIconSide
+    let offset = side + m.calloutIconGap
+    let contentWidth = max(1, width - inset * 2 - offset)
+    let contentX = rtl ? x + inset : x + inset + offset
+    let top = y
+    let icon = CGRect(x: rtl ? width - inset - side : inset, y: m.calloutVerticalInset + 1, width: side, height: side)
+    let node = RichLayout.Callout(tone: callout.tone, iconFrame: icon)
+    guard append(path, CGRect(x: x, y: top, width: width, height: 0), .callout(node), anchor: .stretch) else { return false }
+    let decoration = nodes.count - 1
+    claimsMaximumWidth = true
+    y += m.calloutVerticalInset
+    if let title = callout.title {
+      guard appendText(title, role: .heading(level: 4), path: path.appending(-1), x: contentX, width: contentWidth, isRightToLeft: rtl, depth: depth) else {
+        return false
+      }
+      if !callout.children.isEmpty { y += 4 }
+    }
+    if !callout.children.isEmpty {
+      guard layout(callout.children, parent: path, x: contentX, width: contentWidth, depth: depth, isRightToLeft: rtl) else {
+        return false
+      }
+    }
+    y += m.calloutVerticalInset
+    let height = max(side + m.calloutVerticalInset * 2, y - top)
+    nodes[decoration].frame.size.height = height
+    y = top + height
+    trailingTextIndex = nil
+    return true
   }
 
   // MARK: - Finishing

@@ -12,6 +12,22 @@ public indirect enum RichBlock: Hashable, Sendable {
   case image(RichImage)
   case album([RichImage])
   case disclosure(RichDisclosure)
+  case diff(RichDiff)
+  case steps(RichSteps)
+  case fields(RichFields)
+  case callout(RichCallout)
+  /// Blocks stacked with no chrome of their own.
+  case group([RichBlock])
+}
+
+/// Progress of a disclosure row or a step.
+public enum RichStatus: Hashable, Sendable {
+  case pending
+  case running
+  case waiting
+  case done
+  case failed
+  case cancelled
 }
 
 public enum RichTextRole: Hashable, Sendable {
@@ -97,6 +113,13 @@ public struct RichDisclosure: Hashable, Sendable {
   public var isInProgress: Bool
   public var hasActivityIcon: Bool
   public var isRightToLeft: Bool
+  /// The icon's symbol name, for the host; nil uses the host's default.
+  public var activitySymbol: String?
+  /// Waiting, failed and cancelled get a glyph on the row. Running shows as the summary's
+  /// progress animation and done as plain text.
+  public var status: RichStatus?
+  /// Trailing secondary text on the row, such as "48s" or "+3 -1".
+  public var meta: MessageText?
 
   public init(
     summary: MessageText,
@@ -104,13 +127,123 @@ public struct RichDisclosure: Hashable, Sendable {
     isExpanded: Bool,
     isInProgress: Bool = false,
     hasActivityIcon: Bool = false,
-    isRightToLeft: Bool = false
+    isRightToLeft: Bool = false,
+    activitySymbol: String? = nil,
+    status: RichStatus? = nil,
+    meta: MessageText? = nil
   ) {
     self.summary = summary
     self.children = children
     self.isExpanded = isExpanded
     self.isInProgress = isInProgress
     self.hasActivityIcon = hasActivityIcon
+    self.isRightToLeft = isRightToLeft
+    self.activitySymbol = activitySymbol
+    self.status = status
+    self.meta = meta
+  }
+}
+
+/// One file's change: a header with its path and counts over unified diff lines that scroll
+/// sideways instead of wrapping. The host bounds the lines it passes in.
+public struct RichDiff: Hashable, Sendable {
+  public enum Change: Hashable, Sendable {
+    case added
+    case modified
+    case deleted
+    case renamed
+  }
+
+  public var path: MessageText
+  /// "+3 −1", styled by the host, or nil for no counts.
+  public var counts: MessageText?
+  public var change: Change
+  /// Newline-separated diff lines, or nil for binary or omitted content.
+  public var body: MessageText?
+  /// Says what was left out of `body`, or nil when it is complete.
+  public var footer: MessageText?
+  /// The whole diff as sent, for copying.
+  public var copyText: String
+
+  public init(
+    path: MessageText,
+    counts: MessageText? = nil,
+    change: Change = .modified,
+    body: MessageText? = nil,
+    footer: MessageText? = nil,
+    copyText: String = ""
+  ) {
+    self.path = path
+    self.counts = counts
+    self.change = change
+    self.body = body
+    self.footer = footer
+    self.copyText = copyText
+  }
+}
+
+/// An ordered plan or todo list, with a status marker before each step.
+public struct RichSteps: Hashable, Sendable {
+  public struct Step: Hashable, Sendable {
+    public var text: MessageText
+    public var detail: MessageText?
+    public var status: RichStatus
+
+    public init(text: MessageText, detail: MessageText? = nil, status: RichStatus = .pending) {
+      self.text = text
+      self.detail = detail
+      self.status = status
+    }
+  }
+
+  public var steps: [Step]
+  public var isRightToLeft: Bool
+
+  public init(steps: [Step], isRightToLeft: Bool = false) {
+    self.steps = steps
+    self.isRightToLeft = isRightToLeft
+  }
+}
+
+/// Label and value rows, with the labels in a column.
+public struct RichFields: Hashable, Sendable {
+  public struct Row: Hashable, Sendable {
+    public var label: MessageText
+    public var value: MessageText
+
+    public init(label: MessageText, value: MessageText) {
+      self.label = label
+      self.value = value
+    }
+  }
+
+  public var rows: [Row]
+  public var isRightToLeft: Bool
+
+  public init(rows: [Row], isRightToLeft: Bool = false) {
+    self.rows = rows
+    self.isRightToLeft = isRightToLeft
+  }
+}
+
+/// A tinted box with an icon, an optional title and child blocks.
+public struct RichCallout: Hashable, Sendable {
+  public enum Tone: Hashable, Sendable {
+    case info
+    case success
+    case warning
+    case error
+  }
+
+  public var tone: Tone
+  public var title: MessageText?
+  public var children: [RichBlock]
+  public var isRightToLeft: Bool
+
+  public init(tone: Tone, title: MessageText? = nil, children: [RichBlock] = [], isRightToLeft: Bool = false) {
+    self.tone = tone
+    self.title = title
+    self.children = children
     self.isRightToLeft = isRightToLeft
   }
 }
@@ -163,6 +296,21 @@ public struct RichLayoutMetrics: Hashable, Sendable {
   public var disclosureChevronGap: CGFloat = 4
   public var disclosureActivitySide: CGFloat = 14
   public var disclosureActivityGap: CGFloat = 5
+  public var disclosureStatusSide: CGFloat = 13
+  public var disclosureStatusGap: CGFloat = 4
+  public var disclosureTrailingGap: CGFloat = 8
+  public var diffHeaderHeight: CGFloat = 28
+  public var diffHorizontalInset: CGFloat = 10
+  public var diffVerticalInset: CGFloat = 6
+  public var fieldsLabelGap: CGFloat = 12
+  public var fieldsRowSpacing: CGFloat = 4
+  public var stepMarkerSide: CGFloat = 16
+  public var stepMarkerGap: CGFloat = 6
+  public var stepSpacing: CGFloat = 5
+  public var calloutHorizontalInset: CGFloat = 10
+  public var calloutVerticalInset: CGFloat = 8
+  public var calloutIconSide: CGFloat = 15
+  public var calloutIconGap: CGFloat = 8
   /// Content past these limits falls back to plain text, as on the server.
   public var maximumDepth = 16
   public var maximumNodes = 2_048
@@ -185,6 +333,11 @@ public struct RichLayout: Sendable {
     case image(id: String)
     case album([AlbumItem])
     case disclosure(Disclosure)
+    /// A step's status symbol.
+    case statusMarker(RichStatus)
+    case diff(Diff)
+    /// A callout's tint and icon, behind its title and children.
+    case callout(Callout)
   }
 
   public struct Code: Sendable {
@@ -231,6 +384,43 @@ public struct RichLayout: Sendable {
     public var activityFrame: CGRect?
     public var isExpanded: Bool
     public var isInProgress: Bool
+    /// False when there is nothing to disclose: no chevron, and taps do not toggle.
+    public var hasChildren: Bool
+    public var activitySymbol: String?
+    /// The status to show as a glyph, with its frame; nil when the status has no glyph.
+    public var status: RichStatus?
+    public var statusFrame: CGRect?
+    public var meta: TextLayout?
+    public var metaFrame: CGRect?
+  }
+
+  public struct Diff: Sendable {
+    /// A run of added or removed lines' full-width background.
+    public struct Band: Sendable {
+      /// In the body's scrollable content.
+      public var frame: CGRect
+      public var isAddition: Bool
+    }
+
+    public var path: MessageText
+    public var counts: MessageText?
+    public var change: RichDiff.Change
+    public var headerHeight: CGFloat
+    public var body: TextLayout?
+    /// In the body's scrollable content, which starts below the header.
+    public var bodyOrigin: CGPoint
+    public var footer: TextLayout?
+    public var footerOrigin: CGPoint
+    public var bands: [Band]
+    /// Scrollable width of the body; wider than the box when lines are long.
+    public var contentWidth: CGFloat
+    public var copyText: String
+  }
+
+  public struct Callout: Sendable {
+    public var tone: RichCallout.Tone
+    /// In the node's coordinates.
+    public var iconFrame: CGRect
   }
 
   public struct Placed: Sendable {
