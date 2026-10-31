@@ -1009,6 +1009,17 @@ async fn codex_round_trip_through_inline() {
     // 5. A command needs approval: the card carries Codex's own choices, and
     // the owner's approval runs it.
     scenario.next("5. A command needs approval: the card carries Codex's own choices, and");
+    // New threads start on Approve for me, where Codex's reviewer answers.
+    send(&owner, chat_id, "/permissions :workspace").await;
+    wait_for(
+        &model,
+        &owner,
+        chat_id,
+        bot_user_id,
+        "the permission choice",
+        |texts| texts.iter().any(|(_, text)| text.contains("Applies")),
+    )
+    .await;
     send(&owner, chat_id, "Run the check").await;
     let (card, action) =
         wait_card(&model, &owner, chat_id, "echo E2E_RAN", CardKind::Buttons).await;
