@@ -151,6 +151,10 @@ pub struct Catalog {
     /// Permission modes.
     #[serde(default)]
     pub permission_modes: Vec<DriverSettingOption>,
+    /// The permission mode a new session starts on and "Default" selects, when
+    /// the driver picks one rather than leaving it to the harness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_permission_mode: Option<String>,
     /// Collaboration and plan modes.
     #[serde(default)]
     pub modes: Vec<CatalogMode>,

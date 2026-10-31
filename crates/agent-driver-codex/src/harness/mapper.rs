@@ -83,6 +83,7 @@ enum Pending {
     Permissions,
     ElicitationUrl,
     ElicitationForm,
+    ElicitationApproval,
     UserInput,
     AsyncQuestions,
 }
@@ -862,6 +863,21 @@ impl CodexMapper {
                 None => return self.cancel_dialog(id, method, params),
             },
             "mcpServer/elicitation/request" => match params.get("mode").and_then(Value::as_str) {
+                Some("form") if is_message_only(params) => {
+                    let decisions = decisions::message_only_decisions(params);
+                    (
+                        InteractionKind::Approval {
+                            subject: ApprovalSubject::Other {
+                                title: string(params.get("message"))
+                                    .unwrap_or_else(|| "Allow this request?".to_owned()),
+                                detail: tool_params_text(params),
+                            },
+                            decisions: decisions.clone(),
+                        },
+                        Pending::ElicitationApproval,
+                        decisions,
+                    )
+                }
                 Some("form") => match elicitation_form(params) {
                     Some(form) => (
                         InteractionKind::Question { form },
@@ -1009,7 +1025,13 @@ impl CodexMapper {
             (Pending::ElicitationUrl, InteractionResponse::Decision { .. }) => {
                 json!({"action": picked.as_ref().expect("picked").native})
             }
-            (Pending::ElicitationUrl | Pending::ElicitationForm, InteractionResponse::Cancel) => {
+            (Pending::ElicitationApproval, InteractionResponse::Decision { .. }) => {
+                picked.as_ref().expect("picked").native.clone()
+            }
+            (
+                Pending::ElicitationUrl | Pending::ElicitationForm | Pending::ElicitationApproval,
+                InteractionResponse::Cancel,
+            ) => {
                 json!({"action": "cancel"})
             }
             (Pending::ElicitationForm, InteractionResponse::Answers { answers }) => {
@@ -1200,6 +1222,64 @@ fn user_input_form(params: &Value) -> Option<QuestionForm> {
         asynchronous: params.get("isBlocking").and_then(Value::as_bool) == Some(false),
         auto_resolution_ms: params.get("autoResolutionMs").and_then(Value::as_u64),
     })
+}
+
+/// A form that asks for nothing but a yes or no. Codex asks to run an MCP tool
+/// this way, with its choices in `_meta`.
+fn is_message_only(params: &Value) -> bool {
+    match params.get("requestedSchema") {
+        None | Some(Value::Null) => true,
+        Some(schema) => schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .is_some_and(Map::is_empty),
+    }
+}
+
+/// The arguments of an MCP tool Codex asks to run, for the person deciding.
+fn tool_params_text(params: &Value) -> Option<String> {
+    const MAX_PARAMS: usize = 5;
+    const MAX_VALUE_CHARS: usize = 400;
+    let meta = params.get("_meta")?;
+    let mut rows: Vec<(String, Value)> = meta
+        .get("tool_params_display")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    let name =
+                        string(row.get("display_name")).or_else(|| string(row.get("name")))?;
+                    Some((name, row.get("value")?.clone()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if rows.is_empty() {
+        rows = meta
+            .get("tool_params")
+            .and_then(Value::as_object)
+            .map(|params| {
+                params
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        rows.sort_by(|left, right| left.0.cmp(&right.0));
+    }
+    let lines: Vec<String> = rows
+        .iter()
+        .take(MAX_PARAMS)
+        .map(|(name, value)| {
+            let value = value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_owned);
+            let cut: String = value.chars().take(MAX_VALUE_CHARS).collect();
+            let more = if cut.len() < value.len() { "…" } else { "" };
+            format!("{name}: {cut}{more}")
+        })
+        .collect();
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn elicitation_form(params: &Value) -> Option<QuestionForm> {
@@ -1664,7 +1744,7 @@ fn effective_settings(settings: &Value) -> EffectiveSettings {
         }),
         effort: string(settings.get("effort")),
         speed: string(settings.get("serviceTier")),
-        permission_mode: string(settings.pointer("/activePermissionProfile/id"))
+        permission_mode: super::delivery::active_permission_mode(settings)
             .or_else(|| string(settings.get("approvalPolicy"))),
         mode: string(settings.pointer("/collaborationMode/mode")),
         folder: string(settings.get("cwd")).map(PathBuf::from),
@@ -1774,6 +1854,64 @@ mod tests {
     use inline_agent_bridge::harness::DecisionId;
 
     use super::*;
+
+    #[test]
+    fn an_mcp_tool_approval_is_a_card_with_codex_choices_not_an_empty_form() {
+        let mut mapper = CodexMapper::new("thread-1");
+        let mapped = mapper.server_request(
+            &json!(9),
+            "mcpServer/elicitation/request",
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "serverName": "cloudflare-api",
+                "mode": "form",
+                "message": "Allow the cloudflare-api MCP server to run tool \"execute\"?",
+                "requestedSchema": {"type": "object", "properties": {}},
+                "_meta": {
+                    "codex_approval_kind": "mcp_tool_call",
+                    "persist": ["session", "always"],
+                    "tool_params": {"code": "async () => 1"}
+                }
+            }),
+        );
+        let RequestMapped::Interaction(events) = mapped else {
+            panic!("expected an interaction");
+        };
+        let kind = events
+            .iter()
+            .find_map(|event| match event {
+                Event::Interaction(interaction) => Some(interaction.kind.clone()),
+                _ => None,
+            })
+            .expect("interaction");
+        let InteractionKind::Approval { subject, decisions } = kind else {
+            panic!("expected an approval");
+        };
+        assert_eq!(decisions.len(), 4);
+        let ApprovalSubject::Other { detail, .. } = subject else {
+            panic!("expected a message");
+        };
+        assert_eq!(detail.as_deref(), Some("code: async () => 1"));
+
+        let plan = mapper
+            .answer(
+                &InteractionId::new("9").expect("id"),
+                &InteractionResponse::Decision {
+                    decision: DecisionId::new("acceptForSession").expect("id"),
+                    message: None,
+                },
+                UserId(1),
+            )
+            .expect("answer");
+        let AnswerPlan::Respond { result, .. } = plan else {
+            panic!("expected a response");
+        };
+        assert_eq!(
+            result,
+            json!({"action": "accept", "content": null, "_meta": {"persist": "session"}})
+        );
+    }
 
     #[test]
     fn decision_ids_are_answered_with_their_native_value_and_claimed_once() {

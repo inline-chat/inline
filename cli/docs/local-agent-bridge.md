@@ -16,6 +16,26 @@ requires explicit handoff mentions and warns against reciprocal loops. The Rust
 bridge is bundled with the Inline CLI and runs as one per-user background
 service; agent processes and project files remain on the user's computer.
 
+## Updates and restarts
+
+The bridge applies a staged update as soon as active work and pending
+publication finish. Open idle sessions do not block it, and there is no extra
+quiet period or cooldown between successfully staged releases. Admission closes
+atomically before the old runtime stops, so new work cannot race the handoff.
+
+`inline bridge status` and `inline bridge doctor` show the running CLI version,
+the retained supervisor's version, and pending updates or rollbacks. The binary
+in the bridge's `bin` directory belongs to the supervisor; its `--version` can
+differ from the runtime doing agent work.
+
+A deliberate `inline bridge stop` or `restart` during a candidate's startup
+probation leaves that candidate available for retry. Crashes and failed health
+checks still trigger rollback. A restart preserves native session bindings,
+thread settings, and durable delivery records. Existing sessions reopen when
+you next message them; input with an uncertain delivery is reconciled rather
+than automatically sent again. Unsent input interrupted by a manual restart
+asks you to resend it.
+
 ## Setup
 
 Authenticate the provider's own CLI first, then run setup. If the Inline CLI is
@@ -264,12 +284,17 @@ workspace-scoped settings catalog for the first Agent Settings frame, bounded
 by the normal settings deadline; model, reasoning, and permission controls then
 come from the adapter's live advertised values. New Claude conversations using
 the verified current adapter default to `bypassPermissions` only when the
-adapter advertises it. Codex similarly defaults an unset permission setting to
-its built-in `:danger-full-access` profile only for the workspace whose live
-catalog advertised it. An explicit bot permission setting always wins for
-either provider. Codex managed requirements remain authoritative; when they
-disallow full access, choose an allowed profile in the bot settings. Native
-Claude session continuation is not enabled yet.
+adapter advertises it. New Codex threads start on Codex's own **Approve for me**
+(the workspace profile with Codex's review agent answering approvals), and a
+thread Codex opened before keeps its permissions. Codex's settings offer the
+TUI's choices with their approval policy: **Ask for approval**, **Approve for
+me**, **Full Access** (never stops to ask) and **Read Only**. An explicit bot
+permission setting always wins for either provider, and choosing **Default** on
+Codex selects Approve for me for that thread. Codex managed requirements remain
+authoritative: when they refuse the review agent a new thread asks for approval
+in the same sandbox, and when they refuse that too the error shows, so choose an
+allowed profile in the bot settings. Native Claude session continuation is not
+enabled yet.
 
 Claude's bypass preference is an Inline bridge launch default, applied once to
 a new native session. Follow-up turns preserve native permission-mode changes,
@@ -431,6 +456,11 @@ delivery, and restart recovery then use that child identity.
 
 Approvals appear as Inline action buttons in the conversation where the turn
 is running, including its reply thread. Only the owner can resolve them.
+A message sent while a card is open directs the agent instead of waiting behind
+it: it denies the approval or dismisses the question (a message never grants an
+approval) and then reaches the agent, as a new turn when the denial stopped the
+running one. A card Inline refuses to show is cancelled so the turn cannot wait
+on it.
 Mid-turn owner directions steer when the provider supports steering; `/queue`
 always queues explicitly and provides Undo until work starts. An uncertain
 steering response is never automatically retried as another prompt: Inline

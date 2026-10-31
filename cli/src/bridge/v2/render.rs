@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 use inline_agent_bridge::harness::{
     ApprovalSubject, ChildRef, ClosedBy, CommandAction, Decision, DecisionKind, Envelope, Event,
     FieldInput, FileChangeKind, FileDiff, InputFact, InputId, Interaction, InteractionId,
-    InteractionKind, Item, ItemBody, ItemKind, ItemStatus, ItemUpdate, MessageRole, NoticeLevel,
-    OutputMode, QuestionForm, TurnPhase,
+    InteractionKind, InteractionResponse, Item, ItemBody, ItemKind, ItemStatus, ItemUpdate,
+    MessageRole, NoticeLevel, OutputMode, QuestionForm, TurnPhase,
 };
 use inline_agent_bridge::{AgentMessagePhase, PlanStepStatus, TurnId, TurnOutcome};
 use serde_json::Value;
@@ -457,6 +457,39 @@ impl Renderer {
                 row.phase = Some(AgentMessagePhase::Commentary);
             }
         }
+    }
+
+    /// The answer a person's own message gives an open card. It directs the
+    /// agent elsewhere, so an approval is denied, never granted: the turn goes
+    /// on where the harness offers that, and stops where only stopping is.
+    pub(crate) fn redirect_response(
+        &self,
+        interaction: &InteractionId,
+    ) -> Option<(InteractionResponse, bool)> {
+        let open = self.interactions.get(interaction)?;
+        let InteractionKind::Approval { decisions, .. } = &open.kind else {
+            return Some((InteractionResponse::Cancel, false));
+        };
+        let of_kind = |kind| decisions.iter().find(|decision| decision.kind == kind);
+        Some(match of_kind(DecisionKind::Decline) {
+            Some(decision) => (
+                InteractionResponse::Decision {
+                    decision: decision.id.clone(),
+                    message: None,
+                },
+                false,
+            ),
+            None => match of_kind(DecisionKind::Cancel) {
+                Some(decision) => (
+                    InteractionResponse::Decision {
+                        decision: decision.id.clone(),
+                        message: None,
+                    },
+                    true,
+                ),
+                None => (InteractionResponse::Cancel, true),
+            },
+        })
     }
 
     fn interaction(&mut self, interaction: &Interaction, ops: &mut Vec<RenderOp>) {
@@ -2349,6 +2382,64 @@ Ran cargo test"
             *many = true;
         }
         assert!(!pickable(&multiple));
+    }
+
+    #[test]
+    fn a_message_denies_an_open_approval_and_never_grants_it() {
+        let decision = |id: &str, kind| Decision {
+            id: inline_agent_bridge::harness::DecisionId::new(id).expect("id"),
+            label: id.to_owned(),
+            kind,
+            description: None,
+            accepts_message: false,
+            native: Value::Null,
+        };
+        let id = InteractionId::new("41").expect("id");
+        let mut renderer = Renderer::new(OutputMode::Friendly, Vocabulary::Codex, "Codex");
+        let mut open = |decisions| {
+            let interaction = Interaction {
+                id: id.clone(),
+                turn: None,
+                item: None,
+                parent: None,
+                kind: InteractionKind::Approval {
+                    subject: ApprovalSubject::Other {
+                        title: "Allow?".to_owned(),
+                        detail: None,
+                    },
+                    decisions,
+                },
+                native: Value::Null,
+            };
+            run(&mut renderer, vec![(0, Event::Interaction(interaction))]);
+            renderer.redirect_response(&id)
+        };
+        let picked = |response: Option<(InteractionResponse, bool)>| match response {
+            Some((InteractionResponse::Decision { decision, .. }, stops)) => {
+                (decision.to_string(), stops)
+            }
+            _ => panic!("expected a decision"),
+        };
+
+        assert_eq!(
+            picked(open(vec![
+                decision("accept", DecisionKind::Accept),
+                decision("cancel", DecisionKind::Cancel),
+                decision("decline", DecisionKind::Decline),
+            ])),
+            ("decline".to_owned(), false)
+        );
+        assert_eq!(
+            picked(open(vec![
+                decision("accept", DecisionKind::Accept),
+                decision("cancel", DecisionKind::Cancel),
+            ])),
+            ("cancel".to_owned(), true)
+        );
+        assert!(matches!(
+            open(vec![decision("accept", DecisionKind::Accept)]),
+            Some((InteractionResponse::Cancel, true))
+        ));
     }
 
     #[test]

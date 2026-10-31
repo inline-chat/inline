@@ -764,6 +764,7 @@ fn catalog_from(init: &InitializeResponse, permission_modes: &[String]) -> Catal
             })
             .collect(),
         speeds: Vec::new(),
+        default_permission_mode: None,
         permission_modes: permission_modes
             .iter()
             .map(|mode| option(mode, Some(permission_mode_label(mode)), None))

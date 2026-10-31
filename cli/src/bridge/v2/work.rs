@@ -57,6 +57,11 @@ const PUBLISH_RETRIES: [Duration; 3] = [
 ];
 /// The longest a rate-limited answer waits within one publish attempt.
 const MAX_PUBLISH_WAIT: Duration = Duration::from_secs(30);
+/// `maxRows` in `server/src/modules/message/messageActions.ts`.
+const MAX_ACTION_ROWS: usize = 8;
+/// How long input waits for a turn a card's answer stopped.
+const AFTER_STOP_WAIT: Duration = Duration::from_secs(30);
+const AFTER_STOP_POLL: Duration = Duration::from_millis(100);
 const NOT_PENDING: &str = "This request is no longer pending.";
 /// Trusted instructions for the speak gate's side call.
 const SPEAK_GATE_GUIDE: &str = "You take part in this Inline thread but nobody addressed you. \
@@ -451,6 +456,8 @@ pub(crate) fn spawn(
         consider_lines: HashMap::new(),
         answer_replies: HashMap::new(),
         answer_to: None,
+        after_stop: Vec::new(),
+        after_stop_due: None,
         unsaved: std::sync::Mutex::new(HashMap::new()),
         uncertain: HashMap::new(),
         outbox,
@@ -601,6 +608,9 @@ struct Actor {
     /// The message the next final answer replies to: the latest group input
     /// the harness took.
     answer_to: Option<i64>,
+    /// Input waiting for a turn its card's answer stopped, until `after_stop_due`.
+    after_stop: Vec<PendingInput>,
+    after_stop_due: Option<tokio::time::Instant>,
 }
 
 impl Actor {
@@ -610,6 +620,9 @@ impl Actor {
         loop {
             let next_edit = self.edits.values().map(|edit| edit.due).min();
             let next_working = self.working_due;
+            let next_after_stop = self
+                .after_stop_due
+                .map(|_| tokio::time::Instant::now() + AFTER_STOP_POLL);
             tokio::select! {
                 command = rx.recv() => {
                     let Some(command) = command else { break };
@@ -647,7 +660,9 @@ impl Actor {
                 }
                 _ = sleep_until(next_edit) => self.flush_edits(false).await,
                 _ = sleep_until(next_working) => {}
+                _ = sleep_until(next_after_stop) => {}
             }
+            self.release_after_stop().await;
             self.publish_phase();
             self.sync_working().await;
         }
@@ -697,15 +712,25 @@ impl Actor {
                 self.paused = false;
                 self.consider.supersede();
                 self.consider_lines.clear();
+                if !matches!(input.delivery, Delivery::Queue | Delivery::Passive)
+                    && self.redirect_open_cards(pending.sender.0).await
+                {
+                    self.after_stop_due
+                        .get_or_insert_with(|| tokio::time::Instant::now() + AFTER_STOP_WAIT);
+                }
                 if answer_reply {
                     self.answer_replies.insert(input.id.clone(), message_id);
                 }
                 self.inputs
                     .insert(input.id.clone(), (*input, pending.clone(), message_id));
-                self.event(HoldEvent::AcquireRequested {
-                    input: Some(pending),
-                })
-                .await;
+                if self.after_stop_due.is_some() {
+                    self.after_stop.push(pending);
+                } else {
+                    self.event(HoldEvent::AcquireRequested {
+                        input: Some(pending),
+                    })
+                    .await;
+                }
             }
             Command::Passive { message } => self.passive.push(message),
             Command::Control {
@@ -1017,7 +1042,9 @@ impl Actor {
                 self.pick(message_id, actor, &i, f, label).await
             }
             ActionData::Decision { i, d } => {
-                let card = self.cards.get(&message_id).cloned()?;
+                let Some(card) = self.cards.get(&message_id).cloned() else {
+                    return Some(NOT_PENDING.to_owned());
+                };
                 if card.interaction.as_str() != i {
                     return Some(NOT_PENDING.to_owned());
                 }
@@ -1232,6 +1259,72 @@ impl Actor {
             Ok(_) => None,
             Err(OpError::InteractionNotPending) => Some(NOT_PENDING.to_owned()),
             Err(error) => Some(format!("Could not send the answer: {error}")),
+        }
+    }
+
+    /// A message sent while the agent waits on a card directs the agent: it
+    /// must not sit behind a blocked turn, so it answers what the sender may
+    /// answer and is then delivered as usual. True when that answer is stopping
+    /// the turn, which would lose a steer.
+    async fn redirect_open_cards(&mut self, sender: i64) -> bool {
+        if self.cards.is_empty() {
+            return false;
+        }
+        // Without steering (ACP) the message cannot reach a running turn: the
+        // card stays open rather than being denied for nothing.
+        if self.held_session().is_some_and(|session| {
+            !session
+                .availability()
+                .delivery(inline_agent_bridge::harness::DeliveryKind::SteerNext)
+                .is_supported()
+        }) {
+            return false;
+        }
+        let grants = self.agent.access.grants(sender).await;
+        let mut stops_turn = false;
+        for card in self.cards.values().cloned().collect::<Vec<_>>() {
+            let permitted = if card.approval {
+                grants.permits(Operation::Approve)
+            } else {
+                grants.any()
+            };
+            let response = self.renderer.redirect_response(&card.interaction);
+            if let (true, Some((response, stops))) = (permitted, response)
+                && self
+                    .answer(card.interaction, response, sender)
+                    .await
+                    .is_none()
+            {
+                stops_turn |= stops;
+            }
+        }
+        stops_turn
+            && self
+                .held_session()
+                .is_some_and(|session| live_turn(&session).is_some())
+    }
+
+    /// Input held for a stopping turn goes out once the turn has ended. A turn
+    /// that outlasts the wait is not stopping after all, and is steered.
+    async fn release_after_stop(&mut self) {
+        let Some(due) = self.after_stop_due else {
+            return;
+        };
+        let live = self
+            .held_session()
+            .is_some_and(|session| live_turn(&session).is_some());
+        if live && tokio::time::Instant::now() < due {
+            return;
+        }
+        if live {
+            log::warn!(target: "inline::bridge::v2", "chat={} turn still live after a card stopped it", self.chat_id);
+        }
+        self.after_stop_due = None;
+        for pending in std::mem::take(&mut self.after_stop) {
+            self.event(HoldEvent::AcquireRequested {
+                input: Some(pending),
+            })
+            .await;
         }
     }
 
@@ -2688,10 +2781,30 @@ impl Actor {
         if let Err(error) = self.agent.ledger.remove_output(outgoing.random_id) {
             log::error!(target: "inline::bridge::v2", "cannot settle retained output: {error}");
         }
+        // Nobody can answer a card without its form or buttons, and the agent
+        // would wait on it forever: tell it the request is off.
+        let has_buttons = outgoing
+            .actions
+            .as_ref()
+            .is_some_and(|actions| !actions.rows.is_empty());
+        let unanswerable = failure == Failure::Gone || outgoing.fallback || !has_buttons;
+        if unanswerable && let Some((interaction, _)) = &outgoing.card {
+            let owner = self.agent.owner_user_id;
+            self.answer(interaction.clone(), InteractionResponse::Cancel, owner)
+                .await;
+        }
         if failure == Failure::Gone {
             return;
         }
         crate::telemetry::report_bridge_output_refused(kind);
+        if outgoing.card.is_some() && !has_buttons {
+            self.notice(&format!(
+                "{} had a request Inline couldn't show, so it was cancelled.",
+                self.agent.agent_name
+            ))
+            .await;
+            return;
+        }
         if !outgoing.fallback {
             let random_id = outgoing.random_id.wrapping_add(1).max(1);
             self.outbox.push_front(Outgoing {
@@ -2702,15 +2815,17 @@ impl Actor {
             });
             return;
         }
-        let what = if kind == "card" {
-            "a request for you"
+        self.notice(&if kind == "card" {
+            format!(
+                "{} had a request Inline couldn't show, so it was cancelled.",
+                self.agent.agent_name
+            )
         } else {
-            "an answer"
-        };
-        self.notice(&format!(
-            "{} had {what} Inline couldn't show. Continue in the terminal to see it.",
-            self.agent.agent_name
-        ))
+            format!(
+                "{} had an answer Inline couldn't show. Continue in the terminal to see it.",
+                self.agent.agent_name
+            )
+        })
         .await;
     }
 
@@ -2939,6 +3054,18 @@ impl Actor {
                         Some(form) if render::pickable(form) => pick_actions(&interaction, form, 0),
                         _ => card_actions(&interaction, &actions),
                     };
+                    // Nothing to press: the agent would wait on it forever.
+                    if form.is_none() && buttons.is_none() {
+                        let owner = self.agent.owner_user_id;
+                        self.answer(interaction, InteractionResponse::Cancel, owner)
+                            .await;
+                        self.notice(&format!(
+                            "{} had a request Inline couldn't show, so it was cancelled.",
+                            self.agent.agent_name
+                        ))
+                        .await;
+                        continue;
+                    }
                     let long = long_labels(&actions);
                     let doc = if long.is_empty() {
                         doc
@@ -3665,9 +3792,12 @@ pub(crate) fn card_actions(
     if actions.is_empty() {
         return None;
     }
+    // The last choice is the way to say no; extra remembered rules go first.
+    let last = actions.len() - 1;
     let rows = actions
         .iter()
         .enumerate()
+        .filter(|(index, _)| *index + 1 < MAX_ACTION_ROWS || *index == last)
         .filter_map(|(index, action)| {
             let data = serde_json::to_vec(&ActionData::Decision {
                 i: interaction.to_string(),
@@ -3932,6 +4062,103 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod recovery_tests {
     use super::*;
+
+    #[test]
+    fn a_card_with_too_many_choices_keeps_the_way_to_say_no() {
+        let actions: Vec<CardAction> = (0..12)
+            .map(|index| CardAction {
+                decision: format!("d{index}"),
+                label: format!("Choice {index}"),
+                style: ActionStyle::Default,
+            })
+            .collect();
+        let interaction = InteractionId::new("41").expect("id");
+        let rows = card_actions(&interaction, &actions).expect("buttons").rows;
+        assert_eq!(rows.len(), MAX_ACTION_ROWS);
+        assert_eq!(rows[7].actions[0].text, "Choice 11");
+    }
+
+    /// A message that answers a card by stopping the turn starts a new turn
+    /// once that one has ended; a turn that never ends is steered.
+    pub(crate) async fn a_message_waits_for_the_turn_its_answer_stopped(
+        agent: Arc<Agent>,
+        first: Command,
+        second: Command,
+        third: Command,
+        set_turn: impl Fn(Option<TurnId>),
+        deliveries: impl Fn() -> Vec<Delivery>,
+    ) {
+        let mut work = actor(agent);
+        work.command(first).await;
+        assert_eq!(deliveries().len(), 1);
+        let turn = TurnId::new("turn-0").unwrap();
+        set_turn(Some(turn.clone()));
+
+        let interaction = InteractionId::new("41").unwrap();
+        let open = inline_agent_bridge::harness::Interaction {
+            id: interaction.clone(),
+            turn: Some(turn.clone()),
+            item: None,
+            parent: None,
+            kind: inline_agent_bridge::harness::InteractionKind::Approval {
+                subject: inline_agent_bridge::harness::ApprovalSubject::Other {
+                    title: "Allow?".to_owned(),
+                    detail: None,
+                },
+                decisions: vec![inline_agent_bridge::harness::Decision {
+                    id: inline_agent_bridge::harness::DecisionId::new("cancel").unwrap(),
+                    label: "No".to_owned(),
+                    kind: inline_agent_bridge::harness::DecisionKind::Cancel,
+                    description: None,
+                    accepts_message: false,
+                    native: serde_json::Value::Null,
+                }],
+            },
+            native: serde_json::Value::Null,
+        };
+        work.renderer
+            .apply(&inline_agent_bridge::harness::Envelope {
+                session: inline_agent_bridge::harness::SessionKey {
+                    provider: inline_agent_bridge::ProviderId::new("claude").unwrap(),
+                    session: ProviderSessionId::new("fault-session").unwrap(),
+                },
+                seq: 1,
+                checkpoint: None,
+                at_ms: 0,
+                event: Event::Interaction(open),
+            });
+        work.cards.insert(
+            50,
+            Card {
+                chat: 9,
+                interaction,
+                approval: true,
+                form: None,
+                answered: Vec::new(),
+            },
+        );
+
+        work.command(second).await;
+        work.release_after_stop().await;
+        assert_eq!(deliveries().len(), 1, "held while the turn is stopping");
+
+        set_turn(None);
+        work.release_after_stop().await;
+        let sent = deliveries();
+        assert_eq!(sent.len(), 2);
+        assert!(matches!(sent[1], Delivery::Turn));
+
+        // Past the wait, a turn that still runs is steered: nothing stays held.
+        set_turn(Some(turn));
+        work.after_stop_due = Some(tokio::time::Instant::now());
+        work.command(third).await;
+        assert_eq!(deliveries().len(), 2);
+        work.release_after_stop().await;
+        let sent = deliveries();
+        assert_eq!(sent.len(), 3);
+        assert!(matches!(sent[2], Delivery::Steer { .. }));
+    }
+
     pub(crate) async fn acp_migration_preserves_unavailable_session(agent: Arc<Agent>) {
         let mut work = actor(agent);
         work.native_from_v1 = true;
@@ -4022,6 +4249,8 @@ pub(crate) mod recovery_tests {
             consider_lines: HashMap::new(),
             answer_replies: HashMap::new(),
             answer_to: None,
+            after_stop: Vec::new(),
+            after_stop_due: None,
             unsaved: std::sync::Mutex::new(HashMap::new()),
             uncertain: HashMap::new(),
             outbox,

@@ -191,18 +191,39 @@ pub(crate) fn document(facts: &DocumentFacts<'_>) -> BotChatSettingsDocument {
         ));
     }
     if !catalog.permission_modes.is_empty() {
-        agent.push(select(
+        let mut permissions = select(
             ITEM_PERMISSIONS,
             "Permissions",
             settings.permission_mode.as_deref(),
-            catalog.permission_modes.iter().map(|mode| {
-                (
-                    mode.value.clone(),
-                    mode.label.clone(),
-                    mode.description.clone(),
-                )
-            }),
-        ));
+            catalog
+                .permission_modes
+                .iter()
+                .filter(|mode| !mode.disabled)
+                .map(|mode| {
+                    (
+                        mode.value.clone(),
+                        mode.label.clone(),
+                        mode.description.clone(),
+                    )
+                }),
+        );
+        if let (Some(default), BotChatSettingsControl::Select { options, .. }) = (
+            catalog
+                .default_permission_mode
+                .as_ref()
+                .and_then(|default| {
+                    catalog
+                        .permission_modes
+                        .iter()
+                        .find(|mode| &mode.value == default)
+                }),
+            &mut permissions.control,
+        ) && let Some(row) = options.first_mut()
+        {
+            row.label = format!("Default ({})", default.label);
+            row.description = Some("What new chats start on.".to_owned());
+        }
+        agent.push(permissions);
     }
     let mut session: Vec<BotChatSettingsItem> = facts
         .context
@@ -530,6 +551,9 @@ pub(crate) fn invocation(
             change.effort = Some(chosen.unwrap_or_default());
         }
         ITEM_PERMISSIONS => {
+            // A session keeps its permissions when a setting is cleared, so a
+            // default the driver names is chosen for real.
+            let chosen = chosen.or_else(|| catalog.default_permission_mode.clone());
             if let Some(mode) = &chosen
                 && !catalog
                     .permission_modes
@@ -1032,6 +1056,20 @@ mod tests {
                 .all(|item| item.id != ITEM_REASONING)
         );
         assert_ne!(first.revision, second.revision);
+    }
+
+    #[test]
+    fn a_default_the_driver_names_is_chosen_for_real() {
+        let mut catalog = catalog();
+        catalog.default_permission_mode = Some("bypassPermissions".to_owned());
+        let Ok(Invocation::Change(change)) = invocation(
+            ITEM_PERMISSIONS,
+            Some(&BotSettingsValue::String(DEFAULT_VALUE.to_owned())),
+            &catalog,
+        ) else {
+            panic!("expected a change");
+        };
+        assert_eq!(change.permission_mode.as_deref(), Some("bypassPermissions"));
     }
 
     #[test]

@@ -389,16 +389,12 @@ impl HarnessDriver for CodexHarness {
                     crate::protocol::PermissionProfileListResponse,
                 >(profiles)
             {
-                catalog.permission_modes = profiles
-                    .data
-                    .into_iter()
-                    .map(|profile| DriverSettingOption {
-                        label: profile.id.clone(),
-                        value: profile.id,
-                        description: profile.description,
-                        disabled: profile.allowed == Some(false),
-                    })
-                    .collect();
+                catalog.permission_modes = super::delivery::permission_options(profiles.data);
+                catalog.default_permission_mode = catalog
+                    .permission_modes
+                    .iter()
+                    .find(|mode| mode.value == super::delivery::APPROVE_FOR_ME && !mode.disabled)
+                    .map(|mode| mode.value.clone());
             }
             if let Ok(modes) = connection
                 .request(Request {
@@ -520,7 +516,21 @@ impl HarnessDriver for CodexHarness {
                 }
                 _ => None,
             };
-            let response = match connection.request(Request { method, params }).await {
+            // Managed requirements can refuse the review agent behind the
+            // default. A new thread then asks the person, in the same sandbox;
+            // it never widens to whatever `config.toml` allows.
+            let asking = (matches!(spec.mode, OpenMode::Start)
+                && spec.settings.permission_mode.is_none())
+            .then(|| {
+                let mut params = params.clone();
+                params["approvalsReviewer"] = json!("user");
+                params
+            });
+            let mut result = connection.request(Request { method, params }).await;
+            if let (Err(PeerError::Remote(_)), Some(params)) = (&result, asking) {
+                result = connection.request(Request { method, params }).await;
+            }
+            let response = match result {
                 Ok(response) => response,
                 Err(error) => {
                     if let Some(inner) = &early {
@@ -551,7 +561,7 @@ impl HarnessDriver for CodexHarness {
                 }),
                 effort: text(response.get("reasoningEffort")),
                 speed: text(response.get("serviceTier")),
-                permission_mode: text(response.pointer("/activePermissionProfile/id")),
+                permission_mode: super::delivery::active_permission_mode(&response),
                 mode: None,
                 folder: text(response.get("cwd")).map(PathBuf::from),
             };
