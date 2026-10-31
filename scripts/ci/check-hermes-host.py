@@ -182,11 +182,15 @@ async def exercise_restarted_thread_reply():
 
     async def unrelated_bot_message(chat_id, message_id, **kwargs):
         lookups.append((chat_id, message_id))
-        return {"id": message_id, "chatId": chat_id, "fromId": "500", "sender": {"id": "500", "bot": True}}
+        return {
+            "id": message_id, "chatId": chat_id, "fromId": "500", "sender": {"id": "500", "bot": True},
+            "entities": {"entities": [{"offset": 0, "length": 6, "entity": {"oneofKind": "mention", "mention": {"userId": "999"}}}]},
+        }
 
     async def no_obligation(*args, **kwargs):
         return None
 
+    restarted._me_id = "999"
     restarted._http_client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
     try:
         with patch.object(restarted, "_get_chat_info", child_info), patch.object(restarted, "_fetch_message", unrelated_bot_message):
