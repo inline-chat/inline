@@ -21,7 +21,7 @@ enum RichBlockDisclosureMetrics {
   ) -> CGFloat {
     let width = max(1, containerWidth)
     let chevronWidth = hasChevron ? min(preferredChevronSide, max(0, width - 1)) : 0
-    let gap = min(titleChevronGap, max(0, width - chevronWidth - 1))
+    let gap = hasChevron ? min(titleChevronGap, max(0, width - chevronWidth - 1)) : 0
     let activityWidth = hasActivityIcon ? activityIconSide + activityTitleGap : 0
     return max(1, width - chevronWidth - gap - activityWidth)
   }
@@ -35,7 +35,7 @@ enum RichBlockDisclosureMetrics {
   ) -> HorizontalLayout {
     let width = max(0, bounds.width)
     let chevronWidth = hasChevron ? min(preferredChevronSide, max(0, width - 1)) : 0
-    let availableGap = min(titleChevronGap, max(0, width - chevronWidth - 1))
+    let availableGap = hasChevron ? min(titleChevronGap, max(0, width - chevronWidth - 1)) : 0
     let iconWidth = hasActivityIcon ? min(activityIconSide, max(0, width - chevronWidth - availableGap - 1)) : 0
     let iconGap = iconWidth > 0 ? min(activityTitleGap, max(0, width - chevronWidth - availableGap - iconWidth - 1)) : 0
     let viewportWidth = max(0, width - chevronWidth - availableGap - iconWidth - iconGap)
