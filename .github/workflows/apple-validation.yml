@@ -96,11 +96,11 @@ jobs:
           key: swiftpm-xcode27-${{ hashFiles('apple/**/Package.resolved') }}
       - name: Verify macOS 27 host
         run: test "$(sw_vers -productVersion | cut -d. -f1)" -ge 27
-      - name: Build and test nine utility packages
+      - name: Build and test ten utility packages
         env:
           APPLE_CI_SKIP_SOURCE_CHECKS: '1'
           APPLE_CI_REPORT_DIR: ${{ runner.temp }}/swift-utility-reports
-        run: bash scripts/apple/run-ci-checks.sh InlineRealtimeCore InlineMacSidebarModel InlineThumbnailing InlineSyntaxHighlighting InlineMacScripting InlineMath MemojiKit InlineDevCompanion InlineMessageLayout
+        run: bash scripts/apple/run-ci-checks.sh InlineRealtimeCore InlineMacSidebarModel InlineThumbnailing InlineSyntaxHighlighting InlineMacScripting InlineMath MemojiKit InlineDevCompanion InlineMessageLayout ChatList
       - uses: actions/upload-artifact@v4
         if: always()
         continue-on-error: true
