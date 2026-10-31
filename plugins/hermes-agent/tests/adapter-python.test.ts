@@ -1105,7 +1105,11 @@ def assert_reply_thread_settings():
     real_sidecar_call = inline_tools._sidecar_call
     created = []
 
+    dm_peer = {"peer": {"type": {"oneofKind": "user"}}}
+
     def fake_sidecar(path, body):
+        if path == "/chat":
+            return {"ok": True, "result": dm_peer if body["target"]["chatId"] == "20" else {"id": body["target"]["chatId"]}}
         created.append((path, body))
         return {"ok": True, "result": {"chatId": str(700 + len(created))}}
 
@@ -1155,6 +1159,18 @@ def assert_reply_thread_settings():
             adapter._allowed_chats = {"99"}
             assert "parent chat access" in tool("set_reply_threads", mode="on")["error"]
             adapter._allowed_chats = set()
+            # Someone allowed in groups but not in DMs, added to a thread under a DM, can't change that DM.
+            allow_all, adapter._allow_all = adapter._allow_all, False
+            adapter._dm_policy, adapter._group_policy = "allowlist", "allowlist"
+            adapter._allow_from, adapter._group_allow_from = {"501"}, {"501", "502"}
+            turn("99", "9", sender="502", thread_id="99", parent="20")
+            assert "parent chat access" in tool("set_reply_threads", mode="on")["error"]
+            assert adapter._reply_thread_mode_for_chat("20") == "on"
+            turn("99", "9", sender="501", thread_id="99", parent="20")
+            assert tool("set_reply_threads", mode="on")["result"] == {"chat_id": "20", "mode": "on"}
+            adapter._allow_all = allow_all
+            adapter._dm_policy, adapter._group_policy = "open", "open"
+            adapter._allow_from, adapter._group_allow_from = set(), set()
 
             # Asked for a thread in an Auto chat: one thread, and the answer goes into it.
             turn("10", "40")
@@ -1280,7 +1296,10 @@ try:
     assert len(live_status["generation"]) == 64
     assert "private-token" not in json.dumps(live_status)
     assert "pid" not in live_status and "start_time" not in live_status
-    gateway_runtime["start_time"] = 457
+    # macOS start-time readings drift about a second; that's still this process.
+    gateway_runtime["start_time"] = 556
+    assert inline_cli._gateway_status()["ready"] is True
+    gateway_runtime["start_time"] = 1456
     assert inline_cli._gateway_status()["generation"] != live_status["generation"]
     assert inline_cli._gateway_status()["ready"] is False
     gateway_runtime["start_time"] = 456
@@ -3060,18 +3079,26 @@ async def assert_multi_bot_rules():
     await adapter._dispatch_message(message(321, "move the launch to Friday"))
     assert events == []
 
-    # Delegation hand-back: another bot replying to this bot's message is a request to it,
-    # and the answer quotes that bot so it reaches it.
+    # Delegation hand-back: another bot's reply to this bot's message wakes it, but the response
+    # stays plain and may be silent, or two bots would quote each other forever.
     adapter, events = make(follow_mode=None)
     await adapter._dispatch_message(message(331, "thanks, now break it down by plan", sender="500", bot=True, reply_to="m1"))
     assert len(events) == 1 and events[0].source.is_bot is True
-    assert await adapter._reply_to_for_target("m-331", {"chatId": "10"}) == "m-331"
+    assert await adapter._reply_to_for_target("m-331", {"chatId": "10"}) is None
+    if "reply_expected" in getattr(MessageEvent, "__dataclass_fields__", {}):
+        assert events[0].reply_expected is False
+    # A bot that asks by mention gets a quoted answer, which is how the answer reaches it.
+    adapter, events = make(follow_mode=None)
+    await adapter._dispatch_message(message(332, "@scout what is 2+2?", sender="500", bot=True, entities=[mention("999", 0, 6)], mentioned=True))
+    assert len(events) == 1 and await adapter._reply_to_for_target("m-332", {"chatId": "10"}) == "m-332"
+    assert getattr(events[0], "reply_expected", None) is not False
     # Plain human requests get plain answers.
     assert await adapter._reply_to_for_target("m-321", {"chatId": "10"}) is None
-    # After a restart nothing is remembered: the request's sender decides, read from Inline.
+    # After a restart nothing is remembered: the request, read from Inline, decides.
     restarted = InlineAdapter(PlatformConfig(extra=trusted_extra))
+    restarted._me_id = "999"
     async def fetch_bot_request(chat_id, message_id, **kwargs):
-        return {"id": message_id, "chatId": chat_id, "fromId": "500", "sender": {"id": "500", "bot": True}}
+        return {"id": message_id, "chatId": chat_id, "fromId": "500", "sender": {"id": "500", "bot": True}, "entities": {"entities": [mention("999", 0, 6)]}}
     async def top_level_info(chat_id, **kwargs):
         return {"id": chat_id}
     restarted._get_chat_info = top_level_info
@@ -3102,6 +3129,7 @@ async def assert_multi_bot_rules():
         result = SendResult(success=True, message_id="reply")
         result.raw_response = {}
         return result
+    restarted_thread._me_id = "999"
     restarted_thread._get_chat_info = thread_info
     restarted_thread._fetch_message = unrelated_child_message
     restarted_thread._send_sidecar = capture_send

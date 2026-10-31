@@ -270,6 +270,7 @@ INLINE_TOOL_SCHEMA = {
         + "\n\n"
         "When chat_id is omitted, the tool uses the current Inline reply thread if present, otherwise the current chat. "
         "Return normal assistant replies as text. Use send_message only for a button card or a different destination. "
+        "To hand work to another bot, mention it in your normal reply; its answer comes back to you as a turn that doesn't need a response, and asking it again takes a new mention. "
         "Agent-owned button presses return as ordinary turns, and the normal response replaces the source card while clearing omitted buttons. "
         "Use create_thread on the current triggering message when someone asks to continue in a thread; your answer then goes into it, so don't also post it in the chat, and it starts with a short summary of the conversation so far. "
         "Use set_reply_threads when someone asks you to always or never answer in threads here. "
@@ -621,11 +622,20 @@ def _set_reply_threads(args: Dict[str, Any]) -> Dict[str, Any]:
     turn = _current_turn()
     if not turn.get("senderId"):
         raise InlineToolError("Only the person who asked can change reply threads, and this turn has no sender", "forbidden")
+    parent_chat_id = turn.get("parentChatId") or ""
+    chat_type = turn.get("chatType") or "group"
+    if parent_chat_id:
+        # The change lands on the parent, so the parent's own type decides who may make it:
+        # someone added to a thread under a DM is in a group here but not in that DM.
+        parent = _sidecar_call("/chat", {"target": {"chatId": parent_chat_id}}).get("result")
+        if not isinstance(parent, dict) or not parent:
+            raise InlineToolError("parent chat access could not be confirmed", "forbidden")
+        chat_type = owner.chat_type_from_info(parent)
     try:
         return owner.set_reply_threads_from_tool(
             chat_id=turn["chatId"],
-            chat_type=turn.get("chatType") or "group",
-            parent_chat_id=turn.get("parentChatId") or "",
+            chat_type=chat_type,
+            parent_chat_id=parent_chat_id,
             actor_id=turn["senderId"],
             actor_is_bot=bool(turn.get("senderIsBot")),
             mode=mode,

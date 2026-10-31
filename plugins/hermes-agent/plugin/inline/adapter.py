@@ -1033,7 +1033,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._reply_thread_cache: "OrderedDict[str, str]" = OrderedDict()
         self._reply_thread_parent_reply_ids: "OrderedDict[str, set[str]]" = OrderedDict()
         # Whether each request came from a bot, so answers to bots reply to them and reach them.
-        self._request_sender_is_bot: "OrderedDict[str, bool]" = OrderedDict()
+        self._request_quotes_sender: "OrderedDict[str, bool]" = OrderedDict()
         # Commands this bot advertises in Inline's command menu, as last synced.
         self._advertised_commands: set[str] = set()
         self._reply_thread_parent_typing_targets: "OrderedDict[str, str]" = OrderedDict()
@@ -1197,7 +1197,8 @@ class InlineAdapter(BasePlatformAdapter):
         self, *, chat_id: str, chat_type: str, parent_chat_id: str, actor_id: str, actor_is_bot: bool, mode: str,
     ) -> Dict[str, Any]:
         """Change reply threads because the person talking to the agent asked, with the access
-        /threads needs. Inside a reply thread it changes the parent chat, as /threads does."""
+        /threads needs. Inside a reply thread it changes the parent chat, as /threads does,
+        and chat_type is the parent's."""
         if actor_is_bot or not actor_id:
             raise PermissionError("only a person can change reply threads")
         target_chat_id = parent_chat_id or chat_id
@@ -1207,6 +1208,9 @@ class InlineAdapter(BasePlatformAdapter):
             raise PermissionError("changing reply threads needs access to the threads command")
         self._set_reply_threads_for_chat(target_chat_id, None if mode in {"default", "reset"} else _reply_thread_mode(mode))
         return {"chat_id": self._chat_key(target_chat_id), "mode": self._reply_thread_mode_for_chat(target_chat_id)}
+
+    def chat_type_from_info(self, info: Dict[str, Any]) -> str:
+        return self._bot_settings_chat_type(info)
 
     @staticmethod
     def _bot_settings_chat_type(info: Dict[str, Any]) -> str:
@@ -2733,7 +2737,8 @@ class InlineAdapter(BasePlatformAdapter):
             if not mentioned and not reply_wakes_thread and (addressed_to_others or not ambient):
                 self._remember_observed_context(chat_id, msg, text)
                 return
-        self._remember_request_sender(chat_id, msg_id, sender_profile.get("bot") is True)
+        sender_is_bot = sender_profile.get("bot") is True
+        self._remember_request_sender(chat_id, msg_id, sender_is_bot and (explicitly_mentions_me or command_addressed_to_me))
         if edit:
             text = f"message:edited:{text}" if text else "message:edited"
         if (
@@ -2861,7 +2866,11 @@ class InlineAdapter(BasePlatformAdapter):
             parent_chat_id=parent_chat_id,
             message_id=msg_id,
         )
+        # A bot's answer coming back needs no reply: the agent may stay silent instead of Hermes
+        # posting its "needed a reply" warning. Hosts before reply_expected ignore this.
+        answer_from_bot = sender_is_bot and not explicitly_mentions_me and not command_addressed_to_me
         await self.handle_message(MessageEvent(
+            **({"reply_expected": False} if answer_from_bot and "reply_expected" in getattr(MessageEvent, "__dataclass_fields__", {}) else {}),
             text=text,
             message_type=message_type,
             source=source,
@@ -3988,8 +3997,10 @@ class InlineAdapter(BasePlatformAdapter):
     async def _reply_to_for_target(
         self, reply_to: Optional[str], target: Dict[str, str], *, request_chat_id: str = "", anchored: bool = False,
     ) -> Optional[str]:
-        """Answers quote the message only when it came from a bot: a bot wakes on replies to its
-        own messages, so that is how an answer reaches it. People get plain answers."""
+        """Answers quote the message only when a bot asked by addressing this one: a bot wakes on
+        replies to its own messages, so that is how the answer reaches it. A bot's reply to this
+        bot is that answer coming back and gets a plain response, otherwise two bots would quote
+        each other forever; another round takes a new mention. People get plain answers."""
         if not reply_to:
             return None
         target_chat_id = target.get("chatId") or ""
@@ -4000,8 +4011,8 @@ class InlineAdapter(BasePlatformAdapter):
         if anchored:
             return str(reply_to)
         key = f"{self._chat_key(target_chat_id)}:{reply_to}"
-        sender_is_bot = self._request_sender_is_bot.get(key)
-        if sender_is_bot is None and target_chat_id and self._chat_key(request_chat_id) == self._chat_key(target_chat_id):
+        quotes_sender = self._request_quotes_sender.get(key)
+        if quotes_sender is None and target_chat_id and self._chat_key(request_chat_id) == self._chat_key(target_chat_id):
             info = await self._get_chat_info(target_chat_id)
             if not info:
                 return None
@@ -4013,16 +4024,16 @@ class InlineAdapter(BasePlatformAdapter):
             # Message ids are per chat, so only look it up where the request was sent; an answer
             # moved into a thread would otherwise read the thread's message with the same id.
             fetched = await self._fetch_message(target_chat_id, str(reply_to))
-            sender_is_bot = _inline_sender_profile({}, fetched).get("bot") is True if fetched else False
-            self._remember_request_sender(target_chat_id, str(reply_to), sender_is_bot)
-        return str(reply_to) if sender_is_bot else None
+            quotes_sender = bool(fetched) and _inline_sender_profile({}, fetched).get("bot") is True and self._message_entity_mentions_me(fetched)
+            self._remember_request_sender(target_chat_id, str(reply_to), quotes_sender)
+        return str(reply_to) if quotes_sender else None
 
-    def _remember_request_sender(self, chat_id: str, msg_id: str, sender_is_bot: bool) -> None:
+    def _remember_request_sender(self, chat_id: str, msg_id: str, quotes_sender: bool) -> None:
         key = f"{self._chat_key(chat_id)}:{msg_id}"
-        self._request_sender_is_bot[key] = sender_is_bot
-        self._request_sender_is_bot.move_to_end(key)
-        while len(self._request_sender_is_bot) > _CHAT_INFO_CACHE_MAX_SIZE:
-            self._request_sender_is_bot.popitem(last=False)
+        self._request_quotes_sender[key] = quotes_sender
+        self._request_quotes_sender.move_to_end(key)
+        while len(self._request_quotes_sender) > _CHAT_INFO_CACHE_MAX_SIZE:
+            self._request_quotes_sender.popitem(last=False)
 
     async def _get_chat_info(self, chat_id: str, *, required: bool = False) -> Dict[str, Any]:
         target = _target_from_chat_id(chat_id)

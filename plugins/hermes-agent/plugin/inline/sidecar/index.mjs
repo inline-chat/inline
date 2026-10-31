@@ -6057,18 +6057,26 @@ function defaultErrorText(error) {
 }
 
 // src/sidecar/inbound-delivery.ts
+var MENTION_SENDER_LOOKUP_MS = 2000;
 function explicitlyMentionsSelf(event, meId) {
   if (!meId || event.kind !== "message.new" && event.kind !== "message.edit")
     return false;
   const message = event.message;
   return message?.entities?.entities?.some((e) => e.entity?.oneofKind === "mention" && e.entity.mention?.userId?.toString() === meId) ?? false;
 }
+function resolveMentionSender(event, owner) {
+  const unverified = { provenanceVerified: false };
+  return Promise.race([
+    owner.resolveSender(event).catch(() => unverified),
+    delay(owner.mentionSenderLookupMs ?? MENTION_SENDER_LOOKUP_MS, unverified, { signal: owner.signal, ref: false })
+  ]);
+}
 async function deliverInboundEvent(event, owner) {
   if (inboundEventIsServiceMessage(event))
     return;
   const explicitMention = explicitlyMentionsSelf(event, owner.meId);
   while (!owner.signal.aborted) {
-    const resolution = explicitMention ? { provenanceVerified: false } : inboundEventNeedsSenderResolution(event) ? await owner.resolveSender(event) : { provenanceVerified: true };
+    const resolution = explicitMention ? await resolveMentionSender(event, owner) : inboundEventNeedsSenderResolution(event) ? await owner.resolveSender(event) : { provenanceVerified: true };
     owner.signal.throwIfAborted();
     if (!explicitMention && !resolution.provenanceVerified && (event.kind === "message.new" || event.kind === "message.edit")) {
       await delay(1000, undefined, { signal: owner.signal });

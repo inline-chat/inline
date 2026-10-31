@@ -10,6 +10,8 @@ import {
 
 type SenderResolution = { profile?: GenericSenderProfile; provenanceVerified: boolean }
 
+const MENTION_SENDER_LOOKUP_MS = 2_000
+
 // Match the Python adapter's structured-entity exemption. A display name, text
 // username or the broad `mentioned` flag is not authority for this fast path.
 export function explicitlyMentionsSelf(event: GenericInboundEvent, meId: string | null): boolean {
@@ -24,12 +26,31 @@ export function explicitlyMentionsSelf(event: GenericInboundEvent, meId: string 
   )
 }
 
+// A mention reaches the agent even while the directory is down, so it never waits on a retry.
+// The turn still needs its sender when the lookup works: a bot's answer only gets back to
+// another bot by quoting it, and tools that only people may use check the sender.
+function resolveMentionSender(
+  event: GenericInboundEvent,
+  owner: {
+    signal: AbortSignal
+    mentionSenderLookupMs?: number
+    resolveSender: (event: GenericInboundEvent) => Promise<SenderResolution>
+  },
+): Promise<SenderResolution> {
+  const unverified: SenderResolution = { provenanceVerified: false }
+  return Promise.race([
+    owner.resolveSender(event).catch(() => unverified),
+    delay(owner.mentionSenderLookupMs ?? MENTION_SENDER_LOOKUP_MS, unverified, { signal: owner.signal, ref: false }),
+  ])
+}
+
 export async function deliverInboundEvent(
   event: GenericInboundEvent,
   owner: {
     meId: string | null
     meUsername: string | null
     signal: AbortSignal
+    mentionSenderLookupMs?: number
     resolveSender: (event: GenericInboundEvent) => Promise<SenderResolution>
     deliver: (event: Json) => Promise<void>
   }
@@ -39,7 +60,7 @@ export async function deliverInboundEvent(
   const explicitMention = explicitlyMentionsSelf(event, owner.meId)
   while (!owner.signal.aborted) {
     const resolution = explicitMention
-      ? { provenanceVerified: false }
+      ? await resolveMentionSender(event, owner)
       : inboundEventNeedsSenderResolution(event)
       ? await owner.resolveSender(event)
       : { provenanceVerified: true }

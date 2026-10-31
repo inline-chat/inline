@@ -35,8 +35,11 @@ Expected tarball shape:
 - `plugin/inline/__init__.py`
 - `plugin/inline/adapter.py`
 - `plugin/inline/cli.py`
+- `plugin/inline/message_actions.py`
 - `plugin/inline/plugin.yaml`
+- `plugin/inline/profile.py`
 - `plugin/inline/sidecar/index.mjs`
+- `plugin/inline/telemetry.py`
 - `plugin/inline/tools.py`
 
 ## Host Compatibility and Message Flow
@@ -121,7 +124,9 @@ Manual behavior checks:
 - Media smoke covers one local outbound upload and one inbound URL-backed media
   summary or cache path.
 - Restarting Hermes preserves sidecar startup, catch-up state, and `doctor`
-  health.
+  health, and a message sent while it was down is not answered afterwards.
+- Two bots: one bot mentions the other, the answer quotes it and wakes it, and
+  the exchange stops there. Keep a way to stop both gateways while testing.
 
 ## Publish
 

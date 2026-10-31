@@ -70,8 +70,11 @@ answers. Review these before upgrading:
   bot can see, or one under a bot's direct message, follows that bot. A bot
   mentioned later answers once without following. The agent can follow or
   unfollow a thread itself.
-- **Answers quote the request only when answering another bot**, so that bot
-  sees the answer.
+- **Answers quote the request only when another bot asked by mention**, so that
+  bot gets the answer. Its answer coming back wakes the agent, but the reply
+  doesn't quote it, so two bots can't keep each other going. Asking again takes
+  a new mention. To let a bot talk to yours when you use an allowlist, add its
+  user ID to `INLINE_ALLOWED_USERS`.
 - **Commands go to the bot they name.** Picking a command from Inline's
   suggestions names its bot. A command several bots offer, typed without a
   name, goes to the bot you replied to or the one bot following the thread;

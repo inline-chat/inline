@@ -103,13 +103,38 @@ it("a structured self mention reaches delivery while the real directory is unava
       delivered.push(event)
     },
   })
-  expect(rpcCount).toBe(0)
+  expect(rpcCount).toBeGreaterThan(0)
   expect(delivered).toMatchObject([
     {
       _inlineSenderProvenanceVerified: false,
       message: { fromId: "42", entities: { entities: [{ entity: { mention: { userId: "777" } } }] } },
     },
   ])
+})
+
+it("a mention from another bot carries its sender, so the answer can reach it", async () => {
+  const delivered: Json[] = []
+  await deliverInboundEvent(message(777n), {
+    meId: "777", meUsername: "bot", signal: new AbortController().signal,
+    resolveSender: async () => ({ provenanceVerified: true, profile: { id: "42", bot: true } }),
+    deliver: async (event) => { delivered.push(event) },
+  })
+  expect(delivered).toMatchObject([{ sender: { id: "42", bot: true } }])
+  expect(delivered[0]).not.toHaveProperty("_inlineSenderProvenanceVerified")
+})
+
+it("a mention does not wait on a sender lookup that hangs", async () => {
+  vi.useFakeTimers()
+  const delivered: Json[] = []
+  const pending = deliverInboundEvent(message(777n), {
+    meId: "777", meUsername: "bot", signal: new AbortController().signal,
+    resolveSender: () => new Promise(() => {}),
+    deliver: async (event) => { delivered.push(event) },
+  })
+  await vi.advanceTimersByTimeAsync(2_000)
+  await pending
+  vi.useRealTimers()
+  expect(delivered).toMatchObject([{ _inlineSenderProvenanceVerified: false }])
 })
 
 it("unverified input stays pending until real directory recovery instead of becoming a deduplicated ignore", async () => {

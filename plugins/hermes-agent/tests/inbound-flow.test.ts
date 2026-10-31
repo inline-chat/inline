@@ -164,6 +164,7 @@ it.each(["recover", "abort"])("real SDK, directory and stream isolate held sende
         meId: "777",
         meUsername: "bot",
         signal: abort.signal,
+        mentionSenderLookupMs: 5,
         resolveSender: (event) =>
           directory.resolveWithProvenance({ userId: 42n, chatId: BigInt(event.chatId as bigint), direct: false }),
         deliver: (event) => stream.deliver(event),
@@ -200,6 +201,8 @@ it.each(["recover", "abort"])("real SDK, directory and stream isolate held sende
         },
       })
     )
+    // The mention stops waiting for its held sender lookup after the bound.
+    await new Promise((resolve) => setTimeout(resolve, 30))
     await flush()
     expect(lines.map((line) => JSON.parse(line).chatId)).toEqual(["20"])
     // Bytes reaching Python are not application completion. A healthy chat can
@@ -216,14 +219,17 @@ it.each(["recover", "abort"])("real SDK, directory and stream isolate held sende
       expect(client.exportState().lastSeqByChatId).toEqual({ "10": 1, "20": 2 })
       return
     }
-    const lookup = transport.sent.find(
+    const lookups = transport.sent.filter(
       (message) => message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_CHAT_PARTICIPANTS
     )
-    expect(lookup).toBeDefined()
-    await reply(lookup!.id, {
-      oneofKind: "getChatParticipants",
-      getChatParticipants: { users: [{ id: 42n, bot: false }] },
-    })
+    expect(lookups.length).toBeGreaterThan(0)
+    // Answer both chats' lookups: the mention's has already stopped mattering.
+    for (const lookup of lookups) {
+      await reply(lookup.id, {
+        oneofKind: "getChatParticipants",
+        getChatParticipants: { users: [{ id: 42n, bot: false }] },
+      })
+    }
     await flush()
     expect(lines.map((line) => JSON.parse(line).chatId)).toEqual(["20", "10"])
     expect(client.exportState().lastSeqByChatId).toEqual({ "10": 1, "20": 2 })
