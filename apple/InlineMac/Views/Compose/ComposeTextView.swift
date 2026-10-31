@@ -12,6 +12,7 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressArrowDown(_ textView: NSTextView, event: NSEvent) -> Bool
   func textViewDidPressArrowLeft(_ textView: NSTextView, event: NSEvent) -> Bool
   func textViewDidPressArrowRight(_ textView: NSTextView, event: NSEvent) -> Bool
+  func textViewDidPressCompletionNavigation(_ textView: NSTextView, isForward: Bool) -> Bool
   func textViewDidPressTab(_ textView: NSTextView) -> Bool
   func textViewDidPressEscape(_ textView: NSTextView) -> Bool
   func textViewDidChangeFormatting(_ textView: NSTextView)

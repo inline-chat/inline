@@ -77,6 +77,11 @@ final class GlobalHotkeys {
         return event
       }
 
+      // An open mention, command, or autocomplete menu takes these keys first.
+      if moveCompletionSelection(for: matched.action) {
+        return nil
+      }
+
       // For navigation keys, ensure we’re in Inbox/Archive; for others it may
       // not matter. Extend this logic per-action as needed.
       switch matched.action {
@@ -89,6 +94,25 @@ final class GlobalHotkeys {
       matched.action.perform(using: dependencies)
       return nil // swallow the event
     }
+  }
+
+  private func moveCompletionSelection(for action: Action) -> Bool {
+    let isForward: Bool
+    switch action {
+      case .previousChat:
+        isForward = false
+      case .nextChat:
+        isForward = true
+      case .custom:
+        return false
+    }
+
+    guard let textView = NSApp.keyWindow?.firstResponder as? NSTextView,
+          let delegate = textView.delegate as? ComposeTextViewDelegate
+    else {
+      return false
+    }
+    return delegate.textViewDidPressCompletionNavigation(textView, isForward: isForward)
   }
 
   private func match(event: NSEvent) -> Hotkey? {

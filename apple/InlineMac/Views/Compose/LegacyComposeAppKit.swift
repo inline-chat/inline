@@ -2641,6 +2641,35 @@ extension LegacyComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     return handleAutocompleteArrow(.next)
   }
 
+  func textViewDidPressCompletionNavigation(_ textView: NSTextView, isForward: Bool) -> Bool {
+    guard !textView.hasMarkedText() else { return false }
+
+    if autocompleteMenu?.isVisible == true {
+      _ = handleAutocompleteArrow(isForward ? .next : .previous)
+      return true
+    }
+
+    if commandCompletionMenu?.isVisible == true {
+      if isForward {
+        commandCompletionMenu?.selectNext()
+      } else {
+        commandCompletionMenu?.selectPrevious()
+      }
+      return true
+    }
+
+    if mentionCompletionMenu?.isVisible == true {
+      if isForward {
+        mentionCompletionMenu?.selectNext()
+      } else {
+        mentionCompletionMenu?.selectPrevious()
+      }
+      return true
+    }
+
+    return false
+  }
+
   private func shouldHandlePlainComposeArrow(_ textView: NSTextView, event: NSEvent) -> Bool {
     guard !textView.hasMarkedText() else {
       dismissCompletionMenusForTextNavigation()
