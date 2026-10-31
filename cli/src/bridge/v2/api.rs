@@ -164,6 +164,36 @@ pub(crate) async fn edit_doc(
     Ok(())
 }
 
+/// Removes a message's buttons and keeps what it says.
+pub(crate) async fn clear_actions(
+    bot: &InlineClient,
+    chat_id: i64,
+    message_id: i64,
+) -> ApiResult<()> {
+    let Some(message) = get_messages(bot, chat_id, vec![message_id])
+        .await?
+        .into_iter()
+        .next()
+    else {
+        return Ok(());
+    };
+    call!(
+        bot,
+        EditMessage,
+        proto::EditMessageInput {
+            message_id,
+            peer_id: Some(chat_peer(chat_id)),
+            text: message.message.unwrap_or_default(),
+            parse_markdown: Some(false),
+            actions: Some(proto::MessageActions::default()),
+            block_content: message.block_content,
+            entities: message.entities,
+            ..Default::default()
+        }
+    )?;
+    Ok(())
+}
+
 pub(crate) async fn report_runtime(
     bot: &InlineClient,
     input: proto::ReportAgentRuntimeInput,

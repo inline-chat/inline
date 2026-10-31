@@ -264,7 +264,7 @@ struct ComposeAgentRunButton: View {
       .disabled(disabledReason != nil || model.isControlling || work.runState == .stopping)
       .inlineTooltip(
         verbatim: paused ? "Resume \(name)" : (work.runState == .stopping ? "Stopping \(name)…" : "Stop \(name)"),
-        description: disabledReason ?? (paused ? "Continue the paused work." : "Sending a message still works; it steers the turn."),
+        description: disabledReason ?? (paused ? "Continue the paused work." : "Sending a message still works."),
         placement: .above
       )
       .accessibilityLabel(paused ? "Resume \(name)" : "Stop \(name)")

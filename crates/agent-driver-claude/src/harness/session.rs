@@ -476,7 +476,11 @@ impl HarnessDriver for ClaudeHarness {
                     .and_then(Weak::upgrade)
             }) && let Some(init) = session.initialize.clone()
             {
-                return Ok(catalog_from(&init, &self.permission_modes()));
+                return Ok(catalog_from(
+                    &init,
+                    &self.permission_modes(),
+                    &self.config.permission_mode,
+                ));
             }
             if let Some(cached) = self.state().catalogs.get(&folder)
                 && cached.at.elapsed() < CATALOG_TTL
@@ -498,7 +502,11 @@ impl HarnessDriver for ClaudeHarness {
             // Best effort: API-key accounts and older CLIs have no plan usage.
             let usage = client.get_usage(USAGE_TIMEOUT).await;
             client.close().await;
-            let mut catalog = catalog_from(&init, &self.permission_modes());
+            let mut catalog = catalog_from(
+                &init,
+                &self.permission_modes(),
+                &self.config.permission_mode,
+            );
             self.state().catalogs.insert(
                 folder,
                 CachedCatalog {
@@ -734,7 +742,11 @@ fn held_by(live: &LiveSession) -> HeldBy {
     }
 }
 
-fn catalog_from(init: &InitializeResponse, permission_modes: &[String]) -> Catalog {
+fn catalog_from(
+    init: &InitializeResponse,
+    permission_modes: &[String],
+    launch_permission_mode: &str,
+) -> Catalog {
     let option =
         |value: &str, label: Option<&str>, description: Option<&str>| DriverSettingOption {
             value: value.to_string(),
@@ -764,7 +776,7 @@ fn catalog_from(init: &InitializeResponse, permission_modes: &[String]) -> Catal
             })
             .collect(),
         speeds: Vec::new(),
-        default_permission_mode: None,
+        default_permission_mode: Some(launch_permission_mode.to_owned()),
         permission_modes: permission_modes
             .iter()
             .map(|mode| option(mode, Some(permission_mode_label(mode)), None))

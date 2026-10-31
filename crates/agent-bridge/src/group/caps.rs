@@ -16,8 +16,9 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_DAILY_SPEAK_GATE_BUDGET: u32 = 1_000;
 
 /// Consecutive agent-only messages in one conversation before agent-addressed
-/// input stops starting turns ("in the tens of hops").
-pub const DEFAULT_LOOP_CAP_HOPS: u32 = 30;
+/// input stops starting turns. A runaway guard far above any real handoff, not
+/// a working limit: harnesses have no such cap (Mo, Oct 31).
+pub const DEFAULT_LOOP_CAP_HOPS: u32 = 1_000;
 
 /// A calendar day in the owner's local time, as days since the Unix epoch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -234,6 +235,13 @@ impl LoopGuards {
         guard.verdict()
     }
 
+    /// The verdict for `scope` without recording a message.
+    pub fn current(&mut self, scope: i64) -> LoopVerdict {
+        self.guards
+            .get_mut(&scope)
+            .map_or(LoopVerdict::Allowed { hops: 0 }, LoopGuard::verdict)
+    }
+
     pub fn extend(&mut self, scope: i64, by: u32) {
         let default_limit = self.default_limit;
         self.guards
@@ -350,6 +358,15 @@ mod tests {
     }
 
     #[test]
+    fn reading_the_verdict_adds_no_hop() {
+        let mut guards = LoopGuards::new(1);
+        assert_eq!(guards.current(1), LoopVerdict::Allowed { hops: 0 });
+        guards.record(1, true);
+        assert_eq!(guards.current(1), LoopVerdict::Allowed { hops: 1 });
+        assert_eq!(guards.current(1), LoopVerdict::Allowed { hops: 1 });
+    }
+
+    #[test]
     fn extending_in_place_allows_more_hops_and_notifies_again_later() {
         let mut guards = LoopGuards::new(2);
         guards.record(1, true);
@@ -377,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn default_loop_cap_is_in_the_tens() {
-        assert!((10..100).contains(&DEFAULT_LOOP_CAP_HOPS));
+    fn default_loop_cap_is_only_a_runaway_guard() {
+        const { assert!(DEFAULT_LOOP_CAP_HOPS >= 1_000) };
     }
 }

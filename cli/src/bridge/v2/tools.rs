@@ -40,7 +40,7 @@ use crate::bridge::inline_tools::{
 /// How long a tool that acts through the work (subthread, status) waits for
 /// the work to answer.
 const WORK_ANSWER_TIMEOUT: Duration = Duration::from_secs(12);
-const MAX_TEXT_CHARS: usize = 8_000;
+const MAX_TEXT_CHARS: usize = 50_000;
 
 /// A tool that acts through the work itself, answered by its actor.
 #[derive(Debug)]

@@ -74,6 +74,8 @@ struct FakeSession {
     received: Mutex<Vec<Input>>,
     unknown_first: bool,
     live_turn: Mutex<Option<TurnId>>,
+    /// Harnesses without steering (Amp) refuse input during a turn.
+    no_steer: std::sync::atomic::AtomicBool,
 }
 
 impl Session for FakeSession {
@@ -82,10 +84,19 @@ impl Session for FakeSession {
     }
 
     fn availability(&self) -> AvailabilityMatrix {
+        let no_steer = self.no_steer.load(Ordering::SeqCst);
         DeliveryKind::ALL
             .into_iter()
             .fold(AvailabilityMatrix::default(), |matrix, kind| {
-                matrix.with_delivery(kind, Availability::Supported)
+                let steers = matches!(kind, DeliveryKind::SteerNext | DeliveryKind::SteerNow);
+                matrix.with_delivery(
+                    kind,
+                    if no_steer && steers {
+                        Availability::unavailable("no steering")
+                    } else {
+                        Availability::Supported
+                    },
+                )
             })
     }
 
@@ -237,6 +248,7 @@ fn fixture(unknown_first: bool) -> (Runtime, Arc<FakeHarness>, Cleanup) {
         received: Mutex::new(Vec::new()),
         unknown_first,
         live_turn: Mutex::new(None),
+        no_steer: Default::default(),
     });
     let harness = Arc::new(FakeHarness {
         session,
@@ -602,6 +614,31 @@ async fn a_message_waits_for_the_turn_its_answer_stopped() {
         first,
         second,
         third,
+        |turn| *harness.session.live_turn.lock().unwrap() = turn,
+        || {
+            harness
+                .session
+                .received
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|input| input.delivery.clone())
+                .collect()
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_message_to_a_harness_without_steering_waits_for_the_next_turn() {
+    let (runtime, harness, _cleanup) = fixture(false);
+    harness.session.no_steer.store(true, Ordering::SeqCst);
+    let (_, first) = input(&runtime, 20);
+    let (_, second) = input(&runtime, 21);
+    work::recovery_tests::a_message_waits_for_the_next_turn_without_steering(
+        runtime.agent.clone(),
+        first,
+        second,
         |turn| *harness.session.live_turn.lock().unwrap() = turn,
         || {
             harness

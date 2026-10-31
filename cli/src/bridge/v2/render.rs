@@ -17,10 +17,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use inline_agent_bridge::harness::{
-    ApprovalSubject, ChildRef, ClosedBy, CommandAction, Decision, DecisionKind, Envelope, Event,
-    FieldInput, FileChangeKind, FileDiff, InputFact, InputId, Interaction, InteractionId,
-    InteractionKind, InteractionResponse, Item, ItemBody, ItemKind, ItemStatus, ItemUpdate,
-    MessageRole, NoticeLevel, OutputMode, QuestionForm, TurnPhase,
+    ApprovalSubject, ChildRef, ChildStatus, ChildUpdate, ClosedBy, CommandAction, Decision,
+    DecisionKind, Envelope, Event, FieldInput, FileChangeKind, FileDiff, InputFact, InputId,
+    Interaction, InteractionId, InteractionKind, InteractionResponse, Item, ItemBody, ItemKind,
+    ItemStatus, ItemUpdate, MessageRole, NoticeLevel, OutputMode, QuestionForm, TurnPhase,
 };
 use inline_agent_bridge::{AgentMessagePhase, PlanStepStatus, TurnId, TurnOutcome};
 use serde_json::Value;
@@ -240,6 +240,7 @@ impl Renderer {
                 let elapsed = self.slot_elapsed(now);
                 self.end_slot(elapsed, "Some updates were skipped · worked for", &mut ops);
             }
+            Event::Child { update } => self.child_update(update, &mut ops),
             _ => {}
         }
         ops
@@ -315,6 +316,30 @@ impl Renderer {
             }
         }
         self.push_progress(ops);
+    }
+
+    /// A sub-agent's row follows its own status, which can change long after
+    /// the tool call that started it returned (background agents).
+    fn child_update(&mut self, update: &ChildUpdate, ops: &mut Vec<RenderOp>) {
+        let status = match update.status {
+            ChildStatus::Started | ChildStatus::Running => Status::Running,
+            ChildStatus::Waiting => Status::Waiting,
+            ChildStatus::Completed => Status::Done,
+            ChildStatus::Failed => Status::Failed,
+            ChildStatus::Stopped => Status::Cancelled,
+            _ => return,
+        };
+        let Some(row) = self.slot.as_mut().and_then(|slot| {
+            slot.rows.iter_mut().find(|row| {
+                matches!(&row.body, Some(ItemBody::Child { child, .. }) if child.id == update.child.id)
+            })
+        }) else {
+            return;
+        };
+        if row.status != status {
+            row.status = status;
+            self.push_progress(ops);
+        }
     }
 
     fn open_slot(&mut self, now: u64) {
@@ -1620,6 +1645,77 @@ pub(crate) fn pickable(form: &QuestionForm) -> bool {
         })
 }
 
+/// A reply as the answers to a form, for apps that don't draw forms: one line
+/// per question. `None` when it doesn't read as answers (it is then a message
+/// to the agent) or asks for a secret, which never goes through chat.
+pub(crate) fn reply_answers(form: &QuestionForm, text: &str) -> Option<Vec<(usize, Vec<String>)>> {
+    let text = text.trim();
+    let lines: Vec<&str> = if form.fields.len() == 1 {
+        vec![text]
+    } else {
+        text.lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect()
+    };
+    if text.is_empty() || lines.len() != form.fields.len() {
+        return None;
+    }
+    form.fields
+        .iter()
+        .zip(lines)
+        .enumerate()
+        .map(|(index, (field, line))| {
+            let values = match &field.input {
+                FieldInput::Secret => return None,
+                FieldInput::Text { .. } => vec![line.to_owned()],
+                FieldInput::Number { .. } => {
+                    line.parse::<f64>().ok()?;
+                    vec![line.to_owned()]
+                }
+                FieldInput::Toggle { .. } => match line.to_ascii_lowercase().as_str() {
+                    "yes" | "y" | "on" | "true" => vec!["true".to_owned()],
+                    "no" | "n" | "off" | "false" => vec!["false".to_owned()],
+                    _ => return None,
+                },
+                FieldInput::Select {
+                    options,
+                    multiple,
+                    allow_other,
+                } => {
+                    let parts: Vec<&str> = if *multiple {
+                        line.split(',')
+                            .map(str::trim)
+                            .filter(|part| !part.is_empty())
+                            .collect()
+                    } else {
+                        vec![line]
+                    };
+                    let mut values = Vec::with_capacity(parts.len());
+                    for part in parts {
+                        let by_number = part
+                            .parse::<usize>()
+                            .ok()
+                            .and_then(|number| options.get(number.checked_sub(1)?));
+                        let option = by_number.or_else(|| {
+                            options
+                                .iter()
+                                .find(|option| option.label.eq_ignore_ascii_case(part))
+                        });
+                        match option {
+                            Some(option) => values.push(option.label.clone()),
+                            None if *allow_other => values.push(part.to_owned()),
+                            None => return None,
+                        }
+                    }
+                    values
+                }
+            };
+            Some((index, values))
+        })
+        .collect()
+}
+
 /// Whether the question `field` also takes an answer in the person's own
 /// words: a reply to the card.
 pub(crate) fn takes_reply(form: &QuestionForm, field: usize) -> bool {
@@ -1689,6 +1785,17 @@ fn question_card(agent: &str, form: &QuestionForm) -> Doc {
         form,
         inline_protocol::proto::AgentGrantRequirement::Access,
     );
+    if !form
+        .fields
+        .iter()
+        .any(|field| matches!(field.input, FieldInput::Secret))
+    {
+        builder.paragraph(if form.fields.len() > 1 {
+            "Or reply to this message, one answer per line."
+        } else {
+            "Or reply to this message with your answer."
+        });
+    }
     builder.finish()
 }
 
@@ -1723,6 +1830,70 @@ fn closed_card(interaction: &Interaction, by: &ClosedBy, names: &HashMap<i64, St
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn replies_answer_forms_and_never_carry_secrets() {
+        let field = |id: &str, input| inline_agent_bridge::harness::FormField {
+            id: inline_agent_bridge::harness::FieldId::new(id).unwrap(),
+            header: None,
+            prompt: id.to_owned(),
+            required: true,
+            input,
+        };
+        let option = |label: &str| inline_agent_bridge::harness::FieldOption {
+            label: label.to_owned(),
+            description: None,
+        };
+        let select = |multiple, allow_other| FieldInput::Select {
+            options: vec![option("Red"), option("Blue")],
+            multiple,
+            allow_other,
+        };
+        let form = |fields| QuestionForm {
+            title: None,
+            fields,
+            asynchronous: false,
+            auto_resolution_ms: None,
+        };
+        let text = FieldInput::Text {
+            multiline: false,
+            default: None,
+        };
+
+        let single = form(vec![field("a", text.clone())]);
+        assert_eq!(
+            reply_answers(&single, "  go with\nboth lines "),
+            Some(vec![(0, vec!["go with\nboth lines".to_owned()])])
+        );
+        let many = form(vec![
+            field("a", select(true, false)),
+            field("b", text.clone()),
+        ]);
+        assert_eq!(
+            reply_answers(&many, "blue, 1\nhello"),
+            Some(vec![
+                (0, vec!["Blue".to_owned(), "Red".to_owned()]),
+                (1, vec!["hello".to_owned()])
+            ])
+        );
+        assert_eq!(reply_answers(&many, "blue"), None, "one line is short");
+        let strict = form(vec![field("a", select(false, false))]);
+        assert_eq!(reply_answers(&strict, "green"), None);
+        let open = form(vec![field("a", select(false, true))]);
+        assert_eq!(
+            reply_answers(&open, "green"),
+            Some(vec![(0, vec!["green".to_owned()])])
+        );
+        assert_eq!(
+            reply_answers(&form(vec![field("a", FieldInput::Secret)]), "x"),
+            None
+        );
+        let toggle = form(vec![field("a", FieldInput::Toggle { default: None })]);
+        assert_eq!(
+            reply_answers(&toggle, "Yes"),
+            Some(vec![(0, vec!["true".to_owned()])])
+        );
+    }
+
     use inline_agent_bridge::harness::{DeltaStream, ItemDelta, ItemId, SessionKey, TurnPhase};
     use inline_agent_bridge::{ProviderId, ProviderSessionId};
 

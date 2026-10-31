@@ -631,56 +631,108 @@ pub(crate) fn command_value(argument: &str) -> &str {
     }
 }
 
-/// `/model`, `/reasoning` or `/permissions` with no argument: the current
-/// value and the choices.
-pub(crate) fn describe(item: &str, catalog: &Catalog, settings: &SettingsChange) -> String {
-    let (label, current, choices): (&str, &Option<String>, Vec<String>) = match item {
+/// A setting's choices as (value, label), the default first and named after
+/// what it means here.
+pub(crate) fn choices(
+    item: &str,
+    catalog: &Catalog,
+    settings: &SettingsChange,
+) -> Vec<(String, String)> {
+    let model = settings
+        .model
+        .as_deref()
+        .and_then(|id| catalog.models.iter().find(|model| model.value == id))
+        .or_else(|| catalog.models.iter().find(|model| model.is_default));
+    let (default, options): (Option<String>, Vec<(String, String)>) = match item {
         ITEM_MODEL => (
-            "Model",
-            &settings.model,
             catalog
                 .models
                 .iter()
-                .map(|model| model.value.clone())
+                .find(|model| model.is_default)
+                .map(|model| model.label.clone()),
+            catalog
+                .models
+                .iter()
+                .map(|model| (model.value.clone(), model.label.clone()))
                 .collect(),
         ),
-        ITEM_REASONING => ("Reasoning", &settings.effort, {
-            let model = settings
-                .model
-                .as_deref()
-                .and_then(|id| catalog.models.iter().find(|model| model.value == id))
-                .or_else(|| catalog.models.iter().find(|model| model.is_default));
+        ITEM_REASONING => (
+            model.and_then(|model| model.default_reasoning.clone()),
             model.map_or_else(Vec::new, |model| {
                 model
                     .reasoning
                     .iter()
-                    .map(|effort| effort.value.clone())
+                    .map(|effort| (effort.value.clone(), effort.label.clone()))
                     .collect()
-            })
-        }),
+            }),
+        ),
         _ => (
-            "Permissions",
-            &settings.permission_mode,
+            catalog
+                .default_permission_mode
+                .as_ref()
+                .and_then(|default| {
+                    catalog
+                        .permission_modes
+                        .iter()
+                        .find(|mode| &mode.value == default)
+                })
+                .map(|mode| mode.label.clone()),
             catalog
                 .permission_modes
                 .iter()
-                .map(|mode| mode.value.clone())
+                .filter(|mode| !mode.disabled)
+                .map(|mode| (mode.value.clone(), mode.label.clone()))
                 .collect(),
         ),
     };
-    let command = match item {
-        ITEM_MODEL => "/model",
-        ITEM_REASONING => "/reasoning",
-        _ => "/permissions",
-    };
-    let current = current.as_deref().unwrap_or("default");
-    if choices.is_empty() {
-        return format!("{label}: {current}. This harness offers no choices here.");
+    if options.is_empty() {
+        return options;
     }
-    format!(
-        "{label}: {current}. Choose with {command} <value>: default, {}.",
-        choices.join(", ")
-    )
+    let default = default.map_or_else(
+        || "Default".to_owned(),
+        |label| format!("Default ({label})"),
+    );
+    std::iter::once(("default".to_owned(), default))
+        .chain(options)
+        .collect()
+}
+
+/// `/model`, `/reasoning` or `/permissions` with no argument: what is in
+/// effect, and any choices that don't fit on `shown` buttons.
+pub(crate) fn describe(
+    item: &str,
+    catalog: &Catalog,
+    settings: &SettingsChange,
+    shown: usize,
+) -> String {
+    let (label, current, command) = match item {
+        ITEM_MODEL => ("Model", &settings.model, "/model"),
+        ITEM_REASONING => ("Reasoning", &settings.effort, "/reasoning"),
+        _ => ("Permissions", &settings.permission_mode, "/permissions"),
+    };
+    let choices = choices(item, catalog, settings);
+    let current = match current {
+        Some(current) => choices
+            .iter()
+            .find(|(value, _)| value == current)
+            .map_or_else(|| current.clone(), |(_, label)| label.clone()),
+        None => choices
+            .first()
+            .map_or_else(|| "default".to_owned(), |(_, label)| label.clone()),
+    };
+    let rest: Vec<&str> = choices
+        .iter()
+        .skip(shown)
+        .map(|(value, _)| value.as_str())
+        .collect();
+    if rest.is_empty() {
+        format!("{label}: {current}.")
+    } else {
+        format!(
+            "{label}: {current}. Also {command} <value>: {}.",
+            rest.join(", ")
+        )
+    }
 }
 
 pub(crate) fn problem(

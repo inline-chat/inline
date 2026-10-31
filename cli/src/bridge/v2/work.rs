@@ -61,8 +61,10 @@ const MAX_PUBLISH_WAIT: Duration = Duration::from_secs(30);
 const MAX_ACTION_ROWS: usize = 8;
 /// How long input waits for a turn a card's answer stopped.
 const AFTER_STOP_WAIT: Duration = Duration::from_secs(30);
+const NOTHING_OPEN: &str = "No session has started in";
+const NOT_AVAILABLE: &str = "Not available";
 const AFTER_STOP_POLL: Duration = Duration::from_millis(100);
-const NOT_PENDING: &str = "This request is no longer pending.";
+pub(crate) const NOT_PENDING: &str = "This request is no longer pending.";
 /// Trusted instructions for the speak gate's side call.
 const SPEAK_GATE_GUIDE: &str = "You take part in this Inline thread but nobody addressed you. \
 Decide whether a reply from you would clearly help the people here right now. Stay quiet \
@@ -229,6 +231,9 @@ pub(crate) enum ActionData {
     /// More speak-gate checks for the rest of today.
     #[serde(rename = "gr")]
     RaiseGateBudget,
+    /// One choice of a bare `/model`, `/reasoning` or `/permissions` card.
+    #[serde(rename = "s")]
+    Setting { i: String, v: String },
     /// Option `o` of question `f` on a question card asked with buttons.
     #[serde(rename = "q")]
     Pick { i: String, f: usize, o: usize },
@@ -710,6 +715,42 @@ impl Actor {
                 input,
                 pending,
                 message_id,
+                reply_to: Some(card),
+                ..
+            } if self.cards.get(&card).is_some_and(|open| {
+                open.form
+                    .as_ref()
+                    .is_some_and(|form| render::reply_answers(form, &input.content.text).is_some())
+            }) =>
+            {
+                let open = self.cards[&card].clone();
+                let form = open.form.expect("checked above");
+                let answers = render::reply_answers(&form, &input.content.text)
+                    .expect("checked above")
+                    .into_iter()
+                    .filter_map(|(index, values)| {
+                        Some(FieldAnswer {
+                            field: FieldId::new(form.fields[index].id.as_str()).ok()?,
+                            values,
+                        })
+                    })
+                    .collect();
+                let toast = self
+                    .answer(
+                        open.interaction,
+                        InteractionResponse::Answers { answers },
+                        pending.sender.0,
+                    )
+                    .await;
+                self.mark(&input.id, InputState::Consumed);
+                if let Some(toast) = toast {
+                    self.reply(message_id, &toast).await;
+                }
+            }
+            Command::Input {
+                input,
+                pending,
+                message_id,
                 answer_reply,
                 ..
             } => {
@@ -727,8 +768,23 @@ impl Actor {
                 if answer_reply {
                     self.answer_replies.insert(input.id.clone(), message_id);
                 }
+                let input_delivery = input.delivery.clone();
                 self.inputs
                     .insert(input.id.clone(), (*input, pending.clone(), message_id));
+                if self.cannot_take_input_now(&input_delivery) {
+                    self.after_stop_due
+                        .get_or_insert_with(|| tokio::time::Instant::now() + AFTER_STOP_WAIT);
+                    if self.after_stop.is_empty() {
+                        self.reply(
+                            message_id,
+                            &format!(
+                                "{} reads this when its current turn ends.",
+                                self.agent.agent_name
+                            ),
+                        )
+                        .await;
+                    }
+                }
                 if self.after_stop_due.is_some() {
                     self.after_stop.push(pending);
                 } else {
@@ -924,7 +980,7 @@ impl Actor {
             if pause {
                 self.paused = true;
                 self.report().await;
-                return None;
+                return Some("Paused. Nothing runs here until /resume or a mention.".to_owned());
             }
             return Some("Nothing is running.".to_owned());
         };
@@ -1030,7 +1086,9 @@ impl Actor {
         let grants = self.agent.access.grants(actor).await;
         match data {
             // The main loop answers these; they never reach a work.
-            ActionData::ExtendLoop | ActionData::RaiseGateBudget => None,
+            ActionData::ExtendLoop | ActionData::RaiseGateBudget | ActionData::Setting { .. } => {
+                None
+            }
             ActionData::Pick { i, f, o } => {
                 let label = self
                     .cards
@@ -1214,7 +1272,9 @@ impl Actor {
         response: InteractionResponse,
         actor: i64,
     ) -> Option<String> {
-        let session = self.held_session()?;
+        let Some(session) = self.held_session() else {
+            return Some(NOT_PENDING.to_owned());
+        };
         // The card's resolution names who answered.
         let name = self.agent.names.of(actor).await;
         self.renderer.name_user(actor, name);
@@ -1299,6 +1359,25 @@ impl Actor {
                 .is_some_and(|session| live_turn(&session).is_some())
     }
 
+    fn can_steer(&self) -> bool {
+        self.held_session().is_none_or(|session| {
+            session
+                .availability()
+                .delivery(inline_agent_bridge::harness::DeliveryKind::SteerNext)
+                .is_supported()
+        })
+    }
+
+    /// A harness without steering (Amp) cannot take a message during a turn,
+    /// so it waits for the next one, as a harness's own queue would.
+    fn cannot_take_input_now(&self, delivery: &Delivery) -> bool {
+        !matches!(delivery, Delivery::Queue | Delivery::Passive)
+            && !self.can_steer()
+            && self
+                .held_session()
+                .is_some_and(|session| live_turn(&session).is_some())
+    }
+
     /// Input held for a stopping turn goes out once the turn has ended. A turn
     /// that outlasts the wait is not stopping after all, and is steered.
     async fn release_after_stop(&mut self) {
@@ -1308,7 +1387,7 @@ impl Actor {
         let live = self
             .held_session()
             .is_some_and(|session| live_turn(&session).is_some());
-        if live && tokio::time::Instant::now() < due {
+        if live && (tokio::time::Instant::now() < due || !self.can_steer()) {
             return;
         }
         if live {
@@ -2227,12 +2306,17 @@ impl Actor {
     }
 
     async fn native_op(&mut self, op: Op, done: &str) -> Option<String> {
+        // A session that went idle comes back for this, as for a message.
+        if self.held_session().is_none() {
+            self.event(HoldEvent::AcquireRequested { input: None })
+                .await;
+        }
         let Some(session) = self.held_session() else {
-            return Some("Nothing is open in this thread yet.".to_owned());
+            return Some(format!("{NOTHING_OPEN} this thread yet."));
         };
         match session.control(op).await {
             Ok(_) => Some(done.to_owned()),
-            Err(error) => Some(format!("Not available: {error}")),
+            Err(error) => Some(format!("{NOT_AVAILABLE}: {error}")),
         }
     }
 
@@ -3650,10 +3734,18 @@ const MAX_BUTTON_CHARS: usize = 64;
 
 /// The harness's label, shortened to fit a button.
 fn button_text(label: &str) -> String {
-    if label.chars().count() <= MAX_BUTTON_CHARS {
+    if label.encode_utf16().count() <= MAX_BUTTON_CHARS {
         return label.to_owned();
     }
-    let mut text: String = label.chars().take(MAX_BUTTON_CHARS - 1).collect();
+    let mut text = String::new();
+    let mut units = 0;
+    for character in label.chars() {
+        units += character.len_utf16();
+        if units >= MAX_BUTTON_CHARS {
+            break;
+        }
+        text.push(character);
+    }
     text.push('…');
     text
 }
@@ -3662,7 +3754,7 @@ fn button_text(label: &str) -> String {
 fn long_labels(actions: &[CardAction]) -> Vec<String> {
     actions
         .iter()
-        .filter(|action| action.label.chars().count() > MAX_BUTTON_CHARS)
+        .filter(|action| action.label.encode_utf16().count() > MAX_BUTTON_CHARS)
         .map(|action| action.label.clone())
         .collect()
 }
@@ -3777,6 +3869,42 @@ pub(crate) fn form_answers(form: &QuestionForm, values: &[FormValue]) -> Vec<Fie
             })
         })
         .collect()
+}
+
+/// A setting's choices as buttons, one per row. What doesn't fit stays
+/// reachable by typing it (see `settings::card_text`).
+pub(crate) fn setting_actions(
+    item: &str,
+    choices: &[(String, String)],
+) -> Option<proto::MessageActions> {
+    let rows: Vec<proto::MessageActionRow> = choices
+        .iter()
+        .take(MAX_ACTION_ROWS)
+        .enumerate()
+        .filter_map(|(index, (value, label))| {
+            let data = serde_json::to_vec(&ActionData::Setting {
+                i: item.to_owned(),
+                v: value.clone(),
+            })
+            .ok()?;
+            Some(proto::MessageActionRow {
+                actions: vec![proto::MessageAction {
+                    action_id: format!("v2-{index}"),
+                    text: button_text(label),
+                    action: Some(proto::message_action::Action::Callback(
+                        proto::MessageActionCallback { data },
+                    )),
+                    ..Default::default()
+                }],
+            })
+        })
+        .collect();
+    (!rows.is_empty()).then_some(proto::MessageActions { rows })
+}
+
+/// A session operation's answer that says it did not happen.
+pub(crate) fn is_refusal(toast: &str) -> bool {
+    toast.starts_with(NOTHING_OPEN) || toast.starts_with(NOT_AVAILABLE)
 }
 
 #[cfg(test)]
@@ -3996,6 +4124,34 @@ pub(crate) mod recovery_tests {
         let rows = card_actions(&interaction, &actions).expect("buttons").rows;
         assert_eq!(rows.len(), MAX_ACTION_ROWS);
         assert_eq!(rows[7].actions[0].text, "Choice 11");
+    }
+
+    /// Without steering a message neither fails nor steers: it runs as the
+    /// next turn, however long the current one takes.
+    pub(crate) async fn a_message_waits_for_the_next_turn_without_steering(
+        agent: Arc<Agent>,
+        first: Command,
+        second: Command,
+        set_turn: impl Fn(Option<TurnId>),
+        deliveries: impl Fn() -> Vec<Delivery>,
+    ) {
+        let mut work = actor(agent);
+        work.command(first).await;
+        assert_eq!(deliveries().len(), 1);
+        set_turn(Some(TurnId::new("turn-0").unwrap()));
+
+        work.command(second).await;
+        work.release_after_stop().await;
+        assert_eq!(deliveries().len(), 1, "held during the turn");
+        // Past the wait that gives up on a stopping turn, it still holds.
+        work.after_stop_due = Some(tokio::time::Instant::now());
+        work.release_after_stop().await;
+        assert_eq!(deliveries().len(), 1, "never steered");
+
+        set_turn(None);
+        work.release_after_stop().await;
+        assert_eq!(deliveries().len(), 2);
+        assert!(matches!(deliveries()[1], Delivery::Turn));
     }
 
     /// A message that answers a card by stopping the turn starts a new turn

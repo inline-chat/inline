@@ -7,7 +7,7 @@ const MAX_HOST_TOOL_CALL_ID_BYTES: usize = 256;
 const MAX_HOST_TOOL_RESULT_BYTES: usize = 16 * 1024;
 pub(in crate::bridge) const HOST_TOOL_EXECUTION_TIMEOUT: Duration = Duration::from_secs(15);
 pub(in crate::bridge) const RETURN_ATTACHMENT_TIMEOUT: Duration = Duration::from_secs(60);
-const MAX_RETURN_ATTACHMENT_BYTES: u64 = 20 * 1024 * 1024;
+const MAX_RETURN_ATTACHMENT_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_VIDEO_THUMBNAIL_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone)]

@@ -16,8 +16,8 @@ use inline_agent_bridge::harness::{
     SetupReason,
 };
 use inline_agent_bridge::{
-    DriverError, DriverFuture, DriverModelOption, DriverSettingOption, HostToolConfiguration,
-    ProviderId, ProviderSessionId, SessionPageCursor, TurnId,
+    DriverCommand, DriverError, DriverFuture, DriverModelOption, DriverSettingOption,
+    HostToolConfiguration, ProviderId, ProviderSessionId, SessionPageCursor, TurnId,
 };
 use semver::Version;
 use serde_json::{Value, json};
@@ -333,6 +333,32 @@ fn project_roots(project: crate::protocol::CodexProject) -> Vec<CatalogFolder> {
         .collect()
 }
 
+/// Enabled skills from `skills/list`, by name. Codex expands `$name` in text.
+fn skill_commands(response: &Value) -> Vec<DriverCommand> {
+    let mut commands: Vec<DriverCommand> = response["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| entry["skills"].as_array().into_iter().flatten())
+        .filter(|skill| skill["enabled"].as_bool().unwrap_or(true))
+        .filter_map(|skill| {
+            Some(DriverCommand {
+                name: skill["name"].as_str()?.to_owned(),
+                description: skill["shortDescription"]
+                    .as_str()
+                    .or_else(|| skill["description"].as_str())
+                    .unwrap_or_default()
+                    .to_owned(),
+                input_hint: None,
+                input: Default::default(),
+            })
+        })
+        .collect();
+    commands.sort_by(|left, right| left.name.cmp(&right.name));
+    commands.dedup_by(|left, right| left.name == right.name);
+    commands
+}
+
 impl HarnessDriver for CodexHarness {
     fn describe(&self) -> RuntimeInfo {
         self.info.lock().expect("runtime info poisoned").clone()
@@ -378,6 +404,15 @@ impl HarnessDriver for CodexHarness {
                         is_default: model.is_default,
                     })
                     .collect();
+            }
+            if let Ok(skills) = connection
+                .request(Request {
+                    method: "skills/list",
+                    params: json!({"cwds": scope.folder.iter().collect::<Vec<_>>()}),
+                })
+                .await
+            {
+                catalog.commands = skill_commands(&skills);
             }
             if let Ok(profiles) = connection
                 .request(Request {

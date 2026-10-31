@@ -944,10 +944,16 @@ impl ClaudeMapper {
         let child = match self.children.get(&task.task_id) {
             Some(child) => child.clone(),
             None => {
-                let child = ChildRef {
-                    id,
-                    kind: child_kind(task, raw),
-                };
+                // A subagent keeps the id of the tool use that started it, so
+                // its rows stay under that one row.
+                let child = task
+                    .tool_use_id
+                    .as_ref()
+                    .and_then(|tool_use| self.child_by_tool_use.get(tool_use).cloned())
+                    .unwrap_or(ChildRef {
+                        id,
+                        kind: child_kind(task, raw),
+                    });
                 self.children.insert(task.task_id.clone(), child.clone());
                 child
             }
@@ -1046,10 +1052,10 @@ impl ClaudeMapper {
                     dialog.dialog_kind
                 )),
                 events: vec![notice(
-                    NoticeLevel::Warning,
+                    NoticeLevel::Error,
                     "request_user_dialog",
                     Some(format!(
-                        "Claude asked for a {} dialog Inline cannot show",
+                        "Claude asked for a {} dialog Inline cannot show. Claude continues once it times out.",
                         dialog.dialog_kind
                     )),
                     request,
@@ -1058,9 +1064,17 @@ impl ClaudeMapper {
             IncomingRequest::Elicitation(raw) => RequestMapped::Reply {
                 response: Ok(json!({"action": "decline"})),
                 events: vec![notice(
-                    NoticeLevel::Warning,
+                    NoticeLevel::Error,
                     "elicitation",
-                    raw["message"].as_str().map(str::to_string),
+                    Some(match raw["message"].as_str() {
+                        Some(message) => format!(
+                            "An MCP server asked for input Inline cannot show, so it was declined: {message}"
+                        ),
+                        None => {
+                            "An MCP server asked for input Inline cannot show, so it was declined."
+                                .to_owned()
+                        }
+                    }),
                     request,
                 )],
             },
@@ -1283,6 +1297,38 @@ fn tool_body(block: &Value) -> ItemBody {
                 .collect(),
             text: None,
         },
+        "Task" | "Agent" => {
+            let description = input["description"]
+                .as_str()
+                .filter(|text| !text.is_empty());
+            let prompt = input["prompt"].as_str().filter(|text| !text.is_empty());
+            let id = block["id"].as_str().unwrap_or_default();
+            match ChildId::new(id) {
+                Ok(id) => ItemBody::Child {
+                    child: ChildRef {
+                        id,
+                        kind: ChildKind::Subagent,
+                    },
+                    action: input["subagent_type"].as_str().map(str::to_string),
+                    prompt: match (description, prompt) {
+                        (Some(description), Some(prompt)) => {
+                            Some(format!("{description}\n\n{prompt}"))
+                        }
+                        (description, prompt) => description.or(prompt).map(str::to_string),
+                    },
+                },
+                Err(_) => {
+                    let (name, server) = tool_name(name);
+                    ItemBody::Tool {
+                        name,
+                        server,
+                        input: input.clone(),
+                        output: None,
+                        error: None,
+                    }
+                }
+            }
+        }
         "ExitPlanMode" => ItemBody::Plan {
             explanation: None,
             steps: Vec::new(),
@@ -1723,6 +1769,26 @@ fn suggestion_label(suggestion: &Value, cwd: Option<&std::path::Path>) -> String
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn subagents_are_child_rows_that_keep_their_tool_use_id() {
+        let body = tool_body(&json!({
+            "id": "toolu_1",
+            "name": "Task",
+            "input": {"description": "Find it", "prompt": "Look around", "subagent_type": "Explore"},
+        }));
+        let ItemBody::Child {
+            child,
+            action,
+            prompt,
+        } = body
+        else {
+            panic!("not a child row");
+        };
+        assert_eq!(child.id.as_str(), "toolu_1");
+        assert_eq!(action.as_deref(), Some("Explore"));
+        assert_eq!(prompt.as_deref(), Some("Find it\n\nLook around"));
+    }
+
     use serde_json::json;
 
     use super::*;
