@@ -2724,6 +2724,7 @@ var require_constants = __commonJS(function(exports, module) {
 
 // node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS(function(exports, module) {
+  var { websocketMask, websocketUnmask } = __require("http");
   var { EMPTY_BUFFER } = require_constants();
   var FastBuffer = Buffer[Symbol.species];
   function concat(list, totalLength) {
@@ -2781,7 +2782,20 @@ var require_buffer_util = __commonJS(function(exports, module) {
     toBuffer,
     unmask: _unmask
   };
-  if (!process.env.WS_NO_BUFFER_UTIL) {
+  if (websocketMask) {
+    module.exports.mask = function(source, mask, output, offset, length) {
+      if (length < 24)
+        _mask(source, mask, output, offset, length);
+      else
+        websocketMask(source, mask, output, offset, length);
+    };
+    module.exports.unmask = function(buffer, mask) {
+      if (buffer.length < 24)
+        _unmask(buffer, mask);
+      else
+        websocketUnmask(buffer, mask);
+    };
+  } else if (!process.env.WS_NO_BUFFER_UTIL) {
     try {
       const bufferUtil = (()=>{throw new Error("Cannot require module "+"bufferutil");})();
       module.exports.mask = function(source, mask2, output, offset, length) {
@@ -3769,13 +3783,16 @@ var require_sender = __commonJS(function(exports, module) {
         target[2] = target[3] = 0;
         target.writeUIntBE(dataLength, 4, 6);
       }
-      if (!options.mask)
-        return [target, data];
+      if (!options.mask) {
+        return dataLength ? [target, data] : [target];
+      }
       target[1] |= 128;
       target[offset - 4] = mask[0];
       target[offset - 3] = mask[1];
       target[offset - 2] = mask[2];
       target[offset - 1] = mask[3];
+      if (!dataLength)
+        return [target];
       if (skipMasking)
         return [target, data];
       if (merge) {
@@ -4835,9 +4852,14 @@ var require_websocket = __commonJS(function(exports, module) {
       opts.auth = `${parsedUrl.username}:${parsedUrl.password}`;
     }
     if (isIpcUrl) {
-      const parts = opts.path.split(":");
-      opts.socketPath = parts[0];
-      opts.path = parts[1];
+      const i = opts.path.indexOf(":");
+      if (i === -1) {
+        opts.socketPath = opts.path;
+        opts.path = "";
+      } else {
+        opts.socketPath = opts.path.slice(0, i);
+        opts.path = opts.path.slice(i + 1);
+      }
     }
     let req;
     if (opts.followRedirects) {
