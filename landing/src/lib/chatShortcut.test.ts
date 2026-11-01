@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest"
 
-import { chatShortcutDeepLink, chatShortcutResponse } from "./chatShortcut"
+import { appleAppSiteAssociation, chatShortcutDeepLink, chatShortcutResponse } from "./chatShortcut"
+
+describe("appleAppSiteAssociation", () => {
+  it("claims only chat links for the production iOS app", () => {
+    expect(appleAppSiteAssociation.applinks.details).toEqual([
+      {
+        appIDs: ["2487AN8AL4.chat.inline.InlineIOS"],
+        components: [{ "/": "/c/?*" }],
+      },
+    ])
+  })
+})
 
 describe("chatShortcutDeepLink", () => {
   it("builds a deep link without adding thread metadata", () => {

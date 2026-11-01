@@ -8,6 +8,17 @@ const RESPONSE_HEADERS = {
   "x-robots-tag": "noindex, nofollow, noarchive, nosnippet",
 } as const
 
+export const appleAppSiteAssociation = {
+  applinks: {
+    details: [
+      {
+        appIDs: ["2487AN8AL4.chat.inline.InlineIOS"],
+        components: [{ "/": "/c/?*" }],
+      },
+    ],
+  },
+}
+
 export function chatShortcutDeepLink(chatId: string): string | null {
   if (chatId.length > 19 || !/^[1-9]\d*$/.test(chatId)) {
     return null
