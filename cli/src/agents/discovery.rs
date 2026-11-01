@@ -76,15 +76,18 @@ fn find_executable_candidate(candidates: impl IntoIterator<Item = PathBuf>) -> O
 
 #[cfg(target_os = "macos")]
 fn find_chatgpt_codex_executable() -> Option<PathBuf> {
-    let relative = Path::new("ChatGPT.app/Contents/Resources/codex");
-    let mut candidates = vec![PathBuf::from("/Applications").join(relative)];
+    let mut roots = vec![PathBuf::from("/Applications")];
     if let Some(home) = home_directory() {
-        candidates.push(home.join("Applications").join(relative));
+        roots.push(home.join("Applications"));
     }
     // Runtime preparation performs the authoritative OpenAI signature and
     // protocol checks. Discovery only makes ChatGPT-app-only installs
     // selectable instead of rejecting setup before those checks can run.
-    find_executable_candidate(candidates)
+    find_executable_candidate(
+        roots
+            .iter()
+            .flat_map(|root| inline_agent_driver_codex::chatgpt_codex_executables_in(root)),
+    )
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -263,6 +266,28 @@ mod tests {
             find_executable_candidate([application.path().join("missing"), bundled.clone()]),
             Some(bundled)
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bundled_codex_fallback_finds_each_chatgpt_layout() {
+        for relative in [
+            "ChatGPT.app/Contents/Resources/codex",
+            "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+        ] {
+            let application = tempfile::tempdir().expect("application fixture");
+            let bundled = application.path().join(relative);
+            fs::create_dir_all(bundled.parent().expect("bundle directory"))
+                .expect("create bundle directory");
+            make_executable(&bundled);
+
+            assert_eq!(
+                find_executable_candidate(inline_agent_driver_codex::chatgpt_codex_executables_in(
+                    application.path()
+                )),
+                Some(bundled)
+            );
+        }
     }
 
     #[test]

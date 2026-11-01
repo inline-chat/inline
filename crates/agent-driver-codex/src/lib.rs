@@ -30,8 +30,9 @@ pub use protocol::{
 };
 pub use runtime_discovery::{
     CodexRuntime, CodexRuntimeAttempt, CodexRuntimeCapabilities, CodexRuntimeDiscoveryConfig,
-    CodexRuntimeDiscoveryError, CodexRuntimeFailure, CodexRuntimeSource, discover_codex_runtime,
-    discover_codex_turn_runtime, discover_codex_turn_runtime_in_paths,
+    CodexRuntimeDiscoveryError, CodexRuntimeFailure, CodexRuntimeSource,
+    chatgpt_codex_executables_in, discover_codex_runtime, discover_codex_turn_runtime,
+    discover_codex_turn_runtime_in_paths,
 };
 pub use session_catalog::{CodexRpc, CodexRpcFuture, CodexSessionCatalog, CodexUnsubscribeOutcome};
 pub use session_connection::CodexSessionConnection;

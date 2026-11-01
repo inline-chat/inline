@@ -98,8 +98,8 @@ impl PluginHost {
             Self::Codex => {
                 #[cfg(target_os = "macos")]
                 {
-                    candidates.push(PathBuf::from(
-                        "/Applications/ChatGPT.app/Contents/Resources/codex",
+                    candidates.extend(inline_agent_driver_codex::chatgpt_codex_executables_in(
+                        Path::new("/Applications"),
                     ));
                     candidates.push(PathBuf::from(
                         "/Applications/Codex.app/Contents/Resources/codex",

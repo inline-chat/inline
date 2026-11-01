@@ -15,7 +15,16 @@ const OPENAI_TEAM_IDENTIFIER: &str = "2DC432GLL2";
 #[cfg(target_os = "macos")]
 const OPENAI_SIGNATURE_VERIFICATION_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(15);
-const CHATGPT_CODEX_RELATIVE_PATH: &str = "ChatGPT.app/Contents/Resources/codex";
+// Current bundles first, then the layout older ChatGPT releases shipped.
+const CHATGPT_CODEX_RELATIVE_PATHS: [&str; 2] = [
+    "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+    "ChatGPT.app/Contents/Resources/codex",
+];
+// The bundle's `entrypoint` is an unsigned script that only execs the signed
+// binary, so it can't pass signature verification and is never launched itself.
+const CHATGPT_CODEX_WRAPPER_RELATIVE_PATH: &str =
+    "ChatGPT.app/Contents/Resources/codex-cli/bin/codex";
+const CHATGPT_CODEX_WRAPPER_TARGET: &str = "CodexCLI.app/Contents/MacOS/codex";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CodexRuntimeSource {
@@ -311,7 +320,20 @@ fn runtime_candidates_in_paths(
 }
 
 fn is_chatgpt_bundled_codex_path(executable: &Path) -> bool {
-    executable.ends_with(CHATGPT_CODEX_RELATIVE_PATH)
+    executable.ends_with(CHATGPT_CODEX_WRAPPER_RELATIVE_PATH)
+        || CHATGPT_CODEX_RELATIVE_PATHS
+            .iter()
+            .any(|relative| executable.ends_with(relative))
+}
+
+/// Codex executables a ChatGPT application under `applications_directory` may
+/// provide, most recent layout first. Callers that run one still need the
+/// signature check `discover_codex_turn_runtime` performs.
+pub fn chatgpt_codex_executables_in(applications_directory: &Path) -> Vec<PathBuf> {
+    CHATGPT_CODEX_RELATIVE_PATHS
+        .iter()
+        .map(|relative| applications_directory.join(relative))
+        .collect()
 }
 
 fn resolve_executable_candidate(executable: &Path) -> Option<PathBuf> {
@@ -332,7 +354,12 @@ fn resolve_executable_in_paths(
 }
 
 fn canonical_executable(executable: &Path) -> Option<PathBuf> {
-    let canonical = std::fs::canonicalize(executable).ok()?;
+    let mut canonical = std::fs::canonicalize(executable).ok()?;
+    // Also covers a PATH symlink to the wrapper, which canonicalizes to it.
+    if canonical.ends_with(CHATGPT_CODEX_WRAPPER_RELATIVE_PATH) {
+        let codex_cli = canonical.parent()?.parent()?;
+        canonical = std::fs::canonicalize(codex_cli.join(CHATGPT_CODEX_WRAPPER_TARGET)).ok()?;
+    }
     let metadata = canonical.metadata().ok()?;
     if !metadata.is_file() {
         return None;
@@ -354,9 +381,10 @@ fn chatgpt_runtime_candidates() -> Vec<RuntimeCandidate> {
         roots.push(PathBuf::from(home).join("Applications"));
     }
     roots
-        .into_iter()
-        .map(|root| RuntimeCandidate {
-            executable: root.join(CHATGPT_CODEX_RELATIVE_PATH),
+        .iter()
+        .flat_map(|root| chatgpt_codex_executables_in(root))
+        .map(|executable| RuntimeCandidate {
+            executable,
             source: CodexRuntimeSource::ChatGptApplication,
             verify_openai_signature: true,
         })
@@ -536,6 +564,144 @@ mod tests {
             search_chatgpt_app: false,
         });
         assert!(!standalone[0].verify_openai_signature);
+
+        for bundled in [
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+        ] {
+            let candidates = runtime_candidates(&CodexRuntimeDiscoveryConfig {
+                configured_executable: Some(PathBuf::from(bundled)),
+                search_path: false,
+                search_chatgpt_app: false,
+            });
+            assert!(candidates[0].verify_openai_signature, "{bundled}");
+        }
+    }
+
+    #[test]
+    fn chatgpt_candidates_prefer_the_current_bundle_layout() {
+        assert_eq!(
+            chatgpt_codex_executables_in(Path::new("/Applications")),
+            [
+                PathBuf::from(
+                    "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+                ),
+                PathBuf::from("/Applications/ChatGPT.app/Contents/Resources/codex"),
+            ]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn chatgpt_app_search_covers_both_layouts_with_signature_verification() {
+        let candidates = runtime_candidates(&CodexRuntimeDiscoveryConfig {
+            configured_executable: None,
+            search_path: false,
+            search_chatgpt_app: true,
+        });
+        for executable in chatgpt_codex_executables_in(Path::new("/Applications")) {
+            let candidate = candidates
+                .iter()
+                .find(|candidate| candidate.executable == executable)
+                .expect("ChatGPT layout is searched");
+            assert_eq!(candidate.source, CodexRuntimeSource::ChatGptApplication);
+            assert!(candidate.verify_openai_signature);
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_fake_bundled_file(root: &Path, relative: &str) -> PathBuf {
+        let path = root.join(relative);
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("bundle directories");
+        // Exits 99 so a probe that skipped signature verification cannot pass.
+        std::fs::write(&path, "#!/bin/sh\nexit 99\n").expect("fake bundled file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            .expect("executable permissions");
+        path
+    }
+
+    #[cfg(unix)]
+    async fn discovery_failure(config: CodexRuntimeDiscoveryConfig) -> CodexRuntimeFailure {
+        discover_codex_runtime(&config)
+            .await
+            .expect_err("fake runtime must not be selected")
+            .attempts[0]
+            .failure
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unsigned_runtime_is_rejected_in_every_chatgpt_layout() {
+        for relative in [
+            "ChatGPT.app/Contents/Resources/codex",
+            "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+        ] {
+            let root = tempfile::tempdir().expect("application fixture");
+            let executable = write_fake_bundled_file(root.path(), relative);
+            let failure = discovery_failure(CodexRuntimeDiscoveryConfig {
+                configured_executable: Some(executable),
+                search_path: false,
+                search_chatgpt_app: false,
+            })
+            .await;
+            assert_eq!(failure, CodexRuntimeFailure::InvalidSignature, "{relative}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chatgpt_wrapper_resolves_to_the_signed_binary_it_launches() {
+        let root = tempfile::tempdir().expect("application fixture");
+        let wrapper = write_fake_bundled_file(root.path(), CHATGPT_CODEX_WRAPPER_RELATIVE_PATH);
+        let signed = write_fake_bundled_file(root.path(), CHATGPT_CODEX_RELATIVE_PATHS[0]);
+        let signed = std::fs::canonicalize(signed).expect("canonical");
+
+        assert_eq!(canonical_executable(&wrapper).as_ref(), Some(&signed));
+
+        let path_directory = tempfile::tempdir().expect("PATH fixture");
+        let symlink = path_directory.path().join("codex");
+        std::os::unix::fs::symlink(&wrapper, &symlink).expect("PATH symlink");
+        assert_eq!(canonical_executable(&symlink), Some(signed));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn path_symlink_to_chatgpt_wrapper_keeps_signature_verification() {
+        let root = tempfile::tempdir().expect("application fixture");
+        let wrapper = write_fake_bundled_file(root.path(), CHATGPT_CODEX_WRAPPER_RELATIVE_PATH);
+        write_fake_bundled_file(root.path(), CHATGPT_CODEX_RELATIVE_PATHS[0]);
+        let path_directory = tempfile::tempdir().expect("PATH fixture");
+        std::os::unix::fs::symlink(&wrapper, path_directory.path().join("codex"))
+            .expect("PATH symlink");
+
+        let error = discover_codex_turn_runtime_in_paths(
+            &CodexRuntimeDiscoveryConfig {
+                configured_executable: None,
+                search_path: true,
+                search_chatgpt_app: false,
+            },
+            [path_directory.path().to_owned()],
+        )
+        .await
+        .expect_err("unsigned runtime must not be selected");
+        assert_eq!(
+            error.attempts[0].failure,
+            CodexRuntimeFailure::InvalidSignature
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn chatgpt_wrapper_without_its_signed_binary_is_unavailable() {
+        let root = tempfile::tempdir().expect("application fixture");
+        let wrapper = write_fake_bundled_file(root.path(), CHATGPT_CODEX_WRAPPER_RELATIVE_PATH);
+        let failure = discovery_failure(CodexRuntimeDiscoveryConfig {
+            configured_executable: Some(wrapper),
+            search_path: false,
+            search_chatgpt_app: false,
+        })
+        .await;
+        assert_eq!(failure, CodexRuntimeFailure::Unavailable);
     }
 
     #[test]
