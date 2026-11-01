@@ -1522,6 +1522,8 @@ async fn codex_round_trip_through_inline() {
         },
     )
     .await;
+    // New threads start on Approve for me, where Codex's reviewer answers.
+    ask_for_approval(&owner, bot_user_id, group_three).await;
     teammate
         .send_text(teammate_mention("run the team check"))
         .await
@@ -1784,7 +1786,7 @@ async fn codex_round_trip_through_inline() {
         request.parse_markdown = true;
         request
     };
-    let cap = inline_agent_bridge::group::DEFAULT_LOOP_CAP_HOPS;
+    let cap = super::runtime::LOOP_CAP;
     for hop in 0..=cap {
         other_bot
             .send_text(agent_mention(format!("hop {hop}")))
@@ -2298,6 +2300,58 @@ enum CardKind {
 /// Waits for the bot's card whose text contains `needle`: the message with
 /// decision buttons, or with a form. A progress row can show the same text
 /// first. Returns the card and its first button.
+/// Agent Settings: this thread asks before commands.
+async fn ask_for_approval(owner: &InlineClient, bot_user_id: i64, chat_id: i64) {
+    let settings = owner
+        .invoke_rpc(
+            proto::Method::RequestBotChatSettings,
+            proto::rpc_call::Input::RequestBotChatSettings(proto::RequestBotChatSettingsInput {
+                peer_id: Some(super::api::chat_peer(chat_id)),
+                bot_user_id,
+                version: 1,
+            }),
+        )
+        .await
+        .unwrap();
+    let proto::rpc_result::Result::RequestBotChatSettings(settings) = settings else {
+        panic!("unexpected result");
+    };
+    let document = match settings.response.and_then(|response| response.result) {
+        Some(proto::bot_chat_settings_response::Result::Document(document)) => document,
+        other => panic!("no settings document: {other:?}"),
+    };
+    let invoked = owner
+        .invoke_rpc(
+            proto::Method::InvokeBotChatSettingsItem,
+            proto::rpc_call::Input::InvokeBotChatSettingsItem(
+                proto::InvokeBotChatSettingsItemInput {
+                    peer_id: Some(super::api::chat_peer(chat_id)),
+                    bot_user_id,
+                    version: 1,
+                    item_id: super::settings::ITEM_PERMISSIONS.to_owned(),
+                    value: Some(proto::BotChatSettingsValue {
+                        value: Some(proto::bot_chat_settings_value::Value::StringValue(
+                            ":workspace".to_owned(),
+                        )),
+                    }),
+                    document_revision: document.revision.clone(),
+                },
+            ),
+        )
+        .await
+        .unwrap();
+    let proto::rpc_result::Result::InvokeBotChatSettingsItem(invoked) = invoked else {
+        panic!("unexpected result");
+    };
+    assert!(
+        matches!(
+            invoked.response.and_then(|response| response.result),
+            Some(proto::bot_chat_settings_response::Result::Document(_))
+        ),
+        "the permission change was refused"
+    );
+}
+
 async fn wait_card(
     model: &dyn Seen,
     owner: &InlineClient,

@@ -13,10 +13,9 @@ use std::time::Duration;
 use inline_agent_bridge::ProviderSessionId;
 use inline_agent_bridge::group::{
     ContextAuthorRole, ContextMessage, Conversation, DEFAULT_DAILY_SPEAK_GATE_BUDGET,
-    DEFAULT_LOOP_CAP_HOPS, DailySpeakGateBudget, DayKey, DirectReason, Grants, GroupMessage,
-    IntakeDecision, IntakeFacts, LoopGuards, LoopVerdict, ObserveReason, Operation,
-    ParticipationMode, PendingInput, ReleaseCause, WorkPhase, decide_intake, direct_input,
-    origin_of, required_operation,
+    DailySpeakGateBudget, DayKey, DirectReason, Grants, GroupMessage, IntakeDecision, IntakeFacts,
+    LoopGuards, LoopVerdict, ObserveReason, Operation, ParticipationMode, PendingInput,
+    ReleaseCause, WorkPhase, decide_intake, direct_input, origin_of, required_operation,
 };
 use inline_agent_bridge::harness::{
     Catalog, CatalogScope, Delivery, HarnessDriver, Input, InputContent, InputId, OpKind,
@@ -71,6 +70,12 @@ const JOIN_REPLY_CHAIN: usize = 5;
 /// How long the event loop waits for one work's answer. One stuck work must
 /// not delay this bot's other threads.
 const ASK_TIMEOUT: Duration = Duration::from_secs(10);
+/// Agent-only messages before this agent stops answering other agents. The
+/// e2e walks past a smaller one.
+#[cfg(not(test))]
+const LOOP_CAP: u32 = inline_agent_bridge::group::DEFAULT_LOOP_CAP_HOPS;
+#[cfg(test)]
+pub(super) const LOOP_CAP: u32 = 30;
 const LEDGER_RETENTION_SECS: i64 = 14 * 24 * 3600;
 
 /// Identity and settings of one v2 agent.
@@ -309,7 +314,7 @@ impl Runtime {
             published_commands: None,
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
-            loop_guards: LoopGuards::default(),
+            loop_guards: LoopGuards::new(LOOP_CAP),
             loop_roots: HashMap::new(),
         })
     }
@@ -1029,9 +1034,9 @@ impl Runtime {
             return Some(NO_ACCESS.to_owned());
         }
         let scope = self.loop_scope(chat_id).await;
-        self.loop_guards.extend(scope, DEFAULT_LOOP_CAP_HOPS);
+        self.loop_guards.extend(scope, LOOP_CAP);
         let text = format!(
-            "{} answers other agents here again, for {DEFAULT_LOOP_CAP_HOPS} more agent messages.",
+            "{} answers other agents here again, for {LOOP_CAP} more agent messages.",
             self.config.agent_name
         );
         let _ = api::edit_doc(
@@ -1042,7 +1047,7 @@ impl Runtime {
             Some(proto::MessageActions::default()),
         )
         .await;
-        Some(format!("Allowed {DEFAULT_LOOP_CAP_HOPS} more."))
+        Some(format!("Allowed {LOOP_CAP} more."))
     }
 
     async fn raise_gate_budget(
