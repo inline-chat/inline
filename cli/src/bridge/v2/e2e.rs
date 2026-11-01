@@ -2559,13 +2559,18 @@ async fn claude_round_trip_through_inline() {
         bot_user_id,
         "the steered reply",
         |texts| {
-            // No tool runs, so the steer cuts the slow reply off.
             texts
                 .iter()
-                .any(|(_, text)| text.contains("FAKE-OK") && text.contains("E2E_CLAUDE_STEER"))
+                .any(|(_, text)| text.contains("E2E_CLAUDE_SLOW"))
         },
     )
     .await;
+    // No tool runs, so the steer cuts the slow reply off: Claude asks again
+    // with both messages, and the fake model follows the first one's script.
+    assert!(
+        format!("{:?}", api.conversation_calls()).contains("E2E_CLAUDE_STEER"),
+        "the steer never reached the model"
+    );
 
     // 3c. /stop interrupts a running turn; its late reply never appears.
     scenario.next("3c. /stop interrupts a running turn; its late reply never appears.");
