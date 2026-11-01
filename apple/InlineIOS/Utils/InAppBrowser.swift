@@ -38,6 +38,12 @@ final class InAppBrowser: NSObject {
   private func openOnMain(_ url: URL, from presenter: UIViewController?) {
     guard let scheme = url.scheme?.lowercased() else { return }
 
+    // The system doesn't hand an app its own universal links, so route them directly.
+    if let appURL = InlineDeepLink(universalLink: url)?.url {
+      UIApplication.shared.open(appURL)
+      return
+    }
+
     guard Self.supportedSchemes.contains(scheme) else {
       UIApplication.shared.open(url)
       return

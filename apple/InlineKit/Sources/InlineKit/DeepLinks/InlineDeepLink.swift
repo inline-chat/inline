@@ -108,6 +108,22 @@ public enum InlineDeepLink: Equatable, Sendable {
     }
   }
 
+  /// Parses the `https://inline.chat/c/{id}` form delivered by universal links.
+  public init?(universalLink url: URL) {
+    guard url.scheme?.lowercased() == "https", url.host?.lowercased() == "inline.chat" else {
+      return nil
+    }
+
+    let pathComponents = Self.pathComponents(from: url)
+    guard pathComponents.count == 2, pathComponents[0] == "c",
+          let chatId = Self.id(from: pathComponents, at: 1)
+    else {
+      return nil
+    }
+
+    self = .chat(id: chatId)
+  }
+
   public func url(scheme: String? = nil) -> URL? {
     let normalizedScheme = (scheme ?? Self.configuredScheme).lowercased()
     guard Self.isSupportedScheme(normalizedScheme), isValid else {

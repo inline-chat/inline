@@ -19,6 +19,25 @@ struct InlineDeepLinkTests {
     #expect(InlineDeepLink.chat(id: 34).url(scheme: "https") == nil)
   }
 
+  @Test("parses chat universal links only")
+  func parsesChatUniversalLinks() {
+    #expect(InlineDeepLink(universalLink: URL(string: "https://inline.chat/c/11619")!) == .chat(id: 11619))
+    #expect(InlineDeepLink(universalLink: URL(string: "https://INLINE.chat/c/11619/")!) == .chat(id: 11619))
+
+    for url in [
+      "http://inline.chat/c/11619",
+      "https://example.com/c/11619",
+      "https://api.inline.chat/c/11619",
+      "https://inline.chat/c/abc",
+      "https://inline.chat/c/0",
+      "https://inline.chat/c/11619/extra",
+      "https://inline.chat/s/11619",
+      "inline://chat/11619",
+    ] {
+      #expect(InlineDeepLink(universalLink: URL(string: url)!) == nil)
+    }
+  }
+
   @Test("isolates routable schemes by app identity")
   func isolatesRoutableSchemesByAppIdentity() {
     #expect(InlineDeepLink.appSchemes(configuredScheme: "in") == ["in", "inline"])

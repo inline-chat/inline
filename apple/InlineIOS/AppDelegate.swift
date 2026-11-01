@@ -79,7 +79,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
   @MainActor
   func handleDeepLink(_ url: URL, router: Router) -> Bool {
-    guard let deepLink = InlineDeepLink(url: url) else { return false }
+    guard let deepLink = InlineDeepLink(url: url) ?? InlineDeepLink(universalLink: url) else { return false }
     cancelPendingChatLink()
 
     let request: AppNavigationRequest
