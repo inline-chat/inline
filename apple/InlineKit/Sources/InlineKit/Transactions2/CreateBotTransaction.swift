@@ -39,6 +39,7 @@ public struct CreateBotTransaction: Transaction2 {
       throw TransactionExecutionError.invalid
     }
     log.trace("createBot succeeded for botId: \(response.bot.id)")
+    NotificationCenter.default.post(name: .botAgentsChanged, object: response.bot.id)
   }
 
   public func failed(error: TransactionError2) async {

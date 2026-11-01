@@ -274,6 +274,15 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       }
       .store(in: &cancellables)
 
+    // The app hears nothing about bots made in Terminal or on another device.
+    NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+      .sink { [weak self] _ in
+        Task { @MainActor [weak self] in
+          await self?.loadAgentChoices()
+        }
+      }
+      .store(in: &cancellables)
+
     NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in

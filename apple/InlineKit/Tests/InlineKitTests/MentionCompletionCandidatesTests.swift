@@ -3,6 +3,19 @@ import GRDB
 @testable import InlineKit
 import Testing
 
+private final class PostedCount: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  var value: Int {
+    lock.withLock { count }
+  }
+
+  func increment() {
+    lock.withLock { count += 1 }
+  }
+}
+
 @MainActor
 @Suite("Mention candidate chat priority")
 struct MentionCompletionCandidatesTests {
@@ -109,6 +122,27 @@ struct MentionCompletionCandidatesTests {
     #expect(user.source == .ownedBot)
     #expect(user.lastMsgId == 30)
     #expect(user.isPinned)
+  }
+
+  @Test("creating or deleting a bot asks mention sources to reload")
+  func botTransactionsPostChange() async throws {
+    let botId: Int64 = 951_001
+    let posted = PostedCount()
+    let observer = NotificationCenter.default.addObserver(
+      forName: .botAgentsChanged,
+      object: nil,
+      queue: nil
+    ) { note in
+      if note.object as? Int64 == botId { posted.increment() }
+    }
+    defer { NotificationCenter.default.removeObserver(observer) }
+
+    try await CreateBotTransaction(name: "Claude", username: "claude_bot").apply(
+      .createBot(.with { $0.bot = .with { $0.id = botId } })
+    )
+    #expect(posted.value == 1)
+    try await DeleteBotTransaction(botUserId: botId).apply(.deleteBot(.init()))
+    #expect(posted.value == 2)
   }
 
   @Test("the existing observation refreshes pin and message signals")

@@ -33,6 +33,7 @@ public struct DeleteBotTransaction: Transaction2 {
       throw TransactionExecutionError.invalid
     }
     log.trace("deleteBot succeeded")
+    NotificationCenter.default.post(name: .botAgentsChanged, object: context.botUserId)
   }
 
   public func failed(error: TransactionError2) async {
