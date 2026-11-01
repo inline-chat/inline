@@ -69,6 +69,16 @@ struct ChatToolbarShareButton: View {
         )
       }
 
+      Button {
+        copyDeepLink()
+      } label: {
+        ChatShareMenuLabel(
+          title: "Copy Deep Link",
+          description: "Opens this chat directly in the Inline app.",
+          systemImage: "arrow.up.forward.app"
+        )
+      }
+
       Button {} label: {
         ChatShareMenuLabel(
           title: "Copy Public Link",
@@ -239,9 +249,23 @@ struct ChatToolbarShareButton: View {
   }
 
   private func copyPrivateLink() {
-    guard case let .thread(chatId) = peer,
-          let url = InlineDeepLink.chat(id: chatId).webURL
-    else {
+    guard case let .thread(chatId) = peer else {
+      ToastCenter.shared.showError("Failed to copy link")
+      return
+    }
+    copyLink(InlineDeepLink.chat(id: chatId).webURL, successMessage: "Copied link")
+  }
+
+  private func copyDeepLink() {
+    guard case let .thread(chatId) = peer else {
+      ToastCenter.shared.showError("Failed to copy link")
+      return
+    }
+    copyLink(InlineDeepLink.chat(id: chatId).url, successMessage: "Copied deep link")
+  }
+
+  private func copyLink(_ url: URL?, successMessage: String) {
+    guard let url else {
       ToastCenter.shared.showError("Failed to copy link")
       return
     }
@@ -256,7 +280,7 @@ struct ChatToolbarShareButton: View {
       ToastCenter.shared.showError("Failed to copy link")
       return
     }
-    ToastCenter.shared.showSuccess("Copied link")
+    ToastCenter.shared.showSuccess(successMessage)
   }
 }
 

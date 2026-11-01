@@ -999,7 +999,7 @@ class MessageViewAppKit: NSView {
   }
 
   private func openTextURL(_ url: URL) {
-    if let deepLink = InlineDeepLink(url: url) {
+    if let deepLink = InlineDeepLink(url: url) ?? InlineDeepLink(universalLink: url) {
       if case let .user(userId) = deepLink {
         MessageGestureTrace.debug("MessageView.openTextURL messageId=\(message.messageId) action=openInlineUser userId=\(userId)")
       }
