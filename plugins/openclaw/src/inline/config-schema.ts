@@ -38,8 +38,9 @@ const InlineCapabilitiesSchema = z
     replyThreads: z.boolean().optional(),
   })
   .strict()
-export const InlineReplyThreadModeSchema = z.enum(["auto", "thread", "main"])
-export type InlineReplyThreadMode = z.infer<typeof InlineReplyThreadModeSchema>
+// "thread" and "main" are the pre-1.0 names; they read as "on" and "auto".
+export const InlineReplyThreadModeSchema = z.enum(["auto", "on", "thread", "main"])
+export type InlineReplyThreadMode = "auto" | "on"
 
 const InlineTargetSchema = z.union([z.string(), z.number()])
 const InlineAllowEntrySchema = z.union([z.string(), z.number()])
@@ -185,6 +186,7 @@ export const InlineAccountSchemaBase = z
     replyThreadRequireExplicitMention: z.boolean().optional(),
     replyThreadParentHistoryLimit: z.number().int().min(0).optional(),
     replyToBotWithoutMention: z.boolean().optional(),
+    dropPendingOnColdBoot: z.boolean().optional(),
     historyLimit: z.number().int().min(0).optional(),
     dmHistoryLimit: z.number().int().min(0).optional(),
     parseMarkdown: z.boolean().optional(),

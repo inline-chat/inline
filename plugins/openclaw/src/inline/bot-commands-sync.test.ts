@@ -63,7 +63,7 @@ describe("inline/bot-commands-sync", () => {
     expect(names).toContain("model")
     expect(names).toContain("exec")
     expect(names).toContain("tools")
-    expect(names).toContain("threadreply")
+    expect(names).toContain("threads")
     expect(names).toContain("follow")
     expect(names).toContain("unfollow")
     expect(names).toContain("inline_update")
@@ -385,8 +385,8 @@ describe("inline/bot-commands-sync", () => {
       commands: Array<{ command: string }>
     })
     expect(bodies.map((body) => body.commands.map((entry) => entry.command))).toEqual([
-      ["main_skill", "follow", "unfollow", "threadreply", "inline_update", "inline_sync", "inline_version"],
-      ["ops_skill", "follow", "unfollow", "threadreply", "inline_update", "inline_sync", "inline_version"],
+      ["main_skill", "follow", "unfollow", "threads", "inline_update", "inline_sync", "inline_version"],
+      ["ops_skill", "follow", "unfollow", "threads", "inline_update", "inline_sync", "inline_version"],
     ])
   })
 
@@ -529,7 +529,7 @@ describe("inline/bot-commands-sync", () => {
     expect(names).toContain("status")
     expect(names).toContain("weather_skill")
     expect(names).toContain("plugin_cmd")
-    expect(names).toContain("threadreply")
+    expect(names).toContain("threads")
     expect(names).toContain("follow")
     expect(names).toContain("unfollow")
     expect(names).toContain("inline_update")
@@ -646,7 +646,7 @@ describe("inline/bot-commands-sync", () => {
     expect(firstBody.commands.slice(0, 6).map((command) => command.command)).toEqual([
       "follow",
       "unfollow",
-      "threadreply",
+      "threads",
       "inline_update",
       "inline_sync",
       "inline_version",
@@ -654,7 +654,7 @@ describe("inline/bot-commands-sync", () => {
     expect(secondBody.commands.slice(0, 6).map((command) => command.command)).toEqual([
       "follow",
       "unfollow",
-      "threadreply",
+      "threads",
       "inline_update",
       "inline_sync",
       "inline_version",

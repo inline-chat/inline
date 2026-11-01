@@ -55,14 +55,14 @@ Notes:
 - `defaultTo` is optional and gives outbound sends a fallback target, for example `chat:<id>` or `user:<id>`, when no explicit target is supplied.
 - If you add an explicit `plugins.entries` block, the plugin entry id is `inline`.
 - For multi-bubble replies, enable `channels.inline.blockStreaming: true`.
-- For reply-driven group flows, set `channels.inline.replyToBotWithoutMention: true`.
+- Replies to the bot wake it by default; set `channels.inline.replyToBotWithoutMention: false` to require a mention.
 - Groups use `groupPolicy: "open"` and `requireMention: true` by default, so any group can reach the channel but only an explicit mention wakes the bot unless configured otherwise.
 - Inline uses OpenClaw's group-history default; set `channels.inline.historyLimit` to override it, or use `messages.groupChat.historyLimit` as a global fallback.
 - Inline reply-thread handling is available by default, so OpenClaw `threadId` can map to real Inline reply-thread chats.
 - `replyToId` is still a message reply id. Inline reply-thread behavior does not replace ordinary message replies.
-- Legacy `capabilities.replyThreads` settings are ignored; use `replyThreadMode` to control automatic routing.
-- In an Inline group, authorized users can run `/threadreply` to choose this chat's automatic reply-thread mode with buttons.
-- Bot-participated reply threads and Inline dialogs already marked `FOLLOWING` continue without an explicit mention by default, matching Slack. Reply threads also persist recent participation so sparse follow-ups still route. Set `replyThreadRequireExplicitMention: true` globally, per account, or per group if a chat should require `@bot` on every thread message.
+- Legacy `capabilities.replyThreads` settings are ignored; use `/threads` or `groups.<chatId>.replyThreadMode` to control it per chat.
+- In an Inline chat or DM, authorized users can run `/threads` to choose Auto or On with buttons. Auto answers in the chat and starts a thread when someone asks; On answers each top-level message in a reply thread. A bot-wide value is ignored.
+- Threads the bot follows continue without an explicit mention. A thread's first message decides who follows. Set `replyThreadRequireExplicitMention: true` globally, per account, or per group if a chat should require `@bot` on every thread message.
 - Reply-thread context defaults to nearby parent-chat messages, the anchor message, and child-thread history. Set `replyThreadParentHistoryLimit: 0` only when a chat should stay strictly thread-local.
 - Use `inline_parent_context` from a reply-thread session when the agent needs more complete parent-chat history than the automatic context window.
 - Inline current-message media is attached like native channels. Reply-thread anchor media is summarized as context and is not promoted to current-message media on every child-thread turn.
@@ -90,7 +90,7 @@ channels:
     replyThreadParentHistoryLimit: 10
     groups:
       "123":
-        replyThreadMode: "thread"
+        replyThreadMode: "on"
         replyThreadRequireExplicitMention: true
         replyThreadParentHistoryLimit: 2
 ```

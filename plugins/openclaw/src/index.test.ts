@@ -107,9 +107,10 @@ describe("plugin entry", () => {
       "inline_bot_presence",
       "inline_parent_context",
       "inline_follow",
+      "inline_reply_threads",
     ])
     expect(registeredCommandNames).toEqual([
-      "threadreply",
+      "threads",
       "follow",
       "unfollow",
       "inline-update",

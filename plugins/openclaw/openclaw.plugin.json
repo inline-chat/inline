@@ -14,7 +14,8 @@
       "inline_forward",
       "inline_bot_presence",
       "inline_parent_context",
-      "inline_follow"
+      "inline_follow",
+      "inline_reply_threads"
     ]
   },
   "configSchema": {
@@ -108,7 +109,7 @@
               "additionalProperties": false,
               "properties": {
                 "requireMention": { "type": "boolean", "default": true },
-                "replyThreadMode": { "type": "string", "enum": ["auto", "thread", "main"] },
+                "replyThreadMode": { "type": "string", "enum": ["auto", "on", "thread", "main"] },
                 "replyThreadAutoCreateMinMessages": { "type": "integer", "minimum": 0 },
                 "replyThreadRequireExplicitMention": { "type": "boolean" },
                 "replyThreadParentHistoryLimit": { "type": "integer", "minimum": 0 },
@@ -143,11 +144,12 @@
             }
           },
           "requireMention": { "type": "boolean", "default": true },
-          "replyThreadMode": { "type": "string", "enum": ["auto", "thread", "main"] },
+          "replyThreadMode": { "type": "string", "enum": ["auto", "on", "thread", "main"] },
           "replyThreadAutoCreateMinMessages": { "type": "integer", "minimum": 0 },
           "replyThreadRequireExplicitMention": { "type": "boolean" },
           "replyThreadParentHistoryLimit": { "type": "integer", "minimum": 0 },
           "replyToBotWithoutMention": { "type": "boolean" },
+          "dropPendingOnColdBoot": { "type": "boolean" },
           "historyLimit": { "type": "integer", "minimum": 0 },
           "dmHistoryLimit": { "type": "integer", "minimum": 0 },
           "parseMarkdown": { "type": "boolean" },
@@ -470,6 +472,7 @@
                           "type": "string",
                           "enum": [
                             "auto",
+                            "on",
                             "thread",
                             "main"
                           ]
@@ -566,6 +569,7 @@
                     "type": "string",
                     "enum": [
                       "auto",
+                      "on",
                       "thread",
                       "main"
                     ]
@@ -582,6 +586,9 @@
                     "minimum": 0
                   },
                   "replyToBotWithoutMention": {
+                    "type": "boolean"
+                  },
+                  "dropPendingOnColdBoot": {
                     "type": "boolean"
                   },
                   "historyLimit": {
@@ -1019,7 +1026,11 @@
         },
         "replyToBotWithoutMention": {
           "label": "Inline Reply Mention Bypass",
-          "help": "Allow replies to bot-authored messages to bypass group mention requirements."
+          "help": "Whether a reply to the bot's message reaches it without a mention. Defaults to true; set false to require a mention."
+        },
+        "dropPendingOnColdBoot": {
+          "label": "Inline Drop Pending On Cold Boot",
+          "help": "When true (default), messages recorded before this gateway started don't wake the agent, so a lost sync cursor can't replay chat history as new messages."
         },
         "capabilities.replyThreads": {
           "label": "Inline Reply Threads (Legacy)",
@@ -1031,15 +1042,15 @@
         },
         "replyThreadMode": {
           "label": "Inline Reply Thread Mode",
-          "help": "Controls routing for Inline group replies that start from parent-chat messages: \"auto\" creates a child reply thread only when the user explicitly asks for one, \"thread\" routes every eligible top-level turn into a child reply thread anchored to the triggering message, and \"main\" keeps automatic replies in the parent chat. Explicit thread tools remain available."
+          "help": "Set per chat under groups.<chatId>, DMs included, or with /threads: \"auto\" answers in the chat and starts a thread when someone asks; \"on\" answers each top-level message in a reply thread. Bot-wide and \"*\" values are ignored."
         },
         "replyThreadAutoCreateMinMessages": {
           "label": "Deprecated Reply Thread Threshold",
-          "help": "Deprecated compatibility setting. Message IDs are not chat message counts, so this value is ignored. Use replyThreadMode: \"auto\" for explicit thread requests, \"thread\" for every eligible top-level turn, or \"main\" to stay flat."
+          "help": "Deprecated compatibility setting. Message IDs are not chat message counts, so this value is ignored."
         },
         "replyThreadRequireExplicitMention": {
           "label": "Inline Reply Thread Mentions",
-          "help": "When false (default), bot-participated Inline reply threads can continue without explicitly mentioning the bot, matching Slack thread behavior. Recent bot participation is persisted for sparse follow-ups. Set true to require an explicit mention on every reply-thread message."
+          "help": "When false (default), reply threads and chats the bot follows continue without an @mention. When true, every message in a reply thread must mention the bot."
         },
         "replyThreadParentHistoryLimit": {
           "label": "Inline Reply Thread Parent History",

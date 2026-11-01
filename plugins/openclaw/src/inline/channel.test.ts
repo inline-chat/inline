@@ -2830,11 +2830,6 @@ describe("inline/channel", () => {
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ chatId: 42n, text: "hi" }),
     )
-    expect(register).toHaveBeenCalledWith(
-      "default:7:42",
-      expect.objectContaining({ repliedAt: expect.any(Number) }),
-      { ttlMs: 86_400_000 },
-    )
     expect(connect).toHaveBeenCalled()
     expect(close).toHaveBeenCalled()
   })
@@ -3052,11 +3047,6 @@ describe("inline/channel", () => {
         chatId: 42n,
         text: "caption",
       }),
-    )
-    expect(register).toHaveBeenCalledWith(
-      "default:7:42",
-      expect.objectContaining({ repliedAt: expect.any(Number) }),
-      { ttlMs: 86_400_000 },
     )
     expect(close).toHaveBeenCalled()
   })

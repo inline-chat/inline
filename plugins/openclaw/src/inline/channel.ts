@@ -42,7 +42,6 @@ import {
   type ResolvedInlineAccount,
 } from "./accounts.js"
 import { isInlineReplyThreadsEnabled, resolveInlineReplyThreadChatId } from "./reply-threads.js"
-import { recordInlineThreadParticipation } from "./thread-participation.js"
 import { looksLikeInlineTargetId, normalizeInlineTarget } from "./normalize.js"
 import { monitorInlineProvider } from "./monitor.js"
 import { sendInlineWorkingAction } from "./compose-action.js"
@@ -64,6 +63,7 @@ import {
 } from "./message-formatting.js"
 import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
 import {
+  inlineBotWideReplyThreadOnKeys,
   listIgnoredInlineToolsBySenderKeys,
   resolveInlineGroupRequireMention,
   resolveInlineGroupToolPolicy,
@@ -896,18 +896,6 @@ async function sendTypingInline(params: {
   })
 }
 
-function recordInlineOutboundThreadParticipation(params: {
-  accountId: string
-  parentChatId: bigint
-  chatId: bigint | null
-  threadId?: string | number | null
-}): void {
-  if (params.threadId == null || params.chatId == null || params.chatId === params.parentChatId) {
-    return
-  }
-  recordInlineThreadParticipation(params.accountId, params.parentChatId, params.chatId)
-}
-
 async function notifyPairingApprovedInline(params: {
   cfg: OpenClawConfig
   id: string
@@ -1026,14 +1014,6 @@ async function sendMessageInline(params: {
           resolvedTarget,
         })
       })
-    if (resolvedTarget.kind === "chat") {
-      recordInlineOutboundThreadParticipation({
-        accountId: account.accountId,
-        parentChatId: resolvedTarget.targetId,
-        chatId: effectiveChatId,
-        threadId: params.threadId ?? null,
-      })
-    }
     return {
       messageId: result.messageId != null ? String(result.messageId) : "",
       chatId:
@@ -1133,14 +1113,6 @@ async function sendMediaInline(params: {
           resolvedTarget,
         })
       })
-    if (resolvedTarget.kind === "chat") {
-      recordInlineOutboundThreadParticipation({
-        accountId: account.accountId,
-        parentChatId: resolvedTarget.targetId,
-        chatId: effectiveChatId,
-        threadId: params.threadId ?? null,
-      })
-    }
     return {
       messageId: result.messageId != null ? String(result.messageId) : "",
       chatId:
@@ -1890,6 +1862,8 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       "- Inline bot command discovery: use `peer-bot-commands`/`bot-commands` to read commands available in the current or target chat/user/reply thread; use `inline_bot_commands` only to manage this bot's registered command menu.",
       "- Inline special tools: use `inline_members` to find users in a space and reuse returned `user:<id>` DM targets. It can infer `spaceId` inside a current Inline space chat/reply thread; pass `spaceId` explicitly otherwise. Use `inline_parent_context` for more parent-chat history from the current reply thread, with `beforeMessageId`, `afterMessageId`, or `messageId` for older/newer/around windows.",
       "- Inline special tools: use `inline_nudge` to send a nudge, `inline_forward` to forward message ids between chats or users, and `inline_bot_presence` to move or emote through your on-screen body without sending a chat message.",
+      "- Inline reply threads: when someone asks to continue in a thread, call `thread-create` on the triggering message; your answer then goes into it, so don't also post it in the chat, and start it with a short summary of the conversation so far. When someone asks you to always or never answer in threads here, use `inline_reply_threads`.",
+      "- Inline handing work to another agent: mention it in your normal reply. Its answer comes back as a reply to you that needs no answer; mention it again only if you need more.",
       "- Inline follow state: when someone asks you to follow or unfollow a group chat or reply thread, use `inline_follow`; report the `followMode` it returns. Following lets that chat's messages reach you without an @mention; unfollowing limits you to messages addressed to you.",
       "- Inline bot profile setup: use `inline_update_profile` only when the user explicitly asks to change your Inline bot display name or profile photo.",
       "- Inline bot avatar setup: use `inline_bot_avatar` only when the user explicitly asks you to install, replace, or clear your on-screen avatar. Do not call it during ordinary chat, do not invent file paths, and do not use it for mood/state changes.",
@@ -2221,6 +2195,14 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
           `[${account.accountId}] Tools are disabled for groups with toolsBySender keys that are not numeric Inline user IDs: ${ignoredSenderKeys.join(", ")}. ` +
             "Names, usernames and phone numbers can be changed by the sender, so they never select a tool policy. " +
             "Key each entry by the sender's user ID (ask them to send /whoami) to restore tools there.",
+        )
+      }
+
+      const botWideOnKeys = inlineBotWideReplyThreadOnKeys(account.config)
+      if (botWideOnKeys.length > 0) {
+        ctx.log?.warn?.(
+          `[${account.accountId}] Inline ignores ${botWideOnKeys.join(", ")}: reply threads are On per chat only, so a new chat's first message never gets a thread. ` +
+            "Answers stay in the chat. Run /threads on in each chat that should use threads.",
         )
       }
 

@@ -12,13 +12,12 @@ import {
 } from "./policy.js"
 
 type InlineGroupConfig = {
-  replyThreadMode?: InlineReplyThreadMode | undefined
+  replyThreadMode?: string | undefined
   [key: string]: unknown
 }
 
 type InlineAccountConfig = {
   groups?: Record<string, InlineGroupConfig | undefined> | undefined
-  replyThreadMode?: InlineReplyThreadMode | undefined
   [key: string]: unknown
 }
 
@@ -27,11 +26,10 @@ type InlineChannelConfig = InlineAccountConfig & {
 }
 
 const MODE_LABELS: Record<InlineReplyThreadMode, string> = {
-  auto: "auto",
-  thread: "thread",
-  main: "main",
+  auto: "Auto",
+  on: "On",
 }
-const INLINE_THREADREPLY_NATIVE_NAME = "threadreply"
+const INLINE_THREADREPLY_NATIVE_NAME = "threads"
 
 export const INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE = {
   mode: "none",
@@ -50,9 +48,9 @@ type InlineBuiltinCommandSpec = {
 }
 
 export const INLINE_THREADREPLY_COMMAND_SPEC = {
-  name: "threadreply",
+  name: "threads",
   nativeNames: { inline: INLINE_THREADREPLY_NATIVE_NAME },
-  description: "Set Inline reply-thread mode for this chat.",
+  description: "Choose whether answers in this chat go in reply threads.",
   channels: ["inline"],
   acceptsArgs: true,
 } satisfies Pick<
@@ -81,38 +79,14 @@ function asInlineConfig(value: unknown): InlineChannelConfig | undefined {
 function normalizeMode(raw: unknown): InlineReplyThreadMode | null {
   if (typeof raw !== "string") return null
   const normalized = raw.trim().toLowerCase()
-  if (normalized === "on" || normalized === "threads") return "thread"
-  if (normalized === "off" || normalized === "parent" || normalized === "parentchat") return "main"
-  if (normalized === "auto" || normalized === "thread" || normalized === "main") return normalized
-  return null
+  return normalized === "auto" || normalized === "on" ? normalized : null
 }
 
-function resolveInlineGroupId(ctx: PluginCommandContext): string | null {
-  const raw = ctx.from?.trim() ?? ""
-  if (!/(^|:)chat:/i.test(raw)) return null
-  const normalized = normalizeInlineTarget(raw)
+// A command run inside a reply thread arrives with the parent chat as its `to`,
+// so it applies to the chat the thread hangs off.
+function resolveInlineChatId(ctx: PluginCommandContext): string | null {
+  const normalized = normalizeInlineTarget(ctx.to?.trim() ?? "")
   return normalized && /^[0-9]+$/.test(normalized) ? normalized : null
-}
-
-function resolveInlineConfigForAccount(
-  inline: InlineChannelConfig,
-  accountId: string | undefined,
-): InlineAccountConfig {
-  const normalized = normalizeAccountId(accountId)
-  const accounts = isRecord(inline.accounts)
-    ? (inline.accounts as Record<string, InlineAccountConfig | undefined>)
-    : undefined
-  const accountKey = accounts
-    ? Object.keys(accounts).find((key) => normalizeAccountId(key) === normalized)
-    : undefined
-
-  if (accountKey && accounts?.[accountKey]) {
-    return accounts[accountKey] as InlineAccountConfig
-  }
-  if (normalized !== DEFAULT_ACCOUNT_ID) {
-    return {}
-  }
-  return inline
 }
 
 export function resolveCurrentMode(params: {
@@ -120,26 +94,11 @@ export function resolveCurrentMode(params: {
   accountId?: string | undefined
   groupId: string
 }): InlineReplyThreadMode {
-  const inline = asInlineConfig(params.cfg.channels?.inline) ?? {}
-  const accountConfig = resolveInlineConfigForAccount(inline, params.accountId)
   return resolveInlineGroupReplyThreadMode({
     cfg: params.cfg,
     accountId: params.accountId ?? null,
     groupId: params.groupId,
-    defaultMode: normalizeMode(accountConfig.replyThreadMode) ?? "auto",
   })
-}
-
-function readExplicitMode(params: {
-  cfg: OpenClawConfig
-  accountId?: string | undefined
-  groupId: string
-}): InlineReplyThreadMode | null {
-  const inline = asInlineConfig(params.cfg.channels?.inline)
-  if (!inline) return null
-  const accountConfig = resolveInlineConfigForAccount(inline, params.accountId)
-  const group = accountConfig.groups?.[params.groupId]
-  return normalizeMode(group?.replyThreadMode)
 }
 
 function ensureRecordField(
@@ -212,14 +171,8 @@ function buildStatusText(params: {
   accountId?: string | undefined
   groupId: string
 }): string {
-  const explicit = readExplicitMode(params)
   const current = resolveCurrentMode(params)
-  return [
-    `Thread reply mode for chat ${params.groupId}: ${MODE_LABELS[current]}.`,
-    explicit
-      ? `Explicit chat override: ${MODE_LABELS[explicit]}.`
-      : "Explicit chat override: inherit.",
-  ].join("\n")
+  return `Reply threads in this chat: ${MODE_LABELS[current]}.`
 }
 
 function buildMenuText(params: {
@@ -230,7 +183,7 @@ function buildMenuText(params: {
   return [
     buildStatusText(params),
     "",
-    "Choose where automatic replies for this group should go.",
+    "Auto answers in the chat and starts a thread when someone asks. On answers each top-level message in a reply thread.",
   ].join("\n")
 }
 
@@ -239,11 +192,9 @@ function buildModeButtons() {
     inline: {
       buttons: [
         [
-          { text: "Thread", callback_data: "/threadreply thread" },
-          { text: "Main", callback_data: "/threadreply main" },
-          { text: "Auto", callback_data: "/threadreply auto" },
+          { text: "Auto", callback_data: "/threads auto" },
+          { text: "On", callback_data: "/threads on" },
         ],
-        [{ text: "Inherit Mode", callback_data: "/threadreply inherit" }],
       ],
     },
   }
@@ -254,7 +205,7 @@ function normalizeAction(args: string): InlineReplyThreadMode | "inherit" | "sta
   const normalized = first.trim().toLowerCase()
   if (!normalized || normalized === "help" || normalized === "options") return "help"
   if (normalized === "status" || normalized === "show") return "status"
-  if (normalized === "inherit" || normalized === "default" || normalized === "unset") return "inherit"
+  if (normalized === "reset") return "inherit"
   return normalizeMode(normalized)
 }
 
@@ -273,20 +224,13 @@ export async function handleInlineThreadReplyCommandWithConfigRuntime(
     return { text: "This command requires authorization." }
   }
 
-  const groupId = resolveInlineGroupId(ctx)
+  const groupId = resolveInlineChatId(ctx)
   if (!groupId) {
-    return { text: "/threadreply is only available in Inline group chats." }
+    return { text: "/threads is only available in Inline chats." }
   }
 
   const currentConfig = configRuntime.current() as OpenClawConfig
   const args = ctx.args?.trim() ?? ""
-  const [first = ""] = args.split(/\s+/).filter(Boolean)
-  if (["min", "minimum", "threshold", "limit"].includes(first.trim().toLowerCase())) {
-    return {
-      text: "Reply-thread minimums are no longer used because message IDs are not chat message counts. Use /threadreply auto, thread, or main.",
-    }
-  }
-
   const action = normalizeAction(args)
   if (action === "help") {
     return {
@@ -310,12 +254,11 @@ export async function handleInlineThreadReplyCommandWithConfigRuntime(
   if (!action) {
     return {
       text: [
-        "Usage: /threadreply thread|main|auto|inherit|status",
+        "Usage: /threads auto|on|reset|status",
         "",
-        "- thread: route every eligible parent-chat reply into a per-message Inline reply thread.",
-        "- main: keep automatic replies in the parent chat.",
-        "- auto: create a reply thread only when the user explicitly asks for one.",
-        "- inherit: remove this chat override and use account/default config.",
+        "- auto: answer in the chat; start a thread when someone asks.",
+        "- on: answer each top-level message in a reply thread.",
+        "- reset: remove this chat's setting.",
       ].join("\n"),
     }
   }

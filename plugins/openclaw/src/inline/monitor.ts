@@ -154,10 +154,6 @@ import {
   loadInlineReplyThreadMetadata,
 } from "./reply-threads.js"
 import {
-  hasInlineThreadParticipationWithPersistence,
-  recordInlineThreadParticipation,
-} from "./thread-participation.js"
-import {
   lookupInlineReplyThreadRoute,
   lookupInlineReplyThreadRouteByThreadId,
   rememberInlineReplyThreadRoute,
@@ -226,11 +222,22 @@ const INLINE_BOT_PRESENCE_GESTURE_MS = 1_400
 const INLINE_BOT_PRESENCE_FAILED_MS = 8_000
 const INLINE_BOT_PRESENCE_COMMENT_MAX_LENGTH = 30
 const INLINE_REPLY_THREAD_SYSTEM_PROMPT =
-  "Inline reply threads are scoped conversations: answer only the current reply-thread message and this thread's own history; use parent-chat context only as background, and do not answer unrelated questions from the parent chat or other reply threads."
-const INLINE_REPLY_THREAD_NEGATION_RE =
-  /\b(?:do\s+not|don't|dont|please\s+don't|please\s+dont|no\s+need\s+to)\s+(?:create|start|open|make|use|move|take|reply|respond|answer|send|thread)\b[^.!?\n]*\bthread\b|\b(?:reply|respond|answer|keep)\s+(?:here|in\s+the\s+main\s+chat|in\s+main\s+chat|in\s+the\s+parent\s+chat|in\s+parent\s+chat)\b/u
-const INLINE_REPLY_THREAD_INTENT_RE =
-  /\b(?:reply|respond|answer|send)\s+(?:in|inside|into|to)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|\b(?:create|start|open|make|use)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|\b(?:move|take)\s+(?:(?:this|it|the\s+answer|the\s+reply|the\s+response)\s+)?(?:to|into)\s+(?:a\s+)?(?:(?:new|child|reply)\s+)?thread\b|\bthread\s+(?:this|the\s+answer|the\s+reply|the\s+response)\b|\b(?:threaded\s+(?:reply|response)|(?:reply|respond|answer)\s+threaded)\b/u
+  "Inline reply threads are scoped conversations: answer only the current reply-thread message and this thread's own history; use parent-chat context only as background, and do not answer unrelated questions from the parent chat or other reply threads. Earlier conversation lives in the parent chat; read it with inline_parent_context."
+// Telegram's drop_pending_on_cold_boot, for Inline: updates the server recorded
+// before this gateway process started don't wake the agent. A lost or fresh SDK
+// cursor otherwise replays chat history as new messages.
+const INLINE_PROCESS_STARTED_AT_SECONDS = Date.now() / 1000
+const INLINE_COLD_BOOT_CLOCK_SKEW_SECONDS = 60
+const INLINE_COLD_BOOT_DROP_LOG_INTERVAL_MS = 60_000
+const INLINE_COLD_BOOT_GATED_EVENTS = new Set([
+  "message.new",
+  "message.edit",
+  "reaction.add",
+  "reaction.delete",
+])
+
+const INLINE_BOT_HAND_BACK_SYSTEM_PROMPT =
+  "This message is another bot's reply to you. It needs no answer: your response will not reach that bot. To ask it for more, mention it."
 
 type InlineBotPresenceKind =
   | "idle"
@@ -328,7 +335,6 @@ type HistoryContext = {
   inboundHistory: InlinePendingHistoryEntry[]
   repliedToBot: boolean
   replyToSenderId: string | null
-  hasBotMessage: boolean
 }
 
 type InlineInboundMediaInfo = {
@@ -1378,6 +1384,19 @@ function leadingInlineBotCommandTargetUserId(msg: Message): string | null {
   return null
 }
 
+// The server stamps the bot a bare command settles on; no stamp means no bot won.
+function startsWithUnclaimedInlineBotCommand(msg: Message): boolean {
+  const text = typeof msg.message === "string" ? msg.message : ""
+  for (const entity of msg.entities?.entities ?? []) {
+    if (entity.entity.oneofKind !== "botCommand") continue
+    const offset = Number(entity.offset)
+    if (!Number.isInteger(offset) || offset < 0) continue
+    if (text.slice(0, offset).trim()) continue
+    return entity.entity.botCommand.botUserId <= 0n
+  }
+  return false
+}
+
 function isInlineBotCommandForOtherBot(msg: Message, meId: bigint): boolean {
   const target = leadingInlineBotCommandTargetUserId(msg)
   return target != null && target !== String(meId)
@@ -1436,7 +1455,7 @@ function hasInlineCommandSpec(
 }
 
 function isInlineThreadReplyCommandBody(commandBody: string): boolean {
-  return resolveInlineCommandNameFromBody(commandBody) === "threadreply"
+  return resolveInlineCommandNameFromBody(commandBody) === "threads"
 }
 
 function parseInlineCommandArgs(commandBody: string): string {
@@ -2383,6 +2402,7 @@ function resolveInlineSystemPrompt(params: {
   account: ResolvedInlineAccount
   groupId?: string
   replyThread?: boolean
+  botHandBack?: boolean
 }): string {
   const groupPrompt = params.groupId
     ? resolveInlineGroupSystemPrompt({
@@ -2394,25 +2414,10 @@ function resolveInlineSystemPrompt(params: {
     buildInlineSystemPrompt(params.account.config.systemPrompt),
     groupPrompt,
     params.replyThread ? INLINE_REPLY_THREAD_SYSTEM_PROMPT : undefined,
+    params.botHandBack ? INLINE_BOT_HAND_BACK_SYSTEM_PROMPT : undefined,
   ]
     .filter((entry): entry is string => Boolean(entry))
     .join("\n\n")
-}
-
-function hasExplicitInlineReplyThreadIntent(raw: string): boolean {
-  const text = normalizeLowercaseStringOrEmpty(raw).replace(/\s+/g, " ").trim()
-  if (!text) return false
-  if (INLINE_REPLY_THREAD_NEGATION_RE.test(text)) return false
-  return INLINE_REPLY_THREAD_INTENT_RE.test(text)
-}
-
-function shouldCreateInlineReplyThreadDelivery(params: {
-  mode: InlineReplyThreadMode
-  explicitThreadIntent: boolean
-}): boolean {
-  if (params.mode === "main") return false
-  if (params.explicitThreadIntent) return true
-  return params.mode === "thread"
 }
 
 function rewriteNumericMentionsToUsernames(text: string, senderProfilesById: SenderProfileLookup): string {
@@ -2446,12 +2451,6 @@ function rememberInlineBotDelivery(params: {
 }): void {
   rememberBotMessageId(params.botMessageIdsByChat, params.chatId, params.messageId)
   if (!params.replyThreadContext || params.chatId !== params.replyThreadContext.childChatId) return
-  recordInlineThreadParticipation(
-    params.accountId,
-    params.replyThreadContext.parentChatId,
-    params.replyThreadContext.childChatId,
-    { agentId: params.agentId },
-  )
   rememberInlineReplyThreadRoute({
     accountId: params.accountId,
     parentChatId: params.replyThreadContext.parentChatId,
@@ -2466,10 +2465,6 @@ function rememberInlineBotDelivery(params: {
 function hasBotMessageId(cache: Map<string, string[]>, chatId: bigint, messageId: bigint): boolean {
   const key = String(chatId)
   return (cache.get(key) ?? []).includes(String(messageId))
-}
-
-function hasKnownBotMessageInChat(cache: Map<string, string[]>, chatId: bigint): boolean {
-  return (cache.get(String(chatId)) ?? []).length > 0
 }
 
 function rememberBotMessagesFromList(params: {
@@ -2863,18 +2858,15 @@ function prependInlineReplyThreadAnchor(params: {
     meId: params.meId,
     syntheticMessageId: `anchor:${String(params.parentChatId)}:${String(params.anchorMessage.id)}`,
   })
-  const hasBotMessage = params.historyContext.hasBotMessage || params.anchorMessage.fromId === params.meId
   if (!entry.inboundEntry || !entry.line) {
     return {
       ...params.historyContext,
-      hasBotMessage,
     }
   }
 
   return {
     ...params.historyContext,
     inboundHistory: [entry.inboundEntry, ...params.historyContext.inboundHistory],
-    hasBotMessage,
     historyText: prependLabeledHistoryLine({
       existing: params.historyContext.historyText,
       heading: "Recent thread messages (oldest -> newest):",
@@ -2903,7 +2895,6 @@ function prependInlineParentHistoryContext(params: {
       ...params.parentHistoryContext.inboundHistory,
       ...params.historyContext.inboundHistory,
     ],
-    hasBotMessage: params.historyContext.hasBotMessage || params.parentHistoryContext.hasBotMessage,
     historyText: prependLabeledHistoryBlock({
       existing: params.historyContext.historyText,
       heading: "Recent thread messages (oldest -> newest):",
@@ -3196,10 +3187,6 @@ async function resolveInlineReplyThreadContextFromRoute(params: {
   }
 }
 
-function normalizeInlineReplyThreadMode(raw: unknown): InlineReplyThreadMode {
-  return raw === "thread" || raw === "main" ? raw : "auto"
-}
-
 async function buildReplyThreadParentHistoryContext(params: {
   client: InlineSdkClient
   replyThreadContext: InlineReplyThreadContext
@@ -3239,7 +3226,6 @@ async function buildHistoryContext(params: {
     hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.replyToMsgId)
   let repliedToBot = cachedReplyToBot
   let replyToSenderId: string | null = null
-  let hasBotMessage = hasKnownBotMessageInChat(params.botMessageIdsByChat, params.chatId)
   let foundReplyTargetInHistory = false
   const lines: string[] = []
   const attachmentLines: string[] = []
@@ -3257,7 +3243,6 @@ async function buildHistoryContext(params: {
     if (messages) {
       for (const item of messages) {
         if (item.fromId === params.meId) {
-          hasBotMessage = true
           rememberBotMessageId(params.botMessageIdsByChat, params.chatId, item.id)
         }
       }
@@ -3306,7 +3291,6 @@ async function buildHistoryContext(params: {
     if (replyTarget) {
       replyToSenderId = String(replyTarget.fromId)
       repliedToBot = replyTarget.fromId === params.meId
-      hasBotMessage = hasBotMessage || repliedToBot
     } else if (!cachedReplyToBot) {
       repliedToBot = false
     }
@@ -3320,7 +3304,6 @@ async function buildHistoryContext(params: {
       inboundHistory,
       repliedToBot,
       replyToSenderId,
-      hasBotMessage,
     }
   }
   return {
@@ -3334,7 +3317,6 @@ async function buildHistoryContext(params: {
     inboundHistory,
     repliedToBot,
     replyToSenderId,
-    hasBotMessage,
   }
 }
 
@@ -4004,7 +3986,14 @@ export async function monitorInlineProvider(params: {
       ...createTransportActivityStatusPatch(inboundAt),
     })
 
-    if (takeInlineFollowModeChanged({ accountId: account.accountId, chatId })) {
+    // Follow state is mutable and decides who wakes: the server follows a bot
+    // for a thread it opened with no event here, so a group's snapshot is only
+    // good for one message. Direct chats have no follow state.
+    const previousChatInfo = chatCache.get(chatId)
+    if (
+      takeInlineFollowModeChanged({ accountId: account.accountId, chatId }) ||
+      previousChatInfo?.kind === "group"
+    ) {
       chatCache.delete(chatId)
     }
     let chatInfo: CachedChatInfo
@@ -4012,12 +4001,14 @@ export async function monitorInlineProvider(params: {
       chatInfo = await resolveChatInfo(client, chatCache, chatId)
     } catch (err) {
       publishStatus({ lastError: `getChat failed: ${String(err)}` })
-      runtime.log?.(`inline: drop message chat=${String(chatId)} (chat metadata unavailable)`)
-      return
+      if (!previousChatInfo) {
+        runtime.log?.(`inline: drop message chat=${String(chatId)} (chat metadata unavailable)`)
+        return
+      }
+      chatInfo = previousChatInfo
     }
 
     const inlineThreadDefaults = (cfg.channels?.inline ?? {}) as {
-      replyThreadMode?: unknown
       replyThreadRequireExplicitMention?: boolean
       replyThreadParentHistoryLimit?: number
     }
@@ -4043,7 +4034,16 @@ export async function monitorInlineProvider(params: {
     }
     // Inline encodes every reply-thread child as a chat peer. Preserve the
     // logical parent kind so a DM child remains a DM for policy and sessions.
-    const conversationKind = replyThreadContext?.parentChatKind ?? chatInfo.kind
+    const senderId = String(msg.fromId)
+    // A thread under the bot's DM stays that DM for its person. Anyone else added
+    // to it keeps group rules and their own session, away from the DM's context.
+    const isGuestInDmThread =
+      replyThreadContext?.parentChatKind === "direct" &&
+      replyThreadContext.parentPeerUserId != null &&
+      String(replyThreadContext.parentPeerUserId) !== senderId
+    const conversationKind = isGuestInDmThread
+      ? "group"
+      : replyThreadContext?.parentChatKind ?? chatInfo.kind
     const isGroup = conversationKind !== "direct"
     const effectiveChatId = replyThreadContext?.parentChatId ?? chatId
     const effectiveGroupTitle = replyThreadContext?.parentChatTitle ?? chatInfo.title ?? null
@@ -4053,9 +4053,6 @@ export async function monitorInlineProvider(params: {
             cfg,
             accountId: account.accountId,
             groupId: String(effectiveChatId),
-            defaultMode: normalizeInlineReplyThreadMode(
-              account.config.replyThreadMode ?? inlineThreadDefaults.replyThreadMode,
-            ),
           })
         : "auto"
     const replyThreadRequireExplicitMention =
@@ -4082,7 +4079,6 @@ export async function monitorInlineProvider(params: {
               DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT,
           })
         : DEFAULT_REPLY_THREAD_PARENT_HISTORY_LIMIT
-    const senderId = String(msg.fromId)
     const senderResolution = await senderProfilesById.resolveWithProvenance({ userId: senderId, chatId })
     const senderProfile = senderResolution.profile
     const explicitlyMentionsThisBot = collectInlineMentionedUserIds(currentContent)
@@ -4091,7 +4087,11 @@ export async function monitorInlineProvider(params: {
       runtime.log?.(`inline: observe sender with unverified bot provenance chat=${String(chatId)} sender=${senderId}`)
       return
     }
-    if (senderProfile?.bot === true && !explicitlyMentionsThisBot) {
+    // Another bot wakes this one by mention, addressed command, or a reply to its
+    // message; the reply is checked against history below.
+    const senderIsBot = senderProfile?.bot === true
+    const botAddressedThisBot = senderIsBot && (explicitlyMentionsThisBot || commandAddressedToMe)
+    if (senderIsBot && !botAddressedThisBot && msg.replyToMsgId == null) {
       runtime.log?.(`inline: observe ambient bot message chat=${String(chatId)} sender=${senderId}`)
       return
     }
@@ -4253,6 +4253,18 @@ export async function monitorInlineProvider(params: {
     const inlineFollowCommand = parseInlineFollowCommandBody(normalizedCommandBody)
     const hasControlCommand =
       hasTextControlCommand || isRegisteredNativeCommand || inlineFollowCommand != null
+    // Several bots offer this command and nothing says which one was meant; running
+    // it here could reset or steer the wrong conversation.
+    if (
+      isGroup &&
+      callbackActionEvent == null &&
+      !commandAddressedToMe &&
+      isRegisteredNativeCommand &&
+      startsWithUnclaimedInlineBotCommand(msg)
+    ) {
+      runtime.log?.(`inline: drop command no bot claimed chat=${String(chatId)}`)
+      return
+    }
     const commandSource = hasControlCommand
       ? isRegisteredNativeCommand
         ? "native"
@@ -4431,7 +4443,6 @@ export async function monitorInlineProvider(params: {
         inboundHistory: [],
         repliedToBot: false,
         replyToSenderId: null,
-        hasBotMessage: false,
       }
     })
     let effectiveHistoryContext =
@@ -4444,6 +4455,10 @@ export async function monitorInlineProvider(params: {
             meId,
           })
         : historyContext
+    if (senderIsBot && !botAddressedThisBot && !effectiveHistoryContext.repliedToBot) {
+      runtime.log?.(`inline: observe bot reply to someone else chat=${String(chatId)} sender=${senderId}`)
+      return
+    }
     const explicitlyUnfollowed = isInlineDialogExplicitlyUnfollowed(chatInfo.dialogFollowMode)
     const followModeImplicitMention =
       isGroup &&
@@ -4451,19 +4466,6 @@ export async function monitorInlineProvider(params: {
       // Freshness controls server-side auto-follow only. Once a dialog is
       // FOLLOWING, its unmentioned activity remains relevant until unfollowed.
       isInlineDialogFollowing(chatInfo.dialogFollowMode)
-    const historyReplyThreadImplicitMention =
-      isGroup &&
-      replyThreadContext != null &&
-      !replyThreadRequireExplicitMention &&
-      !explicitlyUnfollowed &&
-      !followModeImplicitMention &&
-      (effectiveHistoryContext.hasBotMessage ||
-        await hasInlineThreadParticipationWithPersistence({
-          accountId: account.accountId,
-          parentChatId: replyThreadContext.parentChatId,
-          threadId: replyThreadContext.childChatId,
-        }))
-    const replyThreadImplicitMention = followModeImplicitMention || historyReplyThreadImplicitMention
     const configuredRequireMention = isGroup
       ? resolveInlineGroupRequireMention({
           cfg,
@@ -4477,10 +4479,10 @@ export async function monitorInlineProvider(params: {
     const unfollowedFreeResponse = isGroup && explicitlyUnfollowed && !configuredRequireMention
     const replyToBotImplicitMention =
       isGroup &&
-      ((account.config.replyToBotWithoutMention ?? false) || unfollowedFreeResponse) &&
+      ((account.config.replyToBotWithoutMention ?? true) || unfollowedFreeResponse) &&
       msg.replyToMsgId != null &&
       effectiveHistoryContext.repliedToBot
-    const inferredThreadAttention = replyThreadImplicitMention || replyToBotImplicitMention
+    const inferredThreadAttention = followModeImplicitMention || replyToBotImplicitMention
     // A reply is addressed to its author. Replies to other people or bots stay
     // theirs unless they mention this bot; replying to yourself is not one.
     const repliedToSomeoneElse =
@@ -4516,7 +4518,6 @@ export async function monitorInlineProvider(params: {
         ? [
             ...(callbackActionEvent != null ? ["message_action"] : []),
             ...(followModeImplicitMention ? ["follow_mode"] : []),
-            ...(historyReplyThreadImplicitMention ? ["reply_thread"] : []),
             ...(replyToBotImplicitMention ? ["reply_to_bot"] : []),
           ]
         : []
@@ -4610,7 +4611,7 @@ export async function monitorInlineProvider(params: {
         typeof configRuntime?.current !== "function" ||
         typeof configRuntime.mutateConfigFile !== "function"
       ) {
-        runtime.error?.("inline /threadreply fallback unavailable: runtime config API missing")
+        runtime.error?.("inline /threads fallback unavailable: runtime config API missing")
       } else {
         const result = await handleInlineThreadReplyCommandWithConfigRuntime(
           configRuntime as Parameters<typeof handleInlineThreadReplyCommandWithConfigRuntime>[0],
@@ -4662,12 +4663,12 @@ export async function monitorInlineProvider(params: {
               })
               if (editResult.oneofKind !== "editMessage") {
                 throw new Error(
-                  `inline /threadreply edit: expected editMessage result, got ${String(editResult.oneofKind)}`,
+                  `inline /threads edit: expected editMessage result, got ${String(editResult.oneofKind)}`,
                 )
               }
               delivered = true
             } catch (error) {
-              runtime.error?.(`inline /threadreply edit failed; falling back to send (${String(error)})`)
+              runtime.error?.(`inline /threads edit failed; falling back to send (${String(error)})`)
             }
           }
           if (!delivered) {
@@ -4927,17 +4928,13 @@ export async function monitorInlineProvider(params: {
     }
 
     let deliveryReplyThreadContext = replyThreadContext
-    const explicitReplyThreadIntent =
-      replyThreadsEnabled &&
-      !deliveryReplyThreadContext &&
-      hasExplicitInlineReplyThreadIntent(rawBody)
+    // A bot's message is answered in place even in a chat set to On: it wakes
+    // on replies in the chat it asked from, and a thread would never reach it.
     const shouldCreateDeliveryThread =
       replyThreadsEnabled &&
       !deliveryReplyThreadContext &&
-      shouldCreateInlineReplyThreadDelivery({
-        mode: replyThreadMode,
-        explicitThreadIntent: explicitReplyThreadIntent,
-      }) &&
+      replyThreadMode === "on" &&
+      senderProfile?.bot !== true &&
       !shouldEditCallbackTargetInPlace
     let parentThreadCreationTyping = false
     const setParentThreadCreationTyping = async (typing: boolean): Promise<void> => {
@@ -5059,7 +5056,6 @@ export async function monitorInlineProvider(params: {
           inboundHistory: [],
           repliedToBot: effectiveHistoryContext.repliedToBot,
           replyToSenderId: effectiveHistoryContext.replyToSenderId,
-          hasBotMessage: effectiveHistoryContext.hasBotMessage,
         },
         anchorMessage: deliveryReplyThreadContext.anchorMessage,
         parentChatId: deliveryReplyThreadContext.parentChatId,
@@ -5205,6 +5201,7 @@ export async function monitorInlineProvider(params: {
       account,
       ...(isGroup ? { groupId: String(effectiveChatId) } : {}),
       replyThread: Boolean(deliveryReplyThreadContext),
+      botHandBack: senderIsBot && !wasMentioned,
     })
     const inlineAgentPrompt = inlineAgent
       ? buildInlineAgentSpecializationPrompt(inlineAgent)
@@ -5410,9 +5407,15 @@ export async function monitorInlineProvider(params: {
     const progressToolProgressEnabled =
       progressPlaceholderEnabled && resolveChannelStreamingPreviewToolProgress(account.config)
     const suppressDefaultToolProgressMessages = progressPlaceholderEnabled
-    let canReplyToSourceMessage = deliveryChatId === chatId
+    // An answer quotes a bot only when that bot asked by mention or addressed
+    // command, so the answer reaches it. A bot's reply needs no answer and quoting
+    // it would wake it again, which is how two bots end up in a loop. People get
+    // plain answers.
+    const botAskedThisBot = senderIsBot && wasMentioned
+    const botHandBack = senderIsBot && !wasMentioned
+    let canReplyToSourceMessage = deliveryChatId === chatId && !botHandBack
     let defaultReplyToMsgId =
-      canReplyToSourceMessage && isGroup && msg.replyToMsgId != null ? msg.id : undefined
+      canReplyToSourceMessage && botAskedThisBot ? msg.id : undefined
     const inlineBlockStreamingEnabled = resolveInlineBlockStreamingEnabled(account.config)
     const disableBlockStreaming =
       progressPlaceholderEnabled || streamViaEditMessage
@@ -6470,8 +6473,7 @@ export async function monitorInlineProvider(params: {
                   // ignore
                 }
               }
-              // Keep reply chains threaded when inbound is a reply in group chats.
-              if (replyToMsgId == null && canReplyToSourceMessage && isGroup && msg.replyToMsgId != null) {
+              if (replyToMsgId == null && canReplyToSourceMessage && botAskedThisBot) {
                 replyToMsgId = msg.id
               }
 
@@ -7245,7 +7247,7 @@ export async function monitorInlineProvider(params: {
     actorUserId: bigint
     eventKind: string
     modelOptions?: OpenClawBotChatSettingsOption[]
-    replyThreads?: "auto" | "on" | "off"
+    replyThreads?: "auto" | "on"
   }): Promise<ResolvedOpenClawBotSettings> => {
     const ingress = await resolveInlineSystemEventContext({
       chatId: params.chatId,
@@ -7326,9 +7328,7 @@ export async function monitorInlineProvider(params: {
         ...(ingress.conversationKind === "direct"
           ? {}
           : { following: isInlineDialogFollowing(ingress.chatInfo.dialogFollowMode) }),
-        replyThreads: params.replyThreads ?? (
-          replyMode === "thread" ? "on" : replyMode === "main" ? "off" : "auto"
-        ),
+        replyThreads: params.replyThreads ?? replyMode ?? "auto",
         canSetDefaultModel,
       },
     }
@@ -7553,7 +7553,7 @@ export async function monitorInlineProvider(params: {
         )
       } else {
         const ingress = resolved.ingress
-        let appliedReplyThreads: "auto" | "on" | "off" | undefined
+        let appliedReplyThreads: "auto" | "on" | undefined
         response = await invokeOpenClawBotChatSetting({
           context: resolved.context,
           mutators: {
@@ -7589,7 +7589,7 @@ export async function monitorInlineProvider(params: {
                   draft,
                   accountId: account.accountId,
                   groupId: String(ingress.effectiveChatId),
-                  mode: value === "on" ? "thread" : value === "off" ? "main" : "auto",
+                  mode: value,
                 }),
               })
               cfg = committed.nextConfig as OpenClawConfig
@@ -7869,6 +7869,8 @@ export async function monitorInlineProvider(params: {
     }
   }
 
+  let coldBootDropped = 0
+  let coldBootDropLoggedAt = 0
   const loop = (async () => {
     try {
       await client.consumeEvents(async (event) => {
@@ -7877,6 +7879,23 @@ export async function monitorInlineProvider(params: {
           return
         }
         const rawEvent = event as Record<string, unknown>
+
+        if (
+          account.config.dropPendingOnColdBoot !== false &&
+          INLINE_COLD_BOOT_GATED_EVENTS.has(event.kind) &&
+          Number(rawEvent.date) > 0 &&
+          Number(rawEvent.date) < INLINE_PROCESS_STARTED_AT_SECONDS - INLINE_COLD_BOOT_CLOCK_SKEW_SECONDS
+        ) {
+          coldBootDropped += 1
+          const now = Date.now()
+          if (now - coldBootDropLoggedAt >= INLINE_COLD_BOOT_DROP_LOG_INTERVAL_MS) {
+            coldBootDropLoggedAt = now
+            log?.info(
+              `[${account.accountId}] inline: dropped ${coldBootDropped} update(s) recorded before this gateway started`,
+            )
+          }
+          return
+        }
 
         if (event.kind === "bot.chatSettings.request") {
           scheduleInboundTask(

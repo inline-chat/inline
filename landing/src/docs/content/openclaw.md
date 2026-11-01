@@ -62,6 +62,17 @@ Defaults:
 
 Configure allowlists for a restricted bot. A mention requirement is not an operator allowlist.
 
+## How it behaves
+
+OpenClaw follows the same rules as Hermes in Inline.
+
+- Only a mention, a reply to the bot, a DM, a command for it, or a thread it follows wakes it. Words never do, its name included.
+- A message that starts by mentioning someone else isn't for it, and neither is a reply to someone else, unless it also mentions the bot.
+- A thread's first message decides which bots follow. A bot mentioned later answers once without following. `/follow` and `/unfollow` change it, and so does asking the agent.
+- Reply threads are Auto or On, per chat, DMs included. Auto answers in the chat and starts a thread when someone asks. On answers each top-level message in a reply thread. Set it with `/threads`, the agent settings, or by asking the agent; On is never bot-wide, so a new chat's first message doesn't get a thread.
+- Answers quote only another bot that asked, so the answer reaches it. Its reply back needs no answer, so two bots can't wake each other without end.
+- Messages sent while the gateway was down aren't answered after a restart.
+
 ## Restart
 
 Restart the gateway:
@@ -109,7 +120,7 @@ openclaw gateway restart
 - Plugin missing: check `openclaw plugins list` and the gateway's install environment.
 - Token missing: set `channels.inline.token` or `INLINE_TOKEN`.
 - DM ignored: complete pairing or check the sender allowlist.
-- Group ignored: check group policy, sender policy, and the mention.
+- Group ignored: check group policy, sender policy, and the mention. A thread the bot only wrote in isn't one it follows; use `/follow`.
 - No reply: check provider sign-in and gateway errors.
 
 ---

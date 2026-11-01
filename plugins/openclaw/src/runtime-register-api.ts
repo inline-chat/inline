@@ -9,6 +9,7 @@ import { createInlineProfileTool } from "./inline/profile-tool.js"
 import { createInlineBotCommandsTool } from "./inline/bot-commands-tool.js"
 import { createInlineAgentsTool } from "./inline/agents-tool.js"
 import { createInlineFollowTool } from "./inline/follow-tool.js"
+import { createInlineReplyThreadsTool } from "./inline/reply-threads-tool.js"
 import { syncInlineCatalogs } from "./inline/catalog-sync.js"
 import { createInlineFollowCommands } from "./inline/follow-command.js"
 import { createInlineMaintenanceCommands } from "./inline/maintenance-command.js"
@@ -39,6 +40,9 @@ export function registerInlinePluginFull(api: OpenClawPluginApi): void {
   })
   api.registerTool((ctx) => createInlineFollowTool(ctx) as AnyAgentTool, {
     names: ["inline_follow"],
+  })
+  api.registerTool((ctx) => createInlineReplyThreadsTool(ctx, api.runtime.config) as AnyAgentTool, {
+    names: ["inline_reply_threads"],
   })
   const registerCommand = (api as { registerCommand?: OpenClawPluginApi["registerCommand"] })
     .registerCommand

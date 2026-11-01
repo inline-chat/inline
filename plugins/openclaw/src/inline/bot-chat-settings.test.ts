@@ -48,7 +48,6 @@ describe("OpenClaw Bot Chat Settings", () => {
         options: [
           { value: "auto", label: "Auto" },
           { value: "on", label: "On" },
-          { value: "off", label: "Off" },
         ],
       },
     })
@@ -150,7 +149,7 @@ describe("OpenClaw Bot Chat Settings", () => {
 
   it("returns a full replacement after a live mutation", async () => {
     let current = context
-    const setReplyThreads = vi.fn(async (value: "auto" | "on" | "off") => {
+    const setReplyThreads = vi.fn(async (value: "auto" | "on") => {
       current = { ...current, replyThreads: value }
     })
     const original = buildOpenClawBotChatSettingsDocument(current)

@@ -33,7 +33,7 @@ export type OpenClawBotChatSettingsContext = {
   reasoningLevel?: string
   reasoningOptions?: OpenClawBotChatSettingsOption[]
   following?: boolean
-  replyThreads: "auto" | "on" | "off"
+  replyThreads: "auto" | "on"
   canSetDefaultModel?: boolean
 }
 
@@ -42,7 +42,7 @@ export type OpenClawBotChatSettingsMutators = {
   setDefaultModel?(): Promise<void>
   setReasoningLevel?(value: string): Promise<void>
   setFollowing?(value: boolean): Promise<void>
-  setReplyThreads?(value: "auto" | "on" | "off"): Promise<void>
+  setReplyThreads?(value: "auto" | "on"): Promise<void>
   resolveContext(): Promise<OpenClawBotChatSettingsContext>
 }
 
@@ -211,9 +211,8 @@ export function buildOpenClawBotChatSettingsDocument(
         select: {
           value: context.replyThreads,
           options: [
-            { value: "auto", label: "Auto", description: "Agent decides.", disabled: false },
+            { value: "auto", label: "Auto", description: "Threads when someone asks.", disabled: false },
             { value: "on", label: "On", description: "Always use threads.", disabled: false },
-            { value: "off", label: "Off", description: "Stay in chat.", disabled: false },
           ],
         },
       },
@@ -320,7 +319,7 @@ export async function invokeOpenClawBotChatSetting(params: {
     }
     await params.mutators.setFollowing(enabled)
   } else if (params.itemId === REPLY_THREADS_ITEM_ID) {
-    if ((selected !== "auto" && selected !== "on" && selected !== "off") || !params.mutators.setReplyThreads) {
+    if ((selected !== "auto" && selected !== "on") || !params.mutators.setReplyThreads) {
       return openClawBotChatSettingsProblem(BotChatSettingsProblem_Code.INVALID_VALUE, "Reply mode unavailable.", currentDocument)
     }
     await params.mutators.setReplyThreads(selected)

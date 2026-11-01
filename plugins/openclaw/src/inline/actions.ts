@@ -25,7 +25,6 @@ import { downloadInlineMediaFromUrl, uploadInlineMediaFromUrl } from "./media.js
 import { summarizeInlineMessageContent } from "./message-content.js"
 import { sanitizeInlineOutgoingText } from "./message-formatting.js"
 import { normalizeInlineTarget } from "./normalize.js"
-import { recordInlineThreadParticipation } from "./thread-participation.js"
 import {
   lookupInlineReplyThreadRoute,
   lookupInlineReplyThreadRouteByThreadId,
@@ -4069,14 +4068,6 @@ export const inlineMessageActions = {
               ...(replyToMsgId != null ? { replyToMsgId } : {}),
               parseMarkdown,
             })
-            if (target.parentChatId != null) {
-              recordInlineThreadParticipation(
-                account.accountId,
-                target.parentChatId,
-                chatId,
-                actionAgentId ? { agentId: actionAgentId } : undefined,
-              )
-            }
             return jsonResult({
               ok: true,
               chatId: String(chatId),

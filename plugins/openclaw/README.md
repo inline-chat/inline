@@ -23,14 +23,26 @@ Supports:
 
 Reply-thread behavior:
 
-- Parent-chat conversations stay in the parent chat by default.
-- `replyThreadMode: "auto"` also creates a child reply thread when the triggering parent-chat message explicitly asks OpenClaw to reply in a thread.
-- `replyThreadMode: "thread"` opts a parent chat into automatic reply-thread delivery; each triggering parent-chat message gets its own child reply thread.
-- `replyThreadMode: "main"` keeps automatic replies in the parent chat, while explicit `thread-create` and `thread-reply` tools remain available.
+- Reply threads are **Auto** or **On**, per chat, DMs included. Auto is the default: answers stay in the chat, and when someone asks for a thread the agent opens one with `thread-create`. On answers each top-level message in a reply thread.
+- On is set per chat only: `/threads on`, the agent settings, `inline_reply_threads`, or `groups.<chatId>.replyThreadMode`. A bot-wide value is ignored, so a new chat's first message never gets a thread.
 - `thread-create` creates a top-level Inline thread when called with participants or `spaceId`, and creates a real Inline reply thread when called with a parent chat target or anchor. `thread-reply` sends into the child reply-thread chat id returned by reply-thread creation.
 - Inbound reply-thread messages use the parent chat as the base conversation target and the child reply-thread chat id as `MessageThreadId`.
-- Bot-participated reply threads and Inline dialogs already marked `FOLLOWING` can continue without an explicit bot mention by default, matching Slack-style thread behavior.
-- Authorized users can run `/follow` in a DM, group, or reply thread to keep eligible unmentioned activity relevant, and `/unfollow` to explicitly opt out.
+- Threads the bot follows continue without a mention. A thread's first message decides who follows; a bot mentioned later answers once without following.
+- Authorized users can run `/follow` in a group or reply thread to keep eligible unmentioned activity relevant, and `/unfollow` to explicitly opt out.
+
+## Upgrading from 0.0.72
+
+Breaking changes in the next release. They match the rules Hermes 1.0 follows; see [How bots behave](https://inline.chat/docs/openclaw).
+
+- **`/threadreply` is now `/threads`**, with `auto`, `on`, `reset`, and `status`, and it works in DMs.
+- **`replyThreadMode` is Auto or On, per chat.** On a chat, `thread` reads as `on` and `main` as `auto`. A bot-wide or `groups."*"` On is ignored with a startup warning; run `/threads on` in each chat that should use threads.
+- **Words no longer open a thread.** The agent understands the request and opens one.
+- **Writing in a thread no longer makes the bot stick to it.** Only following does. Threads that relied on it need `/follow` or a mention.
+- **Replies to the bot wake it by default.** Set `replyToBotWithoutMention: false` for the old behavior.
+- **Answers quote only a bot that asked** by mention or addressed command, so the answer reaches it. People get plain answers. Another bot's reply to this bot wakes it, needs no answer, and isn't quoted; another round takes a new mention.
+- **A command no bot claimed is ignored.** Several bots offering `/status` with nothing naming one means none of them runs it.
+- **Someone added to a thread under the bot's DM keeps group rules** and their own session, so the DM's context never reaches them.
+- **Messages sent while the gateway was down aren't answered.** Updates recorded more than 60 seconds before the gateway started don't wake the agent. Set `dropPendingOnColdBoot: false` to answer them.
 
 ## Install
 
@@ -204,9 +216,9 @@ channels:
     groupAllowFrom:
       - "inline:123" # or "user:123" or just "123"
     requireMention: true # optional: default is true
-    replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
-    replyThreadMode: "auto" # auto|thread|main; auto threads only explicit requests, thread always routes top-level turns
-    replyThreadRequireExplicitMention: false # optional, default false; bot-participated reply threads continue without @mention
+    replyToBotWithoutMention: true # default true; false requires a mention on replies to the bot
+    dropPendingOnColdBoot: true # default true; false answers messages sent while the gateway was down
+    replyThreadRequireExplicitMention: false # optional, default false; threads the bot follows continue without @mention
     replyThreadParentHistoryLimit: 10 # optional, default 10; set 0 to disable parent-chat context before the anchor
 
     # Inbound context history (used to build richer thread context for the agent):
@@ -229,6 +241,7 @@ channels:
     groups:
       "88":
         requireMention: false
+        replyThreadMode: "on" # auto|on, per chat only; DMs use their chat id here too
         replyThreadRequireExplicitMention: true
         replyThreadParentHistoryLimit: 2
         allowFrom:
@@ -251,7 +264,6 @@ channels:
       work:
         token: "<INLINE_BOT_TOKEN>"
         defaultTo: "user:123"
-        replyThreadMode: "main"
 ```
 
 Reply behavior summary:
@@ -259,15 +271,14 @@ Reply behavior summary:
 - Policy is evaluated in three ordered stages: **access**, then **wake**, then **delivery**. Access checks the chat and sender allowlists and is always a hard gate; an `@mention`, reply, callback, or command never grants access to a blocked chat or actor. Wake decides whether an allowed group turn should invoke the agent. Delivery decides whether the accepted reply stays in the parent chat or an existing/new reply thread.
 - `replyToId` is always an Inline message id.
 - Inline reply threads are separate and use OpenClaw `threadId`.
-- Use `replyThreadMode: "main"` if you only want automatic parent-chat replies to stay in the parent chat.
-- Use `replyThreadMode: "thread"` when every parent-chat bot turn should move into a child reply thread anchored to the triggering parent message.
-- In an Inline group, authorized users can run `/threadreply` to choose the chat's mode with buttons, or `/threadreply thread|main|auto|inherit|status`.
-- Authorized users can run `/follow` in an Inline DM, group, or reply thread to opt into eligible unmentioned activity waking OpenClaw. `/unfollow` explicitly opts that dialog out so server auto-follow heuristics do not turn it back on and suppresses follow and reply-thread wakes, including in `requireMention: false` rooms. Explicit mentions, replies to the bot (where reply-to-bot wakes apply: `replyToBotWithoutMention: true` or a `requireMention: false` room), and authorized commands/callbacks remain available.
-- Bot-participated reply threads and Inline dialogs already marked `FOLLOWING` continue without `@bot` by default unless the dialog is explicitly unfollowed. Reply threads also use persisted recent participation state as a fallback. Set `replyThreadRequireExplicitMention: true` if a chat should require `@bot` on every reply-thread message.
-- In an allowed group with `requireMention: true`, an explicit mention wakes the bot. Authorized callbacks/commands and configured reply-to-bot or followed/bot-participated thread behavior may also wake it unless the dialog is explicitly unfollowed. Unmentioned turns that pass access remain non-responsive and may only contribute bounded history context.
+- In an Inline chat or DM, authorized users can run `/threads` to choose the chat's mode with buttons, or `/threads auto|on|reset|status`. Inside a reply thread it applies to the chat the thread hangs off. The agent's `inline_reply_threads` tool does the same for the OpenClaw owner.
+- Authorized users can run `/follow` in an Inline group or reply thread to opt into eligible unmentioned activity waking OpenClaw. `/unfollow` explicitly opts that dialog out so server auto-follow heuristics do not turn it back on and suppresses follow wakes, including in `requireMention: false` rooms. Explicit mentions, replies to the bot, and authorized commands/callbacks remain available.
+- Threads the bot follows continue without `@bot` unless the dialog is explicitly unfollowed. Having written in a thread doesn't make the bot follow it. Set `replyThreadRequireExplicitMention: true` if a chat should require `@bot` on every reply-thread message.
+- In an allowed group with `requireMention: true`, an explicit mention wakes the bot. Authorized callbacks/commands, replies to the bot and followed threads also wake it. Unmentioned turns that pass access remain non-responsive and may only contribute bounded history context.
 - Leading mentions decide who a group message is for. If a message starts with mentions of other people or bots and this bot is not in that leading run, OpenClaw takes no turn, even if it is mentioned later in the text, the message replies to it, the thread is followed, or the room is `requireMention: false`. `@alice @bot compare` still addresses the bot.
-- A reply is addressed to its author. A group reply to another person's or bot's message does not wake OpenClaw unless it mentions the bot, even in followed threads, bot-participated reply threads, and `requireMention: false` rooms. Replying to your own earlier message is not treated as addressing someone else.
-- Other bots wake OpenClaw only by mentioning it; their ambient messages stay context.
+- A reply is addressed to its author. A group reply to another person's or bot's message does not wake OpenClaw unless it mentions the bot, even in followed threads and `requireMention: false` rooms. Replying to your own earlier message is not treated as addressing someone else.
+- Other bots wake OpenClaw by mentioning it, by a command addressed to it, or by replying to its message; their ambient messages stay context. In a chat set to On a bot is answered in place, because a thread would never reach it.
+- An answer quotes a bot only when that bot asked by mention or addressed command. A bot's reply to this bot needs no answer and isn't quoted, so two bots can't wake each other without end. People get plain answers.
 - `replyThreadParentHistoryLimit` defaults to `10`, so reply-thread turns include nearby parent-chat context before the anchor. Set it to `0` only when a chat should stay strictly thread-local.
 
 If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.
@@ -331,9 +342,9 @@ Inline reply-thread semantics:
 - `delete-attachment` removes a URL-preview attachment from a message authored by the current bot/user. Use `attachments[].id` from `read` or `search` as `attachmentId`.
 - `pin`/`unpin` use `messageId` and default to the current Inline chat/thread when no target is passed; `list-pins` also defaults to the current chat/thread.
 - `invite-to-space` invites one user per call into a space using `userId`/`user`/`participant`, `email`, or `phoneNumber`; pass `role: "admin"` for admin invites or omit it for a member invite.
-- In `replyThreadMode: "auto"`, explicit user requests such as "reply in a thread" create and answer in a child reply thread automatically; the `thread-create` and `thread-reply` message-tool actions remain available for manual tool use.
+- In Auto, when someone asks for a thread the agent calls `thread-create` on their message and the rest of its answer goes there.
 - Parent typing stops before reply-thread handoff; subsequent typing, presence, and answers stay in the child. If required creation cannot be confirmed, Inline reports a short error in the parent without generating the answer there.
-- Reply threads can be created from both DM and group parent chats. A first-level DM child keeps direct-message access policy and no-mention behavior even though Inline encodes the child as a chat. Session isolation follows OpenClaw’s `session.dmScope`; use `per-channel-peer` for separate sender transcripts. The host default `main` shares DM transcripts and is unsuitable when an untrusted participant can join a DM child.
+- Reply threads can be created from both DM and group parent chats. A first-level DM child stays that DM for its person: direct-message access policy and no mention needed, even though Inline encodes the child as a chat. Anyone else added to it keeps group rules and their own session. Session isolation follows OpenClaw’s `session.dmScope`; use `per-channel-peer` for separate sender transcripts. The host default `main` shares DM transcripts and is unsuitable when an untrusted participant can join a DM child.
 - A message tool that creates a reply thread during a response moves subsequent visible typing, presence, and delivery to that child. The OpenClaw run and transcript keep the session in which the turn started; the next child message opens the child session. The adapter leaves final suppression to OpenClaw and does not discard a final merely because a tool sent something. Host dedupe varies by action, text, route, and streaming path; identical tool/final output can still repeat, and host streaming suppression can hide distinct text. No OpenClaw internals are patched. Any commentary already sent before creation remains in the parent.
 - Saved thread routes are scoped to the parent message. A missing current-message route never selects an unrelated active thread, and an agent without its own active route cannot inherit another agent's route.
 - Anchored creation reuses the server's existing child only for the same parent-message anchor. Inside a child, unanchored creation reuses that child; an explicit child-local anchor can create a nested Inline reply thread. Nested creation is a durable destination operation and does not move the current generated turn, so send nested content with `thread-reply` using the returned child id. This adapter only guarantees root-DM policy/session projection for first-level DM reply children; nested DM children remain an explicit advanced path.
@@ -341,7 +352,7 @@ Inline reply-thread semantics:
 - During parent-to-child handoff, the exact source parent reply reference is stripped from stale-parent/implicit sends. Other references explicitly targeting the parent are rejected. Omitted destinations inherit the child, and explicitly targeted child-local numeric IDs are preserved even if they equal the parent's source ID. Numeric IDs alone cannot prove which chat an arbitrary reference came from.
 - A mentioned Inline Agent specialization is retained with the saved reply-thread route, so later child follow-ups normally do not require another Agent mention. If local route state expires or is lost, mention the Agent again.
 - Parent DM history is omitted for participants added only to its child. `inline_parent_context` also validates the trusted Inline requester against the actual parent DM peer, including explicit parent overrides. Group history and non-Inline operator tool access keep their existing bot-token access contract.
-- Per-DM reply mode and parent-history limits are honored. The existing `/threadreply` command is group-only; configure DMs through Agent Settings or config.
+- Per-DM reply mode and parent-history limits are honored.
 - Inline current-message media is attached like native channels. Reply-thread anchor media is summarized as context and is not promoted to current-message media on every child-thread turn.
 
 You can gate action groups from config:
@@ -380,6 +391,11 @@ The plugin also registers dedicated tools outside the `message` action surface.
 - Reports the `followMode` read back from Inline (`following`, `unfollowed`, or `default`) and fails when the readback does not match
 - The running monitor refetches that chat before its next routing decision
 
+`inline_reply_threads` reads or changes whether answers in the current chat go in reply threads, DMs included.
+
+- Actions: `status`, `auto`, `on`, `reset`; applies to the current chat, or the chat a reply thread hangs off
+- Reading is open; changing needs the OpenClaw owner. Anyone else authorized can use `/threads`
+
 `inline_parent_context` fetches more parent-chat history for the current Inline reply-thread session when the automatic context window is not enough.
 
 - Defaults to the current reply thread when invoked from one
@@ -414,10 +430,10 @@ Bot command sync:
 
 - On `gateway_start` and OpenClaw's `skill_changed` event, the plugin republishes bot commands and installed skills for each enabled/configured Inline account.
 - Default commands include the same user-facing command set as bundled chat providers (for example: `/status`, `/model`, `/exec`, `/usage`, etc.).
-- Inline also registers `/threadreply` to manage this group's reply-thread mode, `/follow` and `/unfollow` for explicit dialog relevance, `/inline_sync` for a manual catalog refresh, `/inline_version` for safe runtime/install information, and owner-only `/inline_update` for tracked plugin updates.
-- Inline accepts `/command@botusername` when the suffix matches the active bot and ignores commands targeted at another bot, including in followed threads. A command the app attached to a bot (its leading command entity names that bot) is treated the same way: another bot's command is ignored, including `/stop`, and a command for this bot wakes it like a mention.
+- Inline also registers `/threads` to manage this chat's reply threads, `/follow` and `/unfollow` for explicit dialog relevance, `/inline_sync` for a manual catalog refresh, `/inline_version` for safe runtime/install information, and owner-only `/inline_update` for tracked plugin updates.
+- Inline accepts `/command@botusername` when the suffix matches the active bot and ignores commands targeted at another bot, including in followed threads. A command the app attached to a bot (its leading command entity names that bot) is treated the same way: another bot's command is ignored, including `/stop`, and a command for this bot wakes it like a mention. A command several bots offer, typed without a name, goes to the bot you replied to or the one bot following the chat, else nobody.
 - The plugin uses OpenClaw's command, skill command, and plugin command registries when available.
-- Inline-owned `/follow`, `/unfollow`, `/threadreply`, `/inline_update`, `/inline_sync`, and `/inline_version` entries are preserved when a larger host command set is truncated to the Bot API's 100-command limit or retried after `BOT_COMMANDS_TOO_MUCH`; catalog sync logs how many entries were omitted.
+- Inline-owned `/follow`, `/unfollow`, `/threads`, `/inline_update`, `/inline_sync`, and `/inline_version` entries are preserved when a larger host command set is truncated to the Bot API's 100-command limit or retried after `BOT_COMMANDS_TOO_MUCH`; catalog sync logs how many entries were omitted.
 - Disable startup sync globally with `commands.native: false`, or per-channel with `channels.inline.commands.native: false`. Disabled startup sync clears existing Inline bot commands for the affected account.
 - Disable skill command inclusion with `commands.nativeSkills: false`, or per-channel with `channels.inline.commands.nativeSkills: false`.
 

@@ -36,7 +36,7 @@ const INLINE_NATIVE_COMMAND_PROVIDER = "inline"
 const INLINE_REQUIRED_COMMAND_NAMES = new Set([
   "follow",
   "unfollow",
-  "threadreply",
+  "threads",
   "inline_update",
   "inline_sync",
   "inline_version",

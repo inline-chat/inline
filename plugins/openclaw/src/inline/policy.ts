@@ -7,7 +7,7 @@ type InlineToolPolicy = Record<string, unknown>
 
 type InlineGroupConfig = {
   requireMention?: boolean | undefined
-  replyThreadMode?: InlineReplyThreadMode | undefined
+  replyThreadMode?: string | undefined
   replyThreadAutoCreateMinMessages?: number | undefined
   replyThreadRequireExplicitMention?: boolean | undefined
   replyThreadParentHistoryLimit?: number | undefined
@@ -145,16 +145,33 @@ export function resolveInlineGroupRequireMention(params: {
   return params.requireMentionDefault
 }
 
+export function normalizeInlineReplyThreadMode(raw: unknown): InlineReplyThreadMode {
+  return raw === "on" || raw === "thread" ? "on" : "auto"
+}
+
+// On is set per chat only, DMs included. A bot-wide On would turn the first
+// message of every new chat into a thread, so account, channel and "*" values
+// are ignored; see inlineBotWideReplyThreadOnKeys for the startup warning.
 export function resolveInlineGroupReplyThreadMode(params: {
   cfg: OpenClawConfig
   accountId: string | null | undefined
   groupId: string | null | undefined
-  defaultMode: InlineReplyThreadMode
 }): InlineReplyThreadMode {
+  const groupId = params.groupId?.trim()
+  if (!groupId || groupId === "*") return "auto"
   const groups = resolveInlineGroups(params.cfg, params.accountId)
-  const groupConfig = resolveGroupConfig(groups, params.groupId)
-  const defaultConfig = groups?.["*"]
-  return groupConfig?.replyThreadMode ?? defaultConfig?.replyThreadMode ?? params.defaultMode
+  return normalizeInlineReplyThreadMode(resolveGroupConfig(groups, groupId)?.replyThreadMode)
+}
+
+export function inlineBotWideReplyThreadOnKeys(config: {
+  replyThreadMode?: unknown
+  groups?: Record<string, { replyThreadMode?: unknown } | undefined> | undefined
+}): string[] {
+  const isOn = (raw: unknown) => normalizeInlineReplyThreadMode(raw) === "on"
+  return [
+    ...(isOn(config.replyThreadMode) ? ["replyThreadMode"] : []),
+    ...(isOn(config.groups?.["*"]?.replyThreadMode) ? ['groups."*".replyThreadMode'] : []),
+  ]
 }
 
 export function resolveInlineGroupReplyThreadRequireExplicitMention(params: {

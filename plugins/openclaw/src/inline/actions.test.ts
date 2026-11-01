@@ -4764,14 +4764,6 @@ describe("inline/actions", () => {
           replyToMsgId: 700n,
         }),
       )
-      expect(register).toHaveBeenCalledWith(
-        "default:70:770",
-        expect.objectContaining({
-          agentId: "main",
-          repliedAt: expect.any(Number),
-        }),
-        { ttlMs: 86_400_000 },
-      )
       expect(result).toMatchObject({
         details: {
           ok: true,
@@ -4786,7 +4778,7 @@ describe("inline/actions", () => {
     }
   })
 
-  it("records participation for explicit threadId replies when route metadata exists", async () => {
+  it("replies through an explicit threadId when route metadata exists", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
@@ -4876,14 +4868,6 @@ describe("inline/actions", () => {
           chatId: 780n,
           text: "reply through explicit thread id",
         }),
-      )
-      expect(register).toHaveBeenCalledWith(
-        "default:70:780",
-        expect.objectContaining({
-          agentId: "main",
-          repliedAt: expect.any(Number),
-        }),
-        { ttlMs: 86_400_000 },
       )
       expect(result).toMatchObject({
         details: {

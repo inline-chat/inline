@@ -73,6 +73,7 @@ describe("plugin manifest", () => {
         "inline_bot_presence",
         "inline_parent_context",
         "inline_follow",
+        "inline_reply_threads",
       ]),
     )
     expect(json.channelEnvVars).toBeUndefined()
@@ -203,7 +204,7 @@ describe("plugin manifest", () => {
     })
     expect(schema?.properties?.replyThreadMode).toEqual({
       type: "string",
-      enum: ["auto", "thread", "main"],
+      enum: ["auto", "on", "thread", "main"],
     })
     expect(schema?.properties?.replyThreadAutoCreateMinMessages).toEqual({
       type: "integer",
@@ -220,7 +221,7 @@ describe("plugin manifest", () => {
       "Defaults to 10",
     )
     expect(json.channelConfigs?.inline?.uiHints?.replyThreadMode?.help).toContain(
-      '"auto" creates a child reply thread only when the user explicitly asks for one',
+      '"auto" answers in the chat and starts a thread when someone asks',
     )
     expect(json.channelConfigs?.inline?.uiHints?.replyThreadAutoCreateMinMessages?.help).toContain(
       "this value is ignored",
