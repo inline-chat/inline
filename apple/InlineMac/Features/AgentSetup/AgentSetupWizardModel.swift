@@ -1,5 +1,6 @@
 import Foundation
 import InlineCLIInstaller
+import InlineKit
 import Logger
 import Observation
 
@@ -345,6 +346,7 @@ final class AgentSetupWizardModel {
         completeRemainingSetupProgress(with: setupResult)
         result = setupResult
         phase = .completed
+        NotificationCenter.default.post(name: .botAgentsChanged, object: setupResult.bot.id)
         let readinessCode = setupResult.readiness?.code ?? "none"
         log.info(
           "AGENT_SETUP phase=setup_complete target=\(target.id) status=\(setupResult.status) serviceReady=\(setupResult.service.ready) readinessCode=\(readinessCode)"

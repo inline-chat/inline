@@ -230,6 +230,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   private var mentionedAgentTargets: [AllChatsAgentMentionTarget] = []
   private var lastMentionedAgentChoiceID: String?
   private var observedAgentChoiceID: String?
+  private var reloadAgentChoicesAfterLoad = false
   private var agentCatalogTask: Task<Void, Never>?
   private var cancellables = Set<AnyCancellable>()
 
@@ -435,10 +436,20 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   }
 
   func loadAgentChoices() async {
-    guard !isLoadingAgentChoices else { return }
+    guard !isLoadingAgentChoices else {
+      // The in-flight response may predate the change that requested this load.
+      reloadAgentChoicesAfterLoad = true
+      return
+    }
     isLoadingAgentChoices = true
     agentChoicesLoadFailed = false
-    defer { isLoadingAgentChoices = false }
+    defer {
+      isLoadingAgentChoices = false
+      if reloadAgentChoicesAfterLoad {
+        reloadAgentChoicesAfterLoad = false
+        Task { [weak self] in await self?.loadAgentChoices() }
+      }
+    }
     do {
       let result = try await dependencies.realtimeV2.send(.listBots())
       guard case let .listBots(response) = result else { return }
@@ -454,12 +465,17 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         }
       }
       agentChoices = choices
-      mentionSource.setAgents(choices.compactMap { choice in
-        guard let agent = choice.agent else { return nil }
-        let userInfo = ObjectCache.shared.getCachedUser(id: choice.bot.id)
-          ?? UserInfo(user: InlineKit.User(from: choice.bot))
-        return MentionableBotAgent(agent: agent, botUserInfo: userInfo)
-      })
+      let botUserInfos = response.bots.map { bot in
+        ObjectCache.shared.getCachedUser(id: bot.id) ?? UserInfo(user: InlineKit.User(from: bot))
+      }
+      let botUserInfosByID = Dictionary(uniqueKeysWithValues: botUserInfos.map { ($0.id, $0) })
+      mentionSource.setAgents(
+        choices.compactMap { choice in
+          guard let agent = choice.agent, let userInfo = botUserInfosByID[choice.bot.id] else { return nil }
+          return MentionableBotAgent(agent: agent, botUserInfo: userInfo)
+        },
+        ownedBots: botUserInfos
+      )
       applyFirstAgentMentionIfNeeded()
       updateVisibilityTooltip()
     } catch {

@@ -5,6 +5,7 @@ import Observation
 public enum MentionCompletionSource: Int, Sendable {
   case participant
   case spaceMember
+  case ownedBot
   case directChat
 }
 
@@ -62,6 +63,15 @@ public struct MentionCompletionCandidates: Equatable, Sendable {
     self.users = users
     self.groups = groups
     self.agents = agents
+  }
+
+  /// A bot the user just set up has an empty DM, so direct chat history can't surface it yet.
+  public func addingOwnedBots(_ bots: [UserInfo]) -> Self {
+    var candidates = self
+    candidates.users = MentionCompletionUser.mergingDuplicates(
+      users + bots.map { MentionCompletionUser(userInfo: $0, source: .ownedBot) }
+    )
+    return candidates
   }
 }
 

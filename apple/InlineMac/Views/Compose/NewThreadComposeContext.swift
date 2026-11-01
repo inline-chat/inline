@@ -179,6 +179,7 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
   private let updates: CurrentValueSubject<MentionCompletionCandidates, Never>
   private var destination: NewThreadComposeDestination
   private var agents: [MentionableBotAgent] = []
+  private var ownedBots: [UserInfo] = []
   private var cancellable: AnyCancellable?
 
   var candidates: MentionCompletionCandidates {
@@ -211,14 +212,17 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
     await viewModel.refresh()
   }
 
-  func setAgents(_ agents: [MentionableBotAgent]) {
+  func setAgents(_ agents: [MentionableBotAgent], ownedBots: [UserInfo]) {
     self.agents = agents
+    self.ownedBots = ownedBots
     updates.send(candidates)
   }
 
   private func merged(_ candidates: MentionCompletionCandidates) -> MentionCompletionCandidates {
     var candidates = candidates
     if destination.spaceID == nil {
+      // Private space threads only accept members, so owned bots are Home-only.
+      candidates = candidates.addingOwnedBots(ownedBots)
       candidates.agents = agents
     } else {
       let spaceMemberIDs = Set(candidates.users.lazy

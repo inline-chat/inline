@@ -79,6 +79,38 @@ struct MentionCompletionCandidatesTests {
     #expect(ranker.items.map(\.id) == ["user:902", "user:901"])
   }
 
+  @Test("an owned bot with an empty DM is listed at bare at and when searched")
+  func ownedBotWithoutHistory() async throws {
+    let database = AppDatabase.empty()
+    let home = try await database.dbWriter.write { db in
+      try Self.seed(db)
+      return try ChatParticipantsWithMembersViewModel.newThreadMentionCandidates(db, spaceID: nil)
+    }
+    // 904 has an opened but empty DM, as a bot does right after setup.
+    #expect(!home.users.contains { $0.userInfo.id == 904 })
+
+    let bot = UserInfo(user: User(id: 904, email: nil, firstName: "No History"))
+    let ranker = MentionCompletionViewModel(currentUserId: { nil })
+    ranker.updateCandidates(home.addingOwnedBots([bot]))
+    #expect(ranker.items.map(\.id) == ["user:904"])
+    ranker.filter(with: "no h")
+    #expect(ranker.items.map(\.id) == ["user:904"])
+  }
+
+  @Test("an owned bot with DM history stays unique and keeps its chat priority")
+  func ownedBotWithHistory() throws {
+    let bot = UserInfo(user: User(id: 950, email: nil, firstName: "Claude"))
+    let candidates = MentionCompletionCandidates(
+      users: [MentionCompletionUser(userInfo: bot, source: .directChat, lastMsgId: 30, isPinned: true)],
+      groups: []
+    ).addingOwnedBots([bot])
+    #expect(candidates.users.count == 1)
+    let user = try #require(candidates.users.first)
+    #expect(user.source == .ownedBot)
+    #expect(user.lastMsgId == 30)
+    #expect(user.isPinned)
+  }
+
   @Test("the existing observation refreshes pin and message signals")
   func liveChatPriorityUpdates() async throws {
     let database = AppDatabase.empty()
