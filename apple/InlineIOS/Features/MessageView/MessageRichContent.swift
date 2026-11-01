@@ -8,6 +8,7 @@ import struct InlineProtocol.BlockList
 import struct InlineProtocol.BlockTable
 import struct InlineProtocol.BlockText
 import struct InlineProtocol.MessageEntity
+import TextProcessing
 import UIKit
 
 /// Turns a message's block content, or code fences in plain text, into the layout package's
@@ -187,7 +188,7 @@ struct MessageRichContent {
         guard !album.images.isEmpty else { return nil }
         return .album(album.images.enumerated().map { richImage($1, path: path.appending($0)) })
       case let .disclosure(disclosure)?:
-        guard disclosure.hasSummary, let summary = slice(disclosure.summary, color: style.secondaryColor),
+        guard disclosure.hasSummary, let summary = slice(disclosure.summary, color: style.secondaryColor, removesLinks: true),
               let children = blocks(disclosure.children, path: path)
         else { return nil }
         let activity = disclosure.activityKind
@@ -258,13 +259,14 @@ struct MessageRichContent {
     }
 
     /// The block's text from the body, with its font replaced or its color changed for a role.
-    func slice(_ text: BlockText, font: UIFont? = nil, color: UIColor? = nil) -> MessageText? {
+    func slice(_ text: BlockText, font: UIFont? = nil, color: UIColor? = nil, removesLinks: Bool = false) -> MessageText? {
       guard let range = range(text) else { return nil }
       let value = NSMutableAttributedString(attributedString: body.attributedSubstring(from: range))
+      if removesLinks { LinkDetector.shared.removeLinks(from: value) }
       let full = NSRange(location: 0, length: value.length)
       if let font { value.addAttribute(.font, value: font, range: full) }
       if let color { value.addAttribute(.foregroundColor, value: color, range: full) }
-      return font == nil && color == nil ? MessageText(value) : ready(value)
+      return font == nil && color == nil && !removesLinks ? MessageText(value) : ready(value)
     }
 
     func styled(_ string: String) -> MessageText {

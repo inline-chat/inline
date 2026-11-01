@@ -3097,7 +3097,7 @@ class MessageViewAppKit: NSView {
       styleKey: renderCacheStyleKey
     ) {
       attributedString = cached
-      detectedLinks = LinkDetector.shared.detectLinks(in: text).map { (range: $0.range, url: $0.url) }
+      detectedLinks = LinkDetector.shared.detectLinks(in: cached).map { (range: $0.range, url: $0.url) }
     } else {
       let codeBlockBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.05)
       let inlineCodeBackgroundColor = usesOutgoingBubbleStyle ? nil : textColor.withAlphaComponent(0.06)
