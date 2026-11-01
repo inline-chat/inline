@@ -884,7 +884,17 @@ fn redact_absolute_local_path(token: &str) -> String {
                     name.starts_with(|c: char| c.is_ascii_alphabetic())
                         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
                 });
-            ((character == '/' && boundary_before(index) && !closing_tag)
+            // A backticked single word such as `/login` is a slash command.
+            // Paths such as `/Users` and `/tmp/private` still fail this check.
+            let slash_command = character == '/'
+                && token[..index].ends_with('`')
+                && suffix[1..].split_once('`').is_some_and(|(name, _)| {
+                    name.starts_with(|c: char| c.is_ascii_lowercase())
+                        && name
+                            .chars()
+                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                });
+            ((character == '/' && boundary_before(index) && !closing_tag && !slash_command)
                 || (character == '~' && suffix.starts_with("~/") && boundary_before(index))
                 || (character.is_ascii_alphabetic()
                     && suffix
@@ -1261,6 +1271,24 @@ mod tests {
             sanitize_diagnostic_text("No token found").as_deref(),
             Some("No token found")
         );
+    }
+
+    #[test]
+    fn diagnostics_keep_backticked_slash_commands_but_redact_paths() {
+        let message = "Claude is not authenticated; run `claude` and `/login`, then retry";
+        assert_eq!(sanitize_diagnostic_text(message).as_deref(), Some(message));
+
+        for path in [
+            "`/Users`",
+            "`/Users/alice`",
+            "`/tmp/private`,",
+            "`/login/private`",
+            "`/private.txt`",
+            "/login",
+        ] {
+            let redacted = sanitize_diagnostic_text(path).expect("nonempty redacted text");
+            assert!(redacted.contains("[local-path]"), "{path}: {redacted}");
+        }
     }
 
     #[test]
