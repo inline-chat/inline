@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest"
 import { appleAppSiteAssociation, chatShortcutDeepLink, chatShortcutResponse } from "./chatShortcut"
 
 describe("appleAppSiteAssociation", () => {
-  it("claims only chat links for the production iOS app", () => {
+  it("claims chat, space and invite links for the production iOS app", () => {
     expect(appleAppSiteAssociation.applinks.details).toEqual([
       {
         appIDs: ["2487AN8AL4.chat.inline.InlineIOS"],
-        components: [{ "/": "/c/?*" }],
+        components: [{ "/": "/c/?*" }, { "/": "/s/?*" }, { "/": "/invite/?*" }],
       },
     ])
   })
@@ -51,6 +51,7 @@ describe("chatShortcutResponse", () => {
     const body = await response.text()
     expect(body).toContain('content="0;url=in://chat/123456"')
     expect(body).toContain('href="in://chat/123456"')
+    expect(body).toContain('href="/docs/downloads"')
     expect(body.match(/123456/g)).toHaveLength(2)
   })
 

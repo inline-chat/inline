@@ -58,7 +58,7 @@ The output is `inline://chat/123/message/456`. Verify a real link with an accoun
 
 The app's link generator has no HTTPS form for an individual user or message. Use the corresponding app link; do not invent a message suffix for `/c/{chatId}`.
 
-On iOS, conversation links are universal links: with Inline installed, they open the conversation directly. On macOS and in browsers, the page redirects to the app link. Inside the macOS and iOS apps, these links open the conversation without leaving the app.
+On iOS, these are universal links: with Inline installed, they open the destination directly. On macOS and in browsers, the page links to the app and offers a download. Inside the macOS and iOS apps, they open without leaving the app.
 
 ## Accepted Aliases
 

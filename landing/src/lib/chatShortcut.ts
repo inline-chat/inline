@@ -13,7 +13,7 @@ export const appleAppSiteAssociation = {
     details: [
       {
         appIDs: ["2487AN8AL4.chat.inline.InlineIOS"],
-        components: [{ "/": "/c/?*" }],
+        components: [{ "/": "/c/?*" }, { "/": "/s/?*" }, { "/": "/invite/?*" }],
       },
     ],
   },
@@ -39,7 +39,7 @@ export function chatShortcutResponse(chatId: string, includeBody = true): Respon
   }
 
   const body = includeBody
-    ? `<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex,nofollow,noarchive,nosnippet"><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=${deepLink}"><title>Open in Inline</title><a href="${deepLink}">Open in Inline</a>`
+    ? `<!doctype html><meta charset="utf-8"><meta name="robots" content="noindex,nofollow,noarchive,nosnippet"><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=${deepLink}"><title>Open in Inline</title><p><a href="${deepLink}">Open in Inline</a></p><p><a href="/docs/downloads">Get Inline</a></p>`
     : null
 
   return new Response(body, { headers: RESPONSE_HEADERS })

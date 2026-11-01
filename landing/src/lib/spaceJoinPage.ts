@@ -105,7 +105,8 @@ const document = ({
 body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px;box-sizing:border-box}
 main{text-align:center;max-width:560px}h1{font-size:clamp(28px,6vw,48px);letter-spacing:-.035em;line-height:1.08;margin:0 0 28px}
 a{display:inline-block;background:#171717;color:#fff;text-decoration:none;font-weight:650;padding:13px 20px;border-radius:12px}
-@media(prefers-color-scheme:dark){:root{background:#111;color:#f7f7f5}a{background:#f7f7f5;color:#171717}}
+p{margin:20px 0 0}p a{background:none;color:inherit;font-weight:500;padding:0;text-decoration:underline}
+@media(prefers-color-scheme:dark){:root{background:#111;color:#f7f7f5}a{background:#f7f7f5;color:#171717}p a{background:none;color:inherit}}
 </style>
 </head>
 <body>${body}</body>
@@ -133,7 +134,7 @@ export const spaceJoinPageResponse = async (
   const title = `Join ${name} on Inline`
   const description = `You’re invited to join ${name} on Inline.`
   const deepLink = spaceJoinDeepLink(reference)
-  const body = `<main><h1>${escapeHtml(title)}</h1><a href="${escapeHtml(deepLink)}">Open Inline</a></main>`
+  const body = `<main><h1>${escapeHtml(title)}</h1><a href="${escapeHtml(deepLink)}">Open Inline</a><p><a href="/docs/downloads">Get Inline</a></p></main>`
   return new Response(includeBody ? document({ body, description, title }) : null, {
     headers: responseHeaders,
   })
