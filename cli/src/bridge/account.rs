@@ -322,7 +322,7 @@ pub(super) fn load_account_at(
     paths: BridgePaths,
 ) -> Result<LoadedAccount, Box<dyn std::error::Error>> {
     let (account, secrets) = load_account_files(&paths)?;
-    validate_account(&account, &secrets)?;
+    validate_account_allowing_signed_out(&account, &secrets)?;
     Ok(LoadedAccount {
         paths,
         account,
@@ -534,6 +534,17 @@ pub(super) fn validate_account(
     account: &AccountBridgeConfig,
     secrets: &AccountBridgeSecrets,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    validate_account_allowing_signed_out(account, secrets)?;
+    owner_credential(secrets)?;
+    Ok(())
+}
+
+/// A revoked owner sign-in is cleared from the secrets. That account must stay
+/// loadable, or neither bridge commands nor `inline login` could repair it.
+pub(super) fn validate_account_allowing_signed_out(
+    account: &AccountBridgeConfig,
+    secrets: &AccountBridgeSecrets,
+) -> Result<(), Box<dyn std::error::Error>> {
     if account.version != ACCOUNT_CONFIG_VERSION
         || account.owner_user_id <= 0
         || account.api_base_url.trim().is_empty()
@@ -556,7 +567,9 @@ pub(super) fn validate_account(
         )
         .into());
     }
-    owner_credential(secrets)?;
+    if !owner_signed_out(secrets) {
+        owner_credential(secrets)?;
+    }
     let mut retired_labels = HashSet::new();
     if account.superseded_service_labels.iter().any(|label| {
         !is_safe_identifier(label)
@@ -652,6 +665,10 @@ pub(super) fn validate_account(
         .into());
     }
     Ok(())
+}
+
+pub(super) fn owner_signed_out(secrets: &AccountBridgeSecrets) -> bool {
+    secrets.owner_auth.is_none() && secrets.owner_token.trim().is_empty()
 }
 
 pub(super) fn owner_credential(

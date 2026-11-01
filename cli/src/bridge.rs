@@ -57,6 +57,7 @@ use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::auth::AuthStore;
 use crate::config::Config;
 use crate::errors::{BridgeAlreadyRunning, BridgeSetupRequired, CliError, ReportedCliFailure};
 use crate::identity::connect_realtime;
@@ -676,7 +677,7 @@ async fn run_owned_service(
             error,
         )
     })?;
-    validate_account(&account, &secrets).map_err(|error| {
+    validate_account_allowing_signed_out(&account, &secrets).map_err(|error| {
         service_setup_required("account_invalid", "the bridge account is incomplete", error)
     })?;
     let runtime_config = account_runtime_config(&paths, &account);
@@ -1406,10 +1407,12 @@ fn select_workspace_provider<'a>(
 
 pub async fn start(
     config: &Config,
+    auth_store: &AuthStore,
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let loaded = load_installation(config)?;
+    let mut loaded = load_installation(config)?;
+    restore_owner_sign_in(config, auth_store, &mut loaded).await?;
     service::start_service(&loaded.paths, &loaded.account, &loaded.secrets).await?;
     service::wait_for_all_providers_ready(&loaded.paths, &loaded.account, &loaded.secrets).await?;
     let results = provider_statuses(&loaded).await;
@@ -1458,10 +1461,12 @@ pub fn rollback(
 
 pub async fn restart(
     config: &Config,
+    auth_store: &AuthStore,
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let loaded = load_installation(config)?;
+    let mut loaded = load_installation(config)?;
+    restore_owner_sign_in(config, auth_store, &mut loaded).await?;
     // A manual archive install may have updated only the invoking CLI. An
     // explicit restart must also run that binary in the installed service.
     service::restart_service(&loaded.paths, &loaded.account, &loaded.secrets).await?;
@@ -1486,6 +1491,59 @@ pub async fn refresh(
             "Bridge supervisor: {status}. Busy bridges are left running; retry after work finishes."
         );
     }
+    Ok(())
+}
+
+/// Gives the bridge this sign-in when it belongs to the bridge's owner.
+/// Returns the persisted secrets, or `None` for a different account.
+async fn adopt_owner_sign_in(
+    config: &Config,
+    owner_auth: AuthCredential,
+    loaded: &LoadedAccount,
+) -> Result<Option<AccountBridgeSecrets>, Box<dyn std::error::Error>> {
+    let mut owner = crate::owner_session::OwnerSession::connect(config, owner_auth).await?;
+    let me = owner
+        .call(proto::GetMeInput {})
+        .await?
+        .user
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "GetMe returned no user"))?;
+    if me.id != loaded.account.owner_user_id {
+        return Ok(None);
+    }
+    let credential = owner.credential()?;
+    let _account_mutation_lock = acquire_account_mutation_lock(&loaded.paths)?;
+    let mut secrets: AccountBridgeSecrets = read_required_json(&loaded.paths.secrets)?;
+    secrets.version = ACCOUNT_SECRETS_VERSION;
+    secrets.owner_auth = Some(credential);
+    secrets.owner_token.clear();
+    validate_account(&loaded.account, &secrets)?;
+    write_private_json(&loaded.paths.secrets, &secrets)?;
+    Ok(Some(secrets))
+}
+
+/// Starting a signed-out bridge could only stop again, so repair it from the
+/// CLI's sign-in first, or say what to run.
+async fn restore_owner_sign_in(
+    config: &Config,
+    auth_store: &AuthStore,
+    loaded: &mut LoadedAccount,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !owner_signed_out(&loaded.secrets) {
+        return Ok(());
+    }
+    let restored = match crate::owner_session::resolve_owner_credential(auth_store)? {
+        Some(owner_auth) => adopt_owner_sign_in(config, owner_auth, loaded).await?,
+        None => None,
+    };
+    loaded.secrets = restored.ok_or_else(|| {
+        BridgeSetupRequired::new(
+            "owner_credential_missing",
+            format!(
+                "this bridge lost its Inline sign-in; run `inline login` as user {}",
+                loaded.account.owner_user_id
+            ),
+        )
+    })?;
     Ok(())
 }
 
@@ -1531,24 +1589,12 @@ pub(crate) async fn heal_after_login(
             LoginHeal::Restart => false,
             LoginHeal::RefreshOwnerSignIn => true,
         };
-    if owner_sign_in_needed {
-        let mut owner = crate::owner_session::OwnerSession::connect(config, owner_auth).await?;
-        let me = owner
-            .call(proto::GetMeInput {})
+    if owner_sign_in_needed
+        && adopt_owner_sign_in(config, owner_auth, &loaded)
             .await?
-            .user
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "GetMe returned no user"))?;
-        if me.id != loaded.account.owner_user_id {
-            return Ok(None);
-        }
-        let credential = owner.credential()?;
-        let _account_mutation_lock = acquire_account_mutation_lock(&loaded.paths)?;
-        let mut secrets: AccountBridgeSecrets = read_required_json(&loaded.paths.secrets)?;
-        secrets.version = ACCOUNT_SECRETS_VERSION;
-        secrets.owner_auth = Some(credential);
-        secrets.owner_token.clear();
-        validate_account(&loaded.account, &secrets)?;
-        write_private_json(&loaded.paths.secrets, &secrets)?;
+            .is_none()
+    {
+        return Ok(None);
     }
     if !service::kick_service(&loaded.paths, &loaded.account, &loaded.secrets).await? {
         return Ok(None);

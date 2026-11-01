@@ -2941,13 +2941,13 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     bridge::status(&config, cli.json, json_format).await?;
                 }
                 BridgeCommand::Start => {
-                    bridge::start(&config, cli.json, json_format).await?;
+                    bridge::start(&config, &auth_store, cli.json, json_format).await?;
                 }
                 BridgeCommand::Stop => {
                     bridge::stop(&config, cli.json, json_format).await?;
                 }
                 BridgeCommand::Restart => {
-                    bridge::restart(&config, cli.json, json_format).await?;
+                    bridge::restart(&config, &auth_store, cli.json, json_format).await?;
                 }
                 BridgeCommand::Refresh => {
                     bridge::refresh(&config, cli.json, json_format).await?;

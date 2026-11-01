@@ -367,6 +367,17 @@ fn revoked_bridge_owner_authority_is_cleared_without_touching_bot_credentials() 
     );
     assert!(owner_credential(&persisted).is_err());
     validate_account_for_setup(&account, &persisted).expect("setup can repair owner authority");
+    assert!(owner_signed_out(&persisted));
+    validate_account_allowing_signed_out(&account, &persisted)
+        .expect("a signed-out account stays loadable so login can repair it");
+    assert!(validate_account(&account, &persisted).is_err());
+
+    let mut conflicting = persisted.clone();
+    conflicting.owner_token = "legacy-owner".to_string();
+    conflicting.owner_auth = Some(AuthCredential::AccessToken {
+        token: AuthToken::try_new("current-owner").unwrap(),
+    });
+    assert!(validate_account_allowing_signed_out(&account, &conflicting).is_err());
 
     let replacement = AuthCredential::AccessToken {
         token: AuthToken::try_new("replacement-owner").unwrap(),
