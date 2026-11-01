@@ -2745,6 +2745,9 @@ class InlineAdapter(BasePlatformAdapter):
             not edit
             and not agent_action
             and not thread_id
+            # A bot's message is answered in place even in a chat set to On: it wakes on
+            # replies in the chat it asked from, and a thread would never reach it.
+            and sender_profile.get("bot") is not True
             and self._should_create_reply_thread_for_message(chat_id=chat_id, parent_chat_id=parent_chat_id)
         ):
             created_thread_id = await self._create_reply_thread(chat_id, msg_id, text, reply_to_id)

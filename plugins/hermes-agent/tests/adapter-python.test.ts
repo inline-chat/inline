@@ -3117,6 +3117,9 @@ async def assert_multi_bot_rules():
     await opener._dispatch_message(message(334, "prepare the launch"))
     request = opener_events[0]
     assert (request.source.chat_id, request.source.thread_id, request.message_id) == ("77", "77", "m-334")
+    # A bot's request is answered in place even in a chat set to On, or the answer never reaches it.
+    await opener._dispatch_message(message(335, "@scout check this", sender="500", bot=True, entities=[mention("999", 0, 6)], mentioned=True))
+    assert opener_events[-1].source.thread_id is None
     restarted_thread = InlineAdapter(PlatformConfig(extra=trusted_extra))
     lookups, sent = [], []
     async def thread_info(chat_id, **kwargs):
