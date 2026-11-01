@@ -102,7 +102,7 @@ enum ChatMenuActions {
   static func copyLink(for peer: Peer) {
     let url: URL? = switch peer {
     case let .user(id): InlineDeepLink.user(id: id).url
-    case let .thread(id): InlineDeepLink.chat(id: id).url
+    case let .thread(id): InlineDeepLink.chat(id: id).webURL
     }
 
     guard let url else {
