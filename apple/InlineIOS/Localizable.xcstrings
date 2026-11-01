@@ -685,6 +685,9 @@
     "Copy code: %@" : {
       "comment" : "VoiceOver action for labeled inline code"
     },
+    "Copy Deep Link" : {
+
+    },
     "Copy email" : {
       "comment" : "VoiceOver action for an email address"
     },

@@ -986,6 +986,11 @@ private struct ChatToolbarMoreMenu: View {
       }
       .disabled(chat?.id == nil)
 
+      Button("Copy Deep Link", systemImage: "arrow.up.forward.app") {
+        copyDeepLink()
+      }
+      .disabled(chat?.id == nil)
+
       if peer.isThread {
         Button("Copy as Markdown", systemImage: "doc.on.doc") {
           prepareTranscript()
@@ -1094,6 +1099,23 @@ private struct ChatToolbarMoreMenu: View {
 
     UIPasteboard.general.string = url.absoluteString
     ToastManager.shared.showToast("Copied link", type: .success, systemImage: "link")
+  }
+
+  @MainActor
+  private func copyDeepLink() {
+    guard let chatId = chat?.id,
+          let url = InlineDeepLink.chat(id: chatId).url
+    else {
+      ToastManager.shared.showToast(
+        "Failed to copy link",
+        type: .error,
+        systemImage: "exclamationmark.triangle"
+      )
+      return
+    }
+
+    UIPasteboard.general.string = url.absoluteString
+    ToastManager.shared.showToast("Copied deep link", type: .success, systemImage: "link")
   }
 
   private var notificationSelection: DialogNotificationSettingSelection {
