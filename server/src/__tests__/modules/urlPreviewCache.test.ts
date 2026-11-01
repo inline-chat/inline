@@ -105,6 +105,35 @@ describe("URL preview candidates", () => {
   })
 })
 
+describe("URL preview candidates in disclosures", () => {
+  it("skips URLs inside disclosures, including nested ones", async () => {
+    const parsed = await processOutgoingText({
+      text: [
+        "see https://outside.example/docs",
+        "",
+        '<details open>',
+        '<summary kind="progress">Fetching https://summary.example/a</summary>',
+        "",
+        "curl https://body.example/b",
+        "",
+        "<details>",
+        "<summary>Nested</summary>",
+        "",
+        "https://nested.example/c",
+        "</details>",
+        "</details>",
+      ].join("\n"),
+      entities: undefined,
+      parseMarkdown: true,
+    })
+
+    expect(parsed.blockContent?.blocks.some((block) => block.kind.oneofKind === "disclosure")).toBe(true)
+    expect(getPreviewRoutesFromMessage(parsed.text, parsed.entities, parsed.blockContent)).toEqual([
+      { kind: "general", url: "https://outside.example/docs" },
+    ])
+  })
+})
+
 describe("URL preview cache", () => {
   setupTestLifecycle()
 

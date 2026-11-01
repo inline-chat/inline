@@ -351,7 +351,9 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   const hasInputUrlPreview = input.messageAttachments?.some((attachment) => attachment.urlPreviewId != null) ?? false
   const previewRoutes =
-    text && !input.skipLinkProcessing && !hasInputUrlPreview ? getPreviewRoutesFromMessage(text, entities) : []
+    text && !input.skipLinkProcessing && !hasInputUrlPreview
+      ? getPreviewRoutesFromMessage(text, entities, parsedBlockContent?.blockContent)
+      : []
   const hasLink = detectHasLink({ entities }) || hasInputUrlPreview || previewRoutes.length > 0
 
   // Encrypt
