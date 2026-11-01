@@ -17,6 +17,7 @@ import {
 } from "@inline-chat/url-preview"
 import {
   MessageEntity_Type,
+  type BlockContent,
   type InputPeer,
   type MessageAttachment,
   type MessageEntities,
@@ -190,10 +191,17 @@ export function getPreviewUrlsFromMessage(text: string, entities?: MessageEntiti
   })
 }
 
-export function getPreviewRoutesFromMessage(text: string, entities?: MessageEntities | null): PreviewRoute[] {
-  return extractPreviewRoutes(previewCandidateText(text, entities), collectEntityUrls(text, entities), {
-    limit: urlPreviewCandidatePolicy.maxUrls,
-  })
+export function getPreviewRoutesFromMessage(
+  text: string,
+  entities?: MessageEntities | null,
+  blockContent?: BlockContent | null,
+): PreviewRoute[] {
+  const disclosures = disclosureTextRanges(blockContent)
+  return extractPreviewRoutes(
+    previewCandidateText(text, entities, disclosures),
+    collectEntityUrls(text, entities, disclosures),
+    { limit: urlPreviewCandidatePolicy.maxUrls },
+  )
 }
 
 /**
@@ -711,7 +719,34 @@ function previewDiagnostics(
   }
 }
 
-function collectEntityUrls(text: string, entities?: MessageEntities | null): string[] {
+type TextRange = { start: number; end: number }
+
+/** Disclosures hold progress and tool output, not links the sender is sharing. */
+function disclosureTextRanges(blockContent?: BlockContent | null): TextRange[] {
+  const ranges: TextRange[] = []
+  const visit = (value: unknown, inDisclosure: boolean): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, inDisclosure)
+      return
+    }
+    if (typeof value !== "object" || value === null || ArrayBuffer.isView(value)) return
+    const fields = value as Record<string, unknown>
+    if (inDisclosure && typeof fields["offset"] === "bigint" && typeof fields["length"] === "bigint") {
+      const start = Number(fields["offset"])
+      ranges.push({ start, end: start + Number(fields["length"]) })
+    }
+    const nested = inDisclosure || fields["oneofKind"] === "disclosure"
+    for (const field of Object.values(fields)) visit(field, nested)
+  }
+  visit(blockContent?.blocks, false)
+  return ranges
+}
+
+function collectEntityUrls(
+  text: string,
+  entities?: MessageEntities | null,
+  excludedRanges: readonly TextRange[] = [],
+): string[] {
   if (!entities?.entities.length) {
     return []
   }
@@ -730,7 +765,13 @@ function collectEntityUrls(text: string, entities?: MessageEntities | null): str
     if (entity.type === MessageEntity_Type.URL) {
       const start = Number(entity.offset)
       const end = start + Number(entity.length)
-      if (Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 0 && end > start) {
+      if (
+        Number.isSafeInteger(start) &&
+        Number.isSafeInteger(end) &&
+        start >= 0 &&
+        end > start &&
+        !excludedRanges.some((range) => start < range.end && range.start < end)
+      ) {
         urls.push(text.slice(start, end))
       }
     }
@@ -739,8 +780,12 @@ function collectEntityUrls(text: string, entities?: MessageEntities | null): str
   return urls
 }
 
-function previewCandidateText(text: string, entities?: MessageEntities | null): string {
-  const ranges = (entities?.entities ?? [])
+function previewCandidateText(
+  text: string,
+  entities?: MessageEntities | null,
+  excludedRanges: readonly TextRange[] = [],
+): string {
+  const entityRanges = (entities?.entities ?? [])
     .filter((entity) => entity.type === MessageEntity_Type.CODE || entity.type === MessageEntity_Type.PRE)
     .flatMap((entity) => {
       const start = Number(entity.offset)
@@ -753,6 +798,7 @@ function previewCandidateText(text: string, entities?: MessageEntities | null): 
         ? [{ start, end: Math.min(end, text.length) }]
         : []
     })
+  const ranges = [...entityRanges, ...excludedRanges]
     .sort((left, right) => left.start - right.start || left.end - right.end)
 
   if (ranges.length === 0) return text
