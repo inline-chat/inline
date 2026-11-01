@@ -1,4 +1,5 @@
 import Foundation
+import InlineKit
 import Logger
 
 #if os(macOS)
@@ -96,8 +97,12 @@ public final class LinkDetector: Sendable {
   /// Bare-domain TLDs to skip to reduce common false positives in chat text.
   /// `.md` is intentionally excluded because markdown file names like `README.md`
   /// are frequently shared and should not be auto-linkified as web domains.
+  /// The same goes for source file names like `lib.rs` and identifiers like `user.id`.
+  /// `.so` stays linkable for `notion.so`.
   private static let excludedBareDomainTLDs: Set<String> = [
     "md",
+    "cc", "ml", "mm", "pl", "pm", "ps", "py", "rs", "sh", "tf",
+    "as", "id",
   ]
 
   // Note: With the introduction of `fullURLRegex`, we no longer need a dedicated whitelisted TLD
@@ -158,6 +163,34 @@ public final class LinkDetector: Sendable {
     return matches
   }
 
+  /// Detects links outside inline code and code blocks.
+  public func detectLinks(in attributedString: NSAttributedString) -> [LinkMatch] {
+    detectLinks(in: attributedString.string).filter { match in
+      var isCode = false
+      attributedString.enumerateAttributes(in: match.range) { attributes, _, stop in
+        if attributes[.inlineCode] != nil || attributes[.preCode] != nil {
+          isCode = true
+          stop.pointee = true
+        }
+      }
+      return !isCode
+    }
+  }
+
+  /// Removes links and their underline, for text that acts as a single control.
+  public func removeLinks(from attributedString: NSMutableAttributedString) {
+    let fullRange = NSRange(location: 0, length: attributedString.length)
+    attributedString.enumerateAttribute(.link, in: fullRange) { link, range, _ in
+      guard link != nil else { return }
+      attributedString.removeAttribute(.link, range: range)
+      attributedString.removeAttribute(.underlineStyle, range: range)
+      attributedString.removeAttribute(.underlineColor, range: range)
+      #if os(macOS)
+      attributedString.removeAttribute(.cursor, range: range)
+      #endif
+    }
+  }
+
   /// Applies link styling to an attributed string
   /// - Parameters:
   ///   - attributedString: The attributed string to style
@@ -169,8 +202,7 @@ public final class LinkDetector: Sendable {
     linkColor: PlatformColor,
     cursor: Any? = nil
   ) -> [LinkMatch] {
-    let text = attributedString.string
-    let matches = detectLinks(in: text)
+    let matches = detectLinks(in: attributedString)
     let underlineColor = linkColor
 
     for match in matches {

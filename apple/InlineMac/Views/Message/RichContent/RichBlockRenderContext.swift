@@ -81,6 +81,10 @@ struct RichBlockRenderContext {
       )
     }
 
+    if case .disclosureSummary = node.role {
+      // The whole row toggles the disclosure.
+      LinkDetector.shared.removeLinks(from: value)
+    }
     let fullRange = NSRange(location: 0, length: value.length)
     switch node.role {
     case .footer, .disclosureSummary:

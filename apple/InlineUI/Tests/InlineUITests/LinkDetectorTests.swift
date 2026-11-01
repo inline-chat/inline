@@ -1,6 +1,13 @@
 
 import Foundation
+import InlineKit
 import Testing
+
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 @testable import TextProcessing
 
 @Suite("LinkDetector")
@@ -318,6 +325,42 @@ struct LinkDetectorTests {
     let text = "See EXAMPLE.MD for notes."
     let matches = detector.detectLinks(in: text)
     #expect(matches.isEmpty, "Bare .MD domains should be excluded case-insensitively")
+  }
+
+  @Test("Does not detect source file names or identifiers as bare links", arguments: [
+    "doc.rs", "main.py", "build.sh", "foo.pl", "server.cc", "main.tf", "user.id", "value.as",
+  ])
+  func doesNotDetectSourceFileNames(text: String) async throws {
+    #expect(detector.detectLinks(in: "Reading \(text) now").isEmpty)
+  }
+
+  @Test("Still detects explicit URLs and notion.so after source file exclusions")
+  func stillDetectsExplicitSourceFileTldURLs() async throws {
+    #expect(detector.detectLinks(in: "See https://docs.rs/tokio").count == 1)
+    #expect(detector.detectLinks(in: "See notion.so/page").count == 1)
+  }
+
+  @Test("Does not style links inside code")
+  func doesNotStyleLinksInsideCode() async throws {
+    let text = NSMutableAttributedString(string: "inline.chat and google.com and x.ai")
+    text.addAttribute(.inlineCode, value: true, range: NSRange(location: 0, length: 11))
+    text.addAttribute(.preCode, value: true, range: NSRange(location: 16, length: 10))
+
+    let matches = detector.applyLinkStyling(to: text, linkColor: .systemBlue)
+
+    #expect(matches.map(\.url.absoluteString) == ["https://x.ai"])
+    #expect(text.attribute(.link, at: 0, effectiveRange: nil) == nil)
+  }
+
+  @Test("Removes links and their underline")
+  func removesLinks() async throws {
+    let text = NSMutableAttributedString(string: "Reading inline.chat")
+    _ = detector.applyLinkStyling(to: text, linkColor: .systemBlue)
+
+    detector.removeLinks(from: text)
+
+    #expect(text.attribute(.link, at: 8, effectiveRange: nil) == nil)
+    #expect(text.attribute(.underlineStyle, at: 8, effectiveRange: nil) == nil)
   }
 
   @Test("Still detects non-md bare domains after md exclusion")
