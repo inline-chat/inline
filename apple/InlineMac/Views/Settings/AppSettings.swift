@@ -124,10 +124,32 @@ enum SidebarCleanupInterval: String, CaseIterable, Identifiable {
   }
 }
 
+enum SidebarActiveRowStyle: String, CaseIterable, Identifiable {
+  case solid
+  case glass
+  case gray
+
+  static let defaultValue: Self = .gray
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .solid:
+      return "Solid"
+    case .glass:
+      return "Glass"
+    case .gray:
+      return "Gray"
+    }
+  }
+}
+
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
   static let sidebarCleanupIntervalKey = "sidebarCleanupInterval"
   static let sidebarItemSizeKey = "sidebarItemSize"
+  static let sidebarActiveRowStyleKey = "sidebarActiveRowStyle"
   static let sidebarModeKey = "sidebarMode"
   static let showGridInSidebarKey = "showGridInSidebar"
   static let richContentRendererEnabledKey = "experimental.richContentRendererEnabled"
@@ -323,6 +345,14 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var sidebarActiveRowStyle: SidebarActiveRowStyle {
+    didSet {
+      guard sidebarActiveRowStyle != oldValue else { return }
+      UserDefaults.standard.set(sidebarActiveRowStyle.rawValue, forKey: Self.sidebarActiveRowStyleKey)
+      publishThemeChange()
+    }
+  }
+
   var showSidebarMessagePreview: Bool {
     get { sidebarItemSize != .compact }
     set { sidebarItemSize = newValue ? .standard : .compact }
@@ -478,6 +508,12 @@ final class AppSettings: ObservableObject {
       let itemSize: SidebarItemSize = storedShowPreview ? .standard : .compact
       sidebarItemSize = itemSize
       UserDefaults.standard.set(itemSize.rawValue, forKey: Self.sidebarItemSizeKey)
+    }
+    if let storedActiveRowStyle = UserDefaults.standard.string(forKey: Self.sidebarActiveRowStyleKey),
+       let activeRowStyle = SidebarActiveRowStyle(rawValue: storedActiveRowStyle) {
+      sidebarActiveRowStyle = activeRowStyle
+    } else {
+      sidebarActiveRowStyle = .defaultValue
     }
     if let storedSidebarSort = UserDefaults.standard.string(forKey: Self.sidebarSortKey),
        let sort = SidebarSortMode(rawValue: storedSidebarSort) {

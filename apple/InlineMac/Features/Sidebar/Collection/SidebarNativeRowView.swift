@@ -448,6 +448,7 @@ final class SidebarNativeRowView: NSView {
 
     configuredContentView.setLayoutVisibility(isLayoutVisible)
     configuredContentView.setHovered(isLayoutVisible && isHovered)
+    updateClipping(for: configuration.interactionPresentation)
     suppressesNextConfigurationAnimations = false
     needsLayout = true
   }
@@ -471,6 +472,20 @@ final class SidebarNativeRowView: NSView {
     _ presentation: SidebarNativeRowConfiguration.InteractionPresentation
   ) {
     contentView?.setInteractionPresentation(presentation)
+    updateClipping(for: presentation)
+  }
+
+  /// Interactive glass flexes past its bounds when pressed, so the row and its
+  /// collection item stop clipping while they show the active glass surface.
+  private func updateClipping(
+    for presentation: SidebarNativeRowConfiguration.InteractionPresentation
+  ) {
+    var clips = true
+    if #available(macOS 27.0, *) {
+      clips = !presentation.selected || AppSettings.shared.sidebarActiveRowStyle != .glass
+    }
+    clipsToBounds = clips
+    superview?.clipsToBounds = clips
   }
 
   func blocksReorder(at point: NSPoint) -> Bool {
@@ -492,6 +507,7 @@ final class SidebarNativeRowView: NSView {
     isLayoutVisible = false
     isHovered = false
     suppressesNextConfigurationAnimations = true
+    updateClipping(for: .idle)
     // Reuse is the hot scrolling path. Keep the same-kind native subtree and
     // its narrow SwiftUI visual hosts attached to the window; the next
     // configuration overwrites every semantic value. Removing this subtree on
@@ -726,7 +742,12 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
   override func hitTest(_ point: NSPoint) -> NSView? {
     guard isLayoutVisible, let hitView = super.hitTest(point) else { return nil }
     // Native controls own their clicks; visual leaves belong to the row.
-    return hitView is NSControl ? hitView : self
+    if hitView is NSControl { return hitView }
+    // Interactive glass reacts only to events it receives. Unhandled events
+    // continue up the responder chain, so the row still owns the click.
+    let isGlassHit = sequence(first: hitView, next: \.superview)
+      .contains { $0 is SidebarNativeRowBackgroundView }
+    return isGlassHit ? hitView : self
   }
 
   private func cancelPointerInteraction() {
@@ -753,7 +774,7 @@ private class SidebarNativeInteractiveContentView: SidebarNativeContentView {
 
 @MainActor
 private final class SidebarNativeNavigationRowView: SidebarNativeInteractiveContentView {
-  private let backgroundLayer = CALayer()
+  private let rowBackground = SidebarNativeRowBackgroundView()
   private let iconView = SidebarNativeHostedVisualView()
   private let titleField = SidebarNativeTextField()
   private let otherUnreadField = SidebarNativeTextField()
@@ -764,8 +785,7 @@ private final class SidebarNativeNavigationRowView: SidebarNativeInteractiveCont
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
-    SidebarNativeLayerUpdates.disableImplicitAnimations(on: backgroundLayer)
-    layer?.addSublayer(backgroundLayer)
+    addSubview(rowBackground)
     addSubview(iconView)
     addSubview(titleField)
     addSubview(otherUnreadField)
@@ -819,8 +839,7 @@ private final class SidebarNativeNavigationRowView: SidebarNativeInteractiveCont
     super.layout()
     guard let configuration else { return }
     let painted = bounds.insetBy(dx: 8, dy: SidebarCollectionRow.itemVisualEdgeInset)
-    backgroundLayer.frame = painted
-    backgroundLayer.cornerRadius = Theme.sidebarItemRadius
+    rowBackground.frame = painted
 
     let iconSize = configuration.size.iconSize
     let indentation = CGFloat(configuration.indentationLevel) * (iconSize + 8)
@@ -924,13 +943,9 @@ private final class SidebarNativeNavigationRowView: SidebarNativeInteractiveCont
 
   private func updateBackground() {
     guard configuration != nil else { return }
-    SidebarNativeLayerUpdates.setBackgroundColor(
-      SidebarNativeColors.rowBackground(
-        selected: hasSelectedPresentation,
-        hovered: hasHoverPresentation,
-        appearance: effectiveAppearance
-      ).cgColor,
-      on: backgroundLayer
+    rowBackground.update(
+      selected: hasSelectedPresentation,
+      hovered: hasHoverPresentation
     )
   }
 }
@@ -1538,11 +1553,97 @@ final class SidebarNativeMenuItem: NSMenuItem {
   }
 }
 
+/// The painted surface behind a row. Unselected rows stay a plain layer; the
+/// glass view is created only when a row first shows the glass active style, so
+/// scrolling never pays for it.
+@MainActor
+private final class SidebarNativeRowBackgroundView: NSView {
+  private var glassView: NSView?
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    layer?.cornerRadius = Theme.sidebarItemRadius
+    layer?.cornerCurve = .continuous
+    setAccessibilityElement(false)
+    setAccessibilityHidden(true)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func update(selected: Bool, hovered: Bool, dropTargeted: Bool = false) {
+    let isActive = selected && !dropTargeted
+    let style = AppSettings.shared.sidebarActiveRowStyle
+    let usesGlass = isActive && style == .glass
+    if usesGlass, glassView == nil {
+      installGlassView()
+    }
+    glassView?.isHidden = !usesGlass
+
+    SidebarNativeLayerUpdates.setBackgroundColor(
+      usesGlass ? nil : SidebarNativeColors.rowBackground(
+        selected: selected,
+        hovered: hovered,
+        dropTargeted: dropTargeted,
+        activeStyle: style,
+        appearance: effectiveAppearance
+      ).cgColor,
+      on: layer
+    )
+    let isSolid = isActive && style == .solid
+    layer?.borderWidth = isSolid ? 0.5 : 0
+    layer?.borderColor = isSolid
+      ? SidebarNativeColors.activeRowBorder(appearance: effectiveAppearance).cgColor
+      : nil
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    guard #available(macOS 27.0, *), glassView?.isHidden == false else { return nil }
+    return super.hitTest(point)
+  }
+
+  private func installGlassView() {
+    let view: NSView
+    if #available(macOS 26.0, *) {
+      let glass = NSGlassEffectView()
+      glass.style = .regular
+      glass.cornerRadius = Theme.sidebarItemRadius
+      if #available(macOS 27.0, *) { glass.effectIsInteractive = true }
+      glass.contentView = NSView()
+      view = glass
+    } else {
+      let material = NSVisualEffectView()
+      material.material = .popover
+      material.blendingMode = .withinWindow
+      material.state = .active
+      material.wantsLayer = true
+      material.layer?.cornerRadius = Theme.sidebarItemRadius
+      material.layer?.cornerCurve = .continuous
+      material.layer?.masksToBounds = true
+      view = material
+    }
+    view.frame = bounds
+    view.autoresizingMask = [.width, .height]
+    addSubview(view)
+    glassView = view
+  }
+}
+
 private enum SidebarNativeColors {
+  static func activeRowBorder(appearance: NSAppearance) -> NSColor {
+    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+      ? NSColor.white.withAlphaComponent(0.06)
+      : NSColor.black.withAlphaComponent(0.05)
+  }
+
   static func rowBackground(
     selected: Bool,
     hovered: Bool,
     dropTargeted: Bool = false,
+    activeStyle: SidebarActiveRowStyle,
     appearance: NSAppearance
   ) -> NSColor {
     let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -1550,6 +1651,11 @@ private enum SidebarNativeColors {
       return Theme.accentColor.withAlphaComponent(isDark ? 0.24 : 0.16)
     }
     if selected {
+      if activeStyle == .solid {
+        return isDark
+          ? NSColor.white.withAlphaComponent(0.16)
+          : NSColor.white.withAlphaComponent(0.85)
+      }
       return isDark
         ? NSColor.white.withAlphaComponent(0.10)
         : NSColor.black.withAlphaComponent(0.07)
@@ -1588,7 +1694,7 @@ private enum SidebarNativeLayerUpdates {
 
 @MainActor
 private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentView {
-  private let backgroundLayer = CALayer()
+  private let rowBackground = SidebarNativeRowBackgroundView()
   private let disclosureView = SidebarNativeHostedVisualView()
   private let folderIconView = SidebarNativeHostedVisualView()
   private let titleField = SidebarNativeTextField()
@@ -1600,8 +1706,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
-    SidebarNativeLayerUpdates.disableImplicitAnimations(on: backgroundLayer)
-    layer?.addSublayer(backgroundLayer)
+    addSubview(rowBackground)
     addSubview(disclosureView)
     addSubview(folderIconView)
     addSubview(titleField)
@@ -1633,8 +1738,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     super.layout()
     guard let configuration else { return }
     let painted = bounds.insetBy(dx: 8, dy: SidebarCollectionRow.itemVisualEdgeInset)
-    backgroundLayer.frame = painted
-    backgroundLayer.cornerRadius = Theme.sidebarItemRadius
+    rowBackground.frame = painted
 
     disclosureView.frame = disclosureHitRect(in: painted)
 
@@ -1827,14 +1931,10 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
 
   private func updateBackground() {
     guard configuration != nil else { return }
-    SidebarNativeLayerUpdates.setBackgroundColor(
-      SidebarNativeColors.rowBackground(
-        selected: hasSelectedPresentation,
-        hovered: hasHoverPresentation,
-        dropTargeted: interactionPresentation.dragMode == .dropTarget,
-        appearance: effectiveAppearance
-      ).cgColor,
-      on: backgroundLayer
+    rowBackground.update(
+      selected: hasSelectedPresentation,
+      hovered: hasHoverPresentation,
+      dropTargeted: interactionPresentation.dragMode == .dropTarget
     )
   }
 
@@ -1981,7 +2081,7 @@ private final class SidebarNativeFolderEmptyRowView: SidebarNativeContentView {
 
 @MainActor
 private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentView {
-  private let backgroundLayer = CALayer()
+  private let rowBackground = SidebarNativeRowBackgroundView()
   private let leadingUnreadBadge = SidebarNativeUnreadBadgeView()
   private let identityView = SidebarNativeIdentityView()
   private let titleField = SidebarNativeTextField()
@@ -1999,8 +2099,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
-    SidebarNativeLayerUpdates.disableImplicitAnimations(on: backgroundLayer)
-    layer?.addSublayer(backgroundLayer)
+    addSubview(rowBackground)
     addSubview(leadingUnreadBadge)
     addSubview(identityView)
     addSubview(titleField)
@@ -2135,8 +2234,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     guard let configuration else { return }
     let presentation = configuration.presentation
     let painted = bounds.insetBy(dx: 8, dy: SidebarCollectionRow.itemVisualEdgeInset)
-    backgroundLayer.frame = painted
-    backgroundLayer.cornerRadius = Theme.sidebarItemRadius
+    rowBackground.frame = painted
 
     let indentation = SidebarChatRowLayout.contentIndentation(
       level: min(configuration.indentationLevel, 3),
@@ -2670,13 +2768,9 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
 
   private func updateBackground() {
     guard let configuration else { return }
-    SidebarNativeLayerUpdates.setBackgroundColor(
-      SidebarNativeColors.rowBackground(
-        selected: hasSelectedPresentation,
-        hovered: hasHoverPresentation,
-        appearance: effectiveAppearance
-      ).cgColor,
-      on: backgroundLayer
+    rowBackground.update(
+      selected: hasSelectedPresentation,
+      hovered: hasHoverPresentation
     )
   }
 

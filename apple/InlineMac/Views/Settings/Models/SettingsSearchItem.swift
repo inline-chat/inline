@@ -29,6 +29,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case appearance
   case theme
   case sidebarItemSize
+  case sidebarActiveItemStyle
   case chatIcon
   case sidebarTint
   case messageStyle
@@ -115,7 +116,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
          .sendMessages, .syncMessageGestures, .doubleClick, .hold, .swipeToReply, .translationControls,
          .openReplyThreadsInSidePane, .openChatsCleanup:
       .general
-    case .appearance, .theme, .sidebarItemSize, .chatIcon, .sidebarTint, .messageStyle, .preferredSkinTone,
+    case .appearance, .theme, .sidebarItemSize, .sidebarActiveItemStyle, .chatIcon, .sidebarTint, .messageStyle, .preferredSkinTone,
          .unreadBadgeStyle, .compactToolbar, .centeredChats, .fonts, .fontSize:
       .appearance
     case .inputDevice, .outputDevice, .autoUnmuteOnJoin, .autoMuteWhenAlone:
@@ -172,6 +173,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .theme: "Theme"
     case .sidebarItemSize: "Item Size"
     case .chatIcon: "Chat Icon"
+    case .sidebarActiveItemStyle: "Active Item Style"
     case .sidebarTint: "Sidebar Tint"
     case .messageStyle: "Message Style"
     case .preferredSkinTone: "Preferred Skin Tone"
@@ -240,7 +242,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       "Messages"
     case .openChatsCleanup: "Sidebar"
     case .appearance, .theme: "Appearance"
-    case .sidebarItemSize, .chatIcon, .sidebarTint: "Sidebar"
+    case .sidebarItemSize, .sidebarActiveItemStyle, .chatIcon, .sidebarTint: "Sidebar"
     case .messageStyle: "Messages"
     case .preferredSkinTone: "Emoji"
     case .unreadBadgeStyle: "Badges"
@@ -302,6 +304,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .theme: ["colors", "palette", "accent", "import", "export"]
     case .sidebarItemSize: ["density", "compact", "row height"]
     case .chatIcon: ["symbol", "emoji", "thread icon"]
+    case .sidebarActiveItemStyle: ["selected", "highlight", "glass", "solid", "gray", "dia"]
     case .sidebarTint: ["glass", "translucent", "color"]
     case .messageStyle: ["bubbles", "layout"]
     case .preferredSkinTone: ["emoji"]

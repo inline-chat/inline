@@ -30,6 +30,23 @@ struct AppearanceSettingsDetailView: View {
         .settingsSearchAnchor(.sidebarItemSize)
 
         LabeledContent {
+          Picker("Active Item Style", selection: $appSettings.sidebarActiveRowStyle) {
+            ForEach(SidebarActiveRowStyle.allCases) { style in
+              Text(style.title).tag(style)
+            }
+          }
+          .labelsHidden()
+          .pickerStyle(.segmented)
+          .fixedSize()
+        } label: {
+          SettingsRowLabel(
+            .sidebarActiveItemStyle,
+            description: "Choose how the selected sidebar item is highlighted."
+          )
+        }
+        .settingsSearchAnchor(.sidebarActiveItemStyle)
+
+        LabeledContent {
           Picker("Chat Icon", selection: $chatSymbol) {
             ForEach(ChatSymbol.allCases) { symbol in
               Label(symbol.title, systemImage: symbol.symbolName ?? ThreadIconDefaults.normalFallbackSymbol)
