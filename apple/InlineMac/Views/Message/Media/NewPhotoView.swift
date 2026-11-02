@@ -91,17 +91,21 @@ final class NewPhotoView: NSView {
     translatesAutoresizingMaskIntoConstraints = false
 
     addSubview(tinyThumbnailBackgroundView)
-    NSLayoutConstraint.activate([
+    addSubview(backgroundView)
+    bleedLeadingConstraints = [
       tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+    ]
+    bleedTrailingConstraints = [
       tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+    ]
+    NSLayoutConstraint.activate(bleedLeadingConstraints + bleedTrailingConstraints + [
       tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
       tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
-    addSubview(backgroundView)
     NSLayoutConstraint.activate([
-      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
       backgroundView.topAnchor.constraint(equalTo: topAnchor),
       backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
@@ -132,13 +136,42 @@ final class NewPhotoView: NSView {
 
     // Remove existing constraints array if needed
     NSLayoutConstraint.deactivate(imageConstraints)
+    let imageLeading = imageView.leadingAnchor.constraint(equalTo: leadingAnchor)
+    let imageTrailing = imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
+    bleedLeadingConstraints.append(imageLeading)
+    bleedTrailingConstraints.append(imageTrailing)
     imageConstraints = [
-      imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      imageLeading,
+      imageTrailing,
       imageView.topAnchor.constraint(equalTo: topAnchor),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ]
     NSLayoutConstraint.activate(imageConstraints)
+    applyBubbleBleedInsets()
+  }
+
+  /// Set when this photo reaches the bubble's bottom edge: the image continues past the view's
+  /// bounds into the tail, and everything else stays on the bubble's body.
+  var bubbleBleed: MessageBubbleTailGeometry.MediaBleed? {
+    didSet {
+      guard bubbleBleed != oldValue else { return }
+      // A rasterized layer would cut the image off at the view's bounds.
+      layer?.shouldRasterize = bubbleBleed == nil
+      applyBubbleBleedInsets()
+      updateMasks()
+    }
+  }
+
+  private var bleedLeadingConstraints: [NSLayoutConstraint] = []
+  private var bleedTrailingConstraints: [NSLayoutConstraint] = []
+
+  private func applyBubbleBleedInsets() {
+    for constraint in bleedLeadingConstraints {
+      constraint.constant = -(bubbleBleed?.leadingBleed ?? 0)
+    }
+    for constraint in bleedTrailingConstraints {
+      constraint.constant = bubbleBleed?.trailingBleed ?? 0
+    }
   }
 
   // Call for updating image when the message is updated
@@ -360,7 +393,10 @@ final class NewPhotoView: NSView {
     // Only update if we have valid dimensions
     if bounds.width > 0, bounds.height > 0 {
       maskLayer.frame = bounds
-      maskLayer.path = createRoundedRectPath(for: bounds)
+      maskLayer.path = bubbleBleed?.maskPath(in: bounds, isYUp: true) ?? createRoundedRectPath(for: bounds)
+      // Grows past the bubble underneath by half a point, so its color can't fringe the edge.
+      maskLayer.strokeColor = bubbleBleed == nil ? nil : NSColor.black.cgColor
+      maskLayer.lineWidth = bubbleBleed == nil ? 0 : 1
     }
   }
 

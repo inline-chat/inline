@@ -55,6 +55,43 @@ struct MessageBubbleTailGeometryTests {
     }
   }
 
+  @Test("media mask follows the bubble's tail and leaves room for it", arguments: [14.0, 18.0])
+  func mediaMask(cornerRadius: CGFloat) {
+    let bounds = CGRect(x: 0, y: 0, width: 240, height: 180)
+    var bleed = MessageBubbleTailGeometry.MediaBleed(
+      side: .trailing,
+      cornerRadius: cornerRadius,
+      hasTail: true,
+      roundsTop: true
+    )
+    let tailPoint = CGPoint(x: bounds.maxX + 0.5, y: bounds.maxY - cornerRadius * 0.2)
+
+    #expect(bleed.bleedWidth >= MessageBubbleTailGeometry.exposedWidth(radius: cornerRadius))
+    #expect(bleed.leadingBleed == 0)
+    #expect(bleed.trailingBleed == bleed.bleedWidth)
+    #expect(bleed.maskPath(in: bounds).contains(tailPoint))
+    #expect(bleed.maskPath(in: bounds).boundingBoxOfPath.maxX <= bounds.maxX + bleed.bleedWidth)
+
+    bleed.hasTail = false
+    #expect(!bleed.maskPath(in: bounds).contains(tailPoint))
+  }
+
+  @Test("media mask squares the top under a header and flips for AppKit layers")
+  func mediaMaskTopAndFlip() {
+    let bounds = CGRect(x: 0, y: 0, width: 240, height: 180)
+    var bleed = MessageBubbleTailGeometry.MediaBleed(side: .leading, cornerRadius: 14, hasTail: true, roundsTop: true)
+    let topCorner = CGPoint(x: 0.5, y: 0.5)
+    let tailPoint = CGPoint(x: -0.5, y: bounds.maxY - 3)
+
+    #expect(!bleed.maskPath(in: bounds).contains(topCorner))
+    #expect(bleed.maskPath(in: bounds).contains(tailPoint))
+    #expect(bleed.maskPath(in: bounds, isYUp: true).contains(CGPoint(x: tailPoint.x, y: 3)))
+
+    bleed.roundsTop = false
+    #expect(bleed.maskPath(in: bounds).contains(topCorner))
+    #expect(!bleed.maskPath(in: bounds).contains(CGPoint(x: bounds.maxX - 0.5, y: bounds.maxY - 0.5)))
+  }
+
   @Test("leading tail mirrors trailing", arguments: [14.0, 18.0])
   func leadingMirrorsTrailing(cornerRadius: CGFloat) throws {
     for size in Self.sizes {

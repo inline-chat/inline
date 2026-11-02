@@ -51,8 +51,44 @@ public enum MessageBubbleTailGeometry {
     return path
   }
 
+  /// Media that fills a bubble down to its bottom edge and continues into the tail.
+  ///
+  /// The image always draws `bleedWidth` past the body on `side`, whether or not the bubble has
+  /// a tail right now, so gaining or losing the tail changes only the mask and never the crop.
+  public struct MediaBleed: Equatable, Sendable {
+    public var side: Side
+    public var cornerRadius: CGFloat
+    public var hasTail: Bool
+    /// False when a header sits above the media, which then meets it with a square edge.
+    public var roundsTop: Bool
+
+    public init(side: Side, cornerRadius: CGFloat, hasTail: Bool, roundsTop: Bool) {
+      self.side = side
+      self.cornerRadius = cornerRadius
+      self.hasTail = hasTail
+      self.roundsTop = roundsTop
+    }
+
+    public var bleedWidth: CGFloat {
+      exposedWidth(radius: cornerRadius).rounded(.up)
+    }
+
+    /// How far the image reaches past the body's leading (physical left) and trailing edges.
+    public var leadingBleed: CGFloat { side == .leading ? bleedWidth : 0 }
+    public var trailingBleed: CGFloat { side == .trailing ? bleedWidth : 0 }
+
+    /// The visible shape, for a media view whose bounds are the bubble's body. The tail reaches
+    /// outside those bounds. Pass `isYUp` for a view whose layer has its origin at the bottom.
+    public func maskPath(in bounds: CGRect, isYUp: Bool = false) -> CGPath {
+      let path = bubblePath(body: bounds, cornerRadius: cornerRadius, side: hasTail ? side : nil, roundsTop: roundsTop)
+      guard isYUp else { return path }
+      var flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.minY + bounds.maxY)
+      return path.copy(using: &flip) ?? path
+    }
+  }
+
   /// Rounded body plus tail, both clockwise so the non-zero rule fills their union.
-  public static func bubblePath(body: CGRect, cornerRadius: CGFloat, side: Side?) -> CGPath {
+  public static func bubblePath(body: CGRect, cornerRadius: CGFloat, side: Side?, roundsTop: Bool = true) -> CGPath {
     let radius = effectiveRadius(cornerRadius: cornerRadius, size: body.size)
     let path = CGMutablePath()
     guard body.width > 0, body.height > 0 else { return path }
@@ -78,6 +114,10 @@ public enum MessageBubbleTailGeometry {
       radius: radius
     )
     path.closeSubpath()
+
+    if !roundsTop {
+      path.addRect(CGRect(x: body.minX, y: body.minY, width: body.width, height: radius))
+    }
 
     if let side {
       let corner = CGPoint(x: side == .trailing ? body.maxX : body.minX, y: body.maxY)

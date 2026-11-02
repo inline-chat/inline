@@ -209,7 +209,12 @@ final class MessageBlockHostView: UIView {
   }
 
   /// `size` is the planned frame's size.
-  func configure(_ block: MessageBlock, message: FullMessage, size: CGSize) {
+  func configure(
+    _ block: MessageBlock,
+    message: FullMessage,
+    size: CGSize,
+    bubbleBleed: MessageBubbleTailGeometry.MediaBleed? = nil
+  ) {
     let previous = self.message
     self.message = message
     let outgoing = message.message.out == true
@@ -241,6 +246,7 @@ final class MessageBlockHostView: UIView {
     case .photo:
       let photo = contentView as? NewPhotoView ?? install(NewPhotoView(message), fills: false)
       photo.plannedSize = size
+      photo.bubbleBleed = bubbleBleed
       photo.update(with: message)
       photo.onTap = { [weak self] message, sourceView, image, url in
         self?.onPhotoTap?(message, sourceView, image, url)
@@ -249,6 +255,7 @@ final class MessageBlockHostView: UIView {
     case .video:
       let video = contentView as? NewVideoView ?? install(NewVideoView(message), fills: false)
       video.plannedSize = size
+      video.bubbleBleed = bubbleBleed
       video.update(with: message)
 
     case .document:

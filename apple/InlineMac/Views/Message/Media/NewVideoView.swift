@@ -579,17 +579,23 @@ final class NewVideoView: NSView {
     translatesAutoresizingMaskIntoConstraints = false
 
     addSubview(tinyThumbnailBackgroundView)
-    NSLayoutConstraint.activate([
+    addSubview(backgroundView)
+    bleedLeadingConstraints = [
       tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      animatedPlayerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+    ]
+    bleedTrailingConstraints = [
       tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      animatedPlayerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+    ]
+    NSLayoutConstraint.activate([
       tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
       tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
-    addSubview(backgroundView)
     NSLayoutConstraint.activate([
-      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
       backgroundView.topAnchor.constraint(equalTo: topAnchor),
       backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
@@ -607,9 +613,7 @@ final class NewVideoView: NSView {
     ])
 
     addSubview(animatedPlayerView, positioned: .below, relativeTo: overlayView)
-    NSLayoutConstraint.activate([
-      animatedPlayerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      animatedPlayerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+    NSLayoutConstraint.activate(bleedLeadingConstraints + bleedTrailingConstraints + [
       animatedPlayerView.topAnchor.constraint(equalTo: topAnchor),
       animatedPlayerView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
@@ -644,12 +648,41 @@ final class NewVideoView: NSView {
     addSubview(imageView, positioned: .below, relativeTo: animatedPlayerView)
     imageView.layer?.addSublayer(imageLayer)
 
+    let imageLeading = imageView.leadingAnchor.constraint(equalTo: leadingAnchor)
+    let imageTrailing = imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
+    bleedLeadingConstraints.append(imageLeading)
+    bleedTrailingConstraints.append(imageTrailing)
     NSLayoutConstraint.activate([
-      imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      imageLeading,
+      imageTrailing,
       imageView.topAnchor.constraint(equalTo: topAnchor),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
+    applyBubbleBleedInsets()
+  }
+
+  /// Set when this video reaches the bubble's bottom edge: the picture continues past the view's
+  /// bounds into the tail, and the badge and controls stay on the bubble's body.
+  var bubbleBleed: MessageBubbleTailGeometry.MediaBleed? {
+    didSet {
+      guard bubbleBleed != oldValue else { return }
+      // A rasterized layer would cut the picture off at the view's bounds.
+      layer?.shouldRasterize = bubbleBleed == nil
+      applyBubbleBleedInsets()
+      updateMasks()
+    }
+  }
+
+  private var bleedLeadingConstraints: [NSLayoutConstraint] = []
+  private var bleedTrailingConstraints: [NSLayoutConstraint] = []
+
+  private func applyBubbleBleedInsets() {
+    for constraint in bleedLeadingConstraints {
+      constraint.constant = -(bubbleBleed?.leadingBleed ?? 0)
+    }
+    for constraint in bleedTrailingConstraints {
+      constraint.constant = bubbleBleed?.trailingBleed ?? 0
+    }
   }
 
   // MARK: - Image loading
@@ -873,7 +906,10 @@ final class NewVideoView: NSView {
   private func updateMasks() {
     guard bounds.width > 0, bounds.height > 0 else { return }
     maskLayer.frame = bounds
-    maskLayer.path = createRoundedRectPath(for: bounds)
+    maskLayer.path = bubbleBleed?.maskPath(in: bounds, isYUp: true) ?? createRoundedRectPath(for: bounds)
+    // Grows past the bubble underneath by half a point, so its color can't fringe the edge.
+    maskLayer.strokeColor = bubbleBleed == nil ? nil : NSColor.black.cgColor
+    maskLayer.lineWidth = bubbleBleed == nil ? 0 : 1
   }
 
   private func updateCornerRadii() {

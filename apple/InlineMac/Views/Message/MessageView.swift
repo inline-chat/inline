@@ -291,12 +291,42 @@ class MessageViewAppKit: NSView {
 
   private func syncBubbleTail(animated: Bool = false) {
     let side = bubbleTailSide
+    let mediaBleed = mediaBubbleBleed
+    if props.layout.photo != nil {
+      photoView.bubbleBleed = mediaBleed
+    } else if props.layout.video != nil {
+      videoView.bubbleBleed = mediaBleed
+    }
     bubbleTailView.configure(
       side: side,
       color: bubbleBackgroundColor,
-      animated: animated
+      // The media's own tail leaves with its mask; a fading colored tail would flash behind it.
+      animated: animated && mediaBleed == nil
     )
     syncBubbleTailSideConstraint(side)
+  }
+
+  /// Media reaching the bubble's bottom corners continues into the tail.
+  private var mediaBubbleBleed: MessageBubbleTailGeometry.MediaBleed? {
+    let layout = props.layout
+    guard props.renderStyle == .bubble, layout.hasBubbleColor else { return nil }
+    let media: (plan: MessageSizeCalculator.LayoutPlan, top: CGFloat)? = if let photo = layout.photo {
+      (photo, layout.photoContentViewTop)
+    } else if let video = layout.video {
+      (video, layout.videoContentViewTop)
+    } else {
+      nil
+    }
+    guard let media,
+          abs(media.top + media.plan.size.height - layout.bubble.size.height) < 0.5,
+          abs(media.plan.size.width - layout.bubble.size.width) < 0.5
+    else { return nil }
+    return MessageBubbleTailGeometry.MediaBleed(
+      side: outgoing ? .trailing : .leading,
+      cornerRadius: Theme.messageBubbleCornerRadius,
+      hasTail: bubbleTailSide != .none,
+      roundsTop: media.top < 0.5
+    )
   }
 
   private func syncBubbleTailSideConstraint(_ side: MessageBubbleTailView.Side) {

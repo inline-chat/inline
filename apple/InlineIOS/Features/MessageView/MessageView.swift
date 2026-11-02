@@ -186,8 +186,11 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
             appearing.append(view)
           }
         }
-        view.configure(block, message: content.message, size: frame.size)
-        roundToBubble(view, frame: layout.frame(.block(block.id)), isEdgeToEdge: layout.edgeToEdgeBlocks.contains(block.id))
+        let isEdgeToEdge = layout.edgeToEdgeBlocks.contains(block.id)
+        let bubbleBleed = mediaBleed(frame: layout.frame(.block(block.id)), isEdgeToEdge: isEdgeToEdge)
+        view.configure(block, message: content.message, size: frame.size, bubbleBleed: bubbleBleed)
+        // Media continuing into the tail reaches past the host and masks itself.
+        roundToBubble(view, frame: layout.frame(.block(block.id)), isEdgeToEdge: isEdgeToEdge && bubbleBleed == nil)
       }
 
       if content.showsAcknowledgement {
@@ -292,6 +295,22 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         }
       }
     }
+  }
+
+  /// Media reaching the bubble's bottom edge continues into the tail.
+  private func mediaBleed(frame: CGRect?, isEdgeToEdge: Bool) -> MessageBubbleTailGeometry.MediaBleed? {
+    guard isEdgeToEdge, let frame, let layout, let content,
+          abs(frame.maxY - layout.bubble.body.maxY) < 0.5
+    else { return nil }
+    let restingSide: BubbleTailSide = content.message.message.out == true ? .trailing : .leading
+    guard let side = restingSide.physical(isRightToLeft: content.context.isRightToLeft).tailGeometrySide
+    else { return nil }
+    return MessageBubbleTailGeometry.MediaBleed(
+      side: side,
+      cornerRadius: layout.bubble.cornerRadius,
+      hasTail: layout.bubble.tail != .none,
+      roundsTop: abs(frame.minY - layout.bubble.body.minY) < 0.5
+    )
   }
 
   /// Media drawn to the bubble's edges takes the bubble's corners where it touches them.

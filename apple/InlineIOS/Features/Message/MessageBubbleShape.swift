@@ -78,7 +78,7 @@ enum MessageBubbleGeometry {
   }
 }
 
-private extension MessageBubbleTailSide {
+extension MessageBubbleTailSide {
   var tailGeometrySide: MessageBubbleTailGeometry.Side? {
     switch self {
     case .none: nil

@@ -131,6 +131,25 @@ final class NewVideoView: UIView {
     }
   }
 
+  /// Set when this video reaches the bubble's bottom edge: the picture continues past the view's
+  /// bounds into the tail, and the badge and play button stay on the bubble's body.
+  var bubbleBleed: MessageBubbleTailGeometry.MediaBleed? {
+    didSet {
+      guard bubbleBleed != oldValue else { return }
+      for constraint in bleedLeadingConstraints {
+        constraint.constant = -(bubbleBleed?.leadingBleed ?? 0)
+      }
+      for constraint in bleedTrailingConstraints {
+        constraint.constant = bubbleBleed?.trailingBleed ?? 0
+      }
+      setupVideoConstraints()
+      updateMask()
+    }
+  }
+
+  private var bleedLeadingConstraints: [NSLayoutConstraint] = []
+  private var bleedTrailingConstraints: [NSLayoutConstraint] = []
+
   private var downloadProgressCancellable: AnyCancellable?
   private var uploadProgressCancellable: AnyCancellable?
   private var uploadProgressBindingTask: Task<Void, Never>?
@@ -374,8 +393,8 @@ final class NewVideoView: UIView {
         heightAnchor.constraint(equalToConstant: plannedSize?.height ?? size),
 
         thumbnailView.topAnchor.constraint(equalTo: topAnchor),
-        thumbnailView.leadingAnchor.constraint(equalTo: leadingAnchor),
-        thumbnailView.trailingAnchor.constraint(equalTo: trailingAnchor),
+        thumbnailView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -(bubbleBleed?.leadingBleed ?? 0)),
+        thumbnailView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: bubbleBleed?.trailingBleed ?? 0),
         thumbnailView.bottomAnchor.constraint(equalTo: bottomAnchor),
       ]
       NSLayoutConstraint.activate(imageConstraints)
@@ -391,8 +410,8 @@ final class NewVideoView: UIView {
       widthConstraint,
       heightConstraint,
       thumbnailView.topAnchor.constraint(equalTo: topAnchor),
-      thumbnailView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      thumbnailView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      thumbnailView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -(bubbleBleed?.leadingBleed ?? 0)),
+      thumbnailView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: bubbleBleed?.trailingBleed ?? 0),
       thumbnailView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ]
 
@@ -411,15 +430,21 @@ final class NewVideoView: UIView {
     overlayBackground.addSubview(cancelTransferButton)
     addSubview(durationBadge)
 
-    NSLayoutConstraint.activate([
-      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
+    bleedLeadingConstraints = [
       tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      animatedPlayerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      highlightOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
+    ]
+    bleedTrailingConstraints = [
       tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      animatedPlayerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      highlightOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
+    ]
+    NSLayoutConstraint.activate(bleedLeadingConstraints + bleedTrailingConstraints + [
+      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
       tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       animatedPlayerView.topAnchor.constraint(equalTo: topAnchor),
-      animatedPlayerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      animatedPlayerView.trailingAnchor.constraint(equalTo: trailingAnchor),
       animatedPlayerView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       overlayBackground.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -442,8 +467,6 @@ final class NewVideoView: UIView {
       durationBadge.topAnchor.constraint(equalTo: topAnchor, constant: 6),
 
       highlightOverlay.topAnchor.constraint(equalTo: topAnchor),
-      highlightOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
-      highlightOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
       highlightOverlay.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
@@ -474,6 +497,11 @@ final class NewVideoView: UIView {
   }
 
   private func updateMask() {
+    if let bubbleBleed {
+      maskLayer.path = bubbleBleed.maskPath(in: bounds)
+      return
+    }
+
     let roundingCorners: UIRectCorner = if !hasText, !hasReply, !hasReactionsInBubble {
       .allCorners
     } else if hasReactionsInBubble {

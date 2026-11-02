@@ -82,6 +82,27 @@ final class NewPhotoView: UIView {
     }
   }
 
+  /// Set when this photo reaches the bubble's bottom edge: the image continues past the view's
+  /// bounds into the tail, and overlays stay on the bubble's body.
+  var bubbleBleed: MessageBubbleTailGeometry.MediaBleed? {
+    didSet {
+      guard bubbleBleed != oldValue else { return }
+      for constraint in bleedLeadingConstraints {
+        constraint.constant = -(bubbleBleed?.leadingBleed ?? 0)
+      }
+      for constraint in bleedTrailingConstraints {
+        constraint.constant = bubbleBleed?.trailingBleed ?? 0
+      }
+      // The photo was planned for the body, so the wider image crops instead of stretching.
+      imageView.imageView.contentMode = bubbleBleed == nil ? .scaleToFill : .scaleAspectFill
+      setupImageConstraints()
+      updateMask()
+    }
+  }
+
+  private var bleedLeadingConstraints: [NSLayoutConstraint] = []
+  private var bleedTrailingConstraints: [NSLayoutConstraint] = []
+
   var onTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
 
   // MARK: - Initialization
@@ -181,8 +202,8 @@ final class NewPhotoView: UIView {
         heightAnchor.constraint(equalToConstant: plannedSize?.height ?? size),
 
         imageView.topAnchor.constraint(equalTo: topAnchor),
-        imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
-        imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+        imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: -(bubbleBleed?.leadingBleed ?? 0)),
+        imageView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: bubbleBleed?.trailingBleed ?? 0),
         imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
       ]
       NSLayoutConstraint.activate(imageConstraints)
@@ -228,8 +249,14 @@ final class NewPhotoView: UIView {
       } else {
         // Normal case - fill the container
         let imageViewTopConstraint = imageView.topAnchor.constraint(equalTo: topAnchor)
-        let imageViewLeadingConstraint = imageView.leadingAnchor.constraint(equalTo: leadingAnchor)
-        let imageViewTrailingConstraint = imageView.trailingAnchor.constraint(equalTo: trailingAnchor)
+        let imageViewLeadingConstraint = imageView.leadingAnchor.constraint(
+          equalTo: leadingAnchor,
+          constant: -(bubbleBleed?.leadingBleed ?? 0)
+        )
+        let imageViewTrailingConstraint = imageView.trailingAnchor.constraint(
+          equalTo: trailingAnchor,
+          constant: bubbleBleed?.trailingBleed ?? 0
+        )
         let imageViewBottomConstraint = imageView.bottomAnchor.constraint(equalTo: bottomAnchor)
 
         imageConstraints = [
@@ -274,15 +301,19 @@ final class NewPhotoView: UIView {
     addSubview(imageView)
     addSubview(highlightOverlay)
 
-    NSLayoutConstraint.activate([
-      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
+    bleedLeadingConstraints = [
       tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      highlightOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
+    ]
+    bleedTrailingConstraints = [
       tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      highlightOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
+    ]
+    NSLayoutConstraint.activate(bleedLeadingConstraints + bleedTrailingConstraints + [
+      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
       tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
       highlightOverlay.topAnchor.constraint(equalTo: topAnchor),
-      highlightOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
-      highlightOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
       highlightOverlay.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
@@ -304,6 +335,11 @@ final class NewPhotoView: UIView {
   }
 
   private func updateMask() {
+    if let bubbleBleed {
+      maskLayer.path = bubbleBleed.maskPath(in: bounds)
+      return
+    }
+
     let width = bounds.width
     let height = bounds.height
 
