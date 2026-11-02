@@ -16,5 +16,6 @@ pub(crate) mod limits;
 pub(crate) mod render;
 pub(crate) mod runtime;
 pub(crate) mod settings;
+pub(crate) mod skills;
 pub(crate) mod tools;
 pub(crate) mod work;

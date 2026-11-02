@@ -235,7 +235,7 @@ impl BotAgentResolver {
         Self::new(String::new(), String::new())
     }
 
-    async fn resolve(&self, agent_id: i64) -> Option<proto::BotAgent> {
+    pub(super) async fn resolve(&self, agent_id: i64) -> Option<proto::BotAgent> {
         if let Some(cached) = self.cached(agent_id) {
             return cached;
         }

@@ -2150,6 +2150,13 @@ async fn run_provider_installation(
             allowlist: policy.allowed_user_ids().collect(),
             owner_control: owner_control.clone(),
             bot,
+            bot_store,
+            bot_agent_resolver: BotAgentResolver::new(
+                config.realtime_url.clone(),
+                credentials.bot_token.clone(),
+            ),
+            bot_token: credentials.bot_token.clone(),
+            api_base_url: config.api_base_url.clone(),
             inline_events,
             readiness: shared_provider_readiness.as_ref(),
             external_shutdown,
@@ -3312,6 +3319,10 @@ struct V2Launch<'a> {
     allowlist: Vec<i64>,
     owner_control: Option<Arc<OwnerControl>>,
     bot: InlineClient,
+    bot_store: SqliteStore,
+    bot_agent_resolver: BotAgentResolver,
+    bot_token: String,
+    api_base_url: String,
     inline_events: inline_client::LosslessEventReceiver,
     readiness: Option<&'a ProviderReadiness>,
     external_shutdown: Option<tokio::sync::watch::Receiver<bool>>,
@@ -3332,6 +3343,10 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         allowlist,
         owner_control,
         bot,
+        bot_store,
+        bot_agent_resolver,
+        bot_token,
+        api_base_url,
         mut inline_events,
         readiness,
         mut external_shutdown,
@@ -3355,6 +3370,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         attachments_dir: attachments_dir.clone(),
     });
     let mut owned_acp = None;
+    let mut amp_cli = None;
     let (harness, vocabulary, executable): (Arc<dyn HarnessDriver>, _, PathBuf) =
         match installation.provider_id.as_str() {
             "codex" => {
@@ -3399,6 +3415,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
                     return Err(io::Error::other("provider launch was not ACP").into());
                 };
                 let executable = descriptor.program.clone();
+                amp_cli = descriptor.provider_runtime.clone();
                 let harness = Arc::new(
                     inline_agent_driver_acp::IsolatedAcpHarness::connect(
                         descriptor,
@@ -3426,6 +3443,17 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
             }
         };
     settle_v1_leftovers(&bot, &legacy_store, &installation.installation_id).await;
+    let skill_publisher = v2::skills::SkillPublisher {
+        catalog: v2::skills::SkillCatalog {
+            vocabulary,
+            harness: harness.clone(),
+            amp_cli,
+        },
+        folder: workspace.clone(),
+        provider_id: installation.provider_id.clone(),
+        api_base_url,
+        bot_token,
+    };
     let runtime = v2::runtime::Runtime::new(
         v2::runtime::V2Config {
             vocabulary,
@@ -3460,7 +3488,9 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         installation_id: InstallationId::new(installation.installation_id.clone())?,
     })
     .with_legacy_store(legacy_store)
-    .with_startup_activity(startup_activity);
+    .with_startup_activity(startup_activity)
+    .with_skills(skill_publisher)
+    .with_agent_profiles(bot_agent_resolver, bot_store);
     if let Some(readiness) = readiness {
         readiness.mark_ready(&installation.installation_id);
     }

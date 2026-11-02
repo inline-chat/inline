@@ -143,6 +143,16 @@ Current beta provider paths:
   next steps. Idle sessions retain their private process for up to 30 minutes;
   `/release` closes it immediately.
 
+Bridge v2 publishes the provider's installed skills with `setMySkills` and adds
+them to the bot's command menu with `setMyCommands`, at startup and when a
+five-minute check finds a change. Codex lists them with `skills/list`, Amp with
+`amp skill list --json`, and Claude and OpenCode are read from their documented
+skill folders, from the bot's default folder up to its git root and then the
+user's. A list that cannot be read leaves the published skills unchanged.
+`/skill-name` and Skilled Agents send Codex a `$skill-name` mention and other
+providers a request to use the skill. Inline commands and commands the provider
+advertises take priority. The legacy bridge does not publish skills.
+
 When an ACP adapter is required, setup installs only that adapter
 into immutable, private, versioned bridge directories using Inline's complete
 embedded `package-lock.json` files and `npm ci`. Inline disables package scripts

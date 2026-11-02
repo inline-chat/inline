@@ -22,14 +22,17 @@ use inline_agent_bridge::harness::{
     Catalog, CatalogScope, Delivery, HarnessDriver, Input, InputContent, InputId, OpKind,
     OutputMode, RuntimeHealth, SettingsChange, SetupReason, UserId,
 };
+use inline_client::store::ClientStore;
 use inline_client::{
     AnswerBotChatSettingsRequest, AnswerMessageActionRequest, BotCapability,
     BotChatSettingsDocument, BotChatSettingsProblemCode, BotChatSettingsResponse,
     BotInteractionEvent, BotSettingsValue, ClientEvent, ClientStatus, CreateReplyThreadRequest,
-    InlineClient, InlineId, LosslessEventReceiver, MessageRecord,
+    InlineClient, InlineId, LosslessEventReceiver, MessageRecord, SqliteStore,
 };
 use inline_protocol::proto;
 use tokio::sync::{mpsc, oneshot};
+
+use crate::bridge::runtime::{BotAgentResolver, mentioned_agent_id};
 
 use super::api::{self, Notify, chat_peer};
 use super::doc::DocBuilder;
@@ -38,6 +41,7 @@ use super::intake::{MessageFacts, grants_by_user, group_message};
 use super::ledger::{Begin, InputState, Ledger, input_id};
 use super::render::{ActionStyle, QUESTION_FORM_ID, Vocabulary};
 use super::settings;
+use super::skills::{self, Skill, SkillPublisher};
 use super::tools::Tools;
 use super::work::{
     AccessSource, ActionData, Agent, Command, Control, Known, OwnerCalls, SessionOp, WorkHandle,
@@ -213,6 +217,10 @@ pub(crate) struct Runtime {
     loop_guards: LoopGuards,
     /// Chat → the root of its subthread tree, the loop cap's scope.
     loop_roots: HashMap<i64, i64>,
+    skills: Option<SkillPublisher>,
+    /// Skills by thread folder, briefly: Amp takes seconds to list them.
+    listed_skills: HashMap<PathBuf, (tokio::time::Instant, Vec<Skill>)>,
+    agent_profiles: Option<(BotAgentResolver, SqliteStore)>,
 }
 
 impl Runtime {
@@ -293,6 +301,9 @@ impl Runtime {
             default_output_mode: OutputMode::Detailed,
             loop_guards: LoopGuards::default(),
             loop_roots: HashMap::new(),
+            skills: None,
+            listed_skills: HashMap::new(),
+            agent_profiles: None,
         })
     }
 
@@ -318,6 +329,22 @@ impl Runtime {
         self
     }
 
+    /// Publishes installed skills and answers `/skill-name`.
+    pub(crate) fn with_skills(mut self, publisher: SkillPublisher) -> Self {
+        self.skills = Some(publisher);
+        self
+    }
+
+    /// Applies Skilled Agents to the messages addressed to them.
+    pub(crate) fn with_agent_profiles(
+        mut self,
+        resolver: BotAgentResolver,
+        store: SqliteStore,
+    ) -> Self {
+        self.agent_profiles = Some((resolver, store));
+        self
+    }
+
     /// Serves Inline events until `shutdown` resolves or the stream ends.
     pub(crate) async fn run(
         mut self,
@@ -332,6 +359,7 @@ impl Runtime {
         }
         self.recover().await;
         self.publish_capabilities().await;
+        let _skill_sync = self.skills.clone().map(SkillPublisher::spawn);
         self.startup_activity.take();
         let mut heartbeat = tokio::time::interval(self.heartbeat().await);
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1152,6 +1180,84 @@ impl Runtime {
             Err(error) => {
                 log::warn!(target: "inline::bridge::v2", "chat={chat_id} catalog unavailable: {error}");
                 Catalog::default()
+            }
+        }
+    }
+
+    /// The installed skill `/name` means in this thread, if any. Inline's
+    /// commands win, as they do over the harness's.
+    async fn skill_for_command(&mut self, chat_id: i64, name: &str) -> Option<Skill> {
+        if INLINE_COMMANDS.contains(&name) {
+            return None;
+        }
+        let catalog = self.skills.as_ref()?.catalog.clone();
+        let folder = self.thread_folder(chat_id);
+        let cached = self
+            .listed_skills
+            .get(&folder)
+            .filter(|(at, _)| at.elapsed() < CATALOG_TTL)
+            .map(|(_, skills)| skills.clone());
+        let skills = match cached {
+            Some(skills) => skills,
+            None => {
+                // A failed read isn't cached, so the next command tries again.
+                let skills = catalog.list(&folder).await?;
+                self.listed_skills
+                    .insert(folder, (tokio::time::Instant::now(), skills.clone()));
+                skills
+            }
+        };
+        skills.into_iter().find(|skill| skill.answers_to(name))
+    }
+
+    /// Applies the thread's or mentioned Skilled Agent to a message. False
+    /// when the message must not run.
+    async fn apply_agent_profile(
+        &self,
+        message: &MessageRecord,
+        chat_id: i64,
+        input: &mut Input,
+    ) -> bool {
+        let Some((resolver, store)) = &self.agent_profiles else {
+            return true;
+        };
+        let bot_user_id = self.config.bot_user_id;
+        let thread_agent = store
+            .dialog(InlineId::new(chat_id))
+            .await
+            .ok()
+            .flatten()
+            .and_then(|dialog| dialog.agent_context)
+            .filter(|context| context.bot_user_id.get() == bot_user_id)
+            .and_then(|context| context.agent_id)
+            .map(InlineId::get);
+        let Some(agent_id) = thread_agent.or_else(|| mentioned_agent_id(message, bot_user_id))
+        else {
+            return true;
+        };
+        match resolver.resolve(agent_id).await {
+            Some(agent) if agent.bot_user_id == bot_user_id => {
+                input.content.text =
+                    skills::specialized_task(self.config.vocabulary, &agent, &input.content.text);
+                true
+            }
+            Some(_) => {
+                self.reply(
+                    chat_id,
+                    message.message_id.get(),
+                    "The selected Skilled Agent does not belong to this provider.",
+                )
+                .await;
+                false
+            }
+            None => {
+                self.reply(
+                    chat_id,
+                    message.message_id.get(),
+                    "The selected Skilled Agent is unavailable, so I’m continuing with this bot’s default behavior.",
+                )
+                .await;
+                true
             }
         }
     }
@@ -2122,10 +2228,17 @@ impl Runtime {
             }
             _ => false,
         };
+        let skill = match group.command() {
+            Some((name, _)) if control.is_none() && !forward => {
+                self.skill_for_command(chat_id, name).await
+            }
+            _ => None,
+        };
         if let Some((name, _)) = group.command()
             && control.is_none()
             && name != "queue"
             && !forward
+            && skill.is_none()
         {
             let arguments = command_arguments(&group.text, name);
             let answer = self
@@ -2166,11 +2279,19 @@ impl Runtime {
             } else {
                 None
             };
-        let input = if forward {
+        let input = if forward || skill.is_some() {
+            let text = match (&skill, group.command()) {
+                (Some(skill), Some((name, _))) => skills::activation_text(
+                    self.config.vocabulary,
+                    &skill.key,
+                    command_arguments(&group.text, name),
+                ),
+                _ => harness_command_text(&group.text, &self.config.bot_username),
+            };
             Some(Input {
                 id: InputId::new(id.clone())?,
                 content: InputContent {
-                    text: harness_command_text(&group.text, &self.config.bot_username),
+                    text,
                     attachments: Vec::new(),
                     context: None,
                 },
@@ -2216,6 +2337,12 @@ impl Runtime {
         {
             Begin::Seen(_) => return Ok(()),
             Begin::New { .. } => {}
+        }
+        if group.command().is_none()
+            && !self.apply_agent_profile(message, chat_id, &mut input).await
+        {
+            self.agent.ledger.set(&id, InputState::Consumed)?;
+            return Ok(());
         }
         if let Err(error) = self.ensure_work(chat_id, participation.as_ref()).await {
             self.agent.ledger.set(&id, InputState::Failed)?;
@@ -2720,7 +2847,7 @@ fn mentioned_users(message: &GroupMessage) -> Vec<i64> {
 
 /// Commands Inline answers itself; the harness's own commands with these
 /// names are not forwarded.
-const INLINE_COMMANDS: &[&str] = &[
+pub(super) const INLINE_COMMANDS: &[&str] = &[
     "new",
     "stop",
     "pause",
@@ -2792,12 +2919,12 @@ fn harness_command_text(text: &str, bot_username: &str) -> String {
 fn help_text(agent_name: &str, vocabulary: Vocabulary) -> String {
     if matches!(vocabulary, Vocabulary::OpenCode | Vocabulary::Amp) {
         return format!(
-            "{agent_name} commands:\n/status · current model and folder\n/model, /reasoning, /permissions · settings for this thread\n/stop · stop the current turn; /pause and /resume\n/new <task> · a new thread with a fresh session\n/follow, /unfollow · choose which messages to answer\n/allowlist · who may use me (owner)\n/release · close this session while preserving its history\nThe agent's advertised commands work as you type them."
+            "{agent_name} commands:\n/status · current model and folder\n/model, /reasoning, /permissions · settings for this thread\n/stop · stop the current turn; /pause and /resume\n/new <task> · a new thread with a fresh session\n/follow, /unfollow · choose which messages to answer\n/allowlist · who may use me (owner)\n/release · close this session while preserving its history\nThe agent's advertised commands and installed skills work as you type them."
         );
     }
     let native = match vocabulary {
         Vocabulary::Codex => {
-            "/plan, /plan off · Codex plan mode\n/review [branch] · Codex reviews your changes\n"
+            "/plan, /plan off · Codex plan mode\n/review [branch] · Codex reviews your changes\nInstalled Codex skills work as /skill-name.\n"
         }
         Vocabulary::Claude => {
             "/plan · Claude plan mode\n/undo · undo the last turn's file changes\nClaude's own commands and skills work as you type them.\n"

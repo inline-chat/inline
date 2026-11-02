@@ -333,6 +333,37 @@ fn project_roots(project: crate::protocol::CodexProject) -> Vec<CatalogFolder> {
         .collect()
 }
 
+/// Enabled skills from a `skills/list` response, once each across its folders.
+fn skill_options(response: &Value) -> Vec<DriverSettingOption> {
+    let mut seen = std::collections::HashSet::new();
+    response
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("skills").and_then(Value::as_array))
+        .flatten()
+        .filter(|skill| skill.get("enabled").and_then(Value::as_bool) != Some(false))
+        .filter_map(|skill| {
+            let name = skill.get("name").and_then(Value::as_str)?;
+            let interface = skill.get("interface");
+            let text = |value: Option<&Value>| {
+                value
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.is_empty())
+                    .map(str::to_owned)
+            };
+            seen.insert(name.to_owned()).then(|| DriverSettingOption {
+                value: name.to_owned(),
+                label: text(interface.and_then(|value| value.get("displayName")))
+                    .unwrap_or_else(|| name.to_owned()),
+                description: text(skill.get("description")),
+                disabled: false,
+            })
+        })
+        .collect()
+}
+
 impl HarnessDriver for CodexHarness {
     fn describe(&self) -> RuntimeInfo {
         self.info.lock().expect("runtime info poisoned").clone()
@@ -431,6 +462,18 @@ impl HarnessDriver for CodexHarness {
                             .collect()
                     })
                     .unwrap_or_default();
+            }
+            if let Ok(skills) = connection
+                .request(Request {
+                    method: "skills/list",
+                    params: json!({
+                        "cwds": scope.folder.iter().collect::<Vec<_>>(),
+                        "forceReload": true,
+                    }),
+                })
+                .await
+            {
+                catalog.skills = skill_options(&skills);
             }
             catalog.folders = project_folders(&connection).await;
             if let Ok(usage) = connection
@@ -1360,6 +1403,38 @@ fn op_error(error: PeerError) -> OpError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skill_options_keep_enabled_skills_once() {
+        let options = skill_options(&serde_json::json!({"data": [
+            {"cwd": "/a", "errors": [], "skills": [
+                {"name": "fix-ci", "description": "Fixes CI", "enabled": true, "path": "/s", "scope": "user",
+                 "interface": {"displayName": "Fix CI"}},
+                {"name": "off", "description": "Disabled", "enabled": false, "path": "/o", "scope": "user"},
+            ]},
+            {"cwd": "/b", "errors": [], "skills": [
+                {"name": "fix-ci", "description": "Again", "enabled": true, "path": "/s2", "scope": "repo"},
+                {"name": "plain", "description": "", "enabled": true, "path": "/p", "scope": "repo"},
+            ]},
+        ]}));
+        let summary = options
+            .iter()
+            .map(|option| {
+                (
+                    option.value.as_str(),
+                    option.label.as_str(),
+                    option.description.as_deref(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summary,
+            [
+                ("fix-ci", "Fix CI", Some("Fixes CI")),
+                ("plain", "plain", None)
+            ]
+        );
+    }
 
     #[test]
     fn a_project_lists_each_root_under_its_name() {

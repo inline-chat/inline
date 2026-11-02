@@ -113,6 +113,21 @@ OpenCode `/compact`. Amp explains alternatives when compaction is unavailable.
 If an older saved session cannot be resumed, its binding stays intact; retry
 or use `/new` to explicitly start a fresh conversation.
 
+### Skills
+
+Skills installed for Codex, Claude Code, OpenCode or Amp on the bridge machine
+work in Inline. The bridge publishes their names and descriptions to Inline
+when it starts and checks for changes every few minutes, using the skills
+available in the bot's default folder.
+
+- Type `/skill-name` in a thread to run one. Skills whose names fit the command
+  menu also appear in compose autocomplete, with `-` shown as `_`.
+- Choose one for a Skilled Agent in the bot's settings on iOS or macOS. The
+  agent then uses that skill whenever it's mentioned.
+
+Inline's own commands, such as `/status`, take priority over a skill with the
+same name.
+
 Upgrading from an earlier CLI needs no setup. Existing conversations continue
 in their Codex or Claude session, or start a fresh one when that session is no
 longer on the machine. For a bridge installed before the new updater, wait until

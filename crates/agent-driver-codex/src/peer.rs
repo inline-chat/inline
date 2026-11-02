@@ -274,6 +274,7 @@ where
                     | "model/list"
                     | "config/read"
                     | "permissionProfile/list"
+                    | "skills/list"
             ) {
                 pending_guard.disarm();
             }

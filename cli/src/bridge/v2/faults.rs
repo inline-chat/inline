@@ -764,6 +764,98 @@ async fn acp_advertised_commands_use_the_threads_folder_and_preserve_inline_cont
 }
 
 #[tokio::test]
+async fn slash_command_runs_an_installed_skill_but_never_shadows_inline() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    let catalog = super::skills::SkillCatalog {
+        vocabulary: runtime.config.vocabulary,
+        harness: runtime.agent.harness.clone(),
+        amp_cli: None,
+    };
+    runtime.skills = Some(SkillPublisher {
+        catalog,
+        folder: runtime.config.folder.clone(),
+        provider_id: "claude".into(),
+        api_base_url: String::new(),
+        bot_token: String::new(),
+    });
+    let skill = |key: &str| Skill {
+        key: key.to_owned(),
+        description: None,
+    };
+    let folder = runtime.thread_folder(9);
+    runtime.listed_skills.insert(
+        folder,
+        (
+            tokio::time::Instant::now(),
+            vec![skill("gh-fix-ci"), skill("status")],
+        ),
+    );
+    assert!(runtime.skill_for_command(9, "status").await.is_none());
+    assert!(
+        runtime
+            .skill_for_command(9, "not-installed")
+            .await
+            .is_none()
+    );
+
+    let text = format!("/gh_fix_ci@{} the build", runtime.config.bot_username);
+    let message = MessageRecord {
+        chat_id: InlineId::new(9),
+        message_id: InlineId::new(902),
+        sender_id: InlineId::new(1),
+        timestamp: 1,
+        is_outgoing: false,
+        content: inline_client::MessageContent::Text { text: text.clone() },
+        reply_to_message_id: None,
+        metadata: Default::default(),
+        transaction: None,
+    };
+    let group = GroupMessage {
+        chat_id: 9,
+        message_id: 902,
+        author: inline_agent_bridge::group::Author {
+            user_id: 1,
+            display_name: "Owner".into(),
+            kind: inline_agent_bridge::group::AuthorKind::Human,
+        },
+        conversation: Conversation::Dm,
+        via: Default::default(),
+        text,
+        entities: vec![inline_agent_bridge::group::MessageEntity::Command {
+            offset: 0,
+            length: 10,
+            name: "gh_fix_ci".into(),
+            target_user_id: Some(2),
+        }],
+        reply_to: None,
+        sent_at: 1,
+    };
+    let decision = IntakeDecision::Act {
+        reason: DirectReason::Command,
+        join: false,
+        required: Operation::StartWork,
+    };
+    runtime
+        .act(
+            &message,
+            &group,
+            &decision,
+            Operation::StartWork,
+            Grants::OWNER,
+            None,
+        )
+        .await
+        .unwrap();
+    until(|| !harness.session.received.lock().unwrap().is_empty()).await;
+    assert_eq!(
+        harness.session.received.lock().unwrap()[0].content.text,
+        "Use the `gh-fix-ci` skill for this request.\n\nthe build"
+    );
+    let handle = runtime.works.remove(&9).unwrap();
+    cleanup.tasks.push(handle.task);
+}
+
+#[tokio::test]
 async fn unknown_native_manifest_keeps_claudes_compact_control() {
     let (mut runtime, _, _cleanup) = fixture(false);
     let document = runtime.settings_document(9, &Catalog::default()).await;
