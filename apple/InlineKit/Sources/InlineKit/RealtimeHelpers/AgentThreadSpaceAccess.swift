@@ -15,6 +15,18 @@ public enum AgentThreadSpaceAccessError: Error, LocalizedError, Equatable {
   }
 }
 
+public enum OwnedBotSpaceAdmission {
+  /// The requested bots a new thread can't include until they join its space.
+  /// Only the user's own bots: other people's mentions keep their usual handling.
+  public static func botsToAdd(
+    requested: Set<Int64>,
+    ownedBots: Set<Int64>,
+    members: Set<Int64>
+  ) -> [Int64] {
+    requested.intersection(ownedBots).subtracting(members).sorted()
+  }
+}
+
 enum AgentThreadSpaceAccess {
   static func validate(
     botUserID: Int64,

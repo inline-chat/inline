@@ -177,7 +177,6 @@ final class NewThreadComposeAttachmentStore {
 final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource {
   private let viewModel: NewThreadMentionCandidatesViewModel
   private let updates: CurrentValueSubject<MentionCompletionCandidates, Never>
-  private var destination: NewThreadComposeDestination
   private var agents: [MentionableBotAgent] = []
   private var ownedBots: [UserInfo] = []
   private var cancellable: AnyCancellable?
@@ -195,7 +194,6 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
   init(db: AppDatabase, destination: NewThreadComposeDestination) {
     let viewModel = NewThreadMentionCandidatesViewModel(db: db, spaceID: destination.spaceID)
     self.viewModel = viewModel
-    self.destination = destination
     updates = CurrentValueSubject(viewModel.candidates)
     cancellable = viewModel.$candidates.sink { [weak self] candidates in
       guard let self else { return }
@@ -204,7 +202,6 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
   }
 
   func setDestination(_ destination: NewThreadComposeDestination) {
-    self.destination = destination
     viewModel.setSpaceID(destination.spaceID)
   }
 
@@ -219,17 +216,9 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
   }
 
   private func merged(_ candidates: MentionCompletionCandidates) -> MentionCompletionCandidates {
-    var candidates = candidates
-    if destination.spaceID == nil {
-      // Private space threads only accept members, so owned bots are Home-only.
-      candidates = candidates.addingOwnedBots(ownedBots)
-      candidates.agents = agents
-    } else {
-      let spaceMemberIDs = Set(candidates.users.lazy
-        .filter { $0.source == .spaceMember }
-        .map(\.userInfo.id))
-      candidates.agents = agents.filter { spaceMemberIDs.contains($0.botUserId) }
-    }
+    // A bot outside the selected space is offered too; sending asks to add it.
+    var candidates = candidates.addingOwnedBots(ownedBots)
+    candidates.agents = agents
     return candidates
   }
 }

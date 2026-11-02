@@ -110,6 +110,34 @@ struct MentionCompletionCandidatesTests {
     #expect(ranker.items.map(\.id) == ["user:904"])
   }
 
+  @Test("an owned bot outside the selected space is still offered there")
+  func ownedBotOutsideSpace() async throws {
+    let database = AppDatabase.empty()
+    let space = try await database.dbWriter.write { db in
+      try Self.seed(db)
+      return try ChatParticipantsWithMembersViewModel.newThreadMentionCandidates(db, spaceID: 900)
+    }
+    // 904 isn't a member of 900, like a new bot in the user's usual space.
+    #expect(!space.users.contains { $0.userInfo.id == 904 })
+
+    let bot = UserInfo(user: User(id: 904, email: nil, firstName: "No History"))
+    let ranker = MentionCompletionViewModel(currentUserId: { nil })
+    ranker.updateCandidates(space.addingOwnedBots([bot]))
+    #expect(ranker.items.contains { $0.id == "user:904" })
+    ranker.filter(with: "no h")
+    #expect(ranker.items.map(\.id) == ["user:904"])
+  }
+
+  @Test("sending only adds the user's own bots that aren't members yet")
+  func botsToAddToSpace() {
+    #expect(OwnedBotSpaceAdmission.botsToAdd(
+      requested: [1, 2, 3, 4],
+      ownedBots: [2, 3, 5],
+      members: [1, 3]
+    ) == [2])
+    #expect(OwnedBotSpaceAdmission.botsToAdd(requested: [7], ownedBots: [], members: []).isEmpty)
+  }
+
   @Test("an owned bot with DM history stays unique and keeps its chat priority")
   func ownedBotWithHistory() throws {
     let bot = UserInfo(user: User(id: 950, email: nil, firstName: "Claude"))

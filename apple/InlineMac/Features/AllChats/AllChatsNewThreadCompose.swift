@@ -832,6 +832,10 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     }
 
     let agentBotIDs = draft.agentContext.map { Set([$0.botUserID]) } ?? []
+    if let failure = await addOwnedBotsToSpaceIfNeeded(draft, agentBotIDs: agentBotIDs) {
+      return .failure(failure)
+    }
+
     let participantIDs = draft.destination.isPublic
       ? []
       : Array(draft.mentionedUserIDs.union(agentBotIDs).union([draft.authorUserID])).sorted()
@@ -1075,6 +1079,87 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     }
   }
 
+  /// The server only accepts space members, so a bot the user owns joins first,
+  /// once they agree. Returns why the draft can't be sent, if it can't.
+  private func addOwnedBotsToSpaceIfNeeded(
+    _ draft: PreparedNewThreadDraft,
+    agentBotIDs: Set<Int64>
+  ) async -> NewThreadComposeSubmissionFailure? {
+    guard let spaceID = draft.destination.spaceID else { return nil }
+    let requestedIDs = draft.mentionedUserIDs.union(agentBotIDs)
+    let ownedBots = Dictionary(
+      agentChoices.map { ($0.bot.id, $0.bot) },
+      uniquingKeysWith: { first, _ in first }
+    )
+    guard !requestedIDs.isDisjoint(with: ownedBots.keys) else { return nil }
+
+    let response: InlineProtocol.GetSpaceMembersResult
+    do {
+      let result = try await dependencies.realtimeV2.send(.getSpaceMembers(spaceId: spaceID))
+      guard case let .getSpaceMembers(members) = result else {
+        throw NewThreadComposeSubmitError.invalidSpaceMembersResponse
+      }
+      response = members
+    } catch {
+      log.error("Could not read the new thread's space members", error: error)
+      return NewThreadComposeSubmissionFailure(
+        message: "Couldn't check who's in \(destinationTitle). Your message is still here.",
+        createdPeer: nil
+      )
+    }
+
+    do {
+      let missingIDs = OwnedBotSpaceAdmission.botsToAdd(
+        requested: requestedIDs,
+        ownedBots: Set(ownedBots.keys),
+        members: Set(response.members.map(\.userID))
+      )
+      guard !missingIDs.isEmpty else { return nil }
+
+      let names = missingIDs.compactMap { ownedBots[$0] }.map { InlineKit.User(from: $0).displayName }
+      guard await confirmAddingBots(named: names, isPublic: draft.destination.isPublic) else {
+        return NewThreadComposeSubmissionFailure(
+          message: "Not sent. Choose Home or remove the mention; your message is still here.",
+          createdPeer: nil
+        )
+      }
+      for botID in missingIDs {
+        try await dependencies.realtimeV2.send(.inviteToSpace(
+          spaceId: spaceID,
+          access: .member(canAccessPublicChats: draft.destination.isPublic),
+          userId: botID
+        ))
+      }
+      return nil
+    } catch {
+      log.error("Could not add owned bots to the new thread's space", error: error)
+      return NewThreadComposeSubmissionFailure(
+        message: "Couldn't add the agent to \(destinationTitle). You may need to be a space admin; your message is still here.",
+        createdPeer: nil
+      )
+    }
+  }
+
+  private func confirmAddingBots(named names: [String], isPublic: Bool) async -> Bool {
+    let alert = NSAlert()
+    alert.messageText = names.count == 1
+      ? "Add \(names[0]) to \(destinationTitle)?"
+      : "Add \(names.count) agents to \(destinationTitle)?"
+    alert.informativeText = isPublic
+      ? "It joins this space and can read its public threads. Everyone in the space can see it."
+      : "It joins this space and can read only the threads it's added to. Everyone in the space can see it."
+    alert.addButton(withTitle: "Add and Send")
+    alert.addButton(withTitle: "Cancel")
+    guard let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: \.isVisible) else {
+      return alert.runModal() == .alertFirstButtonReturn
+    }
+    return await withCheckedContinuation { continuation in
+      alert.beginSheetModal(for: window) { response in
+        continuation.resume(returning: response == .alertFirstButtonReturn)
+      }
+    }
+  }
+
   private func placeholderTitle(for draft: PreparedNewThreadDraft) -> String {
     let normalized = draft.text
       .split(whereSeparator: \Character.isWhitespace)
@@ -1186,6 +1271,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
 private enum NewThreadComposeSubmitError: Error {
   case invalidGroupMentionDestination
+  case invalidSpaceMembersResponse
 }
 
 private final class WeakNewThreadComposeHost {
