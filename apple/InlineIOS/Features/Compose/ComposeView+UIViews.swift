@@ -94,7 +94,12 @@ final class ComposePlusGlassButton: UIVisualEffectView {
     }
   }
 
-  init(systemImage: String = "plus", pointSize: CGFloat = 16, accessibilityLabel: String = "Add") {
+  init(
+    systemImage: String = "plus",
+    pointSize: CGFloat = 16,
+    iconColor: UIColor = .secondaryLabel,
+    accessibilityLabel: String = "Add"
+  ) {
     if #available(iOS 26.0, *) {
       let glassEffect = UIGlassEffect(style: .regular)
       glassEffect.isInteractive = true
@@ -104,7 +109,7 @@ final class ComposePlusGlassButton: UIVisualEffectView {
       backgroundColor = .secondarySystemBackground
     }
 
-    setup(systemImage: systemImage, pointSize: pointSize, accessibilityLabel: accessibilityLabel)
+    setup(systemImage: systemImage, pointSize: pointSize, iconColor: iconColor, accessibilityLabel: accessibilityLabel)
   }
 
   /// Swaps the glyph in place, e.g. stop and resume on the agent run circle.
@@ -157,7 +162,7 @@ final class ComposePlusGlassButton: UIVisualEffectView {
     super.touchesCancelled(touches, with: event)
   }
 
-  private func setup(systemImage: String, pointSize: CGFloat, accessibilityLabel: String) {
+  private func setup(systemImage: String, pointSize: CGFloat, iconColor: UIColor, accessibilityLabel: String) {
     translatesAutoresizingMaskIntoConstraints = false
     isUserInteractionEnabled = true
     layer.cornerRadius = Constants.cornerRadius
@@ -168,7 +173,7 @@ final class ComposePlusGlassButton: UIVisualEffectView {
 
     imageView.translatesAutoresizingMaskIntoConstraints = false
     setSymbol(systemImage, pointSize: pointSize, accessibilityLabel: accessibilityLabel)
-    imageView.tintColor = .secondaryLabel
+    imageView.tintColor = iconColor
     imageView.contentMode = .center
     contentView.addSubview(imageView)
 
@@ -290,7 +295,7 @@ extension ComposeView {
   }
 
   func makePlusButton() -> UIView {
-    let button = ComposePlusGlassButton()
+    let button = ComposePlusGlassButton(iconColor: .label)
     button.onTouchDown = { [weak self] in
       self?.buttonTouchDown()
     }
