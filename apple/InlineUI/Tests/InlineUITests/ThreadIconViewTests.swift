@@ -40,6 +40,32 @@ struct ThreadIconViewTests {
   }
 
   @MainActor
+  @Test("nudges lopsided emoji toward their visual weight")
+  func nudgesLopsidedEmojiTowardVisualWeight() {
+    #expect(ThreadIconEmojiOpticalCenter.offset(for: "🎯", fontSize: 15.4).width > 0)
+    #expect(ThreadIconEmojiOpticalCenter.offset(for: "🔥", fontSize: 15.4).height < 0)
+  }
+
+  @MainActor
+  @Test("leaves symmetric and blank emoji in place")
+  func leavesSymmetricAndBlankEmojiInPlace() {
+    #expect(ThreadIconEmojiOpticalCenter.offset(for: "🔴", fontSize: 15.4) == .zero)
+    #expect(ThreadIconEmojiOpticalCenter.offset(for: " ", fontSize: 15.4) == .zero)
+  }
+
+  @MainActor
+  @Test("caps the nudge relative to font size")
+  func capsNudgeRelativeToFontSize() {
+    let compact = ThreadIconEmojiOpticalCenter.offset(for: "🌙", fontSize: 15.4)
+    let large = ThreadIconEmojiOpticalCenter.offset(for: "🌙", fontSize: 100)
+
+    #expect(abs(compact.width) == 1)
+    #expect(abs(compact.height) == 1)
+    #expect(abs(large.width) == 6.5)
+    #expect(abs(large.height) == 6.5)
+  }
+
+  @MainActor
   @Test("view equality includes size shape symbol color and background")
   func viewEqualityIncludesSizeShapeSymbolColorAndBackground() {
     let descriptor = ThreadIconDescriptor(emoji: nil, title: "Thread")

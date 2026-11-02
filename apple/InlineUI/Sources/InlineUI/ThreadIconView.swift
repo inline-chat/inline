@@ -1,3 +1,4 @@
+import CoreText
 import InlineKit
 import SwiftUI
 
@@ -166,14 +167,13 @@ public struct ThreadIconView: View, Equatable {
   @ViewBuilder
   private var content: some View {
     if let emoji = descriptor.emoji {
+      let fontSize = resolvedSize * contentScale.emojiRatio * contentScaleMultiplier
       Text(emoji)
-        .font(.system(
-          size: resolvedSize * contentScale.emojiRatio * contentScaleMultiplier,
-          weight: .regular
-        ))
+        .font(.system(size: fontSize, weight: .regular))
         .foregroundStyle(resolvedSymbolColor)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
+        .offset(ThreadIconEmojiOpticalCenter.offset(for: emoji, fontSize: fontSize))
         .accessibilityHidden(true)
     } else {
       Image(systemName: fallbackSymbolName ?? ThreadIconDefaults.fallbackSymbolName(isReplyThread: descriptor.isReplyThread))
@@ -316,6 +316,95 @@ public enum ThreadIconImageRenderer {
     return renderer.uiImage
   }
   #endif
+}
+
+/// Nudges lopsided emoji, such as 🎯, toward the middle of their icon box. Text
+/// layout centers a glyph's box, so uneven artwork looks off-center without this.
+@MainActor
+enum ThreadIconEmojiOpticalCenter {
+  /// Correct only part of the gap, so the emoji's outline doesn't look shifted instead.
+  private static let correctionStrength: CGFloat = 0.6
+  /// About 1pt at the 15.4pt font size used by compact sidebar icons.
+  private static let maxOffsetRatio: CGFloat = 0.065
+  private static let canvasSize = 32
+  private static let measuringFontSize: CGFloat = 20
+  /// Keeps faint antialiased edge pixels from stretching the bounding box.
+  private static let boundingBoxMinAlpha = 64
+
+  private static var ratios: [String: CGSize] = [:]
+
+  /// Offset in points, snapped to half points so most emoji stay where they are.
+  static func offset(for emoji: String, fontSize: CGFloat) -> CGSize {
+    let ratio = ratio(for: emoji)
+    return CGSize(
+      width: (ratio.width * fontSize * 2).rounded() / 2,
+      height: (ratio.height * fontSize * 2).rounded() / 2
+    )
+  }
+
+  /// Measured once per emoji, so rendering a row afterward is only a dictionary lookup.
+  private static func ratio(for emoji: String) -> CGSize {
+    if let ratio = ratios[emoji] { return ratio }
+    let ratio = measureRatio(for: emoji)
+    ratios[emoji] = ratio
+    return ratio
+  }
+
+  /// Compares the opacity-weighted center of the emoji's pixels with the center of
+  /// their bounding box. Using the box as the reference keeps this independent of
+  /// font line metrics. Bitmap rows run top-down, matching SwiftUI's offset direction.
+  private static func measureRatio(for emoji: String) -> CGSize {
+    guard let context = CGContext(
+      data: nil,
+      width: canvasSize,
+      height: canvasSize,
+      bitsPerComponent: 8,
+      bytesPerRow: canvasSize * 4,
+      space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return .zero }
+
+    let font = CTFontCreateUIFontForLanguage(.system, measuringFontSize, nil)
+    let attributes = [kCTFontAttributeName as NSAttributedString.Key: font as Any]
+    let line = CTLineCreateWithAttributedString(NSAttributedString(string: emoji, attributes: attributes))
+    context.textPosition = CGPoint(x: 3, y: 8)
+    CTLineDraw(line, context)
+
+    guard let data = context.data else { return .zero }
+    let pixels = data.bindMemory(to: UInt8.self, capacity: canvasSize * canvasSize * 4)
+
+    var totalAlpha = 0.0
+    var weightedX = 0.0
+    var weightedY = 0.0
+    var (minX, maxX) = (canvasSize, -1)
+    var (minY, maxY) = (canvasSize, -1)
+
+    for y in 0 ..< canvasSize {
+      for x in 0 ..< canvasSize {
+        let alpha = Int(pixels[(y * canvasSize + x) * 4 + 3])
+        guard alpha > 0 else { continue }
+        totalAlpha += Double(alpha)
+        weightedX += Double(x * alpha)
+        weightedY += Double(y * alpha)
+        guard alpha >= boundingBoxMinAlpha else { continue }
+        minX = min(minX, x)
+        maxX = max(maxX, x)
+        minY = min(minY, y)
+        maxY = max(maxY, y)
+      }
+    }
+    guard maxX >= minX, maxY >= minY else { return .zero }
+
+    return CGSize(
+      width: correctedRatio(center: CGFloat(minX + maxX) / 2, weighted: CGFloat(weightedX / totalAlpha)),
+      height: correctedRatio(center: CGFloat(minY + maxY) / 2, weighted: CGFloat(weightedY / totalAlpha))
+    )
+  }
+
+  private static func correctedRatio(center: CGFloat, weighted: CGFloat) -> CGFloat {
+    let ratio = (center - weighted) / measuringFontSize * correctionStrength
+    return min(max(ratio, -maxOffsetRatio), maxOffsetRatio)
+  }
 }
 
 private enum ResolvedBackground: Equatable {
