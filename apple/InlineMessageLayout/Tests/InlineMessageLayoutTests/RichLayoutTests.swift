@@ -135,6 +135,122 @@ struct RichLayoutTests {
     #expect(summary.chevronFrame.minX >= summary.titleFrame.maxX)
   }
 
+  @Test("A disclosure row trails its chevron with status and meta")
+  func disclosureDecoration() throws {
+    let block = RichBlock.disclosure(RichDisclosure(
+      summary: Fixtures.text("Ran the tests"),
+      children: [Self.p("Output")],
+      isExpanded: false,
+      status: .failed,
+      meta: Fixtures.text("exit 1")
+    ))
+    let layout = try Self.layout([block])
+    guard case let .disclosure(row) = layout.nodes[0].node else { Issue.record("not a disclosure"); return }
+    let status = try #require(row.statusFrame)
+    let meta = try #require(row.metaFrame)
+    #expect(row.status == .failed)
+    #expect(status.minX >= row.chevronFrame.maxX)
+    #expect(meta.minX >= status.maxX)
+    #expect(meta.maxX <= layout.nodes[0].frame.width + 0.5)
+  }
+
+  @Test("Quiet statuses draw no glyph, and a childless disclosure has no chevron")
+  func disclosureQuietStates() throws {
+    let block = RichBlock.disclosure(RichDisclosure(
+      summary: Fixtures.text("Read a file"),
+      children: [],
+      isExpanded: false,
+      status: .done
+    ))
+    let layout = try Self.layout([block])
+    guard case let .disclosure(row) = layout.nodes[0].node else { Issue.record("not a disclosure"); return }
+    #expect(row.status == nil)
+    #expect(row.statusFrame == nil)
+    #expect(!row.hasChildren)
+    #expect(row.chevronFrame.width == 0)
+  }
+
+  @Test("Diffs span the width and give runs of changed lines one background")
+  func diffs() throws {
+    let lines = ["--- a/file", "+++ b/file", "@@ -1 +1,2 @@", "-old", "+new", "+newer", " same"]
+    let block = RichBlock.diff(RichDiff(
+      path: Fixtures.text("file"),
+      body: Fixtures.text(lines.joined(separator: "\n"), font: Self.mono),
+      copyText: lines.joined(separator: "\n")
+    ))
+    let layout = try Self.layout([block])
+    #expect(layout.nodes.count == 1)
+    #expect(layout.size.width == 300)
+    guard case let .diff(diff) = layout.nodes[0].node else { Issue.record("not a diff"); return }
+    #expect(diff.bands.map(\.isAddition) == [false, true])
+    #expect(diff.bands[1].frame.height > diff.bands[0].frame.height)
+    #expect(diff.contentWidth >= 300)
+    #expect(layout.nodes[0].frame.height > diff.headerHeight)
+  }
+
+  @Test("A diff with no body is just its header")
+  func diffHeaderOnly() throws {
+    let layout = try Self.layout([.diff(RichDiff(path: Fixtures.text("image.png")))])
+    guard case let .diff(diff) = layout.nodes[0].node else { Issue.record("not a diff"); return }
+    #expect(diff.bands.isEmpty)
+    #expect(layout.nodes[0].frame.height == diff.headerHeight)
+  }
+
+  @Test("Steps put status markers in a column before their text")
+  func steps() throws {
+    let layout = try Self.layout([.steps(RichSteps(steps: [
+      .init(text: Fixtures.text("Fix the bug"), status: .done),
+      .init(text: Fixtures.text("Run the tests"), detail: Fixtures.text("Running"), status: .failed),
+    ]))])
+    #expect(layout.nodes.count == 5)
+    guard case .statusMarker(.done) = layout.nodes[0].node, case .statusMarker(.failed) = layout.nodes[2].node else {
+      Issue.record("markers missing")
+      return
+    }
+    #expect(layout.nodes[0].frame.minX == layout.nodes[2].frame.minX)
+    #expect(layout.nodes[1].frame.minX >= layout.nodes[0].frame.maxX)
+    #expect(layout.nodes[4].frame.minY >= layout.nodes[3].frame.maxY)
+    #expect(layout.trailingLine == nil)
+  }
+
+  @Test("Fields put labels in a column and align their values")
+  func fields() throws {
+    let layout = try Self.layout([.fields(RichFields(rows: [
+      .init(label: Fixtures.text("Command"), value: Fixtures.text("cargo test")),
+      .init(label: Fixtures.text("Folder"), value: Fixtures.text("/repo")),
+    ]))])
+    #expect(layout.nodes.count == 4)
+    #expect(layout.nodes[0].frame.minX == layout.nodes[2].frame.minX)
+    #expect(layout.nodes[1].frame.minX == layout.nodes[3].frame.minX)
+    #expect(layout.nodes[1].frame.minX >= layout.nodes[0].frame.maxX)
+    #expect(layout.nodes[2].frame.minY >= max(layout.nodes[0].frame.maxY, layout.nodes[1].frame.maxY))
+  }
+
+  @Test("Callouts span the width and hold their title and children")
+  func callouts() throws {
+    let layout = try Self.layout([.callout(RichCallout(
+      tone: .warning,
+      title: Fixtures.text("Careful"),
+      children: [Self.p("This deletes the build folder")]
+    ))])
+    #expect(layout.size.width == 300)
+    #expect(layout.nodes.count == 3)
+    guard case let .callout(callout) = layout.nodes[0].node else { Issue.record("not a callout"); return }
+    #expect(callout.tone == .warning)
+    let box = layout.nodes[0].frame
+    #expect(layout.nodes[1].frame.minX >= callout.iconFrame.maxX)
+    #expect(layout.nodes[2].frame.minY >= layout.nodes[1].frame.maxY)
+    #expect(layout.nodes[2].frame.maxY < box.maxY)
+    #expect(abs(layout.size.height - box.maxY) < 0.5)
+  }
+
+  @Test("Groups stack their children with no node of their own")
+  func groups() throws {
+    let layout = try Self.layout([.group([Self.p("One"), Self.p("Two")])])
+    #expect(layout.nodes.map(\.path) == [RichPath([0, 0]), RichPath([0, 1])])
+    #expect(layout.trailingLine == nil)
+  }
+
   @Test("Images keep their aspect inside the width and the height cap")
   func images() throws {
     let layout = try Self.layout([.image(RichImage(id: "a", size: CGSize(width: 1_200, height: 800))), .image(RichImage(id: "b", size: nil))])

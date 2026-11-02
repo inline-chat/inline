@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use agent_client_protocol::schema::{ProtocolVersion, v1 as acp};
-use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Responder};
+use agent_client_protocol::{
+    Agent, Client, ConnectTo, ConnectionTo, JsonRpcNotification, Responder,
+};
 use base64::Engine;
 use futures_util::future::{BoxFuture, FutureExt, Shared};
 use inline_agent_bridge::{
@@ -19,32 +21,109 @@ use inline_agent_bridge::{
     ResumeSessionSpec, SessionReplay, SessionSpec, StartedTurn, SteeringSupport, TurnId, TurnInput,
     TurnOptions, TurnOutcome, TurnTiming,
 };
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::elicitation::{ElicitationField, answer_response, normalize_form};
 use crate::host_tools::AcpHostToolProxy;
 use crate::mapping::{
-    ToolCallSnapshots, available_commands, permission_command, permission_options,
-    permission_summary, select_config_id, session_modes, session_update_events, settings_catalog,
-    turn_outcome,
+    StreamState, available_commands, permission_command, permission_options, permission_summary,
+    select_config_id, session_modes, settings_catalog, stream_events, turn_outcome,
 };
 
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(15);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_FINAL_AGENT_TEXT_BYTES: usize = 64 * 1024;
-const TRUNCATED_AGENT_TEXT_MARKER: &str = "\n[additional agent output omitted]";
-const MAX_PENDING_APPROVALS: usize = 32;
-const MAX_PENDING_APPROVALS_PER_SESSION: usize = 8;
-const MAX_PENDING_ELICITATIONS: usize = 32;
-const MAX_PENDING_ELICITATIONS_PER_SESSION: usize = 8;
+// Opening a session starts its MCP servers and, on load, replays its history.
+// An expiry here ends the process, so it only guards against a wedged agent.
+const SESSION_OPEN_TIMEOUT: Duration = Duration::from_secs(300);
+const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+// The bridge splits long answers itself. This only guards memory, and says so.
+const MAX_FINAL_AGENT_TEXT_BYTES: usize = 64 * 1024 * 1024;
+const TRUNCATED_AGENT_TEXT_MARKER: &str =
+    "\n[Inline stopped collecting this answer at 64 MiB. The rest is in the agent's session.]";
+// Parallel subagents each raise their own cards. Past these safety valves the
+// request is refused with a visible notice.
+const MAX_PENDING_APPROVALS: usize = 4_096;
+const MAX_PENDING_APPROVALS_PER_SESSION: usize = 1_024;
+const MAX_PENDING_ELICITATIONS: usize = 4_096;
+const MAX_PENDING_ELICITATIONS_PER_SESSION: usize = 1_024;
 const MAX_RETAINED_PERMISSION_OPTIONS: usize = 7;
 const MAX_RETAINED_PERMISSION_OPTION_ID_BYTES: usize = 128;
 const MAX_RETAINED_PERMISSION_OPTION_LABEL_CHARS: usize = 80;
 const MAX_PROVIDER_SESSION_ID_BYTES: usize = 256;
 const MAX_NATIVE_PROMPT_MEDIA_BYTES: usize = 20 * 1024 * 1024;
 const MAX_NATIVE_OUTPUT_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+/// Opt-in for OpenCode's structured child-session stream (`capabilities.ts`).
+const OPENCODE_CHILD_UPDATES_CAPABILITY: &str = "opencode/child-session-updates";
+const COMPACT_COMMAND: &str = "compact";
+
+/// OpenCode's private stream for one subagent session (`acp/child.ts`), sent
+/// when the client opts in, instead of flattening children into the parent.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonRpcNotification)]
+#[notification(method = "opencode/session/child_update")]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OpenCodeChildUpdate {
+    pub(crate) root_session_id: String,
+    pub(crate) child_session_id: String,
+    pub(crate) parent_session_id: String,
+    #[serde(default)]
+    pub(crate) title: Option<String>,
+    #[serde(rename = "type")]
+    pub(crate) kind: String,
+    #[serde(default)]
+    pub(crate) update: Option<serde_json::Value>,
+    #[serde(default)]
+    pub(crate) status: Option<String>,
+    #[serde(default)]
+    pub(crate) error: Option<serde_json::Value>,
+}
+
+/// Session facts with no place on the turn-scoped event stream.
+#[derive(Clone, Debug)]
+pub(crate) enum SessionSignal {
+    Update(Box<acp::SessionUpdate>),
+    Child(Box<OpenCodeChildUpdate>),
+    PromptUsage(acp::Usage),
+}
+
+/// What the agent advertised at initialize, beyond [`DriverCapabilities`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AcpFeatures {
+    pub(crate) list_sessions: bool,
+    pub(crate) close_session: bool,
+    pub(crate) fork_session: bool,
+    /// OpenCode's built-in `/compact` command and Build/Plan modes, read from
+    /// its identity because both are only knowable per session otherwise.
+    pub(crate) opencode: bool,
+}
+
+/// The current per-session picture for availability and effective settings.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct SessionView {
+    pub(crate) has_compact: bool,
+    pub(crate) modes: Option<acp::SessionModeState>,
+    pub(crate) config_options: Vec<acp::SessionConfigOption>,
+}
+
+/// One page of `session/list`.
+#[derive(Clone, Debug)]
+pub(crate) struct SessionListing {
+    pub(crate) sessions: Vec<acp::SessionInfo>,
+    pub(crate) next: Option<String>,
+}
+
+/// What an open approval is about, for its card.
+#[derive(Clone, Debug)]
+pub(crate) struct ApprovalContext {
+    pub(crate) options: Vec<acp::PermissionOption>,
+    pub(crate) tool_call_id: String,
+    pub(crate) kind: Option<acp::ToolKind>,
+    pub(crate) title: Option<String>,
+    pub(crate) locations: Vec<PathBuf>,
+    pub(crate) raw_input: Option<serde_json::Value>,
+}
 
 async fn acp_prompt_blocks(
     input: TurnInput,
@@ -148,14 +227,15 @@ async fn acp_local_media(
             "inspect ACP local {expected_top_level_type} attachment: {error}"
         ))
     })?;
-    if !metadata.file_type().is_file()
-        || usize::try_from(metadata.len()).map_or(true, |size| {
-            size == 0 || size > MAX_NATIVE_PROMPT_MEDIA_BYTES
-        })
-    {
+    if !metadata.file_type().is_file() || metadata.len() == 0 {
         return Err(DriverError::Rejected(format!(
-            "ACP local {expected_top_level_type} attachment is not a bounded regular file"
+            "ACP local {expected_top_level_type} attachment is not a regular file"
         )));
+    }
+    // Too large to inline as base64: the caller still attaches the local file
+    // as a resource link, so the agent keeps access to it.
+    if usize::try_from(metadata.len()).map_or(true, |size| size > MAX_NATIVE_PROMPT_MEDIA_BYTES) {
+        return Ok(None);
     }
     let bytes = tokio::fs::read(&path).await.map_err(|error| {
         DriverError::Transient(format!(
@@ -222,7 +302,7 @@ struct ActiveTurn {
     sender: AgentEventSender,
     text: String,
     separate_next_agent_message: bool,
-    tool_calls: ToolCallSnapshots,
+    stream: StreamState,
 }
 
 type ActiveTurns = Arc<StdMutex<HashMap<String, ActiveTurn>>>;
@@ -230,7 +310,7 @@ type ActiveTurns = Arc<StdMutex<HashMap<String, ActiveTurn>>>;
 #[derive(Debug)]
 struct PendingApproval {
     session_id: String,
-    options: Vec<acp::PermissionOption>,
+    context: ApprovalContext,
     responder: Responder<acp::RequestPermissionResponse>,
     completion: oneshot::Sender<()>,
 }
@@ -264,6 +344,19 @@ struct SessionRegistry {
     sessions: HashMap<String, SessionMetadata>,
     prewarmed_by_cwd: HashMap<PathBuf, String>,
     prewarming_by_cwd: HashMap<PathBuf, SessionPrewarm>,
+    signals: HashMap<String, mpsc::UnboundedSender<SessionSignal>>,
+}
+
+impl SessionRegistry {
+    fn signal(&mut self, session_id: &str, signal: SessionSignal) {
+        if self
+            .signals
+            .get(session_id)
+            .is_some_and(|sender| sender.send(signal).is_err())
+        {
+            self.signals.remove(session_id);
+        }
+    }
 }
 
 type Sessions = Arc<StdMutex<SessionRegistry>>;
@@ -372,6 +465,7 @@ impl ConnectionLifecycle {
 pub struct AcpDriver {
     connection: ConnectionTo<Agent>,
     capabilities: DriverCapabilities,
+    features: AcpFeatures,
     prompt_capabilities: acp::PromptCapabilities,
     resume_mode: ResumeMode,
     default_permission_mode: Option<Arc<str>>,
@@ -449,6 +543,7 @@ impl AcpDriver {
         let notification_turns = active_turns.clone();
         let notification_sessions = sessions.clone();
         let notification_output_cache = output_cache_dir.clone();
+        let child_sessions = sessions.clone();
         let permission_turns = active_turns.clone();
         let permission_approvals = approvals.clone();
         let permission_sequence = sequence.clone();
@@ -473,6 +568,17 @@ impl AcpDriver {
                             notification,
                         )
                         .await;
+                        Ok(())
+                    },
+                    agent_client_protocol::on_receive_notification!(),
+                )
+                .on_receive_notification(
+                    async move |update: OpenCodeChildUpdate, _connection| {
+                        let root = update.root_session_id.clone();
+                        child_sessions
+                            .lock()
+                            .expect("ACP session registry poisoned")
+                            .signal(&root, SessionSignal::Child(Box::new(update)));
                         Ok(())
                     },
                     agent_client_protocol::on_receive_notification!(),
@@ -542,6 +648,10 @@ impl AcpDriver {
                         acp::ClientSessionCapabilities::new()
                             .config_options(acp::SessionConfigOptionsCapabilities::new()),
                     )
+                    .meta(serde_json::Map::from_iter([(
+                        OPENCODE_CHILD_UPDATES_CAPABILITY.to_string(),
+                        serde_json::Value::Bool(true),
+                    )]))
                     .elicitation(
                         acp::ElicitationCapabilities::new()
                             .form(acp::ElicitationFormCapabilities::new()),
@@ -565,7 +675,18 @@ impl AcpDriver {
             )));
         }
         let resume_mode = resume_mode(&response.agent_capabilities);
-        let capabilities = map_capabilities(&response.agent_capabilities);
+        let opencode = response
+            .agent_info
+            .as_ref()
+            .is_some_and(|info| info.name.eq_ignore_ascii_case("opencode"));
+        let session_capabilities = &response.agent_capabilities.session_capabilities;
+        let features = AcpFeatures {
+            list_sessions: session_capabilities.list.is_some(),
+            close_session: session_capabilities.close.is_some(),
+            fork_session: session_capabilities.fork.is_some(),
+            opencode,
+        };
+        let capabilities = map_capabilities(&response.agent_capabilities, opencode);
         let prompt_capabilities = response.agent_capabilities.prompt_capabilities.clone();
         log::trace!(
             target: "inline_agent_driver_acp::protocol",
@@ -583,6 +704,7 @@ impl AcpDriver {
         Ok(Self {
             connection,
             capabilities,
+            features,
             prompt_capabilities,
             resume_mode,
             default_permission_mode: None,
@@ -638,7 +760,7 @@ impl AcpDriver {
         );
         let response = mutating_request_with_timeout(
             &self.lifecycle,
-            REQUEST_TIMEOUT,
+            SESSION_OPEN_TIMEOUT,
             "session/new",
             self.connection.send_request(request).block_task(),
             |error| acp_request_error(error, &self.auth_methods),
@@ -874,6 +996,161 @@ impl AcpDriver {
     }
 }
 
+impl AcpDriver {
+    pub(crate) fn features(&self) -> AcpFeatures {
+        self.features
+    }
+
+    /// Bridge v2 subscribes to one session's facts. Without a subscriber, such
+    /// as on the legacy bridge, none are collected or kept.
+    pub(crate) fn subscribe_signals(
+        &self,
+        session_id: &str,
+    ) -> mpsc::UnboundedReceiver<SessionSignal> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        self.sessions
+            .lock()
+            .expect("ACP session registry poisoned")
+            .signals
+            .insert(session_id.to_string(), sender);
+        receiver
+    }
+
+    pub(crate) fn session_view(&self, session_id: &str) -> Option<SessionView> {
+        let sessions = self.sessions.lock().expect("ACP session registry poisoned");
+        let session = sessions.sessions.get(session_id)?;
+        Some(SessionView {
+            has_compact: session
+                .commands
+                .iter()
+                .any(|command| command.name == COMPACT_COMMAND),
+            modes: session.modes.clone(),
+            config_options: session.config_options.clone(),
+        })
+    }
+
+    /// Changes the session's mode. Unlike a permission change this is allowed
+    /// during a turn: ACP lets a mode change at any time, and it applies from
+    /// the agent's next step.
+    pub(crate) async fn set_session_mode(&self, session_id: &str, mode: &str) -> DriverResult<()> {
+        if self.lifecycle.is_stopped() {
+            return Err(DriverError::ProcessExited(
+                "ACP connection epoch has stopped".to_string(),
+            ));
+        }
+        // ACP asks clients to prefer a `mode` config option when an agent has
+        // one; its response also returns the authoritative option values.
+        let mode_config = {
+            let sessions = self.sessions.lock().expect("ACP session registry poisoned");
+            sessions.sessions.get(session_id).is_some_and(|session| {
+                select_config_id(
+                    &session.config_options,
+                    acp::SessionConfigOptionCategory::Mode,
+                    mode,
+                )
+                .is_some()
+            })
+        };
+        if mode_config {
+            self.apply_config_option(session_id, acp::SessionConfigOptionCategory::Mode, mode)
+                .await?;
+        } else {
+            self.apply_session_mode(session_id, mode).await?;
+        }
+        if let Some(session) = self
+            .sessions
+            .lock()
+            .expect("ACP session registry poisoned")
+            .sessions
+            .get_mut(session_id)
+        {
+            session.permission_seed_pending = false;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn list_sessions(
+        &self,
+        cwd: Option<PathBuf>,
+        cursor: Option<String>,
+    ) -> DriverResult<SessionListing> {
+        let response = request_with_timeout(
+            "session/list",
+            &self.auth_methods,
+            self.connection
+                .send_request(acp::ListSessionsRequest::new().cwd(cwd).cursor(cursor))
+                .block_task(),
+        )
+        .await?;
+        Ok(SessionListing {
+            sessions: response.sessions,
+            next: response.next_cursor,
+        })
+    }
+
+    pub(crate) async fn close_session(&self, session_id: &str) -> DriverResult<()> {
+        let closed = tokio::time::timeout(
+            SESSION_CLOSE_TIMEOUT,
+            self.connection
+                .send_request(acp::CloseSessionRequest::new(session_id.to_string()))
+                .block_task(),
+        )
+        .await
+        .map_err(|_| DriverError::Transient("ACP session/close timed out".to_string()))?
+        .map_err(|error| acp_request_error(error, &self.auth_methods))
+        .map(|_| ());
+        let mut sessions = self.sessions.lock().expect("ACP session registry poisoned");
+        sessions.signals.remove(session_id);
+        sessions.sessions.remove(session_id);
+        closed
+    }
+
+    pub(crate) async fn fork_session(
+        &self,
+        source: &ProviderSessionId,
+        cwd: PathBuf,
+    ) -> DriverResult<ProviderSessionId> {
+        validate_provider_session_id(source.as_str())?;
+        let attachment = self.session_mcp_attachment()?;
+        let request = acp::ForkSessionRequest::new(source.to_string(), cwd.clone()).mcp_servers(
+            attachment
+                .as_ref()
+                .map_or_else(Vec::new, SessionMcpAttachment::servers),
+        );
+        let response = mutating_request_with_timeout(
+            &self.lifecycle,
+            SESSION_OPEN_TIMEOUT,
+            "session/fork",
+            self.connection.send_request(request).block_task(),
+            |error| acp_resume_error(error, &self.auth_methods),
+        )
+        .await?;
+        let session_id = response.session_id.to_string();
+        validate_provider_session_id(&session_id)?;
+        let forked = ProviderSessionId::new(session_id.clone())
+            .map_err(|error| DriverError::Protocol(error.to_string()))?;
+        self.record_session(
+            session_id,
+            cwd,
+            response.config_options.unwrap_or_default(),
+            response.modes,
+            false,
+        );
+        if let Some(attachment) = attachment {
+            attachment.bind(forked.clone());
+        }
+        Ok(forked)
+    }
+
+    pub(crate) fn approval_context(&self, approval_id: &str) -> Option<ApprovalContext> {
+        self.approvals
+            .lock()
+            .expect("ACP approvals poisoned")
+            .get(approval_id)
+            .map(|pending| pending.context.clone())
+    }
+}
+
 impl AgentDriver for AcpDriver {
     fn migration_guidance(&self) -> Option<&str> {
         // Only OpenCode version forms are accepted here; the agent identity
@@ -1045,7 +1322,7 @@ impl AgentDriver for AcpDriver {
                     );
                     let response = match mutating_request_with_timeout(
                         &self.lifecycle,
-                        REQUEST_TIMEOUT,
+                        SESSION_OPEN_TIMEOUT,
                         "session/resume",
                         self.connection.send_request(request).block_task(),
                         |error| acp_resume_error(error, &self.auth_methods),
@@ -1091,7 +1368,7 @@ impl AgentDriver for AcpDriver {
                     );
                     let response = match mutating_request_with_timeout(
                         &self.lifecycle,
-                        REQUEST_TIMEOUT,
+                        SESSION_OPEN_TIMEOUT,
                         "session/load",
                         self.connection.send_request(request).block_task(),
                         |error| acp_resume_error(error, &self.auth_methods),
@@ -1183,6 +1460,12 @@ impl AgentDriver for AcpDriver {
                 acp_prompt_blocks(input, &self.prompt_capabilities, native_command).await?;
             let turn_id = TurnId::new(self.next_id("turn"))
                 .map_err(|error| DriverError::Protocol(error.to_string()))?;
+            let rich = self
+                .sessions
+                .lock()
+                .expect("ACP session registry poisoned")
+                .signals
+                .contains_key(&session_key);
             let (sender, events) = AgentEventReceiver::default_channel();
             sender.send(Ok(AgentEvent::TurnStarted {
                 turn_id: turn_id.clone(),
@@ -1201,11 +1484,12 @@ impl AgentDriver for AcpDriver {
                         sender,
                         text: String::new(),
                         separate_next_agent_message: false,
-                        tool_calls: ToolCallSnapshots::new(),
+                        stream: StreamState::new(rich),
                     },
                 );
             }
             let connection = self.connection.clone();
+            let finish_sessions = self.sessions.clone();
             let active_turns = self.active_turns.clone();
             let approvals = self.approvals.clone();
             let elicitations = self.elicitations.clone();
@@ -1216,6 +1500,7 @@ impl AgentDriver for AcpDriver {
                 let result = connection.send_request(prompt).block_task().await;
                 finish_turn(
                     &active_turns,
+                    &finish_sessions,
                     &approvals,
                     &elicitations,
                     &session_key,
@@ -1341,9 +1626,31 @@ impl AgentDriver for AcpDriver {
 
     fn compact_session<'a>(
         &'a self,
-        _session_id: &'a ProviderSessionId,
+        session_id: &'a ProviderSessionId,
     ) -> DriverFuture<'a, StartedTurn> {
-        Box::pin(async { Err(DriverError::Unsupported("ACP session compact")) })
+        Box::pin(async move {
+            // ACP has no compaction request: the agent's own advertised command
+            // is what starts one, with the same lifecycle as in its terminal.
+            let advertised = self
+                .session_commands(session_id)
+                .await?
+                .iter()
+                .any(|command| command.name == COMPACT_COMMAND);
+            if !advertised {
+                return Err(DriverError::Unsupported("ACP session compact"));
+            }
+            self.start_turn(
+                session_id,
+                TurnInput {
+                    text: format!("/{COMPACT_COMMAND}"),
+                    attachments: Vec::new(),
+                    context: None,
+                    client_message_id: None,
+                },
+                TurnOptions::default(),
+            )
+            .await
+        })
     }
 
     fn resolve_approval<'a>(
@@ -1358,7 +1665,7 @@ impl AgentDriver for AcpDriver {
                     DriverError::Rejected("ACP approval is no longer active".to_string())
                 })?;
                 let cancel_turn = matches!(decision, ApprovalDecision::CancelTurn);
-                let outcome = approval_outcome(&pending.options, decision)?;
+                let outcome = approval_outcome(&pending.context.options, decision)?;
                 let pending = approvals
                     .remove(approval_id)
                     .expect("validated ACP approval disappeared");
@@ -1434,15 +1741,18 @@ fn validate_provider_session_id(session_id: &str) -> DriverResult<()> {
     Ok(())
 }
 
-fn map_capabilities(capabilities: &acp::AgentCapabilities) -> DriverCapabilities {
+fn map_capabilities(capabilities: &acp::AgentCapabilities, opencode: bool) -> DriverCapabilities {
     DriverCapabilities {
         resume_session: resume_mode(capabilities) != ResumeMode::Unsupported,
-        compact_session: false,
+        compact_session: opencode,
         cancel_turn: true,
         settings_catalog: true,
         usage_limits: false,
         settings_catalog_starts_session: true,
         session_commands: true,
+        // A second `session/prompt` during a turn is rejected, by OpenCode too
+        // ("Session already has an active ACP prompt"; live on 2.0.32, and in
+        // 2.2.5's `turn.ts`). ACP has no other way to reach a running turn.
         steering: SteeringSupport::Unsupported,
         settings_apply_timing: ApplyTiming::NextTurn,
         approvals: vec![
@@ -1511,6 +1821,22 @@ async fn handle_session_update(
     {
         modes.current_mode_id = update.current_mode_id.clone();
     }
+    if matches!(
+        notification.update,
+        acp::SessionUpdate::UsageUpdate(_)
+            | acp::SessionUpdate::SessionInfoUpdate(_)
+            | acp::SessionUpdate::ConfigOptionUpdate(_)
+            | acp::SessionUpdate::CurrentModeUpdate(_)
+            | acp::SessionUpdate::AvailableCommandsUpdate(_)
+    ) {
+        sessions
+            .lock()
+            .expect("ACP session registry poisoned")
+            .signal(
+                &session_key,
+                SessionSignal::Update(Box::new(notification.update.clone())),
+            );
+    }
     let output_attachment = if active_turns
         .lock()
         .expect("ACP active turns poisoned")
@@ -1528,6 +1854,14 @@ async fn handle_session_update(
                                     "phase=native_output_rejected kind=\"image\" reason={:?}",
                                     error
                                 );
+                                if let Some(turn) = active_turns
+                                    .lock()
+                                    .expect("ACP active turns poisoned")
+                                    .get(&session_key)
+                                    .filter(|turn| turn.stream.is_rich())
+                                {
+                                    turn.sender.send(Err(error));
+                                }
                                 None
                             }
                         }
@@ -1578,7 +1912,7 @@ async fn handle_session_update(
             text: text.to_string(),
         }));
     }
-    for event in session_update_events(&turn.turn_id, &mut turn.tool_calls, notification.update) {
+    for event in stream_events(&turn.turn_id, &mut turn.stream, notification.update) {
         if !turn.sender.send(Ok(event)) {
             break;
         }
@@ -1692,10 +2026,14 @@ fn acp_output_image_extension(mime_type: &str, bytes: &[u8]) -> Option<&'static 
 }
 
 fn append_bounded_agent_text(target: &mut String, chunk: &str) {
+    append_agent_text_up_to(target, chunk, MAX_FINAL_AGENT_TEXT_BYTES);
+}
+
+fn append_agent_text_up_to(target: &mut String, chunk: &str, limit: usize) {
     if target.ends_with(TRUNCATED_AGENT_TEXT_MARKER) {
         return;
     }
-    let remaining = MAX_FINAL_AGENT_TEXT_BYTES.saturating_sub(target.len());
+    let remaining = limit.saturating_sub(target.len());
     if chunk.len() <= remaining {
         target.push_str(chunk);
         return;
@@ -1726,10 +2064,26 @@ fn handle_permission_request(
     };
     let turn_id = turn.turn_id.clone();
     let sender = turn.sender.clone();
+    // Bridge v2 shows an error as a notice; the legacy bridge ends the turn.
+    let surface_refusals = turn.stream.is_rich();
     drop(active);
     let summary = permission_summary(&request);
     let command = permission_command(&request);
     let options = bounded_permission_options(request.options);
+    let fields = &request.tool_call.fields;
+    let context = ApprovalContext {
+        options: options.clone(),
+        tool_call_id: request.tool_call.tool_call_id.to_string(),
+        kind: fields.kind,
+        title: fields.title.clone(),
+        locations: fields
+            .locations
+            .iter()
+            .flatten()
+            .map(|location| location.path.clone())
+            .collect(),
+        raw_input: fields.raw_input.clone(),
+    };
     let approval_id = format!(
         "acp-approval-{epoch}-{}",
         sequence.fetch_add(1, Ordering::Relaxed)
@@ -1754,6 +2108,12 @@ fn handle_permission_request(
             >= MAX_PENDING_APPROVALS_PER_SESSION
     {
         drop(pending_approvals);
+        if surface_refusals {
+            sender.send(Err(DriverError::Rejected(
+                "Too many approvals are open, so this request was refused. Answer some and retry."
+                    .to_string(),
+            )));
+        }
         let _ = responder.respond(acp::RequestPermissionResponse::new(
             acp::RequestPermissionOutcome::Cancelled,
         ));
@@ -1763,7 +2123,7 @@ fn handle_permission_request(
         approval_id.clone(),
         PendingApproval {
             session_id: session_key,
-            options,
+            context,
             responder,
             completion: completion_tx,
         },
@@ -1809,35 +2169,6 @@ fn handle_permission_request(
 }
 
 fn bounded_permission_options(options: Vec<acp::PermissionOption>) -> Vec<acp::PermissionOption> {
-    let allow_once_count = options
-        .iter()
-        .filter(|option| option.kind == acp::PermissionOptionKind::AllowOnce)
-        .count();
-    let allow_always_count = options
-        .iter()
-        .filter(|option| option.kind == acp::PermissionOptionKind::AllowAlways)
-        .count();
-    let reject_count = options
-        .iter()
-        .filter(|option| {
-            matches!(
-                option.kind,
-                acp::PermissionOptionKind::RejectOnce | acp::PermissionOptionKind::RejectAlways
-            )
-        })
-        .count();
-    let preserve_provider_label = options
-        .iter()
-        .filter(|option| match option.kind {
-            acp::PermissionOptionKind::AllowOnce => allow_once_count > 1,
-            acp::PermissionOptionKind::AllowAlways => allow_always_count > 1,
-            acp::PermissionOptionKind::RejectOnce | acp::PermissionOptionKind::RejectAlways => {
-                reject_count > 1
-            }
-            _ => true,
-        })
-        .map(|option| option.option_id.to_string())
-        .collect::<HashSet<_>>();
     options
         .into_iter()
         .filter_map(|option| {
@@ -1848,32 +2179,27 @@ fn bounded_permission_options(options: Vec<acp::PermissionOption>) -> Vec<acp::P
             {
                 return None;
             }
-            let name = match option.kind {
-                _ if preserve_provider_label.contains(&option_id) => option
-                    .name
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .chars()
-                    .take(MAX_RETAINED_PERMISSION_OPTION_LABEL_CHARS)
-                    .collect(),
-                acp::PermissionOptionKind::AllowOnce => "Allow once".to_string(),
-                acp::PermissionOptionKind::AllowAlways => "Allow for session".to_string(),
-                acp::PermissionOptionKind::RejectOnce | acp::PermissionOptionKind::RejectAlways => {
-                    "Reject".to_string()
+            // The harness's own words are the rule: OpenCode's `always` saves
+            // per project, so it must not read as "for this session".
+            let provider = option
+                .name
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(MAX_RETAINED_PERMISSION_OPTION_LABEL_CHARS)
+                .collect::<String>();
+            let name = if provider.is_empty() {
+                match option.kind {
+                    acp::PermissionOptionKind::AllowOnce => "Allow once".to_string(),
+                    acp::PermissionOptionKind::AllowAlways => "Always allow".to_string(),
+                    acp::PermissionOptionKind::RejectOnce
+                    | acp::PermissionOptionKind::RejectAlways => "Reject".to_string(),
+                    _ => return None,
                 }
-                _ => option
-                    .name
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .chars()
-                    .take(MAX_RETAINED_PERMISSION_OPTION_LABEL_CHARS)
-                    .collect(),
+            } else {
+                provider
             };
-            if name.is_empty() {
-                return None;
-            }
             Some(acp::PermissionOption::new(
                 option.option_id,
                 name,
@@ -1914,6 +2240,8 @@ fn handle_elicitation_request(
     };
     let turn_id = turn.turn_id.clone();
     let sender = turn.sender.clone();
+    // Bridge v2 shows an error as a notice; the legacy bridge ends the turn.
+    let surface_refusals = turn.stream.is_rich();
     drop(active);
 
     let request_id = format!(
@@ -1932,6 +2260,11 @@ fn handle_elicitation_request(
                 target: "inline_agent_driver_acp::elicitation",
                 "phase=unsupported_form error={error}"
             );
+            if surface_refusals {
+                sender.send(Err(DriverError::Rejected(format!(
+                    "The agent asked a question Inline can't show, so it was declined: {error}"
+                ))));
+            }
             let _ = responder.respond(acp::CreateElicitationResponse::new(
                 acp::ElicitationAction::Cancel,
             ));
@@ -1950,6 +2283,12 @@ fn handle_elicitation_request(
             >= MAX_PENDING_ELICITATIONS_PER_SESSION
     {
         drop(pending);
+        if surface_refusals {
+            sender.send(Err(DriverError::Rejected(
+                "Too many questions are open, so this one was declined. Answer some and retry."
+                    .to_string(),
+            )));
+        }
         let _ = responder.respond(acp::CreateElicitationResponse::new(
             acp::ElicitationAction::Cancel,
         ));
@@ -2001,6 +2340,7 @@ fn handle_elicitation_request(
 
 fn finish_turn(
     active_turns: &ActiveTurns,
+    sessions: &Sessions,
     approvals: &PendingApprovals,
     elicitations: &PendingElicitations,
     session_key: &str,
@@ -2009,13 +2349,25 @@ fn finish_turn(
 ) {
     cancel_pending_approvals(approvals, Some(session_key));
     cancel_pending_elicitations(elicitations, Some(session_key));
-    let Some(turn) = active_turns
+    let Some(mut turn) = active_turns
         .lock()
         .expect("ACP active turns poisoned")
         .remove(session_key)
     else {
         return;
     };
+    if let Some(thought) = turn.stream.close_thought(&turn.turn_id) {
+        turn.sender.send(Ok(thought));
+    }
+    if let Ok(acp::PromptResponse {
+        usage: Some(usage), ..
+    }) = &result
+    {
+        sessions
+            .lock()
+            .expect("ACP session registry poisoned")
+            .signal(session_key, SessionSignal::PromptUsage(usage.clone()));
+    }
     if !turn.text.is_empty() {
         turn.sender.send(Ok(AgentEvent::AgentTextCompleted {
             turn_id: turn.turn_id.clone(),
@@ -2405,6 +2757,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn media_too_large_to_inline_stays_attached_as_a_local_file() {
+        let directory = tempfile::tempdir().expect("directory");
+        let path = directory.path().join("huge.png");
+        let file = std::fs::File::create(&path).expect("file");
+        file.set_len(MAX_NATIVE_PROMPT_MEDIA_BYTES as u64 + 1)
+            .expect("sparse file");
+        let local_uri = url::Url::from_file_path(&path).expect("URL").to_string();
+        let blocks = acp_prompt_blocks(
+            TurnInput {
+                text: "Inspect".to_string(),
+                attachments: vec![InputAttachment {
+                    kind: InputAttachmentKind::Image,
+                    uri: "https://cdn.inline.chat/huge.png".to_string(),
+                    local_uri: Some(local_uri.clone()),
+                    mime_type: Some("image/png".to_string()),
+                    file_name: Some("huge.png".to_string()),
+                    size_bytes: None,
+                    width: None,
+                    height: None,
+                    duration_ms: None,
+                }],
+                context: None,
+                client_message_id: None,
+            },
+            &acp::PromptCapabilities::new().image(true),
+            false,
+        )
+        .await
+        .expect("an oversized image must not fail the message");
+        assert!(matches!(
+            blocks.as_slice(),
+            [acp::ContentBlock::Text(_), acp::ContentBlock::ResourceLink(link)]
+                if link.uri == local_uri
+        ));
+    }
+
+    #[tokio::test]
     async fn advertised_image_capability_uses_native_content_with_local_uri() {
         let directory = tempfile::tempdir().expect("directory");
         let path = directory.path().join("image.png");
@@ -2516,11 +2905,12 @@ mod tests {
 
     #[test]
     fn final_agent_text_is_bounded_at_the_driver_boundary() {
+        const LIMIT: usize = 1_024;
         let mut text = String::new();
-        append_bounded_agent_text(&mut text, &"x".repeat(MAX_FINAL_AGENT_TEXT_BYTES * 2));
-        append_bounded_agent_text(&mut text, "ignored after truncation");
+        append_agent_text_up_to(&mut text, &"x".repeat(LIMIT * 2), LIMIT);
+        append_agent_text_up_to(&mut text, "ignored after truncation", LIMIT);
 
-        assert!(text.len() <= MAX_FINAL_AGENT_TEXT_BYTES + TRUNCATED_AGENT_TEXT_MARKER.len());
+        assert!(text.len() <= LIMIT + TRUNCATED_AGENT_TEXT_MARKER.len());
         assert!(text.ends_with(TRUNCATED_AGENT_TEXT_MARKER));
         assert!(!text.contains("ignored after truncation"));
     }
@@ -2537,7 +2927,7 @@ mod tests {
                 sender,
                 text: String::new(),
                 separate_next_agent_message: false,
-                tool_calls: ToolCallSnapshots::new(),
+                stream: StreamState::new(false),
             },
         );
 
@@ -2572,18 +2962,29 @@ mod tests {
 
     #[test]
     fn capability_mapping_is_strictly_advertisement_driven() {
-        let none = map_capabilities(&acp::AgentCapabilities::new());
+        let none = map_capabilities(&acp::AgentCapabilities::new(), false);
         assert!(!none.resume_session);
         assert!(none.cancel_turn);
         assert!(none.settings_catalog_starts_session);
         assert!(none.session_commands);
         assert_eq!(none.steering, SteeringSupport::Unsupported);
 
-        let advertised = map_capabilities(&acp::AgentCapabilities::new().session_capabilities(
-            acp::SessionCapabilities::new().resume(acp::SessionResumeCapabilities::new()),
-        ));
+        assert!(!none.compact_session);
+
+        let advertised = map_capabilities(
+            &acp::AgentCapabilities::new().session_capabilities(
+                acp::SessionCapabilities::new().resume(acp::SessionResumeCapabilities::new()),
+            ),
+            false,
+        );
         assert!(advertised.resume_session);
-        assert!(map_capabilities(&acp::AgentCapabilities::new().load_session(true)).resume_session);
+        assert!(
+            map_capabilities(&acp::AgentCapabilities::new().load_session(true), false)
+                .resume_session
+        );
+        let opencode = map_capabilities(&acp::AgentCapabilities::new(), true);
+        assert!(opencode.compact_session);
+        assert_eq!(opencode.steering, SteeringSupport::Unsupported);
     }
 
     #[tokio::test]
@@ -2687,7 +3088,7 @@ mod tests {
                 sender,
                 text: String::new(),
                 separate_next_agent_message: false,
-                tool_calls: ToolCallSnapshots::new(),
+                stream: StreamState::new(false),
             },
         );
 
@@ -2743,6 +3144,20 @@ mod tests {
             acp::RequestPermissionOutcome::Selected(selected)
                 if selected.option_id.to_string() == "exit-plan-default"
         ));
+    }
+
+    #[test]
+    fn retained_permission_options_keep_the_agents_own_words() {
+        let bounded = bounded_permission_options(vec![
+            acp::PermissionOption::new(
+                "always",
+                "Always  allow",
+                acp::PermissionOptionKind::AllowAlways,
+            ),
+            acp::PermissionOption::new("once", " ", acp::PermissionOptionKind::AllowOnce),
+        ]);
+        assert_eq!(bounded[0].name, "Always allow");
+        assert_eq!(bounded[1].name, "Allow once");
     }
 
     #[test]

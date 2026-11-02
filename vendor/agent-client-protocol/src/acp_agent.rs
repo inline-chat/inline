@@ -22,7 +22,7 @@ const STDERR_CAPTURE_LIMIT: usize = 64 * 1024;
 const STDERR_READ_BUFFER_SIZE: usize = 8 * 1024;
 const STDERR_LINE_TRUNCATION_MARKER: &str = "… [stderr line truncated]";
 const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(1);
-const ACP_STDOUT_FRAME_LIMIT: usize = 1024 * 1024;
+const ACP_STDOUT_FRAME_LIMIT: usize = 64 * 1024 * 1024;
 const ACP_STDOUT_READ_CHUNK: usize = 8 * 1024;
 
 fn bounded_stdout_lines<R>(reader: R) -> impl futures::Stream<Item = std::io::Result<String>> + Send
@@ -39,7 +39,7 @@ where
                     if newline > ACP_STDOUT_FRAME_LIMIT {
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
-                            "ACP stdout frame exceeds the 1 MiB limit",
+                            "ACP stdout frame exceeds the 64 MiB limit",
                         ));
                     }
                     let mut line = pending.drain(..=newline).collect::<Vec<_>>();
@@ -62,7 +62,7 @@ where
                     if pending.len() > ACP_STDOUT_FRAME_LIMIT {
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
-                            "ACP stdout frame exceeds the 1 MiB limit",
+                            "ACP stdout frame exceeds the 64 MiB limit",
                         ));
                     }
                     let line = String::from_utf8(std::mem::take(&mut pending)).map_err(|_| {
@@ -84,7 +84,7 @@ where
                 if !pending.contains(&b'\n') && pending.len() > ACP_STDOUT_FRAME_LIMIT {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        "ACP stdout frame exceeds the 1 MiB limit",
+                        "ACP stdout frame exceeds the 64 MiB limit",
                     ));
                 }
             }

@@ -73,6 +73,9 @@ struct FakeSession {
     sends: AtomicUsize,
     received: Mutex<Vec<Input>>,
     unknown_first: bool,
+    live_turn: Mutex<Option<TurnId>>,
+    /// Harnesses without steering (Amp) refuse input during a turn.
+    no_steer: std::sync::atomic::AtomicBool,
 }
 
 impl Session for FakeSession {
@@ -81,10 +84,19 @@ impl Session for FakeSession {
     }
 
     fn availability(&self) -> AvailabilityMatrix {
+        let no_steer = self.no_steer.load(Ordering::SeqCst);
         DeliveryKind::ALL
             .into_iter()
             .fold(AvailabilityMatrix::default(), |matrix, kind| {
-                matrix.with_delivery(kind, Availability::Supported)
+                let steers = matches!(kind, DeliveryKind::SteerNext | DeliveryKind::SteerNow);
+                matrix.with_delivery(
+                    kind,
+                    if no_steer && steers {
+                        Availability::unavailable("no steering")
+                    } else {
+                        Availability::Supported
+                    },
+                )
             })
     }
 
@@ -115,7 +127,10 @@ impl Session for FakeSession {
     }
 
     fn live_work(&self) -> LiveWork {
-        LiveWork::default()
+        LiveWork {
+            turn: self.live_turn.lock().unwrap().clone(),
+            ..LiveWork::default()
+        }
     }
 
     fn release<'a>(&'a self) -> HarnessFuture<'a, Released, OpError> {
@@ -232,6 +247,8 @@ fn fixture(unknown_first: bool) -> (Runtime, Arc<FakeHarness>, Cleanup) {
         sends: AtomicUsize::new(0),
         received: Mutex::new(Vec::new()),
         unknown_first,
+        live_turn: Mutex::new(None),
+        no_steer: Default::default(),
     });
     let harness = Arc::new(FakeHarness {
         session,
@@ -584,6 +601,57 @@ async fn moved_work_keeps_permissions_on_restart() {
 async fn pending_final_and_closed_card_recover_after_actor_restart() {
     let (runtime, _, _cleanup) = fixture(false);
     work::recovery_tests::pending_output_survives_restart(runtime.agent.clone()).await;
+}
+
+#[tokio::test]
+async fn a_message_waits_for_the_turn_its_answer_stopped() {
+    let (runtime, harness, _cleanup) = fixture(false);
+    let (_, first) = input(&runtime, 20);
+    let (_, second) = input(&runtime, 21);
+    let (_, third) = input(&runtime, 22);
+    work::recovery_tests::a_message_waits_for_the_turn_its_answer_stopped(
+        runtime.agent.clone(),
+        first,
+        second,
+        third,
+        |turn| *harness.session.live_turn.lock().unwrap() = turn,
+        || {
+            harness
+                .session
+                .received
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|input| input.delivery.clone())
+                .collect()
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_message_to_a_harness_without_steering_waits_for_the_next_turn() {
+    let (runtime, harness, _cleanup) = fixture(false);
+    harness.session.no_steer.store(true, Ordering::SeqCst);
+    let (_, first) = input(&runtime, 20);
+    let (_, second) = input(&runtime, 21);
+    work::recovery_tests::a_message_waits_for_the_next_turn_without_steering(
+        runtime.agent.clone(),
+        first,
+        second,
+        |turn| *harness.session.live_turn.lock().unwrap() = turn,
+        || {
+            harness
+                .session
+                .received
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|input| input.delivery.clone())
+                .collect()
+        },
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -1058,7 +1126,7 @@ async fn a_thread_v1_served_goes_on_in_its_session_and_folder() {
     let _ = task.await;
     drop(runtime);
     // The next process sees the registered session on Inline. Its folder
-    // survives in the v2 ledger without the legacy store attached.
+    // must survive in the v2 ledger, even without the legacy store attached.
     let mut restarted = super::faults::runtime(&mut cleanup, harness.clone());
     restarted.ensure_work(9, None).await.unwrap();
     let (id, command) = input(&restarted, 95);
@@ -1066,6 +1134,33 @@ async fn a_thread_v1_served_goes_on_in_its_session_and_folder() {
     until(|| state(&restarted, &id) == Some(InputState::Accepted)).await;
     assert_eq!(harness.opened.lock().unwrap()[1].folder, other);
     cleanup.tasks.push(restarted.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
+async fn an_already_registered_legacy_session_keeps_its_folder_without_overriding_new_choices() {
+    for (legacy_session, explicit_folder, use_legacy) in [
+        ("fault-session", false, true),
+        ("fault-session", true, false),
+        ("another-session", false, false),
+    ] {
+        let (mut runtime, harness, mut cleanup, other) = v1_fixture(legacy_session);
+        Arc::get_mut(&mut runtime.agent).unwrap().owner = Arc::new(Owner);
+        if explicit_folder {
+            runtime.thread_settings.entry(9).or_default().folder =
+                Some(runtime.config.folder.clone());
+        }
+        runtime.ensure_work(9, None).await.unwrap();
+        let (id, command) = input(&runtime, 96);
+        runtime.works[&9].tx.send(command).await.unwrap();
+        until(|| state(&runtime, &id) == Some(InputState::Accepted)).await;
+        let expected = if use_legacy {
+            &other
+        } else {
+            &runtime.config.folder
+        };
+        assert_eq!(&harness.opened.lock().unwrap()[0].folder, expected);
+        cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+    }
 }
 
 #[tokio::test]

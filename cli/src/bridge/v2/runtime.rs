@@ -13,10 +13,9 @@ use std::time::Duration;
 use inline_agent_bridge::ProviderSessionId;
 use inline_agent_bridge::group::{
     ContextAuthorRole, ContextMessage, Conversation, DEFAULT_DAILY_SPEAK_GATE_BUDGET,
-    DEFAULT_LOOP_CAP_HOPS, DailySpeakGateBudget, DayKey, DirectReason, Grants, GroupMessage,
-    IntakeDecision, IntakeFacts, LoopGuards, LoopVerdict, ObserveReason, Operation,
-    ParticipationMode, PendingInput, ReleaseCause, WorkPhase, decide_intake, direct_input,
-    origin_of, required_operation,
+    DailySpeakGateBudget, DayKey, DirectReason, Grants, GroupMessage, IntakeDecision, IntakeFacts,
+    LoopGuards, LoopVerdict, ObserveReason, Operation, ParticipationMode, PendingInput,
+    ReleaseCause, WorkPhase, decide_intake, direct_input, origin_of, required_operation,
 };
 use inline_agent_bridge::harness::{
     Catalog, CatalogScope, Delivery, HarnessDriver, Input, InputContent, InputId, OpKind,
@@ -40,8 +39,8 @@ use super::render::{ActionStyle, QUESTION_FORM_ID, Vocabulary};
 use super::settings;
 use super::tools::Tools;
 use super::work::{
-    AccessSource, ActionData, Agent, Command, Control, Known, OwnerCalls, SessionOp, WorkHandle,
-    button_rows, paragraph,
+    self, AccessSource, ActionData, Agent, Command, Control, Known, OwnerCalls, SessionOp,
+    WorkHandle, button_rows, paragraph,
 };
 
 const DEFAULT_HEARTBEAT: Duration = Duration::from_secs(60);
@@ -68,6 +67,15 @@ const LOOP_SCOPE_DEPTH: usize = 8;
 /// Ancestors of the trigger's reply chain read into the join context.
 const JOIN_REPLY_CHAIN: usize = 5;
 /// Settled ledger records are kept this long for replay detection.
+/// How long the event loop waits for one work's answer. One stuck work must
+/// not delay this bot's other threads.
+const ASK_TIMEOUT: Duration = Duration::from_secs(10);
+/// Agent-only messages before this agent stops answering other agents. The
+/// e2e walks past a smaller one.
+#[cfg(not(test))]
+const LOOP_CAP: u32 = inline_agent_bridge::group::DEFAULT_LOOP_CAP_HOPS;
+#[cfg(test)]
+pub(super) const LOOP_CAP: u32 = 30;
 const LEDGER_RETENTION_SECS: i64 = 14 * 24 * 3600;
 
 /// Identity and settings of one v2 agent.
@@ -167,6 +175,18 @@ impl OwnerCalls for OwnerConnection {
                 .map_err(|error| error.to_string())
         })
     }
+
+    fn set_commands(
+        &self,
+        input: proto::SetBotCommandsInput,
+    ) -> futures_util::future::BoxFuture<'_, Result<(), String>> {
+        Box::pin(async move {
+            self.0
+                .set_bot_commands(input)
+                .await
+                .map_err(|error| error.to_string())
+        })
+    }
 }
 
 pub(crate) struct Runtime {
@@ -208,6 +228,8 @@ pub(crate) struct Runtime {
     reported_health: Option<RuntimeHealth>,
     /// What the apps were last told, republished when the catalog changes.
     published: Option<Vec<BotCapability>>,
+    /// The command list last registered in Inline's command menu.
+    published_commands: Option<Vec<proto::BotCommand>>,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
     loop_guards: LoopGuards,
@@ -289,9 +311,10 @@ impl Runtime {
             reconnect: Reconnect::default(),
             reported_health: None,
             published: None,
+            published_commands: None,
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
-            loop_guards: LoopGuards::default(),
+            loop_guards: LoopGuards::new(LOOP_CAP),
             loop_roots: HashMap::new(),
         })
     }
@@ -506,6 +529,24 @@ impl Runtime {
         let folders = self
             .folders(&catalog)
             .and_then(|folders| folders.catalog(&self.config.machine_label));
+        let info = self.agent.harness.describe();
+        let commands = command_catalog(self.config.vocabulary, info.manifest.as_ref(), &catalog);
+        if self.published_commands.as_ref() != Some(&commands) {
+            match self
+                .agent
+                .owner
+                .set_commands(proto::SetBotCommandsInput {
+                    bot_user_id: self.config.bot_user_id,
+                    commands: commands.clone(),
+                })
+                .await
+            {
+                Ok(()) => self.published_commands = Some(commands),
+                Err(error) => {
+                    log::warn!(target: "inline::bridge::v2", "commands not registered: {error}");
+                }
+            }
+        }
         let capabilities = settings::capabilities(&catalog, folders);
         if self.published.as_ref() == Some(&capabilities) {
             return;
@@ -593,6 +634,16 @@ impl Runtime {
                         self.raise_gate_budget(chat_id.get(), message_id.get(), actor_user_id.get())
                             .await
                     }
+                    Ok(ActionData::Setting { i, v }) => {
+                        self.setting_action(
+                            chat_id.get(),
+                            message_id.get(),
+                            actor_user_id.get(),
+                            &i,
+                            &v,
+                        )
+                        .await
+                    }
                     Ok(data) => {
                         self.ask(chat_id.get(), |reply| Command::Action {
                             message_id: message_id.get(),
@@ -604,6 +655,9 @@ impl Runtime {
                     }
                     Err(_) => Some("This button is no longer active.".to_owned()),
                 };
+                if toast.as_deref() == Some(work::NOT_PENDING) {
+                    self.drop_buttons(chat_id.get(), message_id.get()).await;
+                }
                 self.answer(*interaction_id, toast).await;
                 Ok(())
             }
@@ -980,9 +1034,9 @@ impl Runtime {
             return Some(NO_ACCESS.to_owned());
         }
         let scope = self.loop_scope(chat_id).await;
-        self.loop_guards.extend(scope, DEFAULT_LOOP_CAP_HOPS);
+        self.loop_guards.extend(scope, LOOP_CAP);
         let text = format!(
-            "{} answers other agents here again, for {DEFAULT_LOOP_CAP_HOPS} more agent messages.",
+            "{} answers other agents here again, for {LOOP_CAP} more agent messages.",
             self.config.agent_name
         );
         let _ = api::edit_doc(
@@ -993,7 +1047,7 @@ impl Runtime {
             Some(proto::MessageActions::default()),
         )
         .await;
-        Some(format!("Allowed {DEFAULT_LOOP_CAP_HOPS} more."))
+        Some(format!("Allowed {LOOP_CAP} more."))
     }
 
     async fn raise_gate_budget(
@@ -1156,20 +1210,52 @@ impl Runtime {
         }
     }
 
+    #[cfg(test)]
     async fn forwards_command(&mut self, chat_id: i64, name: &str, grants: Grants) -> bool {
+        self.harness_command(chat_id, name, grants).await.is_some()
+    }
+
+    /// The harness's own name for a typed command it should get, whether
+    /// typed in full or by its name in Inline's menu.
+    async fn harness_command(
+        &mut self,
+        chat_id: i64,
+        name: &str,
+        grants: Grants,
+    ) -> Option<String> {
         if !harness_command_candidate(
             self.config.vocabulary,
             self.agent.harness.describe().manifest.as_ref(),
             name,
         ) || (INLINE_COMMANDS.contains(&name) && !grants.permits(Operation::Steer))
         {
-            return false;
+            return None;
         }
-        self.catalog_for_chat(chat_id)
+        let matching = |catalog: &Catalog| {
+            catalog
+                .commands
+                .iter()
+                .find(|command| command.name == name || menu_command_name(&command.name) == name)
+                .map(|command| command.name.clone())
+        };
+        if let Some(command) = matching(&self.catalog_for_chat(chat_id).await) {
+            return Some(command);
+        }
+        // A project's own commands show only from that project's folder.
+        let folder = self.thread_folder(chat_id);
+        if folder == self.config.folder {
+            return None;
+        }
+        let catalog = self
+            .agent
+            .harness
+            .catalog(CatalogScope {
+                folder: Some(folder),
+                session: None,
+            })
             .await
-            .commands
-            .iter()
-            .any(|command| command.name == name)
+            .ok()?;
+        matching(&catalog)
     }
 
     /// The folders threads pick from: the agent's own, the harness's in
@@ -1190,6 +1276,16 @@ impl Runtime {
             .get(&chat_id)
             .and_then(|settings| settings.folder.clone())
             .unwrap_or_else(|| self.config.folder.clone())
+    }
+
+    /// A command for this thread's session finds its work, also after a
+    /// restart or idle close: it reopens the way a message does.
+    async fn work_for_command(&mut self, chat_id: i64) -> bool {
+        if self.works.contains_key(&chat_id) {
+            return true;
+        }
+        self.session_known(chat_id).await.unwrap_or(false)
+            && self.ensure_work(chat_id, None).await.is_ok()
     }
 
     /// Whether Inline knows a session for this thread's work, asked once
@@ -1431,9 +1527,17 @@ impl Runtime {
             }
         };
         if self.works.contains_key(&chat_id) {
-            let _ = self
+            let toast = self
                 .ask(chat_id, |reply| Command::Session { op, reply })
                 .await;
+            if let Some(refusal) = toast.filter(|toast| work::is_refusal(toast)) {
+                let current = self.settings_document(chat_id, &catalog).await;
+                return settings::problem(
+                    BotChatSettingsProblemCode::Failed,
+                    &refusal,
+                    Some(current),
+                );
+            }
         }
         BotChatSettingsResponse::Document(self.settings_document(chat_id, &catalog).await)
     }
@@ -1475,38 +1579,19 @@ impl Runtime {
                 return "Only the agent's owner, or someone they let configure it, can change that."
                     .to_owned();
             }
-            let catalog = self.catalog_for_chat(chat_id).await;
             let argument = arguments.trim();
             if argument.is_empty() {
+                let catalog = self.catalog_for_chat(chat_id).await;
                 return settings::describe(
                     item,
                     &catalog,
                     self.thread_settings
                         .get(&chat_id)
                         .unwrap_or(&SettingsChange::default()),
+                    usize::MAX,
                 );
             }
-            let value = BotSettingsValue::String(settings::command_value(argument).to_owned());
-            return match settings::invocation(item, Some(&value), &catalog) {
-                Ok(settings::Invocation::Change(change)) => {
-                    settings::merge(self.thread_settings.entry(chat_id).or_default(), &change);
-                    self.save_thread(chat_id);
-                    if self.works.contains_key(&chat_id) {
-                        self.ask(chat_id, |reply| Command::Session {
-                            op: SessionOp::Settings(change),
-                            reply,
-                        })
-                        .await
-                        .unwrap_or_else(|| "Set for this thread.".to_owned())
-                    } else {
-                        "Set for this thread, from the next message.".to_owned()
-                    }
-                }
-                Ok(settings::Invocation::Compact | settings::Invocation::Folder(_)) => {
-                    "Use /compact.".to_owned()
-                }
-                Err(message) => message.to_owned(),
-            };
+            return self.apply_setting(chat_id, item, argument).await;
         }
         match name {
             "compact" | "clear" => {
@@ -1528,8 +1613,8 @@ impl Runtime {
                         self.config.agent_name
                     );
                 }
-                if !self.works.contains_key(&chat_id) {
-                    return "Nothing is open in this thread yet.".to_owned();
+                if !self.work_for_command(chat_id).await {
+                    return "No session has started in this thread yet.".to_owned();
                 }
                 let op = if name == "compact" {
                     SessionOp::Compact
@@ -1554,10 +1639,7 @@ impl Runtime {
             "status" => self.status(chat_id, actor).await,
             "help" => {
                 let mut help = help_text(&self.config.agent_name, self.config.vocabulary);
-                if matches!(
-                    self.config.vocabulary,
-                    Vocabulary::OpenCode | Vocabulary::Amp
-                ) {
+                {
                     let catalog = self.catalog_for_chat(chat_id).await;
                     let info = self.agent.harness.describe();
                     let commands: Vec<_> = catalog
@@ -1573,7 +1655,11 @@ impl Runtime {
                         .take(24)
                         .collect();
                     if !commands.is_empty() {
-                        help.push_str("\n\nProvider commands for this thread:");
+                        help.push_str(match self.config.vocabulary {
+                            Vocabulary::Codex => "\n\nCodex skills here:",
+                            Vocabulary::Claude => "\n\nClaude's commands and skills here:",
+                            _ => "\n\nProvider commands for this thread:",
+                        });
                         for command in commands {
                             let name: String = command.name.chars().take(64).collect();
                             help.push_str(&format!("\n/{name}"));
@@ -1590,6 +1676,18 @@ impl Runtime {
                             }
                         }
                     }
+                    let agents: Vec<&str> = catalog
+                        .agents
+                        .iter()
+                        .take(24)
+                        .map(|agent| agent.value.as_str())
+                        .collect();
+                    if !agents.is_empty() {
+                        help.push_str(&format!(
+                            "\n\nSub-agents it can use: {}. Ask for one by name.",
+                            agents.join(", ")
+                        ));
+                    }
                 }
                 help
             }
@@ -1601,6 +1699,14 @@ impl Runtime {
                     ("plan", Vocabulary::Codex) => SessionOp::Mode(
                         if arguments.trim().eq_ignore_ascii_case("off") {
                             "default"
+                        } else {
+                            "plan"
+                        }
+                        .to_owned(),
+                    ),
+                    ("plan", Vocabulary::OpenCode) => SessionOp::Mode(
+                        if arguments.trim().eq_ignore_ascii_case("off") {
+                            "build"
                         } else {
                             "plan"
                         }
@@ -1624,8 +1730,9 @@ impl Runtime {
                         );
                     }
                 };
-                if !self.works.contains_key(&chat_id) {
-                    return "Nothing is open in this thread yet. Send a message first.".to_owned();
+                if !self.work_for_command(chat_id).await {
+                    return "No session has started in this thread yet. Send a message first."
+                        .to_owned();
                 }
                 self.ask(chat_id, |reply| Command::Session { op, reply })
                     .await
@@ -1707,7 +1814,11 @@ impl Runtime {
 
     async fn status(&mut self, chat_id: i64, _actor: i64) -> String {
         let phase = self.works.get(&chat_id).map(|work| *work.phase.borrow());
+        let known = self.session_known(chat_id).await.unwrap_or(false);
         let state = match phase {
+            None | Some(WorkPhase::None) if known => {
+                "Idle. Its session picks up on the next message."
+            }
             None | Some(WorkPhase::None) => "Nothing has run in this thread yet.",
             Some(WorkPhase::Idle) => "Idle.",
             Some(WorkPhase::Running) => "Working.",
@@ -1785,13 +1896,105 @@ impl Runtime {
                 .and_then(|destination| self.works.get(destination))
         });
         let Some(work) = work else {
-            return Some("This request is no longer pending.".to_owned());
+            return Some(work::NOT_PENDING.to_owned());
         };
         let (reply, answer) = oneshot::channel();
         if work.tx.send(command(reply)).await.is_err() {
             return Some("This work stopped. Mention the agent to start it again.".to_owned());
         }
-        answer.await.unwrap_or(None)
+        match tokio::time::timeout(ASK_TIMEOUT, answer).await {
+            Ok(answer) => answer.unwrap_or(None),
+            Err(_) => {
+                log::warn!(target: "inline::bridge::v2", "chat={chat_id} work did not answer in time");
+                Some("This thread's work is busy. Try again in a moment.".to_owned())
+            }
+        }
+    }
+
+    /// A setting chosen by a typed value or a button.
+    async fn apply_setting(&mut self, chat_id: i64, item: &str, argument: &str) -> String {
+        let catalog = self.catalog_for_chat(chat_id).await;
+        let value = BotSettingsValue::String(settings::command_value(argument).to_owned());
+        match settings::invocation(item, Some(&value), &catalog) {
+            Ok(settings::Invocation::Change(change)) => {
+                settings::merge(self.thread_settings.entry(chat_id).or_default(), &change);
+                self.save_thread(chat_id);
+                if self.works.contains_key(&chat_id) {
+                    self.ask(chat_id, |reply| Command::Session {
+                        op: SessionOp::Settings(change),
+                        reply,
+                    })
+                    .await
+                    .unwrap_or_else(|| "Set for this thread.".to_owned())
+                } else {
+                    "Set for this thread, from the next message.".to_owned()
+                }
+            }
+            Ok(settings::Invocation::Compact | settings::Invocation::Folder(_)) => {
+                "Send /compact in this thread.".to_owned()
+            }
+            Err(message) => message.to_owned(),
+        }
+    }
+
+    /// `/model`, `/reasoning` or `/permissions` alone: what's in effect, with
+    /// the choices as buttons.
+    async fn setting_card(&mut self, chat_id: i64, message_id: i64, item: &str) {
+        let catalog = self.catalog_for_chat(chat_id).await;
+        let current = self
+            .thread_settings
+            .get(&chat_id)
+            .cloned()
+            .unwrap_or_default();
+        let choices = settings::choices(item, &catalog, &current);
+        let actions = work::setting_actions(item, &choices);
+        let shown = actions.as_ref().map_or(0, |actions| actions.rows.len());
+        let mut builder = DocBuilder::new();
+        builder.paragraph(&settings::describe(item, &catalog, &current, shown));
+        match api::send_doc(
+            &self.agent.bot,
+            chat_id,
+            Some(message_id),
+            &builder.finish(),
+            actions,
+            Notify::Silent,
+        )
+        .await
+        {
+            Ok(id) => {
+                self.agent.sent.lock().expect("sent").insert(id);
+            }
+            Err(error) => log::warn!(target: "inline::bridge::v2", "setting card failed: {error}"),
+        }
+    }
+
+    /// A tap on a setting card. It changes the thread and the card goes away.
+    async fn setting_action(
+        &mut self,
+        chat_id: i64,
+        message_id: i64,
+        actor: i64,
+        item: &str,
+        value: &str,
+    ) -> Option<String> {
+        if !self
+            .access
+            .grants(actor)
+            .await
+            .permits(Operation::Configure)
+        {
+            return Some(NO_ACCESS.to_owned());
+        }
+        let toast = self.apply_setting(chat_id, item, value).await;
+        self.drop_buttons(chat_id, message_id).await;
+        Some(toast)
+    }
+
+    /// Clears a card's buttons, keeping its text.
+    async fn drop_buttons(&self, chat_id: i64, message_id: i64) {
+        if let Err(error) = super::api::clear_actions(&self.agent.bot, chat_id, message_id).await {
+            log::debug!(target: "inline::bridge::v2", "chat={chat_id} stale buttons kept: {error}");
+        }
     }
 
     async fn answer(&self, interaction_id: InlineId, toast: Option<String>) {
@@ -1960,7 +2163,19 @@ impl Runtime {
             .get(&chat_id)
             .map_or(WorkPhase::None, |work| *work.phase.borrow());
         let scope = self.loop_scope(chat_id).await;
-        let loop_verdict = self.loop_guards.record(scope, group.author.kind.is_agent());
+        // Another agent streaming its answer edits one message many times:
+        // a revision is no new hop. It still goes through intake, since a
+        // handoff's mention can first appear in an edit.
+        let loop_verdict = if group.author.kind.is_agent()
+            && message
+                .metadata
+                .revision
+                .is_some_and(|revision| revision > 0)
+        {
+            self.loop_guards.current(scope)
+        } else {
+            self.loop_guards.record(scope, group.author.kind.is_agent())
+        };
         if let LoopVerdict::CapReached {
             limit,
             notify_owners: true,
@@ -2097,7 +2312,11 @@ impl Runtime {
             }
             self.agent.ledger.set(&id, InputState::Consumed)?;
         }
-        let control = match group.command().map(|(name, _)| name) {
+        let typed = group
+            .command()
+            .map(|(name, _)| typed_command(&group.text, name));
+        let whole = typed.as_deref().is_none_or(plain_command);
+        let control = match group.command().map(|(name, _)| name).filter(|_| whole) {
             Some("new") => return self.new_thread(group, grants, participation).await,
             Some("stop") => Some(Control::Stop),
             Some("pause") => Some(Control::Pause),
@@ -2116,18 +2335,40 @@ impl Runtime {
         // Advertised commands go to the harness as typed. ACP may advertise
         // a slash command for an operation its structured API cannot perform.
         // Inline's controls and access/settings commands still win collisions.
-        let forward = match group.command() {
-            Some((name, _)) if control.is_none() => {
-                self.forwards_command(chat_id, name, grants).await
-            }
-            _ => false,
+        let forward = match &typed {
+            Some(name) if control.is_none() => self.harness_command(chat_id, name, grants).await,
+            _ => None,
         };
+        // A name Inline's parser cut short (`/code-review` reads as `/code`)
+        // is not that shorter command.
+        if let Some(name) = typed.as_deref().filter(|name| !plain_command(name))
+            && forward.is_none()
+        {
+            let answer = format!(
+                "/{name} isn't available with {}. Send /help for what is.",
+                self.config.agent_name
+            );
+            self.reply(chat_id, group.message_id, &answer).await;
+            return Ok(());
+        }
         if let Some((name, _)) = group.command()
             && control.is_none()
             && name != "queue"
-            && !forward
+            && forward.is_none()
         {
             let arguments = command_arguments(&group.text, name);
+            if matches!(name, "model" | "reasoning" | "permissions")
+                && arguments.trim().is_empty()
+                && grants.permits(Operation::Configure)
+            {
+                let item = match name {
+                    "model" => settings::ITEM_MODEL,
+                    "reasoning" => settings::ITEM_REASONING,
+                    _ => settings::ITEM_PERMISSIONS,
+                };
+                self.setting_card(chat_id, group.message_id, item).await;
+                return Ok(());
+            }
             let answer = self
                 .command(
                     chat_id,
@@ -2142,7 +2383,12 @@ impl Runtime {
             return Ok(());
         }
         if let Some(control) = control {
-            let toast = if self.works.contains_key(&chat_id) {
+            let reopens = matches!(control, Control::Release(_));
+            let toast = if if reopens {
+                self.work_for_command(chat_id).await
+            } else {
+                self.works.contains_key(&chat_id)
+            } {
                 self.ask(chat_id, |reply| Command::Control {
                     control,
                     actor: group.author.user_id,
@@ -2166,11 +2412,11 @@ impl Runtime {
             } else {
                 None
             };
-        let input = if forward {
+        let input = if let Some(command) = &forward {
             Some(Input {
                 id: InputId::new(id.clone())?,
                 content: InputContent {
-                    text: harness_command_text(&group.text, &self.config.bot_username),
+                    text: harness_command_text(&group.text, self.config.vocabulary, command),
                     attachments: Vec::new(),
                     context: None,
                 },
@@ -2204,6 +2450,25 @@ impl Runtime {
                         &self.config.attachments_dir,
                     )
                     .await;
+                let missing: Vec<&str> = input
+                    .content
+                    .attachments
+                    .iter()
+                    .filter(|attachment| attachment.local_uri.is_none())
+                    .map(|attachment| attachment.file_name.as_deref().unwrap_or("an attachment"))
+                    .collect();
+                if !missing.is_empty() {
+                    let names = missing.join(", ");
+                    self.reply(
+                        chat_id,
+                        group.message_id,
+                        &format!(
+                            "Could not download {names} to this machine, so {} may not be able to read it.",
+                            self.config.agent_name
+                        ),
+                    )
+                    .await;
+                }
             }
             if input.content.text.trim().is_empty() {
                 input.content.text = content.text;
@@ -2718,6 +2983,104 @@ fn mentioned_users(message: &GroupMessage) -> Vec<i64> {
         .collect()
 }
 
+/// The command menu for this agent: Inline's commands for v2, then the
+/// harness's own (Claude's commands and skills) that fit Inline's rules, up
+/// to Inline's 100.
+fn command_catalog(
+    vocabulary: Vocabulary,
+    manifest: Option<&inline_agent_bridge::harness::CapabilityManifest>,
+    catalog: &Catalog,
+) -> Vec<proto::BotCommand> {
+    let mut commands: Vec<(String, String)> = [
+        ("help", "Show this agent's commands"),
+        ("status", "What it's doing, its model and folder"),
+        ("new", "Start a fresh session in a new thread"),
+        ("stop", "Stop the current turn"),
+        ("pause", "Pause this thread's work"),
+        ("resume", "Resume paused work"),
+        ("queue", "Run a message after the current turn"),
+        ("model", "Show or choose the model"),
+        ("reasoning", "Show or choose reasoning effort"),
+        ("permissions", "Show or choose the permission mode"),
+        ("plan", "Plan mode: plan before changing anything"),
+        ("compact", "Compact the session's context"),
+        ("clear", "Clear the session's context"),
+        ("follow", "Answer every message in this thread"),
+        ("unfollow", "Answer only mentions and replies here"),
+        ("allowlist", "Who may use this agent (owner)"),
+        ("release", "Let the session go"),
+        ("terminal", "Continue the session in a terminal"),
+    ]
+    .into_iter()
+    .map(|(name, description)| (name.to_owned(), description.to_owned()))
+    .collect();
+    // Before the first session opens there is no manifest yet: each native
+    // harness's known shape stands in.
+    let supports = |kind| match (manifest, vocabulary, kind) {
+        (None, Vocabulary::Codex, OpKind::RewindFiles | OpKind::Clear) => false,
+        (None, Vocabulary::Claude, OpKind::Review) => false,
+        _ => native_operation_supported(vocabulary, manifest, kind),
+    };
+    let acp = matches!(vocabulary, Vocabulary::OpenCode | Vocabulary::Amp);
+    let queues = manifest.map_or(!acp, |manifest| {
+        manifest
+            .availability
+            .delivery(inline_agent_bridge::harness::DeliveryKind::Queue)
+            .is_supported()
+    });
+    commands.retain(|(name, _)| match name.as_str() {
+        "plan" => supports(OpKind::Mode),
+        "compact" => supports(OpKind::Compact),
+        "clear" => supports(OpKind::Clear),
+        "queue" => queues,
+        "terminal" => !acp,
+        _ => true,
+    });
+    let position = commands
+        .iter()
+        .position(|(name, _)| name == "follow")
+        .unwrap_or(commands.len());
+    if supports(OpKind::Review) {
+        commands.insert(
+            position,
+            ("review".to_owned(), "Review your changes".to_owned()),
+        );
+    }
+    if supports(OpKind::RewindFiles) {
+        commands.insert(
+            position,
+            (
+                "undo".to_owned(),
+                "Undo the last turn's file changes".to_owned(),
+            ),
+        );
+    }
+    for command in &catalog.commands {
+        if commands.len() >= 100 {
+            break;
+        }
+        let name = menu_command_name(&command.name);
+        if !name.is_empty() && name.len() <= 32 && !commands.iter().any(|(known, _)| *known == name)
+        {
+            let description = if command.description.trim().is_empty() {
+                format!("/{}", command.name)
+            } else {
+                command.description.chars().take(256).collect()
+            };
+            commands.push((name, description));
+        }
+    }
+    commands
+        .into_iter()
+        .enumerate()
+        .map(|(index, (command, description))| proto::BotCommand {
+            command,
+            description,
+            sort_order: i32::try_from(index).ok(),
+        })
+        .collect()
+}
+
 /// Commands Inline answers itself; the harness's own commands with these
 /// names are not forwarded.
 const INLINE_COMMANDS: &[&str] = &[
@@ -2778,14 +3141,57 @@ fn harness_command_candidate(
     !native_operation_supported(vocabulary, manifest, kind)
 }
 
-/// A harness command as the person typed it, without Inline's `@bot` suffix.
-fn harness_command_text(text: &str, bot_username: &str) -> String {
+/// The command as this person typed it, up to whitespace and any `@bot`:
+/// Inline's parser stops at `-` and `:`, so `name` can be only its start.
+fn typed_command(text: &str, name: &str) -> String {
+    let lower = text.to_ascii_lowercase();
+    let Some(start) = lower.find(&format!("/{name}")) else {
+        return name.to_owned();
+    };
+    text[start + 1..]
+        .split(char::is_whitespace)
+        .next()
+        .unwrap_or(name)
+        .split('@')
+        .next()
+        .unwrap_or(name)
+        .to_owned()
+}
+
+/// A name Inline's parser reads whole.
+fn plain_command(name: &str) -> bool {
+    name.bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+/// A harness command's name in Inline's menu, which allows only `[a-z0-9_]`.
+fn menu_command_name(name: &str) -> String {
+    name.chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// A harness command as the harness expects it: its real name, in its own
+/// syntax (Codex skills are `$name`), followed by what the person typed.
+fn harness_command_text(text: &str, vocabulary: Vocabulary, command: &str) -> String {
     let text = text.trim_start();
-    let (command, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
-    let command = command
-        .strip_suffix(&format!("@{bot_username}"))
-        .unwrap_or(command);
-    format!("{command} {}", rest.trim()).trim_end().to_owned()
+    let rest = text
+        .split_once(char::is_whitespace)
+        .map_or("", |(_, rest)| rest);
+    let sigil = if vocabulary == Vocabulary::Codex {
+        '$'
+    } else {
+        '/'
+    };
+    format!("{sigil}{command} {}", rest.trim())
+        .trim_end()
+        .to_owned()
 }
 
 /// `/help`: what this agent answers to.
@@ -2797,10 +3203,10 @@ fn help_text(agent_name: &str, vocabulary: Vocabulary) -> String {
     }
     let native = match vocabulary {
         Vocabulary::Codex => {
-            "/plan, /plan off · Codex plan mode\n/review [branch] · Codex reviews your changes\n"
+            "/plan, /plan off · Codex plan mode\n/review [branch] · Codex reviews your changes\nCodex skills work as /skill-name.\n"
         }
         Vocabulary::Claude => {
-            "/plan · Claude plan mode\n/undo · undo the last turn's file changes\nClaude's own commands and skills work as you type them.\n"
+            "/plan · Claude plan mode\n/clear · reset the session's context\n/undo · undo the last turn's file changes\nClaude's own commands and skills work as you type them.\n"
         }
         Vocabulary::OpenCode | Vocabulary::Amp => {
             unreachable!("ACP providers have capability-limited help above")
@@ -2812,7 +3218,7 @@ fn help_text(agent_name: &str, vocabulary: Vocabulary) -> String {
          /model, /reasoning, /permissions · change them for this thread\n\
          /stop · stop the current turn; /pause and /resume\n\
          /queue <message> · run it after the current turn\n\
-         /compact, /clear · shrink or reset the session's context\n\
+         /compact · shrink the session's context\n\
          /new <task> · a new thread with a fresh session\n\
          /follow, /unfollow · answer every message in this thread, or only mentions and replies\n\
          /allowlist · who may use me (owner)\n\
@@ -2907,9 +3313,16 @@ mod tests {
 
     #[test]
     fn harness_commands_go_to_the_harness_as_typed_without_the_bot_suffix() {
-        assert_eq!(harness_command_text("/review", "claude_bot"), "/review");
         assert_eq!(
-            harness_command_text("/deploy@claude_bot staging now", "claude_bot"),
+            harness_command_text("/review", Vocabulary::Claude, "review"),
+            "/review"
+        );
+        assert_eq!(
+            harness_command_text(
+                "/deploy@claude_bot staging now",
+                Vocabulary::Claude,
+                "deploy"
+            ),
             "/deploy staging now"
         );
         for name in [
@@ -2923,6 +3336,73 @@ mod tests {
         ] {
             assert!(INLINE_COMMANDS.contains(&name), "{name} is Inline's");
         }
+    }
+
+    #[test]
+    fn the_command_menu_holds_inlines_commands_then_the_harness_own() {
+        let mut catalog = Catalog::default();
+        for (name, description) in [
+            ("deploy", "Deploy the app"),
+            ("compact", "Claude's own compact"),
+            ("plugin:skill", "Not a valid Inline command name"),
+        ] {
+            catalog.commands.push(inline_agent_bridge::DriverCommand {
+                name: name.to_owned(),
+                description: description.to_owned(),
+                input_hint: None,
+                input: Default::default(),
+            });
+        }
+        let names = |vocabulary| {
+            command_catalog(vocabulary, None, &catalog)
+                .into_iter()
+                .map(|command| command.command)
+                .collect::<Vec<_>>()
+        };
+        let claude = names(Vocabulary::Claude);
+        assert!(claude.contains(&"undo".to_owned()) && !claude.contains(&"review".to_owned()));
+        assert_eq!(claude.last().map(String::as_str), Some("plugin_skill"));
+        assert_eq!(claude.iter().filter(|name| *name == "compact").count(), 1);
+        assert!(claude.contains(&"deploy".to_owned()));
+        assert!(!claude.iter().any(|name| name.contains(':')));
+        let codex = names(Vocabulary::Codex);
+        assert!(codex.contains(&"review".to_owned()) && !codex.contains(&"undo".to_owned()));
+        for name in INLINE_COMMANDS {
+            assert!(
+                claude.contains(&(*name).to_owned()) || codex.contains(&(*name).to_owned()),
+                "/{name} is answered but not in the menu"
+            );
+        }
+        assert!(!codex.contains(&"clear".to_owned()));
+        let opencode = names(Vocabulary::OpenCode);
+        for hidden in ["plan", "clear", "queue", "terminal", "review", "undo"] {
+            assert!(!opencode.contains(&hidden.to_owned()), "/{hidden} shown");
+        }
+        assert!(command_catalog(Vocabulary::Claude, None, &catalog).len() <= 100);
+    }
+
+    #[test]
+    fn commands_keep_the_names_the_parser_cuts_short() {
+        assert_eq!(typed_command("/code-review now", "code"), "code-review");
+        assert_eq!(typed_command("/plugin:skill", "plugin"), "plugin:skill");
+        assert_eq!(typed_command("/deploy@claude_bot x", "deploy"), "deploy");
+        assert!(plain_command("deploy") && !plain_command("code-review"));
+        assert_eq!(
+            menu_command_name("Plugin:code-review"),
+            "plugin_code_review"
+        );
+    }
+
+    #[test]
+    fn harness_commands_go_out_in_the_harness_syntax() {
+        assert_eq!(
+            harness_command_text("/code_review the diff", Vocabulary::Claude, "code-review"),
+            "/code-review the diff"
+        );
+        assert_eq!(
+            harness_command_text("/gh_fix now", Vocabulary::Codex, "gh-fix"),
+            "$gh-fix now"
+        );
     }
 
     #[test]

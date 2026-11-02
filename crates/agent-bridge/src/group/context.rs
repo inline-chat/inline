@@ -281,11 +281,13 @@ impl PassiveBatch {
     }
 
     pub fn push(&mut self, message: ContextMessage) {
-        if self
+        // Edits replace: a streamed message arrives once per revision.
+        if let Some(queued) = self
             .messages
-            .iter()
-            .any(|queued| queued.message_id == message.message_id)
+            .iter_mut()
+            .find(|queued| queued.message_id == message.message_id)
         {
+            *queued = message;
             return;
         }
         if self.messages.len() == MAX_PASSIVE_BUFFER {

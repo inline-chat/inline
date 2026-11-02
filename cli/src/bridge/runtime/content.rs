@@ -10,8 +10,8 @@ use tokio::io::AsyncWriteExt;
 
 use super::super::render_inline_text;
 
-const MAX_LOCAL_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
-const ATTACHMENT_FETCH_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_LOCAL_ATTACHMENT_BYTES: usize = 100 * 1024 * 1024;
+const ATTACHMENT_FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub(in crate::bridge) struct InboundContent {
     pub text: String,

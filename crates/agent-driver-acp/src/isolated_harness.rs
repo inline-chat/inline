@@ -335,8 +335,38 @@ impl HarnessDriver for IsolatedAcpHarness {
         })
     }
 
-    fn sessions<'a>(&'a self, _query: SessionQuery) -> DriverFuture<'a, SessionPage> {
-        Box::pin(async { Ok(SessionPage::default()) })
+    fn sessions<'a>(&'a self, query: SessionQuery) -> DriverFuture<'a, SessionPage> {
+        Box::pin(async move {
+            if self.stopped.load(Ordering::SeqCst) {
+                return Err(DriverError::Unavailable("ACP harness stopped".into()));
+            }
+            // Listing reads the agent's store, so any live process can answer.
+            let live = self
+                .epochs
+                .lock()
+                .unwrap()
+                .values()
+                .filter_map(|entry| entry.epoch.upgrade())
+                .find(|epoch| {
+                    epoch
+                        .process_status()
+                        .is_some_and(|status| !status.is_finished())
+                });
+            let mut page = match live {
+                Some(epoch) => epoch.sessions(query).await?,
+                None => {
+                    let epoch = launch(&self.descriptor, &self.bridge_version, None).await?;
+                    let page = epoch.sessions(query).await;
+                    let _ = epoch.shutdown().await;
+                    page?
+                }
+            };
+            // Picker probes are this harness's own, not the person's sessions.
+            let probes = self.catalog_sessions.lock().unwrap();
+            page.sessions
+                .retain(|summary| !probes.values().any(|probe| probe == &summary.key.session));
+            Ok(page)
+        })
     }
 
     fn open<'a>(&'a self, spec: OpenSpec) -> HarnessFuture<'a, Arc<dyn Session>, OpenError> {

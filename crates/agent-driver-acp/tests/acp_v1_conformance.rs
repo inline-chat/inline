@@ -55,7 +55,9 @@ async fn initializes_v1_maps_capabilities_and_shuts_down_cleanly() {
     assert_eq!(driver.agent_version(), Some("2.0.32"));
     assert!(capabilities.resume_session);
     assert!(capabilities.cancel_turn);
-    assert!(!capabilities.compact_session);
+    // OpenCode's built-in `/compact`; steering stays off, as it rejects a
+    // prompt during a turn.
+    assert!(capabilities.compact_session);
     assert!(capabilities.settings_catalog);
     assert_eq!(capabilities.steering, SteeringSupport::Unsupported);
     assert_eq!(capabilities.host_tools, HostToolTransport::Mcp);

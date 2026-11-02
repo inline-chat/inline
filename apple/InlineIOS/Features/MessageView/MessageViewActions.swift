@@ -347,11 +347,25 @@ enum MessageViewActions {
     }
   }
 
+  /// A link to a path on the sender's machine, such as an agent's `/Users/me/repo/main.rs:12`.
+  /// It can't open on this device.
+  nonisolated static func isLocalFileLink(_ value: Any?) -> Bool {
+    if let url = value as? URL {
+      return LocalFileLink(url: url) != nil
+    }
+    guard let string = value as? String else { return false }
+    if let url = URL(string: string), LocalFileLink(url: url) != nil {
+      return true
+    }
+    return string.hasPrefix("/") && !string.hasPrefix("//")
+  }
+
   static func linkURL(in text: NSAttributedString, at index: Int) -> URL? {
     guard index >= 0, index < text.length,
           text.attribute(.mentionUserId, at: index, effectiveRange: nil) == nil
     else { return nil }
     let value = text.attribute(.link, at: index, effectiveRange: nil)
+    guard !isLocalFileLink(value) else { return nil }
     if let url = value as? URL {
       return LinkDetector.isSupportedLinkURL(url) ? url : nil
     }

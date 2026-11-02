@@ -11,7 +11,7 @@ use inline_agent_bridge::harness::{
     ChildKind, Delivery, ForkPoint, GoalOp, Input, InputContent, Op, OpError, OpenMode, OpenSpec,
     Origin, QueueOp, ReviewTarget, SettingsScope,
 };
-use inline_agent_bridge::{InputAttachmentKind, TurnId};
+use inline_agent_bridge::{DriverSettingOption, InputAttachmentKind, TurnId};
 use serde_json::{Map, Value, json};
 
 use super::mapper::client_message_id;
@@ -21,6 +21,97 @@ use super::mapper::client_message_id;
 pub(crate) struct Request {
     pub method: &'static str,
     pub params: Value,
+}
+
+/// Codex's own "Approve for me": the workspace profile with its review agent
+/// answering approvals. Not an app-server profile; `permission_params` expands
+/// it as the Codex TUI does (`chatwidget/permissions_menu.rs`).
+pub(crate) const APPROVE_FOR_ME: &str = ":approve-for-me";
+const WORKSPACE_PROFILE: &str = ":workspace";
+const FULL_ACCESS_PROFILE: &str = ":danger-full-access";
+const READ_ONLY_PROFILE: &str = ":read-only";
+
+/// A permission choice as app-server fields. A built-in profile comes with its
+/// preset's approval policy; the profile alone leaves `config.toml`'s policy,
+/// and Full Access would still stop to ask.
+fn permission_params(mode: &str) -> Map<String, Value> {
+    let (profile, policy, reviewer) = match mode {
+        APPROVE_FOR_ME => (WORKSPACE_PROFILE, Some("on-request"), "auto_review"),
+        WORKSPACE_PROFILE | READ_ONLY_PROFILE => (mode, Some("on-request"), "user"),
+        FULL_ACCESS_PROFILE => (mode, Some("never"), "user"),
+        custom => (custom, None, "user"),
+    };
+    let mut params = Map::new();
+    params.insert("permissions".to_owned(), json!(profile));
+    params.insert("approvalsReviewer".to_owned(), json!(reviewer));
+    if let Some(policy) = policy {
+        params.insert("approvalPolicy".to_owned(), json!(policy));
+    }
+    params
+}
+
+/// The permission choice a thread's settings amount to.
+pub(crate) fn active_permission_mode(settings: &Value) -> Option<String> {
+    let profile = settings.pointer("/activePermissionProfile/id")?.as_str()?;
+    let reviewer = settings.get("approvalsReviewer").and_then(Value::as_str);
+    Some(
+        if profile == WORKSPACE_PROFILE
+            && matches!(reviewer, Some("auto_review" | "guardian_subagent"))
+        {
+            APPROVE_FOR_ME
+        } else {
+            profile
+        }
+        .to_owned(),
+    )
+}
+
+/// The permission choices the settings offer, with the Codex TUI's names and
+/// order. "Approve for me" needs the workspace profile.
+pub(crate) fn permission_options(
+    profiles: Vec<crate::protocol::CodexPermissionOption>,
+) -> Vec<DriverSettingOption> {
+    let rank = |id: &str| match id {
+        WORKSPACE_PROFILE => 0,
+        FULL_ACCESS_PROFILE => 2,
+        READ_ONLY_PROFILE => 3,
+        _ => 4,
+    };
+    let mut options = Vec::new();
+    for profile in profiles {
+        let disabled = profile.allowed == Some(false);
+        let label = match profile.id.as_str() {
+            WORKSPACE_PROFILE => "Ask for approval",
+            FULL_ACCESS_PROFILE => "Full Access",
+            READ_ONLY_PROFILE => "Read Only",
+            custom => custom,
+        }
+        .to_owned();
+        if profile.id == WORKSPACE_PROFILE {
+            options.push((
+                1,
+                DriverSettingOption {
+                    value: APPROVE_FOR_ME.to_owned(),
+                    label: "Approve for me".to_owned(),
+                    description: Some(
+                        "Only ask for actions detected as potentially unsafe".to_owned(),
+                    ),
+                    disabled,
+                },
+            ));
+        }
+        options.push((
+            rank(&profile.id),
+            DriverSettingOption {
+                label,
+                value: profile.id,
+                description: profile.description,
+                disabled,
+            },
+        ));
+    }
+    options.sort_by_key(|(rank, _)| *rank);
+    options.into_iter().map(|(_, option)| option).collect()
 }
 
 /// The request that starts, resumes or forks a thread. `dynamic_tools` are
@@ -38,8 +129,17 @@ pub(crate) fn open_request(spec: &OpenSpec, dynamic_tools: Option<Value>) -> Req
     if let Some(model) = &spec.settings.model {
         params["model"] = json!(model);
     }
-    if let Some(permissions) = &spec.settings.permission_mode {
-        params["permissions"] = json!(permissions);
+    // A new thread starts on "Approve for me" until someone chooses otherwise;
+    // an existing one keeps the permissions it has.
+    let permissions =
+        spec.settings
+            .permission_mode
+            .as_deref()
+            .or(matches!(spec.mode, OpenMode::Start).then_some(APPROVE_FOR_ME));
+    if let Some(permissions) = permissions {
+        for (key, value) in permission_params(permissions) {
+            params[key] = value;
+        }
     }
     if let Some(speed) = &spec.settings.speed {
         params["serviceTier"] = json!(speed);
@@ -313,7 +413,7 @@ pub(crate) fn op_request(
                 }
                 SettingsScope::Thread => {
                     if let Some(mode) = &change.permission_mode {
-                        params.insert("permissions".to_owned(), json!(mode));
+                        params.extend(permission_params(mode));
                     }
                     if let Some(folder) = &change.folder {
                         params.insert("cwd".to_owned(), json!(folder));
@@ -454,6 +554,93 @@ mod tests {
     use inline_agent_bridge::{InputAttachment, TurnContext};
 
     use super::*;
+
+    #[test]
+    fn new_threads_start_on_approve_for_me_and_existing_ones_keep_their_permissions() {
+        use inline_agent_bridge::harness::{OutputMode, SettingsChange};
+
+        let spec = |mode, permission_mode: Option<&str>| OpenSpec {
+            mode,
+            folder: "/tmp/project".into(),
+            settings: SettingsChange {
+                permission_mode: permission_mode.map(str::to_owned),
+                ..SettingsChange::default()
+            },
+            instructions: None,
+            title: None,
+            after: None,
+            output_mode: OutputMode::Detailed,
+        };
+        let session = inline_agent_bridge::ProviderSessionId::new("thread-1").expect("id");
+
+        let start = open_request(&spec(OpenMode::Start, None), None).params;
+        assert_eq!(start["permissions"], ":workspace");
+        assert_eq!(start["approvalPolicy"], "on-request");
+        assert_eq!(start["approvalsReviewer"], "auto_review");
+
+        let resume = open_request(
+            &spec(
+                OpenMode::Resume {
+                    session: session.clone(),
+                },
+                None,
+            ),
+            None,
+        )
+        .params;
+        assert!(resume.get("permissions").is_none());
+        assert!(resume.get("approvalsReviewer").is_none());
+
+        // Full Access never stops to ask, whatever config.toml's policy says.
+        let full = open_request(
+            &spec(OpenMode::Resume { session }, Some(":danger-full-access")),
+            None,
+        )
+        .params;
+        assert_eq!(full["permissions"], ":danger-full-access");
+        assert_eq!(full["approvalPolicy"], "never");
+        assert_eq!(full["approvalsReviewer"], "user");
+    }
+
+    #[test]
+    fn permission_options_follow_the_codex_menu() {
+        let option = |id: &str, allowed| crate::protocol::CodexPermissionOption {
+            id: id.to_owned(),
+            description: None,
+            allowed,
+        };
+        let options = permission_options(vec![
+            option("team", None),
+            option(":read-only", None),
+            option(":danger-full-access", None),
+            option(":workspace", None),
+        ]);
+        let labels: Vec<&str> = options.iter().map(|option| option.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "Ask for approval",
+                "Approve for me",
+                "Full Access",
+                "Read Only",
+                "team"
+            ]
+        );
+        assert_eq!(options[1].value, APPROVE_FOR_ME);
+        assert!(
+            permission_options(vec![option(":workspace", Some(false))])
+                .iter()
+                .all(|option| option.disabled)
+        );
+        assert_eq!(
+            active_permission_mode(&json!({
+                "activePermissionProfile": {"id": ":workspace"},
+                "approvalsReviewer": "auto_review"
+            }))
+            .as_deref(),
+            Some(APPROVE_FOR_ME)
+        );
+    }
 
     fn input(delivery: Delivery, origin: Origin) -> Input {
         Input {

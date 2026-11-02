@@ -145,3 +145,83 @@ async fn installed_opencode_v2_completes_and_resumes_across_processes() {
         eprintln!("OpenCode v2 through bridge v2 harness: catalog, nine turns including compact across idle ticks and restart, retained context passed");
     }).await.expect("OpenCode v2 smoke timed out");
 }
+
+/// Costs no prompts: lists, opens, changes mode, forks and closes.
+#[tokio::test]
+#[ignore = "requires an installed OpenCode v2 CLI and INLINE_ACP_SCRATCH_DIR with a named session"]
+async fn installed_opencode_v2_lifecycle_without_prompts() {
+    use inline_agent_bridge::harness::{
+        DeliveryKind, HarnessDriver, ModeId, Op, OpKind, OpenMode, OpenSpec, OutputMode,
+        ReleaseOutcome, SessionQuery,
+    };
+    use inline_agent_driver_acp::{AcpLaunchDescriptor, IsolatedAcpHarness};
+
+    let folder = std::path::PathBuf::from(std::env::var("INLINE_ACP_SCRATCH_DIR").unwrap());
+    let program = std::env::var("INLINE_OPENCODE_PATH").unwrap_or_else(|_| "opencode".into());
+    let harness = IsolatedAcpHarness::connect(AcpLaunchDescriptor::opencode(program), "test", None)
+        .await
+        .unwrap();
+
+    let manifest = harness.describe().manifest.unwrap();
+    assert!(manifest.availability.op(OpKind::Compact).is_supported());
+    assert!(manifest.availability.op(OpKind::Mode).is_supported());
+    assert!(
+        !manifest
+            .availability
+            .delivery(DeliveryKind::SteerNext)
+            .is_supported()
+    );
+
+    let page = harness
+        .sessions(SessionQuery {
+            folder: Some(folder.clone()),
+            ..SessionQuery::default()
+        })
+        .await
+        .unwrap();
+    let named = page.sessions.first().expect("a named session").clone();
+    assert!(named.updated_at.is_some());
+    assert!(!named.title.unwrap().starts_with("New session - "));
+
+    let spec = |mode| OpenSpec {
+        mode,
+        folder: folder.clone(),
+        settings: Default::default(),
+        instructions: None,
+        title: None,
+        after: None,
+        output_mode: OutputMode::Detailed,
+    };
+    let session = harness.open(spec(OpenMode::Start)).await.unwrap();
+    let matrix = session.availability();
+    assert!(matrix.op(OpKind::Mode).is_supported());
+    assert!(matrix.op(OpKind::Compact).is_supported());
+    session
+        .control(Op::Mode {
+            mode: ModeId::new("plan").unwrap(),
+        })
+        .await
+        .unwrap();
+    let released = session.release().await.unwrap();
+    assert_eq!(released.outcome, ReleaseOutcome::NativeReleased);
+
+    let forked = harness
+        .open(spec(OpenMode::Fork {
+            session: named.key.session.clone(),
+            at: None,
+        }))
+        .await
+        .unwrap();
+    assert_ne!(forked.key().session, named.key.session);
+    forked.release().await.unwrap();
+
+    let catalog = harness
+        .catalog(inline_agent_bridge::harness::CatalogScope {
+            folder: Some(folder.clone()),
+            session: None,
+        })
+        .await
+        .unwrap();
+    assert!(catalog.modes.iter().any(|mode| mode.id.as_str() == "plan"));
+    harness.shutdown().await.unwrap();
+}

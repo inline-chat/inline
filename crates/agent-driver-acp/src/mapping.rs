@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use agent_client_protocol::schema::v1::{
     ContentBlock, PermissionOption, PermissionOptionKind, PlanEntryStatus,
@@ -6,22 +7,430 @@ use agent_client_protocol::schema::v1::{
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 use inline_agent_bridge::{
-    ActivityDetail, ActivitySemanticKind, ActivityStatus, ActivityUpsert, AgentEvent,
-    ApprovalOption, DriverCommand, DriverModelOption, DriverSettingOption, DriverSettingsCatalog,
-    FileChange, PlanStep, PlanStepStatus, TurnId, TurnOutcome, native_tool_activity,
-    sanitize_visible_command,
+    ActivityDetail, ActivitySemanticKind, ActivityStatus, ActivityTextStream, ActivityUpsert,
+    AgentEvent, ApprovalOption, DriverCommand, DriverModelOption, DriverSettingOption,
+    DriverSettingsCatalog, FileChange, PlanStep, PlanStepStatus, TurnId, TurnOutcome,
+    native_tool_activity, sanitize_visible_command,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-const MAX_PLAN_STEPS: usize = 32;
-const MAX_PLAN_TEXT_CHARS: usize = 512;
+// Safety valves only: a harness has no such limits, so these sit far past what
+// a real plan or tool run reaches.
+const MAX_PLAN_STEPS: usize = 1_024;
+const MAX_PLAN_TEXT_CHARS: usize = 8_192;
 const MAX_PERMISSION_OPTIONS: usize = 7;
 const MAX_PROVIDER_OPTION_ID_BYTES: usize = 128;
 const MAX_PROVIDER_OPTION_LABEL_CHARS: usize = 80;
-const MAX_RETAINED_TOOL_CALLS: usize = 64;
+const MAX_RETAINED_TOOL_CALLS: usize = 4_096;
 const MAX_RETAINED_TOOL_CALL_ID_BYTES: usize = 256;
-const MAX_RETAINED_TOOL_LOCATIONS: usize = 8;
+const MAX_RETAINED_TOOL_LOCATIONS: usize = 256;
 const MAX_RETAINED_TOOL_PATH_BYTES: usize = 1_024;
 pub(crate) type ToolCallSnapshots = HashMap<String, ToolCall>;
+
+/// What one ACP tool call said beyond its semantic label, for bridge v2 rows
+/// the way a native harness reports them. Legacy sessions never collect this.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ToolDetail {
+    pub(crate) provider_title: String,
+    #[serde(default)]
+    pub(crate) raw_input: Value,
+    #[serde(default)]
+    pub(crate) cwd: Option<PathBuf>,
+    #[serde(default)]
+    pub(crate) output: Option<String>,
+    #[serde(default)]
+    pub(crate) error: Option<String>,
+    #[serde(default)]
+    pub(crate) exit_code: Option<i32>,
+    #[serde(default)]
+    pub(crate) locations: Vec<PathBuf>,
+    #[serde(default)]
+    pub(crate) diffs: Vec<ToolDiff>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ToolDiff {
+    pub(crate) path: PathBuf,
+    pub(crate) old_text: Option<String>,
+    pub(crate) new_text: String,
+}
+
+/// One open run of reasoning text.
+#[derive(Debug)]
+struct OpenThought {
+    activity_id: String,
+    message_id: Option<String>,
+    text: String,
+}
+
+/// Per-turn (or per-child) state for mapping an ACP update stream.
+#[derive(Debug, Default)]
+pub(crate) struct StreamState {
+    pub(crate) tool_calls: ToolCallSnapshots,
+    details: Option<HashMap<String, ToolDetail>>,
+    thought: Option<OpenThought>,
+    thoughts: u64,
+}
+
+impl StreamState {
+    /// `rich` collects tool details for a bridge v2 session.
+    pub(crate) fn new(rich: bool) -> Self {
+        Self {
+            details: rich.then(HashMap::new),
+            ..Self::default()
+        }
+    }
+
+    /// Whether this stream belongs to a bridge v2 session.
+    pub(crate) fn is_rich(&self) -> bool {
+        self.details.is_some()
+    }
+
+    /// Ends the open reasoning run, if any.
+    pub(crate) fn close_thought(&mut self, turn_id: &TurnId) -> Option<AgentEvent> {
+        let thought = self.thought.take()?;
+        let text = thought.text;
+        let activity = ActivityUpsert::new(
+            thought.activity_id,
+            ActivitySemanticKind::Think,
+            ActivityStatus::Completed,
+            "Thinking",
+        )?
+        .with_reasoning_content([text]);
+        Some(AgentEvent::ActivityUpsert {
+            turn_id: turn_id.clone(),
+            activity,
+        })
+    }
+
+    fn thought_events(
+        &mut self,
+        turn_id: &TurnId,
+        chunk: agent_client_protocol::schema::v1::ContentChunk,
+    ) -> Vec<AgentEvent> {
+        let ContentBlock::Text(text) = chunk.content else {
+            return Vec::new();
+        };
+        if text.text.is_empty() {
+            return Vec::new();
+        }
+        let message_id = chunk.message_id.map(|id| id.to_string());
+        let mut events = Vec::new();
+        // A new message id is a new reasoning block, as in the native streams.
+        if self
+            .thought
+            .as_ref()
+            .is_some_and(|open| message_id.is_some() && open.message_id != message_id)
+        {
+            events.extend(self.close_thought(turn_id));
+        }
+        if self.thought.is_none() {
+            self.thoughts += 1;
+            let activity_id = format!("{turn_id}:thought:{}", self.thoughts);
+            if let Some(activity) = ActivityUpsert::new(
+                activity_id.clone(),
+                ActivitySemanticKind::Think,
+                ActivityStatus::InProgress,
+                "Thinking",
+            ) {
+                events.push(AgentEvent::ActivityUpsert {
+                    turn_id: turn_id.clone(),
+                    activity,
+                });
+            }
+            self.thought = Some(OpenThought {
+                activity_id,
+                message_id,
+                text: String::new(),
+            });
+        }
+        let open = self.thought.as_mut().expect("thought just opened");
+        open.text.push_str(&text.text);
+        events.push(AgentEvent::ActivityTextDelta {
+            turn_id: turn_id.clone(),
+            activity_id: open.activity_id.clone(),
+            stream: ActivityTextStream::Summary,
+            index: None,
+            delta: text.text,
+        });
+        events
+    }
+
+    fn merge_detail(&mut self, update: &SessionUpdate) {
+        let Some(details) = self.details.as_mut() else {
+            return;
+        };
+        match update {
+            SessionUpdate::ToolCall(call) => {
+                let detail = details.entry(call.tool_call_id.to_string()).or_default();
+                detail.merge(
+                    Some(call.title.as_str()),
+                    call.raw_input.as_ref(),
+                    Some(call.locations.as_slice()),
+                    Some(call.content.as_slice()),
+                    call.raw_output.as_ref(),
+                    call.status,
+                );
+            }
+            SessionUpdate::ToolCallUpdate(update) => {
+                let detail = details.entry(update.tool_call_id.to_string()).or_default();
+                let fields = &update.fields;
+                detail.merge(
+                    fields.title.as_deref(),
+                    fields.raw_input.as_ref(),
+                    fields.locations.as_deref(),
+                    fields.content.as_deref(),
+                    fields.raw_output.as_ref(),
+                    fields.status.unwrap_or(ToolCallStatus::InProgress),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    /// Carries the collected detail on the activity event itself, so a later
+    /// update cannot race it. Finished calls drop their retained detail.
+    fn attach_details(&mut self, events: &mut [AgentEvent]) {
+        let Some(details) = self.details.as_mut() else {
+            return;
+        };
+        for event in events {
+            let AgentEvent::ActivityUpsert { activity, .. } = event else {
+                continue;
+            };
+            let finished = !matches!(
+                activity.status,
+                ActivityStatus::Pending | ActivityStatus::InProgress
+            );
+            let detail = if finished {
+                details.remove(&activity.activity_id)
+            } else {
+                details.get(&activity.activity_id).cloned()
+            };
+            if let Some(payload) = detail.and_then(|detail| serde_json::to_string(&detail).ok()) {
+                activity.verbose_payload = Some(payload);
+            }
+        }
+    }
+}
+
+impl ToolDetail {
+    fn merge(
+        &mut self,
+        title: Option<&str>,
+        raw_input: Option<&Value>,
+        locations: Option<&[ToolCallLocation]>,
+        content: Option<&[ToolCallContent]>,
+        raw_output: Option<&Value>,
+        status: ToolCallStatus,
+    ) {
+        if let Some(title) = title.filter(|title| !title.trim().is_empty()) {
+            self.provider_title = title.to_owned();
+        }
+        // A pending call reports `{}` until the model finishes its arguments.
+        if let Some(raw_input) = raw_input.filter(|raw| !is_empty_object(raw)) {
+            self.raw_input = raw_input.clone();
+            self.cwd = ["cwd", "workdir"]
+                .iter()
+                .find_map(|key| raw_input.get(*key).and_then(Value::as_str))
+                .map(PathBuf::from);
+        }
+        if let Some(locations) = locations.filter(|locations| !locations.is_empty()) {
+            self.locations = locations
+                .iter()
+                .map(|location| location.path.clone())
+                .collect();
+        }
+        if let Some(content) = content {
+            let diffs = content
+                .iter()
+                .filter_map(|content| match content {
+                    ToolCallContent::Diff(diff) => Some(ToolDiff {
+                        path: diff.path.clone(),
+                        old_text: diff.old_text.clone(),
+                        new_text: diff.new_text.clone(),
+                    }),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if !diffs.is_empty() {
+                self.diffs = diffs;
+            }
+        }
+        let text = content
+            .into_iter()
+            .flatten()
+            .filter_map(|content| match content {
+                ToolCallContent::Content(content) => match &content.content {
+                    ContentBlock::Text(text) if !text.text.is_empty() => Some(text.text.as_str()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let text = (!text.is_empty())
+            .then_some(text)
+            .or_else(|| raw_output.and_then(raw_output_text));
+        if status == ToolCallStatus::Failed {
+            self.error = raw_output
+                .and_then(|raw| raw.get("error"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or(text)
+                .or_else(|| self.error.take());
+        } else if text.is_some() {
+            self.output = text;
+        }
+        if let Some(exit_code) = raw_output.and_then(raw_output_exit_code) {
+            self.exit_code = Some(exit_code);
+        }
+    }
+
+    /// The file changes of this call: the protocol's diffs, or what the raw
+    /// input says when the agent reports none.
+    pub(crate) fn file_diffs(&self) -> Vec<ToolDiff> {
+        if !self.diffs.is_empty() {
+            return self.diffs.clone();
+        }
+        let Some(path) = self.path().or_else(|| self.locations.first().cloned()) else {
+            return Vec::new();
+        };
+        let text = |keys: &[&str]| {
+            keys.iter()
+                .find_map(|key| self.raw_input.get(*key).and_then(Value::as_str))
+                .map(str::to_owned)
+        };
+        match (
+            text(&["oldString", "old_string"]),
+            text(&["newString", "new_string"]),
+            text(&["content"]),
+        ) {
+            (Some(old_text), Some(new_text), _) => vec![ToolDiff {
+                path,
+                old_text: Some(old_text),
+                new_text,
+            }],
+            (None, _, Some(new_text)) => vec![ToolDiff {
+                path,
+                old_text: None,
+                new_text,
+            }],
+            _ => Vec::new(),
+        }
+    }
+
+    pub(crate) fn path(&self) -> Option<PathBuf> {
+        ["path", "filePath", "file_path"]
+            .iter()
+            .find_map(|key| self.raw_input.get(*key).and_then(Value::as_str))
+            .map(PathBuf::from)
+    }
+
+    /// The tool's short name, without a provider-rendered argument suffix.
+    pub(crate) fn tool_name(&self) -> String {
+        self.provider_title
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+    }
+}
+
+fn is_empty_object(value: &Value) -> bool {
+    value.as_object().is_some_and(serde_json::Map::is_empty)
+}
+
+fn raw_output_text(raw: &Value) -> Option<String> {
+    if let Some(text) = raw.as_str() {
+        return Some(text.to_owned());
+    }
+    ["output", "stdout", "content", "text"]
+        .iter()
+        .find_map(|key| raw.get(*key).and_then(Value::as_str))
+        .map(str::to_owned)
+}
+
+fn raw_output_exit_code(raw: &Value) -> Option<i32> {
+    ["exit", "exitCode", "exit_code"]
+        .iter()
+        .find_map(|key| {
+            raw.get("metadata")
+                .and_then(|metadata| metadata.get(*key))
+                .or_else(|| raw.get(*key))
+                .and_then(Value::as_i64)
+        })
+        .and_then(|code| i32::try_from(code).ok())
+}
+
+/// A zero-context unified diff of one edit, for the chat's diff view.
+pub(crate) fn unified_diff(old_text: Option<&str>, new_text: &str) -> String {
+    let old_lines = old_text.map_or_else(Vec::new, |text| text.lines().collect::<Vec<_>>());
+    let new_lines = new_text.lines().collect::<Vec<_>>();
+    let prefix = old_lines
+        .iter()
+        .zip(&new_lines)
+        .take_while(|(old, new)| old == new)
+        .count();
+    let suffix = old_lines[prefix..]
+        .iter()
+        .rev()
+        .zip(new_lines[prefix..].iter().rev())
+        .take_while(|(old, new)| old == new)
+        .count();
+    let removed = &old_lines[prefix..old_lines.len() - suffix];
+    let added = &new_lines[prefix..new_lines.len() - suffix];
+    let mut diff = format!(
+        "@@ -{},{} +{},{} @@\n",
+        prefix + 1,
+        removed.len(),
+        prefix + 1,
+        added.len()
+    );
+    for line in removed {
+        diff.push('-');
+        diff.push_str(line);
+        diff.push('\n');
+    }
+    for line in added {
+        diff.push('+');
+        diff.push_str(line);
+        diff.push('\n');
+    }
+    diff
+}
+
+/// Maps one update of a turn or child stream.
+pub(crate) fn stream_events(
+    turn_id: &TurnId,
+    stream: &mut StreamState,
+    update: SessionUpdate,
+) -> Vec<AgentEvent> {
+    if let SessionUpdate::AgentThoughtChunk(chunk) = update {
+        return stream.thought_events(turn_id, chunk);
+    }
+    let mut events = Vec::new();
+    if matches!(
+        update,
+        SessionUpdate::AgentMessageChunk(_)
+            | SessionUpdate::ToolCall(_)
+            | SessionUpdate::ToolCallUpdate(_)
+            | SessionUpdate::Plan(_)
+    ) {
+        events.extend(stream.close_thought(turn_id));
+    }
+    stream.merge_detail(&update);
+    let mapped_from = events.len();
+    events.extend(session_update_events(
+        turn_id,
+        &mut stream.tool_calls,
+        update,
+    ));
+    stream.attach_details(&mut events[mapped_from..]);
+    events
+}
 
 pub(crate) fn available_commands(
     commands: &[agent_client_protocol::schema::v1::AvailableCommand],
@@ -155,7 +564,7 @@ fn command_title_preview(title: &str) -> Option<String> {
         .to_ascii_lowercase();
     if matches!(
         generic.as_str(),
-        "bash" | "command" | "execute" | "run command" | "running command" | "terminal"
+        "bash" | "command" | "execute" | "run command" | "running command" | "shell" | "terminal"
     ) {
         return None;
     }
@@ -182,7 +591,8 @@ pub(crate) fn session_update_events(
             }
             _ => Vec::new(),
         },
-        SessionUpdate::AgentThoughtChunk(_) => vec![activity(turn_id, "Thinking…")],
+        // Reasoning has its own lifecycle in `stream_events`.
+        SessionUpdate::AgentThoughtChunk(_) => Vec::new(),
         SessionUpdate::ToolCall(call) => {
             let mut events = if let Some(activity) = activity_upsert(&call) {
                 vec![AgentEvent::ActivityUpsert {
@@ -226,6 +636,8 @@ pub(crate) fn session_update_events(
                 })
                 .collect(),
         }],
+        // Session facts reach bridge v2 as signals, not turn events. A user
+        // chunk only echoes this client's prompt or replays history on load.
         SessionUpdate::AvailableCommandsUpdate(_)
         | SessionUpdate::CurrentModeUpdate(_)
         | SessionUpdate::ConfigOptionUpdate(_)
@@ -567,6 +979,35 @@ pub(crate) fn select_config_id(
                 .is_some_and(|values| values.iter().any(|candidate| candidate.value == value))
         })
         .map(|option| option.id.clone())
+}
+
+/// The current value of one select category, with its label.
+pub(crate) fn current_choice(
+    options: &[agent_client_protocol::schema::v1::SessionConfigOption],
+    category: agent_client_protocol::schema::v1::SessionConfigOptionCategory,
+) -> Option<DriverSettingOption> {
+    let option = options
+        .iter()
+        .find(|option| option.category.as_ref() == Some(&category))?;
+    let current = current_select_value(option)?;
+    select_setting(option)?
+        .into_iter()
+        .find(|choice| choice.value == current)
+}
+
+/// OpenCode prefixes a child's tool titles with the child's title.
+pub(crate) fn strip_child_title(update: &mut SessionUpdate, child_title: &str) {
+    let prefix = format!("{child_title}: ");
+    let title = match update {
+        SessionUpdate::ToolCall(call) => Some(&mut call.title),
+        SessionUpdate::ToolCallUpdate(update) => update.fields.title.as_mut(),
+        _ => None,
+    };
+    if let Some(title) = title
+        && let Some(stripped) = title.strip_prefix(&prefix)
+    {
+        *title = stripped.to_owned();
+    }
 }
 
 fn current_select_value(
@@ -1135,6 +1576,152 @@ mod tests {
                     },
                 ],
             }]
+        );
+    }
+
+    fn thought(text: &str, message: &str) -> SessionUpdate {
+        SessionUpdate::AgentThoughtChunk(
+            agent_client_protocol::schema::v1::ContentChunk::new(ContentBlock::Text(
+                TextContent::new(text),
+            ))
+            .message_id(agent_client_protocol::schema::v1::MessageId::new(
+                message.to_string(),
+            )),
+        )
+    }
+
+    #[test]
+    fn thought_text_flows_as_one_reasoning_activity_per_block() {
+        let turn = TurnId::new("turn-1").unwrap();
+        let mut stream = StreamState::new(true);
+        let first = stream_events(&turn, &mut stream, thought("let me ", "m1"));
+        assert!(matches!(
+            first.as_slice(),
+            [
+                AgentEvent::ActivityUpsert { activity, .. },
+                AgentEvent::ActivityTextDelta { delta, stream: ActivityTextStream::Summary, .. },
+            ] if activity.kind == ActivitySemanticKind::Think
+                && activity.status == ActivityStatus::InProgress
+                && delta == "let me "
+        ));
+        let second = stream_events(&turn, &mut stream, thought("think", "m1"));
+        assert!(matches!(
+            second.as_slice(),
+            [AgentEvent::ActivityTextDelta { delta, .. }] if delta == "think"
+        ));
+        let next_block = stream_events(&turn, &mut stream, thought("again", "m2"));
+        assert!(matches!(
+            next_block.as_slice(),
+            [
+                AgentEvent::ActivityUpsert { activity, .. },
+                AgentEvent::ActivityUpsert { activity: opened, .. },
+                AgentEvent::ActivityTextDelta { .. },
+            ] if activity.status == ActivityStatus::Completed
+                && activity.reasoning_content == ["let me think"]
+                && opened.activity_id != activity.activity_id
+        ));
+        let text = stream_events(
+            &turn,
+            &mut stream,
+            SessionUpdate::AgentMessageChunk(agent_client_protocol::schema::v1::ContentChunk::new(
+                ContentBlock::Text(TextContent::new("done")),
+            )),
+        );
+        assert!(matches!(
+            text.as_slice(),
+            [
+                AgentEvent::ActivityUpsert { activity, .. },
+                AgentEvent::AgentTextDelta { .. },
+            ] if activity.reasoning_content == ["again"]
+        ));
+        assert!(stream.close_thought(&turn).is_none());
+    }
+
+    #[test]
+    fn tool_details_survive_status_only_updates_and_read_exit_codes() {
+        let turn = TurnId::new("turn-1").unwrap();
+        let mut stream = StreamState::new(true);
+        stream_events(
+            &turn,
+            &mut stream,
+            SessionUpdate::ToolCall(ToolCall::new("t1", "shell").kind(ToolKind::Execute)),
+        );
+        stream_events(
+            &turn,
+            &mut stream,
+            SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "t1",
+                ToolCallUpdateFields::new()
+                    .title("false")
+                    .status(ToolCallStatus::InProgress)
+                    .raw_input(serde_json::json!({"command": "false", "cwd": "/w"})),
+            )),
+        );
+        let events = stream_events(
+            &turn,
+            &mut stream,
+            SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "t1",
+                ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::Completed)
+                    .content(vec![ToolCallContent::from("(no output)")])
+                    .raw_output(serde_json::json!({"metadata": {"exit": 1}})),
+            )),
+        );
+        let [AgentEvent::ActivityUpsert { activity, .. }] = events.as_slice() else {
+            panic!("expected one snapshot");
+        };
+        let detail: ToolDetail =
+            serde_json::from_str(activity.verbose_payload.as_deref().unwrap()).unwrap();
+        assert_eq!(detail.exit_code, Some(1));
+        assert_eq!(detail.output.as_deref(), Some("(no output)"));
+        assert_eq!(detail.cwd, Some(PathBuf::from("/w")));
+        assert_eq!(detail.raw_input["command"], "false");
+        assert!(stream.details.as_ref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn legacy_streams_collect_no_tool_details() {
+        let turn = TurnId::new("turn-1").unwrap();
+        let mut stream = StreamState::new(false);
+        let events = stream_events(
+            &turn,
+            &mut stream,
+            SessionUpdate::ToolCall(
+                ToolCall::new("t1", "read")
+                    .kind(ToolKind::Read)
+                    .raw_input(serde_json::json!({"path": "/a"})),
+            ),
+        );
+        assert!(matches!(
+            events.as_slice(),
+            [AgentEvent::ActivityUpsert { activity, .. }] if activity.verbose_payload.is_none()
+        ));
+    }
+
+    #[test]
+    fn file_diffs_prefer_the_protocol_then_fall_back_to_raw_input() {
+        let detail = ToolDetail {
+            raw_input: serde_json::json!({"path": "/a", "oldString": "x", "newString": "y"}),
+            ..ToolDetail::default()
+        };
+        assert_eq!(
+            detail.file_diffs(),
+            [ToolDiff {
+                path: "/a".into(),
+                old_text: Some("x".into()),
+                new_text: "y".into(),
+            }]
+        );
+        let write = ToolDetail {
+            raw_input: serde_json::json!({"path": "/n", "content": "x\n"}),
+            ..ToolDetail::default()
+        };
+        assert_eq!(unified_diff(None, "x\n"), "@@ -1,0 +1,1 @@\n+x\n");
+        assert_eq!(write.file_diffs()[0].old_text, None);
+        assert_eq!(
+            unified_diff(Some("a\nb\nc\n"), "a\nB\nc\n"),
+            "@@ -2,1 +2,1 @@\n-b\n+B\n"
         );
     }
 

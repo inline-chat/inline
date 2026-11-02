@@ -5,11 +5,11 @@ use inline_agent_bridge::{
     DriverError, DriverResult, Question, QuestionAnswer, QuestionOption, QuestionRequest, TurnId,
 };
 
-const MAX_QUESTIONS: usize = 4;
+const MAX_QUESTIONS: usize = 32;
 const MAX_QUESTION_ID_BYTES: usize = 128;
-const MAX_OPTIONS: usize = 16;
+const MAX_OPTIONS: usize = 128;
 const MAX_HEADER_CHARS: usize = 80;
-const MAX_PROMPT_CHARS: usize = 2_000;
+const MAX_PROMPT_CHARS: usize = 16_000;
 const MAX_OPTION_LABEL_CHARS: usize = 160;
 const MAX_OPTION_VALUE_BYTES: usize = 512;
 const MAX_OPTION_DESCRIPTION_CHARS: usize = 400;

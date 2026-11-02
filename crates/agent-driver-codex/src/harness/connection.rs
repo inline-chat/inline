@@ -16,8 +16,8 @@ use inline_agent_bridge::harness::{
     SetupReason,
 };
 use inline_agent_bridge::{
-    DriverError, DriverFuture, DriverModelOption, DriverSettingOption, HostToolConfiguration,
-    ProviderId, ProviderSessionId, SessionPageCursor, TurnId,
+    DriverCommand, DriverError, DriverFuture, DriverModelOption, DriverSettingOption,
+    HostToolConfiguration, ProviderId, ProviderSessionId, SessionPageCursor, TurnId,
 };
 use semver::Version;
 use serde_json::{Value, json};
@@ -333,6 +333,32 @@ fn project_roots(project: crate::protocol::CodexProject) -> Vec<CatalogFolder> {
         .collect()
 }
 
+/// Enabled skills from `skills/list`, by name. Codex expands `$name` in text.
+fn skill_commands(response: &Value) -> Vec<DriverCommand> {
+    let mut commands: Vec<DriverCommand> = response["data"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| entry["skills"].as_array().into_iter().flatten())
+        .filter(|skill| skill["enabled"].as_bool().unwrap_or(true))
+        .filter_map(|skill| {
+            Some(DriverCommand {
+                name: skill["name"].as_str()?.to_owned(),
+                description: skill["shortDescription"]
+                    .as_str()
+                    .or_else(|| skill["description"].as_str())
+                    .unwrap_or_default()
+                    .to_owned(),
+                input_hint: None,
+                input: Default::default(),
+            })
+        })
+        .collect();
+    commands.sort_by(|left, right| left.name.cmp(&right.name));
+    commands.dedup_by(|left, right| left.name == right.name);
+    commands
+}
+
 impl HarnessDriver for CodexHarness {
     fn describe(&self) -> RuntimeInfo {
         self.info.lock().expect("runtime info poisoned").clone()
@@ -379,6 +405,15 @@ impl HarnessDriver for CodexHarness {
                     })
                     .collect();
             }
+            if let Ok(skills) = connection
+                .request(Request {
+                    method: "skills/list",
+                    params: json!({"cwds": scope.folder.iter().collect::<Vec<_>>()}),
+                })
+                .await
+            {
+                catalog.commands = skill_commands(&skills);
+            }
             if let Ok(profiles) = connection
                 .request(Request {
                     method: "permissionProfile/list",
@@ -389,16 +424,12 @@ impl HarnessDriver for CodexHarness {
                     crate::protocol::PermissionProfileListResponse,
                 >(profiles)
             {
-                catalog.permission_modes = profiles
-                    .data
-                    .into_iter()
-                    .map(|profile| DriverSettingOption {
-                        label: profile.id.clone(),
-                        value: profile.id,
-                        description: profile.description,
-                        disabled: profile.allowed == Some(false),
-                    })
-                    .collect();
+                catalog.permission_modes = super::delivery::permission_options(profiles.data);
+                catalog.default_permission_mode = catalog
+                    .permission_modes
+                    .iter()
+                    .find(|mode| mode.value == super::delivery::APPROVE_FOR_ME && !mode.disabled)
+                    .map(|mode| mode.value.clone());
             }
             if let Ok(modes) = connection
                 .request(Request {
@@ -520,7 +551,21 @@ impl HarnessDriver for CodexHarness {
                 }
                 _ => None,
             };
-            let response = match connection.request(Request { method, params }).await {
+            // Managed requirements can refuse the review agent behind the
+            // default. A new thread then asks the person, in the same sandbox;
+            // it never widens to whatever `config.toml` allows.
+            let asking = (matches!(spec.mode, OpenMode::Start)
+                && spec.settings.permission_mode.is_none())
+            .then(|| {
+                let mut params = params.clone();
+                params["approvalsReviewer"] = json!("user");
+                params
+            });
+            let mut result = connection.request(Request { method, params }).await;
+            if let (Err(PeerError::Remote(_)), Some(params)) = (&result, asking) {
+                result = connection.request(Request { method, params }).await;
+            }
+            let response = match result {
                 Ok(response) => response,
                 Err(error) => {
                     if let Some(inner) = &early {
@@ -551,7 +596,7 @@ impl HarnessDriver for CodexHarness {
                 }),
                 effort: text(response.get("reasoningEffort")),
                 speed: text(response.get("serviceTier")),
-                permission_mode: text(response.pointer("/activePermissionProfile/id")),
+                permission_mode: super::delivery::active_permission_mode(&response),
                 mode: None,
                 folder: text(response.get("cwd")).map(PathBuf::from),
             };
