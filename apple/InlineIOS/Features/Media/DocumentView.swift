@@ -40,7 +40,8 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
   private var documentURL: URL?
   private weak var viewTapGesture: UITapGestureRecognizer?
 
-  // Progress border
+  // Progress border, hosted in a view centered by constraints so it always tracks the icon button
+  private let progressRingView = createProgressRingView()
   private let progressLayer = CAShapeLayer()
 
   var documentInfo: DocumentInfo? {
@@ -185,6 +186,7 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
     fileIconButton.addSubview(thumbnailView)
     fileIconButton.addSubview(thumbnailTransferOverlay)
     fileIconButton.addSubview(iconView)
+    fileIconButton.addSubview(progressRingView)
     horizantalStackView.addArrangedSubview(verticalStackView)
     verticalStackView.addArrangedSubview(fileNameLabel)
     verticalStackView.addArrangedSubview(fileSizeLabel)
@@ -215,6 +217,11 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
       iconView.centerYAnchor.constraint(equalTo: fileIconButton.centerYAnchor),
       iconView.widthAnchor.constraint(equalToConstant: 22),
       iconView.heightAnchor.constraint(equalToConstant: 22),
+
+      progressRingView.centerXAnchor.constraint(equalTo: fileIconButton.centerXAnchor),
+      progressRingView.centerYAnchor.constraint(equalTo: fileIconButton.centerYAnchor),
+      progressRingView.widthAnchor.constraint(equalToConstant: 38),
+      progressRingView.heightAnchor.constraint(equalToConstant: 38),
     ])
 
     fileIconButton.addTarget(self, action: #selector(fileIconButtonTapped), for: .touchUpInside)
@@ -234,22 +241,9 @@ class DocumentView: UIView, UIGestureRecognizerDelegate {
       clockwise: true
     ).cgPath
     progressLayer.strokeEnd = 0
+    progressLayer.frame = CGRect(x: 0, y: 0, width: 38, height: 38)
 
-    fileIconButton.layer.addSublayer(progressLayer)
-  }
-
-  override func layoutSubviews() {
-    super.layoutSubviews()
-    let progressSize: CGFloat = 38
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    progressLayer.frame = CGRect(
-      x: floor((fileIconButton.bounds.width - progressSize) / 2),
-      y: floor((fileIconButton.bounds.height - progressSize) / 2),
-      width: progressSize,
-      height: progressSize
-    )
-    CATransaction.commit()
+    progressRingView.layer.addSublayer(progressLayer)
   }
 
   /// Short arc kept visible before the first bytes arrive, so a starting download never looks stalled.
@@ -1090,6 +1084,13 @@ extension DocumentView {
     view.backgroundColor = .black.withAlphaComponent(0.38)
     view.layer.cornerRadius = 19
     view.isHidden = true
+    return view
+  }
+
+  static func createProgressRingView() -> UIView {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isUserInteractionEnabled = false
     return view
   }
 
