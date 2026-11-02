@@ -13,6 +13,7 @@ struct ComposeVoiceWaveformView: View {
   let background: Color
   let motion: Motion
   let onSeek: (@MainActor @Sendable (Double) -> Void)?
+  let onTap: (@MainActor () -> Void)?
 
   @State private var lastSeekTime: TimeInterval = 0
   @State private var lastSeekProgress: Double = 0
@@ -23,7 +24,8 @@ struct ComposeVoiceWaveformView: View {
     foreground: Color = Color(uiColor: .secondaryLabel),
     background: Color = Color(uiColor: .tertiaryLabel).opacity(0.35),
     motion: Motion = .fixed,
-    onSeek: (@MainActor @Sendable (Double) -> Void)? = nil
+    onSeek: (@MainActor @Sendable (Double) -> Void)? = nil,
+    onTap: (@MainActor () -> Void)? = nil
   ) {
     self.samples = samples
     self.progress = progress
@@ -31,6 +33,7 @@ struct ComposeVoiceWaveformView: View {
     self.background = background
     self.motion = motion
     self.onSeek = onSeek
+    self.onTap = onTap
   }
 
   var body: some View {
@@ -55,6 +58,7 @@ struct ComposeVoiceWaveformView: View {
           background: background
         )
         .contentShape(Rectangle())
+        .gesture(TapGesture().onEnded { onTap?() }, including: onTap == nil ? .none : .all)
         .gesture(seekGesture(width: geometry.size.width), including: onSeek == nil ? .none : .all)
 
       case .recordingReel:
@@ -67,7 +71,7 @@ struct ComposeVoiceWaveformView: View {
   }
 
   private func seekGesture(width: CGFloat) -> some Gesture {
-    DragGesture(minimumDistance: 0)
+    DragGesture(minimumDistance: onTap == nil ? 0 : Self.tapSlop)
       .onChanged { value in
         commitSeek(locationX: value.location.x, width: width, force: false)
       }
@@ -162,6 +166,7 @@ struct ComposeVoiceWaveformView: View {
   private static let minBarScale: CGFloat = 0.04
   private static let seekCommitInterval: TimeInterval = 1.0 / 30.0
   private static let seekProgressThreshold: Double = 0.015
+  private static let tapSlop: CGFloat = 8
 }
 
 @MainActor

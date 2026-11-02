@@ -54,9 +54,16 @@ struct ComposeVoiceInputView: View {
         if !viewModel.isSending {
           discardButton
         }
-        waveform(progress: viewModel.playbackProgress) { progress in
-          viewModel.seekPlayback(to: progress)
-        }
+        waveform(
+          progress: viewModel.playbackProgress,
+          onSeek: { progress in
+            viewModel.seekPlayback(to: progress)
+          },
+          onTap: {
+            guard !viewModel.isSending else { return }
+            onPlay()
+          }
+        )
         durationLabel
         playButton
         sendButton
@@ -132,7 +139,11 @@ struct ComposeVoiceInputView: View {
       .accessibilityHidden(true)
   }
 
-  private func waveform(progress: Double, onSeek: (@MainActor @Sendable (Double) -> Void)? = nil) -> some View {
+  private func waveform(
+    progress: Double,
+    onSeek: (@MainActor @Sendable (Double) -> Void)? = nil,
+    onTap: (@MainActor () -> Void)? = nil
+  ) -> some View {
     ComposeVoiceWaveformView(
       samples: viewModel.samples,
       progress: progress,
@@ -141,7 +152,8 @@ struct ComposeVoiceInputView: View {
         ? Color(uiColor: .label).opacity(0.88)
         : Color(uiColor: .secondaryLabel).opacity(0.72),
       motion: viewModel.phase == .recording ? .recordingReel : .fixed,
-      onSeek: onSeek
+      onSeek: onSeek,
+      onTap: onTap
     )
     .frame(height: 30)
     .frame(maxWidth: .infinity)

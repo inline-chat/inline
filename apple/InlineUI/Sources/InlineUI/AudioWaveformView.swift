@@ -42,7 +42,9 @@ public struct AudioWaveformView: View {
   private let motion: Motion
   private let amplitudeScale: AmplitudeScale
   private let onSeek: (@MainActor @Sendable (Double) -> Void)?
+  private let onTap: (@MainActor @Sendable () -> Void)?
 
+  /// With `onTap`, a tap fires it and only a drag seeks; without it, touching the waveform seeks.
   public init(
     samples: [UInt8],
     progress: Double,
@@ -57,7 +59,8 @@ public struct AudioWaveformView: View {
     shortSamplesMode: ShortSamplesMode = .stretch,
     motion: Motion = .fixed,
     amplitudeScale: AmplitudeScale = .relative,
-    onSeek: (@MainActor @Sendable (Double) -> Void)? = nil
+    onSeek: (@MainActor @Sendable (Double) -> Void)? = nil,
+    onTap: (@MainActor @Sendable () -> Void)? = nil
   ) {
     self.samples = samples
     self.progress = progress
@@ -73,6 +76,7 @@ public struct AudioWaveformView: View {
     self.motion = motion
     self.amplitudeScale = amplitudeScale
     self.onSeek = onSeek
+    self.onTap = onTap
   }
 
   public init(
@@ -89,7 +93,8 @@ public struct AudioWaveformView: View {
     shortSamplesMode: ShortSamplesMode = .stretch,
     motion: Motion = .fixed,
     amplitudeScale: AmplitudeScale = .relative,
-    onSeek: (@MainActor @Sendable (Double) -> Void)? = nil
+    onSeek: (@MainActor @Sendable (Double) -> Void)? = nil,
+    onTap: (@MainActor @Sendable () -> Void)? = nil
   ) {
     self.init(
       samples: Array(waveform),
@@ -105,7 +110,8 @@ public struct AudioWaveformView: View {
       shortSamplesMode: shortSamplesMode,
       motion: motion,
       amplitudeScale: amplitudeScale,
-      onSeek: onSeek
+      onSeek: onSeek,
+      onTap: onTap
     )
   }
 
@@ -152,7 +158,8 @@ public struct AudioWaveformView: View {
         .modifier(WaveformSeekModifier(
           contentOffset: contentOffset,
           contentWidth: contentWidth,
-          onSeek: onSeek
+          onSeek: onSeek,
+          onTap: onTap
         ))
 
       case .recordingReel:
@@ -433,13 +440,18 @@ private struct WaveformSeekModifier: ViewModifier {
   let contentOffset: CGFloat
   let contentWidth: CGFloat
   let onSeek: (@MainActor @Sendable (Double) -> Void)?
+  let onTap: (@MainActor @Sendable () -> Void)?
 
   func body(content: Content) -> some View {
     if let onSeek {
       content
         .contentShape(Rectangle())
         .gesture(
-          DragGesture(minimumDistance: 0)
+          TapGesture().onEnded { onTap?() },
+          including: onTap == nil ? .none : .all
+        )
+        .gesture(
+          DragGesture(minimumDistance: onTap == nil ? 0 : Self.tapSlop)
             .onChanged { value in
               guard contentWidth > 0 else { return }
               let x = value.location.x - contentOffset
@@ -450,6 +462,8 @@ private struct WaveformSeekModifier: ViewModifier {
       content
     }
   }
+
+  private static let tapSlop: CGFloat = 8
 }
 
 private extension AudioWaveformView.HorizontalBarsAlignment {

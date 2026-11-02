@@ -224,7 +224,8 @@ public struct VoiceMessageBubble: View {
         barSpacing: 2,
         minBarHeight: 2.5,
         verticalAlignment: .center,
-        onSeek: handleSeek
+        onSeek: handleSeek,
+        onTap: waveformTapAction
       )
       .frame(height: 22)
 
@@ -252,7 +253,8 @@ public struct VoiceMessageBubble: View {
           barSpacing: 2,
           minBarHeight: 2,
           verticalAlignment: .bottom,
-          onSeek: handleSeek
+          onSeek: handleSeek,
+          onTap: waveformTapAction
         )
         .frame(height: waveformHeight)
         .padding(.top, waveformTopPadding)
@@ -362,6 +364,21 @@ public struct VoiceMessageBubble: View {
     .help(buttonActionLabel)
     .accessibilityLabel(buttonActionLabel)
     .accessibilityAddTraits(.isButton)
+  }
+
+  /// On iOS, tapping the waveform plays or pauses; on macOS, clicking it seeks.
+  private var waveformTapAction: (@MainActor @Sendable () -> Void)? {
+    #if os(iOS)
+    return handleWaveformTap
+    #else
+    return nil
+    #endif
+  }
+
+  private func handleWaveformTap() {
+    // Only the glyph, which shows an xmark while downloading, cancels a download.
+    guard !isDownloading else { return }
+    handlePrimaryAction()
   }
 
   private func handleSeek(_ progress: Double) {
