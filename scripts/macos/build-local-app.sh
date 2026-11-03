@@ -46,8 +46,10 @@ Optional env:
   SPARKLE_PUBLIC_KEY              Embedded into SUPublicEDKey when set
   MACOS_SPARKLE_PUBLIC_KEY        Alias for SPARKLE_PUBLIC_KEY
   MACOS_CERTIFICATE_NAME          Signing identity used by sign-direct.sh
+                                  (default: first Developer ID or Apple Development identity)
   MACOS_PROVISIONING_PROFILE_BASE64 / _PATH
-                                  Required for APS/keychain entitlements when signing
+                                  Profile for APS/keychain entitlements when signing
+                                  (default: newest installed profile for the app's bundle ID)
   APPCAST_URL                     Override Sparkle feed URL
   SPARKLE_SCHEDULED_CHECK_INTERVAL Override Sparkle check interval in seconds
 EOF
@@ -258,13 +260,109 @@ if [[ ! -d "${FRAMEWORKS_DIR}/Sparkle.framework" ]]; then
 fi
 macos_thin_bundle_to_arch "${APP_PATH}" "${MACOS_RELEASE_ARCH}"
 
+ENTITLEMENTS_PATH="${ROOT_DIR}/apple/InlineMac/InlineMacDirect.entitlements"
+
+# Prefers Developer ID, then falls back to the Apple Development identity Xcode installs.
+resolve_local_certificate() {
+  local identities
+  identities=$(security find-identity -v -p codesigning 2>/dev/null || true)
+  local kind
+  for kind in "Developer ID Application" "Apple Development"; do
+    local hash
+    hash=$(awk -v kind="\"${kind}:" 'index($0, kind) { print $2; exit }' <<<"${identities}")
+    if [[ -n "${hash}" ]]; then
+      printf '%s\n' "${hash}"
+      return 0
+    fi
+  done
+}
+
+# Finds the newest unexpired installed profile (e.g. Xcode's team profile) for the app's bundle ID.
+resolve_local_profile() {
+  local bundle_id
+  bundle_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "${PLIST_PATH}")
+  python3 - "${bundle_id}" \
+    "${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles" \
+    "${HOME}/Library/MobileDevice/Provisioning Profiles" <<'PY'
+import datetime, glob, os, plistlib, subprocess, sys
+
+bundle_id, *dirs = sys.argv[1:]
+now = datetime.datetime.now(datetime.timezone.utc)
+best = None
+for directory in dirs:
+    for path in glob.glob(os.path.join(directory, "*.provisionprofile")):
+        decoded = subprocess.run(["security", "cms", "-D", "-i", path], capture_output=True)
+        if decoded.returncode != 0:
+            continue
+        profile = plistlib.loads(decoded.stdout)
+        app_id = profile.get("Entitlements", {}).get("com.apple.application-identifier", "")
+        expires = profile.get("ExpirationDate")
+        if expires is None or not app_id.endswith("." + bundle_id):
+            continue
+        expires = expires.replace(tzinfo=datetime.timezone.utc)
+        if expires > now and (best is None or expires > best[0]):
+            best = (expires, path)
+if best:
+    print(best[1])
+PY
+}
+
+# Matches the entitlements to the profile like Xcode does: adds the app/team identifiers and
+# drops developer entitlements the profile doesn't grant, which would otherwise block launch.
+prepare_local_entitlements() {
+  local profile_path="$1"
+  local output_path="${OUTPUT_DIR}/InlineMacDirectLocal.entitlements"
+  python3 - "${ENTITLEMENTS_PATH}" "${profile_path}" "${output_path}" <<'PY'
+import plistlib, subprocess, sys
+
+entitlements_path, profile_path, output_path = sys.argv[1:]
+with open(entitlements_path, "rb") as f:
+    entitlements = plistlib.load(f)
+decoded = subprocess.run(["security", "cms", "-D", "-i", profile_path], capture_output=True, check=True)
+granted = plistlib.loads(decoded.stdout)["Entitlements"]
+
+for key in ("com.apple.application-identifier", "com.apple.developer.team-identifier"):
+    entitlements[key] = granted[key]
+for key in [k for k in entitlements if k.startswith("com.apple.developer.") and k not in granted]:
+    del entitlements[key]
+    print(f"Profile does not grant {key}; signing without it.", file=sys.stderr)
+
+with open(output_path, "wb") as f:
+    plistlib.dump(entitlements, f)
+PY
+  printf '%s\n' "${output_path}"
+}
+
 sign_local_app() {
-  MACOS_CERTIFICATE_NAME="${MACOS_CERTIFICATE_NAME:-}" \
+  local certificate="${MACOS_CERTIFICATE_NAME:-}"
+  if [[ -z "${certificate}" ]]; then
+    certificate=$(resolve_local_certificate)
+    if [[ -z "${certificate}" ]]; then
+      echo "No codesigning identity found; set MACOS_CERTIFICATE_NAME or use --skip-sign." >&2
+      exit 1
+    fi
+    echo "Using codesigning identity ${certificate}." >&2
+  fi
+
+  local profile_path="${MACOS_PROVISIONING_PROFILE_PATH:-}"
+  local entitlements_path="${ENTITLEMENTS_PATH}"
+  if [[ -z "${profile_path}" && -z "${MACOS_PROVISIONING_PROFILE_BASE64:-}" ]]; then
+    profile_path=$(resolve_local_profile)
+    if [[ -z "${profile_path}" ]]; then
+      echo "No installed provisioning profile matches this app; set MACOS_PROVISIONING_PROFILE_PATH" >&2
+      echo "or build the DevBuild configuration once in Xcode so it downloads one." >&2
+      exit 1
+    fi
+    echo "Using provisioning profile ${profile_path}." >&2
+    entitlements_path=$(prepare_local_entitlements "${profile_path}")
+  fi
+
+  MACOS_CERTIFICATE_NAME="${certificate}" \
   MACOS_PROVISIONING_PROFILE_BASE64="${MACOS_PROVISIONING_PROFILE_BASE64:-}" \
-  MACOS_PROVISIONING_PROFILE_PATH="${MACOS_PROVISIONING_PROFILE_PATH:-}" \
+  MACOS_PROVISIONING_PROFILE_PATH="${profile_path}" \
     bash "${ROOT_DIR}/scripts/macos/sign-direct.sh" \
       --app-path "${APP_PATH}" \
-      --entitlements-path "${ROOT_DIR}/apple/InlineMac/InlineMacDirect.entitlements" \
+      --entitlements-path "${entitlements_path}" \
       --output-dir "${OUTPUT_DIR}" \
       --skip-timestamp
 }
