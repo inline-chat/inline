@@ -364,26 +364,43 @@ pub(super) fn load_account_files(
         .ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidData, "bridge config has no version")
         })?;
-    match version as u32 {
+    let (mut account, secrets) = match version as u32 {
         ACCOUNT_CONFIG_VERSION => {
             let account: AccountBridgeConfig = serde_json::from_value(value)?;
             let secrets: AccountBridgeSecrets = read_required_json(&paths.secrets)?;
             validate_account_location(paths, &account)?;
-            Ok((account, secrets))
+            (account, secrets)
         }
         LEGACY_CONFIG_VERSION => {
             let legacy: DevBridgeConfig = serde_json::from_value(value)?;
             let legacy_secrets: DevBridgeSecrets = read_required_json(&paths.secrets)?;
             let legacy_root = fs::canonicalize(&paths.root).unwrap_or_else(|_| paths.root.clone());
-            account_from_legacy(legacy, legacy_secrets, &legacy_root)
+            account_from_legacy(legacy, legacy_secrets, &legacy_root)?
         }
-        version => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "bridge config version {version} is not supported (maximum {ACCOUNT_CONFIG_VERSION})"
-            ),
-        )
-        .into()),
+        version => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "bridge config version {version} is not supported (maximum {ACCOUNT_CONFIG_VERSION})"
+                ),
+            )
+            .into());
+        }
+    };
+    follow_moved_codex_executables(&mut account);
+    Ok((account, secrets))
+}
+
+/// ChatGPT updates can move the bundled Codex out from under a saved path, and
+/// nothing reruns setup for the owner, so follow the move on every load.
+fn follow_moved_codex_executables(account: &mut AccountBridgeConfig) {
+    for provider in &mut account.providers {
+        if provider.provider_id == "codex"
+            && let Some(executable) =
+                inline_agent_driver_codex::moved_chatgpt_codex_executable(&provider.executable)
+        {
+            provider.executable = executable;
+        }
     }
 }
 

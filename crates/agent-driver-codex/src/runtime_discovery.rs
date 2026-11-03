@@ -336,6 +336,21 @@ pub fn chatgpt_codex_executables_in(applications_directory: &Path) -> Vec<PathBu
         .collect()
 }
 
+/// The current bundle's executable for a saved path to the layout older ChatGPT
+/// releases shipped, once an app update has removed it. Stays inside the same
+/// application, and launch still verifies the signature of the path returned.
+pub fn moved_chatgpt_codex_executable(configured: &Path) -> Option<PathBuf> {
+    let [current, legacy] = CHATGPT_CODEX_RELATIVE_PATHS;
+    if !configured.ends_with(legacy) || configured.exists() {
+        return None;
+    }
+    let applications_directory = configured
+        .ancestors()
+        .nth(Path::new(legacy).iter().count())?;
+    let executable = applications_directory.join(current);
+    executable.is_file().then_some(executable)
+}
+
 fn resolve_executable_candidate(executable: &Path) -> Option<PathBuf> {
     if executable.components().count() == 1 {
         let search_path = std::env::var_os("PATH")?;
@@ -618,6 +633,29 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
             .expect("executable permissions");
         path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saved_legacy_path_moves_to_the_current_bundle_in_the_same_application() {
+        let [current, legacy] = CHATGPT_CODEX_RELATIVE_PATHS;
+        let root = tempfile::tempdir().expect("application fixture");
+        let saved = root.path().join(legacy);
+
+        // Nothing to move to yet.
+        assert_eq!(moved_chatgpt_codex_executable(&saved), None);
+
+        let moved = write_fake_bundled_file(root.path(), current);
+        assert_eq!(moved_chatgpt_codex_executable(&saved), Some(moved.clone()));
+        assert!(is_chatgpt_bundled_codex_path(&moved));
+
+        // A saved path that still exists is left alone, as is any other install.
+        write_fake_bundled_file(root.path(), legacy);
+        assert_eq!(moved_chatgpt_codex_executable(&saved), None);
+        assert_eq!(
+            moved_chatgpt_codex_executable(&root.path().join("homebrew/bin/codex")),
+            None
+        );
     }
 
     #[cfg(unix)]

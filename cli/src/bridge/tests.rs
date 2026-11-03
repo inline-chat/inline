@@ -681,6 +681,24 @@ fn account_fixture_at(root: &Path) -> (BridgePaths, AccountBridgeConfig, Account
 }
 
 #[test]
+fn loading_follows_chatgpt_moving_its_bundled_codex() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let root = directory.path().join("accounts").join("42");
+    let (paths, mut account, secrets) = account_fixture_at(&root);
+    ensure_private_dir(&paths.root).expect("account directory");
+    let resources = directory.path().join("ChatGPT.app/Contents/Resources");
+    let moved = resources.join("codex-cli/CodexCLI.app/Contents/MacOS/codex");
+    fs::create_dir_all(moved.parent().expect("bundle directory")).expect("bundle directories");
+    fs::write(&moved, "").expect("bundled codex");
+    account.providers[0].executable = resources.join("codex");
+    persist_setup_account_files(&paths, &account, &secrets, false).expect("setup");
+
+    let (loaded, _) = load_account_files(&paths).expect("load account");
+
+    assert_eq!(loaded.providers[0].executable, moved);
+}
+
+#[test]
 fn interrupted_first_setup_ignores_orphaned_secrets_and_retries_cleanly() {
     let directory = tempfile::tempdir().expect("tempdir");
     let root = directory.path().join("accounts").join("42");
