@@ -343,23 +343,10 @@ final class NewPhotoView: UIView {
     let width = bounds.width
     let height = bounds.height
 
-    // Determine which corners to round based on message properties
-    let hasReactionsInBubble = !fullMessage.reactions.isEmpty && hasText
-    let hasTopHeader = hasReply || hasForwardHeader
-
-    let roundingCorners: UIRectCorner = if !hasText, !hasTopHeader, !hasReactionsInBubble {
-      // No text and no header - round all corners
-      .allCorners
-    } else if !hasTopHeader, hasReactionsInBubble || hasText {
-      // Text (or reactions) without a header - round top corners only
-      [.topLeft, .topRight]
-    } else if hasTopHeader, !hasText {
-      // Has header but no text - round bottom corners
-      [.bottomLeft, .bottomRight]
-    } else {
-      // Default case - don't round any corners
-      []
-    }
+    // Edges meeting a header above, or a caption or reactions below, stay square.
+    var roundingCorners: UIRectCorner = []
+    if !hasReply, !hasForwardHeader { roundingCorners.formUnion([.topLeft, .topRight]) }
+    if !hasText, fullMessage.reactions.isEmpty { roundingCorners.formUnion([.bottomLeft, .bottomRight]) }
 
     let bounds = CGRect(x: 0, y: 0, width: width, height: height)
     let bezierPath = UIBezierPath(

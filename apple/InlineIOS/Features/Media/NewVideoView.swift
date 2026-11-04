@@ -171,10 +171,6 @@ final class NewVideoView: UIView {
     fullMessage.message.repliedToMessageId != nil
   }
 
-  private var hasReactionsInBubble: Bool {
-    !fullMessage.reactions.isEmpty && hasText
-  }
-
   private struct ImageDimensions {
     let width: CGFloat
     let height: CGFloat
@@ -502,17 +498,10 @@ final class NewVideoView: UIView {
       return
     }
 
-    let roundingCorners: UIRectCorner = if !hasText, !hasReply, !hasReactionsInBubble {
-      .allCorners
-    } else if hasReactionsInBubble {
-      [.topLeft, .topRight]
-    } else if hasText, !hasReply {
-      [.topLeft, .topRight]
-    } else if hasReply, !hasText {
-      [.bottomLeft, .bottomRight]
-    } else {
-      []
-    }
+    // Edges meeting a header above, or a caption or reactions below, stay square.
+    var roundingCorners: UIRectCorner = []
+    if !hasReply { roundingCorners.formUnion([.topLeft, .topRight]) }
+    if !hasText, fullMessage.reactions.isEmpty { roundingCorners.formUnion([.bottomLeft, .bottomRight]) }
 
     let viewBounds = CGRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
     let bezierPath = UIBezierPath(
