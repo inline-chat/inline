@@ -1263,7 +1263,7 @@ struct ParticipantAvatarView: UIViewRepresentable {
         avatarView.layer.cornerRadius,
         min(avatarView.bounds.width, avatarView.bounds.height) / 2
       )
-      let imageViewer = ImageViewerController(
+      let imageViewer = MediaGalleryViewController(
         imageURL: resolved.url,
         sourceView: avatarView,
         sourceImage: sourceImage,

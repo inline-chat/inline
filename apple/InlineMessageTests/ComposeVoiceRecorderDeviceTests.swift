@@ -137,7 +137,7 @@ struct ComposeVoiceRecorderDeviceTests {
           let malformedVideo = FileManager.default.temporaryDirectory
             .appendingPathComponent("inline-video-failure-probe-\(UUID().uuidString).mp4")
           try Data("malformed local video fixture".utf8).write(to: malformedVideo)
-          let viewer = ImageViewerController(videoURL: malformedVideo, sourceView: source)
+          let viewer = MediaGalleryViewController(videoURL: malformedVideo, sourceView: source)
           defer {
             presenter.dismiss(animated: false)
             window.isHidden = true
@@ -147,7 +147,7 @@ struct ComposeVoiceRecorderDeviceTests {
           presenter.present(viewer, animated: false)
           var nativePlayer: AVPlayer?
           for _ in 0 ..< 80 {
-            nativePlayer = viewer.children.compactMap { $0 as? AVPlayerViewController }.first?.player
+            nativePlayer = viewer.currentVideoPlayer
             if nativePlayer?.currentItem?.status == .failed,
                nativePlayer?.timeControlStatus == .paused, InlineAudioSession.shared.current == nil { break }
             try await Task.sleep(for: .milliseconds(50))

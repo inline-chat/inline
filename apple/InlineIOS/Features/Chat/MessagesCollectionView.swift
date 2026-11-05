@@ -971,7 +971,28 @@ final class MessagesCollectionView: UICollectionView {
       return nil
     }
 
-    return cell.messageView?.newPhotoView.imageView
+    return Self.galleryMediaView(in: cell.contentView)
+  }
+
+  /// The photo or video thumbnail inside a message cell, for gallery transitions.
+  private static func galleryMediaView(in view: UIView) -> UIView? {
+    for subview in view.subviews where !subview.isHidden {
+      if let photoView = subview as? NewPhotoView {
+        return photoView.imageView
+      }
+      if let videoView = subview as? NewVideoView {
+        return videoView.gallerySourceView
+      }
+      if let found = galleryMediaView(in: subview) {
+        return found
+      }
+    }
+    return nil
+  }
+
+  /// Opens the chat media gallery from a video bubble.
+  func presentMediaGallery(for message: FullMessage, sourceImage: UIImage?) -> Bool {
+    coordinator.presentMediaGallery(for: message, sourceImage: sourceImage)
   }
 
   private func safeScrollToTop(animated: Bool = true) {
@@ -4175,31 +4196,60 @@ private extension MessagesCollectionView {
       sourceImage: UIImage?,
       imageURL: URL
     ) {
-      guard message.message.isSticker != true else { return }
-      guard !isPresentingImageViewer else { return }
-      guard let collectionView = currentCollectionView as? MessagesCollectionView else { return }
-      guard let viewController = collectionView.findViewController() else { return }
+      let anchor = MediaGalleryItem(message: message.message, photo: message.photoInfo, video: message.videoInfo)
+        ?? MediaGalleryItem.photo(url: imageURL, id: message.message.messageId)
+      presentMediaGallery(anchor: anchor, sourceImage: sourceImage)
+    }
+
+    /// Opens the chat's media gallery at `message`. Returns false when it can't open now.
+    @discardableResult
+    func presentMediaGallery(for message: FullMessage, sourceImage: UIImage?) -> Bool {
+      guard let anchor = MediaGalleryItem(message: message.message, photo: message.photoInfo, video: message.videoInfo)
+      else { return false }
+      return presentMediaGallery(anchor: anchor, sourceImage: sourceImage)
+    }
+
+    /// Every photo and video in the chat, paged from cache and server, starting at `anchor`.
+    @discardableResult
+    private func presentMediaGallery(anchor: MediaGalleryItem, sourceImage: UIImage?) -> Bool {
+      guard anchor.message?.isSticker != true else { return false }
+      guard !isPresentingImageViewer else { return false }
+      guard let collectionView = currentCollectionView as? MessagesCollectionView else { return false }
+      guard let viewController = collectionView.findViewController() else { return false }
       if viewController.presentedViewController != nil ||
         viewController.isBeingPresented ||
         viewController.isBeingDismissed
       {
-        return
+        return false
       }
 
-      var items = buildImageItems()
-      let stableId = message.id
-      if !items.contains(where: { $0.id == stableId }) {
-        items.append(ImageViewerItem(id: stableId, url: imageURL))
+      let chatId = chatId
+      var actions = MediaGalleryViewController.Actions()
+      actions.showInChat = { [weak collectionView] item in
+        collectionView?.scrollToMessageWhenAvailable(item.id)
       }
-      let initialIndex = items.firstIndex(where: { $0.id == stableId }) ?? 0
+      actions.forward = { [weak self] item in
+        guard let self, let message = item.message,
+              let fullMessage = try? FullMessage.get(messageId: message.messageId, chatId: chatId)
+        else { return }
+        presentForwardSheet(fullMessage)
+      }
+      actions.delete = { item in
+        guard let message = item.message else { return }
+        _ = Transactions.shared.mutate(transaction: .deleteMessage(.init(
+          messageIds: [message.messageId],
+          peerId: message.peerId,
+          chatId: message.chatId
+        )))
+      }
 
-      let viewer = ImageViewerController(
-        imageItems: items,
-        initialIndex: initialIndex,
-        sourceView: sourceView,
+      let viewer = MediaGalleryViewController(
+        source: ChatMediaGallerySource(chatId: chatId, peer: peerId, anchor: anchor),
+        initialItemID: anchor.id,
         sourceImage: sourceImage,
-        sourceViewProvider: { [weak collectionView] id in
-          collectionView?.sourceViewForMessageStableId(id)
+        actions: actions,
+        sourceViewProvider: { [weak collectionView] item in
+          item.messageStableId.flatMap { collectionView?.sourceViewForMessageStableId($0) }
         }
       )
       viewer.onDismiss = { [weak self] in
@@ -4208,47 +4258,7 @@ private extension MessagesCollectionView {
 
       isPresentingImageViewer = true
       viewController.present(viewer, animated: false)
-    }
-
-    private func buildImageItems() -> [ImageViewerItem] {
-      let photoMessages = viewModel.sections
-        .flatMap(\.messages)
-        .filter { $0.photoInfo != nil && $0.message.isSticker != true }
-
-      let sortedMessages = photoMessages.sorted { left, right in
-        if left.message.date != right.message.date {
-          return left.message.date < right.message.date
-        }
-        return left.message.messageId < right.message.messageId
-      }
-
-      var items: [ImageViewerItem] = []
-      items.reserveCapacity(sortedMessages.count)
-
-      for message in sortedMessages {
-        guard let url = photoURL(for: message) else { continue }
-        items.append(ImageViewerItem(id: message.id, url: url))
-      }
-
-      return items
-    }
-
-    private func photoURL(for message: FullMessage) -> URL? {
-      guard let photoInfo = message.photoInfo,
-            let photoSize = photoInfo.bestPhotoSize()
-      else {
-        return nil
-      }
-
-      if let localPath = photoSize.localPath {
-        return FileCache.getUrl(for: .photos, localPath: localPath)
-      }
-
-      if let cdnUrl = photoSize.cdnUrl {
-        return URL(string: cdnUrl)
-      }
-
-      return nil
+      return true
     }
 
     private var sizeCache: [MessageListItem: CGSize] = [:]

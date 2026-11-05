@@ -454,7 +454,7 @@ final class NewPhotoView: UIView {
       return
     }
 
-    let imageViewer = ImageViewerController(
+    let imageViewer = MediaGalleryViewController(
       imageURL: url,
       sourceView: imageView,
       sourceImage: imageView.imageView.image

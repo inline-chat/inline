@@ -2313,14 +2313,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     switch mediaItem {
     case .photo:
-      let viewer = ImageViewerController(
+      let viewer = MediaGalleryViewController(
         imageURL: fileURL,
         sourceView: sourceView,
         sourceCornerRadius: 16
       )
       presenter.present(viewer, animated: false)
     case .video:
-      let viewer = ImageViewerController(
+      let viewer = MediaGalleryViewController(
         videoURL: fileURL,
         sourceView: sourceView,
         sourceCornerRadius: 16

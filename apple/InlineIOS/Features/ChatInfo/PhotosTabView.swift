@@ -121,29 +121,32 @@ struct MediaTabView: View {
     }
   }
 
+  /// Opens the chat's media gallery at this item, paging through all of the chat's media.
   private func presentMedia(_ mediaMessage: MediaMessage, from sourceView: UIView) {
-    switch mediaMessage.kind {
-      case let .photo(photoInfo):
-        guard let url = photoURL(for: photoInfo) else { return }
-        let imageViewer = ImageViewerController(
-          imageURL: url,
-          sourceView: sourceView,
-          sourceImage: (sourceView as? LazyImageView)?.imageView.image,
-          showInChatAction: { onShowInChat(mediaMessage.message) }
-        )
-        topViewController()?.present(imageViewer, animated: false)
-      case let .video(videoInfo):
-        guard let url = videoURL(for: videoInfo) else { return }
-        let imageViewer = ImageViewerController(
-          videoURL: url,
-          sourceView: sourceView,
-          sourceImage: (sourceView as? LazyImageView)?.imageView.image,
-          showInChatAction: { onShowInChat(mediaMessage.message) }
-        )
-        topViewController()?.present(imageViewer, animated: false)
-      case .none:
-        return
+    guard let anchor = MediaGalleryItem(
+      message: mediaMessage.message,
+      photo: mediaMessage.photo,
+      video: mediaMessage.video
+    ) else { return }
+
+    var actions = MediaGalleryViewController.Actions()
+    actions.showInChat = { item in
+      if let message = item.message { onShowInChat(message) }
     }
+    let viewer = MediaGalleryViewController(
+      source: ChatMediaGallerySource(
+        chatId: mediaMessage.message.chatId,
+        peer: mediaMessage.message.peerId,
+        anchor: anchor
+      ),
+      initialItemID: anchor.id,
+      sourceImage: (sourceView as? LazyImageView)?.imageView.image,
+      sourceCornerRadius: 8,
+      actions: actions,
+      // Grid cells aren't addressable by item, so only the opening item flies back.
+      sourceViewProvider: { [weak sourceView] item in item.id == anchor.id ? sourceView : nil }
+    )
+    topViewController()?.present(viewer, animated: false)
   }
 
   private func thumbnailURL(for mediaMessage: MediaMessage) -> URL? {

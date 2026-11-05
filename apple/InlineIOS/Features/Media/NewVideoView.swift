@@ -758,7 +758,19 @@ final class NewVideoView: UIView {
 
   // MARK: - Playback
 
+  /// The thumbnail the media gallery opens from and closes into.
+  var gallerySourceView: UIView {
+    thumbnailView
+  }
+
   @objc private func handleTap() {
+    // In a chat, open the chat's media gallery, which streams the video while it plays.
+    if let messagesView = enclosingMessagesCollectionView(),
+       messagesView.presentMediaGallery(for: fullMessage, sourceImage: snapshotThumbnail())
+    {
+      return
+    }
+
     if let local = videoLocalUrl(), FileManager.default.fileExists(atPath: local.path) {
       presentViewer(url: local)
       return
@@ -775,7 +787,7 @@ final class NewVideoView: UIView {
       return
     }
 
-    let controller = ImageViewerController(
+    let controller = MediaGalleryViewController(
       videoURL: url,
       sourceView: thumbnailView,
       sourceImage: snapshotThumbnail()
@@ -793,6 +805,17 @@ final class NewVideoView: UIView {
 
     isPresentingViewer = true
     viewController.present(controller, animated: false)
+  }
+
+  private func enclosingMessagesCollectionView() -> MessagesCollectionView? {
+    var view = superview
+    while let current = view {
+      if let messagesView = current as? MessagesCollectionView {
+        return messagesView
+      }
+      view = current.superview
+    }
+    return nil
   }
 
   private func startDownloadIfNeeded() {
