@@ -239,20 +239,11 @@ struct InChatSearchResultsPanel: View {
                 InChatSearchResultRow(hit: hit, snippet: model.snippet(for: hit), query: model.query)
                   .padding(.horizontal, 8)
                   .frame(height: Self.rowHeight)
-                  .background {
-                    if hit.messageId == model.currentMessageId {
-                      // Neutral like the bar's buttons (the system accent is blue for most
-                      // people), strong enough to read on clear glass, with a hairline edge.
-                      RoundedRectangle(cornerRadius: Self.rowCornerRadius, style: .continuous)
-                        .fill(Color.primary.opacity(0.14))
-                        .overlay(
-                          RoundedRectangle(cornerRadius: Self.rowCornerRadius, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
-                        )
-                    }
-                  }
               }
-              .buttonStyle(.plain)
+              .buttonStyle(InChatSearchRowButtonStyle(
+                isSelected: hit.messageId == model.currentMessageId,
+                cornerRadius: Self.rowCornerRadius
+              ))
               .id(hit.messageId)
             }
             footer
@@ -314,13 +305,75 @@ private struct InChatSearchIcon: View {
 
 /// Neutral icon buttons: primary when enabled, gray when disabled, dimmed while pressed.
 private struct InChatSearchIconButtonStyle: ButtonStyle {
-  @Environment(\.isEnabled) private var isEnabled
-
   func makeBody(configuration: Configuration) -> some View {
+    InChatSearchIconButton(configuration: configuration)
+  }
+}
+
+/// A soft gray circle under the icon on hover, a bit darker while pressed; disabled
+/// buttons show none.
+private struct InChatSearchIconButton: View {
+  let configuration: ButtonStyleConfiguration
+  @Environment(\.isEnabled) private var isEnabled
+  @State private var isHovered = false
+
+  var body: some View {
     configuration.label
       .foregroundStyle(isEnabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
-      .opacity(configuration.isPressed ? 0.5 : 1)
-      .contentShape(Rectangle())
+      .background {
+        Circle()
+          .fill(Color.primary.opacity(fillOpacity))
+      }
+      .contentShape(Circle())
+      .onHover { isHovered = $0 }
+      .animation(.easeOut(duration: 0.12), value: isHovered)
+      .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+  }
+
+  private var fillOpacity: Double {
+    guard isEnabled else { return 0 }
+    if configuration.isPressed { return 0.16 }
+    return isHovered ? 0.08 : 0
+  }
+}
+
+/// A result row: the selected one is a clear gray with a hairline edge (neutral like the bar's
+/// buttons; the system accent is blue for most people), hover shows a lighter gray.
+private struct InChatSearchRowButtonStyle: ButtonStyle {
+  let isSelected: Bool
+  let cornerRadius: CGFloat
+
+  func makeBody(configuration: Configuration) -> some View {
+    InChatSearchRowButton(configuration: configuration, isSelected: isSelected, cornerRadius: cornerRadius)
+  }
+}
+
+private struct InChatSearchRowButton: View {
+  let configuration: ButtonStyleConfiguration
+  let isSelected: Bool
+  let cornerRadius: CGFloat
+  @State private var isHovered = false
+
+  var body: some View {
+    let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    configuration.label
+      .background {
+        shape
+          .fill(Color.primary.opacity(fillOpacity))
+          .overlay {
+            if isSelected {
+              shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+            }
+          }
+      }
+      .contentShape(shape)
+      .onHover { isHovered = $0 }
+      .animation(.easeOut(duration: 0.12), value: isHovered)
+  }
+
+  private var fillOpacity: Double {
+    if isSelected || configuration.isPressed { return 0.14 }
+    return isHovered ? 0.06 : 0
   }
 }
 
