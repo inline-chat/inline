@@ -289,6 +289,26 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  /// Behind a quoted line the list points at: a deeper shade of this bubble, so the text stays
+  /// clear and the mark reads as part of the bubble. Without a bubble, a faint shade of the text.
+  var quoteHighlightColor: CGColor {
+    var color = NSColor.labelColor.withAlphaComponent(0.1).cgColor
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      let bubble = bubbleBackgroundColor.usingColorSpace(.sRGB) ?? bubbleBackgroundColor
+      guard bubble.alphaComponent > 0 else {
+        color = NSColor.labelColor.withAlphaComponent(0.1).cgColor
+        return
+      }
+      let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+      // A near-black bubble can't get visibly darker; it gets a little lighter instead.
+      let shade = outgoing || !isDark
+        ? bubble.blended(withFraction: outgoing ? 0.22 : 0.12, of: .black)
+        : bubble.blended(withFraction: 0.14, of: .white)
+      color = (shade ?? bubble).cgColor
+    }
+    return color
+  }
+
   private func syncBubbleTail(animated: Bool = false) {
     let side = bubbleTailSide
     let mediaBleed = mediaBubbleBleed

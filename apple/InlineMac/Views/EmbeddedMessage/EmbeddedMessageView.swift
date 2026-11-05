@@ -194,7 +194,8 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
   }()
 
   /// Set when the message quotes part of the replied message; the header then shows the quote.
-  private var isQuote = false
+  private var quote: String?
+  private var isQuote: Bool { quote != nil }
 
   private lazy var quoteIconView: NSImageView = {
     let view = NSImageView()
@@ -357,7 +358,8 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
       case .forwardingInCompose:
         .unknown
     }
-    chatState.scrollTo(msgId: messageId, reason: reason)
+    // A quote reply highlights the quoted text rather than the whole message.
+    chatState.scrollTo(msgId: messageId, reason: reason, quote: kind == .replyInMessage ? quote : nil)
   }
 
   @objc private func handlePress(_ gesture: NSPressGestureRecognizer) {
@@ -575,9 +577,9 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
   }
 
   private func setQuote(_ quote: String?) {
-    let isQuote = quote != nil
-    guard isQuote != self.isQuote else { return }
-    self.isQuote = isQuote
+    let wasQuote = isQuote
+    self.quote = quote
+    guard isQuote != wasQuote else { return }
     quoteIconView.isHidden = !isQuote
     applyTextPadding()
   }

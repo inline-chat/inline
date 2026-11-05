@@ -21,6 +21,8 @@ enum ScrollToMessageReason: String, Sendable, Codable {
 struct ScrollToMessageRequest: Sendable, Equatable {
   let messageId: Int64
   let reason: ScrollToMessageReason
+  /// Text of the message to highlight instead of the whole row, for a quote reply.
+  var quote: String? = nil
 }
 
 class ChatState {
@@ -105,9 +107,9 @@ class ChatState {
   }
 
   /// Scroll to a message by ID and highlight
-  public func scrollTo(msgId: Int64, reason: ScrollToMessageReason = .unknown) {
+  public func scrollTo(msgId: Int64, reason: ScrollToMessageReason = .unknown, quote: String? = nil) {
     Task { @MainActor in
-      await events.send(.scrollToMsg(ScrollToMessageRequest(messageId: msgId, reason: reason)))
+      await events.send(.scrollToMsg(ScrollToMessageRequest(messageId: msgId, reason: reason, quote: quote)))
     }
   }
 

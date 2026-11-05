@@ -89,6 +89,18 @@ struct OptimisticRichTextTests {
     ).replyQuote == nil)
   }
 
+  @Test("A quote is found in the replied message even across blank lines")
+  func quoteRangeInSource() {
+    let source = "first line\n\nsecond line\nthird"
+    #expect(ReplyQuote.range(of: "second line", in: source) == NSRange(location: 12, length: 11))
+    // Quote lines are joined with one newline; the source has a blank line between them.
+    #expect(ReplyQuote.range(of: "first line\nsecond line", in: source) == NSRange(location: 0, length: 23))
+    // The last line is missing: the first line alone.
+    #expect(ReplyQuote.range(of: "first line\nnot there", in: source) == NSRange(location: 0, length: 10))
+    #expect(ReplyQuote.range(of: "missing", in: source) == nil)
+    #expect(ReplyQuote.range(of: "\n \n", in: source) == nil)
+  }
+
   @Test("A confirmed send from a server without quote blocks keeps the quote")
   func serverWithoutQuoteBlocks() throws {
     let text = "quoted\nreply"

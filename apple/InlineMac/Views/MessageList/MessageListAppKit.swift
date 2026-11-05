@@ -4094,7 +4094,7 @@ extension MessageListAppKit {
     if messages.contains(where: { $0.message.messageId == request.messageId }),
        chatRows.historyCoverage.isCertifiedMessage(request.messageId)
     {
-      scrollToMessage(request.messageId, shouldHighlight: true)
+      scrollToMessage(request.messageId, shouldHighlight: true, quote: request.quote)
       return
     }
 
@@ -4139,7 +4139,8 @@ extension MessageListAppKit {
         }
         scrollToMessage(
           displayedMessageID,
-          shouldHighlight: displayedMessageID == request.messageId
+          shouldHighlight: displayedMessageID == request.messageId,
+          quote: request.quote
         )
         // Landing on the newest row below the target is the ordinary latest
         // view, not a detour worth announcing.
@@ -4170,7 +4171,7 @@ extension MessageListAppKit {
     }
   }
 
-  private func scrollToMessage(_ msgId: Int64, shouldHighlight: Bool) {
+  private func scrollToMessage(_ msgId: Int64, shouldHighlight: Bool, quote: String? = nil) {
     let revision = targetScrollRevision
     guard let messageIndex = messages.firstIndex(where: { $0.message.messageId == msgId }) else {
       return
@@ -4187,7 +4188,20 @@ extension MessageListAppKit {
     let currentY = scrollView.contentView.bounds.origin.y
     let targetRect = tableView.rect(ofRow: row)
     let viewportHeight = scrollView.contentView.bounds.height
-    let targetY = max(0, targetRect.midY - (viewportHeight / 2))
+    var targetY = max(0, targetRect.midY - (viewportHeight / 2))
+
+    // A quote reply aims at the quoted line, which in a long message can be far from its
+    // middle. Already in view, it is highlighted where it is.
+    if shouldHighlight, let quote,
+       let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell,
+       let quoteRect = cell.quoteRect(quote, in: tableView)
+    {
+      if quoteViewport.contains(quoteRect) {
+        cell.highlight(quote: quote)
+        return
+      }
+      targetY = centeredScrollY(for: quoteRect)
+    }
 
     // Calculate distance to scroll
     let distance = abs(targetY - currentY)
@@ -4225,7 +4239,7 @@ extension MessageListAppKit {
           if shouldHighlight,
              let currentRow = chatRows.rowIndex(forMessageStableId: stableId)
           {
-            highlightMessage(at: currentRow)
+            highlightMessage(at: currentRow, quote: quote)
           }
         }
       }
@@ -4244,13 +4258,13 @@ extension MessageListAppKit {
         if shouldHighlight,
            let currentRow = chatRows.rowIndex(forMessageStableId: stableId)
         {
-          highlightMessage(at: currentRow)
+          highlightMessage(at: currentRow, quote: quote)
         }
       }
     }
   }
 
-  private func highlightMessage(at row: Int) {
+  private func highlightMessage(at row: Int, quote: String? = nil) {
     // Verify row is still valid (tableView state may have changed during animation)
     guard row >= 0, row < tableView.numberOfRows else {
       log.trace("Cannot highlight message at row \(row) - tableView has \(tableView.numberOfRows) rows")
@@ -4260,7 +4274,49 @@ extension MessageListAppKit {
     guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell else {
       return
     }
-    cell.highlight()
+    // A row that was off screen is centered as a whole; in a tall message the quoted line
+    // can still be out of view, so bring it in before highlighting it.
+    if let quote, let quoteRect = cell.quoteRect(quote, in: tableView), !quoteViewport.contains(quoteRect) {
+      let revision = targetScrollRevision
+      beginProgrammaticScroll()
+      NSAnimationContext.runAnimationGroup { [weak self] context in
+        guard let self else { return }
+        context.duration = 0.25
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        scrollView.contentView.animator().setBoundsOrigin(NSPoint(x: 0, y: centeredScrollY(for: quoteRect)))
+      } completionHandler: { [weak self] in
+        guard let self, !isDisposed, targetScrollRevision == revision else { return }
+        endProgrammaticScroll()
+        updateUnreadIfNeeded()
+        cell.highlight(quote: quote)
+      }
+      return
+    }
+    cell.highlight(quote: quote)
+  }
+
+  /// The part of the list not covered by the header and compose bar, in table coordinates.
+  private var quoteViewport: CGRect {
+    let bounds = scrollView.contentView.bounds
+    let insets = scrollView.contentInsets
+    return CGRect(
+      x: bounds.minX,
+      y: bounds.minY + insets.top,
+      width: bounds.width,
+      height: max(0, bounds.height - insets.top - insets.bottom)
+    )
+  }
+
+  /// Scroll position that centers `rect` in the uncovered part of the list.
+  private func centeredScrollY(for rect: CGRect) -> CGFloat {
+    let bounds = scrollView.contentView.bounds
+    let insets = scrollView.contentInsets
+    let visibleHeight = bounds.height - insets.top - insets.bottom
+    let proposed = NSRect(
+      origin: NSPoint(x: bounds.minX, y: rect.midY - insets.top - visibleHeight / 2),
+      size: bounds.size
+    )
+    return scrollView.contentView.constrainBoundsRect(proposed).origin.y
   }
 }
 

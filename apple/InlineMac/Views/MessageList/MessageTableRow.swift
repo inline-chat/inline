@@ -331,7 +331,14 @@ class MessageTableCell: NSView {
     messageView?.setScrollState(state)
   }
 
-  func highlight() {
+  /// Flashes the row, or with `quote`, tints the quoted text when the message shows it.
+  func highlight(quote: String? = nil) {
+    if let quote, let messageView {
+      // A shade of the message's own bubble; minimal rows have none and get a faint gray.
+      let color = (messageView as? MessageViewAppKit)?.quoteHighlightColor
+        ?? NSColor.labelColor.withAlphaComponent(0.1).cgColor
+      if messageView.highlightQuote(quote, color: color) { return }
+    }
     let currentMsgId = currentContent?.message.message.messageId
 
     // Create animation
