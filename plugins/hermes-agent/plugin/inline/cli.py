@@ -43,6 +43,24 @@ def _open_bot_api_probe(request: urllib.request.Request):
     return urllib.request.build_opener(_RejectRedirects()).open(request, timeout=30)
 
 
+def _setup_ui():
+    """Wizard prompts and output through the helpers Hermes documents for ``setup_fn``:
+    prompts from ``hermes_cli.setup`` and output from ``hermes_cli.cli_output``."""
+    from types import SimpleNamespace
+
+    from hermes_cli import cli_output
+    from hermes_cli.setup import prompt, prompt_yes_no
+
+    return SimpleNamespace(
+        print_header=cli_output.print_header,
+        print_info=cli_output.print_info,
+        print_success=cli_output.print_success,
+        print_warning=cli_output.print_warning,
+        prompt=prompt,
+        prompt_yes_no=prompt_yes_no,
+    )
+
+
 def gateway_setup() -> None:
     """Interactively create or connect an Inline bot.
 
@@ -50,8 +68,9 @@ def gateway_setup() -> None:
     persistence inside Hermes' own config helper so profiles and file
     permissions behave exactly like the built-in Telegram setup.
     """
-    from hermes_cli import gateway as hermes_gateway
-    from hermes_cli import setup as hermes_setup
+    from hermes_cli import config as hermes_gateway
+
+    hermes_setup = _setup_ui()
 
     hermes_setup.print_header("Inline")
     existing = (
@@ -403,7 +422,7 @@ def _machine_setup(args) -> int:
     token = token.strip()
     if not token:
         raise SystemExit("Inline bot token from stdin is empty")
-    from hermes_cli import gateway as hermes_gateway
+    from hermes_cli import config as hermes_gateway
 
     hermes_gateway.save_env_value("INLINE_TOKEN", token)
     allowed = _apply_access(
@@ -431,7 +450,7 @@ def _machine_setup(args) -> int:
 
 
 def _status(args) -> int:
-    from hermes_cli import gateway as hermes_gateway
+    from hermes_cli import config as hermes_gateway
 
     raw_config = _read_inline_config(hermes_gateway)
     token = (

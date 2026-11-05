@@ -42,11 +42,13 @@ slash_confirm = types.ModuleType("tools.slash_confirm")
 clarify_gateway = types.ModuleType("tools.clarify_gateway")
 skills_tool = types.ModuleType("tools.skills_tool")
 hermes_cli = types.ModuleType("hermes_cli")
-hermes_cli.__version__ = "0.18.2"
+import importlib.metadata as importlib_metadata
+real_distribution_version = importlib_metadata.version
+importlib_metadata.version = lambda name: "0.18.2" if name == "hermes-agent" else real_distribution_version(name)
 commands = types.ModuleType("hermes_cli.commands_platforms")
 hermes_plugins = types.ModuleType("hermes_cli.plugins")
 model_cost_guard = types.ModuleType("hermes_cli.model_cost_guard")
-gateway_cli = types.ModuleType("hermes_cli.gateway")
+gateway_cli = types.ModuleType("hermes_cli.config")
 setup_cli = types.ModuleType("hermes_cli.setup")
 hermes_constants = types.ModuleType("hermes_constants")
 
@@ -204,12 +206,12 @@ hermes_plugins.get_plugin_commands = lambda: {
     "inline-sync": {},
     "inline-version": {},
 }
-skills_tool._find_all_skills = lambda skip_disabled=False: [
+skills_tool.find_all_skills = lambda skip_disabled=False: [
     {"name": "research", "description": "Research with sources", "category": "knowledge"},
     {"name": "data-analysis", "description": "Analyze data", "category": "analysis"},
     {"name": "😀" * 129, "description": "Too long in UTF-16", "category": "unicode"},
 ]
-skills_tool._sort_skills = lambda skills: sorted(skills, key=lambda skill: (skill.get("category") or "", skill["name"]))
+skills_tool.sort_skills = lambda skills: sorted(skills, key=lambda skill: (skill.get("category") or "", skill["name"]))
 
 class HttpxResponse:
     def __init__(self, status_code, text):
@@ -292,8 +294,9 @@ sys.modules["hermes_cli"] = hermes_cli
 sys.modules["hermes_cli.commands_platforms"] = commands
 sys.modules["hermes_cli.plugins"] = hermes_plugins
 sys.modules["hermes_cli.model_cost_guard"] = model_cost_guard
-sys.modules["hermes_cli.gateway"] = gateway_cli
+sys.modules["hermes_cli.config"] = gateway_cli
 sys.modules["hermes_cli.setup"] = setup_cli
+sys.modules["hermes_cli.cli_output"] = setup_cli
 sys.modules["hermes_constants"] = hermes_constants
 gateway.display_config = display_config
 tools.approval = approval
@@ -303,8 +306,9 @@ tools.skills_tool = skills_tool
 hermes_cli.commands = commands
 hermes_cli.plugins = hermes_plugins
 hermes_cli.model_cost_guard = model_cost_guard
-hermes_cli.gateway = gateway_cli
+hermes_cli.config = gateway_cli
 hermes_cli.setup = setup_cli
+hermes_cli.cli_output = setup_cli
 test_settings_dir = Path(tempfile.mkdtemp(prefix="inline-hermes-settings-"))
 os.environ["INLINE_SETTINGS_PATH"] = str(test_settings_dir / "adapter-settings.json")
 sys.path.insert(0, "plugin")
@@ -430,16 +434,27 @@ assert _inline_skill_catalog() == [
     {"key": "data-analysis", "name": "data-analysis", "description": "Analyze data", "sort_order": 0},
     {"key": "research", "name": "research", "description": "Research with sources", "sort_order": 1},
 ]
-# Hermes 0.22.5+ exposes only the public names; the catalog must follow them.
-_private_skill_api = (skills_tool._find_all_skills, skills_tool._sort_skills)
-skills_tool.find_all_skills = lambda skip_disabled=False: [{"name": "public-api", "description": "Current Hermes", "category": "x"}]
-skills_tool.sort_skills = lambda skills: skills
-del skills_tool._find_all_skills, skills_tool._sort_skills
-assert _inline_skill_catalog() == [
-    {"key": "public-api", "name": "public-api", "description": "Current Hermes", "sort_order": 0},
-]
-del skills_tool.find_all_skills, skills_tool.sort_skills
-skills_tool._find_all_skills, skills_tool._sort_skills = _private_skill_api
+# Hosts older than Hermes 0.22.5 only expose the private skill catalog names.
+public_find_all_skills = skills_tool.__dict__.pop("find_all_skills")
+public_sort_skills = skills_tool.__dict__.pop("sort_skills")
+skills_tool._find_all_skills = public_find_all_skills
+skills_tool._sort_skills = public_sort_skills
+try:
+    assert [skill["key"] for skill in _inline_skill_catalog()] == ["data-analysis", "research"]
+finally:
+    del skills_tool._find_all_skills, skills_tool._sort_skills
+    skills_tool.find_all_skills = public_find_all_skills
+    skills_tool.sort_skills = public_sort_skills
+# A host without the private gateway menu still publishes Inline's own commands.
+public_menu_commands = commands.__dict__.pop("telegram_menu_commands")
+try:
+    local_only, local_hidden = _inline_menu_commands(100)
+    assert [entry["command"] for entry in local_only] == ["threads", "follow", "unfollow", "inline_sync", "inline_version"]
+    assert local_hidden == 0
+    assert "hermes_cli.commands_platforms.telegram_menu_commands" in inline_adapter_module._UNAVAILABLE_HERMES_SEAMS
+finally:
+    commands.telegram_menu_commands = public_menu_commands
+    inline_adapter_module._UNAVAILABLE_HERMES_SEAMS.clear()
 assert all("/" not in name and "-" not in name for name in menu_names)
 assert _normalize_inline_plugin_command_text("/inline_update") == "/inline_update"
 assert _normalize_inline_plugin_command_text("/inline_update now") == "/inline_update now"
@@ -562,6 +577,23 @@ assert inline_display["tool_progress"] == "off"
 assert inline_display["cleanup_progress"] is True
 assert inline_display["streaming"] is False
 assert inline_display["interim_assistant_messages"] is False
+assert "display_overrides" not in ctx.platform
+
+saved_platform_fields = PlatformEntry.__dataclass_fields__
+PlatformEntry.__dataclass_fields__ = {**saved_platform_fields, "display_tier": object(), "display_overrides": object()}
+display_config._PLATFORM_DEFAULTS.pop("inline", None)
+try:
+    display_ctx = RegistryContext()
+    register(display_ctx)
+    assert "inline" not in display_config._PLATFORM_DEFAULTS
+    assert display_ctx.platform["display_tier"] == "low"
+    assert display_ctx.platform["display_overrides"]["tool_progress"] == "off"
+    assert display_ctx.platform["display_overrides"]["cleanup_progress"] is True
+    assert display_ctx.platform["display_overrides"]["streaming"] is False
+    assert display_ctx.platform["display_overrides"]["interim_assistant_messages"] is False
+finally:
+    PlatformEntry.__dataclass_fields__ = saved_platform_fields
+    _install_inline_display_defaults()
 assert ctx.platform["name"] == "inline"
 assert ctx.platform["emoji"] == chr(0x1F4AC)
 assert ctx.platform["label"] == "Inline"

@@ -206,11 +206,42 @@ def _truthy(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _install_inline_display_defaults() -> None:
-    """Register Slack-like display defaults for Inline when Hermes exposes them.
+_UNAVAILABLE_HERMES_SEAMS: set[str] = set()
 
-    Hermes core owns display resolution. External plugins do not yet have a
-    first-class display-default hook, so we seed the same private table core
+
+def _hermes_seam_unavailable(seam: str, effect: str, exc: Optional[BaseException] = None) -> None:
+    """Warn once per process that an undocumented Hermes internal is missing or changed.
+
+    Hermes documents no public API for these seams yet; the Inline repo tracks them in
+    plugins/hermes-agent/docs/hermes-upstream-seams.md.
+    Callers degrade the one feature that needs the seam; message delivery never depends on one.
+    """
+    if seam in _UNAVAILABLE_HERMES_SEAMS:
+        return
+    _UNAVAILABLE_HERMES_SEAMS.add(seam)
+    reason = f"{type(exc).__name__}: {exc}" if exc is not None else "missing"
+    logger.warning("[inline] Hermes internal %s is unavailable (%s); %s", seam, reason, effect)
+
+
+def _display_registration_fields() -> Dict[str, Any]:
+    """Inline's display defaults through the public PlatformEntry fields, when the host has them."""
+    try:
+        from gateway.platform_registry import PlatformEntry
+
+        fields = getattr(PlatformEntry, "__dataclass_fields__", {})
+        if {"display_tier", "display_overrides"}.issubset(fields):
+            # The overrides cover every key a tier sets, so the tier only names the closest base.
+            return {"display_tier": "low", "display_overrides": dict(_INLINE_DISPLAY_DEFAULTS)}
+    except Exception:
+        logger.debug("[inline] Hermes display registration fields are unavailable", exc_info=True)
+    return {}
+
+
+def _install_inline_display_defaults() -> None:
+    """Seed Inline's display defaults on hosts that predate PlatformEntry.display_overrides.
+
+    Newer hosts take the same defaults from ``ctx.register_platform`` (see
+    ``_display_registration_fields``); only older ones need the private table core
     platforms use. User config still wins over these defaults.
     """
     try:
@@ -218,6 +249,10 @@ def _install_inline_display_defaults() -> None:
 
         defaults = getattr(_display_config, "_PLATFORM_DEFAULTS", None)
         if not isinstance(defaults, dict):
+            _hermes_seam_unavailable(
+                "gateway.display_config._PLATFORM_DEFAULTS",
+                "Inline uses Hermes' generic display defaults (tool progress may be shown)",
+            )
             return
         inline_defaults = dict(_INLINE_DISPLAY_DEFAULTS)
         current = defaults.get("inline")
@@ -225,8 +260,12 @@ def _install_inline_display_defaults() -> None:
             defaults["inline"] = {**inline_defaults, **current}
         else:
             defaults["inline"] = inline_defaults
-    except Exception:
-        logger.debug("[inline] failed to install display defaults", exc_info=True)
+    except Exception as exc:
+        _hermes_seam_unavailable(
+            "gateway.display_config._PLATFORM_DEFAULTS",
+            "Inline uses Hermes' generic display defaults (tool progress may be shown)",
+            exc,
+        )
 
 
 def _reply_thread_mode(value: Any, default: str = "auto") -> str:
@@ -570,7 +609,12 @@ def _normalize_inline_plugin_command_text(text: str) -> str:
         from hermes_cli.plugins import get_plugin_commands
         if command not in (get_plugin_commands() or {}):
             return text
-    except Exception:
+    except Exception as exc:
+        _hermes_seam_unavailable(
+            "hermes_cli.plugins.get_plugin_commands",
+            "hyphenated plugin commands must be typed with hyphens in Inline",
+            exc,
+        )
         return text
     # Inline menus require underscores, while Hermes registers plugin commands
     # with hyphens. Normalize before gateway access checks as well as dispatch.
@@ -585,16 +629,30 @@ def _normalize_inline_command_description(raw: str) -> str:
     return description
 
 
-def _inline_menu_commands(max_commands: int = _INLINE_COMMAND_LIMIT) -> tuple[List[Dict[str, Any]], int]:
-    from hermes_cli.commands_platforms import telegram_menu_commands
+def _hermes_menu_commands(max_commands: int) -> tuple[list, int]:
+    """Hermes' gateway command menu; empty when the host no longer exposes it."""
+    try:
+        from hermes_cli.commands_platforms import telegram_menu_commands
 
+        menu_commands, hidden_count = telegram_menu_commands(max_commands=max_commands)
+        return list(menu_commands or []), int(hidden_count or 0)
+    except Exception as exc:
+        _hermes_seam_unavailable(
+            "hermes_cli.commands_platforms.telegram_menu_commands",
+            "the Inline command menu lists only Inline's own commands",
+            exc,
+        )
+        return [], 0
+
+
+def _inline_menu_commands(max_commands: int = _INLINE_COMMAND_LIMIT) -> tuple[List[Dict[str, Any]], int]:
     command_specs = _inline_command_specs()
     local_commands = [
         (spec.name, spec.description)
         for spec in command_specs[:max(0, max_commands)]
     ]
     remaining = max(0, max_commands - len(local_commands))
-    menu_commands, hidden_count = telegram_menu_commands(max_commands=remaining)
+    menu_commands, hidden_count = _hermes_menu_commands(remaining)
     commands: List[Dict[str, Any]] = []
     seen: set[str] = set()
     skipped = 0
@@ -620,11 +678,15 @@ def _inline_menu_commands(max_commands: int = _INLINE_COMMAND_LIMIT) -> tuple[Li
 
 def _inline_skill_catalog() -> List[Dict[str, Any]]:
     """Return installed, enabled Hermes skills in the Bot API catalog shape."""
-    import tools.skills_tool as skills_tool
+    try:
+        # Public since Hermes 0.22.5 (plugins/index.md § Read the skill catalog).
+        from tools.skills_tool import find_all_skills as find_all, sort_skills as sort
+    except ImportError:
+        # Legacy hosts (< 0.22.5) only had the private names. Drop with that host floor.
+        import tools.skills_tool as legacy_skills_tool
 
-    # Hermes 0.22.5 made these public; older supported hosts keep the private names.
-    find_all = getattr(skills_tool, "find_all_skills", None) or getattr(skills_tool, "_find_all_skills")
-    sort = getattr(skills_tool, "sort_skills", None) or getattr(skills_tool, "_sort_skills")
+        find_all = getattr(legacy_skills_tool, "_find_all_skills")
+        sort = getattr(legacy_skills_tool, "_sort_skills")
     published: List[Dict[str, Any]] = []
     seen: set[str] = set()
     for skill in sort(find_all(skip_disabled=False)):
@@ -1163,12 +1225,14 @@ class InlineAdapter(BasePlatformAdapter):
         """Hermes' own slash-command access for this platform; None on hosts without it."""
         try:
             from gateway.slash_access import policy_from_extra
-        except Exception:
-            return None
-        try:
+
             return policy_from_extra(dict(self.config.extra or {}), "dm" if chat_type == "dm" else "group")
-        except Exception:
-            logger.debug("[inline] slash access policy unavailable", exc_info=True)
+        except Exception as exc:
+            _hermes_seam_unavailable(
+                "gateway.slash_access.policy_from_extra",
+                "reply-thread settings ignore Hermes slash-command admin lists",
+                exc,
+            )
             return None
 
     def _may_change_reply_threads(self, actor_id: str, chat_type: str) -> bool:
@@ -1227,14 +1291,9 @@ class InlineAdapter(BasePlatformAdapter):
         return "group"
 
     def _bot_settings_runner(self) -> Any:
-        runner = getattr(self, "gateway_runner", None)
-        if runner is not None:
-            return runner
-        try:
-            from gateway.run import _gateway_runner_ref
-            return _gateway_runner_ref()
-        except Exception:
-            return None
+        # BasePlatformAdapter.gateway_runner is the runner's documented back-reference;
+        # every supported host sets it before the adapter connects.
+        return getattr(self, "gateway_runner", None)
 
     async def _bot_settings_context(
         self,
@@ -1310,10 +1369,11 @@ class InlineAdapter(BasePlatformAdapter):
             return context
 
         try:
-            from gateway.run import _load_gateway_config
+            from hermes_cli.config import load_config_readonly
             from hermes_cli.model_switch_providers import list_picker_providers
 
-            cfg = _load_gateway_config() or {}
+            # Read-only: the returned dict is Hermes' shared config cache.
+            cfg = load_config_readonly() or {}
             model_cfg = cfg.get("model") if isinstance(cfg, dict) else {}
             if not isinstance(model_cfg, dict):
                 model_cfg = {"default": str(model_cfg or "")}
@@ -1415,8 +1475,16 @@ class InlineAdapter(BasePlatformAdapter):
                     {"value": value, "label": value.capitalize()} for value in dict.fromkeys(reasoning_values)
                 ],
             })
+        except asyncio.TimeoutError:
+            logger.warning("[inline] agent settings model catalog timed out")
         except Exception as exc:
-            logger.debug("[inline] Hermes runtime settings unavailable: %s", exc)
+            # Model and reasoning rows lean on GatewayRunner internals and the model picker
+            # catalog; without them the settings sheet still offers reply-thread controls.
+            _hermes_seam_unavailable(
+                "GatewayRunner session model/reasoning settings",
+                "Inline agent settings hide the model and reasoning rows",
+                exc,
+            )
         return context
 
     @staticmethod
@@ -1632,7 +1700,11 @@ class InlineAdapter(BasePlatformAdapter):
                 f"/model {shlex.quote(model)} --provider {shlex.quote(provider)} "
                 f"{'--global' if item_id == 'model-default' else '--session'}"
             )
-            result = await runner._handle_model_command(MessageEvent(
+            handle_model_command = getattr(runner, "_handle_model_command", None)
+            if not callable(handle_model_command):
+                _hermes_seam_unavailable("GatewayRunner._handle_model_command", "Inline settings cannot switch models")
+                raise ValueError("model switching unavailable")
+            result = await handle_model_command(MessageEvent(
                 text=command,
                 message_type=MessageType.TEXT,
                 source=source,
@@ -1645,7 +1717,13 @@ class InlineAdapter(BasePlatformAdapter):
             selected = str(value_body.get("stringValue") or "")
             if selected not in {option.get("value") for option in context.get("reasoning_options") or []}:
                 raise ValueError("reasoning unavailable")
-            runner._apply_reasoning_selection(context["session_key"], "inline", selected)
+            apply_reasoning_selection = getattr(runner, "_apply_reasoning_selection", None)
+            if not callable(apply_reasoning_selection):
+                _hermes_seam_unavailable(
+                    "GatewayRunner._apply_reasoning_selection", "Inline settings cannot change reasoning effort",
+                )
+                raise ValueError("reasoning unavailable")
+            apply_reasoning_selection(context["session_key"], "inline", selected)
             return
         raise ValueError("setting unavailable")
 
@@ -4392,6 +4470,11 @@ class InlineAdapter(BasePlatformAdapter):
             return True
         try:
             from tools import slash_confirm as slash_confirm_mod
+        except Exception as exc:
+            _hermes_seam_unavailable("tools.slash_confirm.resolve", "Inline slash-confirm buttons cannot answer", exc)
+            await self._finish_action(event, "Unavailable", "This Hermes version cannot record that choice.")
+            return True
+        try:
             result = await slash_confirm_mod.resolve(session_key, confirm_id, choice)
             self._slash_sessions.pop(confirm_id, None)
             text = str(result or ("Cancelled." if choice == "cancel" else "Recorded."))
@@ -4651,7 +4734,10 @@ class InlineAdapter(BasePlatformAdapter):
             from hermes_cli.models_catalog_static import PROVIDER_GROUPS
             label, _desc, members = PROVIDER_GROUPS.get(group_id, (group_id, "", []))
             member_slugs = [str(member) for member in members]
-        except Exception:
+        except Exception as exc:
+            _hermes_seam_unavailable(
+                "hermes_cli.models_catalog_static.PROVIDER_GROUPS", "the model picker cannot open provider groups", exc,
+            )
             member_slugs = []
         by_slug = {
             str(provider.get("slug") or "").strip().lower(): provider
@@ -4750,8 +4836,17 @@ class InlineAdapter(BasePlatformAdapter):
     async def _expensive_model_warning(self, model_id: str, provider_slug: str) -> Optional[Any]:
         try:
             from hermes_cli.model_cost_guard import expensive_model_warning
+        except Exception as exc:
+            _hermes_seam_unavailable(
+                "hermes_cli.model_cost_guard.expensive_model_warning",
+                "the model picker switches without the expensive-model confirmation",
+                exc,
+            )
+            return None
+        try:
             return await asyncio.to_thread(expensive_model_warning, model_id, provider=provider_slug)
         except Exception:
+            logger.warning("[inline] expensive model check failed", exc_info=True)
             return None
 
     async def _edit_action_message(self, event: Dict[str, Any], text: str, actions: Optional[Dict[str, Any]] = None) -> SendResult:
@@ -5396,7 +5491,8 @@ class InlineAdapter(BasePlatformAdapter):
         try:
             from hermes_cli.providers import get_label
             return str(get_label(slug))
-        except Exception:
+        except Exception as exc:
+            _hermes_seam_unavailable("hermes_cli.providers.get_label", "the model picker shows provider slugs", exc)
             return str(slug or "")
 
     def _build_provider_actions(self, picker_id: str, providers: list, *, include_back: bool = False) -> Dict[str, Any]:
@@ -5409,7 +5505,10 @@ class InlineAdapter(BasePlatformAdapter):
         try:
             from hermes_cli.models_catalog_static import group_providers
             grouped = group_providers(list(by_slug.keys()))
-        except Exception:
+        except Exception as exc:
+            _hermes_seam_unavailable(
+                "hermes_cli.models_catalog_static.group_providers", "the model picker lists providers ungrouped", exc,
+            )
             grouped = [{"kind": "single", "slug": slug} for slug in by_slug.keys()]
         for row in grouped:
             if row.get("kind") == "group":
@@ -5784,7 +5883,9 @@ def _inline_catalog_part_summary(part: Dict[str, Any]) -> str:
 def _inline_version_text(last_sync: Optional[Dict[str, Any]] = None) -> str:
     version = _installed_inline_plugin_version()
     try:
-        from hermes_cli import __version__ as hermes_version
+        from importlib.metadata import version as _distribution_version
+
+        hermes_version = _distribution_version("hermes-agent")
     except Exception:
         hermes_version = None
 
@@ -5854,7 +5955,9 @@ def register(ctx) -> None:
     from . import cli as _cli
     from . import tools as _tools
 
-    _install_inline_display_defaults()
+    display_fields = _display_registration_fields()
+    if not display_fields:
+        _install_inline_display_defaults()
     ctx.register_platform(
         name="inline",
         label="Inline",
@@ -5877,6 +5980,7 @@ def register(ctx) -> None:
         allow_update_command=True,
         platform_hint=_tools.INLINE_PLATFORM_GUIDANCE,
         **_target_registration_hooks(),
+        **display_fields,
     )
     register_command = getattr(ctx, "register_command", None)
     if callable(register_command):
