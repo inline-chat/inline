@@ -1699,7 +1699,7 @@ private struct AllChatsComposeAccessoryView: View {
         Text("No agents available")
       }
     } label: {
-      AllChatsComposePillLabel(title: model.agentPickerTitle, showsRobot: true)
+      AllChatsComposePillLabel(title: model.agentPickerTitle, systemImage: "cpu")
     }
     .menuStyle(.button)
     .buttonStyle(.plain)
@@ -1855,16 +1855,11 @@ struct AgentConfigurationOptionMenuLabel: View {
 @available(macOS 26.0, *)
 struct AllChatsComposePillLabel: View {
   let title: String
-  var showsRobot = false
   var systemImage: String?
   @State private var isHovering = false
 
   var body: some View {
     HStack(spacing: 4) {
-      if showsRobot {
-        Text("🤖")
-          .accessibilityHidden(true)
-      }
       if let systemImage {
         Image(systemName: systemImage)
           .font(.system(size: 10.5, weight: .medium))
