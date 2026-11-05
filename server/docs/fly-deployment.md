@@ -117,9 +117,12 @@ does not establish these effective settings.
 
 ### Release contract with a warm fallback
 
-Since October 16, 2026, `api.inline.chat` uses Cloudflare load balancing with
-Fly preferred and a running Nuremberg fallback. The workflow's default
-`origins=both` updates and verifies Nuremberg before Fly in the same run.
+Resolve the effective Cloudflare DNS and load-balancer configuration before each
+release. The running fleet has Fly and a Nuremberg fallback, but automatic
+failover depends on enabled load balancers and pools; a healthy fallback alone
+does not establish it. Record the actual route and preserve it during application
+replacement. The workflow's default `origins=both` updates and verifies Nuremberg
+before Fly in the same run.
 A `fly`-only release leaves Nuremberg on its previous revision; the
 run summary says so, and the requirements below then apply manually.
 
