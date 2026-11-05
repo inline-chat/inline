@@ -6,6 +6,8 @@ import Logger
 public enum LocalMessageSearchSort: Sendable, Hashable {
   case relevance
   case newest
+  /// Newest first by message ID, for keyset paging inside one chat with `beforeMessageId`.
+  case messageIdDescending
 }
 
 public struct LocalMessageSearchOptions: Sendable, Hashable {
@@ -16,6 +18,8 @@ public struct LocalMessageSearchOptions: Sendable, Hashable {
   public var includeArchived: Bool
   public var matchPrefixes: Bool
   public var sort: LocalMessageSearchSort
+  /// Keyset cursor: only messages with a smaller ID. Meaningful with `peer` set.
+  public var beforeMessageId: Int64?
 
   public init(
     peer: Peer? = nil,
@@ -24,7 +28,8 @@ public struct LocalMessageSearchOptions: Sendable, Hashable {
     offset: Int = 0,
     includeArchived: Bool = true,
     matchPrefixes: Bool = true,
-    sort: LocalMessageSearchSort = .relevance
+    sort: LocalMessageSearchSort = .relevance,
+    beforeMessageId: Int64? = nil
   ) {
     self.peer = peer
     self.spaceId = spaceId
@@ -33,6 +38,7 @@ public struct LocalMessageSearchOptions: Sendable, Hashable {
     self.includeArchived = includeArchived
     self.matchPrefixes = matchPrefixes
     self.sort = sort
+    self.beforeMessageId = beforeMessageId
   }
 }
 
@@ -177,6 +183,11 @@ public enum LocalMessageSearch {
       }
     }
 
+    if let beforeMessageId = options.beforeMessageId {
+      filters.append("message.messageId < ?")
+      arguments += StatementArguments([beforeMessageId])
+    }
+
     if let spaceId = options.spaceId {
       filters.append("COALESCE(dialog.spaceId, chat.spaceId) = ?")
       arguments += StatementArguments([spaceId])
@@ -214,6 +225,8 @@ public enum LocalMessageSearch {
         "rank, message.date DESC, message.messageId DESC"
       case .newest:
         "message.date DESC, message.messageId DESC, rank"
+      case .messageIdDescending:
+        "message.messageId DESC"
     }
 
     let sql = """
