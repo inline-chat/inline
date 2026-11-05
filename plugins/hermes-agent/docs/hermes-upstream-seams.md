@@ -66,8 +66,8 @@ Each draft is ready to file on NousResearch/hermes-agent.
 - Uses: `gateway.slash_access.policy_from_extra(extra, scope).can_run(user_id, command)`
 - Why: changing a chat's reply-thread mode from Inline's settings sheet follows the same
   admin lists as running `/threads`.
-- Without it: the settings sheet falls back to Hermes' default (everyone allowed), matching
-  hosts without admin lists.
+- Without it: fails closed. Group reply-thread settings are locked; a DM's owner can still
+  change their own. Every supported host has it, so this only guards a future breakage.
 
 > **Expose slash-command access checks to adapters.** Platform plugins that offer native
 > settings UIs equivalent to a slash command need `can_run(user_id, command)` for the

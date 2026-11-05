@@ -1230,7 +1230,7 @@ class InlineAdapter(BasePlatformAdapter):
         except Exception as exc:
             _hermes_seam_unavailable(
                 "gateway.slash_access.policy_from_extra",
-                "reply-thread settings ignore Hermes slash-command admin lists",
+                "only a DM's owner can change reply threads; group settings are locked",
                 exc,
             )
             return None
@@ -1240,7 +1240,9 @@ class InlineAdapter(BasePlatformAdapter):
         who may run /threads. Without admin lists Hermes allows everyone, and so does this."""
         policy = self._slash_access_policy(chat_type)
         if policy is None:
-            return True
+            # Every supported host has the policy, so its absence means the seam broke:
+            # keep a DM's owner in control, but never open a group's setting to everyone.
+            return chat_type == "dm"
         return policy.can_run(actor_id, "threads")
 
     def note_turn_thread(self, chat_id: str, message_id: str, thread_id: str) -> None:

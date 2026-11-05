@@ -280,6 +280,17 @@ httpx.AsyncClient = AsyncClient
 sys.modules["gateway"] = gateway
 sys.modules["gateway.config"] = config
 sys.modules["gateway.display_config"] = display_config
+# Every supported host ships Hermes' slash-access policy; without admin lists it allows everyone.
+open_slash_access = types.ModuleType("gateway.slash_access")
+
+
+class OpenSlashPolicy:
+    def can_run(self, user_id, command):
+        return True
+
+
+open_slash_access.policy_from_extra = lambda extra, scope: OpenSlashPolicy()
+sys.modules["gateway.slash_access"] = open_slash_access
 sys.modules["gateway.platforms"] = platforms
 sys.modules["gateway.platforms.base"] = base
 sys.modules["gateway.platforms.helpers"] = helpers
@@ -1263,7 +1274,14 @@ def assert_reply_thread_settings():
                 adapter.config.extra.pop("group_user_allowed_commands")
                 assert tool("set_reply_threads", mode="auto")["result"]["mode"] == "auto"
             finally:
-                sys.modules.pop("gateway.slash_access", None)
+                sys.modules["gateway.slash_access"] = open_slash_access
+            # If a future host breaks the policy, groups fail closed and DMs stay with their owner.
+            sys.modules.pop("gateway.slash_access")
+            try:
+                assert adapter._may_change_reply_threads("anyone", "group") is False
+                assert adapter._may_change_reply_threads("owner", "dm") is True
+            finally:
+                sys.modules["gateway.slash_access"] = open_slash_access
     finally:
         inline_tools._sidecar_call = real_sidecar_call
         for key, value in saved_env.items():
