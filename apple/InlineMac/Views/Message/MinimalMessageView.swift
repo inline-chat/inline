@@ -5157,9 +5157,10 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
 
     // Delete or cancel button
     if message.status == .sending {
-      let cancelItem = NSMenuItem(title: "Cancel", action: #selector(cancelMessage), keyEquivalent: "delete")
+      let cancelTitle = fullMessage.showsPhotoUploadProgress ? "Cancel Upload" : "Cancel"
+      let cancelItem = NSMenuItem(title: cancelTitle, action: #selector(cancelMessage), keyEquivalent: "delete")
       cancelItem.target = self
-      cancelItem.image = NSImage(systemSymbolName: "x.circle", accessibilityDescription: "Cancel")
+      cancelItem.image = NSImage(systemSymbolName: "x.circle", accessibilityDescription: cancelTitle)
       menu.addItem(cancelItem)
     } else {
       let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteMessage), keyEquivalent: "delete")

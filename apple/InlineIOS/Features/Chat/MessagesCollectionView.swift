@@ -4905,7 +4905,11 @@ private extension MessagesCollectionView {
           actions.append(copyPhotoAction)
         }
 
-        let cancelAction = UIAction(title: "Cancel", attributes: .destructive) { _ in
+        let cancelAction = UIAction(
+          title: fullMessage.showsPhotoUploadProgress ? "Cancel Upload" : "Cancel",
+          image: fullMessage.showsPhotoUploadProgress ? UIImage(systemName: "xmark.circle") : nil,
+          attributes: .destructive
+        ) { _ in
           PendingMessageCanceller.cancel(fullMessage)
         }
         actions.append(cancelAction)
