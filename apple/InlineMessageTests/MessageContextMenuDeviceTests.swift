@@ -114,8 +114,13 @@ struct MessageContextMenuDeviceTests {
     try await Task.sleep(for: .seconds(1.2))
     let keyed = try #require(lab.openMenuForTesting(row: 6))
     try await Task.sleep(for: .seconds(4))
-    report.append("keyboard: over keyboard \(keyed.isOverKeyboard) focused while open \(lab.isKeyboardFocusedForTesting)")
+    let keyedPreview = keyed.previewHostForTesting.frame
+    report.append(
+      "keyboard: over keyboard \(keyed.isOverKeyboard) focused while open \(lab.isKeyboardFocusedForTesting) preview \(keyedPreview)"
+    )
     #expect(lab.isKeyboardFocusedForTesting == keyed.isOverKeyboard)
+    // The bubble's frame crosses from the chat's window into the keyboard's; it keeps its size.
+    #expect(!keyedPreview.isNull && keyedPreview.width > 1 && keyedPreview.height > 1)
 
     // A sheet over the menu, like the emoji picker, gets a keyboard of its own on top.
     if let scene = stage.window.windowScene, let menuWindow = keyed.moveToOwnWindow() {

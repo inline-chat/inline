@@ -242,9 +242,16 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
   }
 
   /// `rect` in the source window's coordinates, in the menu's viewport.
+  ///
+  /// The host window covers the same screen area as the source window (the keyboard's window
+  /// is checked for that, and the menu's own window takes the source's frame), so window
+  /// coordinates carry over as they are, as in Telegram's `convertFrame`. A direct convert
+  /// between the two windows doesn't work over the keyboard: that window belongs to the
+  /// keyboard's own scene, UIKit returns `CGRect.null` across scenes, and the preview collapsed
+  /// to nothing.
   private func viewportRect(fromSource rect: CGRect) -> CGRect {
-    guard let hostWindow, let sourceWindow else { return rect }
-    return overlay.convert(hostWindow.convert(rect, from: sourceWindow), from: hostWindow)
+    guard let hostWindow else { return rect }
+    return overlay.convert(rect, from: hostWindow)
   }
 
   private var availableWidth: CGFloat {
@@ -547,6 +554,7 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
   var selectionViewForTesting: MessageTextSelectionView? { selectionView }
   var scrollViewForTesting: UIScrollView { scrollView }
   var accessoryHostForTesting: UIView { accessoryHost }
+  var previewHostForTesting: UIView { previewHost }
   #endif
 }
 
