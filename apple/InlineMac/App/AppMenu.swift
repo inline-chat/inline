@@ -297,19 +297,21 @@ final class AppMenu: NSObject {
     findMenuItem.submenu = findMenu
     editMenu.addItem(findMenuItem)
 
+    // Chat views answer these through the responder chain; nothing else in the app uses
+    // NSTextFinder, whose untagged items were inert.
     findMenu.addItem(
       withTitle: "Find…",
-      action: #selector(NSResponder.performTextFinderAction(_:)),
+      action: #selector(InChatSearchMenuActions.showInChatSearch(_:)),
       keyEquivalent: "f"
     )
     findMenu.addItem(
       withTitle: "Find Next",
-      action: #selector(NSResponder.performTextFinderAction(_:)),
+      action: #selector(InChatSearchMenuActions.findNextInChat(_:)),
       keyEquivalent: "g"
     )
     findMenu.addItem(
       withTitle: "Find Previous",
-      action: #selector(NSResponder.performTextFinderAction(_:)),
+      action: #selector(InChatSearchMenuActions.findPreviousInChat(_:)),
       keyEquivalent: "G"
     )
     findMenu.addItem(

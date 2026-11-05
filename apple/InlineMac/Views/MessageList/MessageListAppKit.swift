@@ -284,6 +284,13 @@ class MessageListAppKit: NSViewController {
 
   private lazy var toolbarBgView = ToolbarBackgroundView(surfaceStyle: surfaceStyle)
   private var pinnedHeaderHeight: CGFloat = 0
+  /// Height of a bar floating under the toolbar (in-chat search). Messages start below it,
+  /// and the pinned header hides meanwhile, as in Telegram: its glass under the search
+  /// panel's glass would flatten both.
+  private var topOverlayHeight: CGFloat = 0
+  private var visiblePinnedHeaderHeight: CGFloat {
+    topOverlayHeight > 0 ? 0 : pinnedHeaderHeight
+  }
   private var pinnedHeaderTopConstraint: NSLayoutConstraint?
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
   private lazy var pinnedHeaderView: PinnedMessageHeaderView = {
@@ -297,6 +304,7 @@ class MessageListAppKit: NSViewController {
       guard let self else { return }
       pinnedHeaderHeight = height
       pinnedHeaderHeightConstraint?.constant = height
+      applyPinnedHeaderSuppression()
       updateScrollViewInsets()
     }
     return view
@@ -791,7 +799,7 @@ class MessageListAppKit: NSViewController {
     let toolbarHeight = chromeHeight
     self.toolbarHeight = toolbarHeight
     toolbarBgHeightConstraint?.constant = toolbarHeight
-    let topInset = toolbarHeight + additionalTopContentInset + pinnedHeaderHeight
+    let topInset = toolbarHeight + additionalTopContentInset + topOverlayHeight + visiblePinnedHeaderHeight
 
     pinnedHeaderTopConstraint?.constant = toolbarHeight + additionalTopContentInset
     pinnedHeaderHeightConstraint?.constant = pinnedHeaderHeight
@@ -1383,6 +1391,22 @@ class MessageListAppKit: NSViewController {
 
   var messageColumnGuide: NSLayoutGuide {
     scrollView.messageColumnGuide
+  }
+
+  func setTopOverlayHeight(_ height: CGFloat) {
+    guard topOverlayHeight != height else { return }
+    topOverlayHeight = height
+    applyPinnedHeaderSuppression()
+    updateScrollViewInsets()
+  }
+
+  /// The pinned header shows itself when it has a pin; a top overlay keeps it hidden.
+  private func applyPinnedHeaderSuppression() {
+    if topOverlayHeight > 0 {
+      pinnedHeaderView.isHidden = true
+    } else if pinnedHeaderHeight > 0 {
+      pinnedHeaderView.isHidden = false
+    }
   }
 
   func setMaximumContentWidth(_ width: CGFloat?) {
@@ -4097,7 +4121,12 @@ extension MessageListAppKit {
     if messages.contains(where: { $0.message.messageId == request.messageId }),
        chatRows.historyCoverage.isCertifiedMessage(request.messageId)
     {
-      scrollToMessage(request.messageId, shouldHighlight: true, quote: request.quote)
+      scrollToMessage(
+        request.messageId,
+        shouldHighlight: true,
+        quote: request.quote,
+        flashesRow: request.reason == .search
+      )
       return
     }
 
@@ -4143,7 +4172,8 @@ extension MessageListAppKit {
         scrollToMessage(
           displayedMessageID,
           shouldHighlight: displayedMessageID == request.messageId,
-          quote: request.quote
+          quote: request.quote,
+          flashesRow: request.reason == .search
         )
         // Landing on the newest row below the target is the ordinary latest
         // view, not a detour worth announcing.
@@ -4174,7 +4204,14 @@ extension MessageListAppKit {
     }
   }
 
-  private func scrollToMessage(_ msgId: Int64, shouldHighlight: Bool, quote: String? = nil) {
+  /// `flashesRow` also tints the whole row when the quoted text is highlighted, so a search
+  /// match stands out in a long or busy chat.
+  private func scrollToMessage(
+    _ msgId: Int64,
+    shouldHighlight: Bool,
+    quote: String? = nil,
+    flashesRow: Bool = false
+  ) {
     let revision = targetScrollRevision
     guard let messageIndex = messages.firstIndex(where: { $0.message.messageId == msgId }) else {
       return
@@ -4200,7 +4237,7 @@ extension MessageListAppKit {
        let quoteRect = cell.quoteRect(quote, in: tableView)
     {
       if quoteViewport.contains(quoteRect) {
-        cell.highlight(quote: quote)
+        cell.highlight(quote: quote, flashesRow: flashesRow)
         return
       }
       targetY = centeredScrollY(for: quoteRect)
@@ -4242,7 +4279,7 @@ extension MessageListAppKit {
           if shouldHighlight,
              let currentRow = chatRows.rowIndex(forMessageStableId: stableId)
           {
-            highlightMessage(at: currentRow, quote: quote)
+            highlightMessage(at: currentRow, quote: quote, flashesRow: flashesRow)
           }
         }
       }
@@ -4261,13 +4298,13 @@ extension MessageListAppKit {
         if shouldHighlight,
            let currentRow = chatRows.rowIndex(forMessageStableId: stableId)
         {
-          highlightMessage(at: currentRow, quote: quote)
+          highlightMessage(at: currentRow, quote: quote, flashesRow: flashesRow)
         }
       }
     }
   }
 
-  private func highlightMessage(at row: Int, quote: String? = nil) {
+  private func highlightMessage(at row: Int, quote: String? = nil, flashesRow: Bool = false) {
     // Verify row is still valid (tableView state may have changed during animation)
     guard row >= 0, row < tableView.numberOfRows else {
       log.trace("Cannot highlight message at row \(row) - tableView has \(tableView.numberOfRows) rows")
@@ -4291,11 +4328,11 @@ extension MessageListAppKit {
         guard let self, !isDisposed, targetScrollRevision == revision else { return }
         endProgrammaticScroll()
         updateUnreadIfNeeded()
-        cell.highlight(quote: quote)
+        cell.highlight(quote: quote, flashesRow: flashesRow)
       }
       return
     }
-    cell.highlight(quote: quote)
+    cell.highlight(quote: quote, flashesRow: flashesRow)
   }
 
   /// The part of the list not covered by the header and compose bar, in table coordinates.

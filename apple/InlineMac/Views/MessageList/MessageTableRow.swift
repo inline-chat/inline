@@ -333,15 +333,23 @@ class MessageTableCell: NSView {
     messageView?.setScrollState(state)
   }
 
+  private var highlightGeneration = 0
+
   /// Flashes the row, or with `quote`, tints the quoted text when the message shows it.
-  func highlight(quote: String? = nil) {
+  /// `flashesRow` flashes the row as well, held longer, so a search match is easy to spot.
+  func highlight(quote: String? = nil, flashesRow: Bool = false) {
     if let quote, let messageView {
       // A shade of the message's own bubble; minimal rows have none and get a faint gray.
       let color = (messageView as? MessageViewAppKit)?.quoteHighlightColor
         ?? NSColor.labelColor.withAlphaComponent(0.1).cgColor
-      if messageView.highlightQuote(quote, color: color) { return }
+      if messageView.highlightQuote(quote, color: color), !flashesRow { return }
     }
     let currentMsgId = currentContent?.message.message.messageId
+    let holdDuration: TimeInterval = flashesRow ? 1.2 : 0.4
+    // A newer flash on this row (stepping through matches quickly) owns the fade-out.
+    highlightGeneration &+= 1
+    let generation = highlightGeneration
+    layer?.removeAnimation(forKey: "fadeOutAnimation")
 
     // Create animation
     let fadeIn = CABasicAnimation(keyPath: "backgroundColor")
@@ -355,11 +363,12 @@ class MessageTableCell: NSView {
     layer?.add(fadeIn, forKey: "fadeInAnimation")
 
     // Schedule fade out animation
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + holdDuration) {
       if self.currentContent?.message.message.messageId != currentMsgId {
         // cell was reused
         return
       }
+      guard self.highlightGeneration == generation else { return }
 
       let fadeOut = CABasicAnimation(keyPath: "backgroundColor")
       fadeOut.fromValue = NSColor.systemGray.withAlphaComponent(0.2).cgColor
@@ -372,6 +381,7 @@ class MessageTableCell: NSView {
 
       // Clean up after animation completes
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        guard self.highlightGeneration == generation else { return }
         self.layer?.removeAllAnimations()
       }
     }

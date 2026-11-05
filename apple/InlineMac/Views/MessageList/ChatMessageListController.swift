@@ -13,6 +13,8 @@ protocol ChatMessageListController: NSViewController {
   var messageSelectionInset: CGFloat? { get set }
   var messageColumnGuide: NSLayoutGuide { get }
   func setMaximumContentWidth(_ width: CGFloat?)
+  /// Keeps messages and the pinned header clear of a bar floating under the toolbar.
+  func setTopOverlayHeight(_ height: CGFloat)
   func canSelectMessage(atRow row: Int) -> Bool
   func isMessageSelected(atRow row: Int) -> Bool
   @discardableResult func beginMessageSelection(atRow row: Int) -> Bool

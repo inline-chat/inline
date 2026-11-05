@@ -15,6 +15,7 @@ protocol ComposeImplementation: AnyObject {
   func handleImageDropOrPaste(_ image: NSImage, _ url: URL?)
   func handleVideoDropOrPaste(_ url: URL, thumbnail: NSImage?)
   func handleAnimatedImageDropOrPaste(_ url: URL)
+  func focusEditor()
 }
 
 protocol ComposeAttachmentOwner: AnyObject {
@@ -94,6 +95,10 @@ final class ComposeAppKit: NSView {
 
   func didLayout() {
     implementation.didLayout()
+  }
+
+  func focusEditor() {
+    implementation.focusEditor()
   }
 
   func setPeerUser(_ user: InlineKit.User?) {

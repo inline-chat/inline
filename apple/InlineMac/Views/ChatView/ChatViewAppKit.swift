@@ -3,6 +3,7 @@ import Combine
 import Cocoa
 import InlineKit
 import InlineMacUI
+import InlineSearch
 import InlineUI
 import Logger
 import Nuke
@@ -93,6 +94,12 @@ class ChatViewAppKit: NSViewController {
   private var didInitialRefetch = false
   private let signpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
   private var viewDidLayoutCount = 0
+
+  // In-chat search
+  private var inChatSearch: InChatSearchViewModel?
+  private var inChatSearchBar: NSView?
+  private var inChatSearchState: InChatSearchBarState?
+  private var inChatSearchEscapeUnsubscribe: (() -> Void)?
 
   init(
     peerId: Peer,
@@ -315,6 +322,7 @@ class ChatViewAppKit: NSViewController {
   private func updateDialog(from item: SpaceChatItem?) {
     let dialog = item?.dialog
     messageListVC?.setCollapsedMaxId(dialog?.collapsedMaxId)
+    inChatSearch?.collapsedMaxId = dialog?.collapsedMaxId
     guard let onDialogChange else { return }
     Task { @MainActor [weak self] in
       guard let self, !isDisposed else { return }
@@ -504,6 +512,7 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func clearCurrentViews() {
+    closeInChatSearch()
     centeredChatsCancellable?.cancel()
     centeredChatsCancellable = nil
     messageSelectionCoordinator?.dispose()
@@ -589,6 +598,128 @@ class ChatViewAppKit: NSViewController {
     } catch {
       Log.shared.error("Failed to load image from URL: \(error.localizedDescription)")
       return nil
+    }
+  }
+}
+
+// MARK: - In-chat search
+
+extension ChatViewAppKit: InChatSearchMenuActions, NSMenuItemValidation {
+  func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    switch menuItem.action {
+      case #selector(showInChatSearch(_:)):
+        return canShowInChatSearch
+      case #selector(findNextInChat(_:)):
+        return inChatSearch?.canGoOlder == true || (inChatSearch == nil && canShowInChatSearch)
+      case #selector(findPreviousInChat(_:)):
+        return inChatSearch?.canGoNewer == true
+      default:
+        return true
+    }
+  }
+
+  @objc func showInChatSearch(_: Any?) {
+    guard canShowInChatSearch else { return }
+    if let inChatSearchState {
+      inChatSearchState.focusRevision &+= 1
+      return
+    }
+    openInChatSearch()
+  }
+
+  /// ⌘G steps to the older match, like Telegram's up arrow; it opens search when closed.
+  @objc func findNextInChat(_: Any?) {
+    guard let inChatSearch else {
+      showInChatSearch(nil)
+      return
+    }
+    inChatSearch.goOlder()
+    inChatSearchState?.setShowsResults(false)
+  }
+
+  @objc func findPreviousInChat(_: Any?) {
+    inChatSearch?.goNewer()
+    inChatSearchState?.setShowsResults(false)
+  }
+
+  private var canShowInChatSearch: Bool {
+    guard !isDisposed, messageListVC != nil else { return false }
+    if case .loaded = state { return true }
+    return false
+  }
+
+  private func openInChatSearch() {
+    guard case let .loaded(chat) = state, let messageListVC else { return }
+
+    let model = InChatSearchViewModel(
+      db: dependencies.database,
+      peer: peerId,
+      collapsedMaxId: dialog?.collapsedMaxId
+    )
+    let searchPeer = self.peerId
+    let chatId = chat.id
+    let searchState = InChatSearchBarState()
+    searchState.jump = { selection in
+      ChatsManager.get(for: searchPeer, chatId: chatId)
+        .scrollTo(msgId: selection.messageId, reason: .search, quote: selection.highlight)
+    }
+    model.onSelect = { [weak searchState] selection in
+      searchState?.show(selection)
+    }
+    let bar = NSHostingView(rootView: InChatSearchBar(model: model, state: searchState) { [weak self] in
+      self?.closeInChatSearch(restoringComposeFocus: true)
+    })
+    bar.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(bar, positioned: .above, relativeTo: nil)
+
+    let column = messageListVC.messageColumnGuide
+    let width = bar.widthAnchor.constraint(equalToConstant: 560)
+    width.priority = .defaultHigh
+    NSLayoutConstraint.activate([
+      bar.topAnchor.constraint(
+        equalTo: view.safeAreaLayoutGuide.topAnchor,
+        constant: 8 + appearance.additionalTopContentInset
+      ),
+      bar.centerXAnchor.constraint(equalTo: column.centerXAnchor),
+      bar.leadingAnchor.constraint(greaterThanOrEqualTo: column.leadingAnchor, constant: 12),
+      bar.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor, constant: -12),
+      width,
+    ])
+    // The previews panel stays above the composer and the scroll-to-bottom button (both
+    // glass; glass over glass loses its effect), shrinking in a short window.
+    let bottomLimit = bar.bottomAnchor.constraint(
+      lessThanOrEqualTo: compose?.topAnchor ?? view.bottomAnchor,
+      constant: -(Theme.messageListBottomInset + Theme.scrollButtonSize + 8)
+    )
+    bottomLimit.priority = NSLayoutConstraint.Priority(999)
+    bottomLimit.isActive = true
+    messageListVC.setTopOverlayHeight(InChatSearchBar.fieldHeight + 16)
+
+    inChatSearch = model
+    inChatSearchBar = bar
+    inChatSearchState = searchState
+    // The window's key monitor sees Escape before the field does, and its root handler
+    // closes the chat. The newest handler wins, so while search is open Escape closes it.
+    inChatSearchEscapeUnsubscribe = dependencies.keyMonitor?.addHandler(
+      for: .escape,
+      key: "in_chat_search_\(peerId.toString())_\(ObjectIdentifier(self).hashValue)"
+    ) { [weak self] _ in
+      self?.closeInChatSearch(restoringComposeFocus: true)
+    }
+  }
+
+  private func closeInChatSearch(restoringComposeFocus: Bool = false) {
+    guard let inChatSearch else { return }
+    inChatSearch.dispose()
+    inChatSearchEscapeUnsubscribe?()
+    inChatSearchEscapeUnsubscribe = nil
+    inChatSearchBar?.removeFromSuperview()
+    self.inChatSearch = nil
+    inChatSearchBar = nil
+    inChatSearchState = nil
+    messageListVC?.setTopOverlayHeight(0)
+    if restoringComposeFocus {
+      compose?.focusEditor()
     }
   }
 }
