@@ -1297,8 +1297,7 @@ class UIMessageView: UIView {
         kind: .replyInMessage,
         outgoing: outgoing,
         isOnlyEmoji: isEmojiOnlyMessage,
-        thumbnailReloadMessage: fullMessage.message,
-        quote: fullMessage.message.replyQuote?.text
+        thumbnailReloadMessage: fullMessage.message
       )
     } else {
       embedView.showNotLoaded(kind: .replyInMessage, outgoing: outgoing, isOnlyEmoji: isEmojiOnlyMessage)

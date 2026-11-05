@@ -1664,14 +1664,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     updateAgentReplyTarget()
   }
 
-  /// Puts quote lines before anything already typed, through the normal input path,
-  /// and leaves the cursor at the end so the reply is typed below the quote.
+  /// Adds quote lines after anything already typed, through the normal input path, and
+  /// leaves the cursor at the end so the reply is typed below the quote.
   @objc private func handleQuote(_ notification: Notification) {
     guard let peerId, (notification.userInfo?["peer"] as? InlineKit.Peer) == peerId,
           let markdown = notification.userInfo?["markdown"] as? String else { return }
+    let insertion = MessageMarkdown.quoteInsertion(markdown, into: textView.text ?? "")
     textView.resetTypingAttributesToDefault()
-    textView.selectedRange = NSRange(location: 0, length: 0)
-    textView.insertText(markdown)
+    textView.selectedRange = insertion.range
+    textView.insertText(insertion.text)
     textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
     textView.becomeFirstResponder()
   }

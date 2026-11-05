@@ -75,11 +75,7 @@ extension MessageBlock {
         id: "reply",
         position: .aboveText,
         width: .flexible(
-          preferred: EmbedMessageView.preferredReplyWidth(
-            for: message.repliedToMessage,
-            quote: message.message.replyQuote?.text,
-            traits: traits
-          ),
+          preferred: EmbedMessageView.preferredReplyWidth(for: message.repliedToMessage, traits: traits),
           minimum: 120
         ),
         height: EmbedMessageView.height(compatibleWith: traits)
@@ -238,8 +234,7 @@ final class MessageBlockHostView: UIView {
           kind: .replyInMessage,
           outgoing: outgoing,
           isOnlyEmoji: false,
-          thumbnailReloadMessage: message.message,
-          quote: message.message.replyQuote?.text
+          thumbnailReloadMessage: message.message
         )
       } else {
         embed.showNotLoaded(kind: .replyInMessage, outgoing: outgoing, isOnlyEmoji: false)

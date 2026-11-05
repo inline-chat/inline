@@ -35,9 +35,7 @@ struct MessageRichContent {
     expanded: [RichPath: Bool]
   ) -> MessageRichContent? {
     // Block ranges index the original text; a translation replaces it.
-    if message.translationText == nil, let payload = message.message.blockContentPayload {
-      // A quote reply shows its quote in the reply header, so the body skips it.
-      let content = message.message.replyQuote?.body ?? payload.content
+    if message.translationText == nil, let content = message.message.blockContentPayload?.content {
       var builder = Builder(body: body, style: style, expanded: expanded)
       guard builder.withinLimits(content), let blocks = builder.blocks(content.blocks, path: RichPath()),
             !blocks.isEmpty
