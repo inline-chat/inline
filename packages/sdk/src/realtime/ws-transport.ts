@@ -121,6 +121,9 @@ export class WebSocketTransport implements Transport {
       const socket = this.socket
       this.socket = null
       socket.removeAllListeners()
+      // A retired CONNECTING socket emits an asynchronous error when aborted.
+      // Keep that error owned after removing handlers that could reconnect it.
+      socket.on("error", () => {})
       this.closeSocketSafely(socket)
     }
   }
