@@ -3,23 +3,25 @@ title: "Hermes Agent"
 description: "Connect an existing Hermes Agent to Inline, locally or on an Umbrel server."
 ---
 
-## 1.0 alpha
+## Upgrade to 1.0
 
-The profile-isolated bridge is available as `1.0.0-alpha.2`. Install the exact
-alpha in the same user, home, profile, and npm prefix as the existing gateway:
+Adapter `1.0.0` is the current release. Hermes `0.22.6` and later refuse every
+message from earlier adapters, answering "Hermes refused this message
+(invalid_params)". Upgrade in the same user, home, profile, and npm prefix as
+the existing gateway:
 
 ```bash
-npm install -g @inline-chat/hermes-agent-adapter@1.0.0-alpha.2
+npm install -g @inline-chat/hermes-agent-adapter@latest
 inline-hermes install --force
 hermes gateway restart
 inline-hermes doctor --json
 hermes inline status --json --probe
 ```
 
-Restart at an idle boundary. Keep the existing profile state for recovery, and
-read the upgrade notes below. Verify a real inbound message and its final reply
-after restarting. The npm `latest` channel and the Hermes source catalog keep
-their separately released versions; installing either does not select this alpha.
+Restart at an idle boundary and read [Upgrading to 1.0](#upgrading-to-1-0)
+first: 1.0 changes when the bot answers. Verify a real inbound message and its
+final reply after restarting. `install --force` also replaces any local edits
+to the copied plugin files.
 
 ## Before you begin
 
@@ -36,8 +38,9 @@ it does not migrate or replace its models, memory, skills, or other channels.
 | Hermes version | Adapter `0.0.x` | Adapter `1.0.0` |
 | --- | --- | --- |
 | `0.21.3` (Umbrel app `2026.9.14`) – `0.21.5` | Supported from `0.0.20` | Supported |
-| `0.22.0` and later, one profile | Supported | Supported |
-| `0.22.0` and later, several profiles in one gateway | Not supported: every profile connects as the launch profile's bot and shares its state | Supported |
+| `0.22.0` – `0.22.5`, one profile | Supported | Supported |
+| `0.22.0` – `0.22.5`, several profiles in one gateway | Not supported: every profile connects as the launch profile's bot and shares its state | Supported |
+| `0.22.6` and later | Not supported: Hermes refuses every message | Supported |
 
 Hermes `0.22.0` runs every profile in one gateway process by default. Adapter
 `1.0.0` reads each profile's Inline settings and token from that profile, keeps
@@ -239,6 +242,10 @@ You can also install Inline from the [Hermes plugin catalog](https://hermes-agen
 ```bash
 hermes plugins install inline-platform
 ```
+
+The catalog pins a reviewed release and can lag npm. Hermes `0.22.6` and later
+need adapter `1.0.0`: check the version in `hermes plugins list`, and use the
+npm installation below if the catalog's is older.
 
 In the same Hermes home and profile, enable the plugin and configure the gateway:
 
