@@ -620,11 +620,14 @@ def _inline_menu_commands(max_commands: int = _INLINE_COMMAND_LIMIT) -> tuple[Li
 
 def _inline_skill_catalog() -> List[Dict[str, Any]]:
     """Return installed, enabled Hermes skills in the Bot API catalog shape."""
-    from tools.skills_tool import _find_all_skills, _sort_skills
+    import tools.skills_tool as skills_tool
 
+    # Hermes 0.22.5 made these public; older supported hosts keep the private names.
+    find_all = getattr(skills_tool, "find_all_skills", None) or getattr(skills_tool, "_find_all_skills")
+    sort = getattr(skills_tool, "sort_skills", None) or getattr(skills_tool, "_sort_skills")
     published: List[Dict[str, Any]] = []
     seen: set[str] = set()
-    for skill in _sort_skills(_find_all_skills(skip_disabled=False)):
+    for skill in sort(find_all(skip_disabled=False)):
         if len(published) >= 250:
             break
         key = str(skill.get("name") or "").strip()
@@ -2827,26 +2830,6 @@ class InlineAdapter(BasePlatformAdapter):
             reply_context_messages=context_backfill["reply_context_messages"],
             recent_messages=context_backfill["recent_messages"],
         )
-        metadata = self._inline_event_metadata(
-            chat_id=chat_id,
-            msg_id=msg_id,
-            from_id=from_id,
-            thread_id=thread_id,
-            parent_chat_id=parent_chat_id,
-            parent_message_id=parent_message_id,
-            entity_text=entity_text,
-        )
-        if agent_action:
-            metadata["inline"]["action"] = {
-                "event_kind": "message.action.invoke",
-                "actor_user_id": str(agent_action.get("actorUserId") or ""),
-                "chat_id": str(agent_action.get("chatId") or ""),
-                "target_message_id": str(agent_action.get("messageId") or ""),
-                "interaction_id": str(agent_action.get("interactionId") or ""),
-                "action_id": str(agent_action.get("actionId") or ""),
-                "callback_data_base64": str(agent_action.get("dataBase64") or ""),
-            }
-
         session_chat_id = _session_chat_id(chat_id, chat_type, thread_id, parent_chat_id)
         try:
             from . import tools as _inline_tools
@@ -2896,7 +2879,6 @@ class InlineAdapter(BasePlatformAdapter):
             auto_skill=auto_skill,
             channel_prompt=channel_prompt,
             channel_context=channel_context,
-            metadata=metadata,
             timestamp=self._timestamp(event.get("date") or msg.get("date")),
             allow_gateway_control=not bool(agent_action),
         ))
@@ -3879,33 +3861,6 @@ class InlineAdapter(BasePlatformAdapter):
             else:
                 prefix += " from an unknown sender"
         return f"{prefix}: {text}"
-
-    def _inline_event_metadata(
-        self,
-        *,
-        chat_id: str,
-        msg_id: str,
-        from_id: str,
-        thread_id: Optional[str],
-        parent_chat_id: Optional[str],
-        parent_message_id: Optional[str],
-        entity_text: Optional[str],
-    ) -> Dict[str, Any]:
-        inline: Dict[str, Any] = {
-            "chat_id": self._chat_key(chat_id),
-            "message_id": str(msg_id),
-        }
-        if from_id:
-            inline["sender_user_id"] = self._chat_key(from_id)
-        if thread_id:
-            inline["thread_id"] = self._chat_key(thread_id)
-        if parent_chat_id:
-            inline["parent_chat_id"] = self._chat_key(parent_chat_id)
-        if parent_message_id:
-            inline["parent_message_id"] = str(parent_message_id)
-        if entity_text:
-            inline["message_entities"] = entity_text
-        return {"inline": inline}
 
     @staticmethod
     def _reply_thread_title(text: str) -> str:

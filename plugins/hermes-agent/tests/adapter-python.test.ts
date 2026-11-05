@@ -2025,10 +2025,7 @@ async def assert_thread_bindings():
     assert "@user:u1" not in events[0].channel_prompt
     assert events[0].source.user_name == "Ada Lovelace"
     assert '[this thread](inline://thread?id=99)' in events[0].channel_prompt
-    assert events[0].metadata["inline"]["sender_user_id"] == "u1"
-    assert events[0].metadata["inline"]["thread_id"] == "99"
-    assert events[0].metadata["inline"]["parent_chat_id"] == "10"
-    assert events[0].metadata["inline"]["parent_message_id"] == "5"
+    assert not getattr(events[0], "metadata", None)  # Hermes native admission refuses adapter metadata
     assert events[0].auto_skill == ["triage", "bugs"]
 
 asyncio.run(assert_thread_bindings())
@@ -2078,9 +2075,7 @@ async def assert_reply_thread_chat_metadata():
     assert events[0].source.parent_chat_id == "123"
     assert events[0].channel_prompt.startswith("Parent prompt\n\nYou are handling an Inline message.")
     assert "This turn is already scoped to an Inline reply thread." in events[0].channel_prompt
-    assert events[0].metadata["inline"]["thread_id"] == "456"
-    assert events[0].metadata["inline"]["parent_chat_id"] == "123"
-    assert events[0].metadata["inline"]["parent_message_id"] == "9001"
+    assert not getattr(events[0], "metadata", None)  # Hermes native admission refuses adapter metadata
     assert events[0].auto_skill == ["parent-skill"]
 
 asyncio.run(assert_reply_thread_chat_metadata())
@@ -2120,7 +2115,7 @@ async def assert_default_auto_reply_threads_keep_fresh_parent_messages_flat():
     assert len(events) == 1
     assert events[0].source.chat_id == "10"
     assert events[0].source.thread_id is None
-    assert "thread_id" not in events[0].metadata["inline"]
+    assert not getattr(events[0], "metadata", None)  # Hermes native admission refuses adapter metadata
 
 asyncio.run(assert_default_auto_reply_threads_keep_fresh_parent_messages_flat())
 
@@ -2369,10 +2364,7 @@ async def assert_forced_reply_thread_creation():
     adapter._processing_reactions = False
     assert events[0].channel_prompt.startswith("Thread prompt\n\nYou are handling an Inline message.")
     assert "This turn is already scoped to an Inline reply thread." in events[0].channel_prompt
-    assert events[0].metadata["inline"]["thread_id"] == "99"
-    assert events[0].metadata["inline"]["parent_chat_id"] == "10"
-    assert events[0].metadata["inline"]["parent_message_id"] == "7"
-    assert events[0].metadata["inline"]["sender_user_id"] == "u1"
+    assert not getattr(events[0], "metadata", None)  # Hermes native admission refuses adapter metadata
     assert events[0].reply_to_message_id == "6"
     assert events[0].reply_to_text == "parent quote"
     assert events[0].auto_skill == ["thread-skill"]
@@ -2587,8 +2579,7 @@ async def assert_inline_entity_context():
     assert len(events) == 1
     summary = 'mention "Alice" -> user:99 | text link "docs" -> https://example.com/docs | thread link "thread" -> thread:77'
     assert events[0].channel_context == f"[Inline message entities]\n{summary}"
-    assert events[0].metadata["inline"]["message_entities"] == summary
-    assert events[0].metadata["inline"]["sender_user_id"] == "u1"
+    assert not getattr(events[0], "metadata", None)  # Hermes native admission refuses adapter metadata
     assert "Current Inline sender is" in events[0].channel_prompt
     assert "user:u1" in events[0].channel_prompt
     assert '[@Mo](inline://user?id=u1)' in events[0].channel_prompt
@@ -5750,15 +5741,7 @@ async def assert_agent_action_turn_and_same_message_response():
     assert action_turn.reply_to_text == "Approve proposal 17?"
     assert action_turn.reply_to_is_own_message is True
     assert action_turn.allow_gateway_control is False
-    assert action_turn.metadata["inline"]["action"] == {
-        "event_kind": "message.action.invoke",
-        "actor_user_id": "u1",
-        "chat_id": "10",
-        "target_message_id": "20",
-        "interaction_id": "30",
-        "action_id": "agent:1:1",
-        "callback_data_base64": callback_data,
-    }
+    assert not getattr(action_turn, "metadata", None)  # Hermes native admission refuses adapter metadata
 
     response = await adapter.send("10", "Approved revision 3.", reply_to=action_turn.message_id)
     assert response.success
