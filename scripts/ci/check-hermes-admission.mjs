@@ -46,9 +46,9 @@ const run = (bin, args, timeout = 180_000) => execFileSync(bin, args, { cwd: con
 assert.match(run(adapterBin, ["help"]), /inline-hermes install/)
 console.log(run(adapterBin, ["install", "--hermes-home", home, "--force", "--json"]))
 const pluginFiles = ["adapter.py", "cli.py", "tools.py", "plugin.yaml", "sidecar/index.mjs"]
-// Profile isolation ships in adapter v1; npm latest remains the 0.0.x line
-// during its alpha. Keep validating that published consumer without requiring
-// a module it never shipped. Every v1+ artifact must include the new module.
+// Profile isolation ships in adapter v1. A 0.0.x artifact predates the module;
+// keep validating such a consumer without requiring it. Every v1+ artifact must
+// include the new module.
 if (!installedManifest.version.startsWith("0.")) pluginFiles.push("profile.py")
 for (const file of pluginFiles) {
   assert.deepEqual(

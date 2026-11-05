@@ -116,7 +116,7 @@ try {
     const pkg = manifest.packages.find((entry) => entry.name === name)
     assert.ok(pkg, `missing ${name} candidate`)
     dependencies[name] = publishedHermes && name === "@inline-chat/hermes-agent-adapter"
-      ? "0.0.22"
+      ? "1.0.0"
       : `file:${path.join(artifactDir, pkg.file)}`
   }
   const consumer = await mkdtemp(path.join(os.tmpdir(), "inline-local-bot-flow-"))
@@ -125,7 +125,7 @@ try {
     cwd: consumer, stdio: "inherit", timeout: 180_000,
   })
   const hermesVersion = JSON.parse(await readFile(path.join(consumer, "node_modules/@inline-chat/hermes-agent-adapter/package.json"), "utf8")).version
-  if (publishedHermes) assert.equal(hermesVersion, "0.0.22", "published Hermes compatibility version")
+  if (publishedHermes) assert.equal(hermesVersion, "1.0.0", "published Hermes compatibility version")
   const flow = path.join(consumer, "flow.mjs")
   await writeFile(flow, await readFile(path.join(repoRoot, "scripts/ci/local-packed-flow.mjs")))
   execFileSync("bun", ["--no-env-file", flow], {
