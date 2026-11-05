@@ -179,7 +179,7 @@ xcodebuild_args=(
   CODE_SIGN_STYLE=Manual
   PROVISIONING_PROFILE_SPECIFIER=
 )
-xcodebuild_args+=("ASSETCATALOG_COMPILER_APPICON_NAME=InlineAppIconDebug")
+xcodebuild_args+=("ASSETCATALOG_COMPILER_APPICON_NAME=InlineAppIconDev")
 
 xcodebuild \
   "${xcodebuild_args[@]}" 2>&1 | tee "${BUILD_LOG_PATH}"
