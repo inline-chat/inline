@@ -978,6 +978,10 @@ message Message {
 
   // Explicit false suppresses unread for generated/historical rows.
   optional bool counts_as_unread = 26;
+
+  // Text quoted from the replied message, shown in the reply header. `message`
+  // holds only the caption. Older clients show a plain reply.
+  optional string reply_quote = 27;
 }
 
 // Agent providers that implement Inline's session continuity contract. The
@@ -4040,6 +4044,10 @@ message SendMessageInput {
   // is the flat fallback older clients render with `entities`. Cannot be
   // combined with parse_markdown.
   optional BlockContent block_content = 13;
+
+  // Text quoted from the replied message; `message` is only the caption.
+  // Ignored without reply_to_msg_id.
+  optional string reply_quote = 14;
 }
 
 message SendMessageResult { repeated Update updates = 2; }

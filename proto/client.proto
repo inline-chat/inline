@@ -11,6 +11,8 @@ message MessageContentPayload {
   MessageService service_message = 4;
   MessageSubthread subthread = 5;
   optional bool counts_as_unread = 6;
+  // Text quoted from the replied message; the message text is only the caption.
+  optional string reply_quote = 7;
 }
 
 message MessageVoiceContent {

@@ -6541,6 +6541,17 @@ public nonisolated struct Message: @unchecked Sendable {
   /// Clears the value of `countsAsUnread`. Subsequent reads from it will return its default value.
   public mutating func clearCountsAsUnread() {_uniqueStorage()._countsAsUnread = nil}
 
+  /// Text quoted from the replied message, shown in the reply header. `message`
+  /// holds only the caption. Older clients show a plain reply.
+  public var replyQuote: String {
+    get {_storage._replyQuote ?? String()}
+    set {_uniqueStorage()._replyQuote = newValue}
+  }
+  /// Returns true if `replyQuote` has been explicitly set.
+  public var hasReplyQuote: Bool {_storage._replyQuote != nil}
+  /// Clears the value of `replyQuote`. Subsequent reads from it will return its default value.
+  public mutating func clearReplyQuote() {_uniqueStorage()._replyQuote = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -18738,6 +18749,17 @@ public nonisolated struct SendMessageInput: @unchecked Sendable {
   public var hasBlockContent: Bool {_storage._blockContent != nil}
   /// Clears the value of `blockContent`. Subsequent reads from it will return its default value.
   public mutating func clearBlockContent() {_uniqueStorage()._blockContent = nil}
+
+  /// Text quoted from the replied message; `message` is only the caption.
+  /// Ignored without reply_to_msg_id.
+  public var replyQuote: String {
+    get {_storage._replyQuote ?? String()}
+    set {_uniqueStorage()._replyQuote = newValue}
+  }
+  /// Returns true if `replyQuote` has been explicitly set.
+  public var hasReplyQuote: Bool {_storage._replyQuote != nil}
+  /// Clears the value of `replyQuote`. Subsequent reads from it will return its default value.
+  public mutating func clearReplyQuote() {_uniqueStorage()._replyQuote = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -31598,7 +31620,7 @@ nonisolated extension MessageFormSelection: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Message"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{3}agent_session\0\u{1}subthread\0\u{3}counts_as_unread\0\u{4}V]\u{1}has_link\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{3}agent_session\0\u{1}subthread\0\u{3}counts_as_unread\0\u{3}reply_quote\0\u{4}U]\u{1}has_link\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -31628,6 +31650,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     var _agentSession: AgentSessionMessageInfo? = nil
     var _subthread: MessageSubthread? = nil
     var _countsAsUnread: Bool? = nil
+    var _replyQuote: String? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -31665,6 +31688,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       _agentSession = source._agentSession
       _subthread = source._subthread
       _countsAsUnread = source._countsAsUnread
+      _replyQuote = source._replyQuote
     }
   }
 
@@ -31709,6 +31733,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         case 24: try { try decoder.decodeSingularMessageField(value: &_storage._agentSession) }()
         case 25: try { try decoder.decodeSingularMessageField(value: &_storage._subthread) }()
         case 26: try { try decoder.decodeSingularBoolField(value: &_storage._countsAsUnread) }()
+        case 27: try { try decoder.decodeSingularStringField(value: &_storage._replyQuote) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
         }
@@ -31800,6 +31825,9 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       try { if let v = _storage._countsAsUnread {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 26)
       } }()
+      try { if let v = _storage._replyQuote {
+        try visitor.visitSingularStringField(value: v, fieldNumber: 27)
+      } }()
       try { if let v = _storage._hasLink_p {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
       } }()
@@ -31839,6 +31867,7 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         if _storage._agentSession != rhs_storage._agentSession {return false}
         if _storage._subthread != rhs_storage._subthread {return false}
         if _storage._countsAsUnread != rhs_storage._countsAsUnread {return false}
+        if _storage._replyQuote != rhs_storage._replyQuote {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -50766,7 +50795,7 @@ nonisolated extension InputMediaNudge: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SendMessageInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}message\0\u{3}reply_to_msg_id\0\u{3}random_id\0\u{1}media\0\u{3}is_sticker\0\u{1}entities\0\u{3}parse_markdown\0\u{3}send_mode\0\u{1}actions\0\u{3}initial_agent_context\0\u{3}source_chat_id\0\u{3}block_content\0\u{4}[\u{f}temporary_send_date\0\u{4}HN\u{1}has_link\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}message\0\u{3}reply_to_msg_id\0\u{3}random_id\0\u{1}media\0\u{3}is_sticker\0\u{1}entities\0\u{3}parse_markdown\0\u{3}send_mode\0\u{1}actions\0\u{3}initial_agent_context\0\u{3}source_chat_id\0\u{3}block_content\0\u{3}reply_quote\0\u{4}Z\u{f}temporary_send_date\0\u{4}HN\u{1}has_link\0")
 
   fileprivate class _StorageClass {
     var _peerID: InputPeer? = nil
@@ -50784,6 +50813,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _initialAgentContext: AgentThreadContext? = nil
     var _sourceChatID: Int64? = nil
     var _blockContent: BlockContent? = nil
+    var _replyQuote: String? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -50809,6 +50839,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       _initialAgentContext = source._initialAgentContext
       _sourceChatID = source._sourceChatID
       _blockContent = source._blockContent
+      _replyQuote = source._replyQuote
     }
   }
 
@@ -50840,6 +50871,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 11: try { try decoder.decodeSingularMessageField(value: &_storage._initialAgentContext) }()
         case 12: try { try decoder.decodeSingularInt64Field(value: &_storage._sourceChatID) }()
         case 13: try { try decoder.decodeSingularMessageField(value: &_storage._blockContent) }()
+        case 14: try { try decoder.decodeSingularStringField(value: &_storage._replyQuote) }()
         case 1000: try { try decoder.decodeSingularInt64Field(value: &_storage._temporarySendDate) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
@@ -50893,6 +50925,9 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
       try { if let v = _storage._blockContent {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
       } }()
+      try { if let v = _storage._replyQuote {
+        try visitor.visitSingularStringField(value: v, fieldNumber: 14)
+      } }()
       try { if let v = _storage._temporarySendDate {
         try visitor.visitSingularInt64Field(value: v, fieldNumber: 1000)
       } }()
@@ -50923,6 +50958,7 @@ nonisolated extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._initialAgentContext != rhs_storage._initialAgentContext {return false}
         if _storage._sourceChatID != rhs_storage._sourceChatID {return false}
         if _storage._blockContent != rhs_storage._blockContent {return false}
+        if _storage._replyQuote != rhs_storage._replyQuote {return false}
         return true
       }
       if !storagesAreEqual {return false}

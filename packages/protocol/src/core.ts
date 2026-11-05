@@ -2559,6 +2559,13 @@ export interface Message {
      * @generated from protobuf field: optional bool counts_as_unread = 26;
      */
     countsAsUnread?: boolean;
+    /**
+     * Text quoted from the replied message, shown in the reply header. `message`
+     * holds only the caption. Older clients show a plain reply.
+     *
+     * @generated from protobuf field: optional string reply_quote = 27;
+     */
+    replyQuote?: string;
 }
 /**
  * @generated from protobuf message AgentSessionMessageInfo
@@ -10829,6 +10836,13 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional BlockContent block_content = 13;
      */
     blockContent?: BlockContent;
+    /**
+     * Text quoted from the replied message; `message` is only the caption.
+     * Ignored without reply_to_msg_id.
+     *
+     * @generated from protobuf field: optional string reply_quote = 14;
+     */
+    replyQuote?: string;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -23268,7 +23282,8 @@ class Message$Type extends MessageType<Message> {
             { no: 23, name: "block_content", kind: "message", T: () => BlockContent },
             { no: 24, name: "agent_session", kind: "message", T: () => AgentSessionMessageInfo },
             { no: 25, name: "subthread", kind: "message", T: () => MessageSubthread },
-            { no: 26, name: "counts_as_unread", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 26, name: "counts_as_unread", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 27, name: "reply_quote", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -23368,6 +23383,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional bool counts_as_unread */ 26:
                     message.countsAsUnread = reader.bool();
                     break;
+                case /* optional string reply_quote */ 27:
+                    message.replyQuote = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -23461,6 +23479,9 @@ class Message$Type extends MessageType<Message> {
         /* optional bool counts_as_unread = 26; */
         if (message.countsAsUnread !== undefined)
             writer.tag(26, WireType.Varint).bool(message.countsAsUnread);
+        /* optional string reply_quote = 27; */
+        if (message.replyQuote !== undefined)
+            writer.tag(27, WireType.LengthDelimited).string(message.replyQuote);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -44944,7 +44965,8 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 10, name: "actions", kind: "message", T: () => MessageActions },
             { no: 11, name: "initial_agent_context", kind: "message", T: () => AgentThreadContext },
             { no: 12, name: "source_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 13, name: "block_content", kind: "message", T: () => BlockContent }
+            { no: 13, name: "block_content", kind: "message", T: () => BlockContent },
+            { no: 14, name: "reply_quote", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -45003,6 +45025,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional BlockContent block_content */ 13:
                     message.blockContent = BlockContent.internalBinaryRead(reader, reader.uint32(), options, message.blockContent);
                     break;
+                case /* optional string reply_quote */ 14:
+                    message.replyQuote = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -45060,6 +45085,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional BlockContent block_content = 13; */
         if (message.blockContent)
             BlockContent.internalBinaryWrite(message.blockContent, writer.tag(13, WireType.LengthDelimited).fork(), options).join();
+        /* optional string reply_quote = 14; */
+        if (message.replyQuote !== undefined)
+            writer.tag(14, WireType.LengthDelimited).string(message.replyQuote);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

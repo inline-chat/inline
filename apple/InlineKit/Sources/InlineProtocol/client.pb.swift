@@ -84,6 +84,16 @@ public nonisolated struct Client_MessageContentPayload: @unchecked Sendable {
   /// Clears the value of `countsAsUnread`. Subsequent reads from it will return its default value.
   public mutating func clearCountsAsUnread() {_uniqueStorage()._countsAsUnread = nil}
 
+  /// Text quoted from the replied message; the message text is only the caption.
+  public var replyQuote: String {
+    get {_storage._replyQuote ?? String()}
+    set {_uniqueStorage()._replyQuote = newValue}
+  }
+  /// Returns true if `replyQuote` has been explicitly set.
+  public var hasReplyQuote: Bool {_storage._replyQuote != nil}
+  /// Clears the value of `replyQuote`. Subsequent reads from it will return its default value.
+  public mutating func clearReplyQuote() {_uniqueStorage()._replyQuote = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -154,7 +164,7 @@ fileprivate nonisolated let _protobuf_package = "client"
 
 nonisolated extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".MessageContentPayload"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}voice\0\u{1}actions\0\u{1}replies\0\u{3}service_message\0\u{1}subthread\0\u{3}counts_as_unread\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}voice\0\u{1}actions\0\u{1}replies\0\u{3}service_message\0\u{1}subthread\0\u{3}counts_as_unread\0\u{3}reply_quote\0")
 
   fileprivate class _StorageClass {
     var _voice: Client_MessageVoiceContent? = nil
@@ -163,6 +173,7 @@ nonisolated extension Client_MessageContentPayload: SwiftProtobuf.Message, Swift
     var _serviceMessage: MessageService? = nil
     var _subthread: MessageSubthread? = nil
     var _countsAsUnread: Bool? = nil
+    var _replyQuote: String? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -179,6 +190,7 @@ nonisolated extension Client_MessageContentPayload: SwiftProtobuf.Message, Swift
       _serviceMessage = source._serviceMessage
       _subthread = source._subthread
       _countsAsUnread = source._countsAsUnread
+      _replyQuote = source._replyQuote
     }
   }
 
@@ -203,6 +215,7 @@ nonisolated extension Client_MessageContentPayload: SwiftProtobuf.Message, Swift
         case 4: try { try decoder.decodeSingularMessageField(value: &_storage._serviceMessage) }()
         case 5: try { try decoder.decodeSingularMessageField(value: &_storage._subthread) }()
         case 6: try { try decoder.decodeSingularBoolField(value: &_storage._countsAsUnread) }()
+        case 7: try { try decoder.decodeSingularStringField(value: &_storage._replyQuote) }()
         default: break
         }
       }
@@ -233,6 +246,9 @@ nonisolated extension Client_MessageContentPayload: SwiftProtobuf.Message, Swift
       try { if let v = _storage._countsAsUnread {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 6)
       } }()
+      try { if let v = _storage._replyQuote {
+        try visitor.visitSingularStringField(value: v, fieldNumber: 7)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -248,6 +264,7 @@ nonisolated extension Client_MessageContentPayload: SwiftProtobuf.Message, Swift
         if _storage._serviceMessage != rhs_storage._serviceMessage {return false}
         if _storage._subthread != rhs_storage._subthread {return false}
         if _storage._countsAsUnread != rhs_storage._countsAsUnread {return false}
+        if _storage._replyQuote != rhs_storage._replyQuote {return false}
         return true
       }
       if !storagesAreEqual {return false}

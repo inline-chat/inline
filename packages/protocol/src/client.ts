@@ -43,6 +43,12 @@ export interface MessageContentPayload {
      * @generated from protobuf field: optional bool counts_as_unread = 6;
      */
     countsAsUnread?: boolean;
+    /**
+     * Text quoted from the replied message; the message text is only the caption.
+     *
+     * @generated from protobuf field: optional string reply_quote = 7;
+     */
+    replyQuote?: string;
 }
 /**
  * @generated from protobuf message client.MessageVoiceContent
@@ -107,7 +113,8 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
             { no: 3, name: "replies", kind: "message", T: () => MessageReplies },
             { no: 4, name: "service_message", kind: "message", T: () => MessageService },
             { no: 5, name: "subthread", kind: "message", T: () => MessageSubthread },
-            { no: 6, name: "counts_as_unread", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 6, name: "counts_as_unread", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 7, name: "reply_quote", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<MessageContentPayload>): MessageContentPayload {
@@ -139,6 +146,9 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
                 case /* optional bool counts_as_unread */ 6:
                     message.countsAsUnread = reader.bool();
                     break;
+                case /* optional string reply_quote */ 7:
+                    message.replyQuote = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -169,6 +179,9 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
         /* optional bool counts_as_unread = 6; */
         if (message.countsAsUnread !== undefined)
             writer.tag(6, WireType.Varint).bool(message.countsAsUnread);
+        /* optional string reply_quote = 7; */
+        if (message.replyQuote !== undefined)
+            writer.tag(7, WireType.LengthDelimited).string(message.replyQuote);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
