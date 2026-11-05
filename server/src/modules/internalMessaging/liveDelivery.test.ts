@@ -1,15 +1,28 @@
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, spyOn } from "bun:test"
 import { randomUUID } from "node:crypto"
-import { type Update } from "@inline-chat/protocol/core"
+import { Message, Update, UpdatesPayload } from "@inline-chat/protocol/core"
 import { RealtimeDelivery } from "@in/server/protocol/server"
 import { InternalMessagingService } from "./service"
-import { decodeLiveDelivery, deliveryPartition, LiveRealtimeDelivery, MAX_LIVE_QUEUE_BYTES, MAX_LIVE_QUEUE_ENTRIES } from "./liveDelivery"
-import type { InternalEnvelope } from "./schemas"
+import { decodeLiveDelivery, deliveryPartition, LiveRealtimeDelivery, MAX_LIVE_ENVELOPE_BYTES, MAX_LIVE_QUEUE_BYTES, MAX_LIVE_QUEUE_ENTRIES, MAX_LIVE_RECIPIENTS, MAX_LIVE_UPDATE_BYTES } from "./liveDelivery"
+import { decodeEnvelope, encodeEnvelope, type InternalEnvelope } from "./schemas"
 import { distributedRealtimeConfig } from "./config"
 import { liveRequirements } from "./liveAuthorization"
+import { ENCRYPTION2_OVERHEAD_BYTES, Encryption2 } from "@in/server/modules/encryption/encryption2"
+import { Log } from "@in/server/utils/log"
 
 type Envelope = Extract<InternalEnvelope, { event: { kind: "RealtimeDelivery" } }>
 const reaction = (emoji = "👍"): Update[] => [{ update: { oneofKind: "deleteReaction", deleteReaction: { chatId: 9n, userId: 1n, messageId: 2n, emoji } } }]
+const message = (text: string): Update[] => [Update.create({ update: { oneofKind: "newMessage", newMessage: { message: Message.create({
+  id: 2n, chatId: 9n, fromId: 1n, peerId: { type: { oneofKind: "chat", chat: { chatId: 9n } } }, message: text,
+}) } } })]
+function messageOfSize(bytes: number): Update[] {
+  // Multibyte text stays below the product's 100k UTF-16-unit limit even at
+  // the 256 KiB serialized update ceiling. Account for protobuf framing.
+  const textBytes = bytes - (UpdatesPayload.toBinary({ updates: message("m".repeat(bytes)) }).byteLength - bytes)
+  const updates = message("漢".repeat(Math.floor(textBytes / 3)) + "a".repeat(textBytes % 3))
+  expect(UpdatesPayload.toBinary({ updates }).byteLength).toBe(bytes)
+  return updates
+}
 function fixture(enabled = true) {
   const published: Envelope[] = []
   const gate = { wait: Promise.resolve() }
@@ -17,7 +30,9 @@ function fixture(enabled = true) {
     bootId: randomUUID(), health: "ready", on: () => () => {},
     publish: async (input: Pick<Envelope, "target" | "event">, eventId: string) => {
       await gate.wait
-      published.push({ ...input, eventId, originBootId: service.bootId, version: 1 })
+      const envelope = decodeEnvelope(encodeEnvelope({ ...input, eventId, originBootId: service.bootId, version: 1 }))
+      if (envelope.event.kind !== "RealtimeDelivery") throw new Error("Unexpected event")
+      published.push(envelope as Envelope)
       return { status: "published", subscribers: 2 }
     },
   }
@@ -27,6 +42,65 @@ function fixture(enabled = true) {
 }
 
 describe("local-first live fanout", () => {
+  it("publishes and decodes a valid message update above the generic encryption ceiling", async () => {
+    const updates = message("m".repeat(24_576))
+    expect(UpdatesPayload.toBinary({ updates }).byteLength).toBeGreaterThan(20_000)
+    const { live, published } = fixture()
+    live.toUser(1, updates)
+    await live.stop()
+    expect(published).toHaveLength(1)
+    expect(decodeLiveDelivery(published[0]!).updates).toEqual(updates)
+    expect(live.diagnostics.dropped).toBe(0)
+  })
+  it("round-trips the full update ceiling and maximum recipient header through the broker frame", async () => {
+    const updates = messageOfSize(MAX_LIVE_UPDATE_BYTES)
+    const { live, published } = fixture()
+    for (let i = 0; i < MAX_LIVE_RECIPIENTS; i++) live.toUser(2_147_483_647 - i * 16, updates, 2_147_483_647)
+    await live.stop()
+    expect(published).toHaveLength(1)
+    const frame = decodeLiveDelivery(published[0]!)
+    expect(frame.updates).toEqual(updates)
+    expect(frame.userIds).toHaveLength(MAX_LIVE_RECIPIENTS)
+    expect(frame.skipSessionId).toBe(2_147_483_647n)
+    // The previous reader already supports this unchanged encrypted format.
+    const plaintext = Encryption2.decryptBinary(Buffer.from(published[0]!.event.payload, "base64"))
+    expect(plaintext.byteLength).toBeLessThanOrEqual(MAX_LIVE_ENVELOPE_BYTES)
+    expect(RealtimeDelivery.fromBinary(plaintext).updates).toEqual(updates)
+    expect(live.diagnostics.dropped).toBe(0)
+  })
+  it("rejects oversized updates on both publication and authenticated receive", async () => {
+    const { live, published } = fixture()
+    live.toUser(1, reaction())
+    await live.drain()
+    const oversized = messageOfSize(MAX_LIVE_UPDATE_BYTES + 1)
+    live.toUser(1, oversized)
+    await live.stop()
+    expect(published).toHaveLength(1)
+    expect(live.diagnostics.dropped).toBe(1)
+    const envelope = published[0]!
+    const frame = decodeLiveDelivery(envelope)
+    frame.updates = oversized
+    const payload = Encryption2.encryptWithLimit(RealtimeDelivery.toBinary(frame), MAX_LIVE_ENVELOPE_BYTES).toString("base64")
+    expect(() => decodeLiveDelivery({ ...envelope, event: { ...envelope.event, payload } })).toThrow("updates too large")
+    expect(() => decodeLiveDelivery({ ...envelope, event: { ...envelope.event,
+      payload: Buffer.alloc(MAX_LIVE_ENVELOPE_BYTES + ENCRYPTION2_OVERHEAD_BYTES + 1).toString("base64"),
+    } })).toThrow("envelope too large")
+  })
+  it("reports publication stage and numeric sizes without leaking failure or update contents", async () => {
+    const warning = spyOn(Log.prototype, "warn").mockImplementation(() => {})
+    try {
+      const { live, service } = fixture()
+      service.publish = async () => { throw new Error("private provider failure details") }
+      live.toUser(1, message("private message contents"))
+      await live.stop()
+      expect(warning).toHaveBeenCalledWith(
+        "Live realtime publication degraded; durable discovery remains available",
+        expect.objectContaining({ reason: "publication_failed", stage: "publish", recipientCount: 1,
+          updateBytes: expect.any(Number), envelopeBytes: expect.any(Number), dropped: 1 }),
+      )
+      expect(JSON.stringify(warning.mock.calls)).not.toContain("private")
+    } finally { warning.mockRestore() }
+  })
   it("defaults to local-only, permits explicit brokerless coordination, and rejects ambiguous mode settings", () => {
     expect(distributedRealtimeConfig({})).toEqual({ enabled: false, url: undefined })
     expect(distributedRealtimeConfig({ INLINE_REALTIME_DISTRIBUTED: "1" }).enabled).toBe(true)

@@ -19,6 +19,7 @@ const log = new Log("encryption2")
 const ALGORITHM = "aes-256-gcm"
 const IV_LENGTH = 12 // 96-bit IV for GCM (recommended length)
 const AUTH_TAG_LENGTH = 16 // 128-bit authentication tag
+export const ENCRYPTION2_OVERHEAD_BYTES = IV_LENGTH + AUTH_TAG_LENGTH
 // -----------------------------------------------------------------------------
 // Utilities
 // -----------------------------------------------------------------------------
@@ -41,11 +42,14 @@ const getEncryptionKey = (): Buffer => {
   return keyBuffer
 }
 
-const validatePlaintext = (buf: Buffer | Uint8Array): void => {
+const validatePlaintext = (buf: Buffer | Uint8Array, maxLength: number): void => {
+  if (!Number.isSafeInteger(maxLength) || maxLength <= 0) {
+    throw new Error("Maximum encrypted data length must be a positive safe integer")
+  }
   if (buf.byteLength === 0) {
     throw new Error("Data to encrypt cannot be empty")
   }
-  if (buf.byteLength > MAX_ENCRYPTED_DATA_LENGTH) {
+  if (buf.byteLength > maxLength) {
     throw new Error("Data exceeds maximum allowed length")
   }
 }
@@ -59,7 +63,12 @@ const validatePlaintext = (buf: Buffer | Uint8Array): void => {
  * contains IV, authTag, and ciphertext concatenated together.
  */
 export function encrypt(data: Buffer | Uint8Array): Buffer {
-  validatePlaintext(data)
+  return encryptWithLimit(data, MAX_ENCRYPTED_DATA_LENGTH)
+}
+
+/** Opt in to a caller-owned payload ceiling without weakening generic encryption. */
+export function encryptWithLimit(data: Buffer | Uint8Array, maxLength: number): Buffer {
+  validatePlaintext(data, maxLength)
 
   const key = getEncryptionKey()
   const iv = randomBytes(IV_LENGTH)
@@ -106,6 +115,7 @@ export const encryptBinary = encrypt
 
 export const Encryption2 = {
   encrypt,
+  encryptWithLimit,
   decryptBinary,
   decryptToString,
 }

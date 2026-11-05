@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { Update, UpdatesPayload } from "@inline-chat/protocol/core"
 import { RealtimeDelivery } from "@in/server/protocol/server"
-import { Encryption2 } from "@in/server/modules/encryption/encryption2"
+import { ENCRYPTION2_OVERHEAD_BYTES, Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { connectionManager } from "@in/server/ws/connections"
 import { isDistributedRealtimeEnabled } from "./config"
 import { internalMessaging, type InternalMessagingService } from "./service"
@@ -14,6 +14,12 @@ export const MAX_LIVE_UPDATE_BYTES = 256 * 1024
 export const MAX_LIVE_QUEUE_BYTES = 4 * 1024 * 1024
 export const MAX_LIVE_QUEUE_ENTRIES = 512
 export const MAX_LIVE_RECIPIENTS = 256
+// 256 packed positive int32 recipient IDs use at most 1,280 bytes. The two
+// UUIDs, expiry, optional IDs and protobuf framing fit well within the remaining
+// header allowance. Keep the same 256 KiB update-body limit on both sides.
+export const MAX_LIVE_ENVELOPE_BYTES = MAX_LIVE_UPDATE_BYTES + 4 * 1024
+const MAX_LIVE_CIPHERTEXT_BYTES = MAX_LIVE_ENVELOPE_BYTES + ENCRYPTION2_OVERHEAD_BYTES
+const MAX_LIVE_BASE64_LENGTH = Math.ceil(MAX_LIVE_CIPHERTEXT_BYTES / 3) * 4
 const ownedElsewhere = new Set<Update["update"]["oneofKind"]>([
   undefined, "updateComposeAction", "updateUserStatus", "botPresence", "chatSkipPts",
   "chatHasNewUpdates", "spaceHasNewUpdates", "userHasNewUpdates",
@@ -21,9 +27,14 @@ const ownedElsewhere = new Set<Update["update"]["oneofKind"]>([
 const log = new Log("internalMessaging.liveDelivery")
 type LiveEnvelope = Extract<InternalEnvelope, { event: { kind: "RealtimeDelivery" } }>
 type Pending = { bytes: Buffer; userIds: number[]; spaceId?: number; skipSessionId?: number; expiresAt: number; partition: number }
+type FailureStage = "decode" | "receive" | "update_encode" | "envelope_encode" | "encrypt" | "publish"
+type FailureDetails = { stage: FailureStage; updateBytes?: number; envelopeBytes?: number; updateCount?: number; recipientCount?: number }
 
 export function decodeLiveDelivery(envelope: LiveEnvelope, now = Date.now()): RealtimeDelivery {
-  const payload = RealtimeDelivery.fromBinary(Encryption2.decryptBinary(Buffer.from(envelope.event.payload, "base64")))
+  if (envelope.event.payload.length > MAX_LIVE_BASE64_LENGTH) throw new Error("Realtime delivery envelope too large")
+  const encrypted = Buffer.from(envelope.event.payload, "base64")
+  if (encrypted.byteLength > MAX_LIVE_CIPHERTEXT_BYTES) throw new Error("Realtime delivery envelope too large")
+  const payload = RealtimeDelivery.fromBinary(Encryption2.decryptBinary(encrypted))
   if (payload.version !== 1 || payload.eventId !== envelope.eventId || payload.originBootId !== envelope.originBootId ||
     payload.partition !== envelope.event.partition ||
     payload.expiresAtMs <= BigInt(now) || payload.expiresAtMs > BigInt(now + 10_000) ||
@@ -32,6 +43,9 @@ export function decodeLiveDelivery(envelope: LiveEnvelope, now = Date.now()): Re
     payload.userIds.length > MAX_LIVE_RECIPIENTS ||
     (payload.spaceId === undefined) === (payload.userIds.length === 0)) {
     throw new Error("Invalid realtime delivery envelope")
+  }
+  if (UpdatesPayload.toBinary({ updates: payload.updates }).byteLength > MAX_LIVE_UPDATE_BYTES) {
+    throw new Error("Realtime delivery updates too large")
   }
   for (const id of payload.userIds) positiveId(id)
   if (payload.userIds.some((id) => deliveryPartition(payload.updates, Number(id)) !== payload.partition) ||
@@ -69,10 +83,13 @@ export class LiveRealtimeDelivery {
     if (this.accepting || !this.runtime.enabled()) return
     this.accepting = true
     this.unsubscribe = this.service.on("RealtimeDelivery", async (envelope) => {
+      let stage: FailureStage = "decode"
       try {
-        await this.runtime.receive(decodeLiveDelivery(envelope))
+        const payload = decodeLiveDelivery(envelope)
+        stage = "receive"
+        await this.runtime.receive(payload)
         this.received++
-      } catch { this.drop("invalid_or_failed_delivery") }
+      } catch { this.drop("invalid_or_failed_delivery", { stage }) }
     })
   }
   async stop(): Promise<void> {
@@ -92,9 +109,11 @@ export class LiveRealtimeDelivery {
     if (!this.accepting || !this.runtime.enabled() || this.service.health !== "ready") return
     const selected = updates.filter((update) => !ownedElsewhere.has(update.update.oneofKind))
     if (selected.length === 0) return
+    let updateBytes: number | undefined
     try {
       if (selected.length > 64) throw new Error("Realtime update batch too large")
       const bytes = Buffer.from(UpdatesPayload.toBinary({ updates: selected }))
+      updateBytes = bytes.length
       if (bytes.length > MAX_LIVE_UPDATE_BYTES) throw new Error("Realtime update too large")
       const expiresAt = Date.now() + (selected.every((u) => u.update.oneofKind === "updateReaction" || u.update.oneofKind === "deleteReaction") ? 2_000 : 5_000)
       const partition = deliveryPartition(selected, target.userIds[0] ?? 0, target.spaceId)
@@ -116,13 +135,13 @@ export class LiveRealtimeDelivery {
       this.lastByPartition.set(partition, pending)
       this.bytes += size
       this.pump()
-    } catch { this.drop("unencodable_or_oversized") }
+    } catch { this.drop("unencodable_or_oversized", { stage: "update_encode", updateBytes, updateCount: selected.length }) }
   }
-  private drop(reason: string): void {
+  private drop(reason: string, details?: FailureDetails): void {
     this.dropped++
     if (Date.now() - this.lastWarningAt < 60_000) return
     this.lastWarningAt = Date.now()
-    log.warn("Live realtime publication degraded; durable discovery remains available", { reason, ...this.diagnostics })
+    log.warn("Live realtime publication degraded; durable discovery remains available", { reason, ...details, ...this.diagnostics })
   }
   private pump(): void {
     if (this.task || this.queue.length === 0) return
@@ -137,6 +156,8 @@ export class LiveRealtimeDelivery {
       if (this.lastByPartition.get(next.partition) === next) this.lastByPartition.delete(next.partition)
       this.bytes -= next.bytes.length + next.userIds.length * 8
       if (next.expiresAt <= Date.now() || this.service.health !== "ready") { this.drop("expired_or_unavailable"); continue }
+      let stage: FailureStage = "envelope_encode"
+      let envelopeBytes: number | undefined
       try {
         const eventId = randomUUID()
         const updates = UpdatesPayload.fromBinary(next.bytes).updates
@@ -147,12 +168,16 @@ export class LiveRealtimeDelivery {
           skipSessionId: next.skipSessionId === undefined ? undefined : BigInt(next.skipSessionId),
           updates, partition,
         })
+        envelopeBytes = payload.byteLength
+        stage = "encrypt"
+        const encrypted = Encryption2.encryptWithLimit(payload, MAX_LIVE_ENVELOPE_BYTES).toString("base64")
+        stage = "publish"
         const result = await this.service.publish({ target: { kind: "cluster" }, event: {
-          kind: "RealtimeDelivery", partition, payload: Encryption2.encrypt(payload).toString("base64"),
+          kind: "RealtimeDelivery", partition, payload: encrypted,
         } }, eventId)
         if (result.status === "published") this.published++
         else this.drop("broker_unavailable")
-      } catch { this.drop("publication_failed") }
+      } catch { this.drop("publication_failed", { stage, updateBytes: next.bytes.length, envelopeBytes, recipientCount: next.userIds.length }) }
     }
   }
 }
