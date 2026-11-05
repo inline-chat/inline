@@ -167,3 +167,20 @@ If `doctor` reports a sidecar hash mismatch after an upgrade, rerun:
 inline-hermes install --force
 inline-hermes doctor --json
 ```
+
+## Hermes Catalog Pin
+
+After every stable (`latest`) release, update the Inline entry in the Hermes
+catalog. `hermes plugins install inline-platform` installs that pinned commit,
+not npm, so a stale pin keeps catalog users on the old adapter.
+
+1. Pin the release tag's commit: `git rev-parse hermes-agent-v<version>^{commit}`.
+2. In a fork of `NousResearch/hermes-agent`, change only `sha` and `version` in
+   `plugin-catalog/inline-platform.yaml` (catalog PRs may touch nothing else).
+3. Run their admission checks locally against Hermes `main`:
+   `scripts/validate_plugin_catalog.py plugin-catalog/`,
+   `hermes plugins validate --install-deps <clone>/plugins/hermes-agent/plugin/inline`,
+   and `scripts/scan_plugin_payloads.py` on the same directory.
+4. Confirm the pinned plugin files match the published npm tarball byte-for-byte,
+   then open the PR with the adopted changes, the validation output and the
+   release CI and publish run links.
