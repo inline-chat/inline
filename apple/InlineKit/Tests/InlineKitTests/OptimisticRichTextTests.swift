@@ -22,16 +22,94 @@ struct OptimisticRichTextTests {
   func literalProjection() throws {
     let text = "😀 x^2 **bold** <u>literal</u> ![image](https://example.com/a.png)"
     let value = entities(entity(.math, 3, 3), entity(.bold, 7, 8))
-    let payload = try #require(BlockContentPayload.literalMath(text: text, entities: value))
+    let payload = try #require(BlockContentPayload.literalBlocks(text: text, entities: value))
     #expect(payload.content.blocks.count == 1)
     let paragraph = try #require(payload.content.blocks.first?.paragraph)
     #expect(paragraph.offset == 0)
     #expect(paragraph.length == Int64(text.utf16.count))
     #expect(paragraph.hasIsRtl && !paragraph.isRtl)
-    #expect(BlockContentPayload.literalMath(text: text, entities: nil) == nil)
-    #expect(BlockContentPayload.literalMath(text: text, entities: entities(entity(.bold, 3, 3))) == nil)
+    #expect(BlockContentPayload.literalBlocks(text: text, entities: nil) == nil)
+    #expect(BlockContentPayload.literalBlocks(text: text, entities: entities(entity(.bold, 3, 3))) == nil)
     let persisted = try #require(BlockContentPayload.fromDatabaseValue(payload.databaseValue))
     #expect(persisted == payload)
+  }
+
+  @Test("Whole-line quotes match the server projection")
+  func literalQuoteProjection() throws {
+    let text = "before\nquoted one\n\nquoted two\nreply"
+    let payload = try #require(BlockContentPayload.literalBlocks(text: text, entities: entities(entity(.blockquote, 7, 22))))
+    #expect(payload.content.blocks.map(\.kind) == [
+      .paragraph(.with { $0.length = 6; $0.isRtl = false }),
+      .quote(.with {
+        $0.children = [
+          .with { $0.paragraph = .with { $0.offset = 7; $0.length = 10; $0.isRtl = false } },
+          .with { $0.paragraph = .with { $0.offset = 19; $0.length = 10; $0.isRtl = false } },
+        ]
+        $0.isRtl = false
+      }),
+      .paragraph(.with { $0.offset = 30; $0.length = 5; $0.isRtl = false }),
+    ])
+    // A range that does not own whole lines, or crosses a code block, stays flat.
+    #expect(BlockContentPayload.literalBlocks(text: text, entities: entities(entity(.blockquote, 8, 5))) == nil)
+    #expect(BlockContentPayload.literalBlocks(
+      text: text,
+      entities: entities(entity(.blockquote, 7, 10), entity(.pre, 7, 22))
+    ) == nil)
+  }
+
+  @Test("A reply that opens with a quote moves the quote to the reply header")
+  func replyQuote() throws {
+    let text = "quoted one\n\nquoted two\nreply"
+    let payload = try #require(BlockContentPayload.literalBlocks(text: text, entities: entities(entity(.blockquote, 0, 22))))
+    func message(replyTo: Int64?, text: String = text, payload: BlockContentPayload? = payload) -> InlineKit.Message {
+      InlineKit.Message(
+        messageId: 2, fromId: 1, date: Date(), text: text, peerUserId: 1, peerThreadId: nil, chatId: 1,
+        repliedToMessageId: replyTo, blockContentPayload: payload
+      )
+    }
+
+    let quote = try #require(message(replyTo: 1).replyQuote)
+    #expect(quote.text == "quoted one\nquoted two")
+    #expect(quote.body.blocks.map(\.kind) == [.paragraph(.with { $0.offset = 23; $0.length = 5; $0.isRtl = false })])
+    #expect(quote.bodyCacheSignature != payload.cacheSignature)
+
+    // Not a reply, no reply text after the quote, or no leading quote: the body keeps everything.
+    #expect(message(replyTo: nil).replyQuote == nil)
+    let quoteOnly = "quoted"
+    #expect(message(
+      replyTo: 1,
+      text: quoteOnly,
+      payload: BlockContentPayload.literalBlocks(text: quoteOnly, entities: entities(entity(.blockquote, 0, 6)))
+    ).replyQuote == nil)
+    let late = "reply\nquoted"
+    #expect(message(
+      replyTo: 1,
+      text: late,
+      payload: BlockContentPayload.literalBlocks(text: late, entities: entities(entity(.blockquote, 6, 6)))
+    ).replyQuote == nil)
+  }
+
+  @Test("A confirmed send from a server without quote blocks keeps the quote")
+  func serverWithoutQuoteBlocks() throws {
+    let text = "quoted\nreply"
+    let echo = InlineProtocol.Message.with {
+      $0.id = 2
+      $0.chatID = 1
+      $0.fromID = 1
+      $0.message = text
+      $0.replyToMsgID = 1
+      $0.entities = entities(entity(.blockquote, 0, 6))
+    }
+    let quote = try #require(InlineKit.Message(from: echo).replyQuote)
+    #expect(quote.text == "quoted")
+
+    // Blocks the server did send are kept as they are.
+    let projected = InlineProtocol.Message.with {
+      $0.message = text
+      $0.entities = entities(entity(.blockquote, 0, 6))
+      $0.blockContent = .with { $0.blocks = [.with { $0.paragraph = .with { $0.length = 12 } }] }
+    }
+    #expect(InlineKit.Message(from: projected).blockContent?.blocks.count == 1)
   }
 
   @Test("Display math keeps structural blocks only when the entity owns its line")
@@ -40,14 +118,14 @@ struct OptimisticRichTextTests {
     let displayEntities = entities(displayMath(7, 1))
     let encoded = try JSONEncoder().encode(displayEntities)
     #expect(try JSONDecoder().decode(MessageEntities.self, from: encoded) == displayEntities)
-    let payload = try #require(BlockContentPayload.literalMath(text: text, entities: displayEntities))
+    let payload = try #require(BlockContentPayload.literalBlocks(text: text, entities: displayEntities))
     #expect(payload.content.blocks.map(\.kind) == [
       .paragraph(.with { $0.length = 6; $0.isRtl = false }),
       .math(.with { $0.offset = 7; $0.length = 1 }),
       .paragraph(.with { $0.offset = 9; $0.length = 5; $0.isRtl = false }),
     ])
 
-    let mixed = try #require(BlockContentPayload.literalMath(
+    let mixed = try #require(BlockContentPayload.literalBlocks(
       text: "prefix x suffix", entities: entities(displayMath(7, 1))
     ))
     #expect(mixed.content.blocks.count == 1)
@@ -59,14 +137,14 @@ struct OptimisticRichTextTests {
     let text = "😀 x^2"
     let invalid: [(Int64, Int64)] = [(-1, 1), (0, 0), (0, -1), (0, .max), (.max, 1), (0, 1), (1, 1), (6, 1)]
     for (offset, length) in invalid {
-      #expect(BlockContentPayload.literalMath(text: text, entities: entities(entity(.math, offset, length))) == nil)
+      #expect(BlockContentPayload.literalBlocks(text: text, entities: entities(entity(.math, offset, length))) == nil)
     }
     for type: MessageEntity.TypeEnum in [.code, .pre] {
-      #expect(BlockContentPayload.literalMath(text: text, entities: entities(entity(.math, 3, 3), entity(type, 4, 1))) == nil)
+      #expect(BlockContentPayload.literalBlocks(text: text, entities: entities(entity(.math, 3, 3), entity(type, 4, 1))) == nil)
     }
     // A malformed code range cannot suppress an otherwise valid formula.
-    #expect(BlockContentPayload.literalMath(text: text, entities: entities(entity(.math, 3, 3), entity(.code, -1, 99))) != nil)
-    #expect(BlockContentPayload.literalMath(text: String(repeating: "a", count: 131_073), entities: entities(entity(.math, 0, 1))) == nil)
+    #expect(BlockContentPayload.literalBlocks(text: text, entities: entities(entity(.math, 3, 3), entity(.code, -1, 99))) != nil)
+    #expect(BlockContentPayload.literalBlocks(text: String(repeating: "a", count: 131_073), entities: entities(entity(.math, 0, 1))) == nil)
   }
 
   @Test("Optimistic paragraph direction agrees with the server first-letter policy")
@@ -77,7 +155,7 @@ struct OptimisticRichTextTests {
       ("\u{1E900} x^2", true), ("Ⅳ x^2", false),
     ]
     for (source, direction) in cases {
-      let payload = try #require(BlockContentPayload.literalMath(text: source, entities: entities(entity(.math, 0, Int64(source.utf16.count)))))
+      let payload = try #require(BlockContentPayload.literalBlocks(text: source, entities: entities(entity(.math, 0, Int64(source.utf16.count)))))
       let span = try #require(payload.content.blocks.first?.paragraph)
       #expect(span.hasIsRtl == (direction != nil))
       if let direction { #expect(span.isRtl == direction) }

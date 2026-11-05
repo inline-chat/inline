@@ -1571,6 +1571,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     )
     NotificationCenter.default.addObserver(
       self,
+      selector: #selector(handleQuote(_:)),
+      name: .init("ChatStateQuoteCalled"),
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
       selector: #selector(handleForwardStateChange),
       name: .init("ChatStateSetForwardCalled"),
       object: nil
@@ -1619,10 +1625,14 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
             text: text,
             entities: message.message.entities,
             configuration: configuration
-          ) : ProcessEntities.toAttributedString(
-            text: text,
+          ) : MessageMarkdown.withQuoteSyntax(
+            ProcessEntities.toAttributedString(
+              text: text,
+              entities: message.message.entities,
+              configuration: configuration
+            ),
             entities: message.message.entities,
-            configuration: configuration
+            attributes: [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: UIColor.label]
           )
 
           textView.attributedText = attributedText
@@ -1652,6 +1662,18 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   @objc private func handleReplyStateChange() {
     updateEmbedState(animated: true)
     updateAgentReplyTarget()
+  }
+
+  /// Puts quote lines before anything already typed, through the normal input path,
+  /// and leaves the cursor at the end so the reply is typed below the quote.
+  @objc private func handleQuote(_ notification: Notification) {
+    guard let peerId, (notification.userInfo?["peer"] as? InlineKit.Peer) == peerId,
+          let markdown = notification.userInfo?["markdown"] as? String else { return }
+    textView.resetTypingAttributesToDefault()
+    textView.selectedRange = NSRange(location: 0, length: 0)
+    textView.insertText(markdown)
+    textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
+    textView.becomeFirstResponder()
   }
 
   @objc private func handleForwardStateChange() {

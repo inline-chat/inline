@@ -310,6 +310,9 @@ final class RichBlockContentView: NSView, NSUserInterfaceValidations {
   }
 
   var hasMultiSurfaceSelection: Bool { multiSurfaceSelection.hasSelection }
+  var multiSurfaceSelectedText: NSAttributedString? {
+    multiSurfaceSelection.hasSelection ? multiSurfaceSelection.selectedText : nil
+  }
 
   func retargetMultiSurfaceCopy(in menu: NSMenu) -> NSMenu {
     guard multiSurfaceSelection.hasSelection else { return menu }

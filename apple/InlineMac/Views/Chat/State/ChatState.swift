@@ -86,6 +86,8 @@ class ChatState {
   public let editingMsgIdPublisher = PassthroughSubject<Int64?, Never>()
   public let forwardContextPublisher = PassthroughSubject<ForwardContext?, Never>()
   public let sendSilentlyPublisher = PassthroughSubject<Bool, Never>()
+  /// Quote lines for the composer to place before what is already typed.
+  public let quotePublisher = PassthroughSubject<String, Never>()
 
   struct ForwardContext: Codable {
     var fromPeerId: Peer
@@ -121,6 +123,12 @@ class ChatState {
     data.replyingToMsgId = id
     replyingToMsgIdPublisher.send(id)
     save()
+  }
+
+  /// Replies to a message and starts the composer with `markdown` quote lines.
+  public func quote(_ markdown: String, replyingTo id: Int64) {
+    setReplyingToMsgId(id)
+    quotePublisher.send(markdown)
   }
 
   public func clearReplyingToMsgId() {

@@ -2852,7 +2852,14 @@ export enum MessageEntity_Type {
      *
      * @generated from protobuf enum value: TYPE_MATH = 18;
      */
-    MATH = 18
+    MATH = 18,
+    /**
+     * Whole-line quote range. Composer "> " prefixes are not part of the text;
+     * older clients keep the quoted text visible without the quote style.
+     *
+     * @generated from protobuf enum value: TYPE_BLOCKQUOTE = 19;
+     */
+    BLOCKQUOTE = 19
 }
 /**
  * @generated from protobuf message MessageReactions

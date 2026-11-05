@@ -52,6 +52,7 @@ export type BotMessageEntityType =
   | "strikethrough"
   | "highlight"
   | "math"
+  | "blockquote"
   | "code"
   | "pre"
   | "phone_number"

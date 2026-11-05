@@ -148,7 +148,7 @@ final class RichBlockMultiSurfaceSelectionCoordinator {
     return wrote
   }
 
-  private var selectedText: NSAttributedString? {
+  var selectedText: NSAttributedString? {
     guard surfaces.count == ranges.count else { return nil }
     return RichTextMultiSurfaceSelection.attributedText(
       document: document,

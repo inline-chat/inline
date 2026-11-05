@@ -464,12 +464,20 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       videoId: from.media.video.hasVideo ? from.media.video.video.id : nil,
       documentId: from.media.document.hasDocument ? from.media.document.document.id : nil,
       contentPayload: Self.contentPayload(from: from),
-      blockContentPayload: from.hasBlockContent ? BlockContentPayload(from.blockContent) : nil,
+      blockContentPayload: from.hasBlockContent ? BlockContentPayload(from.blockContent) : Self.quoteBlocks(from),
       actions: from.hasActions ? from.actions : nil,
       isSticker: from.isSticker,
       hasLink: from.hasHasLink_p ? from.hasLink_p : nil,
       entities: from.hasEntities ? from.entities : nil
     )
+  }
+
+  /// Quote blocks for a message whose server did not project them. Servers from
+  /// before quotes keep the blockquote range but send no blocks; without this the
+  /// optimistic quote turns back into flat text once the send is confirmed.
+  private static func quoteBlocks(_ from: InlineProtocol.Message) -> BlockContentPayload? {
+    guard from.hasEntities, from.entities.entities.contains(where: { $0.type == .blockquote }) else { return nil }
+    return .literalBlocks(text: from.message, entities: from.entities)
   }
 
   public static let preview = Message(

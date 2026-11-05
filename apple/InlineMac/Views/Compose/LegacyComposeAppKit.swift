@@ -607,6 +607,11 @@ class LegacyComposeAppKit: NSView {
         focus()
       }.store(in: &cancellables)
 
+    state.quotePublisher
+      .sink { [weak self] markdown in
+        self?.insertQuote(markdown)
+      }.store(in: &cancellables)
+
     state.editingMsgIdPublisher
       .sink { [weak self] editingMsgId in
         guard let self else { return }
@@ -1555,9 +1560,13 @@ class LegacyComposeAppKit: NSView {
               linkColor: ComposeTextEditor.linkColor,
               convertMentionsToLink: false
             )
-          ) : toAttributedString(
-            text: message.message.text ?? "",
-            entities: message.message.entities
+          ) : MessageMarkdown.withQuoteSyntax(
+            toAttributedString(
+              text: message.message.text ?? "",
+              entities: message.message.entities
+            ),
+            entities: message.message.entities,
+            attributes: [.font: ComposeTextEditor.font, .foregroundColor: ComposeTextEditor.textColor]
           )
 
           // TODO: Extract these to a function
@@ -2148,6 +2157,16 @@ class LegacyComposeAppKit: NSView {
     if !window.isKeyWindow {
       window.makeKeyAndOrderFront(nil)
     }
+  }
+
+  /// Puts quote lines before anything already typed, through the normal input path,
+  /// and leaves the cursor at the end so the reply is typed below the quote.
+  private func insertQuote(_ markdown: String) {
+    let textView = textEditor.textView
+    textView.updateTypingAttributesIfNeeded()
+    textView.insertText(markdown, replacementRange: NSRange(location: 0, length: 0))
+    textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+    focus()
   }
 
   // TODO: Abstract setAttributedString out of this

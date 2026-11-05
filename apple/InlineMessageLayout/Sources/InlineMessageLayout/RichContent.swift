@@ -143,7 +143,8 @@ public struct RichLayoutMetrics: Hashable, Sendable {
   public var listMarkerGap: CGFloat = 6
   public var unorderedMarkerWidth: CGFloat = 16
   public var quoteLeadingInset: CGFloat = 9
-  public var quoteTrailingInset: CGFloat = 9
+  // Leaves room for the quote mark in the trailing top corner.
+  public var quoteTrailingInset: CGFloat = 17
   public var quoteVerticalInset: CGFloat = 6
   public var codeHeaderHeight: CGFloat = 21
   public var codeHorizontalInset: CGFloat = 8

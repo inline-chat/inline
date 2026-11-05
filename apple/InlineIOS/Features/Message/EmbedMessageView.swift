@@ -16,6 +16,7 @@ class EmbedMessageView: UIView {
     static let thumbnailSize: CGFloat = 32
     static let thumbnailCornerRadius: CGFloat = 4
     static let thumbnailOverlayPointSize: CGFloat = 16
+    static let quoteIconPointSize: CGFloat = 9
   }
 
   enum Kind {
@@ -37,10 +38,23 @@ class EmbedMessageView: UIView {
     + UIFont.systemFont(ofSize: 14).lineHeight)
 
   /// The width a reply quote needs to show its sender and preview line without truncating.
-  static func preferredReplyWidth(for embedded: EmbeddedMessage?, traits: UITraitCollection) -> CGFloat {
+  /// `quote` is the part of the replied message the reply quotes; it replaces the preview line.
+  static func preferredReplyWidth(
+    for embedded: EmbeddedMessage?,
+    quote: String? = nil,
+    traits: UITraitCollection
+  ) -> CGFloat {
     guard let embedded else { return 120 }
     let message = embedded.message
     let senderName = embedded.from?.shortDisplayName ?? "User"
+    if let quote {
+      let header = ChatTypography.font(14, weight: .medium, compatibleWith: traits)
+      let body = ChatTypography.font(14, compatibleWith: traits)
+      let headerWidth = (senderName as NSString).size(withAttributes: [.font: header]).width
+      let bodyWidth = (quotePreview(quote) as NSString).size(withAttributes: [.font: body]).width
+      return ceil(Constants.rectangleWidth + Constants.contentSpacing + max(headerWidth, bodyWidth)
+        + Constants.horizontalPadding + Constants.quoteIconPointSize + 4)
+    }
     let preview = messageContent(
       for: message,
       displayText: embedded.displayText,
@@ -102,6 +116,19 @@ class EmbedMessageView: UIView {
     label.numberOfLines = 1
     label.lineBreakMode = .byTruncatingTail
     return label
+  }()
+
+  /// Set when the message quotes part of the replied message; the header then shows the quote.
+  private var isQuote = false
+
+  private lazy var quoteIconView: UIImageView = {
+    let view = UIImageView(image: UIImage(
+      systemName: "quote.closing",
+      withConfiguration: UIImage.SymbolConfiguration(pointSize: Constants.quoteIconPointSize, weight: .semibold)
+    ))
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isHidden = true
+    return view
   }()
 
   private lazy var messageLabel: UILabel = {
@@ -261,8 +288,10 @@ class EmbedMessageView: UIView {
     isOnlyEmoji: Bool,
     style: Style? = nil,
     senderNameOverride: String? = nil,
-    thumbnailReloadMessage: Message? = nil
+    thumbnailReloadMessage: Message? = nil,
+    quote: String? = nil
   ) {
+    setQuote(quote != nil)
     updateView(
       message: embeddedMessage.message,
       from: embeddedMessage.from,
@@ -277,6 +306,10 @@ class EmbedMessageView: UIView {
       style: style,
       senderNameOverride: senderNameOverride
     )
+    if let quote {
+      messageLabel.text = Self.quotePreview(quote)
+      imageIconView.isHidden = true
+    }
   }
 
   func configure(
@@ -287,6 +320,7 @@ class EmbedMessageView: UIView {
     style: Style? = nil,
     senderNameOverride: String? = nil
   ) {
+    setQuote(false)
     updateView(
       message: fullMessage.message,
       from: fullMessage.from,
@@ -330,6 +364,7 @@ private extension EmbedMessageView {
     addSubview(thumbnailContainer)
     addSubview(headerLabel)
     addSubview(messageStackView)
+    addSubview(quoteIconView)
 
     thumbnailContainer.addSubview(thumbnailView)
     thumbnailContainer.addSubview(thumbnailOverlayView)
@@ -395,6 +430,9 @@ private extension EmbedMessageView {
         equalTo: bottomAnchor,
         constant: -Constants.verticalPadding
       ),
+
+      quoteIconView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+      quoteIconView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
     ])
 
     applyLeadingBarAppearance()
@@ -654,6 +692,7 @@ private extension EmbedMessageView {
 
         headerLabel.textColor = headerColor
         messageLabel.textColor = textColor
+        quoteIconView.tintColor = headerColor
         rectangleView.backgroundColor = rectangleColor
         imageIconView.tintColor = textColor
 
@@ -694,9 +733,22 @@ private extension EmbedMessageView {
     }
   }
 
+  static func quotePreview(_ quote: String) -> String {
+    quote.replacingOccurrences(of: "\n", with: " ")
+  }
+
+  func setQuote(_ isQuote: Bool) {
+    guard isQuote != self.isQuote else { return }
+    self.isQuote = isQuote
+    quoteIconView.isHidden = !isQuote
+    applyTextPadding()
+  }
+
   func applyTextPadding() {
-    headerTrailingConstraint?.constant = -textTrailingPadding
-    messageTrailingConstraint?.constant = -textTrailingPadding
+    // Keep the name and quoted text clear of the quote mark.
+    let trailing = textTrailingPadding + (isQuote ? Constants.quoteIconPointSize + 4 : 0)
+    headerTrailingConstraint?.constant = -trailing
+    messageTrailingConstraint?.constant = -trailing
     if textLeadingToRectangleConstraint?.isActive == true, !(showsLeadingBar && style == .replyBubble) {
       textLeadingToRectangleConstraint?.constant = textLeadingPadding
     }

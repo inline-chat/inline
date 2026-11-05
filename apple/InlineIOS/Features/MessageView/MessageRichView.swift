@@ -278,17 +278,24 @@ private final class RichCodeView: UIView {
   }
 }
 
+/// Telegram-style quote: accent tint at 10%, a square rail clipped by the rounded block,
+/// and a small closing quote mark in the trailing top corner.
 private final class RichQuoteView: UIView {
   private let rail = UIView()
+  private let icon = UIImageView(image: UIImage(
+    systemName: "quote.closing",
+    withConfiguration: UIImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+  ))
   private var isRightToLeft = false
 
   override init(frame: CGRect) {
     super.init(frame: frame)
-    layer.cornerRadius = 7
+    layer.cornerRadius = 4
     layer.cornerCurve = .continuous
     clipsToBounds = true
-    rail.layer.cornerRadius = 1.5
+    icon.contentMode = .scaleAspectFit
     addSubview(rail)
+    addSubview(icon)
     isUserInteractionEnabled = false
   }
 
@@ -299,14 +306,16 @@ private final class RichQuoteView: UIView {
 
   func configure(isRightToLeft: Bool, palette: MessageRichView.Palette) {
     self.isRightToLeft = isRightToLeft
-    backgroundColor = palette.subtleFill
+    backgroundColor = palette.accent.withAlphaComponent(0.1)
     rail.backgroundColor = palette.accent
+    icon.tintColor = palette.accent
     setNeedsLayout()
   }
 
   override func layoutSubviews() {
     super.layoutSubviews()
     rail.frame = CGRect(x: isRightToLeft ? bounds.width - 3 : 0, y: 0, width: 3, height: bounds.height)
+    icon.frame = CGRect(x: isRightToLeft ? 4 : bounds.width - 4 - 9, y: 4, width: 9, height: 9)
   }
 }
 

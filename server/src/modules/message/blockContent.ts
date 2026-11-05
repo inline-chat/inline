@@ -115,9 +115,10 @@ export function parseBlockContent(
   return result.kind === "parsed" ? result.value : undefined
 }
 
-/** Native entity input is already canonical. Give inline math a render surface
- * without interpreting literal Markdown, tags, links, or image syntax again. */
-export function projectLiteralMathContent(text: string, entities: MessageEntities | undefined): ParsedBlockContent | undefined {
+/** Native entity input is already canonical. Give math and whole-line quotes a
+ * render surface without interpreting literal Markdown, tags, links, or image
+ * syntax again. */
+export function projectLiteralBlockContent(text: string, entities: MessageEntities | undefined): ParsedBlockContent | undefined {
   if (text.length === 0 || text.length > 131_072) return undefined
   const values = entities?.entities ?? []
   const length = BigInt(text.length)
@@ -133,7 +134,8 @@ export function projectLiteralMathContent(text: string, entities: MessageEntitie
   const code = values.filter((entity) => entity && (entity.type === MessageEntity_Type.CODE || entity.type === MessageEntity_Type.PRE) && validRange(entity))
   const math = values.filter((entity) => entity?.type === MessageEntity_Type.MATH && validRange(entity)
     && !code.some((range) => entity.offset < range.offset + range.length && range.offset < entity.offset + entity.length))
-  if (math.length === 0) return undefined
+  const quoteEntities = values.filter((entity) => entity?.type === MessageEntity_Type.BLOCKQUOTE && validRange(entity))
+  if (math.length === 0 && quoteEntities.length === 0) return undefined
 
   const lineStart = (offset: number): number => {
     let cursor = offset
@@ -149,35 +151,69 @@ export function projectLiteralMathContent(text: string, entities: MessageEntitie
     if (text[offset] === "\r" && text[offset + 1] === "\n") return offset + 2
     return text[offset] === "\r" || text[offset] === "\n" ? offset + 1 : offset
   }
+  // A quote owns whole lines. Code blocks keep their own fence, so a quote may
+  // contain inline code but never cut through a PRE block.
+  const quotes = quoteEntities
+    .map((entity) => ({ start: Number(entity.offset), end: Number(entity.offset + entity.length) }))
+    .filter(({ start, end }) => lineStart(start) === start && lineEnd(end) === end
+      && text.slice(start, end).trim().length > 0
+      && !code.some((range) => range.type === MessageEntity_Type.PRE
+        && Number(range.offset) < end && start < Number(range.offset + range.length)))
+    .sort((a, b) => a.start - b.start || a.end - b.end)
+  const nonOverlappingQuotes: typeof quotes = []
+  for (const range of quotes) {
+    if (range.start >= (nonOverlappingQuotes.at(-1)?.end ?? 0)) nonOverlappingQuotes.push(range)
+  }
   const display = math.filter((entity) => entity.entity.oneofKind === "math" && entity.entity.math.display)
     .map((entity) => ({ entity, start: Number(entity.offset), end: Number(entity.offset + entity.length) }))
     .filter(({ start, end }) => {
       const prefix = text.slice(lineStart(start), start)
       const suffix = text.slice(end, lineEnd(end))
       return /^ {0,3}$/.test(prefix) && suffix.trim().length === 0
+        && !nonOverlappingQuotes.some((quote) => quote.start < end && start < quote.end)
     })
     .sort((a, b) => a.start - b.start || a.end - b.end)
   const nonOverlappingDisplay: typeof display = []
   for (const range of display) {
     if (range.start >= (nonOverlappingDisplay.at(-1)?.end ?? 0)) nonOverlappingDisplay.push(range)
   }
+  if (nonOverlappingDisplay.length === 0 && nonOverlappingQuotes.length === 0 && math.length === 0) return undefined
 
-  const blocks: Block[] = []
-  const appendParagraph = (start: number, end: number): void => {
+  const appendParagraph = (target: Block[], start: number, end: number): void => {
     while (start < end && (text[start] === "\n" || text[start] === "\r")) start++
     while (end > start && (text[end - 1] === "\n" || text[end - 1] === "\r")) end--
     if (text.slice(start, end).trim().length > 0) {
-      blocks.push(paragraphBlock({ offset: BigInt(start), length: BigInt(end - start) }))
+      target.push(paragraphBlock({ offset: BigInt(start), length: BigInt(end - start) }))
     }
   }
+  const sections = [
+    ...nonOverlappingDisplay.map((range) => ({ kind: "math" as const, ...range })),
+    ...nonOverlappingQuotes.map((range) => ({ kind: "quote" as const, ...range })),
+  ].sort((a, b) => a.start - b.start)
+
+  const blocks: Block[] = []
   let cursor = 0
-  for (const range of nonOverlappingDisplay) {
-    const start = lineStart(range.start)
-    appendParagraph(cursor, start)
-    blocks.push({ kind: { oneofKind: "math", math: { offset: range.entity.offset, length: range.entity.length } } })
-    cursor = consumeLineBreak(lineEnd(range.end))
+  for (const section of sections) {
+    appendParagraph(blocks, cursor, lineStart(section.start))
+    if (section.kind === "math") {
+      blocks.push({ kind: { oneofKind: "math", math: { offset: section.entity.offset, length: section.entity.length } } })
+      cursor = consumeLineBreak(lineEnd(section.end))
+      continue
+    }
+    // Blank lines inside a quote separate its paragraphs, as in Markdown.
+    const children: Block[] = []
+    let paragraphStart = section.start
+    for (let line = section.start; line < section.end; line = consumeLineBreak(lineEnd(line))) {
+      if (text.slice(line, lineEnd(line)).trim().length === 0) {
+        appendParagraph(children, paragraphStart, line)
+        paragraphStart = consumeLineBreak(lineEnd(line))
+      }
+    }
+    appendParagraph(children, paragraphStart, section.end)
+    blocks.push({ kind: { oneofKind: "quote", quote: { children } } })
+    cursor = consumeLineBreak(section.end)
   }
-  appendParagraph(cursor, text.length)
+  appendParagraph(blocks, cursor, text.length)
   if (blocks.length === 0) blocks.push(paragraphBlock({ offset: 0n, length }))
   const blockContent: BlockContent = {
     blocks,

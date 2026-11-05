@@ -58,14 +58,103 @@ public enum MessageMarkdown {
     ])
   }
 
+  /// Composer syntax for quoting `text` in a reply: every line gets "> ", then a new line to type on.
+  public static func quoteLines(_ text: String) -> String {
+    text.components(separatedBy: .newlines)
+      .map { $0.isEmpty ? ">" : "> " + $0 }
+      .joined(separator: "\n") + "\n"
+  }
+
+  /// Rich-text editing keeps styles as attributes, but a quote has no attribute form.
+  /// Restores its "> " lines so saving the edit keeps the quote.
+  public static func withQuoteSyntax(
+    _ attributedString: NSAttributedString,
+    entities: MessageEntities?,
+    attributes: [NSAttributedString.Key: Any]
+  ) -> NSAttributedString {
+    insertingQuotePrefixes(attributedString, entities: entities, markerAttributes: attributes).0
+  }
+
   private static func isEditableSyntax(_ type: MessageEntity.TypeEnum) -> Bool {
     switch type {
-    case .bold, .italic, .underline, .strikethrough, .highlight, .code, .pre, .math, .textURL: true
+    case .bold, .italic, .underline, .strikethrough, .highlight, .code, .pre, .math, .textURL, .blockquote: true
     default: false
     }
   }
 
   private static func serializedText(
+    _ original: NSAttributedString,
+    entities: MessageEntities?,
+    markerAttributes: [NSAttributedString.Key: Any]
+  ) -> NSAttributedString {
+    let (quoted, inlineEntities) = insertingQuotePrefixes(
+      original,
+      entities: entities,
+      markerAttributes: markerAttributes
+    )
+    return serializedInlineText(quoted, entities: inlineEntities, markerAttributes: markerAttributes)
+  }
+
+  /// Quotes own whole lines, so they serialize as "> " line prefixes instead of paired
+  /// delimiters. Every other entity shifts past the inserted syntax.
+  private static func insertingQuotePrefixes(
+    _ original: NSAttributedString,
+    entities: MessageEntities?,
+    markerAttributes: [NSAttributedString.Key: Any]
+  ) -> (NSAttributedString, MessageEntities?) {
+    guard let entities, entities.entities.contains(where: { $0.type == .blockquote }) else {
+      return (original, entities)
+    }
+    let source = original.string as NSString
+    func validRange(_ entity: MessageEntity) -> NSRange? {
+      guard entity.offset >= 0, entity.length > 0, entity.offset <= source.length,
+            entity.length <= Int64(source.length) - entity.offset else { return nil }
+      return NSRange(location: Int(entity.offset), length: Int(entity.length))
+    }
+    func isLineBreak(_ unit: unichar) -> Bool { unit == 10 || unit == 13 }
+    let opaque = entities.entities.filter { $0.type == .code || $0.type == .pre || $0.type == .math }
+      .compactMap(validRange)
+
+    var markers: [Int: String] = [:]
+    for entity in entities.entities where entity.type == .blockquote {
+      guard let range = validRange(entity) else { continue }
+      var line = range.location
+      while line < NSMaxRange(range) {
+        var end = line
+        while end < NSMaxRange(range), !isLineBreak(source.character(at: end)) { end += 1 }
+        // A line inside a code block is literal code; prefixing it would change the code.
+        if !opaque.contains(where: { $0.location < line && line < NSMaxRange($0) }) {
+          markers[line] = end > line ? "> " : ">"
+        }
+        guard end < NSMaxRange(range) else { break }
+        let isCRLF = source.character(at: end) == 13 && end + 1 < source.length && source.character(at: end + 1) == 10
+        line = end + (isCRLF ? 2 : 1)
+      }
+    }
+
+    let result = NSMutableAttributedString(attributedString: original)
+    for (position, marker) in markers.sorted(by: { $0.key > $1.key }) {
+      result.insert(NSAttributedString(string: marker, attributes: markerAttributes), at: position)
+    }
+    func shifted(_ offset: Int, includingAt: Bool) -> Int {
+      offset + markers.reduce(0) { total, marker in
+        total + (marker.key < offset || (includingAt && marker.key == offset) ? marker.value.utf16.count : 0)
+      }
+    }
+    var remaining = entities
+    remaining.entities = entities.entities.compactMap { entity in
+      guard entity.type != .blockquote else { return nil }
+      guard let range = validRange(entity) else { return entity }
+      var moved = entity
+      let start = shifted(range.location, includingAt: true)
+      moved.offset = Int64(start)
+      moved.length = Int64(shifted(NSMaxRange(range), includingAt: false) - start)
+      return moved
+    }
+    return (result, remaining)
+  }
+
+  private static func serializedInlineText(
     _ original: NSAttributedString,
     entities: MessageEntities?,
     markerAttributes: [NSAttributedString.Key: Any]

@@ -3,7 +3,7 @@ import { db } from "@in/server/db"
 import { botAgents, lower, userNotDeleted, users } from "@in/server/db/schema"
 import { processMessageText } from "@in/server/modules/message/processText"
 import { and, inArray } from "drizzle-orm"
-import { parseBlockContentResult, projectLiteralMathContent, type BlockContentFallbackReason, type BlockContentWarning, type BlockImageSource } from "@in/server/modules/message/blockContent"
+import { parseBlockContentResult, projectLiteralBlockContent, type BlockContentFallbackReason, type BlockContentWarning, type BlockImageSource } from "@in/server/modules/message/blockContent"
 import {
   normalizeMarkdownInput,
   mathOutputRanges,
@@ -792,7 +792,7 @@ export const processOutgoingText = async (
   const blockResult = parsedMarkdown ? parseBlockContentResult(markdown, parsedMarkdown) : undefined
   const parsedBlocks = blockResult?.kind === "parsed"
     ? blockResult.value
-    : !parsedMarkdown ? projectLiteralMathContent(input.text, input.entities) : undefined
+    : !parsedMarkdown ? projectLiteralBlockContent(input.text, input.entities) : undefined
   if (blockResult?.kind === "fallback" && blockResult.reason !== "empty") {
     log.warn("rich content projection fell back to flat text", { reason: blockResult.reason })
   } else if (parsedBlocks?.warnings?.length) {

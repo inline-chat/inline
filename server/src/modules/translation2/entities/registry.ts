@@ -21,6 +21,8 @@ export const entityPolicies: PolicyRegistry = {
   [MessageEntity_Type.THREAD_TITLE]: "markdown",
   [MessageEntity_Type.BOT_COMMAND]: "literalDetected",
   [MessageEntity_Type.GROUP_MENTION]: "markdown",
+  // Line-level structure; translated text keeps the words but not the quote range.
+  [MessageEntity_Type.BLOCKQUOTE]: "unsupported",
 }
 
 export const policyFor = (type: MessageEntity_Type): EntityPolicy => {

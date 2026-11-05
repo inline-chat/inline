@@ -115,6 +115,8 @@ const parseEntityType = (
       return MessageEntity_Type.HIGHLIGHT
     case "math":
       return MessageEntity_Type.MATH
+    case "blockquote":
+      return MessageEntity_Type.BLOCKQUOTE
     case "username_mention":
       return MessageEntity_Type.USERNAME_MENTION
     case "code":
@@ -170,6 +172,8 @@ const typeToString = (
       return "highlight"
     case MessageEntity_Type.MATH:
       return "math"
+    case MessageEntity_Type.BLOCKQUOTE:
+      return "blockquote"
     case MessageEntity_Type.USERNAME_MENTION:
       return "mention"
     case MessageEntity_Type.CODE:

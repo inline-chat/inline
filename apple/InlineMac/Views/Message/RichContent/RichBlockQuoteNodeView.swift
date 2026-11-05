@@ -31,9 +31,9 @@ final class RichBlockQuoteNodeView: RichBlockRenderableView {
   override func apply(node: RichBlockLayoutPlan.Node, context: RichBlockRenderContext) {
     guard case let .quote(quote) = node.kind else { return }
     isRTL = quote.isRTL
-    railColor = context.palette.link.withAlphaComponent(0.72)
-    fillColor = context.palette.subtleFill
-    iconView.contentTintColor = context.palette.link.withAlphaComponent(0.72)
+    railColor = context.palette.link
+    fillColor = context.palette.link.withAlphaComponent(RichBlockQuoteMetrics.fillAlpha)
+    iconView.contentTintColor = context.palette.link
     needsDisplay = true
   }
 
@@ -69,11 +69,9 @@ final class RichBlockQuoteNodeView: RichBlockRenderableView {
       width: RichBlockQuoteMetrics.railWidth,
       height: bounds.height
     )
+    // A square rail clipped by the block's rounded corners, not a separate pill.
     railColor.setFill()
-    NSBezierPath(
-      roundedRect: railRect,
-      xRadius: RichBlockQuoteMetrics.railWidth / 2,
-      yRadius: RichBlockQuoteMetrics.railWidth / 2
-    ).fill()
+    background.addClip()
+    railRect.fill()
   }
 }

@@ -60,6 +60,16 @@ final class ChatState: ObservableObject {
     }
   }
 
+  /// Replies to a message and starts that chat's composer with `markdown` quote lines.
+  func quote(peer: Peer, id: Int64, markdown: String) {
+    setReplyingMessageId(peer: peer, id: id)
+    NotificationCenter.default.post(
+      name: .init("ChatStateQuoteCalled"),
+      object: nil,
+      userInfo: ["peer": peer, "markdown": markdown]
+    )
+  }
+
   func setEditingMessageId(peer: Peer, id: Int64) {
     clearForwarding(peer: peer)
     var state = getState(peer: peer)

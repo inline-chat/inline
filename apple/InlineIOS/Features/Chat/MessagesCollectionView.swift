@@ -1991,7 +1991,16 @@ private extension MessagesCollectionView {
             guard let cell else { return UIMenu(children: []) }
             return makeMessageActionsMenu(for: fullMessage, cell: cell, includesTextCopy: !hasTextSelection)
           },
-          accessory: message.isServiceMessage ? nil : createReactionPickerView(for: fullMessage)
+          accessory: message.isServiceMessage ? nil : createReactionPickerView(for: fullMessage),
+          quoteSelection: message.isServiceMessage || message.status == .sending || message.status == .failed
+            ? nil
+            : { text in
+              ChatState.shared.quote(
+                peer: message.peerId,
+                id: message.messageId,
+                markdown: MessageMarkdown.quoteLines(text)
+              )
+            }
         )
       )
       controller.onWillDismiss = { [weak collectionView] in

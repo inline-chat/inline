@@ -116,7 +116,7 @@ public struct EditMessageTransaction: Transaction2 {
     message.resourceFlags = (message.resourceFlags & ~MessageResourceFlags.link.rawValue)
       | (message.hasLink == true ? MessageResourceFlags.link.rawValue : 0)
     message.editDate = date
-    message.blockContentPayload = .literalMath(text: text, entities: entities)
+    message.blockContentPayload = .literalBlocks(text: text, entities: entities)
     try message.saveMessage(db, preserveExistingBlockContentWhenMissing: false)
     // The acknowledgement may contain the same text/entities we just saved;
     // it cannot detect that these cached translations belong to the old source.

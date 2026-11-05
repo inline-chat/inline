@@ -1011,6 +1011,9 @@ public class ProcessEntities {
       // The math scan already honors code precedence; TeX itself now shields code-like syntax.
       entities = extractPreFromMarkdown(text: &text, existingEntities: entities, opaqueRanges: &opaqueMathRanges)
 
+      // Quote lines are found after code blocks so a "> " inside a fence stays literal code.
+      entities = extractBlockquoteFromMarkdown(text: &text, existingEntities: entities, opaqueRanges: &opaqueMathRanges)
+
       // Extract inline code entities from `text` markdown syntax and update all entity offsets
       // NOTE: This must come SECOND to avoid interference with pre code blocks
       entities = extractInlineCodeFromMarkdown(text: &text, existingEntities: entities, opaqueRanges: &opaqueMathRanges)
@@ -2319,6 +2322,86 @@ public class ProcessEntities {
 
     guard end > start else { return nil }
     return NSRange(location: start, length: end - start)
+  }
+
+  /// Each run of whole lines starting with "> " (or exactly ">") becomes one blockquote.
+  /// Like "**", the prefix is composer syntax only and is not part of the sent text.
+  private static func extractBlockquoteFromMarkdown(
+    text: inout String,
+    existingEntities: [MessageEntity],
+    opaqueRanges: inout [NSRange]
+  ) -> [MessageEntity] {
+    let source = text as NSString
+    guard source.length > 0, text.contains(">") else { return existingEntities }
+
+    var removals: [OffsetRemoval] = []
+    var quoteEntities: [MessageEntity] = []
+    var runStart: Int?
+    var runEnd = 0
+    var runRemovals: [OffsetRemoval] = []
+    func closeRun() {
+      defer { runStart = nil; runRemovals = [] }
+      guard let start = runStart else { return }
+      let content = runRemovals.reduce(into: "") { result, removal in
+        let lineStart = removal.position + removal.length
+        var lineEnd = lineStart
+        while lineEnd < runEnd, !isLineBreakCharacter(source.character(at: lineEnd)) { lineEnd += 1 }
+        result += source.substring(with: NSRange(location: lineStart, length: lineEnd - lineStart))
+      }
+      // A run of bare ">" lines has nothing to quote, so it stays literal text.
+      guard !content.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+      removals.append(contentsOf: runRemovals)
+      var entity = MessageEntity()
+      entity.type = .blockquote
+      entity.offset = Int64(start)
+      entity.length = Int64(runEnd - start)
+      quoteEntities.append(entity)
+    }
+
+    var lineStart = 0
+    while lineStart <= source.length {
+      var lineEnd = lineStart
+      while lineEnd < source.length, !isLineBreakCharacter(source.character(at: lineEnd)) { lineEnd += 1 }
+
+      var prefixLength = 0
+      if lineEnd > lineStart, source.character(at: lineStart) == 62,
+         !isPositionWithinCodeBlock(position: lineStart, entities: existingEntities),
+         !opaqueRanges.contains(where: { NSLocationInRange(lineStart, $0) }) {
+        if lineEnd - lineStart == 1 {
+          prefixLength = 1
+        } else if source.character(at: lineStart + 1) == 32 {
+          prefixLength = 2
+        }
+      }
+
+      if prefixLength > 0 {
+        if runStart == nil { runStart = lineStart }
+        runRemovals.append(OffsetRemoval(position: lineStart, length: prefixLength))
+        runEnd = lineEnd
+      } else {
+        closeRun()
+      }
+
+      guard lineEnd < source.length else { break }
+      let isCRLF = source.character(at: lineEnd) == 13 && lineEnd + 1 < source.length
+        && source.character(at: lineEnd + 1) == 10
+      lineStart = lineEnd + (isCRLF ? 2 : 1)
+    }
+    closeRun()
+
+    guard !removals.isEmpty else { return existingEntities }
+    let stripped = NSMutableString(string: text)
+    for removal in removals.reversed() {
+      stripped.deleteCharacters(in: NSRange(location: removal.position, length: removal.length))
+    }
+    text = stripped as String
+
+    var allEntities = existingEntities
+    applyOffsetRemovals(&allEntities, removals: removals)
+    applyOffsetRemovals(&opaqueRanges, removals: removals)
+    applyOffsetRemovals(&quoteEntities, removals: removals)
+    allEntities.append(contentsOf: quoteEntities)
+    return allEntities
   }
 
   private static func extractPreFromMarkdown(

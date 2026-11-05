@@ -194,7 +194,7 @@ public struct SendMessageTransaction: Transaction2 {
       photoId: nil,
       videoId: nil,
       documentId: nil,
-      blockContentPayload: .literalMath(text: context.text, entities: context.entities),
+      blockContentPayload: .literalBlocks(text: context.text, entities: context.entities),
       transactionId: nil, // No longer using transaction ID in new system
       isSticker: context.isSticker,
       entities: context.entities

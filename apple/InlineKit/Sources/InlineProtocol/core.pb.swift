@@ -6727,6 +6727,10 @@ public nonisolated struct MessageEntity: Sendable {
 
     /// Opaque TeX source range; Markdown must not be parsed inside the formula.
     case math // = 18
+
+    /// Whole-line quote range. Composer "> " prefixes are not part of the text;
+    /// older clients keep the quoted text visible without the quote style.
+    case blockquote // = 19
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -6754,6 +6758,7 @@ public nonisolated struct MessageEntity: Sendable {
       case 16: self = .strikethrough
       case 17: self = .highlight
       case 18: self = .math
+      case 19: self = .blockquote
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -6779,6 +6784,7 @@ public nonisolated struct MessageEntity: Sendable {
       case .strikethrough: return 16
       case .highlight: return 17
       case .math: return 18
+      case .blockquote: return 19
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -6804,6 +6810,7 @@ public nonisolated struct MessageEntity: Sendable {
       .strikethrough,
       .highlight,
       .math,
+      .blockquote,
     ]
 
   }
@@ -32145,7 +32152,7 @@ nonisolated extension MessageEntity: SwiftProtobuf.Message, SwiftProtobuf._Messa
 }
 
 nonisolated extension MessageEntity.TypeEnum: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0TYPE_UNSPECIFIED\0\u{1}TYPE_MENTION\0\u{1}TYPE_URL\0\u{1}TYPE_TEXT_URL\0\u{1}TYPE_EMAIL\0\u{1}TYPE_BOLD\0\u{1}TYPE_ITALIC\0\u{1}TYPE_USERNAME_MENTION\0\u{1}TYPE_CODE\0\u{1}TYPE_PRE\0\u{1}TYPE_PHONE_NUMBER\0\u{1}TYPE_THREAD\0\u{1}TYPE_THREAD_TITLE\0\u{1}TYPE_BOT_COMMAND\0\u{1}TYPE_GROUP_MENTION\0\u{1}TYPE_UNDERLINE\0\u{1}TYPE_STRIKETHROUGH\0\u{1}TYPE_HIGHLIGHT\0\u{1}TYPE_MATH\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0TYPE_UNSPECIFIED\0\u{1}TYPE_MENTION\0\u{1}TYPE_URL\0\u{1}TYPE_TEXT_URL\0\u{1}TYPE_EMAIL\0\u{1}TYPE_BOLD\0\u{1}TYPE_ITALIC\0\u{1}TYPE_USERNAME_MENTION\0\u{1}TYPE_CODE\0\u{1}TYPE_PRE\0\u{1}TYPE_PHONE_NUMBER\0\u{1}TYPE_THREAD\0\u{1}TYPE_THREAD_TITLE\0\u{1}TYPE_BOT_COMMAND\0\u{1}TYPE_GROUP_MENTION\0\u{1}TYPE_UNDERLINE\0\u{1}TYPE_STRIKETHROUGH\0\u{1}TYPE_HIGHLIGHT\0\u{1}TYPE_MATH\0\u{1}TYPE_BLOCKQUOTE\0")
 }
 
 nonisolated extension MessageEntity.MessageEntityMention: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {

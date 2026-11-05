@@ -740,7 +740,7 @@ class MinimalMessageViewAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     view.setRelatedMessage(fullMessage.message)
     if let embeddedMessage = fullMessage.repliedToMessage {
-      view.update(with: embeddedMessage, kind: .replyInMessage)
+      view.update(with: embeddedMessage, kind: .replyInMessage, quote: fullMessage.message.replyQuote?.text)
     }
     return view
   }()
@@ -3070,7 +3070,7 @@ class MinimalMessageViewAppKit: NSView {
     let text = translationText ?? fullMessage.message.text ?? ""
     let entities = translationEntities ?? fullMessage.message.entities
     let richBlockPlan = props.layout.richBlockContent
-    let blockContent = richBlockPlan == nil ? nil : fullMessage.message.blockContent
+    let blockContent = richBlockPlan == nil ? nil : fullMessage.message.replyQuote?.body ?? fullMessage.message.blockContent
 
     let renderCacheStyleKey = "\(richTextStyleKey)|links-v1"
     let attributedString: NSAttributedString
@@ -3475,6 +3475,29 @@ class MinimalMessageViewAppKit: NSView {
       )
 
     state.setReplyingToMsgId(fullMessage.message.messageId)
+  }
+
+  /// Selected text in this message, captured when the menu opens. A selection that spans
+  /// rich blocks wins; otherwise the focused text view's own selection is used.
+  private func selectedTextForQuote() -> String? {
+    let selected: String?
+    if let text = richBlockContentView?.multiSurfaceSelectedText {
+      selected = text.string
+    } else if let textView = window?.firstResponder as? NSTextView, textView.isDescendant(of: self),
+              textView.selectedRange().length > 0 {
+      selected = (textView.string as NSString).substring(with: textView.selectedRange())
+    } else {
+      selected = nil
+    }
+    let trimmed = selected?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
+  @objc private func quoteSelection(_ sender: NSMenuItem) {
+    guard !isAnchorMessage, let quoted = sender.representedObject as? String else { return }
+    ChatsManager
+      .get(for: fullMessage.peerId, chatId: fullMessage.chatId)
+      .quote(MessageMarkdown.quoteLines(quoted), replyingTo: fullMessage.message.messageId)
   }
 
   @objc private func replyInThread() {
@@ -4126,7 +4149,7 @@ class MinimalMessageViewAppKit: NSView {
     if props.layout.hasReply {
       replyView.setRelatedMessage(fullMessage.message)
       if let embeddedMessage = fullMessage.repliedToMessage {
-        replyView.update(with: embeddedMessage, kind: .replyInMessage)
+        replyView.update(with: embeddedMessage, kind: .replyInMessage, quote: fullMessage.message.replyQuote?.text)
       }
     }
     updateReplyThreadSummaryView(for: props)
@@ -4909,6 +4932,14 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
       let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
       replyItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: "Reply")
       menu.addItem(replyItem)
+
+      // Quote is offered only while part of this message is selected.
+      if let quoted = selectedTextForQuote() {
+        let quoteItem = NSMenuItem(title: "Quote", action: #selector(quoteSelection(_:)), keyEquivalent: "")
+        quoteItem.image = NSImage(systemSymbolName: "text.quote", accessibilityDescription: "Quote")
+        quoteItem.representedObject = quoted
+        menu.addItem(quoteItem)
+      }
 
       let replyInThreadItem = NSMenuItem(
         title: message.isSubthreadPlacement ? "Open Subthread" : "Reply in Thread",

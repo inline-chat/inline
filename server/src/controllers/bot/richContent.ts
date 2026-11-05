@@ -175,6 +175,8 @@ const wrapEntity = (
       return entity.entity.oneofKind === "groupMention"
         ? { type: "group_mention", text: child, group_id: Number(entity.entity.groupMention.groupId) }
         : child
+    // Quote structure reaches bots as a quote block, not an inline style.
+    case MessageEntity_Type.BLOCKQUOTE:
     case MessageEntity_Type.UNSPECIFIED:
       return child
   }

@@ -45,6 +45,8 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
     var accessory: UIView?
     /// Copies the selected text; the default puts it on the pasteboard as plain text.
     var copySelection: ((String) -> Void)?
+    /// Replies quoting the selected text; without it the selection offers no Quote.
+    var quoteSelection: ((String) -> Void)?
   }
 
   /// The menu starts closing.
@@ -520,6 +522,13 @@ final class MessageContextMenuController: NSObject, UIGestureRecognizerDelegate,
         }
       },
     ]
+    if let quote = content.quoteSelection {
+      actions.append(UIAction(title: "Quote", image: UIImage(systemName: "text.quote")) { [weak selectionView] _ in
+        guard let text = selectionView?.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return }
+        quote(text)
+      })
+    }
     if !selectionView.selectsAllText {
       actions.append(UIAction(
         title: "Select All",

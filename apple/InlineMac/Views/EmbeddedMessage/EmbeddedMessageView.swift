@@ -15,6 +15,7 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     static let height: CGFloat = Theme.embeddedMessageHeight
     static let photoWidth: CGFloat = 32
     static let photoHeight: CGFloat = 32
+    static let quoteIconSize: CGFloat = 9
   }
 
   // MARK: - Properties
@@ -192,6 +193,18 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     return label
   }()
 
+  /// Set when the message quotes part of the replied message; the header then shows the quote.
+  private var isQuote = false
+
+  private lazy var quoteIconView: NSImageView = {
+    let view = NSImageView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.image = NSImage(systemSymbolName: "quote.closing", accessibilityDescription: nil)?
+      .withSymbolConfiguration(.init(pointSize: Constants.quoteIconSize, weight: .semibold))
+    view.isHidden = true
+    return view
+  }()
+
   private lazy var messageLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
     label.translatesAutoresizingMaskIntoConstraints = false
@@ -233,6 +246,7 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     addSubview(rectangleView)
     addSubview(nameLabel)
     addSubview(messageLabel)
+    addSubview(quoteIconView)
 
     textLeadingConstraint = nameLabel.leadingAnchor.constraint(
       equalTo: rectangleView.trailingAnchor, constant: Constants.contentSpacing
@@ -276,6 +290,10 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
       messageTrailingConstraint!,
       messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor),
       messageLabelBottomConstraint!,
+
+      // Quote mark
+      quoteIconView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+      quoteIconView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
     ])
 
     let clickGesture = NSClickGestureRecognizer(
@@ -354,7 +372,9 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
     }
   }
 
-  func update(with embeddedMessage: EmbeddedMessage, kind: Kind) {
+  /// `quote` replaces the replied message's text with the part the reply quotes.
+  func update(with embeddedMessage: EmbeddedMessage, kind: Kind, quote: String? = nil) {
+    setQuote(quote)
     guard let from = embeddedMessage.from else {
       self.kind = kind
       applyLeadingBarVerticalInsets()
@@ -362,7 +382,9 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
       return
     }
 
-    let messageContent: String = if let displayText = embeddedMessage.displayTextForLastMessage, !displayText.isEmpty {
+    let messageContent: String = if let quote {
+      quote.replacingOccurrences(of: "\n", with: " ")
+    } else if let displayText = embeddedMessage.displayTextForLastMessage, !displayText.isEmpty {
       displayText
     } else {
       getMessageContentText(
@@ -383,6 +405,7 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
   }
 
   func update(with fullMessage: FullMessage, kind: Kind) {
+    setQuote(nil)
     guard let from = fullMessage.from else {
       self.kind = kind
       applyLeadingBarVerticalInsets()
@@ -542,16 +565,27 @@ class EmbeddedMessageView: NSView, NSGestureRecognizerDelegate {
   }
 
   private func applyTextPadding() {
-    nameTrailingConstraint?.constant = -textTrailingPadding
-    messageTrailingConstraint?.constant = -textTrailingPadding
+    // Keep the name and quoted text clear of the quote mark.
+    let trailing = textTrailingPadding + (isQuote ? Constants.quoteIconSize + 4 : 0)
+    nameTrailingConstraint?.constant = -trailing
+    messageTrailingConstraint?.constant = -trailing
     if !showsLeadingBar {
       textLeadingConstraint?.constant = textLeadingPadding
     }
   }
 
+  private func setQuote(_ quote: String?) {
+    let isQuote = quote != nil
+    guard isQuote != self.isQuote else { return }
+    self.isQuote = isQuote
+    quoteIconView.isHidden = !isQuote
+    applyTextPadding()
+  }
+
   private func applyResolvedStyle() {
     rectangleView.layer?.backgroundColor = rectangleColor.cgColor
     nameLabel.textColor = nameLabelColor
+    quoteIconView.contentTintColor = nameLabelColor
     messageLabel.textColor = textColor
     applyBackgroundAppearance()
     applyLeadingBarVerticalInsets()

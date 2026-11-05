@@ -3,7 +3,7 @@ import { BlockContent, MessageEntities, MessageEntity_Type, type MessageEntity }
 import { fromMd, toMd } from "../translation2/entities"
 import { mathLimits } from "../translation2/entities/math"
 import { mathOutputRanges, parseMarkdown, parseMarkdownWithSourceMap } from "./parseMarkdown"
-import { parseBlockContent, projectLiteralMathContent, validateBlockContent } from "./blockContent"
+import { parseBlockContent, projectLiteralBlockContent, validateBlockContent } from "./blockContent"
 import { encodeBlockContentToMarkdown } from "./blockContentMarkdown"
 import { processMessageText } from "./processText"
 import { encodeBotEntities } from "../../controllers/bot/entityCodec"
@@ -68,15 +68,15 @@ describe("rich text v2 math source contract", () => {
   test("literal math projection rejects malformed ranges and gives code precedence", () => {
     const text = "😀 x"
     for (const [offset, length] of [[-1n, 1n], [0n, 0n], [1n, 1n], [0n, 1n], [3n, 99n], [2n ** 63n, 1n]]) {
-      expect(projectLiteralMathContent(text, { entities: [{
+      expect(projectLiteralBlockContent(text, { entities: [{
         type: MessageEntity_Type.MATH, offset: offset!, length: length!, entity: { oneofKind: undefined },
       }] })).toBeUndefined()
     }
     for (const type of [MessageEntity_Type.CODE, MessageEntity_Type.PRE]) {
-      expect(projectLiteralMathContent(text, { entities: [entity(MessageEntity_Type.MATH, 3, 1), entity(type, 0, text.length)] })).toBeUndefined()
+      expect(projectLiteralBlockContent(text, { entities: [entity(MessageEntity_Type.MATH, 3, 1), entity(type, 0, text.length)] })).toBeUndefined()
     }
     const source = "x".repeat(131_073)
-    expect(projectLiteralMathContent(source, { entities: [entity(MessageEntity_Type.MATH, 0, 1)] })).toBeUndefined()
+    expect(projectLiteralBlockContent(source, { entities: [entity(MessageEntity_Type.MATH, 0, 1)] })).toBeUndefined()
   })
 
   test("literal URLs retain dollar bytes and surrounding formatting", () => {
