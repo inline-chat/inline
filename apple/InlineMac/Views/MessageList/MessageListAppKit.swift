@@ -620,6 +620,9 @@ class MessageListAppKit: NSViewController {
     table.wantsLayer = true
     table.layerContentsRedrawPolicy = .onSetNeedsDisplay // could try .never too
     table.layer?.drawsAsynchronously = true
+    // Centered chats make the table narrower than the viewport. Swipe-to-reply moves a
+    // message and its reply arrow past the table's edges, so let them draw into the margins.
+    table.clipsToBounds = false
 
     return table
   }()

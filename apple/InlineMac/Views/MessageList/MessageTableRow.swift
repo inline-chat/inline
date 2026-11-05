@@ -133,6 +133,8 @@ class MessageTableCell: NSView {
 
   private func setupView() {
     wantsLayer = true
+    // Swipe-to-reply translates the message and its reply arrow outside the cell.
+    clipsToBounds = false
     layer?.backgroundColor = .clear
     layerContentsRedrawPolicy = .onSetNeedsDisplay
   }

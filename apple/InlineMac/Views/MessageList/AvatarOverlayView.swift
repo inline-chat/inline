@@ -68,6 +68,8 @@ final class MessageAvatarOverlayView: NSView {
     super.init(frame: frame)
 
     translatesAutoresizingMaskIntoConstraints = true
+    // A swiped message's avatar moves with it, past the edge of a centered table.
+    clipsToBounds = false
   }
 
   @available(*, unavailable)
