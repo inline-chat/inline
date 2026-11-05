@@ -653,8 +653,8 @@ export function createInlineApi(params: {
     return left.userId === right.userId ? 0 : left.userId < right.userId ? -1 : 1
   }
 
-  const buildEligibleChatContext = async (includeSubthreads = false): Promise<EligibleChatContext> => {
-    const payload = await getChats(includeSubthreads)
+  const buildEligibleChatContext = async (includeSubthreads = false, suppliedPayload?: GetChatsResult): Promise<EligibleChatContext> => {
+    const payload = suppliedPayload ?? await getChats(includeSubthreads)
     const dialogByChatId = new Map<string, Dialog>()
     for (const dialog of payload.dialogs) {
       if (dialog.chatId == null) continue
@@ -708,7 +708,7 @@ export function createInlineApi(params: {
     }
   }
 
-  const getEligibleChatContext = async (refresh = false): Promise<EligibleChatContext> => {
+  const getEligibleChatContext = async (refresh = false, suppliedPayload?: GetChatsResult): Promise<EligibleChatContext> => {
     const now = Date.now()
     if (!refresh && eligibleChatsCache && eligibleChatsCache.expiresAtMs > now) {
       return eligibleChatsCache
@@ -717,7 +717,10 @@ export function createInlineApi(params: {
       return await eligibleChatsInFlight
     }
 
-    eligibleChatsInFlight = buildEligibleChatContext()
+    // Some operations already need a fresh catalog for Spaces or people. On a
+    // cold cache, derive the context from that same snapshot instead of issuing
+    // another full catalog RPC. Cache hits and in-flight loads retain their TTL.
+    eligibleChatsInFlight = buildEligibleChatContext(false, suppliedPayload)
       .then((context) => {
         eligibleChatsCache = {
           expiresAtMs: Date.now() + 15_000,
@@ -916,7 +919,7 @@ export function createInlineApi(params: {
 
     async listSpaces({ query, limit }) {
       const payload = await getChats()
-      const context = await getEligibleChatContext()
+      const context = await getEligibleChatContext(false, payload)
       const normalizedQuery = normalizeText(query)
       const maxSpaces = Math.max(1, Math.min(50, Math.trunc(limit ?? 20)))
       const spaceById = new Map(payload.spaces.map((space) => [space.id.toString(), space]))
@@ -970,7 +973,8 @@ export function createInlineApi(params: {
       const safeQuery = query?.trim() ?? ""
       const normalizedQuery = normalizeText(safeQuery)
       const maxPeople = Math.max(1, Math.min(50, Math.trunc(limit ?? 20)))
-      const [payload, context] = await Promise.all([getChats(), getEligibleChatContext()])
+      const payload = await getChats()
+      const context = await getEligibleChatContext(false, payload)
 
       const spaceNameById = new Map<string, string>()
       for (const space of payload.spaces) {

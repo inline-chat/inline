@@ -280,6 +280,132 @@ describe("createInlineApi", () => {
     return { chats, api: createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed }) }
   }
 
+  function catalogReuseFixture() {
+    const state: { payload: GetChatsResult } = {
+      payload: {
+        chats: [spaceChat(7n, "Allowed", 10n, 100n), spaceChat(8n, "Outside", 20n, 200n)],
+        dialogs: [], folders: [], spaces: [space(10n, "Allowed Space"), space(20n, "Outside Space")],
+        users: [user(2n, "Ali", "Allowed", "ali"), user(3n, "Dena", "Outside", "dena")],
+        messages: [message(100n, 7n, 2n, "allowed"), message(200n, 8n, 3n, "outside")],
+      },
+    }
+    realtimeSdk.client.invoke.mockImplementation(async (method: Method) => {
+      if (method === Method.GET_CHATS) return { getChats: state.payload }
+      if (method === Method.GET_SPACE_MEMBERS) return { getSpaceMembers: { members: [], users: [] } }
+      throw new Error(`unexpected method ${method}`)
+    })
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n] } })
+    const catalogCalls = () => realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHATS)
+    return { api, state, catalogCalls }
+  }
+
+  it.each(["listSpaces", "searchPeople"] as const)("reuses the mandatory catalog for a cold %s context", async (operation) => {
+    const { api, catalogCalls } = catalogReuseFixture()
+    try {
+      if (operation === "listSpaces") {
+        expect(await api.listSpaces({ limit: 10 })).toMatchObject([{ id: 10n, name: "Allowed Space", chatCount: 1 }])
+      } else {
+        expect((await api.searchPeople({ limit: 10 })).items.map((item) => item.userId)).toEqual([2n])
+      }
+      expect(catalogCalls()).toHaveLength(1)
+      expect((await api.getEligibleChats()).map((chat) => chat.chatId)).toEqual([7n])
+      expect(catalogCalls()).toHaveLength(1)
+    } finally { await api.close() }
+  })
+
+  it("keeps a warm context's original expiry when a Space read fetches a newer catalog", async () => {
+    let now = 1_000
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now)
+    const { api, state, catalogCalls } = catalogReuseFixture()
+    try {
+      expect(await api.listSpaces({})).toMatchObject([{ chatCount: 1 }])
+      state.payload = { ...state.payload, chats: [], messages: [], users: [] }
+      now = 5_000
+      // The existing cache-first contract is unchanged. A mandatory catalog
+      // fetch must not extend the original 15-second context lifetime.
+      expect(await api.listSpaces({})).toMatchObject([{ chatCount: 1 }])
+      now = 15_999
+      expect((await api.getEligibleChats()).map((chat) => chat.chatId)).toEqual([7n])
+      expect(catalogCalls()).toHaveLength(2)
+      now = 16_000
+      expect(await api.getEligibleChats()).toEqual([])
+      expect(catalogCalls()).toHaveLength(3)
+    } finally { await api.close(); clock.mockRestore() }
+  })
+
+  it("uses the supplied fresh snapshot after expiry and drops revoked catalog entries", async () => {
+    let now = 1_000
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now)
+    const { api, state, catalogCalls } = catalogReuseFixture()
+    try {
+      expect((await api.getEligibleChats()).map((chat) => chat.chatId)).toEqual([7n])
+      state.payload = { ...state.payload, chats: [], messages: [], users: [] }
+      now = 16_000
+      expect(await api.listSpaces({})).toMatchObject([{ chatCount: 0 }])
+      expect(await api.getEligibleChats()).toEqual([])
+      expect(catalogCalls()).toHaveLength(2)
+    } finally { await api.close(); clock.mockRestore() }
+  })
+
+  it("does not launch another catalog request for concurrent cold Space and people reads", async () => {
+    const { api, state, catalogCalls } = catalogReuseFixture()
+    const finish: Array<() => void> = []
+    realtimeSdk.client.invoke.mockImplementation(async (method: Method) => {
+      if (method === Method.GET_CHATS) return await new Promise<{ getChats: GetChatsResult }>((resolve) => {
+        finish.push(() => resolve({ getChats: state.payload }))
+      })
+      if (method === Method.GET_SPACE_MEMBERS) return { getSpaceMembers: { members: [], users: [] } }
+      throw new Error(`unexpected method ${method}`)
+    })
+    const spaces = api.listSpaces({})
+    const people = api.searchPeople({})
+    try {
+      await vi.waitFor(() => expect(finish).toHaveLength(2))
+      for (const resolve of finish) resolve()
+      expect(await spaces).toMatchObject([{ chatCount: 1 }])
+      expect((await people).items.map((item) => item.userId)).toEqual([2n])
+      expect(catalogCalls()).toHaveLength(2)
+    } finally {
+      for (const resolve of finish) resolve()
+      await Promise.allSettled([spaces, people])
+      await api.close()
+    }
+  })
+
+  it("joins an existing context load instead of replacing it with the supplied payload", async () => {
+    const { api, state, catalogCalls } = catalogReuseFixture()
+    let finish: (() => void) | undefined
+    realtimeSdk.client.invoke.mockImplementationOnce(async () => await new Promise<{ getChats: GetChatsResult }>((resolve) => {
+      finish = () => resolve({ getChats: state.payload })
+    }))
+    const context = api.getEligibleChats()
+    let spaces: ReturnType<typeof api.listSpaces> | undefined
+    try {
+      await vi.waitFor(() => expect(catalogCalls()).toHaveLength(1))
+      spaces = api.listSpaces({})
+      await vi.waitFor(() => expect(catalogCalls()).toHaveLength(2))
+      finish?.()
+      expect((await context).map((chat) => chat.chatId)).toEqual([7n])
+      expect(await spaces).toMatchObject([{ chatCount: 1 }])
+      expect(catalogCalls()).toHaveLength(2)
+    } finally {
+      finish?.()
+      await Promise.allSettled([context, ...(spaces ? [spaces] : [])])
+      await api.close()
+    }
+  })
+
+  it.each(["listSpaces", "searchPeople"] as const)("preserves a mandatory %s catalog failure despite a warm context", async (operation) => {
+    const { api, catalogCalls } = catalogReuseFixture()
+    const failure = new Error("Catalog unavailable")
+    try {
+      await api.getEligibleChats()
+      realtimeSdk.client.invoke.mockRejectedValueOnce(failure)
+      await expect(operation === "listSpaces" ? api.listSpaces({}) : api.searchPeople({})).rejects.toBe(failure)
+      expect(catalogCalls()).toHaveLength(2)
+    } finally { await api.close() }
+  })
+
   it.each(["conversation", "history", "context", "messages", "search"] as const)("legacy %s reads refuse missing DMs without invoking mutation-capable user-peer RPCs", async (operation) => {
     const { api } = fixtureApi({ allowedSpaceIds: [], allowDms: true, allowHomeThreads: false })
     const read = {
