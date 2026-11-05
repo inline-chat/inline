@@ -16,6 +16,7 @@ on:
       - 'server/src/modules/translation2/entities/**'
       - 'scripts/check-codex-plugin.mjs'
       - 'scripts/ci/check-chatgpt-plugin.mjs'
+      - 'scripts/ci/mcp-artifact-cancellation-smoke.ts'
       - 'scripts/ci/fixtures/mcp-2026-07-28/**'
       - 'package.json'
       - 'bun.lock'
@@ -36,6 +37,7 @@ on:
       - 'server/src/modules/translation2/entities/**'
       - 'scripts/check-codex-plugin.mjs'
       - 'scripts/ci/check-chatgpt-plugin.mjs'
+      - 'scripts/ci/mcp-artifact-cancellation-smoke.ts'
       - 'scripts/ci/fixtures/mcp-2026-07-28/**'
       - 'package.json'
       - 'bun.lock'
@@ -79,6 +81,17 @@ jobs:
           bun run --cwd packages/mcp test
       - name: Validate compiled HTTP contract and submission metadata
         run: bun --no-env-file scripts/ci/check-chatgpt-plugin.mjs "$RUNNER_TEMP/chatgpt-plugin-contract.json"
+      - name: Build the exact Linux MCP image
+        run: >-
+          docker build --file packages/mcp/Dockerfile
+          --build-arg SOURCE_COMMIT="$GITHUB_SHA"
+          --tag inline-mcp-cancellation:${{ github.run_id }}-${{ github.run_attempt }} .
+      - name: Verify cancellation and fresh request recovery in the Linux MCP image
+        run: |
+          docker run --rm --network none --entrypoint bun \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/scripts/ci/mcp-artifact-cancellation-smoke.ts,dst=/tmp/mcp-artifact-cancellation-smoke.ts,readonly" \
+            inline-mcp-cancellation:${{ github.run_id }}-${{ github.run_attempt }} \
+            --no-env-file /tmp/mcp-artifact-cancellation-smoke.ts /app/packages/mcp "$GITHUB_SHA"
       - name: Save synthetic contract evidence
         uses: actions/upload-artifact@v4
         with:
