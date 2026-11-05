@@ -122,6 +122,25 @@ struct AnchoredMessageWindowTests {
     #expect(expandedIDs == expandedIDs.sorted())
   }
 
+  @Test("a reload queued before a jump does not bring back the old window")
+  @MainActor
+  func jumpOutlivesAReloadQueuedBeforeIt() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let model = fixture.model(rows: Array(fixture.messages.suffix(60)))
+    defer { model.dispose() }
+    var reloads = 0
+    model.observe { if case .reload = $0 { reloads += 1 } }
+
+    // Saving the target's history queues a reload of the window on screen; the jump follows.
+    fixture.publisher.messagesReload(peer: .thread(id: 1), animated: false)
+    #expect(model.loadLocalWindowAroundMessage(messageId: 1_200))
+    try await Task.sleep(for: .milliseconds(300))
+
+    #expect(reloads == 0)
+    #expect(model.messages.contains { $0.message.messageId == 1_200 })
+    #expect(!model.messages.contains { $0.message.messageId == 2_400 })
+  }
+
   @Test("a message sent or received while scrolled up at the live end is shown and survives a reload")
   @MainActor
   func scrolledUpLiveWindowStillShowsNewMessages() async throws {

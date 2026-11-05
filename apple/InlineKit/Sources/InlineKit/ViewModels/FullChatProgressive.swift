@@ -1527,6 +1527,9 @@ public class MessagesProgressiveViewModel {
       }
 
       aroundBatch = sort(batch: aroundBatch)
+      // A reload queued before this jump (often by saving the target's history)
+      // read the old window; finishing later, it would replace this one.
+      invalidatePendingReload()
       // A deferred history reload must preserve this window until scrolling
       // establishes that the user has returned to the live end of the chat.
       atBottom = false
