@@ -49,6 +49,8 @@
 
 - Reuse completed checks, stage only the intended changes, verify the staged diff, and commit without unnecessary repeated validation.
 - Commit messages should be lowercase and scoped when useful, for example `macos: fix ...`, `server: add ...`, or `chore: ...`.
+- Split commits by platform: one for macOS, one for iOS, one for shared Apple packages (`apple: ...`), one for server, and so on. Never mix platforms in one commit, even for a single feature.
+- In a shared worktree, commit through a private index (`GIT_INDEX_FILE`) so other agents' staged and unstaged work stays untouched. Stage mixed files with context patches (`git diff -U3` plus `git apply --cached`), never `--unidiff-zero`, which can land hunks at the wrong lines; then check `git show` of the commit and the remaining `git diff` before moving on.
 - Never add yourself as a co-author in commits; no `Co-Authored-By` or other agent attribution trailers.
 - When I say “commit” or “finalize and commit” review and validate the change proportionally to its risk, check it against relevant feedback, and make scoped commits.
 
