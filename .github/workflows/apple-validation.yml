@@ -12,7 +12,9 @@ permissions:
 
 concurrency:
   group: apple-validation-${{ github.ref }}
-  cancel-in-progress: true
+  # Publishers need a completed main qualification; keep the active run and
+  # let later main pushes replace only the pending run. PR feedback stays fresh.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   changes:
