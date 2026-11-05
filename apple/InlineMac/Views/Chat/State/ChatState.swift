@@ -21,7 +21,7 @@ enum ScrollToMessageReason: String, Sendable, Codable {
 struct ScrollToMessageRequest: Sendable, Equatable {
   let messageId: Int64
   let reason: ScrollToMessageReason
-  /// Text of the message to highlight instead of the whole row, for a quote reply.
+  /// Text of the message to highlight instead of the whole row, such as a search match.
   var quote: String? = nil
 }
 

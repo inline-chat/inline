@@ -289,7 +289,7 @@ class MessageViewAppKit: NSView {
     }
   }
 
-  /// Behind a quoted line the list points at: a deeper shade of this bubble, so the text stays
+  /// Behind highlighted text the list points at: a deeper shade of this bubble, so the text stays
   /// clear and the mark reads as part of the bubble. Without a bubble, a faint shade of the text.
   var quoteHighlightColor: CGColor {
     var color = NSColor.labelColor.withAlphaComponent(0.1).cgColor
@@ -867,7 +867,7 @@ class MessageViewAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     view.setRelatedMessage(fullMessage.message)
     if let embeddedMessage = fullMessage.repliedToMessage {
-      view.update(with: embeddedMessage, kind: .replyInMessage, quote: fullMessage.message.replyQuote?.text)
+      view.update(with: embeddedMessage, kind: .replyInMessage)
     }
     return view
   }()
@@ -3180,7 +3180,7 @@ class MessageViewAppKit: NSView {
     let text = translationText ?? fullMessage.message.text ?? ""
     let entities = translationEntities ?? fullMessage.message.entities
     let richBlockPlan = props.layout.richBlockContent
-    let blockContent = richBlockPlan == nil ? nil : fullMessage.message.replyQuote?.body ?? fullMessage.message.blockContent
+    let blockContent = richBlockPlan == nil ? nil : fullMessage.message.blockContent
 
     // Sizing caches the entity projection before view-only link styling. Keep a
     // separate immutable render entry so rich and flat rows can reuse the exact
@@ -4234,7 +4234,7 @@ class MessageViewAppKit: NSView {
       replyView.setRelatedMessage(fullMessage.message)
       replyView.setStyle(embeddedReplyStyle(for: props))
       if let embeddedMessage = fullMessage.repliedToMessage {
-        replyView.update(with: embeddedMessage, kind: .replyInMessage, quote: fullMessage.message.replyQuote?.text)
+        replyView.update(with: embeddedMessage, kind: .replyInMessage)
       }
     }
     updateReplyThreadSummaryView(for: props)

@@ -3170,12 +3170,13 @@ class GlassComposeAppKit: NSView {
     }
   }
 
-  /// Puts quote lines before anything already typed, through the normal input path,
-  /// and leaves the cursor at the end so the reply is typed below the quote.
+  /// Adds quote lines after anything already typed, through the normal input path, and
+  /// leaves the cursor at the end so the reply is typed below the quote.
   private func insertQuote(_ markdown: String) {
     let textView = textEditor.textView
+    let insertion = MessageMarkdown.quoteInsertion(markdown, into: textView.string)
     textView.updateTypingAttributesIfNeeded()
-    textView.insertText(markdown, replacementRange: NSRange(location: 0, length: 0))
+    textView.insertText(insertion.text, replacementRange: insertion.range)
     textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
     focus()
   }

@@ -4230,7 +4230,7 @@ extension MessageListAppKit {
     let viewportHeight = scrollView.contentView.bounds.height
     var targetY = max(0, targetRect.midY - (viewportHeight / 2))
 
-    // A quote reply aims at the quoted line, which in a long message can be far from its
+    // Highlighted text aims at its line, which in a long message can be far from its
     // middle. Already in view, it is highlighted where it is.
     if shouldHighlight, let quote,
        let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell,
@@ -4314,7 +4314,7 @@ extension MessageListAppKit {
     guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell else {
       return
     }
-    // A row that was off screen is centered as a whole; in a tall message the quoted line
+    // A row that was off screen is centered as a whole; in a tall message the highlighted line
     // can still be out of view, so bring it in before highlighting it.
     if let quote, let quoteRect = cell.quoteRect(quote, in: tableView), !quoteViewport.contains(quoteRect) {
       let revision = targetScrollRevision
