@@ -41,20 +41,6 @@ type EncodableMessage = DbMessage & {
   agentSession?: Message["agentSession"]
 }
 
-/** The quote a reply carries apart from its caption, or undefined when it has none. */
-function decryptReplyQuote(
-  message: Partial<Pick<DbMessage, "replyToMsgId" | "replyQuoteEncrypted" | "replyQuoteIv" | "replyQuoteTag">>,
-): string | undefined {
-  if (!message.replyToMsgId || !message.replyQuoteEncrypted || !message.replyQuoteIv || !message.replyQuoteTag) {
-    return undefined
-  }
-  return decryptMessage({
-    encrypted: message.replyQuoteEncrypted,
-    iv: message.replyQuoteIv,
-    authTag: message.replyQuoteTag,
-  }) || undefined
-}
-
 function encodeServiceMessage(systemMessage: SystemMessage | null | undefined): MessageService | undefined {
   const event = systemMessage?.event
 
@@ -252,7 +238,6 @@ export const encodeMessage = ({
       ? false
       : entities ? isUserMentioned(entities, encodingForUserId, mentionedUserIds) : false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
-    replyQuote: decryptReplyQuote(message),
     media: media,
     isSticker: message.isSticker || undefined,
     hasLink: hasLink,
@@ -400,7 +385,6 @@ export const encodeFullMessage = ({
       ? false
       : message.entities ? isUserMentioned(message.entities, encodingForUserId) : false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
-    replyQuote: decryptReplyQuote(message),
     media: media,
     isSticker: message.isSticker ?? false,
     hasLink: message.hasLink === true || detectHasLink({ entities: message.entities }) || hasLinkFromAttachments,

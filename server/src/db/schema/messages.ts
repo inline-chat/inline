@@ -78,7 +78,7 @@ export const messages = pgTable(
     /** optional, message it is replying to */
     replyToMsgId: integer("reply_to_msg_id"),
 
-    /** text quoted from the replied message; kept out of `text`, which holds only the caption */
+    /** unused: briefly held a reply's quote apart from `text`; quotes now live in `text` as blockquotes */
     replyQuoteEncrypted: bytea("reply_quote_encrypted"),
     replyQuoteIv: bytea("reply_quote_iv"),
     replyQuoteTag: bytea("reply_quote_tag"),

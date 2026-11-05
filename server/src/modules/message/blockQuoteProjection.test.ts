@@ -42,6 +42,13 @@ describe("literal blockquote projection", () => {
     ])
   })
 
+  test("separate quotes in one reply stay separate, in order", () => {
+    const text = "first\n\nsecond\nreply"
+    const projected = projectLiteralBlockContent(text, { entities: [quote(0, 5), quote(7, 6)] })
+    expect(shape(projected?.blockContent, text)).toEqual([{ quote: ["first"] }, { quote: ["second"] }, "reply"])
+    validateBlockContent(text, projected!.blockContent)
+  })
+
   test("blank lines inside a quote separate paragraphs", () => {
     const text = "first\n\nsecond\nreply"
     const projected = projectLiteralBlockContent(text, { entities: [quote(0, 13)] })
