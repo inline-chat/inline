@@ -376,7 +376,14 @@ export async function getAgentSession(
   if (!input.peerId) throw RealtimeRpcError.BadRequest()
   const botUserId = safePositiveNumber(input.botUserId)
   const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, { currentUserId })
-  await verifiedOwnerBotChat({ chat, botUserId, ownerUserId: currentUserId })
+  // Before sending the first mention, the composer checks whether a session
+  // has already fixed this agent's folder. Reading that state must not require
+  // adding the bot to the chat. Session creation and writes still do.
+  await verifiedOwnerBot(botUserId, currentUserId)
+  await Promise.all([
+    AccessGuards.ensureChatAccess(chat, currentUserId),
+    ensureNotInternetPublic(chat),
+  ])
   const row = await selectedAgentSession({ chatId: chat.id, botUserId, sessionId: input.agentSessionId })
   if (!row) return {}
   if (row.ownerUserId !== currentUserId) throw RealtimeRpcError.UserIdInvalid()

@@ -11,7 +11,7 @@ import type {
 } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "./_types"
 import { requireManageableBot } from "./bot.avatarHelpers"
-import { resolvePeerBotScope } from "./bot.peerDiscovery"
+import { resolvePeerBotConfigurationScope } from "./bot.peerDiscovery"
 
 export async function getBotConfigurationCatalog(
   input: GetBotConfigurationCatalogInput,
@@ -21,8 +21,7 @@ export async function getBotConfigurationCatalog(
   if (!Number.isSafeInteger(botUserId) || botUserId <= 0) throw RealtimeRpcError.UserIdInvalid()
 
   if (input.peerId) {
-    const { botUserIds } = await resolvePeerBotScope(input.peerId, context.currentUserId)
-    if (!botUserIds.includes(botUserId)) throw RealtimeRpcError.UserIdInvalid()
+    await resolvePeerBotConfigurationScope(input.peerId, botUserId, context.currentUserId)
   } else {
     await requireManageableBot(botUserId, context)
   }

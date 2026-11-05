@@ -15,6 +15,7 @@ import {
   agentSessionMessages,
   agentSessions,
   botMessageRoutes,
+  chatParticipants,
   chats,
   members,
   messages,
@@ -65,6 +66,20 @@ describe("agent session continuity", () => {
       projectRef: "inline-public",
     }, ownerId)
   }
+
+  test("an owner can check for work before the agent joins, without granting chat access", async () => {
+    await db.delete(chatParticipants).where(and(eq(chatParticipants.chatId, chatId), eq(chatParticipants.userId, botId)))
+    const input = {
+      peerId: { type: { oneofKind: "chat" as const, chat: { chatId: BigInt(chatId) } } },
+      botUserId: BigInt(botId),
+    }
+    expect(await getAgentSession(input, ownerId)).toEqual({})
+    await expect(getAgentSession(input, teammateId)).rejects.toThrow()
+    await expect(connect()).rejects.toThrow()
+    expect(await db.select().from(agentSessions).where(eq(agentSessions.chatId, chatId))).toEqual([])
+    await db.delete(chatParticipants).where(and(eq(chatParticipants.chatId, chatId), eq(chatParticipants.userId, ownerId)))
+    await expect(getAgentSession(input, ownerId)).rejects.toThrow()
+  })
 
   test("imports one row per turn with canonical owner and bot authorship", async () => {
     const connected = await connect()

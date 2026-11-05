@@ -6,7 +6,7 @@ import { SessionId, UserId } from "@in/server/core/schema/identifiers"
 import { sendMessageToRealtimeBotConnection } from "@in/server/realtime/message"
 import { db } from "@in/server/db"
 import { sessions, users, userNotDeleted } from "@in/server/db/schema"
-import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { resolvePeerBotConfigurationScope } from "@in/server/functions/bot.peerDiscovery"
 import { and, eq, isNull } from "drizzle-orm"
 import { BotCapabilitiesModel } from "@in/server/db/models/botCapabilities"
 import { hasChatSettingsCapability } from "@in/server/functions/bot.capabilitiesShared"
@@ -77,8 +77,11 @@ export function subscribePrivateBotRequests(): () => void {
     ])
     if (!actorSession || !chat) return
     try {
-      await AccessGuards.ensureChatAccess(chat, event.originConnection.userId)
-      await AccessGuards.ensureChatAccess(chat, target.userId)
+      await resolvePeerBotConfigurationScope(
+        { type: { oneofKind: "chat", chat: { chatId: BigInt(chatId) } } },
+        target.userId,
+        event.originConnection.userId,
+      )
     } catch { return }
     if (!hasChatSettingsCapability(await BotCapabilitiesModel.getForBotUserId(target.userId))) return
     if (event.payload.kind === "botFilesystem") {

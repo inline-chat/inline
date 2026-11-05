@@ -85,3 +85,21 @@ export async function resolvePeerBotScope(
     botUserIds: Array.from(new Set(await getBotUserIdsForChatScope(chat, currentUserId))).sort((a, b) => a - b),
   }
 }
+
+/** A mentioned agent can be configured before sending the message that adds it
+ * to the chat. Only its owner gets this pre-join path; chat access is still
+ * checked, and ordinary discovery continues to list the chat's actual bots. */
+export async function resolvePeerBotConfigurationScope(
+  peerId: InputPeer | undefined,
+  botUserId: number,
+  currentUserId: number,
+): Promise<{ chat: DbChat }> {
+  const { chat, botUserIds } = await resolvePeerBotScope(peerId, currentUserId)
+  if (!botUserIds.includes(botUserId)) {
+    const bot = await UsersModel.getUserById(botUserId)
+    if (bot?.bot !== true || bot.deleted === true || bot.botCreatorId !== currentUserId) {
+      throw RealtimeRpcError.UserIdInvalid()
+    }
+  }
+  return { chat }
+}
