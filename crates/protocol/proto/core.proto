@@ -1054,6 +1054,9 @@ message MessageEntity {
     TYPE_HIGHLIGHT = 17;
     // Opaque TeX source range; Markdown must not be parsed inside the formula.
     TYPE_MATH = 18;
+    // Whole-line quote range. Composer "> " prefixes are not part of the text;
+    // older clients keep the quoted text visible without the quote style.
+    TYPE_BLOCKQUOTE = 19;
   }
 
   Type type = 1;
