@@ -13,6 +13,7 @@ import {
   type Peer,
 } from "@inline-chat/protocol/core"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
+import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 
 const peer: Peer = {
   type: {
@@ -49,6 +50,9 @@ const baseMessage: DbMessage = {
   rev: 0,
   date: new Date("2025-01-01T00:00:00Z"),
   replyToMsgId: null,
+  replyQuoteEncrypted: null,
+  replyQuoteIv: null,
+  replyQuoteTag: null,
   fwdFromPeerUserId: null,
   fwdFromPeerChatId: null,
   fwdFromMessageId: null,
@@ -107,6 +111,9 @@ const baseFullMessage: DbFullMessage = {
   rev: 0,
   date: new Date("2025-01-01T00:00:00Z"),
   replyToMsgId: null,
+  replyQuoteEncrypted: null,
+  replyQuoteIv: null,
+  replyQuoteTag: null,
   fwdFromPeerUserId: null,
   fwdFromPeerChatId: null,
   fwdFromMessageId: null,
@@ -199,6 +206,41 @@ const currentBlockPhoto: DbFullPhoto = {
     },
   }],
 }
+
+describe("reply quote", () => {
+  const quoted = () => {
+    const encrypted = encryptMessage("the quoted line")
+    return { replyQuoteEncrypted: encrypted.encrypted, replyQuoteIv: encrypted.iv, replyQuoteTag: encrypted.authTag }
+  }
+
+  it("sends the quote apart from the caption on a reply", () => {
+    const direct = encodeMessage({
+      message: buildMessage({ text: "caption", replyToMsgId: 5, ...quoted() }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+    const full = encodeFullMessage({
+      message: buildFullMessage({ text: "caption", replyToMsgId: 5, ...quoted() }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    for (const result of [direct, full]) {
+      expect(result.message).toBe("caption")
+      expect(result.replyQuote).toBe("the quoted line")
+    }
+  })
+
+  it("drops a quote that has no reply", () => {
+    const result = encodeMessage({
+      message: buildMessage({ text: "caption", ...quoted() }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.replyQuote).toBeUndefined()
+  })
+})
 
 describe("encodeMessage nudge", () => {
   it("encodes nudge media when mediaType is nudge", () => {

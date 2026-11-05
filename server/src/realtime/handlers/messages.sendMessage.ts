@@ -18,6 +18,7 @@ export const sendMessage = async (
       peerId: input.peerId,
       message: input.message,
       replyToMessageId: input.replyToMsgId,
+      replyQuote: input.replyQuote,
       randomId: input.randomId,
       photoId: media?.oneofKind === "photo" ? media.photo.photoId : undefined,
       videoId: media?.oneofKind === "video" ? media.video.videoId : undefined,

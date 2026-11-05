@@ -18,6 +18,7 @@ import { chats, messageAttachments, messages, type DbChat, type DbMessage } from
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
+import { splitLeadingReplyQuote } from "@in/server/modules/message/replyQuote"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -108,6 +109,8 @@ type Input = {
   peerId: InputPeer
   message?: string
   replyToMessageId?: bigint
+  /** Text quoted from the replied message, shown in the reply header; `message` is the caption. */
+  replyQuote?: string
   randomId?: bigint
   photoId?: bigint
   videoId?: bigint
@@ -260,10 +263,21 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     })
   }
 
+  // Like Telegram, a reply's quote lives apart from its text. A client that still sends the
+  // quote as the text's opening "> " lines gets it moved out here, so the stored text,
+  // notification and chat preview are only the caption.
+  const inlineReplyQuote =
+    replyToMsgIdNumber !== null &&
+    input.replyQuote === undefined &&
+    !input.parseMarkdown &&
+    !input.blockContent &&
+    !input.botBlockContent
+      ? splitLeadingReplyQuote(input.message, input.entities)
+      : undefined
   const outgoingText = input.message
     ? await processOutgoingText({
-        text: input.message,
-        entities: input.entities,
+        text: inlineReplyQuote?.caption ?? input.message,
+        entities: inlineReplyQuote ? inlineReplyQuote.entities : input.entities,
         parseMarkdown: input.parseMarkdown,
       })
     : undefined
@@ -358,6 +372,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   // Encrypt
   const encryptedMessage = text ? encryptMessage(text) : undefined
+  // A quote only makes sense on a reply.
+  const replyQuote =
+    replyToMsgIdNumber !== null ? (input.replyQuote ?? inlineReplyQuote?.quote)?.trim() || undefined : undefined
+  const encryptedReplyQuote = replyQuote ? encryptMessage(replyQuote) : undefined
   const normalizedActions = normalizeAndValidateMessageActions(input.actions, botBlockContent)
   if (normalizedActions !== undefined && !(await senderIsBot())) {
     throw RealtimeRpcError.BadRequest()
@@ -480,6 +498,9 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
           textIv: encryptedMessage?.iv ?? null,
           textTag: encryptedMessage?.authTag ?? null,
           replyToMsgId: replyToMsgIdNumber,
+          replyQuoteEncrypted: encryptedReplyQuote?.encrypted ?? null,
+          replyQuoteIv: encryptedReplyQuote?.iv ?? null,
+          replyQuoteTag: encryptedReplyQuote?.authTag ?? null,
           fwdFromPeerUserId: fwdFromPeerUserId,
           fwdFromPeerChatId: fwdFromPeerChatId,
           fwdFromMessageId: fwdFromMessageId,

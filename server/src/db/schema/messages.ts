@@ -78,6 +78,11 @@ export const messages = pgTable(
     /** optional, message it is replying to */
     replyToMsgId: integer("reply_to_msg_id"),
 
+    /** text quoted from the replied message; kept out of `text`, which holds only the caption */
+    replyQuoteEncrypted: bytea("reply_quote_encrypted"),
+    replyQuoteIv: bytea("reply_quote_iv"),
+    replyQuoteTag: bytea("reply_quote_tag"),
+
     /** forward header */
     fwdFromPeerUserId: integer("fwd_from_peer_user_id"),
     fwdFromPeerChatId: integer("fwd_from_peer_chat_id"),
