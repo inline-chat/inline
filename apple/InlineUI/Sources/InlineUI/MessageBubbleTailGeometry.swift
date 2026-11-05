@@ -39,6 +39,11 @@ public enum MessageBubbleTailGeometry {
     tip.x * radius
   }
 
+  /// How far in from the bubble's side edge the tail's underside leaves the body.
+  public static func tailStartInset(radius: CGFloat) -> CGFloat {
+    notchInset * radius
+  }
+
   /// Tail for the bottom corner of a body whose bottom corner on `side` sits at `corner`.
   public static func tailPath(corner: CGPoint, radius: CGFloat, side: Side) -> CGPath {
     let path = CGMutablePath()

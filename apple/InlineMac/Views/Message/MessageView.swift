@@ -524,6 +524,50 @@ class MessageViewAppKit: NSView {
   /// Will do tasks, Loom embeds, etc.
   private var attachmentsView: MessageAttachmentsView?
   private var messageActionRowsView: MessageActionRowsView?
+  private var uploadProgressView: PhotoUploadProgressView?
+
+  /// A sending photo's upload bar sits in the list's bottom inset under the newest message, so
+  /// it never changes the row's height and the list doesn't move when it leaves.
+  private func syncUploadProgressView(props: MessageViewProps) {
+    guard fullMessage.showsPhotoUploadProgress, props.isLastMessage,
+          let photoLocalId = fullMessage.photoInfo?.photo.id
+    else {
+      // Sent: the bar fills, then fades. Otherwise it only fades.
+      uploadProgressView?.dismiss(filling: !fullMessage.showsPhotoUploadProgress)
+      uploadProgressView = nil
+      return
+    }
+
+    let view = uploadProgressView ?? PhotoUploadProgressView()
+    if view.superview == nil {
+      addSubview(view)
+    }
+    view.configure(photoLocalId: photoLocalId)
+    uploadProgressView = view
+    needsLayout = true
+  }
+
+  private func layoutUploadProgressView() {
+    guard let uploadProgressView else { return }
+    let bubble = bubbleView.convert(bubbleView.bounds, to: self)
+    let size = PhotoUploadProgressView.size
+    // The bar ends under where the bubble's tail leaves the body.
+    let radius = MessageBubbleTailGeometry.effectiveRadius(
+      cornerRadius: MessageBubbleTailView.maxCornerRadius,
+      size: bubble.size
+    )
+    let tailStartInset = MessageBubbleTailGeometry.tailStartInset(radius: radius)
+    uploadProgressView.frame = CGRect(
+      x: outgoing
+        ? bubble.maxX - size.width - tailStartInset
+        : bubble.minX + tailStartInset,
+      y: isFlipped
+        ? bubble.maxY + PhotoUploadProgressView.topSpacing
+        : bubble.minY - PhotoUploadProgressView.topSpacing - size.height,
+      width: size.width,
+      height: size.height
+    )
+  }
 
   private func createAttachmentsView() -> MessageAttachmentsView? {
     let view = MessageAttachmentsView(
@@ -1109,6 +1153,7 @@ class MessageViewAppKit: NSView {
     super.layout()
     syncContinuousBubbleGradient()
     layoutAcknowledgement()
+    layoutUploadProgressView()
   }
 
   private func layoutAcknowledgement() {
@@ -1273,6 +1318,7 @@ class MessageViewAppKit: NSView {
     syncTextViewForCurrentProps()
 
     syncMessageActionRowsView(message: fullMessage, props: props)
+    syncUploadProgressView(props: props)
 
     if hasReactions {
       setupReactions(animate: false)
@@ -4126,6 +4172,7 @@ class MessageViewAppKit: NSView {
     }
     syncForwardHeaderView(for: props)
     syncMessageActionRowsView(message: fullMessage, props: props)
+    syncUploadProgressView(props: props)
 
     if props.layout.document != nil {
       if documentContainerView.superview == nil {

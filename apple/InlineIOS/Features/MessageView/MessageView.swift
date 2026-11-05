@@ -27,6 +27,7 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
   /// Forward header, reply, media, file or voice, by block id.
   private(set) var blockViews: [String: MessageBlockHostView] = [:]
   private var acknowledgementView: MessageAcknowledgementView?
+  private var uploadProgressView: PhotoUploadProgressView?
   private var avatarView: UserAvatarLayerView?
   private lazy var textTap = UITapGestureRecognizer(target: self, action: #selector(handleTextTap(_:)))
   private lazy var bubbleDoubleTap: UITapGestureRecognizer = {
@@ -224,6 +225,8 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       }
     }
 
+    syncUploadProgress(content, layout: layout, isSameMessage: isSameMessage)
+
     let appearingViews = appearing
     let leavingViews = leaving
     // New pills keep their starting scale on the row's curve and settle with the pop's bounce.
@@ -274,6 +277,9 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
       if let avatarView, let frame = layout.frame(.avatar) {
         avatarView.frame = frame
       }
+      if let uploadProgressView {
+        uploadProgressView.frame = uploadProgressFrame(layout, content: content)
+      }
     }, completion: { [weak self] _ in
       guard let self else { return }
       for (id, view) in leavingViews where leavingReactionViews[id] === view {
@@ -295,6 +301,44 @@ final class MessageView: UIView, UIGestureRecognizerDelegate {
         }
       }
     }
+  }
+
+  /// A sending photo's upload bar sits in the gap under the last bubble of its group, so it
+  /// never changes the row's height and the list doesn't move when it leaves.
+  private func syncUploadProgress(_ content: MessageViewContent, layout: MessageLayout, isSameMessage: Bool) {
+    let message = content.message
+    guard message.showsPhotoUploadProgress, content.context.isLastInGroup, layout.bubble.isVisible,
+          let photoLocalId = message.photoInfo?.photo.id
+    else {
+      if let uploadProgressView {
+        self.uploadProgressView = nil
+        // Sent: the bar fills, then fades. Otherwise it only fades, or goes with a reused row.
+        uploadProgressView.dismiss(filling: !message.showsPhotoUploadProgress, animated: isSameMessage)
+      }
+      return
+    }
+    let view = uploadProgressView ?? {
+      let view = PhotoUploadProgressView()
+      addSubview(view)
+      uploadProgressView = view
+      return view
+    }()
+    view.configure(photoLocalId: photoLocalId)
+    view.frame = uploadProgressFrame(layout, content: content)
+  }
+
+  /// Under the body, ending where the tail leaves it.
+  private func uploadProgressFrame(_ layout: MessageLayout, content: MessageViewContent) -> CGRect {
+    let body = layout.bubble.body
+    let size = PhotoUploadProgressView.size
+    let inset = MessageBubbleTailGeometry.tailStartInset(radius: layout.bubble.cornerRadius)
+    let isOnRight = (content.message.message.out == true) != content.context.isRightToLeft
+    return CGRect(
+      x: isOnRight ? body.maxX - inset - size.width : body.minX + inset,
+      y: body.maxY + PhotoUploadProgressView.topSpacing,
+      width: size.width,
+      height: size.height
+    )
   }
 
   /// Media reaching the bubble's bottom edge continues into the tail.

@@ -3745,6 +3745,20 @@ extension MessageListAppKit: NSTableViewDelegate {
     return allowed
   }
 
+  private static let rowViewIdentifier = NSUserInterfaceItemIdentifier("MessageListRowView")
+
+  /// AppKit's own row view clips to its bounds, and a sending photo's upload bar draws just
+  /// below its row, in the list's bottom inset.
+  func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+    if let rowView = tableView.makeView(withIdentifier: Self.rowViewIdentifier, owner: nil) as? NSTableRowView {
+      return rowView
+    }
+    let rowView = NSTableRowView()
+    rowView.identifier = Self.rowViewIdentifier
+    rowView.clipsToBounds = false
+    return rowView
+  }
+
   func isFirstInGroup(at row: Int) -> Bool {
     guard let stableId = messageStableId(forRow: row) else { return true }
     guard let index = chatRows.messageIndex(forStableMessageId: stableId) else { return true }
