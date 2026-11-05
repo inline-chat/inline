@@ -70,7 +70,7 @@ struct OptimisticRichTextTests {
 
     let quote = try #require(message(replyTo: 1).replyQuote)
     #expect(quote.text == "quoted one\nquoted two")
-    #expect(quote.body.blocks.map(\.kind) == [.paragraph(.with { $0.offset = 23; $0.length = 5; $0.isRtl = false })])
+    #expect(quote.body?.blocks.map(\.kind) == [.paragraph(.with { $0.offset = 23; $0.length = 5; $0.isRtl = false })])
     #expect(quote.bodyCacheSignature != payload.cacheSignature)
 
     // Not a reply, no reply text after the quote, or no leading quote: the body keeps everything.
@@ -87,6 +87,48 @@ struct OptimisticRichTextTests {
       text: late,
       payload: BlockContentPayload.literalBlocks(text: late, entities: entities(entity(.blockquote, 6, 6)))
     ).replyQuote == nil)
+  }
+
+  @Test("A quote reply sends only its caption, with the quote apart")
+  func splitQuoteFromCaption() throws {
+    let text = "quoted\nsecond\nwhat now"
+    let split = try #require(ReplyQuote.split(
+      text: text,
+      entities: entities(entity(.blockquote, 0, 13), entity(.bold, 1, 2), entity(.bold, 14, 4))
+    ))
+    #expect(split.quote == "quoted\nsecond")
+    #expect(split.caption == "what now")
+    // The caption keeps its own styles, moved to its start; styles inside the quote stay behind.
+    #expect(split.entities?.entities == [entity(.bold, 0, 4)])
+
+    // No caption after the quote, or no quote at the start: an ordinary message.
+    #expect(ReplyQuote.split(text: "quoted", entities: entities(entity(.blockquote, 0, 6))) == nil)
+    #expect(ReplyQuote.split(text: "reply\nquoted", entities: entities(entity(.blockquote, 6, 6))) == nil)
+    #expect(ReplyQuote.split(text: "plain", entities: nil) == nil)
+  }
+
+  @Test("A reply carrying its quote apart shows it in the header and keeps the whole body")
+  func storedReplyQuote() throws {
+    var message = InlineKit.Message(
+      messageId: 2, fromId: 1, date: Date(), text: "what", peerUserId: 1, peerThreadId: nil, chatId: 1,
+      repliedToMessageId: 1
+    )
+    message.replyQuoteText = "the quoted line"
+    let quote = try #require(message.replyQuote)
+    #expect(quote.text == "the quoted line")
+    #expect(quote.body == nil)
+
+    // Confirmed from the server, the quote comes from the message itself.
+    let confirmed = InlineKit.Message(from: InlineProtocol.Message.with {
+      $0.id = 2; $0.fromID = 1; $0.chatID = 1; $0.message = "what"
+      $0.peerID = .with { $0.chat.chatID = 1 }
+      $0.replyToMsgID = 1; $0.replyQuote = "the quoted line"
+    })
+    #expect(confirmed.text == "what")
+    #expect(confirmed.replyQuote?.text == "the quoted line")
+
+    message.repliedToMessageId = nil
+    #expect(message.replyQuote == nil)
   }
 
   @Test("A quote is found in the replied message even across blank lines")

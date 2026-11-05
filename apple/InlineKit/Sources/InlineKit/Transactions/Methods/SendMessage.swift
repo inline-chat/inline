@@ -61,11 +61,14 @@ public enum FailedMessageResender {
     try auth.validateAccountMutation(account)
     // Admit before deleting. An account transition or rejected admission leaves
     // the recoverable failed row and its original media untouched.
-    guard admit(.init(
+    var retry = TransactionSendMessage(
       text: message.text, peerId: message.peerId, chatId: message.chatId,
       mediaItems: mediaItems(for: fullMessage), replyToMsgId: message.repliedToMessageId,
       isSticker: message.isSticker, entities: message.entities
-    )) else { return }
+    )
+    // The failed row holds only the caption; its quote travels apart.
+    if let quote = message.replyQuoteText { retry.replyQuote = quote }
+    guard admit(retry) else { return }
     let deleted = try await database.dbWriter.write { db in
       try auth.validateAccountMutation(account)
       guard let stored = try Message.fetchOne(db, key: [
@@ -164,6 +167,8 @@ public struct TransactionSendMessage: Transaction {
   public var chatId: Int64
   public var attachments: [SendMessageAttachment]
   public var replyToMsgId: Int64? = nil
+  /// Text quoted from the replied message; `text` is then only the caption.
+  public var replyQuote: String? = nil
   public var isSticker: Bool? = nil
   public var entities: MessageEntities? = nil
   public var sendMode: MessageSendMode? = nil
@@ -185,6 +190,7 @@ public struct TransactionSendMessage: Transaction {
     case chatId
     case attachments
     case replyToMsgId
+    case replyQuote
     case isSticker
     case entities
     case sendMode
@@ -204,6 +210,7 @@ public struct TransactionSendMessage: Transaction {
     chatId = try container.decode(Int64.self, forKey: .chatId)
     attachments = try container.decodeIfPresent([SendMessageAttachment].self, forKey: .attachments) ?? []
     replyToMsgId = try container.decodeIfPresent(Int64.self, forKey: .replyToMsgId)
+    replyQuote = try container.decodeIfPresent(String.self, forKey: .replyQuote)
     isSticker = try container.decodeIfPresent(Bool.self, forKey: .isSticker)
     entities = try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
     if let rawValue = try container.decodeIfPresent(Int.self, forKey: .sendMode) {
@@ -236,6 +243,7 @@ public struct TransactionSendMessage: Transaction {
     try container.encode(chatId, forKey: .chatId)
     try container.encode(attachments, forKey: .attachments)
     try container.encodeIfPresent(replyToMsgId, forKey: .replyToMsgId)
+    try container.encodeIfPresent(replyQuote, forKey: .replyQuote)
     try container.encodeIfPresent(isSticker, forKey: .isSticker)
     try container.encodeIfPresent(entities, forKey: .entities)
     if let sendMode = sendMode {
@@ -266,6 +274,12 @@ public struct TransactionSendMessage: Transaction {
     self.isSticker = isSticker
     self.entities = entities
     self.sendMode = sendMode
+    // A reply opening with "> " lines sends that quote apart, so the message is just the caption.
+    if replyToMsgId != nil, let text, let split = ReplyQuote.split(text: text, entities: entities) {
+      self.text = split.caption
+      self.entities = split.entities
+      replyQuote = split.quote
+    }
     attachments = mediaItems.map { SendMessageAttachment(media: $0) }
     config = Self.sendConfiguration(config, hasAttachments: !attachments.isEmpty)
     self.replyToMsgId = replyToMsgId
@@ -305,7 +319,7 @@ public struct TransactionSendMessage: Transaction {
       return
     }
 
-    let message = Message(
+    var message = Message(
       messageId: temporaryMessageId,
       randomId: randomId,
       fromId: currentUserId,
@@ -331,6 +345,7 @@ public struct TransactionSendMessage: Transaction {
       isSticker: isSticker,
       entities: entities
     )
+    message.replyQuoteText = replyQuote
 
     // When I remove this task, or make it a sync call, I get frame drops in very fast sending
     // (mo a few months later) TRADE OFFS BABY
@@ -502,6 +517,7 @@ public struct TransactionSendMessage: Transaction {
 
       if let text { $0.message = text }
       if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
+      if let replyQuote { $0.replyQuote = replyQuote }
       if let inputMedia { $0.media = inputMedia }
       if let entities { $0.entities = entities }
       if let sendMode { $0.sendMode = sendMode }
