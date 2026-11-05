@@ -65,6 +65,19 @@ public enum MessageMarkdown {
       .joined(separator: "\n") + "\n"
   }
 
+  /// Where quote lines go in a composer holding `text`: after everything typed, replacing
+  /// trailing blank space, with a blank line before them so each quote stays its own block.
+  public static func quoteInsertion(_ quoteLines: String, into text: String) -> (range: NSRange, text: String) {
+    let source = text as NSString
+    var end = source.length
+    while end > 0, let scalar = UnicodeScalar(source.character(at: end - 1)),
+          CharacterSet.whitespacesAndNewlines.contains(scalar)
+    {
+      end -= 1
+    }
+    return (NSRange(location: end, length: source.length - end), end == 0 ? quoteLines : "\n\n" + quoteLines)
+  }
+
   /// Rich-text editing keeps styles as attributes, but a quote has no attribute form.
   /// Restores its "> " lines so saving the edit keeps the quote.
   public static func withQuoteSyntax(

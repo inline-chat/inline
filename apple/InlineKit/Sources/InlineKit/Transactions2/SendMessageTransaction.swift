@@ -24,8 +24,6 @@ public struct SendMessageTransaction: Transaction2 {
     public var peerId: Peer
     public var chatId: Int64
     public var replyToMsgId: Int64?
-    /// Text quoted from the replied message; `text` is then only the caption.
-    public var replyQuote: String?
     public var isSticker: Bool?
     public var isNudge: Bool
     public var entities: MessageEntities?
@@ -38,7 +36,6 @@ public struct SendMessageTransaction: Transaction2 {
       case peerId
       case chatId
       case replyToMsgId
-      case replyQuote
       case isSticker
       case isNudge
       case entities
@@ -52,7 +49,6 @@ public struct SendMessageTransaction: Transaction2 {
       peerId: Peer,
       chatId: Int64,
       replyToMsgId: Int64?,
-      replyQuote: String? = nil,
       isSticker: Bool?,
       isNudge: Bool,
       entities: MessageEntities?,
@@ -64,7 +60,6 @@ public struct SendMessageTransaction: Transaction2 {
       self.peerId = peerId
       self.chatId = chatId
       self.replyToMsgId = replyToMsgId
-      self.replyQuote = replyQuote
       self.isSticker = isSticker
       self.isNudge = isNudge
       self.entities = entities
@@ -79,7 +74,6 @@ public struct SendMessageTransaction: Transaction2 {
       peerId = try container.decode(Peer.self, forKey: .peerId)
       chatId = try container.decode(Int64.self, forKey: .chatId)
       replyToMsgId = try container.decodeIfPresent(Int64.self, forKey: .replyToMsgId)
-      replyQuote = try container.decodeIfPresent(String.self, forKey: .replyQuote)
       isSticker = try container.decodeIfPresent(Bool.self, forKey: .isSticker)
       isNudge = try container.decodeIfPresent(Bool.self, forKey: .isNudge) ?? false
       entities = try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
@@ -98,7 +92,6 @@ public struct SendMessageTransaction: Transaction2 {
       try container.encode(peerId, forKey: .peerId)
       try container.encode(chatId, forKey: .chatId)
       try container.encodeIfPresent(replyToMsgId, forKey: .replyToMsgId)
-      try container.encodeIfPresent(replyQuote, forKey: .replyQuote)
       try container.encodeIfPresent(isSticker, forKey: .isSticker)
       if isNudge {
         try container.encode(isNudge, forKey: .isNudge)
@@ -123,17 +116,14 @@ public struct SendMessageTransaction: Transaction2 {
     sendMode: MessageSendMode? = nil
   ) {
     let randomId = Int64.random(in: 1 ... Int64.max)
-    // A reply opening with "> " lines sends that quote apart, so the message is just the caption.
-    let split = replyToMsgId == nil || isNudge ? nil : text.flatMap { ReplyQuote.split(text: $0, entities: entities) }
     context = Context(
-      text: split?.caption ?? text,
+      text: text,
       peerId: peerId,
       chatId: chatId,
       replyToMsgId: replyToMsgId,
-      replyQuote: split?.quote,
       isSticker: isSticker,
       isNudge: isNudge,
-      entities: split.map { $0.entities } ?? entities,
+      entities: entities,
       sendMode: sendMode,
       randomId: randomId,
       temporaryMessageId: -1 * randomId
@@ -149,7 +139,6 @@ public struct SendMessageTransaction: Transaction2 {
 
       if let text = context.text { $0.message = text }
       if let replyToMsgId = context.replyToMsgId { $0.replyToMsgID = replyToMsgId }
-      if let replyQuote = context.replyQuote { $0.replyQuote = replyQuote }
       if let entities = context.entities { $0.entities = entities }
       if let sendMode = context.sendMode { $0.sendMode = sendMode }
       if context.isNudge { $0.media = InputMedia.fromNudge() }
@@ -189,7 +178,7 @@ public struct SendMessageTransaction: Transaction2 {
       return
     }
 
-    var draftMessage = Message(
+    let message = Message(
       messageId: context.temporaryMessageId,
       randomId: context.randomId,
       fromId: fromId,
@@ -210,8 +199,6 @@ public struct SendMessageTransaction: Transaction2 {
       isSticker: context.isSticker,
       entities: context.entities
     )
-    draftMessage.replyQuoteText = context.replyQuote
-    let message = draftMessage
 
     // Clear typing status
     Task(priority: .utility) {

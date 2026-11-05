@@ -167,23 +167,6 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     }
   }
 
-  /// Text quoted from the replied message, kept apart from `text`, which is only the caption.
-  public var replyQuoteText: String? {
-    get {
-      guard let contentPayload, contentPayload.hasReplyQuote, !contentPayload.replyQuote.isEmpty else { return nil }
-      return contentPayload.replyQuote
-    }
-    set {
-      var payload = contentPayload ?? Client_MessageContentPayload()
-      if let newValue, !newValue.isEmpty {
-        payload.replyQuote = newValue
-      } else {
-        payload.clearReplyQuote()
-      }
-      contentPayload = Self.hasContentPayload(payload) ? payload : nil
-    }
-  }
-
   public var hasForwardHeader: Bool {
     forwardFromUserId != nil
       || forwardFromPeerUserId != nil
@@ -645,7 +628,6 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
 
   private static func hasContentPayload(_ payload: Client_MessageContentPayload) -> Bool {
     payload.hasVoice || payload.hasActions || payload.hasReplies || payload.hasServiceMessage || payload.hasSubthread || payload.hasCountsAsUnread
-      || payload.hasReplyQuote
   }
 
   private static func contentPayload(from voice: InlineProtocol.Voice) -> Client_MessageContentPayload {
@@ -677,7 +659,6 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       payload.subthread = message.subthread
     }
     if message.hasCountsAsUnread { payload.countsAsUnread = message.countsAsUnread }
-    if message.hasReplyQuote, !message.replyQuote.isEmpty { payload.replyQuote = message.replyQuote }
 
     return hasContentPayload(payload) ? payload : nil
   }
@@ -799,11 +780,6 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
           merged.countsAsUnread = incoming.countsAsUnread
         } else if existing.hasCountsAsUnread {
           merged.countsAsUnread = existing.countsAsUnread
-        }
-
-        // An update without the quote, such as a reaction or an edit, keeps the one sent.
-        if !incoming.hasReplyQuote, existing.hasReplyQuote {
-          merged.replyQuote = existing.replyQuote
         }
 
         return hasContentPayload(merged) ? merged : nil

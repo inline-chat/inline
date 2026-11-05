@@ -111,4 +111,23 @@ struct BlockquoteMarkdownTests {
     #expect(parsed.text == "one\n\ntwo\nreply")
     #expect(ranges(parsed.entities, .blockquote) == [NSRange(location: 0, length: 8)])
   }
+
+  @Test("Quoting again adds a separate quote after what is typed")
+  func quoteAgain() {
+    func quote(_ selection: String, into text: String) -> String {
+      let insertion = MessageMarkdown.quoteInsertion(MessageMarkdown.quoteLines(selection), into: text)
+      return (text as NSString).replacingCharacters(in: insertion.range, with: insertion.text)
+    }
+
+    let first = quote("one", into: "")
+    #expect(first == "> one\n")
+    let second = quote("two", into: first)
+    #expect(second == "> one\n\n> two\n")
+    let parsed = parse(second + "reply")
+    #expect(parsed.text == "one\n\ntwo\nreply")
+    #expect(ranges(parsed.entities, .blockquote) == [NSRange(location: 0, length: 3), NSRange(location: 5, length: 3)])
+
+    // Text typed after a quote stays where it is; the next quote goes below it.
+    #expect(quote("two", into: "> one\nmy take  \n") == "> one\nmy take\n\n> two\n")
+  }
 }

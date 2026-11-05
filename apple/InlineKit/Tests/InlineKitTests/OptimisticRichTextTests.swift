@@ -57,81 +57,27 @@ struct OptimisticRichTextTests {
     ) == nil)
   }
 
-  @Test("A reply that opens with a quote moves the quote to the reply header")
-  func replyQuote() throws {
-    let text = "quoted one\n\nquoted two\nreply"
-    let payload = try #require(BlockContentPayload.literalBlocks(text: text, entities: entities(entity(.blockquote, 0, 22))))
-    func message(replyTo: Int64?, text: String = text, payload: BlockContentPayload? = payload) -> InlineKit.Message {
-      InlineKit.Message(
-        messageId: 2, fromId: 1, date: Date(), text: text, peerUserId: 1, peerThreadId: nil, chatId: 1,
-        repliedToMessageId: replyTo, blockContentPayload: payload
-      )
-    }
-
-    let quote = try #require(message(replyTo: 1).replyQuote)
-    #expect(quote.text == "quoted one\nquoted two")
-    #expect(quote.body?.blocks.map(\.kind) == [.paragraph(.with { $0.offset = 23; $0.length = 5; $0.isRtl = false })])
-    #expect(quote.bodyCacheSignature != payload.cacheSignature)
-
-    // Not a reply, no reply text after the quote, or no leading quote: the body keeps everything.
-    #expect(message(replyTo: nil).replyQuote == nil)
-    let quoteOnly = "quoted"
-    #expect(message(
-      replyTo: 1,
-      text: quoteOnly,
-      payload: BlockContentPayload.literalBlocks(text: quoteOnly, entities: entities(entity(.blockquote, 0, 6)))
-    ).replyQuote == nil)
-    let late = "reply\nquoted"
-    #expect(message(
-      replyTo: 1,
-      text: late,
-      payload: BlockContentPayload.literalBlocks(text: late, entities: entities(entity(.blockquote, 6, 6)))
-    ).replyQuote == nil)
-  }
-
-  @Test("A quote reply sends only its caption, with the quote apart")
-  func splitQuoteFromCaption() throws {
-    let text = "quoted\nsecond\nwhat now"
-    let split = try #require(ReplyQuote.split(
+  @Test("A reply keeps every quote in its body, in order")
+  func replyKeepsQuotesInBody() throws {
+    let text = "first\n\nsecond\nreply"
+    let payload = try #require(BlockContentPayload.literalBlocks(
       text: text,
-      entities: entities(entity(.blockquote, 0, 13), entity(.bold, 1, 2), entity(.bold, 14, 4))
+      entities: entities(entity(.blockquote, 0, 5), entity(.blockquote, 7, 6))
     ))
-    #expect(split.quote == "quoted\nsecond")
-    #expect(split.caption == "what now")
-    // The caption keeps its own styles, moved to its start; styles inside the quote stay behind.
-    #expect(split.entities?.entities == [entity(.bold, 0, 4)])
-
-    // No caption after the quote, or no quote at the start: an ordinary message.
-    #expect(ReplyQuote.split(text: "quoted", entities: entities(entity(.blockquote, 0, 6))) == nil)
-    #expect(ReplyQuote.split(text: "reply\nquoted", entities: entities(entity(.blockquote, 6, 6))) == nil)
-    #expect(ReplyQuote.split(text: "plain", entities: nil) == nil)
+    #expect(payload.content.blocks.map(\.kind) == [
+      .quote(.with {
+        $0.children = [.with { $0.paragraph = .with { $0.length = 5; $0.isRtl = false } }]
+        $0.isRtl = false
+      }),
+      .quote(.with {
+        $0.children = [.with { $0.paragraph = .with { $0.offset = 7; $0.length = 6; $0.isRtl = false } }]
+        $0.isRtl = false
+      }),
+      .paragraph(.with { $0.offset = 14; $0.length = 5; $0.isRtl = false }),
+    ])
   }
 
-  @Test("A reply carrying its quote apart shows it in the header and keeps the whole body")
-  func storedReplyQuote() throws {
-    var message = InlineKit.Message(
-      messageId: 2, fromId: 1, date: Date(), text: "what", peerUserId: 1, peerThreadId: nil, chatId: 1,
-      repliedToMessageId: 1
-    )
-    message.replyQuoteText = "the quoted line"
-    let quote = try #require(message.replyQuote)
-    #expect(quote.text == "the quoted line")
-    #expect(quote.body == nil)
-
-    // Confirmed from the server, the quote comes from the message itself.
-    let confirmed = InlineKit.Message(from: InlineProtocol.Message.with {
-      $0.id = 2; $0.fromID = 1; $0.chatID = 1; $0.message = "what"
-      $0.peerID = .with { $0.chat.chatID = 1 }
-      $0.replyToMsgID = 1; $0.replyQuote = "the quoted line"
-    })
-    #expect(confirmed.text == "what")
-    #expect(confirmed.replyQuote?.text == "the quoted line")
-
-    message.repliedToMessageId = nil
-    #expect(message.replyQuote == nil)
-  }
-
-  @Test("A quote is found in the replied message even across blank lines")
+  @Test("Highlighted text is found in a message even across blank lines")
   func quoteRangeInSource() {
     let source = "first line\n\nsecond line\nthird"
     #expect(ReplyQuote.range(of: "second line", in: source) == NSRange(location: 12, length: 11))
@@ -154,8 +100,12 @@ struct OptimisticRichTextTests {
       $0.replyToMsgID = 1
       $0.entities = entities(entity(.blockquote, 0, 6))
     }
-    let quote = try #require(InlineKit.Message(from: echo).replyQuote)
-    #expect(quote.text == "quoted")
+    let blocks = try #require(InlineKit.Message(from: echo).blockContent?.blocks)
+    #expect(blocks.count == 2)
+    guard case .quote? = blocks.first?.kind else {
+      Issue.record("expected the quote block first")
+      return
+    }
 
     // Blocks the server did send are kept as they are.
     let projected = InlineProtocol.Message.with {
