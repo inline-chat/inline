@@ -1351,12 +1351,7 @@ class UIMessageView: UIView {
   }
 
   @objc func handleEmbedViewTap() {
-    guard let repliedId = message.repliedToMessageId else { return }
-    NotificationCenter.default.post(
-      name: Notification.Name("ScrollToRepliedMessage"),
-      object: nil,
-      userInfo: ["repliedToMessageId": repliedId, "chatId": message.chatId]
-    )
+    MessageViewActions.openRepliedMessage(of: message)
   }
 
   func setupFileViewIfNeeded() {

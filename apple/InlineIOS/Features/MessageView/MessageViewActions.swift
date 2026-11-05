@@ -249,13 +249,15 @@ enum MessageViewActions {
     presenter.present(alert, animated: true)
   }
 
-  /// Scrolls to the message a reply quotes.
+  /// Scrolls to the message a reply quotes; a quote reply highlights the quoted text.
   static func openRepliedMessage(of message: Message) {
     guard let repliedId = message.repliedToMessageId else { return }
+    var userInfo: [String: Any] = ["repliedToMessageId": repliedId, "chatId": message.chatId]
+    userInfo["quote"] = message.replyQuote?.text
     NotificationCenter.default.post(
       name: Notification.Name("ScrollToRepliedMessage"),
       object: nil,
-      userInfo: ["repliedToMessageId": repliedId, "chatId": message.chatId]
+      userInfo: userInfo
     )
   }
 
