@@ -21,6 +21,7 @@ if (target === "server") {
     "server/dist/migrate.js",
     "server/dist/verify-migrations.js",
     "server/dist/livekit-cutover-preflight.js",
+    "server/dist/realtime-cross-origin-smoke.js",
     "server/scripts/start-production.ts",
     "server/scripts/verify-migrations.ts",
     "server/drizzle/meta/_journal.json",
@@ -28,8 +29,11 @@ if (target === "server") {
     "packages/oauth-core/dist/index.js",
   ]) await access(file)
   // Run the actual bundled CLI import graphs with no credentials or network.
-  for (const command of ["migrate", "verify-migrations", "livekit-cutover-preflight"]) {
-    for (const file of [`server/dist/${command}.js`, `server/scripts/${command}.ts`]) {
+  for (const command of ["migrate", "verify-migrations", "livekit-cutover-preflight", "realtime-cross-origin-smoke"]) {
+    const files = command === "realtime-cross-origin-smoke"
+      ? [`server/dist/${command}.js`]
+      : [`server/dist/${command}.js`, `server/scripts/${command}.ts`]
+    for (const file of files) {
       const child = Bun.spawn([process.execPath, "--no-env-file", file, "--help"], {
         env: { PATH: process.env.PATH }, stdout: "pipe", stderr: "pipe",
       })

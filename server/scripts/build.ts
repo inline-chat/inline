@@ -16,7 +16,7 @@ console.info("Reviewed Forge source:", JSON.stringify(verifyForgeSource()))
 const result = await Bun.build({
   entrypoints: [
     resolve(__dirname, "../src/index.ts"),
-    ...["core-production-smoke", "encrypt-content", "migrate", "verify-migrations", "livekit-cutover-preflight"].map(
+    ...["core-production-smoke", "encrypt-content", "migrate", "verify-migrations", "livekit-cutover-preflight", "realtime-cross-origin-smoke"].map(
       (name) => resolve(__dirname, `./${name}.ts`),
     ),
   ],

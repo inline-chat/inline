@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -103,6 +103,45 @@ describe("server release restore plan", () => {
     expect(checks).not.toMatch(/flyctl deploy|docker run|--allow-mutation/)
     const nbg = JSON.stringify(workflow.jobs.nuremberg)
     expect(nbg).not.toMatch(/NBG_SSH|NBG_KNOWN_HOSTS|STANDBY_RELEASE_SSH_KEY|FLY_API_TOKEN|crane|registry\.fly\.io/)
+  })
+})
+
+describe("cross-origin qualification caller", () => {
+  const readonly = preflight.steps.find((step) => step.name === "Verify the dedicated cross-origin fixture without sending messages")!
+  const live = workflow.jobs.deploy!.steps.find((step) => step.name === "Verify large live messages across both origins")!
+
+  it("checks the fixture before recording the migration plan and mutates only after canonical postflight", () => {
+    expect(preflight.steps.indexOf(readonly)).toBeLessThan(preflight.steps.findIndex((step) => step.name?.startsWith("Save the qualified")))
+    const deploy = workflow.jobs.deploy!.steps
+    expect(deploy.indexOf(live)).toBeGreaterThan(deploy.findIndex((step) => step.name === "Smoke-test the canonical route"))
+    for (const step of [readonly, live]) expect(step.if).toBe("${{ !inputs.bootstrap && inputs.origins == 'both' }}")
+  })
+
+  it("runs the exact qualified image with credentials forwarded by name, and refuses mutable image tags", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "cross-origin-caller-"))
+    const executable = path.join(directory, "docker")
+    const argsFile = path.join(directory, "args")
+    writeFileSync(executable, '#!/bin/sh\ntest "$SMOKE_BOT_TOKEN" = fixture-token || exit 9\nprintf "%s\\n" "$@" > "$PROBE_ARGS"\n')
+    chmodSync(executable, 0o700)
+    const run = (step: Step, image: string) => Bun.spawnSync(["bash", "-e", "-c", step.run!], { cwd: root, env: {
+      PATH: `${directory}:${process.env.PATH}`, PROBE_ARGS: argsFile, RUNTIME_IMAGE: image,
+      SMOKE_BOT_TOKEN: "fixture-token", SMOKE_CHAT_ID: "7", FLY_ORIGIN_IP: "203.0.113.1", NBG_ORIGIN_IP: "203.0.113.2", GITHUB_SHA: sha,
+    } })
+    try {
+      for (const [step, mode] of [[readonly, "--preflight"], [live, "--confirm-test-writes"]] as const) {
+        expect(run(step, runtime).exitCode).toBe(0)
+        const args = readFileSync(argsFile, "utf8").trim().split("\n")
+        expect(args).toContain(runtime)
+        expect(args).toContain("server/dist/realtime-cross-origin-smoke.js")
+        expect(args).toContain("--no-env-file")
+        expect(args).toContain(mode)
+        expect(args).toContain("SMOKE_BOT_TOKEN")
+        expect(args).not.toContain("fixture-token")
+        expect(args).toContain("203.0.113.1")
+        expect(args).toContain("203.0.113.2")
+        expect(run(step, "ghcr.io/inline-chat/inline-server:latest").exitCode).not.toBe(0)
+      }
+    } finally { rmSync(directory, { recursive: true, force: true }) }
   })
 })
 

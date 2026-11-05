@@ -170,6 +170,15 @@ jobs:
             bun --no-env-file scripts/ci/nbg-release.ts --preflight
             bun --no-env-file scripts/ci/release-smoke.ts --preflight --origin nuremberg --ip "$NBG_ORIGIN_IP"
           fi
+      - name: Verify the dedicated cross-origin fixture without sending messages
+        if: ${{ !inputs.bootstrap && inputs.origins == 'both' }}
+        run: |
+          set -euo pipefail
+          [[ "$RUNTIME_IMAGE" =~ ^ghcr\.io/inline-chat/inline-server@sha256:[a-f0-9]{64}$ ]] || exit 1
+          docker run --rm --entrypoint bun \
+            -e SMOKE_BOT_TOKEN -e SMOKE_CHAT_ID \
+            "$RUNTIME_IMAGE" --no-env-file server/dist/realtime-cross-origin-smoke.js \
+            --fly-ip "$FLY_ORIGIN_IP" --nbg-ip "$NBG_ORIGIN_IP" --preflight
       - name: Save the qualified image identities and original restore targets
         id: baseline
         run: |
@@ -393,6 +402,20 @@ jobs:
           set -euo pipefail
           bun --no-env-file scripts/ci/release-smoke.ts --origin fly --revision "$GITHUB_SHA" --ip "$FLY_ORIGIN_IP"
           bun --no-env-file scripts/ci/release-smoke.ts --origin canonical --revision "$GITHUB_SHA"
+      - name: Verify large live messages across both origins
+        if: ${{ !inputs.bootstrap && inputs.origins == 'both' }}
+        env:
+          FLY_ORIGIN_IP: ${{ vars.FLY_ORIGIN_IP }}
+          NBG_ORIGIN_IP: ${{ secrets.NBG_ORIGIN_IP }}
+          SMOKE_BOT_TOKEN: ${{ secrets.SMOKE_BOT_TOKEN }}
+          SMOKE_CHAT_ID: ${{ vars.SMOKE_CHAT_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$RUNTIME_IMAGE" =~ ^ghcr\.io/inline-chat/inline-server@sha256:[a-f0-9]{64}$ ]] || exit 1
+          docker run --rm --entrypoint bun \
+            -e SMOKE_BOT_TOKEN -e SMOKE_CHAT_ID \
+            "$RUNTIME_IMAGE" --no-env-file server/dist/realtime-cross-origin-smoke.js \
+            --revision "$GITHUB_SHA" --fly-ip "$FLY_ORIGIN_IP" --nbg-ip "$NBG_ORIGIN_IP" --confirm-test-writes
 
   activate:
     name: Enable workers on the same qualified bootstrap image
