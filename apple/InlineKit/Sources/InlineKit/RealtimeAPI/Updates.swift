@@ -2427,6 +2427,9 @@ extension InlineProtocol.UpdateNewMessage {
     materializeMissingReferences: Bool,
     incrementUnreadCount: Bool = true
   ) throws {
+    // A send the user cancelled after it was dispatched; it's being deleted on the server.
+    if CancelledSends.shared.isLanded(chatId: message.chatID, messageId: message.id) { return }
+
     // Avoid double-applying side effects when the same message is replayed (eg. sync catch-up,
     // duplicate delivery, history prefill).
     let hadMessage = try Message
@@ -2549,6 +2552,10 @@ extension InlineProtocol.UpdateMessageId {
   /// still resolves the current account through the existing Auth wrapper.
   func apply(_ db: Database, currentUserId: Int64?) throws {
     Log.shared.debug("update message id \(randomID) \(messageID)")
+    if let target = CancelledSends.shared.land(randomId: randomID, messageId: messageID) {
+      try removeCancelledSend(db, target: target, currentUserId: currentUserId)
+      return
+    }
     // FIXME: optimize this to update in one go OR to make a faster fetch
     let message = try Message
       .fetchOne(db, key: ["fromId": currentUserId, "randomId": randomID])
@@ -2567,6 +2574,35 @@ extension InlineProtocol.UpdateMessageId {
 
       if !message.isGridTranscript {
         try Chat.updateLastMsgId(db, chatId: message.chatId, lastMsgId: message.messageId, date: message.date)
+      }
+    }
+  }
+}
+
+extension InlineProtocol.UpdateMessageId {
+  /// The user cancelled this send after it was dispatched: drop any local copy, and delete it on
+  /// the server.
+  private func removeCancelledSend(_ db: Database, target: CancelledSends.Target, currentUserId: Int64?) throws {
+    Log.shared.debug("deleting cancelled send \(randomID) \(messageID)")
+    let localIds = try Message
+      .filter(Column("fromId") == currentUserId && Column("randomId") == randomID)
+      .fetchAll(db)
+      .map(\.messageId)
+    let messageIds = Array(Set(localIds + [messageID]))
+    try Message.deleteMessages(db, messageIds: messageIds, chatId: target.chatId)
+    let messageID = messageID
+    db.afterNextTransaction { _ in
+      Task { @MainActor in
+        MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: target.peerId)
+        do {
+          _ = try await Api.realtime.send(.deleteMessages(
+            messageIds: [messageID],
+            peerId: target.peerId,
+            chatId: target.chatId
+          ))
+        } catch {
+          Log.shared.error("Failed to delete cancelled send", error: error)
+        }
       }
     }
   }

@@ -89,6 +89,10 @@ public enum PendingMessageCanceller {
           account.userID == message.fromId else { return false }
     let transactionID = message.transactionId.flatMap { $0.isEmpty ? nil : $0 }
     guard transactionID != nil || message.randomId != nil else { return false }
+    // The send may already be on its way; if it lands anyway, it's deleted there.
+    if let randomID = message.randomId {
+      CancelledSends.shared.record(randomId: randomID, chatId: message.chatId, peerId: message.peerId)
+    }
     if let transactionID { Transactions.shared.cancel(transactionId: transactionID) }
     let media = FailedMessageResender.mediaItems(for: fullMessage)
     Task {
