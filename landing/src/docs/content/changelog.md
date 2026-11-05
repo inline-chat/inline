@@ -7,6 +7,15 @@ Release notes for Inline apps, developer tools, and integrations.
 
 > [Download the latest Inline apps](/download).
 
+## November 5, 2026
+
+[CLI 0.7.21](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.21) · [Hermes adapter 1.0.0](https://www.npmjs.com/package/@inline-chat/hermes-agent-adapter/v/1.0.0)
+
+### Fixes
+
+- 🛠️ **Hermes 0.22.6 and later work with Inline again.** Those versions refused every message from earlier adapters, replying "Hermes refused this message (invalid_params)". Upgrade to the [Hermes adapter](/docs/hermes) **1.0.0**: run `npm install -g @inline-chat/hermes-agent-adapter@latest`, `inline-hermes install --force`, and restart the gateway. 1.0.0 also changes when the bot answers; read [Upgrading to 1.0](/docs/hermes#upgrading-to-1-0) first.
+- [CLI](/docs/cli) **0.7.21**: `inline agents setup` upgrades Hermes adapters older than 1.0.0. It also finds Codex in the current ChatGPT app, lets a signed-out bridge load so login and restart can repair it, and publishes installed skills from the agent bridge.
+
 ## October 30, 2026
 
 [macOS 0.2 beta, build 6338](https://public-assets.inline.chat/mac/beta/6338/Inline.dmg) · [iOS TestFlight build 1393](https://testflight.apple.com/join/FkC3f7fz) · [CLI 0.7.20](https://github.com/inline-chat/inline/releases/tag/cli-v0.7.20)
