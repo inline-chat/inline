@@ -425,6 +425,11 @@ jobs:
           HERMES_BIN: ${{ steps.host.outputs.hermes-bin }}
           HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
         run: node scripts/ci/check-hermes-source.mjs plugins/hermes-agent/plugin/inline "$HERMES_BIN" "$HERMES_PYTHON"
+      - name: Run an inbound turn through the production Hermes gateway
+        env:
+          HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
+        run: |
+          "$HERMES_PYTHON" scripts/ci/hermes-gateway-e2e.py plugins/hermes-agent/plugin/inline
 
   local-integration:
     name: Packed adapters with local Inline server

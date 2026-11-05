@@ -36,3 +36,12 @@ jobs:
           HERMES_BIN: ${{ steps.host.outputs.hermes-bin }}
           HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
         run: node scripts/ci/check-hermes-admission.mjs --latest "$HERMES_BIN" "$HERMES_PYTHON"
+      - name: Run an inbound turn through the production Hermes gateway (npm latest)
+        env:
+          HERMES_PYTHON: ${{ steps.host.outputs.python-bin }}
+        run: |
+          pack_dir="$RUNNER_TEMP/npm-latest"
+          mkdir -p "$pack_dir"
+          npm pack @inline-chat/hermes-agent-adapter@latest --pack-destination "$pack_dir"
+          tar -xzf "$pack_dir"/*.tgz -C "$pack_dir"
+          "$HERMES_PYTHON" scripts/ci/hermes-gateway-e2e.py "$pack_dir/package/plugin/inline"

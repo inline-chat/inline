@@ -51,6 +51,11 @@ loads the platform and tool through Hermes, and exercises inbound/reply delivery
 deduplication, and media URL rejection. Host modules are not stubbed; this fast
 lane uses an offline transport and a deterministic reply handler.
 
+The gateway lane (`scripts/ci/hermes-gateway-e2e.py`) runs an inbound turn
+through Hermes' production `python -m gateway.run` on the same hosts, with no
+replaced message handler: native admission, the agent turn (fake loopback model)
+and reply delivery to a fake sidecar. The six-hourly job runs it on npm `latest`.
+
 The local integration lane additionally runs the packaged Python adapter and its
 bundled Node sidecar against the source Inline server and verifies an inbound
 message and persisted outbound reply. This needs no production credential or LLM.
