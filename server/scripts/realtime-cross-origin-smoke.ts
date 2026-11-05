@@ -55,7 +55,7 @@ export const originApi: Api = (ip, path, token, body) => new Promise((resolve, r
       if (response.statusCode !== 200) return reject(new Error(`Origin returned HTTP ${response.statusCode ?? 0}`))
       try {
         const value: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"))
-        if (!object(value) || value.ok !== true) throw new Error()
+        if (!object(value) || value["ok"] !== true) throw new Error()
         resolve(value)
       } catch { reject(new Error("Origin returned an invalid successful response")) }
     })
@@ -88,20 +88,20 @@ const bounded = async <T>(work: Promise<T>, milliseconds: number, label: string)
 
 async function preflight(origin: Origin, options: CrossOriginOptions, api: Api): Promise<number> {
   const ready = await api(origin.ip, "/readyz")
-  if (typeof ready.revision !== "string" || !/^[a-f0-9]{40}$/.test(ready.revision) ||
-    (options.revision && ready.revision !== options.revision) || ready.draining !== false) {
+  if (typeof ready["revision"] !== "string" || !/^[a-f0-9]{40}$/.test(ready["revision"]) ||
+    (options.revision && ready["revision"] !== options.revision) || ready["draining"] !== false) {
     throw new Error(`${origin.name} is not ready on the selected revision`)
   }
   const me = await api(origin.ip, "/bot/getMe", options.token)
-  const user = object(me.result) && object(me.result.user) ? me.result.user : undefined
-  if (!user || !positiveId(user.id) || user.is_bot !== true || user.username !== BOT_USERNAME) {
+  const user = object(me["result"]) && object(me["result"]["user"]) ? me["result"]["user"] : undefined
+  if (!user || !positiveId(user["id"]) || user["is_bot"] !== true || user["username"] !== BOT_USERNAME) {
     throw new Error("Credential does not identify the dedicated release smoke bot")
   }
   const response = await api(origin.ip, `/bot/getChat?chat_id=${options.chatId}`, options.token)
-  const chat = object(response.result) && object(response.result.chat) ? response.result.chat : undefined
-  if (!chat || chat.chat_id !== Number(options.chatId) || chat.type !== "thread" || chat.title !== CHAT_TITLE ||
-    chat.space_id != null || chat.is_public === true) throw new Error("Target is not the private release smoke fixture")
-  return user.id
+  const chat = object(response["result"]) && object(response["result"]["chat"]) ? response["result"]["chat"] : undefined
+  if (!chat || chat["chat_id"] !== Number(options.chatId) || chat["type"] !== "thread" || chat["title"] !== CHAT_TITLE ||
+    chat["space_id"] != null || chat["is_public"] === true) throw new Error("Target is not the private release smoke fixture")
+  return user["id"]
 }
 
 type LiveReceipt = { messageId: bigint; textBytes: number; updatesBytes: number; frameBytes: number }
@@ -161,12 +161,12 @@ async function direction(send: Origin, receive: Origin, botId: number, options: 
         chat_id: Number(options.chatId), text, parse_markdown: false, silent: true,
       })
     } catch { throw new Error("Send outcome is ambiguous; inspect the smoke chat before retrying") }
-    const message = object(sent.result) && object(sent.result.message) ? sent.result.message : undefined
-    if (!message || !positiveId(message.message_id)) throw new Error("Send outcome is ambiguous; inspect the smoke chat before retrying")
+    const message = object(sent["result"]) && object(sent["result"]["message"]) ? sent["result"]["message"] : undefined
+    if (!message || !positiveId(message["message_id"])) throw new Error("Send outcome is ambiguous; inspect the smoke chat before retrying")
     const receipt = await bounded(delivered.promise, options.timeoutMs ?? 15_000,
-      `No full cross-origin push for message ${message.message_id}; message remains in the smoke chat`)
-    if (receipt.messageId !== BigInt(message.message_id)) throw new Error("Live message identity did not match the send receipt")
-    return { direction: `${send.name}->${receive.name}`, messageId: message.message_id, chatId: Number(options.chatId),
+      `No full cross-origin push for message ${message["message_id"]}; message remains in the smoke chat`)
+    if (receipt.messageId !== BigInt(message["message_id"])) throw new Error("Live message identity did not match the send receipt")
+    return { direction: `${send.name}->${receive.name}`, messageId: message["message_id"], chatId: Number(options.chatId),
       textBytes: receipt.textBytes, updatesBytes: receipt.updatesBytes, frameBytes: receipt.frameBytes,
       textSha256: createHash("sha256").update(text).digest("hex"), elapsedMs: Date.now() - started,
       unsolicitedLivePush: true, getUpdatesRequests: 0 }
