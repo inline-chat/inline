@@ -7,6 +7,43 @@ import Testing
 @Suite("Bot chat settings coordinator", .serialized)
 @MainActor
 struct BotChatSettingsCoordinatorTests {
+  @Test("a mentioned agent loads and edits settings before joining the chat")
+  func composeTargetBeforeFirstMessage() async {
+    let mutations = InvocationCounter()
+    let coordinator = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in
+        Issue.record("An explicit compose target should not wait for peer discovery")
+        return .init()
+      },
+      settingsRequester: { peer, botID in
+        #expect(peer == .thread(id: 77))
+        #expect(botID == 20)
+        return documentResponse(revision: "one", replyThreads: "auto")
+      },
+      itemInvoker: { peer, botID, itemID, value, revision in
+        #expect(peer == .thread(id: 77))
+        #expect(botID == 20)
+        #expect(itemID == "reply-threads")
+        #expect(value == .string("on"))
+        #expect(revision == "one")
+        await mutations.increment()
+        return documentResponse(revision: "two", replyThreads: "on")
+      }
+    )
+    defer { coordinator.cancel() }
+
+    coordinator.selectComposeTarget(botUserID: 20)
+    await waitUntil { coordinator.selectedState.phase == .loaded }
+    #expect(coordinator.selectedBotID == 20)
+    #expect(coordinator.selectedState.document?.revision == "one")
+
+    coordinator.invoke(itemID: "reply-threads", value: .string("on"))
+    await waitUntil { coordinator.selectedState.document?.revision == "two" }
+    #expect(await mutations.count == 1)
+    #expect(replyThreadsValue(in: coordinator.selectedState.document) == "on")
+  }
+
   @Test("a registered folder refreshes the catalog before selection")
   func registeredFolderSelection() async throws {
     let responses = SettingsResponseSequence(responses: [

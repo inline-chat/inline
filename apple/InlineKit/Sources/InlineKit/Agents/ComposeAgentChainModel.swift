@@ -54,7 +54,6 @@ public final class ComposeAgentChainModel: ObservableObject {
   private var replyToUserID: Int64?
   private var cancellables: Set<AnyCancellable> = []
   private var catalogTask: Task<Void, Never>?
-  private var settingsTask: Task<Void, Never>?
   private var isStarted = false
 
   public init(
@@ -75,7 +74,6 @@ public final class ComposeAgentChainModel: ObservableObject {
 
   deinit {
     catalogTask?.cancel()
-    settingsTask?.cancel()
   }
 
   public func start() {
@@ -119,7 +117,6 @@ public final class ComposeAgentChainModel: ObservableObject {
     isStarted = false
     cancellables.removeAll()
     catalogTask?.cancel()
-    settingsTask?.cancel()
     threadModel.cancel()
     settings?.cancel()
     settings = nil
@@ -201,7 +198,6 @@ public final class ComposeAgentChainModel: ObservableObject {
 
   private func loadTarget() {
     catalogTask?.cancel()
-    settingsTask?.cancel()
     guard let target else {
       catalog = nil
       botUserInfo = nil
@@ -229,16 +225,8 @@ public final class ComposeAgentChainModel: ObservableObject {
   /// and reasoning in the server preset.
   private func prepareSettings(for botUserID: Int64) {
     let settings = ensureSettings()
-    settingsTask?.cancel()
-    settingsTask = Task { @MainActor [weak self, weak settings] in
-      guard let settings else { return }
-      if !settings.bots.contains(where: { $0.id == botUserID }) {
-        await settings.warmUp()
-      }
-      guard let self, !Task.isCancelled, self.target?.botUserID == botUserID else { return }
-      settings.selectBot(botUserID)
-      self.observeSettings()
-    }
+    settings.selectComposeTarget(botUserID: botUserID)
+    observeSettings()
   }
 
   public func prepareUsage() {

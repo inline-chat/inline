@@ -401,6 +401,19 @@ public final class BotChatSettingsCoordinator {
     refreshSelectedIfStale()
   }
 
+  /// A leading mention can target an owned agent before the first message
+  /// adds it to this chat. The server authorizes that explicit target; peer
+  /// discovery intentionally lists only bots already in the chat.
+  public func selectComposeTarget(botUserID: Int64) {
+    if !bots.contains(where: { $0.id == botUserID }) {
+      bots.append(BotChatSettingsBot(user: .with {
+        $0.id = botUserID
+        $0.bot = true
+      }))
+    }
+    selectBot(botUserID)
+  }
+
   public func refreshSelected() {
     guard let selectedBotID, !hasPendingMutation(for: selectedBotID) else { return }
     startRequest(botID: selectedBotID)
