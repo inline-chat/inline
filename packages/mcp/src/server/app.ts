@@ -3,6 +3,7 @@ import { OAuth } from "./oauth/routes"
 import { Mcp } from "./mcp/handler"
 import { modernRequestHeaderHint } from "./mcp/modern"
 import { defaultAllowedHosts, defaultAllowedOriginHosts, defaultConfig, type McpConfig } from "./config"
+import { mcpProcessIdentity } from "./process-diagnostics"
 
 export type InlineMcpApp = {
   fetch(req: Request): Promise<Response>
@@ -200,7 +201,8 @@ export function createApp(options?: CreateAppOptions): InlineMcpApp {
       }
 
       if (url.pathname === "/health") {
-        return finish(withJson({ ok: true }))
+        const revision = mcpProcessIdentity().revision
+        return finish(withJson({ ok: true, ...(revision ? { revision } : {}) }))
       }
 
       const mcpRes = (await legacyMcp.handle(req, url, modern)) ?? (await submissionMcp.handle(req, url, modern))

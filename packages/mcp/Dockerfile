@@ -23,6 +23,8 @@ RUN bun run --cwd packages/sdk build
 RUN bun run --cwd packages/mcp build
 
 FROM base AS release
+ARG SOURCE_COMMIT=unknown
+ENV INLINE_MCP_REVISION=$SOURCE_COMMIT
 COPY --from=pruner /app/out/json/ ./
 RUN bun install --frozen-lockfile --filter @inline-chat/mcp --production
 COPY --from=build /app/packages/protocol/dist ./packages/protocol/dist

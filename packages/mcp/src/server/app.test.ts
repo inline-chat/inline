@@ -4,6 +4,7 @@ import { createApp } from "./app"
 describe("mcp app", () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.unstubAllEnvs()
   })
 
   it("createApp works without options", async () => {
@@ -13,10 +14,24 @@ describe("mcp app", () => {
   })
 
   it("health returns ok", async () => {
+    vi.stubEnv("INLINE_MCP_REVISION", "")
+    vi.stubEnv("SOURCE_COMMIT", "")
     const app = createApp({ issuer: "http://localhost:1234" })
     const res = await app.fetch(new Request("http://localhost/health"))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
+  })
+
+  it("health reports the validated deployed revision without echoing invalid metadata", async () => {
+    const revision = "1234567890abcdef1234567890abcdef12345678"
+    vi.stubEnv("INLINE_MCP_REVISION", "unknown")
+    vi.stubEnv("SOURCE_COMMIT", revision)
+    const app = createApp({ issuer: "http://localhost:1234" })
+    const response = await app.fetch(new Request("http://localhost/health"))
+    expect(await response.json()).toEqual({ ok: true, revision })
+    vi.stubEnv("SOURCE_COMMIT", "private-invalid-value")
+    const invalid = await app.fetch(new Request("http://localhost/health"))
+    expect(await invalid.json()).toEqual({ ok: true })
   })
 
   it("root returns a description", async () => {

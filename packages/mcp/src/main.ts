@@ -1,14 +1,15 @@
-import { createApp } from "./server/app"
-import { defaultConfig } from "./server/config"
+import { installMcpProcessDiagnostics } from "./server/process-diagnostics"
 
-const port = Number(process.env.PORT ?? "8791")
-const config = defaultConfig()
-const app = createApp(config)
+const diagnostics = installMcpProcessDiagnostics()
+try {
+  // Observe initialization failures before importing the application graph.
+  const [{ createApp }, { defaultConfig }] = await Promise.all([import("./server/app"), import("./server/config")])
+  const port = Number(process.env.PORT ?? "8791")
+  const app = createApp(defaultConfig())
 
-Bun.serve({
-  port,
-  fetch: app.fetch,
-})
-
-// Keep logs minimal and never include tokens.
-console.log(`inline mcp listening on http://localhost:${port}`)
+  Bun.serve({ port, fetch: app.fetch })
+  diagnostics.started()
+} catch (error) {
+  diagnostics.startupFailure(error)
+  throw error
+}
