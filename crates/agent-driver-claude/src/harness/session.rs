@@ -230,6 +230,11 @@ impl ClaudeHarness {
         SessionStore::resolve(&self.config.env)
     }
 
+    fn with_saved_projects(&self, mut catalog: Catalog) -> Catalog {
+        catalog.folders = crate::projects::folders(&self.config.env);
+        catalog
+    }
+
     /// Revalidates the executable and reads its version (every connection).
     async fn validate(&self, cwd: &std::path::Path) -> Result<ClaudeVersion, SetupReason> {
         let executable = &self.config.executable;
@@ -476,12 +481,12 @@ impl HarnessDriver for ClaudeHarness {
                     .and_then(Weak::upgrade)
             }) && let Some(init) = session.initialize.clone()
             {
-                return Ok(catalog_from(&init, &self.permission_modes()));
+                return Ok(self.with_saved_projects(catalog_from(&init, &self.permission_modes())));
             }
             if let Some(cached) = self.state().catalogs.get(&folder)
                 && cached.at.elapsed() < CATALOG_TTL
             {
-                return Ok(cached.catalog.clone());
+                return Ok(self.with_saved_projects(cached.catalog.clone()));
             }
             self.validate(&folder)
                 .await
@@ -510,7 +515,7 @@ impl HarnessDriver for ClaudeHarness {
             if let Ok(usage) = usage {
                 catalog.usage = super::mapper::plan_usage(&usage);
             }
-            Ok(catalog)
+            Ok(self.with_saved_projects(catalog))
         })
     }
 
@@ -794,8 +799,7 @@ fn catalog_from(init: &InitializeResponse, permission_modes: &[String]) -> Catal
             .map(|agent| option(&agent.name, None, agent.description.as_deref()))
             .collect(),
         skills: Vec::new(),
-        // Claude keeps sessions per folder but no list of folders; reading
-        // them back means reading every session file.
+        // Saved project roots are added from Claude's global project metadata.
         folders: Vec::new(),
         usage: Vec::new(),
     }

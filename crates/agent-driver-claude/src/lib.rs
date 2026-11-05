@@ -25,6 +25,7 @@ pub mod harness;
 pub mod input;
 pub mod mcp;
 pub mod options;
+mod projects;
 pub mod sessions;
 pub mod transport;
 pub mod version;

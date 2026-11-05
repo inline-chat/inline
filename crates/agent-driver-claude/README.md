@@ -15,6 +15,10 @@ directly. Nothing is bundled: no Node, no Bun, no copy of Claude Code.
 - User messages carry `uuid`, `priority` (`now` / `next` / `later`),
   `shouldQuery` and `origin`.
 - Every stdout frame keeps its native JSON; unknown kinds are passed through.
+- Folder choices include existing local roots saved in Claude Code's
+  `.claude.json`, merged by the bridge with registered folders. Discovery
+  reads only project metadata, validates the directories and leaves Claude's
+  configuration unchanged; it does not scan conversation transcripts.
 
 The MIT Python Agent SDK (`claude-agent-sdk`) is the readable reference for
 the port; the TypeScript SDK's `sdk.d.ts` is the coverage checklist.
