@@ -60,7 +60,9 @@ one thread per conversation. Each Hermes 0.22 profile keeps its own bot, state
 and sidecar. Agents can follow, unfollow and manage chats, and they show Working
 while they work. Status and doctor report whether messages reach the agent. See
 "Upgrading to 1.0" in the [Hermes docs](https://inline.chat/docs/hermes) for every
-change. Pinned realtime SDK `0.0.20`.
+change. Hermes `0.22.6` and later need `1.0.0`: they refuse every message from
+earlier adapters with "Hermes refused this message (invalid_params)". Pinned
+realtime SDK `0.0.20`.
 
 ```sh
 npm install -g @inline-chat/hermes-agent-adapter@1.0.0
@@ -195,10 +197,11 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 
 - Hermes Agent: requires the external user plugin registry and native platform
   plugin loader available in Hermes Agent `>=0.21.3`. This package was validated
-  against Hermes Agent `0.22.5` from source commit `bf0203a794a07aac3ff764972ab9087baa4e4f4e` (tag
-  `v0.22.5`), and installs on the minimum `0.21.3`.
+  against Hermes Agent `0.22.7` from source commit `b200f5bc60e31588ba2cb60e288029c4a54ba5fa` (tag
+  `v0.22.7`), and installs on the minimum `0.21.3`. Hermes `0.22.6` and later refuse
+  every message from adapters before `1.0.0`; upgrade as in Release 1.0.0 above.
 - CI checks the minimum supported Hermes release, newest stable source, and upstream
-  `main`. A six-hour scheduled check also tests the published npm `latest` adapter.
+  `main`, including a full inbound turn through Hermes' production gateway. A six-hour scheduled check also tests the published npm `latest` adapter.
   `inline-hermes doctor` requires successful host loading and compatibility validation;
   unavailable Hermes diagnostics no longer count as healthy.
 - Node.js: `>=20` is required for the bundled sidecar. Hermes-managed Node 22,

@@ -430,6 +430,16 @@ assert _inline_skill_catalog() == [
     {"key": "data-analysis", "name": "data-analysis", "description": "Analyze data", "sort_order": 0},
     {"key": "research", "name": "research", "description": "Research with sources", "sort_order": 1},
 ]
+# Hermes 0.22.5+ exposes only the public names; the catalog must follow them.
+_private_skill_api = (skills_tool._find_all_skills, skills_tool._sort_skills)
+skills_tool.find_all_skills = lambda skip_disabled=False: [{"name": "public-api", "description": "Current Hermes", "category": "x"}]
+skills_tool.sort_skills = lambda skills: skills
+del skills_tool._find_all_skills, skills_tool._sort_skills
+assert _inline_skill_catalog() == [
+    {"key": "public-api", "name": "public-api", "description": "Current Hermes", "sort_order": 0},
+]
+del skills_tool.find_all_skills, skills_tool.sort_skills
+skills_tool._find_all_skills, skills_tool._sort_skills = _private_skill_api
 assert all("/" not in name and "-" not in name for name in menu_names)
 assert _normalize_inline_plugin_command_text("/inline_update") == "/inline_update"
 assert _normalize_inline_plugin_command_text("/inline_update now") == "/inline_update now"
