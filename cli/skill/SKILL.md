@@ -493,7 +493,7 @@ Message list (GetChatHistoryResult, truncated to essential fields):
 
 ## Selection and forwarding contract
 
-Use `inline capabilities COMMAND... --compact` to read the installed command metadata, conflicts, groups, and examples offline. Resolve the source conversation, chosen authors/messages, and destination independently; a person in “my messages to X” can identify the source DM depending on the full request.
+Use `inline cli search "<task>"` to find the right command offline, then `inline capabilities COMMAND... --compact` to read the installed command metadata, conflicts, groups, and examples offline. Resolve the source conversation, chosen authors/messages, and destination independently; a person in “my messages to X” can identify the source DM depending on the full request.
 
 ```bash
 inline messages search --chat-id SOURCE --query 'TOPIC' --sender-id AUTHOR --limit 50 --json --compact

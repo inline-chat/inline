@@ -83,11 +83,12 @@ Never ask the user to paste a bearer token into chat or print one. `inline logou
 Use `--json --compact` for agent parsing. Start from live help instead of guessing syntax:
 
 ```bash
-inline --help
-inline messages --help
+inline cli search "send a file to a thread"
 inline messages send --help
 inline capabilities messages send --compact
 ```
+
+`inline cli search "<task>"` ranks the installed commands against a plain-language task and returns up to five `{command, summary}` JSON matches (`--limit 1-20`). It runs offline without signing in. Start there instead of chaining nested `--help` calls, pick the best match, then read that command's help or capabilities. If an older CLI reports `cli` as an unknown command, fall back to `inline --help`.
 
 `inline capabilities [COMMAND...]` and `inline schema commands [COMMAND...]` emit the live public command metadata, conflicts, argument groups, and command examples as JSON without loading authentication, checking for updates, or connecting to Inline. Query the narrowest relevant command instead of loading the entire protobuf schema. Core command groups are `chats`, `messages`, `users`, `spaces`, `notifications`, `bots`, `typing`, `tasks`, and `schema`. Useful read workflows include:
 

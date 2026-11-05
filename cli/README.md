@@ -387,6 +387,18 @@ read-only lookup.
 
 ### Agent discovery and Codex plugin
 
+`inline cli search "<task>"` searches the live command tree by intent: command
+names and aliases, summaries, curated keywords and synonyms, and flag help.
+It prints up to five `{command, summary}` JSON matches (`--limit 1-20`) and
+runs offline without auth. When a coding-agent harness is detected from its
+environment (`CLAUDECODE`, `CODEX_THREAD_ID`, `CURSOR_AGENT`, `AI_AGENT`, ...),
+root and group `--help` start with a short block pointing agents at search.
+
+```bash
+inline cli search "send a file to a thread"
+inline cli search mute a chat --limit 3
+```
+
 `inline capabilities [COMMAND...]` and `inline schema commands [COMMAND...]`
 emit the actual public Clap command metadata as JSON, including flag conflicts,
 argument groups, and command examples. They run before config,

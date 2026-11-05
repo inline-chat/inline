@@ -1,9 +1,11 @@
+mod agent_context;
 mod agents;
 mod attachments;
 mod auth;
 mod auth_flow;
 mod bridge;
 mod chat_output;
+mod cli_search;
 mod command_schema;
 mod completion;
 mod config;
@@ -358,6 +360,7 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
     disable_version_flag = true,
     propagate_version = true,
     after_help = r#"Common workflows:
+  inline cli search "send a file to a thread"
   inline login
   inline me
   inline chat ls --space-id 7 --unread -L 20
@@ -593,6 +596,39 @@ One-pass review:
         #[arg(value_name = "COMMAND", num_args = 0.., help = "Optional command path, for example: messages send")]
         path: Vec<String>,
     },
+    #[command(about = "Discover CLI commands")]
+    Cli {
+        #[command(subcommand)]
+        command: CliCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum CliCommand {
+    #[command(
+        about = "Search CLI commands by describing a task",
+        after_help = "Examples:\n  inline cli search \"send a file to a thread\"\n  inline cli search mute a chat --limit 3\n\nWorks offline without signing in. Prints a JSON array of {command, summary}.\nRun `<command> --help` or `inline capabilities <command path> --compact` for exact flags."
+    )]
+    Search(CliSearchArgs),
+}
+
+#[derive(Args)]
+struct CliSearchArgs {
+    #[arg(
+        value_name = "TASK",
+        required = true,
+        num_args = 1..,
+        help = "What you want to do, in plain words"
+    )]
+    query: Vec<String>,
+    #[arg(
+        long,
+        short = 'L',
+        default_value_t = cli_search::DEFAULT_LIMIT,
+        value_parser = clap::value_parser!(u8).range(1..=(cli_search::MAX_LIMIT as i64)),
+        help = "Maximum number of results (1-20)"
+    )]
+    limit: u8,
 }
 
 impl Command {
@@ -650,6 +686,9 @@ impl Command {
             Self::Completion { .. } => "completion",
             Self::Schema { .. } => "schema",
             Self::Capabilities { .. } => "capabilities",
+            Self::Cli { command } => match command {
+                CliCommand::Search(_) => "cli_search",
+            },
         }
     }
 }
@@ -2518,6 +2557,12 @@ fn main() {
                 err.kind(),
                 ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
             ) {
+                if err.kind() == ErrorKind::DisplayHelp
+                    && agent_context::detect().is_some()
+                    && help_targets_command_group(&argv)
+                {
+                    print!("{}", agent_context::DISCOVERY_HELP);
+                }
                 let _ = err.print();
                 std::process::exit(err.exit_code());
             }
@@ -2533,6 +2578,12 @@ fn main() {
                     eprintln!("{diagnostic}");
                 }
             } else {
+                if err.kind() == ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                    && agent_context::detect().is_some()
+                    && help_targets_command_group(&argv)
+                {
+                    eprint!("{}", agent_context::DISCOVERY_HELP);
+                }
                 eprintln!("{diagnostic}");
             }
             std::process::exit(err.exit_code());
@@ -2594,7 +2645,48 @@ fn main() {
         return;
     }
 
+    if let Command::Cli {
+        command: CliCommand::Search(args),
+    } = &cli.command
+    {
+        let hits = cli_search::search(
+            &Cli::command(),
+            &args.query.join(" "),
+            usize::from(args.limit),
+        );
+        let result = output::print_json(&hits, flags.json_format).map_err(Into::into);
+        if result.is_ok() && hits.is_empty() && !flags.json {
+            eprintln!("No matching commands. Try other words, or run `inline --help`.");
+        }
+        finish_offline_command(result, flags);
+        return;
+    }
+
     run_cli(cli, flags, started_at);
+}
+
+/// True when `--help` (or a missing subcommand) is for the root or a command
+/// group, where agents would otherwise start walking nested help.
+fn help_targets_command_group(argv: &[OsString]) -> bool {
+    let mut root = Cli::command();
+    root.build();
+    let mut command = &root;
+    for arg in argv.iter().skip(1) {
+        let Some(arg) = arg.to_str() else { break };
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with('-') || arg == "help" {
+            continue;
+        }
+        match command.find_subcommand(arg) {
+            Some(next) => command = next,
+            None => break,
+        }
+    }
+    command
+        .get_subcommands()
+        .any(|child| !child.is_hide_set() && child.get_name() != "help")
 }
 
 fn finish_offline_command(
@@ -3192,8 +3284,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 .await?;
             }
             Command::Completion { .. } => unreachable!("completions are handled before runtime setup"),
-            Command::Schema { .. } | Command::Capabilities { .. } => {
-                unreachable!("schemas are handled before runtime setup")
+            Command::Schema { .. } | Command::Capabilities { .. } | Command::Cli { .. } => {
+                unreachable!("offline discovery commands are handled before runtime setup")
             }
             Command::Bots { command } => match command {
                 BotsCommand::List(args) => {

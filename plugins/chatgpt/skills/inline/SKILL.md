@@ -20,6 +20,7 @@ Use Inline as a thread-first work chat system. Find the exact conversation, read
    - Use `conversations.list` for a thread, chat, or recent DM.
 4. When using MCP, use `conversations.get` to verify an ambiguous or write-sensitive target.
 5. When using the CLI, read the [Inline CLI reference](references/inline-cli.md) before installing, authenticating, or operating it.
+   - To find a command, run `inline cli search "<task>"` first instead of walking nested `--help`; it is offline and returns up to five JSON matches. Describe the action and resource type only, without names, IDs, or message text.
    - When exact flags are uncertain, query `inline capabilities COMMAND... --compact`; it is offline and reflects the installed command tree.
 6. Read the smallest useful message window, then answer or act.
 
