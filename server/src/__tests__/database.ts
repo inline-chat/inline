@@ -111,31 +111,52 @@ export const cleanDatabase = async () => {
   const [current] = await db.execute<{ name: string }>(sql`SELECT current_database() AS name`)
   if (current?.name !== lease.name) throw new Error("Refusing to clean a database not owned by this test lifecycle.")
   AccessGuardsCache.resetAll()
-  try {
-    await db.execute(sql`
-      SET client_min_messages TO WARNING;
-      DO $$ DECLARE
-        table_list TEXT;
-      BEGIN
-        SELECT string_agg(
-          format('%I.%I', schemaname, tablename),
-          ', '
-        )
-        INTO table_list
-        FROM pg_tables
-        WHERE schemaname = 'public';
-
-        IF table_list IS NOT NULL THEN
-          EXECUTE 'TRUNCATE TABLE ' || table_list || ' CASCADE';
-        END IF;
-      END $$;
-      SET client_min_messages TO NOTICE;
-    `)
-  } catch (error) {
-    console.error("Failed to clean database before test:", error)
-    throw error
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await truncatePublicTables()
+      return
+    } catch (error) {
+      // A straggling query from the previous test can hold a lock that
+      // deadlocks the TRUNCATE; Postgres aborts the TRUNCATE, so retry it.
+      if (isDeadlock(error) && attempt < cleanupDeadlockAttempts) {
+        await Bun.sleep(50 * attempt)
+        await drainDatabaseBackgroundWork()
+        continue
+      }
+      console.error("Failed to clean database before test:", error)
+      throw error
+    }
   }
 }
+
+const cleanupDeadlockAttempts = 3
+
+const isDeadlock = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null) return false
+  if ("code" in error && error.code === "40P01") return true
+  return "cause" in error && isDeadlock(error.cause)
+}
+
+const truncatePublicTables = () =>
+  db.execute(sql`
+    SET client_min_messages TO WARNING;
+    DO $$ DECLARE
+      table_list TEXT;
+    BEGIN
+      SELECT string_agg(
+        format('%I.%I', schemaname, tablename),
+        ', '
+      )
+      INTO table_list
+      FROM pg_tables
+      WHERE schemaname = 'public';
+
+      IF table_list IS NOT NULL THEN
+        EXECUTE 'TRUNCATE TABLE ' || table_list || ' CASCADE';
+      END IF;
+    END $$;
+    SET client_min_messages TO NOTICE;
+  `)
 
 export const setupTestLifecycle = () => {
   beforeAll(setupTestDatabase)
