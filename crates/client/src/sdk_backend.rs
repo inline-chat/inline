@@ -9837,6 +9837,7 @@ mod tests {
                         agent_session: None,
                         subthread: None,
                         counts_as_unread: None,
+                        reply_quote: None,
                     }),
                 })),
             }],
