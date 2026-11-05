@@ -32,6 +32,8 @@ import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 import { getDialogFolders } from "@in/server/modules/dialogFolders"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 import { getMessageThreadProjectionsByParent } from "@in/server/modules/subthreads"
+import { catalogDiagnostics, type CatalogWork } from "@in/server/modules/message/catalogDiagnostics"
+import { connectionManager } from "@in/server/ws/connections"
 
 type Input = GetChatsInput
 
@@ -343,12 +345,31 @@ async function getCatalogWhere(
 
 // Dialog creation remains a preparation step. Response data is re-read and
 // reauthorized later inside the read-only snapshot, including concurrent winners.
-async function prepareCatalogDialogs(input: Input, currentUserId: number): Promise<void> {
+async function prepareCatalogDialogs(input: Input, currentUserId: number, work: CatalogWork): Promise<void> {
   const candidates = await db.query.chats.findMany({
     columns: { id: true, type: true, minUserId: true, maxUserId: true, spaceId: true },
     where: {
       AND: [
-        await getCatalogWhere(currentUserId, input.includeSubthreads === true, db),
+        input.includeSubthreads === true
+          ? {
+              // Only roots can need preparation. These are exactly the root
+              // seeds of the complete catalog; no descendant walk or separate
+              // ID query is needed before the response snapshot walks the tree.
+              RAW: (chat) => sql`(
+                (${chat.type} = 'private' and (${chat.minUserId} = ${currentUserId} or ${chat.maxUserId} = ${currentUserId}))
+                or (${chat.type} = 'thread' and (
+                  exists (select 1 from members m where m.space_id = ${chat.spaceId} and m.user_id = ${currentUserId})
+                  or exists (select 1 from chat_participants cp where cp.chat_id = ${chat.id} and cp.user_id = ${currentUserId})
+                  or exists (
+                    select 1 from chat_participant_groups cpg
+                    join user_group_members ugm on ugm.group_id = cpg.group_id
+                    where cpg.chat_id = ${chat.id} and ugm.user_id = ${currentUserId}
+                  )
+                ))
+              )
+              `,
+            }
+          : await getCatalogWhere(currentUserId, false, db),
         {
           parentChatId: { isNull: true },
           RAW: (chat, { not, exists }) =>
@@ -364,6 +385,7 @@ async function prepareCatalogDialogs(input: Input, currentUserId: number): Promi
       ],
     },
   })
+  work.preparationCandidates = candidates.length
   if (candidates.length === 0) return
   const access = await getEffectiveChatAccessUserIds(
     db,
@@ -391,8 +413,26 @@ async function prepareCatalogDialogs(input: Input, currentUserId: number): Promi
 }
 
 export const getChats = async (input: Input, context: FunctionContext): Promise<Output> => {
+  const connection = context.currentConnectionId
+    ? connectionManager.getConnection(context.currentConnectionId)
+    : connectionManager.getConnectionBySession(context.currentUserId, context.currentSessionId)
+  return catalogDiagnostics.observe({
+    clientType: connection?.clientType,
+    version: connection?.version,
+    isBot: context.isBot ?? connection?.isBot,
+    includeSubthreads: input.includeSubthreads === true,
+  }, async (work) => {
+    const prepareStarted = performance.now()
+    try { await prepareCatalogDialogs(input, context.currentUserId, work) }
+    finally { work.prepareMs = performance.now() - prepareStarted }
+    const snapshotStarted = performance.now()
+    try { return await readCatalog(input, context, work) }
+    finally { work.snapshotMs = performance.now() - snapshotStarted }
+  })
+}
+
+async function readCatalog(input: Input, context: FunctionContext, work: CatalogWork): Promise<Output> {
   const currentUserId = context.currentUserId
-  await prepareCatalogDialogs(input, currentUserId)
   return withHistoryReadSnapshot(async (tx) => {
     const foldersList = await getDialogFolders(currentUserId, tx)
 
@@ -495,6 +535,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
       },
     })
 
+    work.candidateChats = candidates.length
     // Discovery is not authorization. Check every candidate against this exact
     // catalog snapshot before exposing its metadata, previews or senders.
     const chatAccess = await getEffectiveChatAccessUserIds(

@@ -8,6 +8,7 @@ import { relations } from "./relations"
 import { startDatabaseDiagnostics } from "./databaseDiagnostics"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { recordSqlStatement } from "@in/server/modules/transfers/trace"
+import { startCatalogDiagnostics } from "@in/server/modules/message/catalogDiagnostics"
 
 const diagnosticsLog = new Log("db.diagnostics", LogLevel.INFO)
 let stopDiagnostics: (() => void) | undefined
@@ -60,7 +61,9 @@ export const validateDatabaseStartup = async () => {
   }
   if (!stopDiagnostics) {
     try { diagnosticsLog.info("Database connection configuration", clients.diagnosticsConfiguration) } catch { /* Best-effort. */ }
-    stopDiagnostics = startDatabaseDiagnostics((row) => diagnosticsLog.info("Database operation window", row))
+    const stopDatabase = startDatabaseDiagnostics((row) => diagnosticsLog.info("Database operation window", row))
+    const stopCatalog = startCatalogDiagnostics((row) => diagnosticsLog.info("Chat catalog window", row))
+    stopDiagnostics = () => { stopDatabase(); stopCatalog() }
   }
 }
 export const closeDb = async () => {

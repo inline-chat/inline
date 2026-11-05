@@ -10,6 +10,8 @@ import { parseBlockContent } from "@in/server/modules/message/blockContent"
 import { prepareBlockContent } from "@in/server/modules/message/blockContentStorage"
 import { parseMarkdown } from "@in/server/modules/message/parseMarkdown"
 import type { FunctionContext } from "@in/server/functions/_types"
+import { countTransferWork } from "@in/server/modules/transfers/trace"
+import { catalogDiagnostics } from "@in/server/modules/message/catalogDiagnostics"
 
 // Helper to create a HandlerContext
 const makeHandlerContext = (userId: number): FunctionContext => ({
@@ -19,6 +21,58 @@ const makeHandlerContext = (userId: number): FunctionContext => ({
 
 describe("getChats", () => {
   setupTestLifecycle()
+
+  test("complete catalog adds only its snapshot discovery query to an unchanged root catalog", async () => {
+    const user = await testUtils.createUser("catalog-query-budget@example.test")
+    const chat = await testUtils.createChat(null, "Root", "thread", false, user.id)
+    if (!chat) throw new Error("Root not created")
+    await testUtils.addParticipant(chat.id, user.id)
+    const context = makeHandlerContext(user.id)
+    await getChats({}, context)
+    catalogDiagnostics.drain()
+    const normal = await countTransferWork(() => getChats({}, context))
+    const complete = await countTransferWork(() => getChats({ includeSubthreads: true }, context))
+    expect(complete.value).toEqual(normal.value)
+    expect(complete.counters.sqlStatements).toBe(normal.counters.sqlStatements + 1)
+    const windows = catalogDiagnostics.drain()
+    expect(windows.find((row) => row.includeSubthreads)?.sqlStatements).toBe(complete.counters.sqlStatements)
+    expect(windows.find((row) => row.includeSubthreads)?.returnedChats).toBe(1)
+  })
+
+  test("root-only preparation preserves legacy public, home, group and archived roots without creating child or denied dialogs", async () => {
+    const { space, users: [owner, reader] } = await testUtils.createSpaceWithMembers("Catalog root preparation", [
+      "catalog-roots-owner@example.test", "catalog-roots-reader@example.test",
+    ])
+    await db.update(schema.members).set({ canAccessPublicChats: null }).where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, reader.id)))
+    const legacyPublic = await testUtils.createChat(space.id, "Legacy public", "thread", true, owner.id)
+    const home = await testUtils.createChat(null, "Home", "thread", false, owner.id)
+    const groupRoot = await testUtils.createChat(space.id, "Group", "thread", false, owner.id)
+    const archived = await testUtils.createChat(space.id, "Archived", "thread", false, owner.id)
+    const denied = await testUtils.createChat(space.id, "Denied", "thread", false, owner.id)
+    if (!legacyPublic || !home || !groupRoot || !archived || !denied) throw new Error("Roots not created")
+    await testUtils.addParticipant(home.id, reader.id)
+    await testUtils.addParticipant(archived.id, reader.id)
+    await testUtils.addParticipant(denied.id, owner.id)
+    await db.insert(schema.dialogs).values({ chatId: archived.id, userId: reader.id, spaceId: space.id, archived: true, open: false, chatListHidden: true })
+    const [group] = await db.insert(schema.userGroups).values({ spaceId: space.id, name: "Root readers", createdBy: owner.id }).returning()
+    if (!group) throw new Error("Group not created")
+    await db.insert(schema.userGroupMembers).values({ groupId: group.id, userId: reader.id })
+    await db.insert(schema.chatParticipantGroups).values({ groupId: group.id, chatId: groupRoot.id })
+    const [child] = await db.insert(schema.chats).values({ type: "thread", title: "Unopened child", parentChatId: home.id }).returning()
+    if (!child) throw new Error("Child not created")
+    const complete = await getChats({ includeSubthreads: true }, makeHandlerContext(reader.id))
+    expect(complete.chats.map((chat) => Number(chat.id)).sort((a, b) => a - b)).toEqual(
+      [legacyPublic.id, home.id, groupRoot.id, archived.id, child.id].sort((a, b) => a - b),
+    )
+    const prepared = await db.select({ chatId: schema.dialogs.chatId, archived: schema.dialogs.archived, open: schema.dialogs.open })
+      .from(schema.dialogs).where(eq(schema.dialogs.userId, reader.id))
+    expect(prepared.map((dialog) => dialog.chatId).sort((a, b) => a - b)).toEqual([legacyPublic.id, home.id, groupRoot.id, archived.id].sort((a, b) => a - b))
+    expect(prepared.find((dialog) => dialog.chatId === archived.id)).toMatchObject({ archived: true, open: false })
+
+    await db.delete(schema.members).where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, reader.id)))
+    const revoked = await getChats({ includeSubthreads: true }, makeHandlerContext(reader.id))
+    expect(revoked.chats.map((chat) => Number(chat.id)).sort((a, b) => a - b)).toEqual([home.id, child.id].sort((a, b) => a - b))
+  })
 
   test("returns empty collections for a user with no conversations", async () => {
     const user = await testUtils.createUser("empty@example.com")

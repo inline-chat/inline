@@ -12,6 +12,9 @@ export const handleGetChats = async (input: GetChatsInput, context: HandlerConte
     const functionContext: FunctionContext = {
       currentUserId: context.userId,
       currentSessionId: context.sessionId,
+      currentConnectionId: context.connectionId,
+      isBot: context.isBot,
+      signal: context.signal,
     }
     return await getChats(input, functionContext)
   } catch (error) {
