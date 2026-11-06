@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 pub enum HandoffProvider {
     Codex,
     Claude,
+    /// OpenCode v2's shared service: the TUI attaches to the same live
+    /// session, so the handoff never waits for Inline to let go.
+    OpenCode,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +53,7 @@ pub fn handoff_instruction(
         (HandoffProvider::Claude, HandoffTarget::App) => {
             format!("claude --desktop --resume {id}")
         }
+        (HandoffProvider::OpenCode, _) => format!("opencode --session {id}"),
     };
     let command = match folder {
         Some(folder) => format!("cd {} && {command}", shell_quote(&folder.to_string_lossy())),
@@ -118,6 +122,15 @@ mod tests {
                 Some(Path::new("/Users/mo/My Projects/it's"))
             )),
             format!("cd '/Users/mo/My Projects/it'\\''s' && claude --resume {ID}")
+        );
+        assert_eq!(
+            command(handoff_instruction(
+                HandoffProvider::OpenCode,
+                HandoffTarget::Terminal,
+                "ses_abc",
+                Some(Path::new("/Users/mo/dev/inline"))
+            )),
+            "cd /Users/mo/dev/inline && opencode --session ses_abc"
         );
         assert_eq!(
             command(handoff_instruction(
