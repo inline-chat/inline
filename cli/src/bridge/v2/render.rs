@@ -355,20 +355,60 @@ impl Renderer {
     /// Creates or edits the open progress message. Near a server limit the
     /// message ends and the rest continues in a new one.
     fn push_progress(&mut self, ops: &mut Vec<RenderOp>) {
-        let Some(id) = self.slot.as_ref().map(|slot| slot.id) else {
-            return;
-        };
-        let doc = self.progress_doc();
-        if limits::progress_fits(&doc) || !self.split_slot(ops) {
+        loop {
+            let Some(slot) = self.slot.as_ref() else {
+                return;
+            };
+            let id = slot.id;
+            let doc = self.progress_doc();
+            if !limits::progress_fits(&doc) && self.split_slot(ops) {
+                continue;
+            }
+            let doc = self.bounded_progress(self.slot.as_ref().unwrap(), "Working", true, doc);
             ops.push(RenderOp::Progress { slot: id, doc });
             return;
         }
-        if let Some(slot) = &self.slot {
-            ops.push(RenderOp::Progress {
-                slot: slot.id,
-                doc: self.progress_doc(),
-            });
+    }
+
+    /// A running child or a single large command cannot move to a finished
+    /// message yet. Keep its recent activity visible within the same native
+    /// progress disclosure instead of repeatedly publishing an invalid edit.
+    fn bounded_progress(&self, slot: &Slot, summary: &str, working: bool, doc: Doc) -> Doc {
+        if limits::progress_fits(&doc) {
+            return doc;
         }
+        let mut keep = slot.rows.len() / 2;
+        while keep > 0 {
+            let recent = recent_rows(slot, keep);
+            let mut builder = DocBuilder::new();
+            builder.progress(summary, working, |inner| {
+                inner.paragraph(
+                    "Showing recent activity; earlier details remain in the agent session.",
+                );
+                self.write_slot(inner, &recent);
+            });
+            let limited = builder.finish();
+            if limits::progress_fits(&limited) {
+                return limited;
+            }
+            keep /= 2;
+        }
+        // Even one command's arguments can exceed the entire message limit.
+        let tail: String = doc
+            .text
+            .chars()
+            .rev()
+            .take(30_000)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        let mut builder = DocBuilder::new();
+        builder.progress(summary, working, |inner| {
+            inner.paragraph("Showing recent output; full details remain in the agent session.");
+            inner.code(&tail, None);
+        });
+        builder.finish()
     }
 
     /// Ends the open message with the longest run of finished rows that fits,
@@ -551,6 +591,7 @@ impl Renderer {
         } else {
             self.ended_doc(&slot, &summary)
         };
+        let doc = self.bounded_progress(&slot, &summary, false, doc);
         ops.push(RenderOp::EndProgress { slot: id, doc });
     }
 
@@ -1136,6 +1177,34 @@ fn subset(slot: &Slot, tops: &[usize]) -> Slot {
             .zip(keep)
             .filter(|(_, keep)| *keep)
             .map(|(row, _)| row.clone())
+            .collect(),
+    }
+}
+
+/// Recent rows plus the sub-agent ancestors needed to display them.
+fn recent_rows(slot: &Slot, count: usize) -> Slot {
+    let mut keep = std::collections::HashSet::new();
+    let mut pending: Vec<&Row> = slot.rows.iter().rev().take(count).collect();
+    while let Some(row) = pending.pop() {
+        if !keep.insert(row.id.as_str()) {
+            continue;
+        }
+        if let Some(parent) = &row.parent
+            && let Some(ancestor) = slot.rows.iter().find(|candidate| {
+                matches!(&candidate.body, Some(ItemBody::Child { child, .. }) if child.id.as_str() == parent)
+            })
+        {
+            pending.push(ancestor);
+        }
+    }
+    Slot {
+        id: slot.id,
+        started_ms: slot.started_ms,
+        rows: slot
+            .rows
+            .iter()
+            .filter(|row| keep.contains(row.id.as_str()))
+            .cloned()
             .collect(),
     }
 }
@@ -2056,6 +2125,66 @@ Ran cargo test"
                 .expect("last")
                 .contains("Ran cargo test -p cratelive")
         );
+    }
+
+    #[test]
+    fn unfinished_activity_and_one_large_command_stay_within_message_limits() {
+        for huge_command in [false, true] {
+            let mut renderer = Renderer::new(OutputMode::Detailed, Vocabulary::Claude, "Claude");
+            let mut events = vec![(0, turn(TurnPhase::Started { inputs: vec![] }))];
+            let count = if huge_command { 1 } else { 70 };
+            for index in 0..count {
+                let command = if huge_command {
+                    "🚀".repeat(110_000)
+                } else {
+                    format!("command-{index}")
+                };
+                events.push((
+                    index + 1,
+                    Event::Item(Item::new(
+                        ItemId::new(format!("live-{index}")).unwrap(),
+                        None,
+                        ItemUpdate::Started {
+                            body: ItemBody::Command {
+                                command,
+                                cwd: None,
+                                actions: vec![],
+                                exit_code: None,
+                                duration_ms: None,
+                                output: Some("x".repeat(2_000)),
+                            },
+                        },
+                        Value::Null,
+                    )),
+                ));
+            }
+            events.push((
+                100,
+                turn(TurnPhase::Completed {
+                    outcome: TurnOutcome::Completed,
+                    inputs_consumed: vec![],
+                    error: None,
+                    duration_ms: Some(100),
+                }),
+            ));
+            let ops = run(&mut renderer, events);
+            let mut bounded = false;
+            for op in ops {
+                if let RenderOp::Progress { doc, .. } | RenderOp::EndProgress { doc, .. } = op {
+                    assert!(
+                        limits::Size::of(&doc).fits(),
+                        "{:?}",
+                        limits::Size::of(&doc)
+                    );
+                    assert!(matches!(
+                        doc.blocks[0].kind,
+                        Some(inline_protocol::proto::block::Kind::Disclosure(_))
+                    ));
+                    bounded |= doc.text.contains("Showing recent");
+                }
+            }
+            assert!(bounded, "large live activity needs a bounded view");
+        }
     }
 
     #[test]
