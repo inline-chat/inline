@@ -505,6 +505,28 @@ struct CLIAgentSetupRunnerTests {
     group.leave()
   }
 
+  @Test("delivers streamed progress lines before the CLI closes stdout")
+  func streamsChunksBeforeEOF() throws {
+    let pipe = Pipe()
+    let firstChunk = DispatchSemaphore(value: 0)
+    let drained = DispatchSemaphore(value: 0)
+    DispatchQueue.global(qos: .utility).async {
+      _ = CLIAgentSetupRunner.boundedDrain(
+        pipe.fileHandleForReading,
+        onOverflow: nil,
+        onChunk: { _ in firstChunk.signal() }
+      )
+      drained.signal()
+    }
+    try pipe.fileHandleForWriting.write(contentsOf: Data("{\"event\":\"phase.started\"}\n".utf8))
+
+    // The writer is still open: a chunk must arrive without waiting for EOF.
+    #expect(firstChunk.wait(timeout: .now() + 2) == .success)
+
+    try pipe.fileHandleForWriting.close()
+    #expect(drained.wait(timeout: .now() + 2) == .success)
+  }
+
   private func drain(_ payload: Data, through pipe: Pipe) async -> Data {
     await withCheckedContinuation { continuation in
       DispatchQueue.global(qos: .utility).async {

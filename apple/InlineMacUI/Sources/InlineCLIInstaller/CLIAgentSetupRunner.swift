@@ -617,26 +617,41 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     boundedDrain(handle, onOverflow: nil, onChunk: nil)
   }
 
-  private static func boundedDrain(
+  /// Drains a pipe, delivering each chunk as soon as the writer produces it.
+  ///
+  /// `FileHandle.read(upToCount:)` blocks until the full count or EOF, which
+  /// held every streamed setup progress line until the CLI exited. `read(2)`
+  /// returns whatever is available, so progress reaches the UI live.
+  static func boundedDrain(
     _ handle: FileHandle,
     onOverflow: (@Sendable () -> Void)?,
     onChunk: (@Sendable (Data) -> Void)? = nil
   ) -> Data {
     var retained = Data()
     var reportedOverflow = false
-    do {
-      while let chunk = try handle.read(upToCount: 64 * 1_024), !chunk.isEmpty {
-        let remaining = maximumOutputBytes - retained.count
-        if remaining > 0 {
-          retained.append(contentsOf: chunk.prefix(remaining))
-          onChunk?(Data(chunk.prefix(remaining)))
-        }
-        if chunk.count > remaining, !reportedOverflow {
-          reportedOverflow = true
-          onOverflow?()
-        }
+    let descriptor = handle.fileDescriptor
+    let bufferSize = 64 * 1_024
+    let buffer = UnsafeMutableRawPointer.allocate(byteCount: bufferSize, alignment: 1)
+    defer { buffer.deallocate() }
+    while true {
+      let count = Darwin.read(descriptor, buffer, bufferSize)
+      if count < 0 {
+        if errno == EINTR { continue }
+        break
       }
-    } catch {}
+      if count == 0 { break }
+      let chunk = Data(bytes: buffer, count: count)
+      let remaining = maximumOutputBytes - retained.count
+      if remaining > 0 {
+        let accepted = chunk.prefix(remaining)
+        retained.append(contentsOf: accepted)
+        onChunk?(Data(accepted))
+      }
+      if chunk.count > remaining, !reportedOverflow {
+        reportedOverflow = true
+        onOverflow?()
+      }
+    }
     return retained
   }
 
