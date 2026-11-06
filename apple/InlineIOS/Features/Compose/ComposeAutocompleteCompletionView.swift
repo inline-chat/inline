@@ -56,7 +56,17 @@ private final class ComposeAutocompleteRowControl: UIControl {
   }
 }
 
+/// Rows are `UIControl`s that fill the panel. A plain scroll view never takes
+/// over a touch that began on a control, so drags would only ever tap rows.
+private final class ComposeAutocompleteScrollView: UIScrollView {
+  override func touchesShouldCancel(in view: UIView) -> Bool {
+    view is UIControl ? true : super.touchesShouldCancel(in: view)
+  }
+}
+
 final class ComposeAutocompleteCompletionView: UIView {
+  /// Visible rows before the list scrolls; a half row peeks below to show there is more.
+  static let maxVisibleRows: CGFloat = 4.5
   static let maxHeight: CGFloat = 280
   static let minimumItemHeight: CGFloat = 56
   static let cornerRadius: CGFloat = 20
@@ -76,9 +86,9 @@ final class ComposeAutocompleteCompletionView: UIView {
   private var isContentInteractionEnabled = true
 
   private lazy var scrollView: UIScrollView = {
-    let scrollView = UIScrollView()
+    let scrollView = ComposeAutocompleteScrollView()
     scrollView.translatesAutoresizingMaskIntoConstraints = false
-    scrollView.showsVerticalScrollIndicator = false
+    scrollView.showsVerticalScrollIndicator = true
     scrollView.backgroundColor = .clear
     scrollView.delaysContentTouches = false
     scrollView.verticalScrollIndicatorInsets = UIEdgeInsets(
@@ -543,8 +553,8 @@ final class ComposeAutocompleteCompletionView: UIView {
       .scaledFont(for: .systemFont(ofSize: 12)).lineHeight
     let lineMultiplier: CGFloat = usesExpandedAccessibilityRows ? 2 : 1
     let itemHeight = max(Self.minimumItemHeight, ceil((titleHeight + subtitleHeight) * lineMultiplier + 18))
-    let rowCount = placeholder == nil ? min(items.count, 4) : 1
-    let contentHeight = CGFloat(rowCount) * itemHeight + Self.contentInset * 2
+    let rowCount: CGFloat = placeholder == nil ? min(CGFloat(items.count), Self.maxVisibleRows) : 1
+    let contentHeight = rowCount * itemHeight + Self.contentInset * 2
     let constrainedHeight = min(contentHeight, Self.maxHeight)
 
     if let heightConstraint {
