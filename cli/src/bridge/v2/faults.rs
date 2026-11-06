@@ -306,6 +306,166 @@ fn spawn_work(runtime: &Runtime, cleanup: &mut Cleanup) -> crate::bridge::v2::wo
 }
 
 #[tokio::test]
+async fn first_delivery_of_an_edited_agent_handoff_runs_once() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    runtime
+        .agent
+        .names
+        .remember(1, "Allowed agent".into())
+        .await;
+    runtime.loop_roots.insert(9, 9);
+    let mut message = MessageRecord {
+        chat_id: InlineId::new(9),
+        message_id: InlineId::new(35),
+        sender_id: InlineId::new(1),
+        timestamp: 1,
+        is_outgoing: false,
+        reply_to_message_id: None,
+        transaction: None,
+        content: inline_client::MessageContent::Text {
+            text: "@Fault handle this".into(),
+        },
+        metadata: inline_client::MessageMetadata {
+            sender_is_bot: Some(true),
+            revision: Some(4),
+            entities: vec![inline_client::MessageEntityRecord {
+                kind: "TYPE_MENTION".into(),
+                offset: 0,
+                length: 6,
+                user_id: Some(InlineId::new(2)),
+                agent_id: None,
+                group_id: None,
+                chat_id: None,
+                value: None,
+            }],
+            ..Default::default()
+        },
+    };
+    runtime.on_message(&message).await.unwrap();
+    until(|| harness.session.sends.load(Ordering::SeqCst) == 1).await;
+    message.metadata.revision = Some(5);
+    runtime.on_message(&message).await.unwrap();
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 1);
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
+async fn an_observed_agent_reply_edited_into_a_handoff_runs_once() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    runtime
+        .agent
+        .names
+        .remember(1, "Allowed agent".into())
+        .await;
+    runtime.loop_roots.insert(9, 9);
+    let mut message = MessageRecord {
+        chat_id: InlineId::new(9),
+        message_id: InlineId::new(36),
+        sender_id: InlineId::new(1),
+        timestamp: 1,
+        is_outgoing: false,
+        reply_to_message_id: None,
+        transaction: None,
+        content: inline_client::MessageContent::Text {
+            text: "Thinking".into(),
+        },
+        metadata: inline_client::MessageMetadata {
+            sender_is_bot: Some(true),
+            ..Default::default()
+        },
+    };
+    // A streamed reply starts unaddressed and is only observed.
+    runtime.on_message(&message).await.unwrap();
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 0);
+    // Its final edit hands off to this agent.
+    message.content = inline_client::MessageContent::Text {
+        text: "@Fault handle this".into(),
+    };
+    message.metadata.revision = Some(1);
+    message.metadata.entities = vec![inline_client::MessageEntityRecord {
+        kind: "TYPE_MENTION".into(),
+        offset: 0,
+        length: 6,
+        user_id: Some(InlineId::new(2)),
+        agent_id: None,
+        group_id: None,
+        chat_id: None,
+        value: None,
+    }];
+    runtime.on_message(&message).await.unwrap();
+    until(|| harness.session.sends.load(Ordering::SeqCst) == 1).await;
+    message.metadata.revision = Some(2);
+    runtime.on_message(&message).await.unwrap();
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 1);
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
+async fn replayed_agent_progress_does_not_invoke_or_exhaust_the_loop_guard() {
+    let (mut runtime, harness, _cleanup) = fixture(false);
+    runtime.agent.names.remember(3, "Other agent".into()).await;
+    runtime.loop_roots.insert(9, 9);
+    let mut message = MessageRecord {
+        chat_id: InlineId::new(9),
+        message_id: InlineId::new(35),
+        sender_id: InlineId::new(3),
+        timestamp: 1,
+        is_outgoing: false,
+        content: inline_client::MessageContent::Text {
+            text: "@Fault Working".into(),
+        },
+        reply_to_message_id: None,
+        transaction: None,
+        metadata: inline_client::MessageMetadata {
+            sender_is_bot: Some(true),
+            ..Default::default()
+        },
+    };
+    for revision in 1..=100 {
+        message.metadata.revision = Some(revision);
+        tokio::time::timeout(Duration::from_millis(200), runtime.on_message(&message))
+            .await
+            .expect("edits must not wait on the native session")
+            .unwrap();
+    }
+    assert!(runtime.works.is_empty());
+    assert!(harness.opened.lock().unwrap().is_empty());
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 0);
+    assert!(matches!(
+        runtime.loop_guards.record(9, true),
+        LoopVerdict::Allowed { .. }
+    ));
+}
+
+#[tokio::test]
+async fn agent_messages_not_addressed_to_this_agent_never_reach_the_loop_cap() {
+    let (mut runtime, harness, _cleanup) = fixture(false);
+    runtime.agent.names.remember(3, "Other agent".into()).await;
+    runtime.loop_roots.insert(9, 9);
+    for message_id in 1..=(i64::from(DEFAULT_LOOP_CAP_HOPS) + 5) {
+        let message = MessageRecord {
+            chat_id: InlineId::new(9),
+            message_id: InlineId::new(message_id),
+            sender_id: InlineId::new(3),
+            timestamp: 1,
+            is_outgoing: false,
+            content: inline_client::MessageContent::Text {
+                text: "Working".into(),
+            },
+            reply_to_message_id: None,
+            transaction: None,
+            metadata: inline_client::MessageMetadata {
+                sender_is_bot: Some(true),
+                ..Default::default()
+            },
+        };
+        runtime.on_message(&message).await.unwrap();
+    }
+    assert!(runtime.loop_guards.guard(9).is_none());
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn service_messages_are_skipped_but_identical_human_text_still_runs() {
     let (mut runtime, harness, mut cleanup) = fixture(false);
     let mut message = MessageRecord {

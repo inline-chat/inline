@@ -27,6 +27,15 @@ pub(crate) fn message_text(content: &MessageContent) -> &str {
     }
 }
 
+pub(crate) fn is_agent_edit(message: &MessageRecord) -> bool {
+    message.metadata.sender_is_bot == Some(true)
+        && (message
+            .metadata
+            .revision
+            .is_some_and(|revision| revision > 0)
+            || message.metadata.edit_timestamp.is_some())
+}
+
 pub(crate) fn group_message(message: &MessageRecord, facts: MessageFacts<'_>) -> GroupMessage {
     let text = message_text(&message.content).to_owned();
     let units = text.encode_utf16().collect::<Vec<_>>();
@@ -384,6 +393,20 @@ mod tests {
                 Some(("stop", None))
             );
         }
+    }
+
+    #[test]
+    fn streamed_agent_edits_are_distinct_from_new_input_and_human_edits() {
+        let mut message = record("Working", vec![]);
+        message.metadata.sender_is_bot = Some(true);
+        assert!(!is_agent_edit(&message));
+        message.metadata.revision = Some(90);
+        assert!(is_agent_edit(&message));
+        message.metadata.revision = Some(0);
+        message.metadata.edit_timestamp = Some(1);
+        assert!(is_agent_edit(&message));
+        message.metadata.sender_is_bot = Some(false);
+        assert!(!is_agent_edit(&message));
     }
 
     #[test]
