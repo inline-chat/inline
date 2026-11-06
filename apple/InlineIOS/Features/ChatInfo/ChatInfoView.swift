@@ -935,6 +935,10 @@ struct InfoTabView: View {
   @State var showRemoveAlert = false
   @State var groupToRemove: UserGroup?
   @State var showRemoveGroupAlert = false
+  @ObservedObject private var agentGrants = AgentGrantStore.shared
+  /// The owned bot whose access the avatar badges show, when several are here.
+  @State private var preferredBadgeBotID: Int64?
+  @State private var managedBot: UserInfo?
 
   private var cardBackgroundColor: Color {
     Color(uiColor: .secondarySystemGroupedBackground)
@@ -977,6 +981,9 @@ struct InfoTabView: View {
           "Remove \(group.name) from this thread? Members may still have access through direct participants, parent access, or another group."
         )
       }
+    }
+    .sheet(item: $managedBot) { bot in
+      OwnedBotAccessSheet(bot: bot, participants: chatInfoView.participants)
     }
   }
 
@@ -1057,12 +1064,15 @@ struct InfoTabView: View {
 
       rowDivider
 
-      Text("Direct Participants")
-        .font(.footnote.weight(.semibold))
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
+      HStack(spacing: 8) {
+        Text("Direct Participants")
+          .font(.footnote.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        agentAccessLegend
+      }
+      .padding(.horizontal, 16)
+      .padding(.top, 12)
 
       participantsGrid
         .padding(.horizontal, 16)
@@ -1122,7 +1132,11 @@ struct InfoTabView: View {
   }
 
   private var participantsGrid: some View {
-    LazyVGrid(columns: [
+    // Computed once per render rather than per avatar.
+    let ownedBots = Set(ownedBotIDs)
+    let badgeBotName = badgeBotID.map(botName)
+    let badged = badgedUserIDs
+    return LazyVGrid(columns: [
       GridItem(.flexible()),
       GridItem(.flexible()),
       GridItem(.flexible()),
@@ -1154,8 +1168,23 @@ struct InfoTabView: View {
 
       ForEach(chatInfoView.participants) { userInfo in
         VStack(spacing: 4) {
-          ParticipantAvatarView(userInfo: userInfo, size: 68)
-            .frame(width: 68, height: 68)
+          ParticipantAvatarView(
+            userInfo: userInfo,
+            size: 68,
+            onTap: ownedBots.contains(userInfo.user.id) ? { managedBot = userInfo } : nil
+          )
+          .frame(width: 68, height: 68)
+          .overlay(alignment: .bottomTrailing) {
+            if badged.contains(userInfo.user.id) {
+              AgentAccessBadge()
+            }
+          }
+          .accessibilityElement(children: .ignore)
+          .accessibilityLabel(avatarAccessibilityLabel(
+            userInfo,
+            canUseBot: badged.contains(userInfo.user.id) ? badgeBotName : nil,
+            isOwnedBot: ownedBots.contains(userInfo.user.id)
+          ))
 
           Text(userInfo.user.shortDisplayName)
             .font(.callout)
@@ -1173,6 +1202,13 @@ struct InfoTabView: View {
               Label("Remove Participant", systemImage: "minus.circle")
             }
           }
+          if ownedBots.contains(userInfo.user.id) {
+            Button {
+              managedBot = userInfo
+            } label: {
+              Label("Manage Bot Access", systemImage: "person.badge.key")
+            }
+          }
         }
 
         .transition(.asymmetric(
@@ -1182,6 +1218,87 @@ struct InfoTabView: View {
       }
     }
     .animation(.easeInOut(duration: 0.2), value: chatInfoView.participants.count)
+    .animation(.easeInOut(duration: 0.2), value: badged)
+    .task(id: participantBotIDs) {
+      // Owned bots' lists come back in full; others' only answer for the viewer.
+      for botUserID in participantBotIDs {
+        agentGrants.ensureLoaded(botUserID: botUserID)
+      }
+    }
+  }
+
+  // MARK: Bot access badges
+
+  private var participantBotIDs: [Int64] {
+    chatInfoView.participants.filter(\.user.bot).map(\.user.id)
+  }
+
+  /// Bots here the viewer owns; only their access lists are visible.
+  private var ownedBotIDs: [Int64] {
+    OwnedAgentGrants.ownedBotIDs(among: participantBotIDs, owned: agentGrants.ownedGrantsByBotUserID)
+  }
+
+  private var badgeBotID: Int64? {
+    OwnedAgentGrants.selectedBotID(preferred: preferredBadgeBotID, among: ownedBotIDs)
+  }
+
+  private var badgedUserIDs: Set<Int64> {
+    guard let badgeBotID else { return [] }
+    return agentGrants.ownedGrants(botUserID: badgeBotID)?.userIDs ?? []
+  }
+
+  private func botName(_ botUserID: Int64) -> String {
+    chatInfoView.participants.first { $0.user.id == botUserID }?.user.shortDisplayName ?? "Bot"
+  }
+
+  private func avatarAccessibilityLabel(_ userInfo: UserInfo, canUseBot: String?, isOwnedBot: Bool) -> String {
+    var label = userInfo.user.shortDisplayName
+    if let canUseBot {
+      label += ", can use \(canUseBot)"
+    }
+    if isOwnedBot {
+      label += ", your bot"
+    }
+    return label
+  }
+
+  @ViewBuilder
+  private var agentAccessLegend: some View {
+    if let badgeBotID {
+      if ownedBotIDs.count > 1 {
+        Menu {
+          Picker("Show Access For", selection: Binding(
+            get: { badgeBotID },
+            set: { preferredBadgeBotID = $0 }
+          )) {
+            ForEach(ownedBotIDs, id: \.self) { botUserID in
+              Text(botName(botUserID)).tag(botUserID)
+            }
+          }
+        } label: {
+          HStack(spacing: 3) {
+            agentAccessLegendLabel(badgeBotID)
+            Image(systemName: "chevron.up.chevron.down")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(.secondary)
+          }
+        }
+        .accessibilityLabel("Show access for \(botName(badgeBotID))")
+      } else {
+        agentAccessLegendLabel(badgeBotID)
+          .accessibilityElement(children: .combine)
+      }
+    }
+  }
+
+  private func agentAccessLegendLabel(_ botUserID: Int64) -> some View {
+    HStack(spacing: 4) {
+      AgentAccessBadge(size: 13)
+      Text("\(botName(botUserID)) access")
+        .lineLimit(1)
+    }
+    .font(.footnote)
+    .foregroundStyle(.secondary)
   }
 
   private func groupAccessRow(_ group: UserGroup) -> some View {
@@ -1239,6 +1356,8 @@ struct InfoTabView: View {
 struct ParticipantAvatarView: UIViewRepresentable {
   let userInfo: UserInfo
   let size: CGFloat
+  /// Replaces opening the photo when set.
+  var onTap: (() -> Void)? = nil
 
   func makeUIView(context: Context) -> UserAvatarView {
     let view = UserAvatarView()
@@ -1253,6 +1372,7 @@ struct ParticipantAvatarView: UIViewRepresentable {
     uiView.configure(with: userInfo, size: size)
     context.coordinator.userInfo = userInfo
     context.coordinator.avatarView = uiView
+    context.coordinator.onTap = onTap
   }
 
   func makeCoordinator() -> Coordinator {
@@ -1262,8 +1382,13 @@ struct ParticipantAvatarView: UIViewRepresentable {
   class Coordinator: NSObject, UIGestureRecognizerDelegate {
     var userInfo: UserInfo?
     weak var avatarView: UserAvatarView?
+    var onTap: (() -> Void)?
 
     @objc func handleTap() {
+      if let onTap {
+        onTap()
+        return
+      }
       guard let userInfo, let avatarView else { return }
 
       let sourceImage = avatarView.currentImage() ?? snapshotImage(from: avatarView)
