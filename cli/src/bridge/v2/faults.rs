@@ -1333,7 +1333,7 @@ async fn a_thread_v1_served_goes_on_in_its_session_and_folder() {
     let _ = task.await;
     drop(runtime);
     // The next process sees the registered session on Inline. Its folder
-    // survives in the v2 ledger without the legacy store attached.
+    // must survive in the v2 ledger, even without the legacy store attached.
     let mut restarted = super::faults::runtime(&mut cleanup, harness.clone());
     restarted.ensure_work(9, None).await.unwrap();
     let (id, command) = input(&restarted, 95);
@@ -1341,6 +1341,33 @@ async fn a_thread_v1_served_goes_on_in_its_session_and_folder() {
     until(|| state(&restarted, &id) == Some(InputState::Accepted)).await;
     assert_eq!(harness.opened.lock().unwrap()[1].folder, other);
     cleanup.tasks.push(restarted.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
+async fn an_already_registered_legacy_session_keeps_its_folder_without_overriding_new_choices() {
+    for (legacy_session, explicit_folder, use_legacy) in [
+        ("fault-session", false, true),
+        ("fault-session", true, false),
+        ("another-session", false, false),
+    ] {
+        let (mut runtime, harness, mut cleanup, other) = v1_fixture(legacy_session);
+        Arc::get_mut(&mut runtime.agent).unwrap().owner = Arc::new(Owner);
+        if explicit_folder {
+            runtime.thread_settings.entry(9).or_default().folder =
+                Some(runtime.config.folder.clone());
+        }
+        runtime.ensure_work(9, None).await.unwrap();
+        let (id, command) = input(&runtime, 96);
+        runtime.works[&9].tx.send(command).await.unwrap();
+        until(|| state(&runtime, &id) == Some(InputState::Accepted)).await;
+        let expected = if use_legacy {
+            &other
+        } else {
+            &runtime.config.folder
+        };
+        assert_eq!(&harness.opened.lock().unwrap()[0].folder, expected);
+        cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+    }
 }
 
 #[tokio::test]

@@ -5,6 +5,7 @@ use super::*;
 #[derive(Clone, Copy, Debug)]
 pub(super) enum InterruptionKind {
     BridgeRestart,
+    BridgeUpdate,
     ProviderRestart,
 }
 
@@ -12,6 +13,7 @@ impl InterruptionKind {
     fn failure(self) -> &'static str {
         match self {
             Self::BridgeRestart => "bridge process restarted during the turn",
+            Self::BridgeUpdate => "bridge moved to v2 before the turn finished",
             Self::ProviderRestart => "local agent disconnected during the turn",
         }
     }
@@ -20,6 +22,9 @@ impl InterruptionKind {
         match self {
             Self::BridgeRestart => {
                 "This turn was interrupted when the bridge restarted. Send it again if you still want me to continue."
+            }
+            Self::BridgeUpdate => {
+                "This didn't finish before the bridge was updated. Send it again if you still want it."
             }
             Self::ProviderRestart => {
                 "This turn was interrupted when the local agent disconnected. Send it again after the agent reconnects."
@@ -35,7 +40,13 @@ pub(super) async fn recover_provider_inbox(
     interruption: InterruptionKind,
 ) -> Result<(), Box<dyn std::error::Error>> {
     store.recover_session_pickers(installation_id, now_seconds())?;
-    recover_session_picker_commands(bot, store, installation_id).await?;
+    recover_session_picker_commands(
+        bot,
+        store,
+        installation_id,
+        matches!(interruption, InterruptionKind::BridgeUpdate),
+    )
+    .await?;
     for request in store
         .expire_open_command_choice_requests_for_installation(installation_id, now_seconds())?
     {

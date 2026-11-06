@@ -3569,18 +3569,13 @@ fn opencode_native_route(installation: &ProviderInstallationConfig) -> bool {
 async fn settle_v1_leftovers(bot: &InlineClient, store: &BridgeStore, installation_id: &str) {
     let result: Result<(), Box<dyn std::error::Error>> = async {
         let installation_id = InstallationId::new(installation_id.to_owned())?;
+        store.expire_session_pickers_for_installation(&installation_id, now_seconds())?;
         store.stage_unfinished_inbound_for_installation(
             &installation_id,
             "bridge moved to v2 before the turn finished",
             "This didn't finish before the bridge was updated. Send it again if you still want it.",
         )?;
-        recover_provider_inbox(
-            bot,
-            store,
-            &installation_id,
-            InterruptionKind::BridgeRestart,
-        )
-        .await
+        recover_provider_inbox(bot, store, &installation_id, InterruptionKind::BridgeUpdate).await
     }
     .await;
     if let Err(error) = result {
