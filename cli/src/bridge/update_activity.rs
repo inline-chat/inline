@@ -5,7 +5,6 @@ use std::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
 };
 
 #[derive(Clone)]
@@ -13,13 +12,10 @@ pub(crate) struct Activity(Arc<Mutex<State>>);
 struct State {
     active: usize,
     busy: HashSet<u64>,
-    last_work: Instant,
-    requested: Option<Instant>,
     draining: bool,
 }
 pub(crate) struct Lease {
     activity: Activity,
-    work: bool,
 }
 pub(crate) struct BusyKey {
     activity: Activity,
@@ -36,18 +32,16 @@ impl Activity {
         Self(Arc::new(Mutex::new(State {
             active: 0,
             busy: HashSet::new(),
-            last_work: Instant::now(),
-            requested: None,
             draining: false,
         })))
     }
     pub fn enter(&self) -> Option<Lease> {
-        self.reserve(true)
+        self.reserve()
     }
     pub fn maintenance(&self) -> Option<Lease> {
-        self.reserve(false)
+        self.reserve()
     }
-    fn reserve(&self, work: bool) -> Option<Lease> {
+    fn reserve(&self) -> Option<Lease> {
         let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if state.draining {
             return None;
@@ -55,7 +49,6 @@ impl Activity {
         state.active += 1;
         Some(Lease {
             activity: self.clone(),
-            work,
         })
     }
     pub fn key(&self) -> BusyKey {
@@ -70,24 +63,13 @@ impl Activity {
     pub fn cancel(&self) {
         let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
         state.draining = false;
-        state.requested = None;
     }
     pub fn prepare(&self) -> bool {
-        self.prepare_with_quiet(Duration::from_secs(120))
-    }
-    fn prepare_with_quiet(&self, quiet: Duration) -> bool {
         let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        let now = Instant::now();
-        let requested = *state.requested.get_or_insert(now);
-        let quiet = if now.duration_since(requested) >= Duration::from_secs(24 * 60 * 60) {
-            Duration::ZERO
-        } else {
-            quiet
-        };
-        if state.active == 0
-            && state.busy.is_empty()
-            && now.duration_since(state.last_work) >= quiet
-        {
+        // The admission lock and the work leases provide the handoff boundary.
+        // A time window also counts unrelated bot events as work, so an idle
+        // bridge could otherwise wait indefinitely on its own traffic.
+        if state.active == 0 && state.busy.is_empty() {
             state.draining = true;
         }
         state.draining
@@ -97,21 +79,15 @@ impl Drop for Lease {
     fn drop(&mut self) {
         let mut state = self.activity.0.lock().unwrap_or_else(|e| e.into_inner());
         state.active = state.active.saturating_sub(1);
-        if self.work {
-            state.last_work = Instant::now();
-        }
     }
 }
 impl BusyKey {
     pub fn set(&self, busy: bool) {
         let mut state = self.activity.0.lock().unwrap_or_else(|e| e.into_inner());
-        let changed = if busy {
-            state.busy.insert(self.id)
+        if busy {
+            state.busy.insert(self.id);
         } else {
-            state.busy.remove(&self.id)
-        };
-        if changed {
-            state.last_work = Instant::now();
+            state.busy.remove(&self.id);
         }
     }
 }
@@ -125,10 +101,10 @@ impl Drop for BusyKey {
 mod tests {
     use super::*;
     #[test]
-    fn updater_housekeeping_does_not_prevent_a_quiet_handoff() {
+    fn finished_deliveries_and_housekeeping_do_not_delay_an_idle_handoff() {
         let activity = Activity::new();
-        activity.0.lock().unwrap().last_work = Instant::now() - Duration::from_secs(180);
         for _ in 0..10 {
+            drop(activity.enter().unwrap());
             drop(activity.maintenance().unwrap());
         }
         assert!(activity.prepare());
@@ -139,13 +115,13 @@ mod tests {
     fn queued_work_and_questions_close_the_admission_race() {
         let activity = Activity::new();
         let queued = activity.enter().unwrap();
-        assert!(!activity.prepare_with_quiet(Duration::ZERO));
+        assert!(!activity.prepare());
         let question = activity.key();
         question.set(true);
         drop(queued);
-        assert!(!activity.prepare_with_quiet(Duration::ZERO));
+        assert!(!activity.prepare());
         question.set(false);
-        assert!(activity.prepare_with_quiet(Duration::ZERO));
+        assert!(activity.prepare());
         assert!(activity.enter().is_none());
         activity.cancel();
         assert!(activity.enter().is_some());

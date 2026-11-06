@@ -219,7 +219,7 @@ persisted policy and actual provider readiness after this new-binary restart.
 For an already supervised bridge, `inline bridge refresh --json` refreshes the
 retained parent from its committed, verified runtime. It never installs the
 invoking CLI. It returns `waiting_for_idle` while turns, queued inputs, questions,
-approvals or the two-minute quiet period remain; retry later. It refuses pending
+approvals or pending publication remain; retry later. It refuses pending
 activations and preserves configuration, authentication, receipt databases and
 runtime rollback history. An already current parent returns `up_to_date`.
 
