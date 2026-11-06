@@ -30,7 +30,7 @@
     "release:preflight": "npm publish --dry-run --access public"
   },
   "dependencies": {
-    "@inline-chat/protocol": "0.0.12",
+    "@inline-chat/protocol": "0.0.13",
     "ws": "^8.18.3"
   },
   "devDependencies": {

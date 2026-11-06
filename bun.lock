@@ -201,7 +201,7 @@
       "name": "@inline-chat/realtime-sdk",
       "version": "0.0.20",
       "dependencies": {
-        "@inline-chat/protocol": "0.0.12",
+        "@inline-chat/protocol": "0.0.13",
         "ws": "^8.18.3",
       },
       "devDependencies": {
