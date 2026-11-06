@@ -276,7 +276,7 @@ struct ChatRouteTitleBar: View {
 
         Text(subtitle)
           .font(.system(size: toolbarLayout.subtitleFontSize))
-          .foregroundStyle(status.usesAccentColor ? Color.accentColor : Color.secondary)
+          .foregroundStyle(status.usesAccentColor ? Color(nsColor: Theme.accentColor) : Color.secondary)
           .lineLimit(1)
       }
       .id("subtitle-\(status.usesAccentColor)-\(status.isRecordingVoice)-\(subtitle)")
@@ -292,16 +292,16 @@ struct ChatRouteTitleBar: View {
   @ViewBuilder
   private func statusIndicator(_ status: ChatRouteToolbarTitleModel.Status) -> some View {
     if status.isWorking {
-      WorkingActivityIndicator()
+      WorkingActivityIndicator(color: Color(nsColor: Theme.accentColor))
     } else if status.isTyping {
-      TypingActivityIndicator(color: .accentColor)
+      TypingActivityIndicator(color: Color(nsColor: Theme.accentColor))
     } else if status.isRecordingVoice {
       VoiceRecordingActivityIndicator(
         barWidth: 2,
         spacing: 2,
         minBarHeight: 3,
         maxBarHeight: 9,
-        color: .accentColor
+        color: Color(nsColor: Theme.accentColor)
       )
     }
   }

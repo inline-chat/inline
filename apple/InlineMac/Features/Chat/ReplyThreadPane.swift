@@ -153,19 +153,19 @@ private struct ReplyThreadPaneControls: View {
         if status.isTyping || status.isWorking, let typingText = status.text {
           HStack(spacing: 3) {
             if status.isWorking {
-              WorkingActivityIndicator()
+              WorkingActivityIndicator(color: Color(nsColor: Theme.accentColor))
             } else if status.isTyping {
               TypingActivityIndicator(
                 dotSize: 2,
                 spacing: 1,
-                color: .accentColor,
+                color: Color(nsColor: Theme.accentColor),
                 lift: 1
               )
             }
 
             Text(typingText)
               .font(.system(size: 9))
-              .foregroundStyle(Color.accentColor)
+              .foregroundStyle(Color(nsColor: Theme.accentColor))
               .lineLimit(1)
               .truncationMode(.tail)
           }
