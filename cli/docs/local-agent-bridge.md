@@ -86,8 +86,33 @@ Current beta provider paths:
   remains a dark foundation and is not part of this beta claim. Older runtimes,
   missing required methods, and incompatible response shapes fail closed; a new
   Codex version number alone does not.
-- **OpenCode v2 experimental:** uses native `opencode acp` through bridge v2.
+- **OpenCode v2 experimental:** OpenCode 2.2.0 and newer run natively
+  against OpenCode's shared background service (`opencode service start`),
+  the same service its terminal, desktop and web clients use. Inline reuses
+  the running service, or starts it, and never stops or replaces it.
+  An Inline thread and the owner's terminal see the same live session:
+  `/terminal` prints `opencode --session <id>` for the thread's folder, and
+  that terminal can watch and steer while Inline keeps following.
+  Turns, steering (`delivery: steer`), `/queue` (OpenCode's queue, taken in
+  the same run when the model finishes), passive context, stop with or
+  without the queue, approvals (allow once, always, reject with feedback,
+  reject and stop), questions, model and reasoning variant, permission
+  presets (OpenCode rules or ask first), `/plan` (OpenCode's plan agent),
+  `/undo` (revert the last turn, files and conversation), `/compact`, rename,
+  archive, sub-agent progress and stop, context usage, OpenCode Go usage
+  meters, the session browser and resume all use OpenCode's native API.
+  Inline's guide is attached as a session instruction entry, so it survives
+  compaction. Inline's tools are served over OpenCode's client MCP as
+  `inline_*` (inside `execute` in Code Mode); calls from sessions Inline did
+  not open are refused. Advertised OpenCode commands such as `/init` and
+  `/review` run through OpenCode's command API.
   OpenCode's application version is 2; its ACP wire protocol remains v1.
+  OpenCode 2.0 and 2.1, and any version with `INLINE_OPENCODE_DRIVER=acp`,
+  use native `opencode acp` through bridge v2 instead: each session owns a
+  private ACP process, there is no native queue, passive input, session
+  browser or terminal handoff, and idle sessions keep their process for up to
+  30 minutes (`/release` closes it). Reasoning streams as readable thinking
+  and ACP context usage feeds the context meter on that route too.
   New setups require OpenCode v2. Existing 0.x and v1 installations stay on bridge v1
   with migration guidance in `/help`, `/status`, and `inline bridge doctor`.
   `INLINE_BRIDGE_V2=off` also keeps v2 installations on the legacy bridge.
@@ -95,16 +120,6 @@ Current beta provider paths:
   each entry has `version`, `majorVersion`, `supportStatus`, and a `migrationUrl`
   for 0.x/v1, without local paths. Setup prefers verified v2, including the older
   `opencode2` alias; binary names alone do not establish a version.
-  Each bridge v2 session owns a private ACP process so chats in the same folder
-  cannot share Inline tool bindings. Stop, settings, approvals, questions, and
-  session resume use the shared bridge contract. Native queue, passive input,
-  session browser, and terminal handoff are not available through this route.
-  An advertised OpenCode slash command such as `/compact` is sent unchanged to
-  OpenCode even when ACP has no equivalent structured operation. The settings
-  panel offers only supported structured operations, so this does not add a
-  Compact button. Command and model catalogs come from the thread's folder and
-  open session. Idle sessions keep their private process for up to 30 minutes;
-  `/release` closes it immediately.
   An old session that cannot resume keeps its binding and asks the user to retry
   or explicitly start a fresh conversation with `/new`.
   To migrate, follow the [OpenCode guide](https://opencode.ai/v2/docs/migrate-v1/),

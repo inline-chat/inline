@@ -196,6 +196,7 @@ fn runtime(cleanup: &mut Cleanup, harness: Arc<FakeHarness>) -> Runtime {
     Runtime::new(
         V2Config {
             vocabulary: Vocabulary::Claude,
+            acp: false,
             agent_name: "Fault".into(),
             installation_id: "faults".into(),
             owner_user_id: 1,
@@ -607,6 +608,7 @@ async fn acp_unsupported_commands_offer_a_useful_next_step_without_opening_a_ses
     for vocabulary in [Vocabulary::OpenCode, Vocabulary::Amp] {
         let (mut runtime, harness, _cleanup) = fixture(false);
         runtime.config.vocabulary = vocabulary;
+        runtime.config.acp = true;
         let compact = runtime
             .command(9, 1, Grants::OWNER, "compact", "", &[])
             .await;
@@ -621,11 +623,31 @@ async fn acp_unsupported_commands_offer_a_useful_next_step_without_opening_a_ses
 }
 
 #[tokio::test]
+async fn native_opencode_keeps_the_full_command_set() {
+    let (mut runtime, harness, _cleanup) = fixture(false);
+    runtime.config.vocabulary = Vocabulary::OpenCode;
+    runtime.config.acp = false;
+    let help = runtime.command(9, 1, Grants::OWNER, "help", "", &[]).await;
+    assert!(help.contains("/terminal"), "{help}");
+    assert!(
+        help.contains("plan agent") && help.contains("/undo"),
+        "{help}"
+    );
+    assert!(help.contains("/queue"), "{help}");
+    let terminal = runtime
+        .command(9, 1, Grants::OWNER, "terminal", "", &[])
+        .await;
+    assert!(!terminal.contains("not available"), "{terminal}");
+    assert!(harness.opened.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn acp_advertised_commands_use_the_threads_folder_and_preserve_inline_controls() {
     use inline_agent_bridge::{DriverCommand, DriverCommandInput};
     for vocabulary in [Vocabulary::OpenCode, Vocabulary::Amp] {
         let (mut runtime, harness, mut cleanup) = fixture(false);
         runtime.config.vocabulary = vocabulary;
+        runtime.config.acp = true;
         let folder = PathBuf::from("/project-with-commands");
         runtime.thread_settings.entry(9).or_default().folder = Some(folder.clone());
         let advertised = if vocabulary == Vocabulary::OpenCode {
@@ -867,6 +889,7 @@ async fn unknown_native_manifest_keeps_claudes_compact_control() {
             .any(|item| item.id == settings::ITEM_COMPACT)
     );
     runtime.config.vocabulary = Vocabulary::OpenCode;
+    runtime.config.acp = true;
     let document = runtime.settings_document(9, &Catalog::default()).await;
     assert!(
         !document
@@ -1170,6 +1193,7 @@ async fn registered_acp_legacy_sessions_inherit_only_their_matching_folder() {
         ] {
             let (mut runtime, harness, mut cleanup, other) = v1_fixture(legacy_session);
             runtime.config.vocabulary = vocabulary;
+            runtime.config.acp = true;
             let agent = Arc::get_mut(&mut runtime.agent).unwrap();
             agent.owner = Arc::new(Owner);
             agent.vocabulary = vocabulary;

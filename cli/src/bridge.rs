@@ -3370,78 +3370,105 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         attachments_dir: attachments_dir.clone(),
     });
     let mut owned_acp = None;
+    let mut owned_opencode: Option<Arc<inline_agent_driver_opencode::OpenCodeHarness>> = None;
+    let mut acp_route = false;
     let mut amp_cli = None;
-    let (harness, vocabulary, executable): (Arc<dyn HarnessDriver>, _, PathBuf) =
-        match installation.provider_id.as_str() {
-            "codex" => {
-                let ProviderLaunch::Codex(launch) = ProviderLaunch::from_installation(installation)
-                    .map_err(provider_setup_required)?
-                else {
-                    return Err(io::Error::other("codex launch was not a Codex launch").into());
-                };
-                let executable = launch.executable.clone();
-                let harness = inline_agent_driver_codex::harness::CodexHarness::new(
-                    inline_agent_driver_codex::harness::CodexHarnessConfig {
-                        launch,
-                        source: ExecutableSource::Path,
-                        pinned_sha256: None,
-                        bridge_version: env!("CARGO_PKG_VERSION").to_owned(),
-                        cache_root: installation.state_dir.join("v2"),
-                    },
-                );
-                harness.configure_host_tools(tools.configuration());
-                (Arc::new(harness), v2::render::Vocabulary::Codex, executable)
-            }
-            "claude" => {
-                let executable = provider::native_claude_executable(Some(&installation.executable))
-                    .map_err(io::Error::other)?;
-                let mut config = inline_agent_driver_claude::harness::ClaudeHarnessConfig::new(
-                    executable.clone(),
+    let (harness, vocabulary, executable): (Arc<dyn HarnessDriver>, _, PathBuf) = match installation
+        .provider_id
+        .as_str()
+    {
+        "codex" => {
+            let ProviderLaunch::Codex(launch) =
+                ProviderLaunch::from_installation(installation).map_err(provider_setup_required)?
+            else {
+                return Err(io::Error::other("codex launch was not a Codex launch").into());
+            };
+            let executable = launch.executable.clone();
+            let harness = inline_agent_driver_codex::harness::CodexHarness::new(
+                inline_agent_driver_codex::harness::CodexHarnessConfig {
+                    launch,
+                    source: ExecutableSource::Path,
+                    pinned_sha256: None,
+                    bridge_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    cache_root: installation.state_dir.join("v2"),
+                },
+            );
+            harness.configure_host_tools(tools.configuration());
+            (Arc::new(harness), v2::render::Vocabulary::Codex, executable)
+        }
+        "claude" => {
+            let executable = provider::native_claude_executable(Some(&installation.executable))
+                .map_err(io::Error::other)?;
+            let mut config = inline_agent_driver_claude::harness::ClaudeHarnessConfig::new(
+                executable.clone(),
+                env!("CARGO_PKG_VERSION"),
+            );
+            config.host_tools = Some(tools.configuration());
+            let harness = inline_agent_driver_claude::harness::ClaudeHarness::new(config);
+            (
+                Arc::new(harness),
+                v2::render::Vocabulary::Claude,
+                executable,
+            )
+        }
+        "opencode" if opencode_native_route(installation) => {
+            let ProviderLaunch::Acp(descriptor) =
+                ProviderLaunch::from_installation(installation).map_err(provider_setup_required)?
+            else {
+                return Err(io::Error::other("provider launch was not ACP").into());
+            };
+            let executable = descriptor.program.clone();
+            let mut config = inline_agent_driver_opencode::OpenCodeHarnessConfig::new(
+                executable.clone(),
+                env!("CARGO_PKG_VERSION"),
+            );
+            config.host_tools = Some(tools.configuration());
+            // A service Inline starts never inherits Inline's secrets.
+            config.scrub_env = std::env::vars_os()
+                .map(|(name, _)| name)
+                .filter(|name| {
+                    inline_agent_driver_acp::should_scrub_acp_environment_name(name, "opencode")
+                })
+                .collect();
+            let harness = Arc::new(inline_agent_driver_opencode::OpenCodeHarness::new(config));
+            owned_opencode = Some(harness.clone());
+            (harness, v2::render::Vocabulary::OpenCode, executable)
+        }
+        "opencode" | "amp" => {
+            acp_route = true;
+            let ProviderLaunch::Acp(descriptor) =
+                ProviderLaunch::from_installation(installation).map_err(provider_setup_required)?
+            else {
+                return Err(io::Error::other("provider launch was not ACP").into());
+            };
+            let executable = descriptor.program.clone();
+            amp_cli = descriptor.provider_runtime.clone();
+            let harness = Arc::new(
+                inline_agent_driver_acp::IsolatedAcpHarness::connect(
+                    descriptor,
                     env!("CARGO_PKG_VERSION"),
-                );
-                config.host_tools = Some(tools.configuration());
-                let harness = inline_agent_driver_claude::harness::ClaudeHarness::new(config);
-                (
-                    Arc::new(harness),
-                    v2::render::Vocabulary::Claude,
-                    executable,
+                    Some(tools.configuration()),
                 )
-            }
-            "opencode" | "amp" => {
-                let ProviderLaunch::Acp(descriptor) =
-                    ProviderLaunch::from_installation(installation)
-                        .map_err(provider_setup_required)?
-                else {
-                    return Err(io::Error::other("provider launch was not ACP").into());
-                };
-                let executable = descriptor.program.clone();
-                amp_cli = descriptor.provider_runtime.clone();
-                let harness = Arc::new(
-                    inline_agent_driver_acp::IsolatedAcpHarness::connect(
-                        descriptor,
-                        env!("CARGO_PKG_VERSION"),
-                        Some(tools.configuration()),
-                    )
-                    .await?,
-                );
-                owned_acp = Some(harness.clone());
-                (
-                    harness,
-                    if installation.provider_id == "amp" {
-                        v2::render::Vocabulary::Amp
-                    } else {
-                        v2::render::Vocabulary::OpenCode
-                    },
-                    executable,
-                )
-            }
-            other => {
-                return Err(io::Error::other(format!(
-                    "bridge v2 does not support the {other} provider yet"
-                ))
-                .into());
-            }
-        };
+                .await?,
+            );
+            owned_acp = Some(harness.clone());
+            (
+                harness,
+                if installation.provider_id == "amp" {
+                    v2::render::Vocabulary::Amp
+                } else {
+                    v2::render::Vocabulary::OpenCode
+                },
+                executable,
+            )
+        }
+        other => {
+            return Err(io::Error::other(format!(
+                "bridge v2 does not support the {other} provider yet"
+            ))
+            .into());
+        }
+    };
     settle_v1_leftovers(&bot, &legacy_store, &installation.installation_id).await;
     let skill_publisher = v2::skills::SkillPublisher {
         catalog: v2::skills::SkillCatalog {
@@ -3457,6 +3484,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
     let runtime = v2::runtime::Runtime::new(
         v2::runtime::V2Config {
             vocabulary,
+            acp: acp_route,
             agent_name,
             installation_id: installation.installation_id.clone(),
             owner_user_id,
@@ -3508,8 +3536,30 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
     if let Some(harness) = owned_acp {
         harness.shutdown().await?;
     }
+    if let Some(harness) = owned_opencode {
+        // Sessions stay in OpenCode's shared service for other clients.
+        harness.shutdown().await;
+    }
     result?;
     Ok(())
+}
+
+/// OpenCode v2 runs natively against its shared service from
+/// [`inline_agent_driver_opencode::CORE_FLOOR`] on. Older v2 releases, and
+/// `INLINE_OPENCODE_DRIVER=acp`, keep the ACP route.
+fn opencode_native_route(installation: &ProviderInstallationConfig) -> bool {
+    if std::env::var("INLINE_OPENCODE_DRIVER").is_ok_and(|value| value.eq_ignore_ascii_case("acp"))
+    {
+        return false;
+    }
+    let version = opencode_startup_version(&installation.executable)
+        .ok()
+        .as_deref()
+        .and_then(inline_agent_driver_opencode::version::parse);
+    match version {
+        Some(version) => inline_agent_driver_opencode::native_supported(&version),
+        None => false,
+    }
 }
 
 /// v2 never runs what v1 accepted, so v1's open work is closed the way a v1

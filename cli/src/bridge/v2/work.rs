@@ -94,6 +94,8 @@ pub(crate) struct Agent {
     pub harness: Arc<dyn HarnessDriver>,
     pub ledger: Arc<Ledger>,
     pub vocabulary: Vocabulary,
+    /// The harness runs through ACP (see `V2Config::acp`).
+    pub acp: bool,
     pub provider: proto::AgentSessionProvider,
     pub agent_name: String,
     pub installation_id: String,
@@ -160,6 +162,7 @@ impl Agent {
         match self.vocabulary {
             Vocabulary::Codex => Some(HandoffProvider::Codex),
             Vocabulary::Claude => Some(HandoffProvider::Claude),
+            Vocabulary::OpenCode if !self.acp => Some(HandoffProvider::OpenCode),
             Vocabulary::OpenCode | Vocabulary::Amp => None,
         }
     }

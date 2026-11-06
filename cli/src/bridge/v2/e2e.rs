@@ -2078,6 +2078,7 @@ impl CodexBridge {
         let runtime = Runtime::new(
             V2Config {
                 vocabulary: Vocabulary::Codex,
+                acp: false,
                 agent_name: "Codex".to_owned(),
                 installation_id: "e2e-installation".to_owned(),
                 owner_user_id: self.owner_user_id,
@@ -2960,6 +2961,7 @@ impl ClaudeBridge {
         let runtime = Runtime::new(
             V2Config {
                 vocabulary: Vocabulary::Claude,
+                acp: false,
                 agent_name: "Claude".to_owned(),
                 installation_id: "e2e-claude".to_owned(),
                 owner_user_id: self.owner_user_id,

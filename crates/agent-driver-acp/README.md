@@ -81,7 +81,7 @@ INLINE_ACP_WITH_HOST_TOOLS=1 \
   cargo test -p inline-agent-driver-acp --test live_amp -- --ignored --nocapture
 ```
 
-OpenCode bridge v2 uses `IsolatedAcpHarness`: one private ACP process per
+OpenCode 2.0 and 2.1 (and `INLINE_OPENCODE_DRIVER=acp`) use `IsolatedAcpHarness`; OpenCode 2.2 and newer run natively through `inline-agent-driver-opencode`. On this route, one private ACP process per
 session. OpenCode's [ACP reference](https://opencode.ai/v2/docs/cli/acp) states
 that supplied MCP servers are directory-scoped; sharing one process across
 Inline chats in the same directory would share tool registrations. Session

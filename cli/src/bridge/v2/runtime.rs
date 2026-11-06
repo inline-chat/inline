@@ -78,6 +78,9 @@ const LEDGER_RETENTION_SECS: i64 = 14 * 24 * 3600;
 #[derive(Clone, Debug)]
 pub(crate) struct V2Config {
     pub vocabulary: Vocabulary,
+    /// The harness runs through ACP (Amp, or OpenCode's fallback route):
+    /// no terminal handoff, native queue or session browser.
+    pub acp: bool,
     pub agent_name: String,
     pub installation_id: String,
     pub owner_user_id: i64,
@@ -258,6 +261,7 @@ impl Runtime {
             harness,
             ledger,
             vocabulary: config.vocabulary,
+            acp: config.acp,
             provider: config.provider(),
             agent_name: config.agent_name.clone(),
             installation_id: config.installation_id.clone(),
@@ -1646,12 +1650,7 @@ impl Runtime {
                     .await
                     .unwrap_or_else(|| "Done.".to_owned())
             }
-            "terminal"
-                if matches!(
-                    self.config.vocabulary,
-                    Vocabulary::OpenCode | Vocabulary::Amp
-                ) =>
-            {
+            "terminal" if self.config.acp => {
                 format!(
                     "Terminal handoff is not available for {}. Use /release to close this session, or keep chatting here.",
                     self.config.agent_name
@@ -1659,7 +1658,11 @@ impl Runtime {
             }
             "status" => self.status(chat_id, actor).await,
             "help" => {
-                let mut help = help_text(&self.config.agent_name, self.config.vocabulary);
+                let mut help = help_text(
+                    &self.config.agent_name,
+                    self.config.vocabulary,
+                    self.config.acp,
+                );
                 if matches!(
                     self.config.vocabulary,
                     Vocabulary::OpenCode | Vocabulary::Amp
@@ -1723,6 +1726,16 @@ impl Runtime {
                         Some(arguments.trim().to_owned()).filter(|branch| !branch.is_empty()),
                     ),
                     ("undo", Vocabulary::Claude) => SessionOp::Undo,
+                    // OpenCode's plan agent is a mode; build is its default.
+                    ("plan", Vocabulary::OpenCode) if !self.config.acp => SessionOp::Mode(
+                        if arguments.trim().eq_ignore_ascii_case("off") {
+                            "build"
+                        } else {
+                            "plan"
+                        }
+                        .to_owned(),
+                    ),
+                    ("undo", Vocabulary::OpenCode) if !self.config.acp => SessionOp::Undo,
                     (other, _) => {
                         return format!(
                             "/{other} isn't available with {}. Send /help for what is.",
@@ -2209,12 +2222,7 @@ impl Runtime {
             Some("pause") => Some(Control::Pause),
             Some("resume") => Some(Control::Resume),
             Some("release") => Some(Control::Release(ReleaseCause::Command)),
-            Some("terminal")
-                if !matches!(
-                    self.config.vocabulary,
-                    Vocabulary::OpenCode | Vocabulary::Amp
-                ) =>
-            {
+            Some("terminal") if !self.config.acp => {
                 Some(Control::Release(ReleaseCause::ContinueInTerminal))
             }
             _ => None,
@@ -2916,8 +2924,8 @@ fn harness_command_text(text: &str, bot_username: &str) -> String {
 }
 
 /// `/help`: what this agent answers to.
-fn help_text(agent_name: &str, vocabulary: Vocabulary) -> String {
-    if matches!(vocabulary, Vocabulary::OpenCode | Vocabulary::Amp) {
+fn help_text(agent_name: &str, vocabulary: Vocabulary, acp: bool) -> String {
+    if acp || vocabulary == Vocabulary::Amp {
         return format!(
             "{agent_name} commands:\n/status · current model and folder\n/model, /reasoning, /permissions · settings for this thread\n/stop · stop the current turn; /pause and /resume\n/new <task> · a new thread with a fresh session\n/follow, /unfollow · choose which messages to answer\n/allowlist · who may use me (owner)\n/release · close this session while preserving its history\nThe agent's advertised commands and installed skills work as you type them."
         );
@@ -2929,9 +2937,10 @@ fn help_text(agent_name: &str, vocabulary: Vocabulary) -> String {
         Vocabulary::Claude => {
             "/plan · Claude plan mode\n/undo · undo the last turn's file changes\nClaude's own commands and skills work as you type them.\n"
         }
-        Vocabulary::OpenCode | Vocabulary::Amp => {
-            unreachable!("ACP providers have capability-limited help above")
+        Vocabulary::OpenCode => {
+            "/plan, /plan off · OpenCode's plan agent, or back to build\n/undo · undo the last turn, files and conversation\nOpenCode's own commands and skills work as you type them; /terminal opens this session in OpenCode alongside Inline.\n"
         }
+        Vocabulary::Amp => unreachable!("ACP providers have capability-limited help above"),
     };
     format!(
         "{agent_name} commands:\n\
@@ -3054,9 +3063,9 @@ mod tests {
 
     #[test]
     fn help_names_each_harness_own_commands() {
-        let codex = help_text("Codex", Vocabulary::Codex);
+        let codex = help_text("Codex", Vocabulary::Codex, false);
         assert!(codex.contains("/review") && !codex.contains("/undo"));
-        let claude = help_text("Claude", Vocabulary::Claude);
+        let claude = help_text("Claude", Vocabulary::Claude, false);
         assert!(claude.contains("/undo") && claude.contains("skills"));
         assert!(claude.contains("/allowlist") && claude.contains("/follow"));
     }
