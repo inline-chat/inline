@@ -868,6 +868,7 @@ async function insertMessage(
 async function deleteMessages(
   messageIds: bigint[],
   chatId: number,
+  transaction?: Transaction,
 ): Promise<{
   update: UpdateSeqAndDate
   metadataChatUpdates: ChatMetadataUpdate[]
@@ -875,7 +876,7 @@ async function deleteMessages(
   log.trace("deleteMessages", { messageIds, chatId })
 
   // Use a transaction with FOR UPDATE to lock the row while we're working with it
-  let { update, metadataChatUpdates } = await db.transaction(async (tx) => {
+  const persist = async (tx: Transaction) => {
     let [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update")
 
     if (!chat) throw ModelError.ChatInvalid
@@ -952,9 +953,9 @@ async function deleteMessages(
     const metadataChatUpdates = await persistChatMetadataUpdates(tx, orphanedChatIds)
 
     return { update, metadataChatUpdates }
-  })
+  }
 
-  return { update, metadataChatUpdates }
+  return transaction ? persist(transaction) : db.transaction(persist)
 }
 
 async function orphanReplyThreadsForDeletedMessages(

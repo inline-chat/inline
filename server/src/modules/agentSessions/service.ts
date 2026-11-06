@@ -19,6 +19,7 @@ import {
   type Update,
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
+import type { Transaction } from "@in/server/db/types"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
@@ -1138,9 +1139,13 @@ export async function isImportedAgentMessage(chatId: number, messageId: number):
   return row !== undefined
 }
 
-export async function hasImportedAgentMessages(chatId: number, messageIds: readonly number[]): Promise<boolean> {
+export async function hasImportedAgentMessages(
+  chatId: number,
+  messageIds: readonly number[],
+  transaction?: Transaction,
+): Promise<boolean> {
   if (messageIds.length === 0) return false
-  const [row] = await db
+  const [row] = await (transaction ?? db)
     .select({ id: agentSessionMessages.id })
     .from(messages)
     .innerJoin(agentSessionMessages, eq(agentSessionMessages.messageGlobalId, messages.globalId))

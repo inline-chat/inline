@@ -1,6 +1,5 @@
 import type { InputPeer, Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
-import { ModelError } from "@in/server/db/models/_errors"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -21,7 +20,9 @@ import {
 import { pushChatMetadataUpdates } from "@in/server/modules/chatMetadataUpdatePush"
 import { deleteBacklinkMessages, getBacklinkMessagesForSourceMessages } from "@in/server/modules/threadGraph"
 import { db } from "@in/server/db"
-import { members, messages, type DbChat } from "@in/server/db/schema"
+import type { Transaction } from "@in/server/db/types"
+import { registerPostCommitHook } from "@in/server/db/commitHooks"
+import { chats, members, messages, translations, type DbChat } from "@in/server/db/schema"
 import { and, eq, inArray } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { BotUpdateProjector } from "@in/server/modules/botUpdates/projector"
@@ -41,31 +42,37 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
   return deleteMessageWithOptions(input, context)
 }
 
+/** The caller owns the parent chat before the child, and publishes only after commit. */
 export async function deleteSubthreadParentPlacement(
   childChatId: number,
   context: FunctionContext,
+  tx: Transaction,
 ): Promise<void> {
-  const parentMessage = await getSubthreadParentMessageRef(childChatId)
-  if (!parentMessage) {
-    return
-  }
+  const parentMessage = await getSubthreadParentMessageRef(childChatId, tx)
+  if (!parentMessage) return
 
-  try {
-    await deleteMessageWithOptions({
-      peer: {
-        type: {
-          oneofKind: "chat",
-          chat: { chatId: BigInt(parentMessage.parentChatId) },
-        },
-      },
-      messageIds: [BigInt(parentMessage.parentMessageId)],
-    }, context, { trustedPlacementCleanup: true })
-  } catch (error) {
-    if (error instanceof ModelError && error.code === ModelError.Codes.MESSAGE_INVALID) {
-      return
-    }
-    throw error
+  const inputPeer: InputPeer = {
+    type: { oneofKind: "chat", chat: { chatId: BigInt(parentMessage.parentChatId) } },
   }
+  const messageIds = [BigInt(parentMessage.parentMessageId)]
+  const [parentChat] = await tx.select().from(chats).where(eq(chats.id, parentMessage.parentChatId)).limit(1)
+  if (!parentChat) throw RealtimeRpcError.ChatIdInvalid()
+  if (await hasImportedAgentMessages(parentChat.id, [parentMessage.parentMessageId], tx)) {
+    throw RealtimeRpcError.AgentSessionMessageImmutable()
+  }
+  await tx.delete(translations).where(and(eq(translations.chatId, parentMessage.parentChatId), eq(translations.messageId, parentMessage.parentMessageId)))
+  const { update, metadataChatUpdates } = await MessageModel.deleteMessages(messageIds, parentMessage.parentChatId, tx)
+  registerPostCommitHook(tx, Symbol("deleted-subthread-placement"), {
+    run: async () => {
+      await pushUpdates({ inputPeer, messageIds, currentUserId: context.currentUserId, update })
+      await pushChatMetadataUpdates({ currentUserId: context.currentUserId, chatUpdates: metadataChatUpdates })
+      if (isReplyThread(parentChat)) {
+        await emitMessageSubthreadUpdateIfNeeded({ chatId: parentChat.id, currentUserId: context.currentUserId })
+      } else if (isLinkedSubthread(parentChat)) {
+        queueSubthreadParentUpdate({ chatId: parentChat.id, currentUserId: context.currentUserId, reason: "message deletion" })
+      }
+    },
+  })
 }
 
 async function deleteMessageWithOptions(

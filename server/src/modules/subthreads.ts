@@ -694,8 +694,9 @@ export type SubthreadParentMessageRef = {
 
 export async function getSubthreadParentMessageRef(
   childChatId: number,
+  transaction?: Transaction,
 ): Promise<SubthreadParentMessageRef | undefined> {
-  const [row] = await db
+  const [row] = await (transaction ?? db)
     .select({
       parentChatId: messages.chatId,
       parentMessageId: messages.messageId,
