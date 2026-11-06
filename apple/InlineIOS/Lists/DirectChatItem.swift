@@ -129,7 +129,7 @@ struct DirectChatItem: View {
   var unreadAndProfileView: some View {
     HStack(alignment: .center, spacing: 5) {
       Circle()
-        .fill(hasUnreadMessages ? Color.accentColor : .clear)
+        .fill(hasUnreadMessages ? ThemeManager.shared.accentColor : .clear)
         .frame(width: 8, height: 8)
         .animation(.easeInOut(duration: 0.3), value: hasUnreadMessages)
 
@@ -197,9 +197,9 @@ struct DirectChatItem: View {
   private func composeActionIndicator(_ action: ApiComposeAction?) -> some View {
     switch action {
     case .working:
-      WorkingActivityIndicator()
+      WorkingActivityIndicator(color: ThemeManager.shared.accentColor)
     case .typing:
-      TypingActivityIndicator(color: .accentColor)
+      TypingActivityIndicator(color: ThemeManager.shared.accentColor)
     case .uploadingPhoto:
       UploadActivityIndicator(color: .secondary)
     case .uploadingDocument:
@@ -212,7 +212,7 @@ struct DirectChatItem: View {
         spacing: 2.2,
         minBarHeight: 4,
         maxBarHeight: 11,
-        color: .accentColor
+        color: ThemeManager.shared.accentColor
       )
     case .none:
       EmptyView()
@@ -222,7 +222,7 @@ struct DirectChatItem: View {
   private func composeActionForegroundColor(_ action: ApiComposeAction?) -> Color {
     switch action {
     case .typing, .working, .recordingVoice:
-      .accentColor
+      ThemeManager.shared.accentColor
     default:
       .secondary
     }

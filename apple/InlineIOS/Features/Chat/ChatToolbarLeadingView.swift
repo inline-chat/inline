@@ -551,7 +551,7 @@ private struct ChatToolbarComposeActionSubtitle: View {
       ChatToolbarComposeActionIndicator(action: presentation.action)
       ChatToolbarSubtitleText(
         text: presentation.text,
-        color: usesAccentColor ? .accentColor : .secondary
+        color: usesAccentColor ? ThemeManager.shared.accentColor : .secondary
       )
     }
     .accessibilityElement(children: .ignore)
@@ -566,9 +566,9 @@ private struct ChatToolbarComposeActionIndicator: View {
   var body: some View {
     switch action {
     case .working:
-      WorkingActivityIndicator()
+      WorkingActivityIndicator(color: ThemeManager.shared.accentColor)
     case .typing:
-      TypingActivityIndicator(color: .accentColor)
+      TypingActivityIndicator(color: ThemeManager.shared.accentColor)
     case .uploadingPhoto:
       AnimatedPhotoUpload()
     case .uploadingDocument:
@@ -581,7 +581,7 @@ private struct ChatToolbarComposeActionIndicator: View {
         spacing: 2,
         minBarHeight: 3,
         maxBarHeight: 9,
-        color: .accentColor
+        color: ThemeManager.shared.accentColor
       )
     }
   }
