@@ -4231,6 +4231,7 @@ extension GlassComposeAppKit {
 
 extension GlassComposeAppKit {
   private func persistDraftAfterProgrammaticChange() {
+    refreshAgentDraftTarget()
     updateSendButtonIfNeeded()
     switch usage {
       case .chat:
