@@ -341,7 +341,7 @@ describe("plugin manifest", () => {
     expect(json.peerDependencies?.openclaw).toBe(">=2026.8.2")
     expect(json.peerDependenciesMeta?.openclaw?.optional).toBe(true)
     expect(json.openclaw?.compat?.pluginApi).toBe(">=2026.8.2")
-    expect(json.devDependencies?.openclaw).toBe("2026.9.4")
+    expect(json.devDependencies?.openclaw).toBe("2026.11.1")
     expect(json.openclaw?.build?.openclawVersion).toBe(json.devDependencies?.openclaw)
     expect(json.openclaw?.release?.publishToClawHub).toBe(true)
     expect(json.openclaw?.release?.publishToNpm).toBe(true)

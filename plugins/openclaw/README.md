@@ -47,7 +47,7 @@ Breaking changes in the next release. They match the rules Hermes 1.0 follows; s
 ## Install
 
 The Inline plugin supports OpenClaw `2026.8.2` and newer, including
-`2026.9.x`, with no upper version cap. It is built against `2026.9.4`. Install
+`2026.9.x`, with no upper version cap. It is built against `2026.11.1`. Install
 the plugin version for your OpenClaw release line. The current stable release
 is `0.0.72`.
 
