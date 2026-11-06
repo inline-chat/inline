@@ -54,7 +54,16 @@ pub(crate) fn group_message(message: &MessageRecord, facts: MessageFacts<'_>) ->
                     let start = offset as usize;
                     let end = start.checked_add(length as usize)?.min(units.len());
                     let raw = String::from_utf16_lossy(units.get(start..end)?);
-                    let (name, target) = command_parts(&raw, facts.bot_user_id, facts.bot_username);
+                    let (name, text_target) =
+                        command_parts(&raw, facts.bot_user_id, facts.bot_username);
+                    // Apps insert a bare `/cmd` when one bot offers it and carry
+                    // that bot on the entity; the server fills it in for typed
+                    // commands too. Prefer it over the `@bot` text suffix.
+                    let target = match entity.user_id.map(|id| id.get()) {
+                        Some(id) if id == facts.bot_user_id => Some(facts.bot_user_id),
+                        Some(_) => Some(-1),
+                        None => text_target,
+                    };
                     Some(MessageEntity::Command {
                         offset,
                         length,
@@ -138,7 +147,7 @@ pub(crate) fn grants_by_user(result: &proto::ListAgentGrantsResult) -> HashMap<i
 #[cfg(test)]
 mod tests {
     use super::*;
-    use inline_agent_bridge::group::{AddresseeKind, classify_addressee};
+    use inline_agent_bridge::group::{AddresseeKind, DirectReason, classify_addressee};
     use inline_client::{InlineId, MessageEntityRecord, MessageMetadata};
 
     const BOT: i64 = 99;
@@ -218,6 +227,35 @@ mod tests {
             facts(),
         );
         assert_eq!(classify_addressee(&other, BOT), AddresseeKind::Others);
+    }
+
+    #[test]
+    fn bare_commands_use_the_entity_target() {
+        let text = "/allowlist @dena @vlad";
+        let mine = group_message(
+            &record(
+                text,
+                vec![
+                    entity("TYPE_BOT_COMMAND", 0, 10, Some(BOT)),
+                    entity("TYPE_MENTION", 11, 5, Some(8)),
+                    entity("TYPE_MENTION", 17, 5, Some(9)),
+                ],
+            ),
+            facts(),
+        );
+        assert_eq!(mine.command(), Some(("allowlist", Some(BOT))));
+        assert_eq!(
+            classify_addressee(&mine, BOT),
+            AddresseeKind::Me {
+                reason: DirectReason::Command
+            }
+        );
+
+        let theirs = group_message(
+            &record(text, vec![entity("TYPE_BOT_COMMAND", 0, 10, Some(42))]),
+            facts(),
+        );
+        assert_eq!(classify_addressee(&theirs, BOT), AddresseeKind::Others);
     }
 
     #[test]
