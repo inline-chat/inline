@@ -94,6 +94,16 @@ struct ChatInfoView: View {
     currentMemberRole == .owner || currentMemberRole == .admin
   }
 
+  /// Mirrors `ensureCanManageChatParticipants` on the server: the chat's creator
+  /// may always add or remove people; in a space, so may its owners and admins.
+  var canManageParticipants: Bool {
+    guard isPrivate else { return false }
+    if let currentUserId = Auth.shared.getCurrentUserId(), currentChat?.createdBy == currentUserId {
+      return true
+    }
+    return currentChat?.spaceId != nil && isOwnerOrAdmin
+  }
+
   /// Mirrors the update-chat-visibility server contract: only the creator of a
   /// space thread, or a space owner/admin, may change its visibility.
   var canChangeChatVisibility: Bool {
@@ -246,7 +256,7 @@ struct ChatInfoView: View {
                     isSearching: $isSearching,
                     isPrivate: isPrivate,
                     isDM: isDM,
-                    isOwnerOrAdmin: isOwnerOrAdmin,
+                    canManageParticipants: canManageParticipants,
                     canChangeVisibility: canChangeChatVisibility,
                     participants: participantsWithMembersViewModel.participants,
                     groupParticipants: participantsWithMembersViewModel.groupParticipants,
@@ -1118,7 +1128,7 @@ struct InfoTabView: View {
       GridItem(.flexible()),
       GridItem(.flexible()),
     ], spacing: 16) {
-      if chatInfoView.isOwnerOrAdmin, chatInfoView.isPrivate {
+      if chatInfoView.canManageParticipants {
         Button(action: {
           chatInfoView.isSearching = true
         }) {
@@ -1153,7 +1163,7 @@ struct InfoTabView: View {
             .lineLimit(1)
         }
         .contextMenu {
-          if chatInfoView.isOwnerOrAdmin, chatInfoView.isPrivate {
+          if chatInfoView.canManageParticipants {
             Button(role: .destructive, action: {
               let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
               impactFeedback.impactOccurred()
@@ -1197,7 +1207,7 @@ struct InfoTabView: View {
       Spacer()
     }
     .contextMenu {
-      if chatInfoView.isOwnerOrAdmin, chatInfoView.isPrivate {
+      if chatInfoView.canManageParticipants {
         Button(role: .destructive, action: {
           let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
           impactFeedback.impactOccurred()

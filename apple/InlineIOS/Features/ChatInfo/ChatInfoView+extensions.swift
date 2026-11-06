@@ -440,7 +440,7 @@ extension ChatInfoView {
 
   var participantsSection: some View {
     Section("Participants") {
-      if isOwnerOrAdmin, isPrivate {
+      if canManageParticipants {
         Button(action: {
           isSearching = true
         }) {
@@ -450,7 +450,7 @@ extension ChatInfoView {
       ForEach(participantsWithMembersViewModel.participants) { userInfo in
         ProfileRow(userInfo: userInfo, isChatInfo: true)
           .swipeActions {
-            if isOwnerOrAdmin, isPrivate {
+            if canManageParticipants {
               Button(role: .destructive, action: {
                 guard currentChatId != 0 else {
                   Log.shared.error("No chat ID found when trying to remove participant")
@@ -489,7 +489,7 @@ extension ChatInfoView {
           }
         }
         .swipeActions {
-          if isOwnerOrAdmin, isPrivate {
+          if canManageParticipants {
             Button(role: .destructive, action: {
               removeGroupParticipant(group)
             }) {
