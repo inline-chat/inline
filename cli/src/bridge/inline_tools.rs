@@ -1794,12 +1794,22 @@ pub(in crate::bridge) fn validate_tool_arguments(
         }
     }
     for (key, value) in arguments {
-        validate_schema_value(value, properties.get(key).ok_or(())?)?;
+        validate_schema_value(value, properties.get(key).ok_or(())?, multiline_field(key))?;
     }
     Ok(())
 }
 
-fn validate_schema_value(value: &serde_json::Value, schema: &serde_json::Value) -> Result<(), ()> {
+/// Prose fields: a message, caption or summary may span lines. Every other
+/// string (ids, names, emoji, paths, queries) stays on one line.
+fn multiline_field(key: &str) -> bool {
+    matches!(key, "text" | "caption" | "description" | "summary")
+}
+
+fn validate_schema_value(
+    value: &serde_json::Value,
+    schema: &serde_json::Value,
+    multiline: bool,
+) -> Result<(), ()> {
     match schema.get("type").and_then(serde_json::Value::as_str) {
         Some("integer") => {
             let value = value.as_i64().ok_or(())?;
@@ -1819,11 +1829,12 @@ fn validate_schema_value(value: &serde_json::Value, schema: &serde_json::Value) 
         Some("string") => {
             let value = value.as_str().ok_or(())?;
             let length = value.chars().count();
-            if value.chars().any(char::is_control)
-                || schema
-                    .get("minLength")
-                    .and_then(serde_json::Value::as_u64)
-                    .is_some_and(|minimum| length < minimum as usize)
+            if value.chars().any(|character| {
+                character.is_control() && !(multiline && matches!(character, '\n' | '\r' | '\t'))
+            }) || schema
+                .get("minLength")
+                .and_then(serde_json::Value::as_u64)
+                .is_some_and(|minimum| length < minimum as usize)
                 || schema
                     .get("maxLength")
                     .and_then(serde_json::Value::as_u64)
@@ -2134,6 +2145,26 @@ mod tests {
             specs
                 .iter()
                 .any(|spec| spec.name == "return_attachment" && !spec.read_only)
+        );
+    }
+
+    #[test]
+    fn message_text_may_span_lines_but_identifiers_may_not() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "minLength": 1, "maxLength": 8000},
+                "emoji": {"type": "string"}
+            },
+            "required": ["text"]
+        });
+        assert!(
+            validate_tool_arguments(&serde_json::json!({"text": "a\nb\r\n\tc"}), &schema).is_ok()
+        );
+        assert!(validate_tool_arguments(&serde_json::json!({"text": "a\u{0}b"}), &schema).is_err());
+        assert!(
+            validate_tool_arguments(&serde_json::json!({"text": "ok", "emoji": "a\nb"}), &schema)
+                .is_err()
         );
     }
 
