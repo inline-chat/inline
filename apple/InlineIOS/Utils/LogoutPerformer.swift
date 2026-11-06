@@ -91,6 +91,7 @@ enum LogoutPerformer {
       AgentWorkStateStore.shared.removeAll()
       AgentGrantStore.shared.removeAll()
       MessageFormDraftStore.shared.reset()
+      PeerBotCommandsStore.shared.clear()
     }
 
     BotAgentDirectory.shared.clear()

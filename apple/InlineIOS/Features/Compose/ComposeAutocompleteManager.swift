@@ -78,11 +78,10 @@ final class ComposeAutocompleteManager: NSObject {
         return mentionViewModel.items.prefix(limit).map(Self.autocompleteItem(for:))
       },
       commandItems: { query, limit in
-        let botCommands = commandViewModel.suggestions(matching: query)
-          .map { ComposeCommandSuggestion.bot($0) }
-        let inlineCommands = InlineCommandRegistry.suggestions(matching: query)
-          .map { ComposeCommandSuggestion.inline($0) }
-        return (botCommands + inlineCommands).prefix(limit).map(Self.autocompleteItem(for:))
+        // The menu scrolls; the shared mention/thread limit would hide app commands behind bot ones.
+        commandViewModel.commandSuggestions(matching: query)
+          .prefix(max(limit, Self.commandLimit))
+          .map(Self.autocompleteItem(for:))
       },
       emojiItems: { query, limit in
         ComposeEmojiAutocompleteProvider.items(matching: query, limit: limit)
@@ -289,6 +288,8 @@ final class ComposeAutocompleteManager: NSObject {
     NSLayoutConstraint.activate(completionConstraints)
   }
 
+  private static let commandLimit = 40
+
   private static func recentThreadChatIds(limit: Int) -> [Int64] {
     var ids: [Int64] = []
     var seen = Set<Int64>()
@@ -401,14 +402,17 @@ final class ComposeAutocompleteManager: NSObject {
 
   private func loadCommandsIfNeeded(for match: ComposeAutocompleteMatch) {
     guard match.kind == .command,
-          commandViewModel.loadState != .loaded,
+          commandViewModel.shouldAttemptLoad,
           commandLoadTask == nil
     else {
       return
     }
 
-    commandLoadStateOverride = .loading
-    renderCurrentState()
+    // Cached commands stay visible while they revalidate.
+    if commandViewModel.loadState != .loaded {
+      commandLoadStateOverride = .loading
+      renderCurrentState()
+    }
     let commandViewModel = commandViewModel
     commandLoadTask = Task { @MainActor [weak self] in
       await commandViewModel.ensureLoaded()
