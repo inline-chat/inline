@@ -65,6 +65,25 @@ public enum MessageMarkdown {
       .joined(separator: "\n") + "\n"
   }
 
+  /// Where a reply's quote lines go: first, so the reply shows them in its header, replacing
+  /// `previous` (the lines the last Quote inserted) while they still open the text. A typed
+  /// "> " quote right below gets a blank line so the two stay separate blocks.
+  public static func replyQuoteInsertion(
+    _ quoteLines: String,
+    into text: String,
+    replacing previous: String?
+  ) -> (range: NSRange, text: String) {
+    let replaced = previous.flatMap { text.hasPrefix($0) ? ($0 as NSString).length : nil } ?? 0
+    let rest = (text as NSString).substring(from: replaced)
+    return (NSRange(location: 0, length: replaced), rest.hasPrefix(">") ? quoteLines + "\n" : quoteLines)
+  }
+
+  /// The range of `previous` quote lines to remove when their reply goes away, if they still
+  /// open the text unchanged. Edited lines stay; they are the user's now.
+  public static func replyQuoteRemoval(_ previous: String, from text: String) -> NSRange? {
+    text.hasPrefix(previous) ? NSRange(location: 0, length: (previous as NSString).length) : nil
+  }
+
   /// Where quote lines go in a composer holding `text`: after everything typed, replacing
   /// trailing blank space, with a blank line before them so each quote stays its own block.
   public static func quoteInsertion(_ quoteLines: String, into text: String) -> (range: NSRange, text: String) {
