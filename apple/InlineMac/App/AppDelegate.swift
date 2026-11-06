@@ -763,6 +763,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         AgentWorkStateStore.shared.removeAll()
         AgentGrantStore.shared.removeAll()
         MessageFormDraftStore.shared.reset()
+        PeerBotCommandsStore.shared.clear()
       }
       ObjectCache.shared.clear()
       try await FileCache.shared.clearCache()

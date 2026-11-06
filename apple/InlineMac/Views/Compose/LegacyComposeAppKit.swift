@@ -1170,11 +1170,7 @@ class LegacyComposeAppKit: NSView {
     hideAutocomplete()
 
     guard let peerBotCommandsViewModel, let commandCompletionMenu else { return }
-    let botSuggestions = peerBotCommandsViewModel.suggestions(matching: query)
-      .map { ComposeCommandSuggestion.bot($0) }
-    let inlineSuggestions = InlineCommandRegistry.suggestions(matching: query)
-      .map { ComposeCommandSuggestion.inline($0) }
-    let suggestions = botSuggestions + inlineSuggestions
+    let suggestions = peerBotCommandsViewModel.commandSuggestions(matching: query)
     commandCompletionMenu.updateSuggestions(suggestions)
 
     if suggestions.isEmpty {

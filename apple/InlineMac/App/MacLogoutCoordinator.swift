@@ -283,6 +283,7 @@ extension AppDelegate {
       AgentWorkStateStore.shared.removeAll()
       AgentGrantStore.shared.removeAll()
       MessageFormDraftStore.shared.reset()
+      PeerBotCommandsStore.shared.clear()
     }
     ObjectCache.shared.clear()
 
