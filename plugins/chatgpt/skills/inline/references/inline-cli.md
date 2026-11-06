@@ -95,6 +95,8 @@ inline capabilities messages send --compact
 ```bash
 inline chats list --filter "launch" --json --compact
 inline messages list --chat-id CHAT_ID --limit 50 --json --compact
+inline messages list --chat-id CHAT_ID --limit 50 --include-threads --json --compact  # adds reply-thread replies (threadReplies[]) for the 20 newest threads; threadsSkipped counts the rest
+inline messages list --chat-id CHAT_ID --thread MESSAGE_ID --json --compact  # one message's reply thread
 inline messages search --chat-id CHAT_ID --query "launch" --json --compact
 inline messages get --chat-id CHAT_ID --message-id 91,92,100 --json --compact
 inline auth sessions --json --compact
@@ -105,8 +107,7 @@ Resolve and verify the exact target before any write. Send only when the user ex
 ```bash
 inline messages send --chat-id CHAT_ID --text "MESSAGE"
 inline messages send --chat-id CHAT_ID --reply-to MESSAGE_ID --text "QUOTE REPLY IN THE SAME CHAT"
-inline chats subthread --parent-chat-id CHAT_ID --message-id MESSAGE_ID --json --compact  # reuses the reply thread
-inline messages send --chat-id THREAD_CHAT_ID --text "REPLY IN THE THREAD"
+inline messages send --chat-id CHAT_ID --thread MESSAGE_ID --text "REPLY IN THE THREAD"  # reuses or starts the reply thread
 inline messages pin --chat-id CHAT_ID --message-id MESSAGE_ID
 inline chats subthread --parent-chat-id CHAT_ID --message-id MESSAGE_ID --title "FOLLOW-UP"
 inline chats follow --chat-id REPLY_THREAD_ID
