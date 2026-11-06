@@ -2207,8 +2207,17 @@ class MessageViewAppKit: NSView {
     guard let user = fullMessage.senderInfo?.user else { return }
 
     Task { @MainActor in
-      openChat(peer: .user(id: user.id))
+      openSenderProfile(peer: .user(id: user.id))
     }
+  }
+
+  private func openSenderProfile(peer: Peer) {
+    guard let dependencies else {
+      Nav.main.open(.chatInfo(peer: peer))
+      return
+    }
+
+    dependencies.openChatInfo(peer: peer)
   }
 
   func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
