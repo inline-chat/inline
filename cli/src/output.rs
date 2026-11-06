@@ -82,6 +82,41 @@ pub struct MessageSummary {
     pub relative_date: String,
     pub media: Option<MediaSummary>,
     pub attachments: Vec<AttachmentSummary>,
+    /// The child chat holding this message's reply thread or subthread.
+    /// Its messages are not part of this chat's history; list them with
+    /// `messages list --chat-id <thread.chatId>`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread: Option<ThreadSummary>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSummary {
+    pub chat_id: i64,
+    /// `reply` for a reply thread anchored on this message, `subthread` for a titled subthread.
+    pub kind: &'static str,
+    pub title: Option<String>,
+    pub reply_count: i32,
+    pub has_unread: bool,
+}
+
+impl ThreadSummary {
+    pub(crate) fn line(&self) -> String {
+        let count = match self.reply_count {
+            1 => "1 reply".to_string(),
+            n => format!("{n} replies"),
+        };
+        let mut line = match (self.kind, &self.title) {
+            ("subthread", Some(title)) => {
+                format!("↳ subthread {} \"{}\" · {count}", self.chat_id, title)
+            }
+            _ => format!("↳ {count} in thread {}", self.chat_id),
+        };
+        if self.has_unread {
+            line.push_str(" · unread");
+        }
+        line
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -891,6 +926,14 @@ pub fn print_messages(
             pad_right(&truncate_display(&item.sender_name, from_width), from_width),
             pad_right(&text, text_width),
         );
+        if let Some(thread) = &item.thread {
+            let indent = id_width + when_width + from_width + 6;
+            println!(
+                "{}{}",
+                " ".repeat(indent),
+                style_dim(&truncate_display(&thread.line(), text_width))
+            );
+        }
     }
     Ok(())
 }
@@ -935,6 +978,16 @@ pub(crate) fn print_message_detail(summary: &MessageSummary, peer_label: &str) {
         println!();
         println!("{}", style_heading("Media"));
         println!("  {}", terminal_text(&format_media_detail(media)));
+    }
+
+    if let Some(thread) = &summary.thread {
+        println!();
+        println!("{}", style_heading("Thread"));
+        println!("  {}", terminal_text(&thread.line()));
+        println!(
+            "  read it: inline messages list --chat-id {}",
+            thread.chat_id
+        );
     }
 
     if !summary.attachments.is_empty() {
@@ -1137,6 +1190,15 @@ pub(crate) fn style_heading(value: &str) -> String {
     let value = terminal_text(value);
     if color_enabled(io::stdout().is_terminal()) {
         format!("\x1b[1m{value}\x1b[0m")
+    } else {
+        value.to_string()
+    }
+}
+
+fn style_dim(value: &str) -> String {
+    let value = terminal_text(value);
+    if color_enabled(io::stdout().is_terminal()) {
+        format!("\x1b[2m{value}\x1b[0m")
     } else {
         value.to_string()
     }

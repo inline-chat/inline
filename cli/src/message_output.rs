@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::media::best_photo_size;
 use crate::output::{
-    AttachmentSummary, MediaSummary, MessageListOutput, MessageSummary, PeerSummary, format_bytes,
-    format_relative_date, user_summary,
+    AttachmentSummary, MediaSummary, MessageListOutput, MessageSummary, PeerSummary, ThreadSummary,
+    format_bytes, format_relative_date, user_summary,
 };
 use inline_protocol::proto;
 
@@ -84,7 +84,43 @@ pub(crate) fn message_summary(
         relative_date,
         media,
         attachments,
+        thread: message_thread_summary(message),
     }
+}
+
+/// Reply threads and subthreads are child chats; their messages never appear
+/// in this chat's history, so surface where they live.
+fn message_thread_summary(message: &proto::Message) -> Option<ThreadSummary> {
+    if let Some(replies) = message
+        .replies
+        .as_ref()
+        .filter(|r| r.chat_id > 0 && r.reply_count > 0)
+    {
+        return Some(ThreadSummary {
+            chat_id: replies.chat_id,
+            kind: "reply",
+            title: None,
+            reply_count: replies.reply_count,
+            has_unread: replies.has_unread,
+        });
+    }
+    let subthread = message.subthread.as_ref().filter(|s| s.chat_id > 0)?;
+    let is_subthread = subthread.kind == proto::message_subthread::Kind::Subthread as i32;
+    if !is_subthread && subthread.message_count == 0 {
+        return None;
+    }
+    Some(ThreadSummary {
+        chat_id: subthread.chat_id,
+        kind: if is_subthread { "subthread" } else { "reply" },
+        title: subthread
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .map(str::to_owned),
+        reply_count: subthread.message_count,
+        has_unread: subthread.has_unread,
+    })
 }
 
 fn message_preview(
@@ -327,6 +363,48 @@ fn current_epoch_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reply_threads_surface_their_child_chat() {
+        let message = proto::Message {
+            id: 412,
+            replies: Some(proto::MessageReplies {
+                chat_id: 11702,
+                reply_count: 3,
+                has_unread: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let thread = message_thread_summary(&message).expect("thread");
+        assert_eq!(thread.chat_id, 11702);
+        assert_eq!(thread.line(), "↳ 3 replies in thread 11702 · unread");
+
+        let empty = proto::Message {
+            replies: Some(proto::MessageReplies {
+                chat_id: 11703,
+                reply_count: 0,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(message_thread_summary(&empty).is_none());
+
+        let titled = proto::Message {
+            subthread: Some(proto::MessageSubthread {
+                chat_id: 9,
+                kind: proto::message_subthread::Kind::Subthread as i32,
+                title: Some("Q4 calendar".into()),
+                message_count: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            message_thread_summary(&titled).expect("subthread").line(),
+            "↳ subthread 9 \"Q4 calendar\" · 1 reply"
+        );
+    }
 
     #[test]
     fn message_summary_uses_sender_name_preview_and_relative_date() {
