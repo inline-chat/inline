@@ -41,12 +41,10 @@ public enum InlineCommandRegistry {
     ),
   ]
 
-  public static func suggestions(matching query: String) -> [InlineCommandDefinition] {
-    let query = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    guard !query.isEmpty else { return commands }
-    return commands.filter {
-      $0.command.contains(query) || $0.description.lowercased().contains(query)
-    }
+  /// App commands that can run in `peer`. Only threads can be renamed, so DMs don't offer `/rename`.
+  public static func commands(for peer: Peer?) -> [InlineCommandDefinition] {
+    guard let peer, peer.asThreadId() == nil else { return commands }
+    return commands.filter { $0.action != .renameThread }
   }
 
   public static func action(forStandaloneText text: String) -> InlineCommandAction? {

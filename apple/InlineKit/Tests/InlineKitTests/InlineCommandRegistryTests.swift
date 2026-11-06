@@ -21,7 +21,6 @@ struct InlineCommandRegistryTests {
     #expect(InlineCommandRegistry.action(forStandaloneText: "  /RENAME\n") == .renameThread)
     #expect(InlineCommandRegistry.action(forStandaloneText: "/rename@bot") == nil)
     #expect(InlineCommandRegistry.action(forStandaloneText: "hello /rename") == nil)
-    #expect(InlineCommandRegistry.suggestions(matching: "rename").first?.action == .renameThread)
     #expect(InlineCommandRegistry.action(forStandaloneText: "/clear") == .collapseHistory)
     #expect(InlineCommandRegistry.action(forStandaloneText: "  /CLEAR\n") == .collapseHistory)
     #expect(InlineCommandRegistry.action(forStandaloneText: "/thread") == .createSubthread)
@@ -29,6 +28,14 @@ struct InlineCommandRegistryTests {
     #expect(InlineCommandRegistry.action(forStandaloneText: "/clear now") == nil)
     #expect(InlineCommandRegistry.action(forStandaloneText: "hello /clear") == nil)
     #expect(InlineCommandRegistry.action(forStandaloneText: "/clear@bot") == nil)
+  }
+
+  @Test("rename is only offered where it can run")
+  func contextualCommands() {
+    let threadCommands = InlineCommandRegistry.commands(for: .thread(id: 1)).map(\.command)
+    let directMessageCommands = InlineCommandRegistry.commands(for: .user(id: 2)).map(\.command)
+    #expect(threadCommands == ["rename", "clear", "thread"])
+    #expect(directMessageCommands == ["clear", "thread"])
   }
 
   @Test("Compose command launch ignores reply context and blocks content modes")

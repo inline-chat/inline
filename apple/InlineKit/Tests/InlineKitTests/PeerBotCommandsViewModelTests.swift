@@ -233,8 +233,74 @@ struct PeerBotCommandsViewModelTests {
     await viewModel.ensureLoaded()
 
     #expect(viewModel.suggestions(matching: "build").map(\.command) == ["build"])
-    #expect(viewModel.suggestions(matching: "deploy logs").map(\.command) == ["logs"])
+    #expect(viewModel.suggestions(matching: "log").map(\.command) == ["logs"])
     #expect(viewModel.suggestions(matching: "build@build").map(\.command) == ["build"])
+    // A command name match outranks a description match.
+    #expect(viewModel.suggestions(matching: "deploy").map(\.command) == ["deploy", "logs"])
+  }
+
+  @Test("a new view model shows the shared cached commands before any fetch")
+  func sharedStoreServesFirstFrame() async {
+    let store = PeerBotCommandsStore()
+    let counter = FetchCounter()
+    let peer = Peer.thread(id: 100)
+    let fetcher: PeerBotCommandsViewModel.Fetcher = { _ in
+      await counter.increment()
+      return [Self.makeGroup(botId: 1, username: "alpha", commands: [("help", "Show help")])]
+    }
+
+    let first = PeerBotCommandsViewModel(
+      peer: peer, fetcher: fetcher, userInfoResolver: Self.makeResolver(), store: store
+    )
+    await first.ensureLoaded()
+
+    let second = PeerBotCommandsViewModel(
+      peer: peer, fetcher: fetcher, userInfoResolver: Self.makeResolver(), store: store
+    )
+    #expect(second.loadState == .loaded)
+    #expect(second.suggestions.map(\.command) == ["help"])
+    #expect(second.shouldAttemptLoad == false)
+    await second.ensureLoaded()
+    #expect(await counter.value == 1)
+  }
+
+  @Test("stale cached commands stay visible while they revalidate")
+  func staleCommandsRevalidate() async {
+    let store = PeerBotCommandsStore()
+    let counter = FetchCounter()
+    let gate = AsyncGate()
+    let clock = TestClock()
+    let peer = Peer.thread(id: 100)
+    let fetcher: PeerBotCommandsViewModel.Fetcher = { _ in
+      if await counter.next() == 1 {
+        return [Self.makeGroup(botId: 1, username: "alpha", commands: [("old", "Old")])]
+      }
+      await gate.wait()
+      return [Self.makeGroup(botId: 1, username: "alpha", commands: [("new", "New")])]
+    }
+    let viewModel = PeerBotCommandsViewModel(
+      peer: peer,
+      fetcher: fetcher,
+      userInfoResolver: Self.makeResolver(),
+      store: store,
+      now: { clock.now },
+      cacheTTL: 60
+    )
+    await viewModel.ensureLoaded()
+    clock.now = clock.now.addingTimeInterval(61)
+    #expect(viewModel.shouldAttemptLoad)
+
+    let revalidate = Task { @MainActor in await viewModel.ensureLoaded() }
+    while await counter.value < 2 {
+      await Task.yield()
+    }
+    #expect(viewModel.loadState == .loaded)
+    #expect(viewModel.suggestions.map(\.command) == ["old"])
+
+    await gate.open()
+    await revalidate.value
+    #expect(viewModel.suggestions.map(\.command) == ["new"])
+    #expect(viewModel.shouldAttemptLoad == false)
   }
 
   @Test("retries after a failed load")
@@ -445,6 +511,11 @@ struct PeerBotCommandsViewModelTests {
     }
     return group
   }
+}
+
+@MainActor
+private final class TestClock {
+  var now = Date(timeIntervalSince1970: 1_000_000)
 }
 
 private actor FetchCounter {

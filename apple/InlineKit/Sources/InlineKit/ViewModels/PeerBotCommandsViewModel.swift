@@ -415,6 +415,65 @@ public struct PeerBotCommandSuggestion: Identifiable, Hashable, Sendable {
     }
     return "/\(command) "
   }
+
+  func markedAmbiguous() -> PeerBotCommandSuggestion {
+    guard !isAmbiguous else { return self }
+    return PeerBotCommandSuggestion(
+      command: command,
+      description: description,
+      normalizedCommand: normalizedCommand,
+      botId: botId,
+      botUsername: botUsername,
+      botDisplayName: botDisplayName,
+      botUserInfo: botUserInfo,
+      isAmbiguous: true
+    )
+  }
+}
+
+/// Account-scoped peer command catalogs shared by every compose view, so reopening a chat shows its
+/// bot commands on the first `/` instead of only the app commands until a fetch lands.
+@MainActor
+public final class PeerBotCommandsStore {
+  public static let shared = PeerBotCommandsStore()
+
+  struct Entry {
+    let groups: [InlineProtocol.PeerBotCommands]
+    let fetchedAt: Date
+  }
+
+  private let maxPeers: Int
+  private var entries: [Peer: Entry] = [:]
+  private var accessOrder: [Peer] = []
+
+  public init(maxPeers: Int = 64) {
+    self.maxPeers = max(1, maxPeers)
+  }
+
+  func entry(for peer: Peer) -> Entry? {
+    guard let entry = entries[peer] else { return nil }
+    touch(peer)
+    return entry
+  }
+
+  func store(_ groups: [InlineProtocol.PeerBotCommands], for peer: Peer, at date: Date) {
+    entries[peer] = Entry(groups: groups, fetchedAt: date)
+    touch(peer)
+    while accessOrder.count > maxPeers, let oldest = accessOrder.first {
+      entries[oldest] = nil
+      accessOrder.removeFirst()
+    }
+  }
+
+  public func clear() {
+    entries.removeAll()
+    accessOrder.removeAll()
+  }
+
+  private func touch(_ peer: Peer) {
+    accessOrder.removeAll { $0 == peer }
+    accessOrder.append(peer)
+  }
 }
 
 @MainActor
@@ -436,8 +495,10 @@ public final class PeerBotCommandsViewModel {
 
   @ObservationIgnored private let fetcher: Fetcher
   @ObservationIgnored private let userInfoResolver: UserInfoResolver
+  @ObservationIgnored private let store: PeerBotCommandsStore
+  @ObservationIgnored private let now: @MainActor () -> Date
+  @ObservationIgnored private let cacheTTL: TimeInterval
   @ObservationIgnored private let log = Log.scoped("PeerBotCommandsViewModel")
-  @ObservationIgnored private var cache: [Peer: [InlineProtocol.PeerBotCommands]] = [:]
   @ObservationIgnored private var loadTask: Task<Void, Never>?
   @ObservationIgnored private var loadGeneration = UUID()
 
@@ -445,20 +506,39 @@ public final class PeerBotCommandsViewModel {
     self.peer = peer
     self.fetcher = fetcher
     userInfoResolver = PeerBotCommandsViewModel.resolveUserInfo
+    store = PeerBotCommandsStore()
+    now = Date.init
+    cacheTTL = 60
+    restoreFromStore()
   }
 
+  /// - Parameters:
+  ///   - store: Shared across view models so a reopened chat has its commands immediately.
+  ///   - cacheTTL: After this, cached commands are still shown but `ensureLoaded` refetches them.
   public init(
     peer: Peer,
     fetcher: @escaping Fetcher,
-    userInfoResolver: @escaping UserInfoResolver
+    userInfoResolver: @escaping UserInfoResolver,
+    store: PeerBotCommandsStore = PeerBotCommandsStore(),
+    now: @escaping @MainActor () -> Date = Date.init,
+    cacheTTL: TimeInterval = 60
   ) {
     self.peer = peer
     self.fetcher = fetcher
     self.userInfoResolver = userInfoResolver
+    self.store = store
+    self.now = now
+    self.cacheTTL = cacheTTL
+    restoreFromStore()
   }
 
   public convenience init(peer: Peer) {
-    self.init(peer: peer, fetcher: Self.fetchPeerBotCommands)
+    self.init(
+      peer: peer,
+      fetcher: Self.fetchPeerBotCommands,
+      userInfoResolver: Self.resolveUserInfo,
+      store: .shared
+    )
   }
 
   public var suggestions: [PeerBotCommandSuggestion] {
@@ -469,58 +549,55 @@ public final class PeerBotCommandsViewModel {
     loadTask?.cancel()
   }
 
+  /// True when there is nothing loaded yet, the last load failed, or the cached commands are stale.
   public var shouldAttemptLoad: Bool {
     switch loadState {
     case .idle, .failed:
       return true
-    case .loading, .loaded:
+    case .loading:
       return false
+    case .loaded:
+      return !isCacheFresh(for: peer)
     }
   }
 
+  /// Bot commands for this peer, ranked by `ComposeCommandSearch`.
   public func suggestions(matching query: String) -> [PeerBotCommandSuggestion] {
-    let normalizedQuery = query
-      .trimmingCharacters(in: .whitespacesAndNewlines)
-      .lowercased()
-
-    guard !normalizedQuery.isEmpty else {
-      return suggestions
-    }
-
-    let parts = normalizedQuery.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
-    let commandQuery = parts.first.map(String.init) ?? ""
-    let botQuery = parts.count > 1 ? String(parts[1]) : nil
-
-    return suggestions.filter { suggestion in
-      let commandMatches = commandQuery.isEmpty || suggestion.normalizedCommand.contains(commandQuery)
-      if let botQuery {
-        guard commandMatches else { return false }
-        return suggestion.botUsername?.lowercased().contains(botQuery) == true
-      }
-
-      if commandMatches {
-        return true
-      }
-
-      let descriptionMatches = suggestion.description.lowercased().contains(normalizedQuery)
-      let usernameMatches = suggestion.botUsername?.lowercased().contains(normalizedQuery) == true
-      return descriptionMatches || usernameMatches
+    ComposeCommandSearch.suggestions(
+      matching: query,
+      botCommands: suggestions,
+      inlineCommands: [],
+      peer: peer
+    ).compactMap { suggestion in
+      if case let .bot(command) = suggestion { return command }
+      return nil
     }
   }
 
+  /// Bot and app commands for the compose picker, ranked together.
+  public func commandSuggestions(matching query: String) -> [ComposeCommandSuggestion] {
+    ComposeCommandSearch.suggestions(
+      matching: query,
+      botCommands: suggestions,
+      inlineCommands: InlineCommandRegistry.commands(for: peer),
+      peer: peer
+    )
+  }
+
+  /// Loads commands when missing or stale. Stale commands stay visible while they refresh.
   public func ensureLoaded() async {
     if let loadTask {
       await loadTask.value
       return
     }
 
-    if let cached = cache[peer] {
-      botGroups = cached
+    if let entry = store.entry(for: peer) {
+      botGroups = entry.groups
       loadState = .loaded
-      return
+      if isCacheFresh(for: peer) { return }
     }
 
-    await startLoad(for: peer)
+    await startLoad(for: peer, forceRefresh: true, keepsVisibleCommands: loadState == .loaded)
   }
 
   public func refresh() async {
@@ -537,22 +614,33 @@ public final class PeerBotCommandsViewModel {
     loadTask = nil
     loadGeneration = UUID()
     self.peer = peer
-    if let cached = cache[peer] {
-      botGroups = cached
-      loadState = .loaded
-      return
-    }
-
     botGroups = []
     loadState = .idle
+    restoreFromStore()
   }
 
-  private func startLoad(for peer: Peer, forceRefresh: Bool = false) async {
+  private func restoreFromStore() {
+    guard let entry = store.entry(for: peer) else { return }
+    botGroups = entry.groups
+    loadState = .loaded
+  }
+
+  private func isCacheFresh(for peer: Peer) -> Bool {
+    guard let entry = store.entry(for: peer) else { return false }
+    return now().timeIntervalSince(entry.fetchedAt) < cacheTTL
+  }
+
+  private func startLoad(for peer: Peer, forceRefresh: Bool = false, keepsVisibleCommands: Bool = false) async {
     let generation = UUID()
     loadGeneration = generation
     let task = Task { @MainActor [weak self] in
       guard let self else { return }
-      await fetchAndStore(for: peer, forceRefresh: forceRefresh, generation: generation)
+      await fetchAndStore(
+        for: peer,
+        forceRefresh: forceRefresh,
+        keepsVisibleCommands: keepsVisibleCommands,
+        generation: generation
+      )
     }
     loadTask = task
     await task.value
@@ -564,15 +652,19 @@ public final class PeerBotCommandsViewModel {
   private func fetchAndStore(
     for peer: Peer,
     forceRefresh: Bool = false,
+    keepsVisibleCommands: Bool = false,
     generation: UUID
   ) async {
-    if !forceRefresh, let cached = cache[peer] {
-      botGroups = cached
+    if !forceRefresh, let entry = store.entry(for: peer) {
+      botGroups = entry.groups
       loadState = .loaded
       return
     }
 
-    loadState = .loading
+    // Revalidating stale commands keeps them on screen instead of flashing a loading state.
+    if !keepsVisibleCommands {
+      loadState = .loading
+    }
 
     do {
       let groups = try await fetcher(peer)
@@ -580,7 +672,7 @@ public final class PeerBotCommandsViewModel {
         return
       }
 
-      cache[peer] = groups
+      store.store(groups, for: peer, at: now())
       botGroups = groups
       loadState = .loaded
     } catch {
@@ -589,7 +681,9 @@ public final class PeerBotCommandsViewModel {
       }
       guard loadGeneration == generation, self.peer == peer else { return }
       log.error("Failed to fetch peer bot commands", error: error)
-      loadState = .failed(String(describing: error))
+      if !keepsVisibleCommands {
+        loadState = .failed(String(describing: error))
+      }
     }
   }
 
