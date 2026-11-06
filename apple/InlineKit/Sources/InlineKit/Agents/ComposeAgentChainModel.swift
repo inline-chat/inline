@@ -441,10 +441,16 @@ public final class ComposeAgentChainModel: ObservableObject {
 
   public var automaticReasoningTitle: String? {
     switch source {
-    case .agentThread: threadModel.automaticReasoningTitle
+    case .agentThread: return threadModel.automaticReasoningTitle
     case .agentSettings:
-      settingsDocument == nil ? nil : catalog?.automaticReasoningTitle(forModelID: effectiveSettingsModelID)
-    case nil: nil
+      guard settingsDocument != nil else { return nil }
+      if let title = catalog?.automaticReasoningTitle(forModelID: effectiveSettingsModelID) { return title }
+      guard let item = settingsDocument?.item(ComposeAgentSettingsItem.reasoning),
+            case let .select(_, options) = item.control else { return nil }
+      return options.first {
+        $0.value == ComposeAgentSettingsItem.defaultValue && !$0.isDisabled
+      }?.label
+    case nil: return nil
     }
   }
 
