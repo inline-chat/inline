@@ -1,0 +1,34 @@
+[package]
+name = "inline-agent-driver-opencode"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Native OpenCode v2 server driver for Inline's local coding-agent bridge."
+readme = "README.md"
+keywords = ["inline", "agent", "opencode", "coding-agent"]
+categories = ["development-tools"]
+
+[dependencies]
+base64 = "0.22.1"
+futures-util.workspace = true
+inline-agent-bridge = { version = "0.7.22-alpha.1", path = "../agent-bridge" }
+inline-agent-driver-acp = { version = "0.7.22-alpha.1", path = "../agent-driver-acp" }
+log.workspace = true
+reqwest.workspace = true
+semver = "1"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+tempfile = "3"
+tokio = { workspace = true, features = ["test-util"] }

@@ -5,6 +5,7 @@ members = [
   "crates/agent-driver-acp",
   "crates/agent-driver-claude",
   "crates/agent-driver-codex",
+  "crates/agent-driver-opencode",
   "crates/client",
   "crates/protocol",
   "crates/sdk",
