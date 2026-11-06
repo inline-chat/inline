@@ -104,7 +104,7 @@ export class InlineRealtimeV3Client {
           return
         }
       } catch (error) {
-        if (!(error instanceof InlineProtocolV3Error) || error.code !== "unauthorized") {
+        if (!(error instanceof InlineProtocolV3Error) || error.code !== "authorization-invalidated") {
           await session.close()
           throw error
         }

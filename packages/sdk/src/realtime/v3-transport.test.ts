@@ -4,6 +4,7 @@ import type { InlineProtocolAuthorization } from "./v3-connection.js"
 import { InlineProtocolV3Connection, InlineProtocolV3Error } from "./v3-connection.js"
 import { ConnectionError_Reason } from "@inline-chat/protocol/core"
 import { InlineProtocolV3Transport } from "./v3-transport.js"
+import { InlineSdkClient } from "../sdk/inline-sdk-client.js"
 
 const authorization = (temporary: boolean): InlineProtocolAuthorization => ({
   key: new Uint8Array(256).fill(temporary ? 2 : 1),
@@ -134,7 +135,7 @@ describe("InlineProtocolV3Transport", () => {
       .mockResolvedValueOnce(cached)
       .mockResolvedValueOnce(replacement)
     cached.probeTemporaryAuthorization = vi.fn(async () => {
-      const rejected = new InlineProtocolV3Error("unauthorized", "cached key was forgotten")
+      const rejected = new InlineProtocolV3Error("authorization-invalidated", "cached key was forgotten")
       connect.mock.calls[0]?.[0].onClose?.(rejected)
       throw rejected
     })
@@ -150,6 +151,311 @@ describe("InlineProtocolV3Transport", () => {
     expect(cached.close).toHaveBeenCalledOnce()
     expect(replacement.bindTemporary).toHaveBeenCalledOnce()
     expect(transport.getDiagnostics()).toMatchObject({ state: "connected", connected: true })
+    await transport.stop()
+  })
+
+  it.each(["authorization-invalidated", "session-revoked"] as const)(
+    "bounds replacement failure %s and only logs out for confirmed revocation", async (code) => {
+      vi.useFakeTimers()
+      const cached = fakeConnection()
+      const replacement = fakeConnection()
+      replacement.bindTemporary = vi.fn(async () => {
+        throw new InlineProtocolV3Error(code, "replacement failed")
+      })
+      const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+        .mockResolvedValueOnce(cached)
+        .mockResolvedValueOnce(replacement)
+      const transport = new InlineProtocolV3Transport({
+        url: "ws://localhost/realtime/v3",
+        rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+        credentials: { permanent: authorization(false), temporary: authorization(true) },
+      })
+      const iterator = transport.events[Symbol.asyncIterator]()
+      await transport.start()
+      await iterator.next()
+      await iterator.next()
+      connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("authorization-invalidated", "forgotten"))
+      expect((await iterator.next()).value).toEqual({ type: "connecting" })
+      await vi.advanceTimersByTimeAsync(999)
+      expect(connect).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(1)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(connect).toHaveBeenCalledTimes(2)
+      expect(replacement.bindTemporary).toHaveBeenCalledOnce()
+      expect(replacement.close).toHaveBeenCalledOnce()
+      expect(transport.getDiagnostics()).toMatchObject({ state: "idle", connected: false })
+      await transport.reconnect({ skipDelay: true })
+      expect(connect).toHaveBeenCalledTimes(2)
+      await transport.events.send({ type: "stopping" })
+      expect((await iterator.next()).value).toMatchObject(code === "session-revoked"
+        ? { type: "message", message: { body: { connectionError: { reason: ConnectionError_Reason.SESSION_REVOKED } } } }
+        : { type: "stopping" })
+    },
+  )
+
+  it("coalesces live invalidation and concurrent reconnects into one replacement", async () => {
+    vi.useFakeTimers()
+    const cached = fakeConnection()
+    const replacement = fakeConnection()
+    const persisted = vi.fn()
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(cached)
+      .mockResolvedValueOnce(replacement)
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+      onCredentials: persisted,
+    })
+    await transport.start()
+    connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("authorization-invalidated", "forgotten"))
+    await Promise.all([transport.reconnect(), transport.reconnect()])
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(replacement.bindTemporary).toHaveBeenCalledWith(authorization(false))
+    expect(persisted).toHaveBeenCalledTimes(2)
+    expect(transport.getDiagnostics()).toMatchObject({ state: "connected" })
+    await transport.stop()
+  })
+
+  it.each(["connect", "bind", "probe"])("retries a transient %s failure within the recovery episode", async (phase) => {
+    vi.useFakeTimers()
+    const cached = fakeConnection()
+    const failed = fakeConnection()
+    const replacement = fakeConnection()
+    const interrupted = new InlineProtocolV3Error(phase === "probe" ? "timeout" : "closed", "restart")
+    if (phase === "bind") failed.bindTemporary = vi.fn().mockRejectedValue(interrupted)
+    if (phase === "probe") failed.ping = vi.fn().mockRejectedValue(interrupted)
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect").mockResolvedValueOnce(cached)
+    if (phase === "connect") connect.mockRejectedValueOnce(interrupted)
+    else connect.mockResolvedValueOnce(failed)
+    connect.mockResolvedValueOnce(replacement)
+    const persist = vi.fn()
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+      onCredentials: persist,
+    })
+    await transport.start()
+    connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("authorization-invalidated", "forgotten"))
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(transport.getDiagnostics()).toMatchObject({ state: "connecting", connected: false, recoveringAuthorization: true })
+    await vi.advanceTimersByTimeAsync(999)
+    expect(connect).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(connect).toHaveBeenCalledTimes(3)
+    expect(replacement.bindTemporary).toHaveBeenCalledOnce()
+    expect(persist).toHaveBeenCalledTimes(2)
+    expect(transport.getDiagnostics()).toMatchObject({ state: "connected", connected: true, recoveringAuthorization: false })
+    if (phase !== "connect") expect(failed.close).toHaveBeenCalledOnce()
+    await transport.stop()
+  })
+
+  it("bounds exhausted network recovery to three bootstrap attempts without logging out", async () => {
+    vi.useFakeTimers()
+    const cached = fakeConnection()
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(cached)
+      .mockRejectedValue(new InlineProtocolV3Error("timeout", "restart continues"))
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+    })
+    const iterator = transport.events[Symbol.asyncIterator]()
+    await transport.start()
+    await iterator.next()
+    await iterator.next()
+    connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("authorization-invalidated", "forgotten"))
+    expect((await iterator.next()).value).toEqual({ type: "connecting" })
+    await vi.advanceTimersByTimeAsync(3_999)
+    expect(connect).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(connect).toHaveBeenCalledTimes(4)
+    expect(transport.getDiagnostics()).toMatchObject({ state: "idle", connected: false, recoveringAuthorization: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(connect).toHaveBeenCalledTimes(4)
+    await transport.events.send({ type: "stopping" })
+    expect((await iterator.next()).value).toEqual({ type: "stopping" })
+  })
+
+  it("does not retry a persistence failure even when its code resembles a network timeout", async () => {
+    vi.useFakeTimers()
+    const cached = fakeConnection()
+    const replacement = fakeConnection()
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(cached).mockResolvedValueOnce(replacement)
+    const persist = vi.fn().mockResolvedValueOnce(undefined)
+      .mockRejectedValue(new InlineProtocolV3Error("timeout", "store timeout"))
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+      onCredentials: persist,
+    })
+    await transport.start()
+    connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("authorization-invalidated", "forgotten"))
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(persist).toHaveBeenCalledTimes(2)
+    expect(replacement.close).toHaveBeenCalledOnce()
+    expect(transport.getDiagnostics()).toMatchObject({ state: "idle", connected: false })
+  })
+
+  it.each(["backoff", "handshake", "persistence"])("manual stop fences recovery during %s", async (phase) => {
+    vi.useFakeTimers()
+    const cached = fakeConnection()
+    const replacement = fakeConnection()
+    const opening = deferred<InlineProtocolV3Connection>()
+    const persisting = deferred<void>()
+    const persist = vi.fn().mockResolvedValueOnce(undefined).mockImplementationOnce(() => persisting.promise)
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(cached)
+      .mockReturnValueOnce(opening.promise)
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+      onCredentials: persist,
+    })
+    await transport.start()
+    connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("authorization-invalidated", "forgotten"))
+    if (phase !== "backoff") await vi.advanceTimersByTimeAsync(1_000)
+    if (phase === "persistence") {
+      opening.resolve(replacement)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(persist).toHaveBeenCalledTimes(2)
+    }
+    await transport.stop()
+    opening.resolve(replacement)
+    persisting.resolve()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(transport.getDiagnostics()).toMatchObject({ state: "idle", connected: false })
+    expect(connect).toHaveBeenCalledTimes(phase === "backoff" ? 1 : 2)
+    if (phase === "handshake") {
+      expect(replacement.bindTemporary).not.toHaveBeenCalled()
+      expect(persist).toHaveBeenCalledOnce()
+    }
+    if (phase !== "backoff") expect(replacement.close).toHaveBeenCalledOnce()
+  })
+
+  it("does not replace a cached key when revocation is confirmed during startup", async () => {
+    const cached = fakeConnection()
+    cached.probeTemporaryAuthorization = vi.fn(async () => {
+      throw new InlineProtocolV3Error("session-revoked", "revoked")
+    })
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect").mockResolvedValue(cached)
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+    })
+    const iterator = transport.events[Symbol.asyncIterator]()
+    await transport.start()
+    await iterator.next()
+    expect((await iterator.next()).value).toMatchObject({ type: "message", message: {
+      body: { connectionError: { reason: ConnectionError_Reason.SESSION_REVOKED } },
+    } })
+    expect(connect).toHaveBeenCalledOnce()
+    expect(transport.getDiagnostics()).toMatchObject({ state: "idle" })
+  })
+
+  it("keeps an old account recovery from publishing after a new account takes over", async () => {
+    vi.useFakeTimers()
+    const old = fakeConnection()
+    const stale = fakeConnection()
+    const current = fakeConnection()
+    const opening = deferred<InlineProtocolV3Connection>()
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(old)
+      .mockReturnValueOnce(opening.promise)
+      .mockResolvedValueOnce(current)
+    const persistOld = vi.fn()
+    const persistCurrent = vi.fn()
+    const options = {
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+    }
+    const oldOwner = new InlineProtocolV3Transport({ ...options, onCredentials: persistOld })
+    await oldOwner.start()
+    connect.mock.calls[0]![0].onClose!(new InlineProtocolV3Error("authorization-invalidated", "forgotten"))
+    await vi.advanceTimersByTimeAsync(1_000)
+    await oldOwner.stop()
+    const newPermanent = { ...authorization(false), keyId: new Uint8Array(8).fill(9) }
+    const newOwner = new InlineProtocolV3Transport({
+      ...options, credentials: { permanent: newPermanent }, onCredentials: persistCurrent,
+    })
+    await newOwner.start()
+    opening.resolve(stale)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(stale.bindTemporary).not.toHaveBeenCalled()
+    expect(stale.close).toHaveBeenCalledOnce()
+    expect(persistOld).toHaveBeenCalledOnce()
+    expect(current.bindTemporary).toHaveBeenCalledWith(newPermanent)
+    expect(persistCurrent).toHaveBeenCalledOnce()
+    expect(newOwner.getDiagnostics()).toMatchObject({ state: "connected" })
+    await newOwner.stop()
+  })
+
+  it("honors SDK connect cancellation during cached-key recovery backoff", async () => {
+    vi.useFakeTimers()
+    const cached = fakeConnection()
+    cached.probeTemporaryAuthorization = vi.fn(async () => {
+      throw new InlineProtocolV3Error("authorization-invalidated", "forgotten")
+    })
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect").mockResolvedValue(cached)
+    const persist = vi.fn()
+    const client = new InlineSdkClient({ inlineProtocol: {
+      realtimeUrl: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+      onCredentials: persist,
+    } })
+    const controller = new AbortController()
+    const opening = client.connect(controller.signal)
+    const rejected = expect(opening).rejects.toThrow()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(cached.probeTemporaryAuthorization).toHaveBeenCalledOnce()
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await rejected
+    expect(connect).toHaveBeenCalledOnce()
+    expect(persist).not.toHaveBeenCalled()
+    await client.close()
+  })
+
+  it("does not lose an invalidation arriving while a reconnect publishes open", async () => {
+    vi.useFakeTimers()
+    const first = fakeConnection()
+    const second = fakeConnection()
+    const replacement = fakeConnection()
+    const connect = vi.spyOn(InlineProtocolV3Connection, "connect")
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second)
+      .mockResolvedValueOnce(replacement)
+    const transport = new InlineProtocolV3Transport({
+      url: "ws://localhost/realtime/v3",
+      rsaPublicKeys: [{ modulus: "1", exponent: "3", fingerprint: "1" }],
+      credentials: { permanent: authorization(false), temporary: authorization(true) },
+    })
+    await transport.start()
+    const send = transport.events.send.bind(transport.events)
+    let invalidated = false
+    vi.spyOn(transport.events, "send").mockImplementation(async (event) => {
+      if (event.type === "connected" && !invalidated) {
+        invalidated = true
+        connect.mock.calls[1]![0].onClose!(new InlineProtocolV3Error("authorization-invalidated", "forgotten"))
+      }
+      await send(event)
+    })
+    await transport.reconnect()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(connect).toHaveBeenCalledTimes(3)
+    expect(replacement.bindTemporary).toHaveBeenCalledOnce()
+    expect(transport.getDiagnostics()).toMatchObject({ state: "connected" })
     await transport.stop()
   })
 
@@ -291,7 +597,7 @@ describe("InlineProtocolV3Transport", () => {
     await iterator.next()
 
     connect.mock.calls[0]?.[0].onClose?.(new InlineProtocolV3Error(
-      "unauthorized",
+      "session-revoked",
       "session revoked",
     ))
 

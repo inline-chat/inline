@@ -22,6 +22,8 @@ const pendingUpdateByteCapacity = 8 * 1024 * 1024
 const transportEventByteCapacity = 8 * 1024 * 1024
 const rejectedBeforeExecutionRetryLimit = 2
 const rejectedBeforeExecutionRetryDelayMs = 1_000
+const authorizationRecoveryDelayMs = 1_000
+const authorizationRecoveryAttemptLimit = 3
 // The server closes an idle transfer socket after 120 s; close ours first.
 const transferIdleTimeoutMs = 110_000
 
@@ -35,7 +37,7 @@ type TransferConnection = {
 
 /** A transfer connection failure the main connection can absorb: every transfer RPC is idempotent. */
 const transferCarrierFailed = (error: unknown): boolean =>
-  error instanceof InlineProtocolV3Error && error.code !== "unauthorized"
+  error instanceof InlineProtocolV3Error && error.code !== "unauthorized" && error.code !== "session-revoked"
 
 const transportEventByteLength = (event: TransportEvent): number =>
   event.type === "message" ? ServerProtocolMessage.toBinary(event.message).byteLength : 32
@@ -60,8 +62,11 @@ const cloneCredentials = (value: InlineProtocolV3Credentials): InlineProtocolV3C
   ...(value.temporary ? { temporary: cloneAuthorization(value.temporary) } : {}),
 })
 
-const isAuthenticationInvalidated = (error: unknown): error is InlineProtocolV3Error =>
-  error instanceof InlineProtocolV3Error && error.code === "unauthorized"
+const isSessionRevoked = (error: unknown): error is InlineProtocolV3Error =>
+  error instanceof InlineProtocolV3Error && error.code === "session-revoked"
+
+const isAuthorizationInvalidated = (error: unknown): error is InlineProtocolV3Error =>
+  error instanceof InlineProtocolV3Error && error.code === "authorization-invalidated"
 
 export class InlineProtocolV3Transport implements Transport {
   readonly events = new AsyncChannel<TransportEvent>(256, {
@@ -74,7 +79,8 @@ export class InlineProtocolV3Transport implements Transport {
   #credentials: InlineProtocolV3Credentials
   #connection: InlineProtocolV3Connection | undefined
   #state: State = "idle"
-  #reconnecting = false
+  #reconnectingGeneration: number | undefined
+  #reconnectAfterOpen = false
   #generation = 0
   #retryTimer: ReturnType<typeof setTimeout> | undefined
   #pendingUpdates: RealtimeV3Update[] = []
@@ -83,6 +89,8 @@ export class InlineProtocolV3Transport implements Transport {
   #rotationDue = false
   #activeRequests = 0
   #transfer: TransferConnection | undefined
+  // One bounded replacement episode per invalidation; only transient bootstrap failures retry.
+  #recoveringAuthorization = false
 
   constructor(options: InlineProtocolV3TransportOptions) {
     this.#options = options
@@ -93,6 +101,8 @@ export class InlineProtocolV3Transport implements Transport {
   async start(): Promise<void> {
     if (this.#state !== "idle") return
     this.#state = "connecting"
+    this.#recoveringAuthorization = false
+    this.#reconnectAfterOpen = false
     this.#flushingUpdates = false
     this.#rotationDue = false
     const generation = ++this.#generation
@@ -102,7 +112,7 @@ export class InlineProtocolV3Transport implements Transport {
     try {
       await this.#open(generation)
     } catch (error) {
-      if (isAuthenticationInvalidated(error)) {
+      if (isSessionRevoked(error)) {
         await this.#authenticationInvalidated(generation, error)
         return
       }
@@ -113,6 +123,7 @@ export class InlineProtocolV3Transport implements Transport {
 
   async stop(): Promise<void> {
     ++this.#generation
+    this.#reconnectingGeneration = undefined
     if (this.#retryTimer) {
       clearTimeout(this.#retryTimer)
       this.#retryTimer = undefined
@@ -131,6 +142,7 @@ export class InlineProtocolV3Transport implements Transport {
 
   async stopConnection(): Promise<void> {
     ++this.#generation
+    this.#reconnectingGeneration = undefined
     const connection = this.#connection
     this.#connection = undefined
     if (this.#state !== "idle") this.#state = "connecting"
@@ -139,13 +151,14 @@ export class InlineProtocolV3Transport implements Transport {
   }
 
   async reconnect(options?: TransportReconnectOptions): Promise<void> {
-    if (this.#state === "idle" || this.#reconnecting) return
-    this.#reconnecting = true
+    if (this.#state === "idle" || this.#reconnectingGeneration !== undefined) return
+    this.#reconnectAfterOpen = false
     if (this.#retryTimer) {
       clearTimeout(this.#retryTimer)
       this.#retryTimer = undefined
     }
     const generation = ++this.#generation
+    this.#reconnectingGeneration = generation
     this.#pendingUpdates = []
     this.#pendingUpdateBytes = 0
     try {
@@ -161,8 +174,14 @@ export class InlineProtocolV3Transport implements Transport {
       await this.#open(generation)
     } catch (error) {
       if (this.#generation !== generation || this.#isIdle()) return
-      if (isAuthenticationInvalidated(error)) {
+      if (isSessionRevoked(error)) {
         await this.#authenticationInvalidated(generation, error)
+        return
+      }
+      if (this.#recoveringAuthorization || isAuthorizationInvalidated(error)) {
+        // Keep permanent authority, but require an explicit start after a failed replacement.
+        this.#state = "idle"
+        this.#log.warn?.("Inline Protocol temporary authorization replacement failed; automatic recovery stopped", error)
         return
       }
       this.#log.warn?.("Inline Protocol reconnect failed", error)
@@ -172,7 +191,11 @@ export class InlineProtocolV3Transport implements Transport {
         void this.reconnect({ cause: "v3-retry" })
       }, options?.skipDelay ? 0 : 1_000)
     } finally {
-      this.#reconnecting = false
+      if (this.#reconnectingGeneration === generation) this.#reconnectingGeneration = undefined
+      if (this.#generation === generation && this.#reconnectAfterOpen && !this.#isIdle()) {
+        this.#reconnectAfterOpen = false
+        void this.reconnect({ cause: "v3-closed-during-open" })
+      }
     }
   }
 
@@ -307,6 +330,7 @@ export class InlineProtocolV3Transport implements Transport {
       kind: "inline-protocol-v3",
       state: this.#state,
       connected: this.#connection !== undefined,
+      recoveringAuthorization: this.#state === "connecting" && this.#recoveringAuthorization,
       hasTemporaryAuthorization: this.#credentials.temporary !== undefined,
     }
   }
@@ -346,6 +370,7 @@ export class InlineProtocolV3Transport implements Transport {
           },
         })
         cachedSource = connection
+        this.#requireCurrent(generation)
         await connection.probeTemporaryAuthorization()
         if (openingCloseError) throw openingCloseError
         this.#requireCurrent(generation)
@@ -358,60 +383,83 @@ export class InlineProtocolV3Transport implements Transport {
       } catch (error) {
         await connection?.close()
         connection = undefined
-        if (!isAuthenticationInvalidated(error)) throw error
-        this.#log.warn?.("Stored Inline Protocol temporary authorization was rejected; regenerating once", error)
+        if (!isAuthorizationInvalidated(error)) throw error
+        this.#requireCurrent(generation)
+        this.#credentials.temporary = undefined
+        this.#recoveringAuthorization = true
+        this.#log.warn?.("Stored Inline Protocol temporary authorization was rejected; starting bounded recovery", error)
         openingCloseError = undefined
       }
     }
 
     if (!connection) {
+      if (this.#recoveringAuthorization) {
+        await new Promise((resolve) => setTimeout(resolve, authorizationRecoveryDelayMs))
+      }
       if (this.#generation !== generation || this.#isIdle()) {
         throw new Error("Inline Protocol connection attempt was superseded")
       }
       if (this.#options.rsaPublicKeys.length === 0) {
         throw new Error("Pinned Inline Protocol RSA keys are required to replace the temporary authorization")
       }
-      let replacementSource: InlineProtocolV3Connection | undefined
-      const replacement = await InlineProtocolV3Connection.connect({
-        url: this.#options.url,
-        rsaPublicKeys: this.#options.rsaPublicKeys,
-        temporary: true,
-        requestTimeoutMs: this.#options.requestTimeoutMs,
-        onUpdate: (update) => {
-          void this.#forwardUpdate(generation, update).catch((error) => {
-            this.#connectionFailed(generation, error instanceof Error ? error : new Error(String(error)))
-          })
-        },
-        onClose: (error) => {
-          if (replacementSource && this.#connection === replacementSource) {
-            this.#connectionFailed(generation, error)
-          } else {
-            openingCloseError ??= error
-          }
-        },
-        // Let the authenticated message that crossed the boundary finish delivery first.
-        onRotationDue: () => {
-          setTimeout(() => {
-            if (replacementSource) this.#rotationBecameDue(generation, replacementSource)
-          }, 0)
-        },
-      })
-      replacementSource = replacement
-      try {
-        await replacement.bindTemporary(this.#credentials.permanent)
-        await replacement.ping()
-        if (openingCloseError) throw openingCloseError
+      for (let attempt = 0; !connection; attempt += 1) {
         this.#requireCurrent(generation)
-        connection = replacement
-      } catch (error) {
-        await replacement.close()
-        throw error
+        let replacement: InlineProtocolV3Connection | undefined
+        let attemptCurrent = true
+        openingCloseError = undefined
+        try {
+          replacement = await InlineProtocolV3Connection.connect({
+            url: this.#options.url,
+            rsaPublicKeys: this.#options.rsaPublicKeys,
+            temporary: true,
+            requestTimeoutMs: this.#options.requestTimeoutMs,
+            onUpdate: (update) => {
+              if (!attemptCurrent) return
+              void this.#forwardUpdate(generation, update).catch((error) => {
+                this.#connectionFailed(generation, error instanceof Error ? error : new Error(String(error)))
+              })
+            },
+            onClose: (error) => {
+              if (!attemptCurrent) return
+              if (replacement && this.#connection === replacement) {
+                this.#connectionFailed(generation, error)
+              } else {
+                openingCloseError ??= error
+              }
+            },
+            // Let the authenticated message that crossed the boundary finish delivery first.
+            onRotationDue: () => {
+              setTimeout(() => {
+                if (attemptCurrent && replacement) this.#rotationBecameDue(generation, replacement)
+              }, 0)
+            },
+          })
+          this.#requireCurrent(generation)
+          await replacement.bindTemporary(this.#credentials.permanent)
+          await replacement.ping()
+          if (openingCloseError) throw openingCloseError
+          this.#requireCurrent(generation)
+          connection = replacement
+        } catch (error) {
+          attemptCurrent = false
+          await replacement?.close()
+          this.#requireCurrent(generation)
+          const transient = error instanceof InlineProtocolV3Error && (error.code === "closed" || error.code === "timeout")
+          if (!this.#recoveringAuthorization || !transient || attempt + 1 >= authorizationRecoveryAttemptLimit) throw error
+          // No application request or persistence has started. A restart can lose
+          // the new socket while establishing/binding/probing its temporary key.
+          this.#pendingUpdates = []
+          this.#pendingUpdateBytes = 0
+          this.#log.warn?.("Inline Protocol temporary authorization bootstrap interrupted; retrying", error)
+          await new Promise((resolve) => setTimeout(resolve, authorizationRecoveryDelayMs * (attempt + 1)))
+        }
       }
     }
 
     const nextCredentials = cloneCredentials(this.#credentials)
     nextCredentials.temporary = connection.authorization
     try {
+      this.#requireCurrent(generation)
       await this.#options.onCredentials?.(cloneCredentials(nextCredentials))
       if (openingCloseError) throw openingCloseError
       this.#requireCurrent(generation)
@@ -419,6 +467,7 @@ export class InlineProtocolV3Transport implements Transport {
       await connection.close()
       throw error
     }
+    this.#recoveringAuthorization = false
     this.#credentials = nextCredentials
     this.#connection = connection
     this.#state = "connected"
@@ -533,17 +582,29 @@ export class InlineProtocolV3Transport implements Transport {
 
   #connectionFailed(generation: number, error: Error): void {
     if (this.#generation !== generation || this.#state === "idle") return
-    if (isAuthenticationInvalidated(error)) {
+    if (isSessionRevoked(error)) {
       void this.#authenticationInvalidated(generation, error)
       return
     }
+    if (isAuthorizationInvalidated(error)) {
+      this.#credentials.temporary = undefined
+      this.#recoveringAuthorization = true
+    }
     this.#log.warn?.("Inline Protocol connection closed; reconnecting", error)
+    // A close can arrive while #open is publishing buffered events. Do not lose
+    // it to reconnect's single-flight guard; finish that generation, then reopen.
+    if (this.#reconnectingGeneration === generation) {
+      this.#state = "connecting"
+      this.#reconnectAfterOpen = true
+      return
+    }
     void this.reconnect({ skipDelay: true, cause: "v3-connection-closed" })
   }
 
   async #authenticationInvalidated(generation: number, error: Error): Promise<void> {
     if (this.#generation !== generation || this.#state === "idle") return
     ++this.#generation
+    this.#reconnectingGeneration = undefined
     if (this.#retryTimer) {
       clearTimeout(this.#retryTimer)
       this.#retryTimer = undefined
@@ -556,8 +617,10 @@ export class InlineProtocolV3Transport implements Transport {
     this.#closeTransfer()
     const connection = this.#connection
     this.#connection = undefined
+    const terminalGeneration = this.#generation
     await connection?.close()
-    this.#log.warn?.("Inline Protocol authorization invalidated; reconnect disabled", error)
+    if (this.#generation !== terminalGeneration) return
+    this.#log.warn?.("Inline Protocol session revocation confirmed; reconnect disabled", error)
     await this.events.send({
       type: "message",
       message: ServerProtocolMessage.create({

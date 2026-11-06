@@ -76,7 +76,7 @@ describe("InlineRealtimeV3Client temporary-key rotation", () => {
     const permanent = authorization(false, 1)
     const cached = fakeConnection(authorization(true, 2))
     cached.probeTemporaryAuthorization = vi.fn().mockRejectedValue(
-      new InlineProtocolV3Error("unauthorized", "cached key is unknown"),
+      new InlineProtocolV3Error("authorization-invalidated", "cached key is unknown"),
     )
     const replacement = fakeConnection(authorization(true, 3))
     vi.spyOn(InlineProtocolV3Connection, "connect")
@@ -103,11 +103,11 @@ describe("InlineRealtimeV3Client temporary-key rotation", () => {
     await client.close()
   })
 
-  it("does not replace a cached temporary key after a transient probe failure", async () => {
+  it.each(["closed", "session-revoked"] as const)("does not replace a cached temporary key after %s", async (code) => {
     const permanent = authorization(false, 1)
     const cached = fakeConnection(authorization(true, 2))
     cached.probeTemporaryAuthorization = vi.fn().mockRejectedValue(
-      new InlineProtocolV3Error("closed", "network failed"),
+      new InlineProtocolV3Error(code, "probe failed"),
     )
     const connect = vi.spyOn(InlineProtocolV3Connection, "connect").mockResolvedValueOnce(cached)
     const client = new InlineRealtimeV3Client({
@@ -116,7 +116,7 @@ describe("InlineRealtimeV3Client temporary-key rotation", () => {
     })
 
     await expect(client.connect({ permanent, temporary: cached.authorization }))
-      .rejects.toMatchObject({ code: "closed" })
+      .rejects.toMatchObject({ code })
     expect(connect).toHaveBeenCalledOnce()
     expect(client.authenticated).toBe(false)
   })

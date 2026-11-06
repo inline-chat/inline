@@ -130,7 +130,7 @@ export type InlineProtocolV3ConnectionOptions = {
 
 export class InlineProtocolV3Error extends Error {
   constructor(
-    readonly code: "capacity-exceeded" | "closed" | "commit-outcome-unknown" | "invalid-key" | "protocol" | "rejected-before-execution" | "rotation-due" | "timeout" | "unauthorized",
+    readonly code: "authorization-invalidated" | "session-revoked" | "capacity-exceeded" | "closed" | "commit-outcome-unknown" | "invalid-key" | "protocol" | "rejected-before-execution" | "rotation-due" | "timeout" | "unauthorized",
     message: string,
     options?: ErrorOptions,
   ) {
@@ -562,7 +562,7 @@ export class InlineProtocolV3Connection {
       return await this.#invoke(request, () => { dispatched = true }, signal)
     } catch (error) {
       if (dispatched && error instanceof InlineProtocolV3Error &&
-          ["closed", "protocol", "timeout", "unauthorized"].includes(error.code)) {
+          ["closed", "protocol", "timeout", "unauthorized", "authorization-invalidated", "session-revoked"].includes(error.code)) {
         throw new InlineProtocolV3Error(
           "commit-outcome-unknown",
           "Mutation lost its authoritative result after Inline Protocol dispatch; the outcome is unknown",
@@ -610,8 +610,10 @@ export class InlineProtocolV3Connection {
       try { this.#inbox.push(rawDataBytes(data)) }
       catch (error) { this.#inbox.fail(error instanceof Error ? error : new Error(String(error))) }
     })
-    socket.on("close", (code) => this.#inbox.fail(code === SESSION_REVOKED_CLOSE_CODE
-      ? new InlineProtocolV3Error("unauthorized", "Inline Protocol session was revoked")
+    socket.on("close", (code, reason) => this.#inbox.fail(code === SESSION_REVOKED_CLOSE_CODE
+      ? reason.toString() === "session_revoked_confirmed"
+        ? new InlineProtocolV3Error("session-revoked", "Inline Protocol session was revoked")
+        : new InlineProtocolV3Error("authorization-invalidated", "Inline Protocol temporary authorization is unavailable")
       : new InlineProtocolV3Error("closed", "Inline Protocol connection closed")))
     socket.on("error", (error) => this.#inbox.fail(new InlineProtocolV3Error("closed", "Inline Protocol WebSocket failed", { cause: error })))
     await new Promise<void>((resolve, reject) => {

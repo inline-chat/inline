@@ -5,6 +5,8 @@ import { EventEmitter } from "node:events"
 import { WebSocket, WebSocketServer } from "ws"
 import {
   InlineProtocolServerSession,
+  InlineProtocolAuthorizationInvalidated,
+  InlineProtocolSessionRevoked,
   MessageIdGenerator,
   ServiceConstructor,
   acceptObfuscatedClientHeader,
@@ -39,6 +41,8 @@ import {
   type InlineProtocolPublicKey,
 } from "./v3-connection.js"
 import { InlineSdkClient } from "../sdk/inline-sdk-client.js"
+import { InlineProtocolV3Transport } from "./v3-transport.js"
+import type { InlineProtocolV3Credentials } from "./v3-client.js"
 import { ProtocolClient } from "./protocol-client.js"
 import { TransportError, type Transport } from "./transport.js"
 import { AsyncChannel } from "../utils/async-channel.js"
@@ -190,11 +194,16 @@ const testServer = async (options: {
   applicationRpcErrorCode?: number
   /** Compress large results and answer GET_ME with a large, compressible user. */
   gzipResults?: boolean
+  invalidateAfterMutation?: boolean
+  interruptRecoveryBootstrap?: boolean
 } = {}): Promise<{
   url: string
   publicKeys: InlineProtocolPublicKey[]
   pushUpdate: (update: RealtimeV3Update) => void
-  stats: { framesReceived: number; gzipped: number; retainedPendingBytes: () => number }
+  stats: { framesReceived: number; gzipped: number; connections: number; mutations: number; retainedPendingBytes: () => number }
+  resetTemporaryStore: () => void
+  forgetPermanentAuthority: () => void
+  closeActive: (reason: string) => void
 }> => {
   const pair = generateKeyPairSync("rsa", { modulusLength: 2048, publicExponent: 65537 })
   const jwk = pair.publicKey.export({ format: "jwk" })
@@ -203,6 +212,7 @@ const testServer = async (options: {
     Uint8Array.from(Buffer.from(jwk.e!, "base64url")),
   )
   const keys = new MemoryAuthorizationKeys()
+  let interruptNextBootstrap = false
   const server = new WebSocketServer({ port: 0 })
   const active: Array<{
     socket: WebSocket
@@ -212,10 +222,13 @@ const testServer = async (options: {
   servers.push(server)
   const stats = {
     framesReceived: 0,
+    connections: 0,
+    mutations: 0,
     gzipped: 0,
     retainedPendingBytes: () => active.at(-1)?.session.retainedPendingMessageBytes ?? 0,
   }
   server.on("connection", (socket) => {
+    stats.connections += 1
     let carrier: ObfuscatedServerHeader | undefined
     let queue = Promise.resolve()
     const session = new InlineProtocolServerSession({
@@ -255,6 +268,11 @@ const testServer = async (options: {
             }) }
           }
           if (application.body.oneofKind === "rpc") {
+            if (application.body.rpc.method === Method.DELETE_CHAT && options.invalidateAfterMutation) {
+              stats.mutations += 1
+              socket.close(4401, "authorization_unavailable")
+              return { kind: "error", code: 500, message: "result lost after execution" }
+            }
             if (application.body.rpc.method === Method.DELETE_CHAT && options.applicationRpcErrorCode !== undefined) {
               return { kind: "result", payload: RealtimeV3Response.toBinary({
                 body: { oneofKind: "rpcError", rpcError: {
@@ -308,8 +326,18 @@ const testServer = async (options: {
         const decoded = decodeAbridgedFrame(carrier.inbound.process(frame))
         if (decoded.kind !== "packet") throw new Error("unexpected quick ACK")
         stats.framesReceived += 1
+        if (interruptNextBootstrap && decoded.payload.subarray(0, 8).every((byte) => byte === 0)) {
+          interruptNextBootstrap = false
+          socket.close(1012, "rolling restart during replacement handshake")
+          return
+        }
         const responses = await session.receive(decoded.payload)
-        for (const response of responses) socket.send(carrier.outbound.process(encodeAbridgedPacket(response)))
+        for (const response of responses) {
+          if (socket.readyState === WebSocket.OPEN) socket.send(carrier.outbound.process(encodeAbridgedPacket(response)))
+        }
+      }).catch((error) => {
+        socket.close(error instanceof InlineProtocolAuthorizationInvalidated || error instanceof InlineProtocolSessionRevoked ? 4401 : 1011,
+          error instanceof InlineProtocolSessionRevoked ? "session_revoked_confirmed" : "authorization_unavailable")
       })
     })
   })
@@ -324,6 +352,16 @@ const testServer = async (options: {
       fingerprint: profile.fingerprint.toString(),
     }],
     stats,
+    resetTemporaryStore: () => {
+      interruptNextBootstrap = options.interruptRecoveryBootstrap === true
+      for (const [id, key] of keys.values) if (key.temporary) keys.values.delete(id)
+      // Restart loses both RAM keys and live sockets. The next cached-key probe hits unknown-key.
+      for (const connection of active) connection.socket.close(1012, "restart")
+    },
+    forgetPermanentAuthority: () => {
+      for (const [id, key] of keys.values) if (!key.temporary) keys.values.delete(id)
+    },
+    closeActive: (reason) => { active.at(-1)!.socket.close(4401, reason) },
     pushUpdate: (update) => {
       const target = active.at(-1)
       const carrier = target?.carrier()
@@ -702,7 +740,11 @@ describe("InlineProtocolV3Connection", () => {
     await connection.close()
   })
 
-  it("distinguishes a post-dispatch mutation close from a query close", async () => {
+  it.each([
+    ["manual", "closed"],
+    ["authorization_unavailable", "authorization-invalidated"],
+    ["session_revoked_confirmed", "session-revoked"],
+  ])("keeps mutation outcome unknown on %s while preserving the query error", async (reason, code) => {
     const mutationSocket = new OpenWebSocketStub()
     const mutationConnection = await InlineProtocolV3Connection.connect({
       url: "ws://inline.test/realtime/v3",
@@ -714,7 +756,8 @@ describe("InlineProtocolV3Connection", () => {
       method: Method.DELETE_CHAT,
       input: { oneofKind: "deleteChat", deleteChat: {} },
     })
-    await mutationConnection.close()
+    if (reason === "manual") await mutationConnection.close()
+    else mutationSocket.emit("close", 4401, Buffer.from(reason))
     await expect(mutation).rejects.toMatchObject({ code: "commit-outcome-unknown" })
 
     const querySocket = new OpenWebSocketStub()
@@ -728,11 +771,19 @@ describe("InlineProtocolV3Connection", () => {
       method: Method.GET_SPACE,
       input: { oneofKind: "getSpace", getSpace: { spaceId: 7n } },
     })
+    if (reason === "manual") await queryConnection.close()
+    else querySocket.emit("close", 4401, Buffer.from(reason))
+    await expect(query).rejects.toMatchObject({ code })
+    await mutationConnection.close()
     await queryConnection.close()
-    await expect(query).rejects.toMatchObject({ code: "closed" })
   })
 
-  it("maps the authenticated session-revoked close code to a terminal authorization failure", async () => {
+  it.each([
+    ["session_revoked_confirmed", "session-revoked"],
+    ["authorization_unavailable", "authorization-invalidated"],
+    ["session_revoked", "authorization-invalidated"],
+    ["", "authorization-invalidated"],
+  ])("classifies 4401 reason %s as %s", async (reason, code) => {
     const socket = new OpenWebSocketStub()
     let closed: Error | undefined
     const connection = await InlineProtocolV3Connection.connect({
@@ -744,10 +795,10 @@ describe("InlineProtocolV3Connection", () => {
     })
 
     socket.readyState = WebSocket.CLOSED
-    socket.emit("close", 4401, Buffer.from("session_revoked"))
+    socket.emit("close", 4401, Buffer.from(reason))
 
     await expect.poll(() => closed).toBeInstanceOf(InlineProtocolV3Error)
-    expect(closed).toMatchObject({ code: "unauthorized" })
+    expect(closed).toMatchObject({ code })
     await connection.close()
   })
 
@@ -855,6 +906,95 @@ describe("InlineProtocolV3Connection", () => {
     await temporary.close()
     await permanent.close()
   }, 30_000)
+
+  it.each([false, true])("recovers the SDK after temporary-store reset with interrupted replacement=%s", async (interruptRecoveryBootstrap) => {
+    const fixture = await testServer({ interruptRecoveryBootstrap })
+    const { permanent, connection } = await authenticatedTestConnection(fixture)
+    const credentials = { permanent: permanent.authorization, temporary: connection.authorization }
+    await connection.close()
+    await permanent.close()
+    const saved: InlineProtocolV3Credentials[] = []
+    const client = new InlineSdkClient({
+      inlineProtocol: {
+        credentials,
+        rsaPublicKeys: fixture.publicKeys,
+        realtimeUrl: fixture.url,
+        onCredentials: (value) => { saved.push(value) },
+      },
+    })
+    try {
+      await client.connect()
+      expect(saved).toHaveLength(1)
+      fixture.resetTemporaryStore()
+      await expect.poll(() => saved.length, { timeout: 10_000 }).toBe(2)
+      expect(saved[1]!.permanent.keyId).toEqual(credentials.permanent.keyId)
+      expect(saved[1]!.temporary!.keyId).not.toEqual(credentials.temporary.keyId)
+      await expect(client.getMe()).resolves.toEqual({ userId: 7n })
+      // Initial owner + temporary + SDK cached + rejected cache + ONE replacement.
+      expect(fixture.stats.connections).toBe(interruptRecoveryBootstrap ? 6 : 5)
+    } finally {
+      await client.close()
+    }
+  }, 30_000)
+
+  it("recovers a live invalidation without replaying an ambiguous mutation", async () => {
+    const fixture = await testServer({ invalidateAfterMutation: true })
+    const { permanent, connection } = await authenticatedTestConnection(fixture)
+    const transport = new InlineProtocolV3Transport({
+      url: fixture.url,
+      rsaPublicKeys: fixture.publicKeys,
+      credentials: { permanent: permanent.authorization, temporary: connection.authorization },
+    })
+    await connection.close()
+    await permanent.close()
+    const protocol = new ProtocolClient({ transport, getConnectionInit: () => ({ token: "", layer: 1 }) })
+    try {
+      await protocol.startTransport()
+      await expect.poll(() => protocol.state).toBe("open")
+      await expect(protocol.callRpc(Method.DELETE_CHAT))
+        .rejects.toMatchObject({ code: "commit-outcome-unknown" })
+      await expect.poll(() => fixture.stats.connections, { timeout: 10_000 }).toBe(4)
+      await expect.poll(() => protocol.state).toBe("open")
+      expect(fixture.stats.mutations).toBe(1)
+      await expect(protocol.callRpc(Method.GET_ME))
+        .resolves.toMatchObject({ oneofKind: "getMe" })
+    } finally {
+      await protocol.stopTransport()
+    }
+  }, 30_000)
+
+  it.each(["session_revoked_confirmed", "replacement-failed"])(
+    "stops recovery for %s without repeated connections", async (failure) => {
+      const fixture = await testServer()
+      const { permanent, connection } = await authenticatedTestConnection(fixture)
+      const transport = new InlineProtocolV3Transport({
+        url: fixture.url,
+        rsaPublicKeys: fixture.publicKeys,
+        credentials: { permanent: permanent.authorization, temporary: connection.authorization },
+      })
+      await connection.close()
+      await permanent.close()
+      const iterator = transport.events[Symbol.asyncIterator]()
+      try {
+        await transport.start()
+        await iterator.next()
+        await iterator.next()
+        if (failure === "replacement-failed") fixture.forgetPermanentAuthority()
+        fixture.closeActive(failure === "replacement-failed" ? "authorization_unavailable" : failure)
+        const event = await iterator.next()
+        expect(event.value).toMatchObject(failure === "replacement-failed"
+          ? { type: "connecting" }
+          : { type: "message", message: { body: { oneofKind: "connectionError" } } })
+        await expect.poll(() => transport.getDiagnostics().state, { timeout: 10_000 }).toBe("idle")
+        const connections = fixture.stats.connections
+        await new Promise((resolve) => setTimeout(resolve, 1_100))
+        expect(fixture.stats.connections).toBe(connections)
+        expect(connections).toBe(failure === "replacement-failed" ? 4 : 3)
+      } finally {
+        await transport.stop()
+      }
+    }, 30_000,
+  )
 
   it("uses V3 as the high-level SDK session owner", async () => {
     const fixture = await testServer()
