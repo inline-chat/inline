@@ -3712,7 +3712,9 @@ describe("inline/monitor", () => {
           ThreadLabel: "Re: deploy plan",
           Body: "can you handle this reply thread?",
           BodyForAgent: "can you handle this reply thread?",
-          GroupSystemPrompt: expect.stringContaining("do not answer unrelated questions from the parent chat or other reply threads"),
+          GroupSystemPrompt: expect.stringMatching(
+            /Don't pick up questions asked in the parent chat or other reply threads[\s\S]*may read it with the message tool's read action/u,
+          ),
           InboundHistory: expect.arrayContaining([
             expect.objectContaining({ body: "unrelated parent chat line" }),
             expect.objectContaining({ body: "Parent thread anchor" }),

@@ -37,6 +37,7 @@ import {
   sanitizeInlineVisibleText,
 } from "./outbound-sanitize.js"
 import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
+import { assertInlineReadAllowed, captureInlineReadFence } from "./read-authority.js"
 import { buildInlineUserDisplayName, getSpaceMembersWithUsers } from "./space-members.js"
 import {
   buildInlineMessageActionId,
@@ -2439,6 +2440,8 @@ async function findMessageById(params: {
 async function withInlineClient<T>(params: {
   cfg: OpenClawConfig
   accountId: string | null | undefined
+  /** Host authority fence; runs after token resolution, right before connecting. */
+  beforeConnect?: (() => void) | undefined
   fn: (client: InlineSdkClient, account: ReturnType<typeof resolveInlineAccount>) => Promise<T>
 }): Promise<T> {
   const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
@@ -2450,6 +2453,7 @@ async function withInlineClient<T>(params: {
     baseUrl: account.baseUrl,
     token,
   })
+  params.beforeConnect?.()
   await client.connect()
   try {
     return await params.fn(client, account)
@@ -3555,6 +3559,11 @@ export const inlineMessageActions = {
     supportsInlineMessageButtons(listEnabledInlineActions(cfg, accountId ?? null)),
   supportsCards: () => false,
   supportsAction: ({ action }) => SUPPORTED_ACTIONS.includes(action as InlineMessageActionName),
+  // `read` admission is provider-owned (assertInlineReadAllowed) and every
+  // Inline request it makes runs behind the host read-authority fence. Hosts
+  // apply this only to verified official installs; others keep exact-current.
+  readAuthorityActions: ["read"],
+  providerOwnedReadGates: ["read"],
   messageActionTargetAliases: inlineMessageActionTargetAliases,
   extractToolSend: ({ args }) => {
     const action = typeof args.action === "string" ? args.action.trim() : ""
@@ -3615,6 +3624,9 @@ export const inlineMessageActions = {
     mediaLocalRoots,
     mediaReadFile,
     toolContext,
+    requesterSenderId,
+    conversationReadOrigin,
+    assertDirectAdapterHandoff,
   }) => {
     if (!SUPPORTED_ACTIONS.includes(action as InlineMessageActionName)) {
       throw new Error(`Action ${action} is not supported for provider inline.`)
@@ -4289,9 +4301,13 @@ export const inlineMessageActions = {
     }
 
     if (normalizedAction === "read") {
+      // Capture synchronously at submission, inside the host's read scope, and
+      // keep this exact fence for every Inline request this read makes.
+      const fence = captureInlineReadFence({ assertDirectAdapterHandoff })
       return await withInlineClient({
         cfg,
         accountId,
+        beforeConnect: fence,
         fn: async (client) => {
           const target = resolveInlineReadTarget(
             params,
@@ -4303,6 +4319,37 @@ export const inlineMessageActions = {
               : undefined,
           )
           const history = resolveInlineHistoryRequest(params)
+          const targetPeer = target.peerId.type
+          await assertInlineReadAllowed({
+            client: {
+              getChat: (input) => client.getChat(input),
+              listChatParticipantIds: async ({ chatId }) => {
+                const result = await client.invokeRaw(Method.GET_CHAT_PARTICIPANTS, {
+                  oneofKind: "getChatParticipants",
+                  getChatParticipants: { chatId },
+                })
+                if (result.oneofKind !== "getChatParticipants") {
+                  throw new Error(
+                    `inline action: expected getChatParticipants result, got ${String(result.oneofKind)}`,
+                  )
+                }
+                // `users` also carries members of user groups granted on the chat.
+                return [
+                  ...(result.getChatParticipants.participants ?? []).map((participant) => participant.userId),
+                  ...(result.getChatParticipants.users ?? []).map((user) => user.id),
+                ]
+              },
+            },
+            fence,
+            target:
+              targetPeer.oneofKind === "user"
+                ? { kind: "user", userId: targetPeer.user.userId }
+                : { kind: "chat", chatId: targetPeer.chat.chatId },
+            toolContext,
+            requesterSenderId,
+            conversationReadOrigin,
+          })
+          fence()
           const result = await client.invokeRaw(Method.GET_CHAT_HISTORY, {
             oneofKind: "getChatHistory",
             getChatHistory: {

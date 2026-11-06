@@ -222,7 +222,7 @@ const INLINE_BOT_PRESENCE_GESTURE_MS = 1_400
 const INLINE_BOT_PRESENCE_FAILED_MS = 8_000
 const INLINE_BOT_PRESENCE_COMMENT_MAX_LENGTH = 30
 const INLINE_REPLY_THREAD_SYSTEM_PROMPT =
-  "Inline reply threads are scoped conversations: answer only the current reply-thread message and this thread's own history; use parent-chat context only as background, and do not answer unrelated questions from the parent chat or other reply threads. Earlier conversation lives in the parent chat; read it with inline_parent_context."
+  "Inline reply threads are scoped conversations: reply to the current reply-thread message using this thread's own history, with parent-chat context as background. Don't pick up questions asked in the parent chat or other reply threads as if they were addressed here. Earlier conversation lives in the parent chat; read it with inline_parent_context. When someone here asks about another chat or thread you're in, you may read it with the message tool's read action."
 // Telegram's drop_pending_on_cold_boot, for Inline: updates the server recorded
 // before this gateway process started don't wake the agent. A lost or fresh SDK
 // cursor otherwise replays chat history as new messages.
