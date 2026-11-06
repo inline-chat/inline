@@ -87,6 +87,54 @@ pub struct MessageSummary {
     /// `messages list --chat-id <thread.chatId>`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread: Option<ThreadSummary>,
+    /// Replies fetched from `thread` by `messages list --include-threads`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread_replies: Option<ThreadReplies>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadReplies {
+    /// Newest replies, oldest first.
+    pub items: Vec<MessageSummary>,
+    /// Why the thread could not be read, if it failed.
+    pub error: Option<String>,
+}
+
+impl ThreadReplies {
+    /// A dim note (earlier replies or a read error) and one line per reply,
+    /// both indented under the parent's thread marker.
+    pub(crate) fn lines(&self, thread: &ThreadSummary) -> (Option<String>, Vec<String>) {
+        if let Some(error) = &self.error {
+            return (
+                Some(format!(
+                    "  could not read thread {}: {error}",
+                    thread.chat_id
+                )),
+                Vec::new(),
+            );
+        }
+        let earlier = usize::try_from(thread.reply_count)
+            .unwrap_or(0)
+            .saturating_sub(self.items.len());
+        let note = (earlier > 0).then(|| {
+            format!(
+                "  … {earlier} earlier: inline messages list --chat-id {}",
+                thread.chat_id
+            )
+        });
+        let replies = self
+            .items
+            .iter()
+            .map(|reply| {
+                format!(
+                    "  {}  {} ({}): {}",
+                    reply.message.id, reply.sender_name, reply.relative_date, reply.preview
+                )
+            })
+            .collect();
+        (note, replies)
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -886,6 +934,16 @@ pub fn print_messages(
     let mut text_width = display_width("text");
     for item in &output.items {
         text_width = text_width.max(display_width(&item.preview));
+        // Thread markers and replies share the text column; size it for them too.
+        if let Some(thread) = &item.thread {
+            text_width = text_width.max(display_width(&thread.line()));
+            if let Some(replies) = &item.thread_replies {
+                let (note, lines) = replies.lines(thread);
+                for line in note.iter().chain(&lines) {
+                    text_width = text_width.max(display_width(line));
+                }
+            }
+        }
     }
     let widths = flexible_widths(
         &[
@@ -927,12 +985,26 @@ pub fn print_messages(
             pad_right(&text, text_width),
         );
         if let Some(thread) = &item.thread {
-            let indent = id_width + when_width + from_width + 6;
+            let indent = " ".repeat(id_width + when_width + from_width + 6);
             println!(
-                "{}{}",
-                " ".repeat(indent),
+                "{indent}{}",
                 style_dim(&truncate_display(&thread.line(), text_width))
             );
+            if let Some(replies) = &item.thread_replies {
+                let (note, lines) = replies.lines(thread);
+                if let Some(note) = note {
+                    println!(
+                        "{indent}{}",
+                        style_dim(&truncate_display(&note, text_width))
+                    );
+                }
+                for line in lines {
+                    println!(
+                        "{indent}{}",
+                        terminal_text(&truncate_display(&line, text_width))
+                    );
+                }
+            }
         }
     }
     Ok(())
@@ -1195,7 +1267,7 @@ pub(crate) fn style_heading(value: &str) -> String {
     }
 }
 
-fn style_dim(value: &str) -> String {
+pub(crate) fn style_dim(value: &str) -> String {
     let value = terminal_text(value);
     if color_enabled(io::stdout().is_terminal()) {
         format!("\x1b[2m{value}\x1b[0m")

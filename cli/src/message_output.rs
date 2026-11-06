@@ -2,10 +2,103 @@ use std::collections::HashMap;
 
 use crate::media::best_photo_size;
 use crate::output::{
-    AttachmentSummary, MediaSummary, MessageListOutput, MessageSummary, PeerSummary, ThreadSummary,
-    format_bytes, format_relative_date, user_summary,
+    AttachmentSummary, MediaSummary, MessageListOutput, MessageSummary, PeerSummary, ThreadReplies,
+    ThreadSummary, format_bytes, format_relative_date, user_summary,
 };
 use inline_protocol::proto;
+use serde::Serialize;
+
+/// One parent message's reply thread as read by `messages list --include-threads`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FetchedThreadReplies {
+    pub parent_message_id: i64,
+    pub chat_id: i64,
+    pub kind: &'static str,
+    pub reply_count: i32,
+    /// The thread has more replies than `messages` holds.
+    pub has_more: bool,
+    /// Newest replies, oldest first.
+    pub messages: Vec<proto::Message>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl FetchedThreadReplies {
+    pub(crate) fn new(
+        parent_message_id: i64,
+        thread: &ThreadSummary,
+        fetched: Result<Vec<proto::Message>, String>,
+        limit: usize,
+    ) -> Self {
+        let (messages, error) = match fetched {
+            Ok(messages) => (thread_replies_in_order(messages, limit), None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
+        Self {
+            parent_message_id,
+            chat_id: thread.chat_id,
+            kind: thread.kind,
+            reply_count: thread.reply_count,
+            has_more: error.is_none()
+                && usize::try_from(thread.reply_count).unwrap_or(0) > messages.len(),
+            messages,
+            error,
+        }
+    }
+}
+
+/// Most reply threads `messages list --include-threads` reads per call.
+pub(crate) const MAX_INCLUDED_THREADS: usize = 20;
+
+/// The threaded parents to read, newest first and at most `cap`, plus how
+/// many threaded parents were left out.
+pub(crate) fn threaded_parents_to_read(
+    messages: &[proto::Message],
+    cap: usize,
+) -> (Vec<(i64, ThreadSummary)>, usize) {
+    let mut parents: Vec<(i64, ThreadSummary)> = messages
+        .iter()
+        .filter_map(|message| message_thread_summary(message).map(|thread| (message.id, thread)))
+        .collect();
+    parents.sort_by_key(|(id, _)| std::cmp::Reverse(*id));
+    let skipped = parents.len().saturating_sub(cap);
+    parents.truncate(cap);
+    (parents, skipped)
+}
+
+pub(crate) fn threads_skipped_line(skipped: usize) -> String {
+    let noun = if skipped == 1 { "thread" } else { "threads" };
+    format!(
+        "… {skipped} more {noun} not read (cap {MAX_INCLUDED_THREADS}); use --thread MESSAGE_ID"
+    )
+}
+
+/// Hangs each fetched thread's replies under its parent row.
+pub(crate) fn attach_thread_replies(
+    output: &mut MessageListOutput,
+    threads: &[FetchedThreadReplies],
+    users_by_id: &HashMap<i64, proto::User>,
+    current_user_id: Option<i64>,
+) {
+    let now = current_epoch_seconds() as i64;
+    for item in &mut output.items {
+        let Some(fetched) = threads
+            .iter()
+            .find(|thread| thread.parent_message_id == item.message.id)
+        else {
+            continue;
+        };
+        item.thread_replies = Some(ThreadReplies {
+            items: fetched
+                .messages
+                .iter()
+                .map(|message| message_summary(message, users_by_id, current_user_id, now, None))
+                .collect(),
+            error: fetched.error.clone(),
+        });
+    }
+}
 
 pub(crate) fn build_message_list(
     result: proto::GetChatHistoryResult,
@@ -85,12 +178,42 @@ pub(crate) fn message_summary(
         media,
         attachments,
         thread: message_thread_summary(message),
+        thread_replies: None,
     }
+}
+
+/// The child chat already holding this message's reply thread or subthread,
+/// even when it has no replies yet. Mirrors the apps' `replyThreadPeer`.
+pub(crate) fn existing_thread_chat_id(message: &proto::Message) -> Option<i64> {
+    message
+        .replies
+        .as_ref()
+        .map(|replies| replies.chat_id)
+        .filter(|chat_id| *chat_id > 0)
+        .or_else(|| {
+            message
+                .subthread
+                .as_ref()
+                .map(|subthread| subthread.chat_id)
+                .filter(|chat_id| *chat_id > 0)
+        })
+}
+
+/// Thread replies for display under their parent: oldest first, at most
+/// `limit`, newest kept when the fetched page is larger.
+pub(crate) fn thread_replies_in_order(
+    mut messages: Vec<proto::Message>,
+    limit: usize,
+) -> Vec<proto::Message> {
+    messages.sort_by_key(|message| message.id);
+    let skip = messages.len().saturating_sub(limit);
+    messages.drain(..skip);
+    messages
 }
 
 /// Reply threads and subthreads are child chats; their messages never appear
 /// in this chat's history, so surface where they live.
-fn message_thread_summary(message: &proto::Message) -> Option<ThreadSummary> {
+pub(crate) fn message_thread_summary(message: &proto::Message) -> Option<ThreadSummary> {
     if let Some(replies) = message
         .replies
         .as_ref()
@@ -363,6 +486,147 @@ fn current_epoch_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn existing_thread_prefers_replies_then_subthread() {
+        let empty_reply_thread = proto::Message {
+            replies: Some(proto::MessageReplies {
+                chat_id: 70,
+                reply_count: 0,
+                ..Default::default()
+            }),
+            subthread: Some(proto::MessageSubthread {
+                chat_id: 71,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(existing_thread_chat_id(&empty_reply_thread), Some(70));
+
+        let subthread_only = proto::Message {
+            replies: Some(proto::MessageReplies::default()),
+            subthread: Some(proto::MessageSubthread {
+                chat_id: 71,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(existing_thread_chat_id(&subthread_only), Some(71));
+        assert_eq!(existing_thread_chat_id(&proto::Message::default()), None);
+    }
+
+    #[test]
+    fn thread_replies_are_oldest_first_and_capped_to_newest() {
+        let messages = [5, 9, 7, 6]
+            .into_iter()
+            .map(|id| proto::Message {
+                id,
+                ..Default::default()
+            })
+            .collect();
+        let ids: Vec<i64> = thread_replies_in_order(messages, 3)
+            .iter()
+            .map(|message| message.id)
+            .collect();
+        assert_eq!(ids, [6, 7, 9]);
+    }
+
+    #[test]
+    fn included_threads_are_capped_to_the_newest_parents() {
+        let messages: Vec<proto::Message> = (1..=25)
+            .rev()
+            .map(|id| proto::Message {
+                id,
+                // Every fifth message has no thread; the rest do.
+                replies: (id % 5 != 0).then(|| proto::MessageReplies {
+                    chat_id: 1000 + id,
+                    reply_count: 1,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .collect();
+        let (parents, skipped) = threaded_parents_to_read(&messages, 3);
+        let ids: Vec<i64> = parents.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, [24, 23, 22]);
+        assert_eq!(parents[0].1.chat_id, 1024);
+        assert_eq!(skipped, 17);
+
+        let (parents, skipped) = threaded_parents_to_read(&messages, MAX_INCLUDED_THREADS);
+        assert_eq!((parents.len(), skipped), (20, 0));
+
+        assert_eq!(
+            threads_skipped_line(1),
+            "… 1 more thread not read (cap 20); use --thread MESSAGE_ID"
+        );
+        assert_eq!(
+            threads_skipped_line(17),
+            "… 17 more threads not read (cap 20); use --thread MESSAGE_ID"
+        );
+    }
+
+    #[test]
+    fn included_replies_render_under_their_parent() {
+        let parent = proto::Message {
+            id: 412,
+            replies: Some(proto::MessageReplies {
+                chat_id: 11702,
+                reply_count: 3,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let other = proto::Message {
+            id: 413,
+            ..Default::default()
+        };
+        let reply = proto::Message {
+            id: 9,
+            chat_id: 11702,
+            from_id: 7,
+            message: Some("shipped".into()),
+            ..Default::default()
+        };
+        let users = HashMap::from([(
+            7,
+            proto::User {
+                id: 7,
+                first_name: Some("Boba".into()),
+                ..Default::default()
+            },
+        )]);
+        let thread = message_thread_summary(&parent).unwrap();
+        let mut output =
+            build_message_list_from_messages(&[parent, other], &users, None, None, None, None);
+        attach_thread_replies(
+            &mut output,
+            &[FetchedThreadReplies::new(412, &thread, Ok(vec![reply]), 10)],
+            &users,
+            None,
+        );
+        assert!(output.items[1].thread_replies.is_none());
+        let replies = output.items[0].thread_replies.as_ref().unwrap();
+        let (note, lines) = replies.lines(&thread);
+        assert_eq!(
+            note.as_deref(),
+            Some("  … 2 earlier: inline messages list --chat-id 11702")
+        );
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("  9  Boba ("), "{}", lines[0]);
+        assert!(lines[0].ends_with("): shipped"), "{}", lines[0]);
+
+        let failed = ThreadReplies {
+            items: Vec::new(),
+            error: Some("permission denied".into()),
+        };
+        assert_eq!(
+            failed.lines(&thread),
+            (
+                Some("  could not read thread 11702: permission denied".into()),
+                Vec::new()
+            )
+        );
+    }
 
     #[test]
     fn reply_threads_surface_their_child_chat() {

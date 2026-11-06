@@ -78,7 +78,9 @@ use crate::message_export::{
     build_message_export_bundle, forward_source_key, infer_export_format, render_export,
 };
 use crate::message_output::{
-    build_message_list, build_message_list_from_messages, message_summary,
+    FetchedThreadReplies, MAX_INCLUDED_THREADS, attach_thread_replies, build_message_list,
+    build_message_list_from_messages, existing_thread_chat_id, message_summary,
+    threaded_parents_to_read, threads_skipped_line,
 };
 use crate::message_page::{MessagePage, MessagePageOutput};
 use crate::message_selectors::{parse_forward_message_id_selectors, parse_message_id_selectors};
@@ -1463,7 +1465,21 @@ struct TypingArgs {
 
 #[derive(Subcommand)]
 enum MessagesCommand {
-    #[command(about = "List messages for a chat or user", visible_alias = "ls")]
+    #[command(
+        about = "List messages for a chat or user",
+        visible_alias = "ls",
+        after_help = r#"Examples:
+  inline messages list --chat-id 123 --limit 50
+  inline messages list --chat-id 123 --include-threads --json
+  inline messages list --chat-id 123 --thread 456
+
+Reply threads are separate child chats, so their replies are not in the
+parent chat's history. Rows with a thread show "↳ N replies in thread ID";
+--include-threads also reads the threads of the 20 newest threaded messages
+(newest --thread-limit replies each); JSON adds threadReplies[] and, past the
+cap, threadsSkipped. --thread lists one parent message's thread.
+"#
+    )]
     List(MessagesListArgs),
     #[command(about = "Search messages in a chat or DM", after_help = SEARCH_HELP)]
     Search(MessagesSearchArgs),
@@ -1605,7 +1621,32 @@ struct MessagesListArgs {
 
     #[arg(long, conflicts_with_all = ["json", "translate"], help = "Print only message ids (one per line; skips name lookups)")]
     ids: bool,
+
+    #[arg(
+        long,
+        conflicts_with_all = ["ids", "translate", "thread"],
+        help = "Also read the reply threads of the 20 newest threaded messages and show replies under each parent"
+    )]
+    include_threads: bool,
+
+    #[arg(
+        long,
+        value_name = "N",
+        default_value_t = DEFAULT_THREAD_REPLY_LIMIT,
+        requires = "include_threads",
+        help = "Newest replies to show per thread with --include-threads"
+    )]
+    thread_limit: i32,
+
+    #[arg(
+        long,
+        value_name = "MESSAGE_ID",
+        help = "List the reply thread of this parent message in the given chat (never creates one)"
+    )]
+    thread: Option<i64>,
 }
+
+const DEFAULT_THREAD_REPLY_LIMIT: i32 = 10;
 
 #[derive(Args)]
 struct MessagesSearchArgs {
@@ -1821,6 +1862,10 @@ Examples (single quotes protect backticks and dollar signs from the shell):
   inline messages send --chat-id 123 --text-file report.md
   inline messages send --chat-id 123 --attach ./chart.png --text '**Results**'
   inline messages send --chat-id 123 --stdin < report.md
+  inline messages send --chat-id 123 --thread 456 --text 'Reply in the thread'
+
+--reply-to quotes a message in the same chat. --thread posts in the message's
+reply thread (a separate child chat), starting it if it does not exist yet.
 "#;
 
 #[derive(Args)]
@@ -1845,8 +1890,20 @@ struct MessagesSendArgs {
     )]
     text: Option<String>,
 
-    #[arg(long, help = "Reply to message id")]
+    #[arg(
+        long,
+        help = "Quote-reply in the same chat; use --thread to post in the message's reply thread"
+    )]
     reply_to: Option<i64>,
+
+    #[arg(
+        long,
+        value_name = "MESSAGE_ID",
+        conflicts_with = "user_id",
+        requires = "chat_id",
+        help = "Post in this parent message's reply thread (reuses it, or starts one)"
+    )]
+    thread: Option<i64>,
 
     #[arg(
         long = "mention",
@@ -2311,6 +2368,22 @@ struct MediaDownloadSummary {
     files: Vec<DownloadedFileOutput>,
     skipped_message_ids: Vec<i64>,
     errors: Vec<DownloadErrorOutput>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MessagePageWithThreadsOutput {
+    #[serde(flatten)]
+    payload: proto::GetChatHistoryResult,
+    page: MessagePage,
+    thread_replies: Vec<FetchedThreadReplies>,
+    /// Threaded parents on this page left unread by the per-call cap.
+    #[serde(skip_serializing_if = "is_zero")]
+    threads_skipped: usize,
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 #[derive(Serialize)]
@@ -3912,10 +3985,21 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .as_deref()
                         .map(normalize_translation_language)
                         .transpose()?;
-                    let peer = input_peer_from_args(args.chat_id, args.user_id)?;
-                    let peer_summary = peer_summary_from_input(&peer);
+                    let thread_parent = validate_optional_message_id_arg("--thread", args.thread)?;
+                    if args.include_threads && args.thread_limit <= 0 {
+                        return Err(CliError::invalid_args("--thread-limit must be greater than 0").into());
+                    }
+                    let parent_peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
+                    let peer = match thread_parent {
+                        Some(parent_id) => chat_input_peer(
+                            resolve_existing_reply_thread(&mut realtime, &parent_peer, parent_id)
+                                .await?,
+                        ),
+                        None => parent_peer,
+                    };
+                    let peer_summary = peer_summary_from_input(&peer);
 
                     let input = proto::GetChatHistoryInput {
                         peer_id: Some(peer.clone()),
@@ -3931,10 +4015,27 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     filter_messages_by_list_options(&mut payload.messages, &args);
                     page.returned_count = payload.messages.len();
 
+                    let (thread_replies, threads_skipped) = if args.include_threads {
+                        fetch_thread_replies(&mut realtime, &payload.messages, args.thread_limit)
+                            .await
+                    } else {
+                        (Vec::new(), 0)
+                    };
+
                     if args.ids {
                         for message in &payload.messages {
                             println!("{}", message.id);
                         }
+                    } else if cli.json && args.include_threads {
+                        output::print_json(
+                            &MessagePageWithThreadsOutput {
+                                payload,
+                                page,
+                                thread_replies,
+                                threads_skipped,
+                            },
+                            json_format,
+                        )?;
                     } else if cli.json {
                         if let Some(language) = translation_language.as_deref() {
                             let message_ids = collect_message_ids(&payload.messages);
@@ -3983,7 +4084,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             .map(|chat| (chat.id, chat))
                             .collect();
                         let current_user_id = local_db.load()?.current_user.map(|user| user.id);
-                        let output = build_message_list(
+                        let mut output = build_message_list(
                             payload,
                             &users_by_id,
                             current_user_id,
@@ -3991,7 +4092,19 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             peer_name_from_input(&peer, &users_by_id, &chats_by_id),
                             Some(&translations_by_id),
                         );
+                        attach_thread_replies(
+                            &mut output,
+                            &thread_replies,
+                            &users_by_id,
+                            current_user_id,
+                        );
                         output::print_messages(&output, false, json_format)?;
+                        if threads_skipped > 0 {
+                            println!(
+                                "{}",
+                                output::style_dim(&threads_skipped_line(threads_skipped))
+                            );
+                        }
                     }
                 }
                 MessagesCommand::Search(args) => {
@@ -4134,6 +4247,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
                 MessagesCommand::Send(args) => {
                     let reply_to = validate_optional_message_id_arg("--reply-to", args.reply_to)?;
+                    let thread_parent = validate_optional_message_id_arg("--thread", args.thread)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let caption = resolve_message_source(args.text, args.stdin, args.text_file.as_deref())?;
                     let mention_entities = parse_mention_entities(&args.mentions)?;
@@ -4155,6 +4269,19 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     )?;
                     let mut realtime =
                         connect_authenticated_realtime(&config, &auth_store).await?;
+                    let (peer, reply_thread) = match thread_parent {
+                        Some(parent_id) => {
+                            let thread = ensure_reply_thread(&mut realtime, &peer, parent_id).await?;
+                            if thread.created && !cli.json {
+                                println!(
+                                    "Started reply thread {} on message {parent_id}.",
+                                    thread.chat_id
+                                );
+                            }
+                            (chat_input_peer(thread.chat_id), Some(thread))
+                        }
+                        None => (peer, None),
+                    };
                     if attachments.is_empty() {
                         let text = caption
                             .ok_or_else(|| {
@@ -4173,7 +4300,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         )
                         .await?;
                         if cli.json {
-                            output::print_json(&payload, json_format)?;
+                            print_send_json(payload, reply_thread, json_format)?;
+                        } else if let Some(thread) = reply_thread {
+                            println!("Message sent in reply thread {}.", thread.chat_id);
                         } else {
                             println!("Message sent (updates: {}).", payload.updates.len());
                         }
@@ -4191,7 +4320,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         )
                         .await?;
                         if cli.json {
-                            output::print_json(&output, json_format)?;
+                            print_send_json(output, reply_thread, json_format)?;
+                        } else if let Some(thread) = reply_thread {
+                            println!("Message sent in reply thread {}.", thread.chat_id);
                         }
                     }
                 }
@@ -6408,6 +6539,150 @@ fn get_messages_input_for_ids(
     }
 }
 
+fn chat_input_peer(chat_id: i64) -> proto::InputPeer {
+    proto::InputPeer {
+        r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
+            chat_id,
+        })),
+    }
+}
+
+async fn fetch_thread_parent(
+    realtime: &mut AuthenticatedRealtime,
+    parent_peer: &proto::InputPeer,
+    parent_message_id: i64,
+) -> Result<proto::Message, Box<dyn std::error::Error>> {
+    let (messages, _) = fetch_messages_by_ids(realtime, parent_peer, &[parent_message_id]).await?;
+    messages.into_iter().next().ok_or_else(|| {
+        CliError::invalid_args(format!(
+            "Message {parent_message_id} was not found in that chat."
+        ))
+        .into()
+    })
+}
+
+/// The chat holding an existing reply thread; never creates one.
+async fn resolve_existing_reply_thread(
+    realtime: &mut AuthenticatedRealtime,
+    parent_peer: &proto::InputPeer,
+    parent_message_id: i64,
+) -> Result<i64, Box<dyn std::error::Error>> {
+    let parent = fetch_thread_parent(realtime, parent_peer, parent_message_id).await?;
+    existing_thread_chat_id(&parent)
+        .ok_or_else(|| CliError::invalid_args(no_reply_thread_message(&parent)).into())
+}
+
+fn no_reply_thread_message(parent: &proto::Message) -> String {
+    format!(
+        "Message {} has no reply thread. Reply in a new thread with: inline messages send --chat-id {} --thread {} --text TEXT",
+        parent.id, parent.chat_id, parent.id
+    )
+}
+
+struct ReplyThreadTarget {
+    chat_id: i64,
+    created: bool,
+}
+
+/// Reuses the parent's reply thread or starts one, like the apps' reply
+/// thread navigator.
+async fn ensure_reply_thread(
+    realtime: &mut AuthenticatedRealtime,
+    parent_peer: &proto::InputPeer,
+    parent_message_id: i64,
+) -> Result<ReplyThreadTarget, Box<dyn std::error::Error>> {
+    let parent = fetch_thread_parent(realtime, parent_peer, parent_message_id).await?;
+    if let Some(chat_id) = existing_thread_chat_id(&parent) {
+        return Ok(ReplyThreadTarget {
+            chat_id,
+            created: false,
+        });
+    }
+    let parent_chat_id = match (parent.chat_id, &parent_peer.r#type) {
+        (chat_id, _) if chat_id > 0 => chat_id,
+        (_, Some(proto::input_peer::Type::Chat(chat))) => chat.chat_id,
+        _ => return Err(CliError::invalid_args("--thread needs the parent chat id.").into()),
+    };
+    let payload = realtime
+        .call(reply_thread_input(parent_chat_id, parent_message_id))
+        .await?;
+    let chat_id = payload
+        .chat
+        .map(|chat| chat.id)
+        .filter(|chat_id| *chat_id > 0)
+        .ok_or_else(|| CliError::invalid_args("The server did not return the reply thread."))?;
+    Ok(ReplyThreadTarget {
+        chat_id,
+        created: true,
+    })
+}
+
+fn reply_thread_input(parent_chat_id: i64, parent_message_id: i64) -> proto::CreateSubthreadInput {
+    proto::CreateSubthreadInput {
+        parent_chat_id,
+        parent_message_id: Some(parent_message_id),
+        ..Default::default()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplyThreadSendOutput<T> {
+    #[serde(flatten)]
+    payload: T,
+    thread_chat_id: i64,
+    thread_created: bool,
+}
+
+fn print_send_json(
+    payload: proto::SendMessageResult,
+    reply_thread: Option<ReplyThreadTarget>,
+    json_format: output::JsonFormat,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match reply_thread {
+        Some(thread) => output::print_json(
+            &ReplyThreadSendOutput {
+                payload,
+                thread_chat_id: thread.chat_id,
+                thread_created: thread.created,
+            },
+            json_format,
+        )?,
+        None => output::print_json(&payload, json_format)?,
+    }
+    Ok(())
+}
+
+/// Reads the reply threads of the newest `MAX_INCLUDED_THREADS` threaded
+/// messages and returns how many others were skipped. A thread that cannot
+/// be read keeps its error instead of failing the whole list.
+async fn fetch_thread_replies(
+    realtime: &mut AuthenticatedRealtime,
+    messages: &[proto::Message],
+    limit: i32,
+) -> (Vec<FetchedThreadReplies>, usize) {
+    let (parents, skipped) = threaded_parents_to_read(messages, MAX_INCLUDED_THREADS);
+    let mut threads = Vec::new();
+    for (parent_id, thread) in parents {
+        let fetched = realtime
+            .call(proto::GetChatHistoryInput {
+                peer_id: Some(chat_input_peer(thread.chat_id)),
+                limit: Some(limit),
+                ..Default::default()
+            })
+            .await
+            .map(|payload| payload.messages)
+            .map_err(|error| error.to_string());
+        threads.push(FetchedThreadReplies::new(
+            parent_id,
+            &thread,
+            fetched,
+            usize::try_from(limit).unwrap_or(0),
+        ));
+    }
+    (threads, skipped)
+}
+
 fn peer_summary_from_input(peer: &proto::InputPeer) -> Option<PeerSummary> {
     match &peer.r#type {
         Some(proto::input_peer::Type::Chat(chat)) => Some(PeerSummary {
@@ -7272,6 +7547,9 @@ mod cli_parsing_tests {
             since: None,
             until: None,
             sender_id: None,
+            include_threads: false,
+            thread_limit: DEFAULT_THREAD_REPLY_LIMIT,
+            thread: None,
         };
 
         filter_messages_by_list_options(&mut messages, &args);
@@ -8340,6 +8618,149 @@ mod cli_parsing_tests {
         .err()
         .unwrap();
         assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn reply_thread_flags_parse_and_conflict() {
+        let parse =
+            |args: &[&str]| Cli::try_parse_from(["inline", "messages"].iter().chain(args).copied());
+
+        let Command::Messages {
+            command: MessagesCommand::List(args),
+        } = parse(&["list", "--chat-id", "1", "--include-threads"])
+            .unwrap()
+            .command
+        else {
+            panic!("expected messages list");
+        };
+        assert!(args.include_threads);
+        assert_eq!(args.thread_limit, DEFAULT_THREAD_REPLY_LIMIT);
+
+        let Command::Messages {
+            command: MessagesCommand::List(args),
+        } = parse(&["list", "--chat-id", "1", "--thread", "7"])
+            .unwrap()
+            .command
+        else {
+            panic!("expected messages list");
+        };
+        assert_eq!(args.thread, Some(7));
+
+        let Command::Messages {
+            command: MessagesCommand::Send(args),
+        } = parse(&[
+            "send",
+            "--chat-id",
+            "1",
+            "--thread",
+            "7",
+            "--reply-to",
+            "8",
+            "--text",
+            "hi",
+        ])
+        .unwrap()
+        .command
+        else {
+            panic!("expected messages send");
+        };
+        assert_eq!((args.thread, args.reply_to), (Some(7), Some(8)));
+
+        for (args, kind) in [
+            (
+                &["list", "--chat-id", "1", "--thread-limit", "3"][..],
+                clap::error::ErrorKind::MissingRequiredArgument,
+            ),
+            (
+                &[
+                    "list",
+                    "--chat-id",
+                    "1",
+                    "--thread",
+                    "7",
+                    "--include-threads",
+                ][..],
+                clap::error::ErrorKind::ArgumentConflict,
+            ),
+            (
+                &["list", "--chat-id", "1", "--include-threads", "--ids"][..],
+                clap::error::ErrorKind::ArgumentConflict,
+            ),
+            (
+                &["send", "--user-id", "2", "--thread", "7", "--text", "hi"][..],
+                clap::error::ErrorKind::ArgumentConflict,
+            ),
+        ] {
+            assert_eq!(parse(args).err().unwrap().kind(), kind, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn reply_thread_creation_anchors_the_parent_message() {
+        let input = reply_thread_input(12, 34);
+        assert_eq!(input.parent_chat_id, 12);
+        assert_eq!(input.parent_message_id, Some(34));
+        assert_eq!(input.title, None);
+        assert!(input.participants.is_empty());
+
+        let parent = proto::Message {
+            id: 34,
+            chat_id: 12,
+            ..Default::default()
+        };
+        assert_eq!(
+            no_reply_thread_message(&parent),
+            "Message 34 has no reply thread. Reply in a new thread with: inline messages send --chat-id 12 --thread 34 --text TEXT"
+        );
+    }
+
+    #[test]
+    fn included_thread_replies_are_listed_in_json() {
+        let parent = proto::Message {
+            id: 412,
+            replies: Some(proto::MessageReplies {
+                chat_id: 11702,
+                reply_count: 2,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let thread = crate::message_output::message_thread_summary(&parent).unwrap();
+        let reply = proto::Message {
+            id: 3,
+            chat_id: 11702,
+            ..Default::default()
+        };
+        let payload = proto::GetChatHistoryResult {
+            messages: vec![parent],
+            ..Default::default()
+        };
+        let output = MessagePageWithThreadsOutput {
+            page: MessagePage::new(&payload.messages, false),
+            payload,
+            thread_replies: vec![
+                FetchedThreadReplies::new(412, &thread, Ok(vec![reply]), 10),
+                FetchedThreadReplies::new(412, &thread, Err("denied".into()), 10),
+            ],
+            threads_skipped: 0,
+        };
+        let value = serde_json::to_value(&output).unwrap();
+        assert_eq!(value["messages"][0]["replies"]["chat_id"], 11702);
+        let replies = &value["threadReplies"];
+        assert_eq!(replies[0]["parentMessageId"], 412);
+        assert_eq!(replies[0]["chatId"], 11702);
+        assert_eq!(replies[0]["kind"], "reply");
+        assert_eq!(replies[0]["hasMore"], true);
+        assert_eq!(replies[0]["messages"][0]["id"], 3);
+        assert!(replies[0].get("error").is_none());
+        assert_eq!(replies[1]["error"], "denied");
+        assert_eq!(replies[1]["hasMore"], false);
+        assert!(value.get("threadsSkipped").is_none());
+
+        let mut output = output;
+        output.threads_skipped = 4;
+        let value = serde_json::to_value(&output).unwrap();
+        assert_eq!(value["threadsSkipped"], 4);
     }
 
     #[test]
