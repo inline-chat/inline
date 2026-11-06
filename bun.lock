@@ -199,7 +199,7 @@
     },
     "packages/sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.20",
+      "version": "0.0.21",
       "dependencies": {
         "@inline-chat/protocol": "0.0.13",
         "ws": "^8.18.3",
