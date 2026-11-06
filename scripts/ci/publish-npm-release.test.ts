@@ -29,6 +29,8 @@ describe("retained npm publication", () => {
   let commands: string[][]
   let ghCalls: { method: string; endpoint: string; payload?: Payload }[]
   let pauses: number[]
+  let elapsed: number
+  let diagnostics: string[]
   let lostPublish: boolean
   let rejectPublish: boolean
   let visibilityDelay: number
@@ -80,7 +82,10 @@ describe("retained npm publication", () => {
     }
     return { status: rejectPublish || rejectDistTag ? 1 : 0, stdout: "" }
   }
-  const options = () => ({ tag, sha, repository: "inline-chat/inline", registry, github, npm, pause: async (ms: number) => { pauses.push(ms) } })
+  const options = () => ({ tag, sha, repository: "inline-chat/inline", registry, github, npm,
+    pause: async (ms: number) => { pauses.push(ms); elapsed += ms },
+    now: () => elapsed, log: (message: string) => { diagnostics.push(message) },
+  })
   const run = () => publishNpmRelease(directory, options())
   const outcome = () => runPublisher([directory], options(), path.join(directory, "outputs"))
 
@@ -92,7 +97,7 @@ describe("retained npm publication", () => {
     priorReleases = Object.fromEntries(["protocol-v1.2.3-alpha.1", "protocol-v1.2.2"].map((prior) => [prior, { ...identity(), tag_name: prior }]))
     refs = [{ ref: "refs/tags/protocol-v1.2.3-alpha.1" }, { ref: "refs/tags/bot-client-v9.0.0" },
       { ref: "refs/tags/protocol-v1.2.3-alpha.3" }, { ref: "refs/tags/protocol-v1.2.2" }]
-    commands = []; ghCalls = []; pauses = []
+    commands = []; ghCalls = []; pauses = []; elapsed = 0; diagnostics = []
     lostPublish = false; rejectPublish = false; visibilityDelay = 0; failNotes = false
     lostNotes = false; lostDistTag = false; rejectDistTag = false
     await writeFile(path.join(directory, "fixture.tgz"), bytes)
@@ -175,10 +180,47 @@ describe("retained npm publication", () => {
   it("fails a rejected upload after bounded polling and records the terminal outcome", async () => {
     rejectPublish = true
     expect((await outcome()).outcome).toBe("failed")
-    expect(pauses).toEqual(Array(29).fill(5_000))
+    expect(pauses).toEqual(Array(60).fill(5_000))
+    expect(elapsed).toBe(300_000)
+    expect(diagnostics).toEqual([
+      "npm registry verification: stage=metadata elapsedMs=0 status=pending",
+      "npm registry verification: stage=metadata elapsedMs=300000 status=timed-out",
+    ])
     expect(commands).toHaveLength(1)
     expect(saved).toBeNull()
     expect(await readFile(path.join(directory, "outputs"), "utf8")).toContain("outcome=failed\nreason=npm publish failed;")
+  })
+
+  it.each(["metadata", "tarball"])("allows delayed %s visibility past the old deadline with one upload", async (stage) => {
+    const slowRegistry = {
+      ...registry,
+      version: async () => published && stage === "metadata" && elapsed < 160_000 ? null : published,
+      tarball: async () => stage === "tarball" && elapsed < 160_000 ? null : downloaded,
+    }
+    expect((await publishNpmRelease(directory, { ...options(), registry: slowRegistry })).outcome).toBe("published")
+    expect(elapsed).toBe(160_000)
+    expect(commands.filter((args) => args[0] === "publish")).toHaveLength(1)
+    expect(diagnostics).toEqual([
+      `npm registry verification: stage=${stage} elapsedMs=0 status=pending`,
+      "npm registry verification: stage=tarball elapsedMs=160000 status=verified",
+    ])
+    expect(saved).toEqual(identity())
+  })
+
+  it("includes registry read time in the bounded verification window", async () => {
+    published = metadata()
+    const readStarts: number[] = []
+    const slowRegistry = { ...registry, tarball: async () => { readStarts.push(elapsed); elapsed += 10_000; return null } }
+    expect((await runPublisher([directory], { ...options(), registry: slowRegistry })).outcome).toBe("failed")
+    // Twenty 10s reads and twenty 5s pauses reach the deadline. No new read
+    // starts at the deadline; only a read already in flight may finish later.
+    expect(elapsed).toBe(300_000)
+    expect(readStarts).toHaveLength(20)
+    expect(readStarts.at(-1)).toBe(285_000)
+    expect(pauses).toHaveLength(20)
+    expect(commands).toEqual([])
+    expect(diagnostics.at(-1)).toBe("npm registry verification: stage=tarball elapsedMs=300000 status=timed-out")
+    expect(saved).toBeNull()
   })
 
   it("blocks different published bytes even when the registry claims the retained integrity", async () => {
@@ -202,7 +244,7 @@ describe("retained npm publication", () => {
     published = metadata(); downloaded = null
     expect((await outcome()).outcome).toBe("failed")
     expect(commands).toEqual([])
-    expect(pauses).toHaveLength(29)
+    expect(pauses).toHaveLength(60)
   })
 
   it("rejects receipt identity, path, and digest changes before any provider operation", async () => {
@@ -248,7 +290,7 @@ describe("retained npm publication", () => {
     published = metadata(); rejectDistTag = true
     expect((await outcome()).outcome).toBe("failed")
     expect(commands).toHaveLength(1)
-    expect(pauses).toHaveLength(29)
+    expect(pauses).toHaveLength(60)
     expect(saved).toBeNull()
   })
 

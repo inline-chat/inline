@@ -83,6 +83,7 @@ export async function publishNpmRelease(directory, {
   repository = process.env.GITHUB_REPOSITORY ?? "inline-chat/inline",
   registry = createRegistry(), github = createGitHub(repository), npm = npmCommand,
   pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  now = () => performance.now(), log = (message) => console.log(message),
 } = {}) {
   const release = parseReleaseTag(tag, "npm")
   requireRelease(/^[\w.-]+\/[\w.-]+$/.test(repository), "Invalid GitHub repository")
@@ -116,21 +117,36 @@ export async function publishNpmRelease(directory, {
     if (value !== undefined) { requireRelease(typeof value === "string", "Registry returned a malformed channel version"); canonicalSemver(value) }
     return value
   }
+  let pendingStage = "metadata"
   const verifyVersion = async () => {
+    pendingStage = "metadata"
     const version = await registry.version(receipt.name, release.version)
     if (version === null) return false
     requireRelease(record(version) && version.name === receipt.name && version.version === receipt.version && record(version.dist) &&
       version.dist.integrity === receipt.integrity && typeof version.dist.tarball === "string", "Published version metadata differs from the retained artifact")
+    pendingStage = "tarball"
     const downloaded = await registry.tarball(version.dist.tarball)
     if (downloaded === null) return false
     requireRelease(matches(downloaded), "Published tarball bytes differ from the retained artifact")
     return true
   }
   const converge = async (check) => {
-    for (let attempt = 0; attempt < 30; attempt++) {
-      if (await check()) return true
-      if (attempt < 29) await pause(5_000)
-    }
+    const started = now()
+    let lastStage
+    const report = (status) => log(`npm registry verification: stage=${pendingStage} elapsedMs=${Math.round(now() - started)} status=${status}`)
+    // Publication can become readable minutes after npm accepts the upload.
+    // Bound read verification by elapsed time; never repeat the upload here.
+    do {
+      if (await check()) {
+        if (lastStage !== undefined) report("verified")
+        return true
+      }
+      if (pendingStage !== lastStage) { report("pending"); lastStage = pendingStage }
+      const remaining = 300_000 - (now() - started)
+      if (remaining <= 0) break
+      await pause(Math.min(5_000, remaining))
+    } while (now() - started < 300_000)
+    report("timed-out")
     return false
   }
 
@@ -150,7 +166,7 @@ export async function publishNpmRelease(directory, {
   let channel = await channelVersion()
   if (!channel || compareVersions(channel, release.version) < 0) {
     try { await npm(["dist-tag", "add", `${receipt.name}@${release.version}`, release.channel]) } catch { /* Verify a possibly accepted operation below. */ }
-    if (!await converge(async () => { channel = await channelVersion(); return channel !== undefined && compareVersions(channel, release.version) >= 0 })) {
+    if (!await converge(async () => { pendingStage = "channel"; channel = await channelVersion(); return channel !== undefined && compareVersions(channel, release.version) >= 0 })) {
       throw new Error(`npm ${release.channel} channel did not converge`)
     }
     changed = true
