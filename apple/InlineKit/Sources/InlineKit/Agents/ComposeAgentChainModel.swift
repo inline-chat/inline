@@ -173,6 +173,11 @@ public final class ComposeAgentChainModel: ObservableObject {
 
   private func resolve() {
     let agentThreadBotUserID = threadModel.context?.botUserID
+    // Mention completion has these users locally, but their memory entries
+    // can still be cold. Read them together before classifying the target.
+    var targetUserIDs = leadingMentionUserIDs
+    if let replyToUserID { targetUserIDs.append(replyToUserID) }
+    let targetUsers = ObjectCache.shared.get(targetUserIDs.map { .user($0) })
     let next = AgentComposeTargetResolver.resolve(
       leadingMentionUserIDs: leadingMentionUserIDs,
       replyToUserID: replyToUserID,
@@ -180,7 +185,7 @@ public final class ComposeAgentChainModel: ObservableObject {
       directMessageBotUserID: directMessageBotUserID,
       isBot: { userID in
         if userID == agentThreadBotUserID || userID == self.directMessageBotUserID { return true }
-        return ObjectCache.shared.getCachedUser(id: userID)?.user.bot == true
+        return targetUsers.user(userID)?.user.bot == true
       }
     )
     let nextSource: Source? = next.map {
@@ -408,8 +413,11 @@ public final class ComposeAgentChainModel: ObservableObject {
       return threadModel.reasoningTitle
     case .agentSettings:
       if let title = selectedLabel(ComposeAgentSettingsItem.reasoning) { return title }
-      guard let catalog, let id = catalog.defaultReasoningEffortID(forModelID: effectiveSettingsModelID) else { return nil }
-      return catalog.reasoning?.first(where: { $0.id == id })?.label
+      if let catalog, let id = catalog.defaultReasoningEffortID(forModelID: effectiveSettingsModelID),
+         let title = catalog.reasoning?.first(where: { $0.id == id })?.label {
+        return title
+      }
+      return reasoningOptions.isEmpty ? nil : String(localized: "Default")
     case nil:
       return nil
     }
