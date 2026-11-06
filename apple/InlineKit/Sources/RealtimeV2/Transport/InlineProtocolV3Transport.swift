@@ -186,9 +186,11 @@ public actor InlineProtocolV3Transport: Transport {
           candidate = replacement
           try requireCurrentStart(generation)
           credentials.temporary = await replacement.authorization
-          try await auth.saveInlineProtocolCredentials(credentials, authority: authority)
+          try await Self.persistVerifiedTemporaryAuthorization(
+            credentials, auth: auth, authority: authority, bearerToken: bearerToken
+          )
           try requireCurrentStart(generation)
-          log.debug("Replacement temporary authorization verified and stored")
+          log.debug("Replacement temporary authorization verified")
         }
       }
       if candidate == nil, (!rsaPublicKeys.isEmpty || InlineProtocolTrustRoots.supportsLocalDebugDiscovery(
@@ -200,9 +202,11 @@ public actor InlineProtocolV3Transport: Transport {
         candidate = replacement
         try requireCurrentStart(generation)
         credentials.temporary = await replacement.authorization
-        try await auth.saveInlineProtocolCredentials(credentials, authority: authority)
+        try await Self.persistVerifiedTemporaryAuthorization(
+          credentials, auth: auth, authority: authority, bearerToken: bearerToken
+        )
         try requireCurrentStart(generation)
-        log.debug("Replacement temporary authorization verified and stored")
+        log.debug("Replacement temporary authorization verified")
       } else if candidate == nil {
         // Application traffic must never fall back to the permanent authorization key. A client
         // without a usable temporary key must have pinned roots available to create and bind one.
@@ -315,6 +319,42 @@ public actor InlineProtocolV3Transport: Transport {
     guard snapshot.token == bearerToken, let current = snapshot.inlineProtocol else { return false }
     return current.userId == credentials.userId && current.accountSessionId == credentials.accountSessionId &&
       current.permanent.keyID == credentials.permanent.keyID && current.permanent.key == credentials.permanent.key
+  }
+
+  /// Called only after a replacement temporary key has been bound and independently verified.
+  /// This stage never establishes or replaces permanent account authority.
+  @discardableResult
+  static func persistVerifiedTemporaryAuthorization(
+    _ credentials: InlineProtocolSessionCredentials,
+    auth: AuthHandle,
+    authority: AuthAccountMutationToken,
+    bearerToken: String?
+  ) async throws -> Bool {
+    func requireCurrentAuthority() throws {
+      try Task.checkCancellation()
+      try auth.validateAccountMutation(authority)
+      guard !auth.hasPendingAccountTransition(),
+            Self.matchesAccount(auth.snapshot(), credentials: credentials, bearerToken: bearerToken)
+      else { throw AuthStorageError.loginSuperseded }
+      guard credentials.temporary?.temporary == true else { throw AuthStorageError.encodingFailed }
+    }
+
+    try requireCurrentAuthority()
+    do {
+      try await auth.saveInlineProtocolCredentials(credentials, authority: authority)
+    } catch AuthStorageError.keychainWriteFailed {
+      try requireCurrentAuthority()
+      // The candidate already proved the retained permanent authority. Local storage failure
+      // must not close it and force every reconnect to retry the stale durable temporary key.
+      // Keep this connection's verified key in RAM; initial/permanent credential writes remain
+      // fail-closed in AuthStore, and a later reconnect can renew again if storage is unavailable.
+      Log.scoped("RealtimeV3.Transport").warning(
+        "Verified temporary authorization persistence unavailable; keeping current connection"
+      )
+      return false
+    }
+    try requireCurrentAuthority()
+    return true
   }
 
   public func send(_ message: ClientMessage) async throws {
