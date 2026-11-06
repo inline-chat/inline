@@ -104,7 +104,9 @@ Resolve and verify the exact target before any write. Send only when the user ex
 
 ```bash
 inline messages send --chat-id CHAT_ID --text "MESSAGE"
-inline messages send --chat-id CHAT_ID --reply-to MESSAGE_ID --text "REPLY"
+inline messages send --chat-id CHAT_ID --reply-to MESSAGE_ID --text "QUOTE REPLY IN THE SAME CHAT"
+inline chats subthread --parent-chat-id CHAT_ID --message-id MESSAGE_ID --json --compact  # reuses the reply thread
+inline messages send --chat-id THREAD_CHAT_ID --text "REPLY IN THE THREAD"
 inline messages pin --chat-id CHAT_ID --message-id MESSAGE_ID
 inline chats subthread --parent-chat-id CHAT_ID --message-id MESSAGE_ID --title "FOLLOW-UP"
 inline chats follow --chat-id REPLY_THREAD_ID

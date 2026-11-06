@@ -11,7 +11,8 @@ Inline organizes work around conversations that can remain focused and shareable
 - **Thread:** A focused Inline conversation, often titled and optionally created inside a space. Home threads can exist without a parent space when the grant permits them.
 - **Subthread:** A child of a conversation, optionally anchored to a parent message. It inherits root-chat access plus its own direct/group grants; participants added only to an intermediate child are not automatically inherited by its descendants. A direct participant list is not an exhaustive audience list. Creation inputs apply only to a new child; reusing an existing anchored reply thread does not edit metadata or participants or repair older creator membership.
 - **DM:** A direct conversation with a person. Like every other conversation, MCP tools address it by its stable `chatId`; person results may expose that value as `dmChatId`.
-- **Message:** A conversation item with a stable message ID. Replies may reference `replyToMsgId`.
+- **Message:** A conversation item with a stable message ID. A quote reply in the same chat references `replyToMsgId`.
+- **Reply thread:** A child chat anchored on one message. Its replies are not in the parent chat's history; the parent message points to it through its `replies` field (thread chat ID and reply count; `messages[].replies.chat_id` in CLI JSON). Read that chat as well when following a conversation, and post there to reply in the thread.
 - **Reply context:** Messages surrounding an anchor. Use `messages.context` rather than interpreting a reply or search result alone.
 - **File/media:** Photos, videos, documents, and URL-preview media associated with messages. Upload first, then send the returned media ID.
 

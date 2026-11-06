@@ -35,9 +35,10 @@ These recipes use Inline MCP. In a shell-capable environment, use the [Inline CL
 
 ## “Reply to this message”
 
-1. Resolve the containing conversation and inspect context.
+1. Resolve the containing conversation and inspect context, including the message's reply thread if it has one.
 2. Draft if the requested wording is not explicit.
-3. `messages.send({ chatId, text, replyToMsgId })`
+3. If the discussion is in the message's reply thread, or the user says "in the thread", post there: `conversations.create_subthread({ parentChatId: chatId, parentMessageId })` reuses the existing reply thread, then `messages.send({ chatId: thread.chatId, text })`.
+4. Otherwise quote-reply in the same chat: `messages.send({ chatId, text, replyToMsgId })`. This lands in the parent chat, not the reply thread.
 
 ## “Create a private project thread and post this update”
 
