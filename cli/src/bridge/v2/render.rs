@@ -37,6 +37,29 @@ pub(crate) enum Vocabulary {
     Amp,
 }
 
+/// A model told to "stay quiet" in a followed thread sometimes answers with
+/// a marker instead of nothing ("(quiet)", "[no reply]"). Posting it would
+/// be the opposite of quiet.
+fn is_quiet_marker(text: &str) -> bool {
+    let text = text
+        .trim()
+        .trim_matches(|character: char| {
+            matches!(character, '(' | ')' | '[' | ']' | '*' | '_' | '.' | '…')
+        })
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        text.as_str(),
+        "quiet"
+            | "staying quiet"
+            | "stay quiet"
+            | "silent"
+            | "no reply"
+            | "no response"
+            | "nothing to add"
+    )
+}
+
 /// One message operation for the runtime.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RenderOp {
@@ -569,6 +592,7 @@ impl Renderer {
         self.turn_slots = 0;
         if let Some(text) = self.final_answer.take()
             && !text.trim().is_empty()
+            && !is_quiet_marker(&text)
         {
             ops.push(RenderOp::Final {
                 doc: Doc::markdown(&text),
@@ -1686,6 +1710,48 @@ fn closed_card(interaction: &Interaction, by: &ClosedBy, names: &HashMap<i64, St
     };
     builder.footer(&resolution);
     builder.finish()
+}
+
+#[cfg(test)]
+mod quiet_tests {
+    use super::*;
+
+    #[test]
+    fn quiet_markers_are_not_answers() {
+        for text in [
+            "(quiet)",
+            " [no reply] ",
+            "*staying quiet*",
+            "Quiet.",
+            "(nothing to add)",
+        ] {
+            assert!(is_quiet_marker(text), "{text}");
+        }
+        for text in [
+            "Quiet hours start at 9.",
+            "No reply from the server yet",
+            "ok",
+        ] {
+            assert!(!is_quiet_marker(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_quiet_turn_posts_no_answer() {
+        let mut renderer = Renderer::new(OutputMode::Friendly, Vocabulary::OpenCode, "OpenCode");
+        renderer.final_answer = Some("(quiet)".to_owned());
+        renderer.turn = Some(TurnId::new("t").unwrap());
+        let mut ops = Vec::new();
+        renderer.complete_turn(TurnOutcome::Completed, None, None, 0, &mut ops);
+        assert!(
+            !ops.iter().any(|op| matches!(op, RenderOp::Final { .. })),
+            "{ops:?}"
+        );
+        renderer.final_answer = Some("Done.".to_owned());
+        let mut ops = Vec::new();
+        renderer.complete_turn(TurnOutcome::Completed, None, None, 0, &mut ops);
+        assert!(ops.iter().any(|op| matches!(op, RenderOp::Final { .. })));
+    }
 }
 
 #[cfg(test)]
