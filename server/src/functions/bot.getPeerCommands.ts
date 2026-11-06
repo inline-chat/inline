@@ -10,13 +10,18 @@ export const getPeerBotCommands = async (
   input: GetPeerBotCommandsInput,
   context: FunctionContext,
 ): Promise<GetPeerBotCommandsResult> => {
-  const { botUserIds: uniqueBotUserIds } = await resolvePeerBotScope(input.peerId, context.currentUserId)
-  if (uniqueBotUserIds.length === 0) {
+  const { botUserIdsByProximity } = await resolvePeerBotScope(input.peerId, context.currentUserId)
+  if (botUserIdsByProximity.length === 0) {
     return { bots: [] }
   }
 
-  const botRows = await UsersModel.getUsersWithPhotos(uniqueBotUserIds)
-  const commandsByBotUserId = await BotCommandsModel.getForBotUserIds(uniqueBotUserIds)
+  const [botRows, commandsByBotUserId] = await Promise.all([
+    UsersModel.getUsersWithPhotos(botUserIdsByProximity),
+    BotCommandsModel.getForBotUserIds(botUserIdsByProximity),
+  ])
+  // Clients rank equally good matches by this order, so the bot you're talking to comes first.
+  const proximity = new Map(botUserIdsByProximity.map((botUserId, index) => [botUserId, index]))
+  botRows.sort((left, right) => (proximity.get(left.user.id) ?? 0) - (proximity.get(right.user.id) ?? 0))
 
   return {
     bots: botRows

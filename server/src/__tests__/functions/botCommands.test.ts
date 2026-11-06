@@ -182,6 +182,42 @@ describe("bot commands", () => {
     expect(result.bots[0]?.commands.map((command) => command.command)).toEqual(["threadreply"])
   })
 
+  test("getPeerBotCommands lists thread participant bots before space-wide bots", async () => {
+    const space = await testUtils.createSpace("Ordered Bot Commands")
+    if (!space) {
+      throw new Error("Expected space")
+    }
+    await db.insert(schema.members).values({ userId: creator.id, spaceId: space.id, role: "member" })
+
+    // Created first, so it has the lower user id that used to sort first.
+    const spaceBot = await createBot({ name: "Space Bot", username: "orderedspacebot" }, creatorContext)
+    const threadBot = await createBot({ name: "Thread Bot", username: "orderedthreadbot" }, creatorContext)
+    const spaceBotId = Number(spaceBot.bot?.id ?? 0n)
+    const threadBotId = Number(threadBot.bot?.id ?? 0n)
+    expect(spaceBotId).toBeLessThan(threadBotId)
+
+    for (const botUserId of [spaceBotId, threadBotId]) {
+      await setBotCommands(
+        { botUserId: BigInt(botUserId), commands: [{ command: "help", description: "Show help" }] },
+        creatorContext,
+      )
+    }
+    await db.insert(schema.members).values({ userId: spaceBotId, spaceId: space.id, role: "member" })
+
+    const chat = await testUtils.createChat(space.id, "Ordered Command Thread", "thread", true, creator.id)
+    if (!chat) {
+      throw new Error("Expected chat")
+    }
+    await testUtils.addParticipant(chat.id, threadBotId)
+
+    const result = await getPeerBotCommands(
+      { peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } } },
+      creatorContext,
+    )
+
+    expect(result.bots.map((group) => group.bot?.username)).toEqual(["orderedthreadbot", "orderedspacebot"])
+  })
+
   test("getPeerBotCommands inherits parent bot commands in reply threads", async () => {
     const created = await createBot({ name: "Reply Thread Bot", username: "replythreadbot" }, creatorContext)
     const botUserId = Number(created.bot?.id ?? 0n)

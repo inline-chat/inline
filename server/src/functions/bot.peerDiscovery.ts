@@ -41,16 +41,17 @@ async function getPrivatePeerBotUserId(chat: DbChat, currentUserId: number): Pro
 }
 
 async function getTopLevelBotUserIds(chat: DbChat, currentUserId: number): Promise<number[]> {
+  // Ordered nearest-first: the DM's own bot, then bots in this chat, then space-wide bots.
   if (chat.type === "private") {
     return [
-      ...(await getParticipantBotUserIds(chat.id)),
       ...(await getPrivatePeerBotUserId(chat, currentUserId)),
+      ...(await getParticipantBotUserIds(chat.id)),
     ]
   }
   if (chat.spaceId && chat.publicThread) {
     return [
-      ...(await getPublicSpaceBotUserIds(chat.spaceId)),
       ...(await getParticipantBotUserIds(chat.id)),
+      ...(await getPublicSpaceBotUserIds(chat.spaceId)),
     ]
   }
   return getParticipantBotUserIds(chat.id)
@@ -76,13 +77,16 @@ export async function getBotUserIdsForChatScope(
 export async function resolvePeerBotScope(
   peerId: InputPeer | undefined,
   currentUserId: number,
-): Promise<{ chat: DbChat; botUserIds: number[] }> {
+): Promise<{ chat: DbChat; botUserIds: number[]; botUserIdsByProximity: number[] }> {
   if (!peerId?.type.oneofKind) throw RealtimeRpcError.BadRequest()
   const chat = await ChatModel.getChatFromInputPeerUnchecked(peerId, { currentUserId })
   await AccessGuards.ensureChatAccess(chat, currentUserId)
+  // `Set` keeps each bot at its first (nearest) scope position.
+  const botUserIdsByProximity = Array.from(new Set(await getBotUserIdsForChatScope(chat, currentUserId)))
   return {
     chat,
-    botUserIds: Array.from(new Set(await getBotUserIdsForChatScope(chat, currentUserId))).sort((a, b) => a - b),
+    botUserIds: [...botUserIdsByProximity].sort((a, b) => a - b),
+    botUserIdsByProximity,
   }
 }
 
