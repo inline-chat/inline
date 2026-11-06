@@ -75,7 +75,11 @@ extension MessageBlock {
         id: "reply",
         position: .aboveText,
         width: .flexible(
-          preferred: EmbedMessageView.preferredReplyWidth(for: message.repliedToMessage, traits: traits),
+          preferred: EmbedMessageView.preferredReplyWidth(
+            for: message.repliedToMessage,
+            quote: message.leadingReplyQuote?.text,
+            traits: traits
+          ),
           minimum: 120
         ),
         height: EmbedMessageView.height(compatibleWith: traits)
@@ -234,7 +238,8 @@ final class MessageBlockHostView: UIView {
           kind: .replyInMessage,
           outgoing: outgoing,
           isOnlyEmoji: false,
-          thumbnailReloadMessage: message.message
+          thumbnailReloadMessage: message.message,
+          quote: message.leadingReplyQuote?.text
         )
       } else {
         embed.showNotLoaded(kind: .replyInMessage, outgoing: outgoing, isOnlyEmoji: false)
@@ -391,7 +396,7 @@ final class MessageBlockHostView: UIView {
 
   @objc private func handleReplyTap() {
     guard let message else { return }
-    MessageViewActions.openRepliedMessage(of: message.message)
+    MessageViewActions.openRepliedMessage(of: message)
   }
 
   @objc private func handleForwardTap() {
