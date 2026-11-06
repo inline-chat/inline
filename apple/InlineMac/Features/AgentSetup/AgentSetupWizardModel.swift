@@ -37,6 +37,24 @@ struct AgentSetupProgressItem: Equatable, Identifiable {
   let id: ID
   var state: State = .pending
   var detail: String?
+  /// Retained after the step finishes so completed rows can show a duration.
+  var startedAt: Date?
+  var finishedAt: Date?
+
+  var duration: TimeInterval? {
+    guard let startedAt, let finishedAt else { return nil }
+    return max(0, finishedAt.timeIntervalSince(startedAt))
+  }
+
+  var isCompleted: Bool {
+    if case .completed = state { return true }
+    return false
+  }
+
+  var isActive: Bool {
+    if case .active = state { return true }
+    return false
+  }
 }
 
 private struct AgentSetupTelemetryFailure: PrivacySafeErrorCategoryProviding {
@@ -147,6 +165,8 @@ final class AgentSetupWizardModel {
   private(set) var failure: AgentSetupFailure?
   private(set) var failureOperation: FailureOperation?
   private(set) var progressItems: [AgentSetupProgressItem] = []
+  /// When the current preparation or setup run started; drives the overall timer.
+  private(set) var operationStartedAt: Date?
   private(set) var isCancelling = false
   var selectedTargetID: String?
 
@@ -313,6 +333,7 @@ final class AgentSetupWizardModel {
       failureOperation = nil
       result = nil
       progressItems = Self.targetSetupProgress
+      operationStartedAt = Date()
       beginProgress(.preflight)
       log.info(
         "AGENT_SETUP phase=setup_start target=\(target.id) replaceExisting=\(replaceExisting)"
@@ -409,6 +430,7 @@ final class AgentSetupWizardModel {
     failure = nil
     failureOperation = nil
     progressItems = Self.preparationProgress
+    operationStartedAt = Date()
     selectedTargetID = nil
     isCancelling = false
     log.info("AGENT_SETUP phase=prepare_start")
@@ -598,9 +620,21 @@ final class AgentSetupWizardModel {
 
   private func beginProgress(_ id: AgentSetupProgressItem.ID, detail: String? = nil) {
     guard let index = progressItems.firstIndex(where: { $0.id == id }) else { return }
-    if case .completed = progressItems[index].state { return }
-    progressItems[index].state = .active(startedAt: Date())
-    progressItems[index].detail = detail
+    if progressItems[index].isCompleted { return }
+    let now = Date()
+    // Phases run sequentially; a later phase starting means earlier ones are done.
+    for earlier in progressItems.indices[..<index] where progressItems[earlier].isActive {
+      progressItems[earlier].state = .completed(nil)
+      progressItems[earlier].finishedAt = now
+    }
+    // Keep the original start when the CLI re-announces a step the app already
+    // started locally, so the timer does not jump back to zero.
+    let startedAt = progressItems[index].startedAt ?? now
+    progressItems[index].state = .active(startedAt: startedAt)
+    progressItems[index].startedAt = startedAt
+    if let detail {
+      progressItems[index].detail = detail
+    }
   }
 
   private func completeProgress(
@@ -609,7 +643,12 @@ final class AgentSetupWizardModel {
     detail: String? = nil
   ) {
     guard let index = progressItems.firstIndex(where: { $0.id == id }) else { return }
+    let now = Date()
+    if progressItems[index].startedAt == nil {
+      progressItems[index].startedAt = now
+    }
     progressItems[index].state = .completed(outcome)
+    progressItems[index].finishedAt = now
     progressItems[index].detail = detail
   }
 
@@ -640,6 +679,7 @@ final class AgentSetupWizardModel {
         nil
       }
       progressItems[index].state = .completed(outcome)
+      progressItems[index].finishedAt = Date()
     }
   }
 

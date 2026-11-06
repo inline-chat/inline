@@ -45,7 +45,8 @@ struct AgentSetupWizardContentView: View {
     case .installingCLI, .signingIn, .discovering:
       AgentSetupProgressScreen(
         title: "Preparing This Mac",
-        detail: model.phase.preparationDetail,
+        targetID: nil,
+        startedAt: model.operationStartedAt,
         items: model.progressItems
       )
     case .choosing:
@@ -61,13 +62,15 @@ struct AgentSetupWizardContentView: View {
     case let .settingUp(name):
       AgentSetupProgressScreen(
         title: "Setting Up \(name)",
-        detail: "Completed work stays visible. If setup pauses or fails, the active step shows where to look.",
+        targetID: model.selectedTargetID,
+        startedAt: model.operationStartedAt,
         items: model.progressItems
       )
     case .completed:
       AgentSetupCompletionScreen(
         result: model.result,
         isReady: model.isReady,
+        targetName: model.selectedTarget?.displayName,
         items: model.progressItems
       )
     case .failed:
@@ -433,6 +436,7 @@ private struct AgentSetupHarnessResources {
 private struct AgentSetupHarnessIcon: View {
   let targetID: String
   let fallbackSystemImage: String
+  var size: CGFloat = 40
 
   var body: some View {
     ZStack {
@@ -447,10 +451,10 @@ private struct AgentSetupHarnessIcon: View {
           .foregroundStyle(.secondary)
       }
     }
-    .frame(width: 40, height: 40)
-    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .frame(width: size, height: size)
+    .clipShape(RoundedRectangle(cornerRadius: size / 4, style: .continuous))
     .overlay {
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
+      RoundedRectangle(cornerRadius: size / 4, style: .continuous)
         .strokeBorder(.black.opacity(0.08), lineWidth: 0.5)
     }
     .accessibilityHidden(true)
@@ -507,136 +511,254 @@ private struct AgentSetupNoHarnessesScreen: View {
 
 private struct AgentSetupProgressScreen: View {
   let title: LocalizedStringResource
-  let detail: LocalizedStringResource
+  let targetID: String?
+  let startedAt: Date?
   let items: [AgentSetupProgressItem]
 
   var body: some View {
-    ScrollView {
-      VStack(spacing: 22) {
-        AgentSetupScreenHeader(
-          systemImage: "gearshape.2",
-          title: title,
-          detail: detail
-        )
+    VStack(spacing: 0) {
+      AgentSetupProgressHeader(
+        title: title,
+        targetID: targetID,
+        startedAt: startedAt,
+        items: items
+      )
+      .frame(maxWidth: 480)
+      .padding(.horizontal, 32)
+      .padding(.top, 24)
+      .padding(.bottom, 16)
+
+      ScrollView {
         AgentSetupProgressList(items: items)
+          .frame(maxWidth: 480)
           .padding(.horizontal, 32)
           .padding(.bottom, 24)
+          .frame(maxWidth: .infinity)
       }
-      .frame(maxWidth: 500)
-      .frame(maxWidth: .infinity)
+      .scrollBounceBehavior(.basedOnSize)
     }
+    .frame(maxWidth: .infinity)
   }
 }
 
+/// Live summary of the running step: what is happening now, how far along the
+/// run is, and how long it has taken. Updates on every streamed CLI event.
+private struct AgentSetupProgressHeader: View {
+  let title: LocalizedStringResource
+  let targetID: String?
+  let startedAt: Date?
+  let items: [AgentSetupProgressItem]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      HStack(spacing: 14) {
+        AgentSetupHarnessIcon(
+          targetID: targetID ?? "",
+          fallbackSystemImage: "gearshape.2",
+          size: 44
+        )
+        VStack(alignment: .leading, spacing: 3) {
+          Text(title)
+            .font(.title3.weight(.semibold))
+          statusText
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .contentTransition(.opacity)
+            .animation(.easeInOut(duration: 0.2), value: activeItem?.id)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+
+      VStack(spacing: 6) {
+        ProgressView(value: items.progressFraction)
+          .progressViewStyle(.linear)
+          .animation(.smooth(duration: 0.4), value: items.progressFraction)
+        HStack {
+          if let currentStep = items.currentStep {
+            Text("Step \(currentStep) of \(items.count)")
+          }
+          if let startedAt {
+            Text(startedAt, style: .timer)
+              .monospacedDigit()
+              .frame(maxWidth: .infinity, alignment: .trailing)
+          }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+    }
+    .accessibilityElement(children: .combine)
+  }
+
+  private var activeItem: AgentSetupProgressItem? {
+    items.first(where: \.isActive)
+  }
+
+  private var statusText: Text {
+    if let activeItem {
+      if let detail = activeItem.detail {
+        return Text(verbatim: detail)
+      }
+      return Text(activeItem.id.activity)
+    }
+    return Text("Finishing up…")
+  }
+}
+
+/// Vertical step timeline. Finished steps collapse to one line with their
+/// outcome and duration; the running step expands with live detail.
 private struct AgentSetupProgressList: View {
   let items: [AgentSetupProgressItem]
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      if let currentStep {
-        Text("Step \(currentStep) of \(items.count)")
-          .font(.caption.weight(.medium))
-          .foregroundStyle(.secondary)
-      }
-
-      GroupBox {
-        VStack(spacing: 0) {
-          ForEach(items) { item in
-            AgentSetupProgressRow(item: item)
-            if item.id != items.last?.id {
-              Divider()
-                .padding(.leading, 34)
-            }
-          }
-        }
+    VStack(alignment: .leading, spacing: 0) {
+      ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+        AgentSetupProgressRow(
+          item: item,
+          isFirst: index == 0,
+          isLast: index == items.count - 1
+        )
       }
     }
-  }
-
-  private var currentStep: Int? {
-    if let current = items.firstIndex(where: {
-      switch $0.state {
-      case .active, .failed: true
-      case .pending, .completed: false
-      }
-    }) {
-      return current + 1
-    }
-    let completed = items.count(where: {
-      if case .completed = $0.state { return true }
-      return false
-    })
-    return completed == 0 ? nil : min(completed, items.count)
+    .animation(.smooth(duration: 0.3), value: items)
   }
 }
 
 private struct AgentSetupProgressRow: View {
   let item: AgentSetupProgressItem
+  let isFirst: Bool
+  let isLast: Bool
+
+  private static let indicatorSize: CGFloat = 20
+
+  private var verticalPadding: CGFloat { item.isActive ? 10 : 7 }
 
   var body: some View {
-    HStack(spacing: 12) {
+    HStack(alignment: .top, spacing: 12) {
       statusSymbol
-        .frame(width: 22, height: 22)
+        .frame(width: Self.indicatorSize, height: Self.indicatorSize)
+        .padding(.top, verticalPadding)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background { connector }
         .accessibilityHidden(true)
 
-      VStack(alignment: .leading, spacing: 2) {
-        Text(item.id.title)
-          .foregroundStyle(titleStyle)
-        statusDetail
-          .font(.caption)
-          .foregroundStyle(.secondary)
+      VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text(item.id.title)
+            .font(item.isActive ? .body.weight(.semibold) : .body)
+            .foregroundStyle(titleStyle)
+            .frame(maxWidth: .infinity, alignment: .leading)
+          trailing
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        }
+        if case .active = item.state {
+          activeDetail
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .transition(.opacity)
+        } else if case .failed = item.state {
+          Text("Stopped here")
+            .font(.callout)
+            .foregroundStyle(.orange)
+        }
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.vertical, verticalPadding)
+      // Center single-line rows on the 20pt indicator.
+      .padding(.top, 1)
     }
-    .padding(.horizontal, 4)
-    .padding(.vertical, 8)
+    .padding(.horizontal, 10)
+    .fixedSize(horizontal: false, vertical: true)
+    .background {
+      if item.isActive {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+          .fill(Color.accentColor.opacity(0.08))
+      }
+    }
     .accessibilityElement(children: .combine)
+  }
+
+  private var connector: some View {
+    VStack(spacing: 0) {
+      segment(color: isFirst ? .clear : topColor)
+        .frame(height: verticalPadding)
+      Color.clear
+        .frame(height: Self.indicatorSize)
+      segment(color: isLast ? .clear : bottomColor)
+        .frame(maxHeight: .infinity)
+    }
+  }
+
+  private func segment(color: Color) -> some View {
+    Rectangle()
+      .fill(color)
+      .frame(width: 1.5)
+  }
+
+  private var topColor: Color {
+    switch item.state {
+    case .completed, .active, .failed: Color.green.opacity(0.5)
+    case .pending: Color(nsColor: .separatorColor)
+    }
+  }
+
+  private var bottomColor: Color {
+    item.isCompleted ? Color.green.opacity(0.5) : Color(nsColor: .separatorColor)
   }
 
   @ViewBuilder
   private var statusSymbol: some View {
     switch item.state {
     case .pending:
-      Image(systemName: "circle")
-        .foregroundStyle(.tertiary)
+      Circle()
+        .strokeBorder(Color(nsColor: .tertiaryLabelColor), lineWidth: 1.5)
+        .frame(width: 12, height: 12)
     case .active:
       ProgressView()
         .controlSize(.small)
     case .completed:
       Image(systemName: "checkmark.circle.fill")
-        .foregroundStyle(.green)
+        .font(.system(size: 17))
+        .foregroundStyle(.white, .green)
+        .transition(.scale.combined(with: .opacity))
     case .failed:
-      Image(systemName: "exclamationmark.triangle.fill")
-        .foregroundStyle(.orange)
+      Image(systemName: "exclamationmark.circle.fill")
+        .font(.system(size: 17))
+        .foregroundStyle(.white, .orange)
     }
   }
 
   @ViewBuilder
-  private var statusDetail: some View {
+  private var trailing: some View {
     switch item.state {
-    case .pending:
-      Text("Waiting")
     case let .active(startedAt):
-      VStack(alignment: .leading, spacing: 2) {
-        if let detail = item.detail {
-          Text(detail)
-        }
-        HStack(spacing: 4) {
-          Text("Elapsed")
-          Text(startedAt, style: .timer)
-            .monospacedDigit()
-        }
-      }
+      Text(startedAt, style: .timer)
+        .monospacedDigit()
     case let .completed(outcome):
-      if let detail = item.detail {
-        Text(detail)
-      } else if let outcome {
-        Text(outcome.label)
-      } else {
-        Text("Completed")
+      HStack(spacing: 6) {
+        if let outcome {
+          Text(outcome.label)
+        }
+        if let duration = item.duration {
+          Text(verbatim: AgentSetupDurationFormat.string(duration))
+            .monospacedDigit()
+            .foregroundStyle(.tertiary)
+        }
       }
-    case .failed:
-      Text("Stopped here")
+    case .pending, .failed:
+      EmptyView()
+    }
+  }
+
+  @ViewBuilder
+  private var activeDetail: some View {
+    if let detail = item.detail {
+      Text(verbatim: detail)
+    } else {
+      Text(item.id.activity)
     }
   }
 
@@ -646,22 +768,77 @@ private struct AgentSetupProgressRow: View {
   }
 }
 
+private enum AgentSetupDurationFormat {
+  static func string(_ duration: TimeInterval) -> String {
+    let seconds = max(1, Int(duration.rounded()))
+    return Duration.seconds(seconds).formatted(
+      .units(allowed: [.minutes, .seconds], width: .narrow)
+    )
+  }
+}
+
+private extension [AgentSetupProgressItem] {
+  var currentStep: Int? {
+    if let current = firstIndex(where: {
+      switch $0.state {
+      case .active, .failed: true
+      case .pending, .completed: false
+      }
+    }) {
+      return current + 1
+    }
+    let completed = count(where: \.isCompleted)
+    return completed == 0 ? nil : Swift.min(completed + 1, count)
+  }
+
+  /// Completed steps plus partial credit for the running one, so the bar moves
+  /// the moment a step starts instead of only when it ends.
+  var progressFraction: Double {
+    guard !isEmpty else { return 0 }
+    let completed = Double(count(where: \.isCompleted))
+    let active = contains(where: \.isActive) ? 0.4 : 0
+    return Swift.min(1, (completed + active) / Double(count))
+  }
+
+  var totalDuration: TimeInterval? {
+    let starts = compactMap(\.startedAt)
+    let ends = compactMap(\.finishedAt)
+    guard let start = starts.min(), let end = ends.max() else { return nil }
+    return end.timeIntervalSince(start)
+  }
+}
+
 private struct AgentSetupCompletionScreen: View {
   let result: AgentSetupResult?
   let isReady: Bool
+  let targetName: String?
   let items: [AgentSetupProgressItem]
+  @State private var showsSteps: Bool
+  @State private var celebrated = false
+
+  init(
+    result: AgentSetupResult?,
+    isReady: Bool,
+    targetName: String?,
+    items: [AgentSetupProgressItem]
+  ) {
+    self.result = result
+    self.isReady = isReady
+    self.targetName = targetName
+    self.items = items
+    // A clean run needs no step-by-step review; keep it one click away.
+    _showsSteps = State(initialValue: !isReady)
+  }
 
   var body: some View {
     ScrollView {
-      VStack(spacing: 18) {
-        AgentSetupScreenHeader(
-          systemImage: isReady ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
-          title: title,
-          detail: summary
-        )
+      VStack(spacing: 22) {
+        hero
 
         VStack(alignment: .leading, spacing: 16) {
-          AgentSetupProgressList(items: items)
+          if let result {
+            summaryCard(result)
+          }
 
           if let readiness = result?.readiness, !readiness.ready {
             AgentSetupRecoveryCard(readiness: readiness)
@@ -671,20 +848,101 @@ private struct AgentSetupCompletionScreen: View {
               systemImage: "exclamationmark.triangle"
             )
             .foregroundStyle(.secondary)
-          } else if isReady {
+          }
+
+          if !items.isEmpty {
+            DisclosureGroup(isExpanded: $showsSteps) {
+              AgentSetupProgressList(items: items)
+                .padding(.top, 6)
+            } label: {
+              stepsLabel
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            }
+          }
+
+          if isReady {
             Label(
-              "Open the agent and send a first message to verify the full conversation path.",
+              "Open the agent and send a first message to try it out.",
               systemImage: "bubble.left"
             )
+            .font(.callout)
             .foregroundStyle(.secondary)
           }
         }
-        .padding(.horizontal, 32)
-        .padding(.bottom, 24)
       }
-      .frame(maxWidth: 500)
+      .frame(maxWidth: 460)
+      .padding(.horizontal, 32)
+      .padding(.vertical, 24)
       .frame(maxWidth: .infinity)
     }
+    .scrollBounceBehavior(.basedOnSize)
+    .onAppear { celebrated = true }
+  }
+
+  private var hero: some View {
+    VStack(spacing: 10) {
+      AgentSetupHarnessIcon(
+        targetID: result?.target ?? "",
+        fallbackSystemImage: "cpu",
+        size: 60
+      )
+      .overlay(alignment: .bottomTrailing) {
+        Image(systemName: isReady ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+          .font(.system(size: 22))
+          .foregroundStyle(.white, isReady ? .green : .orange)
+          .background(Circle().fill(Color(nsColor: .windowBackgroundColor)).padding(-2))
+          .symbolEffect(.bounce, options: .nonRepeating, value: celebrated)
+          .offset(x: 7, y: 7)
+          .accessibilityHidden(true)
+      }
+      .padding(.bottom, 4)
+
+      Text(title)
+        .font(.title2.weight(.semibold))
+      Text(summary)
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    .frame(maxWidth: .infinity)
+  }
+
+  private func summaryCard(_ result: AgentSetupResult) -> some View {
+    GroupBox {
+      VStack(spacing: 8) {
+        LabeledContent("Bot") {
+          Text(verbatim: "@\(result.bot.username)")
+            .textSelection(.enabled)
+            .lineLimit(1)
+            .truncationMode(.middle)
+        }
+        Divider()
+        LabeledContent("Harness") {
+          Text(verbatim: targetName ?? result.target)
+        }
+        Divider()
+        LabeledContent("Bridge Service") {
+          HStack(spacing: 6) {
+            Circle()
+              .fill(result.service.ready ? Color.green : Color.orange)
+              .frame(width: 7, height: 7)
+            Text(result.service.ready ? "Running" : "Not running")
+          }
+        }
+      }
+      .padding(.horizontal, 4)
+      .padding(.vertical, 2)
+    }
+  }
+
+  private var stepsLabel: Text {
+    let completed = items.count(where: \.isCompleted)
+    if let total = items.totalDuration {
+      return Text("\(completed) of \(items.count) steps completed in \(AgentSetupDurationFormat.string(total))")
+    }
+    return Text("\(completed) of \(items.count) steps completed")
   }
 
   private var title: LocalizedStringResource {
@@ -700,9 +958,9 @@ private struct AgentSetupCompletionScreen: View {
   private var summary: LocalizedStringResource {
     guard let result else { return "Inline finished the available setup work." }
     if isReady {
-      return "\(result.bot.name) is connected through \(result.target) as @\(result.bot.username)."
+      return "\(result.bot.name) is connected and running on this Mac."
     }
-    return "\(result.bot.name) is configured through \(result.target) as @\(result.bot.username)."
+    return "\(result.bot.name) is configured, but needs attention before it can reply."
   }
 }
 
@@ -979,22 +1237,6 @@ private struct AgentSetupNavigationRow: View {
   }
 }
 
-private extension AgentSetupWizardModel.Phase {
-  var preparationDetail: LocalizedStringResource {
-    switch self {
-    case .installingCLI:
-      "Inline checks the CLI, access, and installed agent harnesses before changing anything."
-    case .signingIn:
-      "Inline is securely connecting the CLI to your signed-in account."
-    case .discovering:
-      "Inline is finding supported harnesses already installed on this Mac."
-    case .idle, .choosingLocation, .remoteSetup, .choosing, .noHarnesses, .settingUp,
-         .completed, .failed:
-      "Inline is preparing this Mac for agent setup."
-    }
-  }
-}
-
 private extension AgentSetupProgressItem.ID {
   var title: LocalizedStringResource {
     switch self {
@@ -1008,6 +1250,23 @@ private extension AgentSetupProgressItem.ID {
     case .service: "Start Managed Service"
     case .verification: "Verify Readiness"
     case .configuration: "Configure Agent"
+    }
+  }
+
+  /// Present-tense status shown while the step runs and the CLI has not sent
+  /// its own message yet.
+  var activity: LocalizedStringResource {
+    switch self {
+    case .cli: "Checking the Inline CLI…"
+    case .authentication: "Connecting the CLI to your Inline account…"
+    case .discovery: "Looking for agent harnesses on this Mac…"
+    case .preflight: "Inspecting the existing setup…"
+    case .bot: "Creating or reusing the Inline bot…"
+    case .integration: "Configuring the Inline integration…"
+    case .access: "Applying bot access controls…"
+    case .service: "Starting the local bridge service…"
+    case .verification: "Verifying the agent is ready…"
+    case .configuration: "Configuring the agent…"
     }
   }
 }
