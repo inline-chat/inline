@@ -1,5 +1,6 @@
 import type {
   ChannelMessageActionAdapter,
+  ChannelMessageActionContext,
   ChannelMessageActionName,
   ChannelMessageToolDiscovery,
   ChannelMessageToolSchemaContribution,
@@ -3197,6 +3198,16 @@ type LegacyInlineMessageActionAdapter = {
   supportsCards?: (params: { cfg: OpenClawConfig }) => boolean
 }
 
+// November hosts add read-authority metadata and a per-request handoff fence.
+// Earlier supported hosts ignore the metadata and omit the optional fence.
+type InlineReadAuthorityMessageActionAdapter = {
+  readAuthorityActions?: ChannelMessageActionName[]
+}
+
+type InlineMessageActionContext = ChannelMessageActionContext & {
+  assertDirectAdapterHandoff?: (() => void) | undefined
+}
+
 const inlineMessageActionTargetAliases = {
   react: {
     aliases: ["to", "target", "chatId", "channelId", "threadId", "messageId", "emoji", "remove"],
@@ -3627,7 +3638,7 @@ export const inlineMessageActions = {
     requesterSenderId,
     conversationReadOrigin,
     assertDirectAdapterHandoff,
-  }) => {
+  }: InlineMessageActionContext) => {
     if (!SUPPORTED_ACTIONS.includes(action as InlineMessageActionName)) {
       throw new Error(`Action ${action} is not supported for provider inline.`)
     }
@@ -5662,6 +5673,6 @@ export const inlineMessageActions = {
 
     throw new Error(`Action ${action} is not supported for provider inline.`)
   },
-} satisfies ChannelMessageActionAdapter & LegacyInlineMessageActionAdapter
+} satisfies ChannelMessageActionAdapter & LegacyInlineMessageActionAdapter & InlineReadAuthorityMessageActionAdapter
 
 export const inlineSupportedActions = listAllActions()
