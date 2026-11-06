@@ -40,7 +40,12 @@ import { messageAttachments, type DbMessageAttachment } from "@in/server/db/sche
 import { decryptMessage, encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, not, or, sql } from "drizzle-orm"
-import { decrypt, decryptBinary, encryptBinary } from "@in/server/modules/encryption/encryption"
+import {
+  decrypt,
+  decryptBinary,
+  encryptBinary,
+  EncryptionConfigurationError,
+} from "@in/server/modules/encryption/encryption"
 import type { DbExternalTask, DbLinkEmbed } from "@in/server/db/schema/attachments"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { UpdateBucket } from "@in/server/db/schema/updates"
@@ -615,25 +620,43 @@ export function buildMediaFilterClause(filter: MessageMediaFilter | undefined) {
   }
 }
 
+type StoredMessageContent = Pick<
+  DbMessage,
+  "chatId" | "messageId" | "text" | "textEncrypted" | "textIv" | "textTag" | "entitiesEncrypted" | "entitiesIv" | "entitiesTag"
+>
+
+/**
+ * A message whose stored text can't be decrypted, such as one written under another key, reads
+ * as empty instead of failing every chat list and history page it appears in. A missing or
+ * malformed key still throws.
+ */
+function decryptStoredText(message: StoredMessageContent): string | null {
+  if (!message.textEncrypted || !message.textIv || !message.textTag) return message.text
+  try {
+    return decryptMessage({ encrypted: message.textEncrypted, iv: message.textIv, authTag: message.textTag })
+  } catch (error) {
+    if (error instanceof EncryptionConfigurationError) throw error
+    log.error("Failed to decrypt message text", { chatId: message.chatId, messageId: message.messageId, error })
+    return null
+  }
+}
+
+function decryptStoredEntities(message: StoredMessageContent): MessageEntities | null {
+  if (!message.entitiesEncrypted || !message.entitiesIv || !message.entitiesTag) return null
+  try {
+    return MessageEntities.fromBinary(
+      decryptBinary({ encrypted: message.entitiesEncrypted, iv: message.entitiesIv, authTag: message.entitiesTag }),
+    )
+  } catch (error) {
+    if (error instanceof EncryptionConfigurationError) throw error
+    log.error("Failed to decrypt message entities", { chatId: message.chatId, messageId: message.messageId, error })
+    return null
+  }
+}
+
 function processMessage(message: DbInputFullMessage): DbFullMessage {
-  const text =
-    message.textEncrypted && message.textIv && message.textTag
-      ? decryptMessage({
-          encrypted: message.textEncrypted,
-          iv: message.textIv,
-          authTag: message.textTag,
-        })
-      : message.text
-  const entities =
-    message.entitiesEncrypted && message.entitiesIv && message.entitiesTag
-      ? MessageEntities.fromBinary(
-          decryptBinary({
-            encrypted: message.entitiesEncrypted,
-            iv: message.entitiesIv,
-            authTag: message.entitiesTag,
-          }),
-        )
-      : null
+  const text = decryptStoredText(message)
+  const entities = decryptStoredEntities(message)
 
   return {
     ...message,
@@ -1352,21 +1375,8 @@ async function getNonFullMessagesRange(chatId: number, offsetId: number, limit: 
 
   return result.map((msg) => ({
     ...msg,
-    text:
-      msg.textEncrypted && msg.textIv && msg.textTag
-        ? decryptMessage({
-            encrypted: msg.textEncrypted,
-            iv: msg.textIv,
-            authTag: msg.textTag,
-          })
-        : // legacy fallback
-          msg.text,
-    entities:
-      msg.entitiesEncrypted && msg.entitiesIv && msg.entitiesTag
-        ? MessageEntities.fromBinary(
-            decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
-          )
-        : null,
+    text: decryptStoredText(msg),
+    entities: decryptStoredEntities(msg),
     actions:
       msg.actionsEncrypted && msg.actionsIv && msg.actionsTag
         ? MessageActions.fromBinary(
@@ -1400,21 +1410,8 @@ async function getNonFullMessagesFromNewToOld(input: {
 
   return result.map((msg) => ({
     ...msg,
-    text:
-      msg.textEncrypted && msg.textIv && msg.textTag
-        ? decryptMessage({
-            encrypted: msg.textEncrypted,
-            iv: msg.textIv,
-            authTag: msg.textTag,
-          })
-        : // legacy fallback
-          msg.text,
-    entities:
-      msg.entitiesEncrypted && msg.entitiesIv && msg.entitiesTag
-        ? MessageEntities.fromBinary(
-            decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
-          )
-        : null,
+    text: decryptStoredText(msg),
+    entities: decryptStoredEntities(msg),
     actions:
       msg.actionsEncrypted && msg.actionsIv && msg.actionsTag
         ? MessageActions.fromBinary(
@@ -1462,21 +1459,8 @@ async function getMessagesAroundTarget(
 
   return combinedMessages.map((msg) => ({
     ...msg,
-    text:
-      msg.textEncrypted && msg.textIv && msg.textTag
-        ? decryptMessage({
-            encrypted: msg.textEncrypted,
-            iv: msg.textIv,
-            authTag: msg.textTag,
-          })
-        : // legacy fallback
-          msg.text,
-    entities:
-      msg.entitiesEncrypted && msg.entitiesIv && msg.entitiesTag
-        ? MessageEntities.fromBinary(
-            decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
-          )
-        : null,
+    text: decryptStoredText(msg),
+    entities: decryptStoredEntities(msg),
     actions:
       msg.actionsEncrypted && msg.actionsIv && msg.actionsTag
         ? MessageActions.fromBinary(
