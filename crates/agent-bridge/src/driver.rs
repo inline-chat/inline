@@ -1164,6 +1164,18 @@ pub enum AgentEvent {
         /// queue or bridge database.
         attachment: OutputAttachment,
     },
+    /// Context usage the provider reported while the turn runs (ACP
+    /// `usage_update`). Additive: consumers that do not show usage ignore it.
+    UsageUpdated {
+        /// Turn running when the provider reported it.
+        turn_id: TurnId,
+        /// Tokens currently in the model's context window.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_used: Option<u64>,
+        /// Size of the model's context window.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_window: Option<u64>,
+    },
     /// Terminal event for a provider turn.
     TurnCompleted {
         /// Completed turn identity.

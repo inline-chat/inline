@@ -6,10 +6,10 @@ use agent_client_protocol::schema::v1::{
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 use inline_agent_bridge::{
-    ActivityDetail, ActivitySemanticKind, ActivityStatus, ActivityUpsert, AgentEvent,
-    ApprovalOption, DriverCommand, DriverModelOption, DriverSettingOption, DriverSettingsCatalog,
-    FileChange, PlanStep, PlanStepStatus, TurnId, TurnOutcome, native_tool_activity,
-    sanitize_visible_command,
+    ActivityDetail, ActivitySemanticKind, ActivityStatus, ActivityTextStream, ActivityUpsert,
+    AgentEvent, ApprovalOption, DriverCommand, DriverModelOption, DriverSettingOption,
+    DriverSettingsCatalog, FileChange, PlanStep, PlanStepStatus, TurnId, TurnOutcome,
+    native_tool_activity, sanitize_visible_command,
 };
 
 const MAX_PLAN_STEPS: usize = 32;
@@ -21,7 +21,107 @@ const MAX_RETAINED_TOOL_CALLS: usize = 64;
 const MAX_RETAINED_TOOL_CALL_ID_BYTES: usize = 256;
 const MAX_RETAINED_TOOL_LOCATIONS: usize = 8;
 const MAX_RETAINED_TOOL_PATH_BYTES: usize = 1_024;
-pub(crate) type ToolCallSnapshots = HashMap<String, ToolCall>;
+/// Per-turn mapping state: tool-call snapshots, plus the reasoning block the
+/// agent is streaming. ACP thought chunks carry no identity, so one block
+/// runs from the first chunk until the agent says or does something else.
+#[derive(Debug, Default)]
+pub(crate) struct ToolCallSnapshots {
+    calls: HashMap<String, ToolCall>,
+    thought: Option<Thought>,
+    thoughts: usize,
+}
+
+#[derive(Debug)]
+struct Thought {
+    id: String,
+    text: String,
+}
+
+impl ToolCallSnapshots {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl std::ops::Deref for ToolCallSnapshots {
+    type Target = HashMap<String, ToolCall>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.calls
+    }
+}
+
+impl std::ops::DerefMut for ToolCallSnapshots {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.calls
+    }
+}
+
+/// Largest reasoning text kept for one block's completed snapshot.
+const MAX_THOUGHT_CHARS: usize = 64_000;
+
+/// Streams one thought chunk into the open reasoning block.
+fn thought_events(
+    turn_id: &TurnId,
+    state: &mut ToolCallSnapshots,
+    text: String,
+) -> Vec<AgentEvent> {
+    if text.is_empty() {
+        return Vec::new();
+    }
+    let mut events = Vec::new();
+    if state.thought.is_none() {
+        state.thoughts += 1;
+        let id = format!("{turn_id}:thought:{}", state.thoughts);
+        if let Some(activity) = ActivityUpsert::new(
+            id.clone(),
+            ActivitySemanticKind::Think,
+            ActivityStatus::InProgress,
+            "Thinking",
+        ) {
+            events.push(AgentEvent::ActivityUpsert {
+                turn_id: turn_id.clone(),
+                activity,
+            });
+        }
+        state.thought = Some(Thought {
+            id,
+            text: String::new(),
+        });
+    }
+    let thought = state.thought.as_mut().expect("open thought");
+    if thought.text.chars().count() < MAX_THOUGHT_CHARS {
+        thought.text.push_str(&text);
+    }
+    events.push(AgentEvent::ActivityTextDelta {
+        turn_id: turn_id.clone(),
+        activity_id: thought.id.clone(),
+        stream: ActivityTextStream::Content,
+        index: None,
+        delta: text,
+    });
+    events
+}
+
+/// Completes the open reasoning block, if any: the agent moved on or the
+/// turn ended.
+pub(crate) fn finish_thought(turn_id: &TurnId, state: &mut ToolCallSnapshots) -> Vec<AgentEvent> {
+    let Some(thought) = state.thought.take() else {
+        return Vec::new();
+    };
+    ActivityUpsert::new(
+        thought.id,
+        ActivitySemanticKind::Think,
+        ActivityStatus::Completed,
+        "Thought",
+    )
+    .map(|activity| AgentEvent::ActivityUpsert {
+        turn_id: turn_id.clone(),
+        activity: activity.with_reasoning_content([thought.text]),
+    })
+    .into_iter()
+    .collect()
+}
 
 pub(crate) fn available_commands(
     commands: &[agent_client_protocol::schema::v1::AvailableCommand],
@@ -167,6 +267,36 @@ pub(crate) fn session_update_events(
     tool_calls: &mut ToolCallSnapshots,
     update: SessionUpdate,
 ) -> Vec<AgentEvent> {
+    if let SessionUpdate::AgentThoughtChunk(chunk) = &update {
+        return match &chunk.content {
+            ContentBlock::Text(text) => thought_events(turn_id, tool_calls, text.text.clone()),
+            _ => Vec::new(),
+        };
+    }
+    // Usage and settings notices do not end a reasoning block.
+    if let SessionUpdate::UsageUpdate(usage) = &update {
+        return vec![AgentEvent::UsageUpdated {
+            turn_id: turn_id.clone(),
+            context_used: Some(usage.used),
+            context_window: (usage.size > 0).then_some(usage.size),
+        }];
+    }
+    let mut events = match &update {
+        SessionUpdate::AgentMessageChunk(_)
+        | SessionUpdate::ToolCall(_)
+        | SessionUpdate::ToolCallUpdate(_)
+        | SessionUpdate::Plan(_) => finish_thought(turn_id, tool_calls),
+        _ => Vec::new(),
+    };
+    events.extend(session_update_body(turn_id, tool_calls, update));
+    events
+}
+
+fn session_update_body(
+    turn_id: &TurnId,
+    tool_calls: &mut ToolCallSnapshots,
+    update: SessionUpdate,
+) -> Vec<AgentEvent> {
     match update {
         SessionUpdate::AgentMessageChunk(chunk) => match chunk.content {
             ContentBlock::Text(text) if !text.text.is_empty() => {
@@ -182,7 +312,7 @@ pub(crate) fn session_update_events(
             }
             _ => Vec::new(),
         },
-        SessionUpdate::AgentThoughtChunk(_) => vec![activity(turn_id, "Thinking…")],
+        SessionUpdate::AgentThoughtChunk(_) => Vec::new(),
         SessionUpdate::ToolCall(call) => {
             let mut events = if let Some(activity) = activity_upsert(&call) {
                 vec![AgentEvent::ActivityUpsert {
@@ -692,6 +822,72 @@ mod tests {
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].name, "research_codebase");
         assert_eq!(commands[0].input_hint.as_deref(), Some("topic"));
+    }
+
+    #[test]
+    fn thoughts_stream_as_one_reasoning_block_until_the_agent_moves_on() {
+        use agent_client_protocol::schema::v1::ContentChunk;
+        let turn_id = TurnId::new("turn-1").expect("turn id");
+        let mut state = ToolCallSnapshots::new();
+        let thought = |text: &str| {
+            SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new(text),
+            )))
+        };
+        let first = session_update_events(&turn_id, &mut state, thought("Reading "));
+        assert!(matches!(
+            &first[0],
+            AgentEvent::ActivityUpsert { activity, .. }
+                if activity.kind == ActivitySemanticKind::Think && activity.status == ActivityStatus::InProgress
+        ));
+        assert!(matches!(
+            &first[1],
+            AgentEvent::ActivityTextDelta { stream: ActivityTextStream::Content, delta, .. } if delta == "Reading "
+        ));
+        let second = session_update_events(&turn_id, &mut state, thought("the code"));
+        assert_eq!(second.len(), 1, "one block, one more delta");
+        let moved_on = session_update_events(
+            &turn_id,
+            &mut state,
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("Done"),
+            ))),
+        );
+        assert!(matches!(
+            &moved_on[0],
+            AgentEvent::ActivityUpsert { activity, .. }
+                if activity.status == ActivityStatus::Completed
+                    && activity.reasoning_content == vec!["Reading the code".to_owned()]
+        ));
+        assert!(matches!(&moved_on[1], AgentEvent::AgentTextDelta { .. }));
+        // A later thought is a new block; the turn's end completes it.
+        let later = session_update_events(&turn_id, &mut state, thought("Next"));
+        assert!(
+            matches!(&later[0], AgentEvent::ActivityUpsert { activity, .. } if activity.activity_id == "turn-1:thought:2")
+        );
+        assert_eq!(finish_thought(&turn_id, &mut state).len(), 1);
+        assert!(finish_thought(&turn_id, &mut state).is_empty());
+    }
+
+    #[test]
+    fn usage_updates_report_the_context_window() {
+        let turn_id = TurnId::new("turn-1").expect("turn id");
+        let mut state = ToolCallSnapshots::new();
+        let events = session_update_events(
+            &turn_id,
+            &mut state,
+            SessionUpdate::UsageUpdate(agent_client_protocol::schema::v1::UsageUpdate::new(
+                42_000, 200_000,
+            )),
+        );
+        assert_eq!(
+            events,
+            vec![AgentEvent::UsageUpdated {
+                turn_id,
+                context_used: Some(42_000),
+                context_window: Some(200_000),
+            }]
+        );
     }
 
     #[test]

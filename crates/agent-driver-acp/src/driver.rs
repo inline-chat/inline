@@ -2009,7 +2009,7 @@ fn finish_turn(
 ) {
     cancel_pending_approvals(approvals, Some(session_key));
     cancel_pending_elicitations(elicitations, Some(session_key));
-    let Some(turn) = active_turns
+    let Some(mut turn) = active_turns
         .lock()
         .expect("ACP active turns poisoned")
         .remove(session_key)
@@ -2021,6 +2021,9 @@ fn finish_turn(
             turn_id: turn.turn_id.clone(),
             text: turn.text,
         }));
+    }
+    for event in crate::mapping::finish_thought(&turn.turn_id, &mut turn.tool_calls) {
+        turn.sender.send(Ok(event));
     }
     let (outcome, error) = match result {
         Ok(response) => (turn_outcome(response.stop_reason), None),

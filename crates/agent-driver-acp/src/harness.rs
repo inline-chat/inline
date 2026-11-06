@@ -21,7 +21,7 @@ use inline_agent_bridge::harness::{
     LiveWork, MessageRole, Notice, NoticeLevel, Op, OpError, OpKind, OpOutcome, OpenError,
     OpenMode, OpenSpec, QuestionForm, ReleaseOutcome, Released, RunState, RunStateTracker,
     RuntimeHealth, RuntimeInfo, SendError, Session, SessionKey, SessionPage, SessionQuery,
-    SettingsScope, TurnPhase, UserId,
+    SettingsScope, TokenUsage, TurnPhase, UsageUpdate, UserId,
 };
 use inline_agent_bridge::{
     ActivitySemanticKind, ActivityStatus, ActivityTextStream, AgentDriver, AgentEvent,
@@ -978,7 +978,10 @@ fn map_event(inner: &AcpSessionInner, event: AgentEvent, native: Value) -> Vec<E
                 },
                 native,
             )
-            .with_kind(ItemKind::Unknown),
+            .with_kind(match stream {
+                ActivityTextStream::Summary | ActivityTextStream::Content => ItemKind::Reasoning,
+                _ => ItemKind::Unknown,
+            }),
         )],
         AgentEvent::PlanUpdated {
             turn_id,
@@ -1123,6 +1126,26 @@ fn map_event(inner: &AcpSessionInner, event: AgentEvent, native: Value) -> Vec<E
             },
             native,
         ))],
+        AgentEvent::UsageUpdated {
+            context_used,
+            context_window,
+            ..
+        } => vec![Event::Usage {
+            usage: UsageUpdate {
+                // ACP reports what the context holds now, which is what the
+                // context meter shows for every harness.
+                last: context_used.map(|used| TokenUsage {
+                    input: used,
+                    cached_input: 0,
+                    output: 0,
+                    reasoning: 0,
+                    total: used,
+                }),
+                total: None,
+                context_window,
+                limits: Vec::new(),
+            },
+        }],
         AgentEvent::OutputAttachment { .. } => vec![Event::Notice(Notice {
             level: NoticeLevel::Info,
             code: "output_attachment".into(),

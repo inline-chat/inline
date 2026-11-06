@@ -1935,6 +1935,7 @@ fn agent_event_kind(event: &AgentEvent) -> &'static str {
         AgentEvent::QuestionRequested(_) => "question_requested",
         AgentEvent::FilesChanged { .. } => "files_changed",
         AgentEvent::OutputAttachment { .. } => "output_attachment",
+        AgentEvent::UsageUpdated { .. } => "usage_updated",
         AgentEvent::TurnCompleted { .. } => "turn_completed",
     }
 }
@@ -2026,6 +2027,7 @@ fn event_turn_id(event: &AgentEvent) -> &TurnId {
         | AgentEvent::ApprovalClosed { turn_id, .. }
         | AgentEvent::FilesChanged { turn_id, .. }
         | AgentEvent::OutputAttachment { turn_id, .. }
+        | AgentEvent::UsageUpdated { turn_id, .. }
         | AgentEvent::TurnCompleted { turn_id, .. } => turn_id,
         AgentEvent::ApprovalRequested(request) => &request.turn_id,
         AgentEvent::QuestionRequested(request) => &request.turn_id,

@@ -119,6 +119,17 @@ async fn fixture() -> Fixture {
                                 acp::ToolCallUpdateFields::new().status(acp::ToolCallStatus::Completed)))))?;
                     }
                 }
+                if text.contains("think then stop") {
+                    // A thought, a usage reading, then the turn ends with
+                    // the reasoning block still open.
+                    for chunk in ["Weighing ", "options"] {
+                        connection.send_notification(acp::SessionNotification::new(r.session_id.clone(),
+                            acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(chunk))))))?;
+                    }
+                    connection.send_notification(acp::SessionNotification::new(r.session_id.clone(),
+                        acp::SessionUpdate::UsageUpdate(acp::UsageUpdate::new(12_000, 200_000))))?;
+                    return responder.respond(acp::PromptResponse::new(acp::StopReason::EndTurn));
+                }
                 if text.contains("ask permission") {
                     let permission = connection.send_request(acp::RequestPermissionRequest::new(
                         r.session_id.clone(),
@@ -315,6 +326,48 @@ fn prompt_text(blocks: &[acp::ContentBlock]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[tokio::test]
+async fn reasoning_streams_as_a_completed_reasoning_item_and_usage_feeds_the_meter() {
+    let f = fixture().await;
+    let session = f.harness.open(spec(OpenMode::Start)).await.unwrap();
+    let mut events = session.events();
+    session
+        .send(input("think", "think then stop"))
+        .await
+        .unwrap();
+    let mut deltas = String::new();
+    let mut completed = None;
+    let mut usage = None;
+    loop {
+        match event(&mut events).await {
+            Event::Item(item) if item.kind == ItemKind::Reasoning => match item.update {
+                ItemUpdate::Delta { delta } => deltas.push_str(&delta.text),
+                ItemUpdate::Completed {
+                    body: ItemBody::Reasoning { content, .. },
+                    ..
+                } => completed = Some(content),
+                _ => {}
+            },
+            Event::Usage { usage: update } => usage = Some(update),
+            Event::Turn {
+                phase: TurnPhase::Completed { .. },
+                ..
+            } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(deltas, "Weighing options");
+    assert_eq!(
+        completed,
+        Some(vec!["Weighing options".to_owned()]),
+        "the turn's end completes the open thought"
+    );
+    let usage = usage.expect("ACP usage reaches the context meter");
+    assert_eq!(usage.context_window, Some(200_000));
+    assert_eq!(usage.last.map(|last| last.total), Some(12_000));
+    f.driver.shutdown().await.unwrap();
 }
 
 #[tokio::test]

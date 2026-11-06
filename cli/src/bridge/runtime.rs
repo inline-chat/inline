@@ -92,6 +92,7 @@ fn runtime_agent_event_kind(event: &AgentEvent) -> &'static str {
         AgentEvent::QuestionRequested(_) => "question_requested",
         AgentEvent::FilesChanged { .. } => "files_changed",
         AgentEvent::OutputAttachment { .. } => "output_attachment",
+        AgentEvent::UsageUpdated { .. } => "usage_updated",
         AgentEvent::TurnCompleted { .. } => "turn_completed",
     }
 }
@@ -1810,6 +1811,8 @@ pub(super) async fn run_inbound_turn<D: AgentDriver + SessionCatalogSource + 'st
                             ).await?;
                         }
                     }
+                    // Bridge v1 shows no context meter.
+                    Some(Ok(AgentEvent::UsageUpdated { .. })) => {}
                     Some(Ok(AgentEvent::OutputAttachment { attachment, .. })) => {
                         if seen_output_attachments.insert(attachment.id.clone()) {
                             output_attachments.push(attachment);
