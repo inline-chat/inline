@@ -170,7 +170,7 @@ test("V3 recovers cached authorization across origins, catches up without Redis,
     // B shares the durable permanent key, never A's process-local temporary key.
     const forgotten = await InlineProtocolV3Connection.connect({ ...options(second.url), authorization: original.temporary })
     clients.push(forgotten)
-    await expect(forgotten.probeTemporaryAuthorization()).rejects.toMatchObject({ code: "unauthorized" })
+    await expect(forgotten.probeTemporaryAuthorization()).rejects.toMatchObject({ code: "authorization-invalidated" })
     await forgotten.close()
     expect(await repository.getActive(permanent.keyId)).toBeDefined()
 
@@ -225,9 +225,9 @@ test("V3 recovers cached authorization across origins, catches up without Redis,
     // both sockets; no manual reconciliation or injected broker event is used.
     await Promise.all(origins.map((origin) => origin.command(`WAIT_REVOKED:${targetSession.session.id}`, "REVOKED")))
     // Registry removal precedes the remote close event. If that event arrives
-    // during this RPC the SDK reports unauthorized; if already received it
+    // during this RPC the SDK reports session-revoked; if already received it
     // reports closed. Neither origin may successfully execute the RPC.
-    const revokedOrClosed = { code: expect.stringMatching(/^(unauthorized|closed)$/) }
+    const revokedOrClosed = { code: expect.stringMatching(/^(session-revoked|closed)$/) }
     await expect(firstClient.callRpc(getMe)).rejects.toMatchObject(revokedOrClosed)
     await expect(secondClient.callRpc(getMe)).rejects.toMatchObject(revokedOrClosed)
     expect((await observer.callRpc(getMe)).oneofKind).toBe("getMe")
