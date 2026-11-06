@@ -1114,7 +1114,7 @@ struct GridAudioEngineTests {
 
   @Test("a stopped engine exposes warming until recovery finishes")
   func stoppedEngineExposesRecoveryState() async throws {
-    let driver = FakeGridAudioDriver()
+    let driver = FakeGridAudioDriver(blockRecovery: true)
     let engine = GridAudioEngine(
       driver: driver,
       permissionDriver: TestGridMicrophonePermissionDriver(),
@@ -1133,7 +1133,10 @@ struct GridAudioEngineTests {
     #expect(degraded.state == .warming)
     try await eventually { await driver.operations().contains("recover") }
 
+    // Keep recovery pending across both snapshot reads, even on a busy runner.
+    await driver.releaseRecovery()
     try await eventually { await engine.currentSnapshot().isPrepared }
+    _ = await engine.shutdown()
   }
 
   @Test("duplicate engine-stop callbacks coalesce into one recovery")
