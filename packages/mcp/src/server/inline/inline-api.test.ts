@@ -49,7 +49,7 @@ describe("createInlineApi", () => {
       async *[Symbol.asyncIterator]() {},
     })
     realtimeSdk.client.invoke.mockReset()
-    realtimeSdk.client.invokeRaw.mockReset()
+    realtimeSdk.client.invokeRaw.mockReset().mockImplementation((method, input) => realtimeSdk.client.invoke(method, input))
     realtimeSdk.client.sendMessage.mockReset().mockResolvedValue({ messageId: 300n })
   })
 
@@ -460,22 +460,21 @@ describe("createInlineApi", () => {
     } finally { await api.close() }
   })
 
-  it.each(["recent", "search", "filter-only search"])("%s includes names and avatar URLs only for returned authors without profile RPCs", async (operation) => {
-    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false } })
-    const invokeContext = async (method: Method) => {
-      if (method === Method.GET_CHATS) return { getChats: { chats: [spaceChat(7n, "Source", 10n, 100n)], dialogs: [], users: [] as User[], spaces: [], messages: [], folders: [] } }
-      throw new Error(`unexpected method ${method}`)
-    }
+  it.each(["recent", "search", "filter-only search"])("%s includes only returned authors through bounded public profile lookup", async (operation) => {
+    const { api } = fixtureApi()
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
     const messages = [message(100n, 7n, 2n, "Visible author"), message(99n, 7n, 4n, "Unknown author")]
-    realtimeSdk.client.invoke.mockImplementation(async (method) => {
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
       if (method === Method.GET_CHAT_HISTORY) return { getChatHistory: { messages } }
       if (method === Method.SEARCH_MESSAGES) return { searchMessages: { messages } }
-      const result = await invokeContext(method)
-      if (method === Method.GET_CHATS) result.getChats.users = [
-        { ...user(2n, "Dena", "Example", "dena"), profilePhoto: { cdnUrl: "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" } },
-        { ...user(3n, "Unrelated", "Person", "other"), profilePhoto: { cdnUrl: "https://api.inline.chat/file?id=avatar_three&exp=1999999999&sig=fixture" } },
-      ]
-      return result
+      if (method === Method.GET_USERS) {
+        expect(input.getUsers.userIds).toEqual([2n, 4n])
+        return { oneofKind: "getUsers", getUsers: { users: [
+          { ...user(2n, "Dena", "Example", "dena"), profilePhoto: { cdnUrl: "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" } },
+          { ...user(3n, "Unrelated", "Person", "other"), profilePhoto: { cdnUrl: "https://api.inline.chat/file?id=avatar_three&exp=1999999999&sig=fixture" } },
+        ] } }
+      }
+      return invokeContext(method, input)
     })
     try {
       const result = operation === "recent"
@@ -483,10 +482,353 @@ describe("createInlineApi", () => {
         : await api.searchMessages({ chatId: 7n, query: operation === "search" ? "author" : undefined })
       expect(result.senderDisplayNames).toEqual({ "2": "Dena Example" })
       expect(result.senderAvatarUrls).toEqual({ "2": "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" })
-      expect(realtimeSdk.client.invoke.mock.calls.map(([method]) => method)).toEqual([
-        Method.GET_CHATS, operation === "search" ? Method.SEARCH_MESSAGES : Method.GET_CHAT_HISTORY,
-      ])
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHATS)).toHaveLength(0)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_USERS)).toHaveLength(1)
     } finally { await api.close() }
+  })
+
+  const canonicalReadOperations = ["conversation", "context", "recent context", "messages", "search", "filter-only search", "recent"] as const
+  type CanonicalReadOperation = typeof canonicalReadOperations[number]
+  function canonicalRead(api: ReturnType<typeof createInlineApi>, operation: CanonicalReadOperation) {
+    switch (operation) {
+      case "conversation": return api.getConversation({ chatId: 7n })
+      case "context": return api.messageContext({ chatId: 7n, anchorMessageId: 100n })
+      case "recent context": return api.messageContext({ chatId: 7n })
+      case "messages": return api.getMessages({ chatId: 7n, messageIds: [100n, 100n, 99n] })
+      case "search": return api.searchMessages({ chatId: 7n, query: "topic" })
+      case "filter-only search": return api.searchMessages({ chatId: 7n })
+      case "recent": return api.recentMessages({ chatId: 7n })
+    }
+  }
+
+  function canonicalReadFixture(kind: "space" | "dm" = "space") {
+    const peer = { ...user(2n, "Dena", "Example", "dena"), profilePhoto: { cdnUrl: "https://api.inline.chat/file?id=avatar_two&exp=1999999999&sig=fixture" } }
+    const state = {
+      chat: kind === "space" ? spaceChat(7n, "Source", 10n, 100n) : { ...spaceChat(7n, "DM", 10n, 100n), spaceId: undefined, peerId: { type: { oneofKind: "user" as const, user: { userId: 2n } } } },
+      dialog: { chatId: 7n, archived: true, pinned: true, unreadCount: 2, readMaxId: 98n },
+      failure: null as Error | null,
+      missing: false,
+      spaceFailure: false,
+      usersFailure: false,
+      authorUser: peer,
+      spaceName: "Engineering",
+    }
+    const rows = [message(100n, 7n, 2n, "topic"), message(99n, 7n, 3n, "topic"), message(98n, 7n, 4n, "read topic")]
+    const wire = (result: RpcResult["result"]) => RpcResult.fromBinary(RpcResult.toBinary(RpcResult.create({ result }))).result
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      switch (method) {
+        case Method.GET_CHATS:
+          return wire({ oneofKind: "getChats", getChats: { chats: [state.chat], dialogs: [state.dialog], users: [state.authorUser], spaces: [space(10n, state.spaceName)], messages: [rows[0]!], folders: [] } })
+        case Method.GET_CHAT:
+          expect(input.getChat.peerId).toEqual({ type: { oneofKind: "chat", chat: { chatId: 7n } } })
+          expect(input.getChat.includeRecentMessages).not.toBe(true)
+          if (state.failure) throw state.failure
+          return wire({ oneofKind: "getChat", getChat: { chat: state.missing ? undefined : state.chat, dialog: state.dialog, user: kind === "dm" ? state.authorUser : undefined, pinnedMessageIds: [99n], messages: [] } })
+        case Method.GET_SPACE:
+          expect(input.getSpace.spaceId).toBe(10n)
+          if (state.spaceFailure) throw new Error("SPACE_ID_INVALID")
+          return wire({ oneofKind: "getSpace", getSpace: { space: space(10n, state.spaceName) } })
+        case Method.GET_CHAT_PARTICIPANTS:
+          return wire({ oneofKind: "getChatParticipants", getChatParticipants: GetChatParticipantsResult.create({ participants: [{ userId: 2n, date: 1n }], users: [state.authorUser], groupParticipants: [{ groupId: 20n, date: 1n }] }) })
+        case Method.GET_MESSAGES:
+          return wire({ oneofKind: "getMessages", getMessages: { messages: rows.filter((message) => input.getMessages.messageIds.includes(message.id)) } })
+        case Method.GET_CHAT_HISTORY:
+          return wire({ oneofKind: "getChatHistory", getChatHistory: { messages: rows } })
+        case Method.SEARCH_MESSAGES:
+          return wire({ oneofKind: "searchMessages", searchMessages: { messages: rows } })
+        case Method.GET_USERS:
+          if (state.usersFailure) throw new Error("RATE_LIMIT")
+          return wire({ oneofKind: "getUsers", getUsers: { users: [state.authorUser].filter((user) => input.getUsers.userIds.includes(user.id)) } })
+        default: throw new Error(`unexpected method ${method}`)
+      }
+    })
+    const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: true, allowHomeThreads: false } })
+    return { api, state }
+  }
+
+  it.each(canonicalReadOperations)("cold canonical %s preserves wire metadata without a catalog read", async (operation) => {
+    const { api } = canonicalReadFixture()
+    try {
+      const result = await canonicalRead(api, operation)
+      expect(result.chat).toMatchObject({ chatId: 7n, title: "Source", spaceId: 10n, spaceName: "Engineering", archived: true, pinned: true, unreadCount: 2, readMaxId: 98n, lastMessageId: 100n, lastMessageDate: 100n })
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHATS)).toHaveLength(0)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHAT)).toHaveLength(1)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_SPACE)).toHaveLength(1)
+      if (operation === "conversation") expect(result).toMatchObject({ pinnedMessageIds: [99n], groupParticipantCount: 1, participants: [{ userId: 2n, spaceNames: ["Engineering"] }] })
+      expect(realtimeSdk.client.sendMessage).not.toHaveBeenCalled()
+      expect(realtimeSdk.client.invokeRaw.mock.calls.every(([method]) => method === Method.GET_USERS)).toBe(true)
+    } finally { await api.close() }
+  })
+
+  it.each(canonicalReadOperations)("cold canonical DM %s retains counterpart names without DM creation", async (operation) => {
+    const { api } = canonicalReadFixture("dm")
+    try {
+      const result = await canonicalRead(api, operation)
+      expect(result.chat).toMatchObject({ chatId: 7n, title: "Dena Example", chatTitle: "DM", kind: "dm", peerUserId: 2n, peerDisplayName: "Dena Example", peerUsername: "dena", archived: true, readMaxId: 98n, lastMessageDate: 100n })
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHATS || method === Method.GET_SPACE)).toHaveLength(0)
+      for (const [, input] of realtimeSdk.client.invoke.mock.calls) {
+        const peerId = input[input.oneofKind]?.peerId
+        if (peerId) expect(peerId.type.oneofKind).toBe("chat")
+      }
+    } finally { await api.close() }
+  })
+
+  it.each(canonicalReadOperations)("canonical %s fails closed on fresh revocation despite warm discovery", async (operation) => {
+    const { api, state } = canonicalReadFixture()
+    try {
+      await api.getEligibleChats()
+      realtimeSdk.client.invoke.mockClear()
+      state.failure = new Error("CHAT_ID_INVALID")
+      await expect(canonicalRead(api, operation)).rejects.toBe(state.failure)
+      expect(realtimeSdk.client.invoke.mock.calls.map(([method]) => method)).toEqual([Method.GET_CHAT])
+    } finally { await api.close() }
+  })
+
+  it.each(["denied", "missing", "unavailable", "wrong canonical ID"])("does not use stale metadata when fresh target is %s", async (failure) => {
+    const { api, state } = canonicalReadFixture()
+    try {
+      await api.getEligibleChats()
+      realtimeSdk.client.invoke.mockClear()
+      if (failure === "denied") state.chat.spaceId = 20n
+      if (failure === "missing") state.missing = true
+      if (failure === "unavailable") state.failure = new Error("transport unavailable")
+      if (failure === "wrong canonical ID") state.chat.id = 8n
+      await expect(api.getConversation({ chatId: 7n })).rejects.toThrow(failure === "denied" ? "allowed context" : failure === "unavailable" ? "transport unavailable" : "missing chat")
+      expect(realtimeSdk.client.invoke.mock.calls.map(([method]) => method)).toEqual([Method.GET_CHAT])
+    } finally { await api.close() }
+  })
+
+  it("reads an authorized private chat even when its parent space cannot be read", async () => {
+    const { api, state } = canonicalReadFixture()
+    state.spaceFailure = true
+    try {
+      const result = await api.getConversation({ chatId: 7n })
+      expect(result.chat).toMatchObject({ chatId: 7n, spaceId: 10n, spaceName: null, unreadCount: 2 })
+      expect(result.participants[0]?.spaceNames).toEqual(["space 10"])
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_SPACE_MEMBERS || method === Method.GET_CHATS || method === Method.GET_USERS)).toHaveLength(0)
+    } finally { await api.close() }
+  })
+
+  it("uses the fresh dialog read boundary without marking messages read", async () => {
+    const { api } = canonicalReadFixture()
+    try {
+      const result = await api.recentMessages({ chatId: 7n, unreadOnly: true })
+      expect(result.messages.map((message) => message.id)).toEqual([100n, 99n])
+      expect(result.nextOffsetId).toBeNull()
+      expect(result.chat.readMaxId).toBe(98n)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => ![Method.GET_CHAT, Method.GET_SPACE, Method.GET_MESSAGES, Method.GET_CHAT_HISTORY, Method.GET_USERS].includes(method))).toHaveLength(0)
+      expect(realtimeSdk.client.invoke.mock.calls.find(([method]) => method === Method.GET_USERS)?.[1].getUsers.userIds).toEqual([2n, 3n])
+    } finally { await api.close() }
+  })
+
+  it("omits unavailable optional public author labels while returning the authorized page", async () => {
+    const { api, state } = canonicalReadFixture()
+    state.usersFailure = true
+    try {
+      const result = await api.searchMessages({ chatId: 7n, query: "topic" })
+      expect(result.messages.map((message) => message.id)).toEqual([100n, 99n, 98n])
+      expect(result.senderDisplayNames).toEqual({})
+      expect(result.senderAvatarUrls).toEqual({})
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHATS)).toHaveLength(0)
+    } finally { await api.close() }
+  })
+
+  it("coalesces optional metadata for details and history while authorizing each read freshly", async () => {
+    const { api } = canonicalReadFixture()
+    try {
+      await api.getConversation({ chatId: 7n })
+      await api.recentMessages({ chatId: 7n })
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHAT)).toHaveLength(2)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_SPACE)).toHaveLength(1)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_MESSAGES)).toHaveLength(1)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHATS)).toHaveLength(0)
+    } finally { await api.close() }
+  })
+
+  it.each(["context", "recent context", "search", "filter-only search", "recent"] as const)("%s derives latest metadata from its actual page without another message RPC", async (operation) => {
+    const { api } = canonicalReadFixture()
+    try {
+      const result = await canonicalRead(api, operation)
+      expect(result.chat.lastMessageDate).toBe(100n)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_MESSAGES)).toHaveLength(0)
+    } finally { await api.close() }
+  })
+
+  it.each(["context", "search", "recent"] as const)("%s fetches missing latest metadata only after reading its older page", async (operation) => {
+    const { api } = canonicalReadFixture()
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      if (method === Method.GET_CHAT_HISTORY) return { getChatHistory: { messages: [message(99n, 7n, 2n, "older topic")] } }
+      if (method === Method.SEARCH_MESSAGES) return { searchMessages: { messages: [message(99n, 7n, 2n, "older topic")] } }
+      return invokeContext(method, input)
+    })
+    try {
+      const result = await canonicalRead(api, operation)
+      expect(result.chat.lastMessageDate).toBe(100n)
+      const methods = realtimeSdk.client.invoke.mock.calls.map(([method]) => method)
+      expect(methods.filter((method) => method === Method.GET_MESSAGES)).toHaveLength(1)
+      expect(methods.indexOf(Method.GET_MESSAGES)).toBeGreaterThan(methods.indexOf(operation === "search" ? Method.SEARCH_MESSAGES : Method.GET_CHAT_HISTORY))
+    } finally { await api.close() }
+  })
+
+  it("reuses authorized source-page metadata even when client filters omit its latest row", async () => {
+    const { api } = canonicalReadFixture()
+    try {
+      const result = await api.searchMessages({ chatId: 7n, query: "topic", senderUserId: 3n })
+      expect(result.messages.map((message) => message.id)).toEqual([99n])
+      expect(result.chat.lastMessageDate).toBe(100n)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_MESSAGES)).toHaveLength(0)
+      expect(realtimeSdk.client.invokeRaw.mock.calls[0]?.[1].getUsers.userIds).toEqual([3n])
+    } finally { await api.close() }
+  })
+
+  it("piggybacks latest metadata while preserving exact unique message selection and requested order", async () => {
+    const { api } = canonicalReadFixture()
+    try {
+      const result = await api.getMessages({ chatId: 7n, messageIds: [99n, 98n, 99n] })
+      expect(result.messages.map((message) => message.id)).toEqual([99n, 98n])
+      expect(result.chat.lastMessageDate).toBe(100n)
+      const queries = realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_MESSAGES)
+      expect(queries).toHaveLength(1)
+      expect(queries[0]?.[1].getMessages.messageIds).toEqual([99n, 98n, 100n])
+    } finally { await api.close() }
+  })
+
+  it.each([true, false])("respects the 1000-ID backend cap when the requested batch includes latest=%s", async (includesLatest) => {
+    const { api, state } = canonicalReadFixture()
+    if (!includesLatest) state.chat.lastMsgId = 2_000n
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      if (method === Method.GET_MESSAGES && input.getMessages.messageIds[0] === 2_000n) return { getMessages: { messages: [message(2_000n, 7n, 2n, "latest")] } }
+      return invokeContext(method, input)
+    })
+    try {
+      const result = await api.getMessages({ chatId: 7n, messageIds: Array.from({ length: 1_000 }, (_, index) => BigInt(index + 1)) })
+      expect(result.messages.map((message) => message.id)).toEqual([98n, 99n, 100n])
+      expect(result.chat.lastMessageDate).toBe(includesLatest ? 100n : 2_000n)
+      const queries = realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_MESSAGES)
+      expect(queries.map(([, input]) => input.getMessages.messageIds.length)).toEqual(includesLatest ? [1_000] : [1_000, 1])
+    } finally { await api.close() }
+  })
+
+  it("does not retry a latest row omitted from an already combined exact-message result", async () => {
+    const { api } = canonicalReadFixture()
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => method === Method.GET_MESSAGES ? { getMessages: { messages: [message(99n, 7n, 2n, "remaining")] } } : invokeContext(method, input))
+    try {
+      const result = await api.getMessages({ chatId: 7n, messageIds: [99n] })
+      expect(result.messages.map((message) => message.id)).toEqual([99n])
+      expect(result.chat.lastMessageDate).toBeNull()
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_MESSAGES)).toHaveLength(1)
+    } finally { await api.close() }
+  })
+
+  it("opens details and history with one fresh target and uses authorized participant profiles", async () => {
+    const { api } = canonicalReadFixture()
+    try {
+      const result = await api.openConversation!({ chatId: 7n, limit: 2 })
+      expect(result.details).toMatchObject({ chat: { lastMessageDate: 100n, unreadCount: 2, readMaxId: 98n }, pinnedMessageIds: [99n], groupParticipantCount: 1 })
+      expect(result.history.messages.map((message) => message.id)).toEqual([100n, 99n])
+      expect(result.history.nextOffsetId).toBe(99n)
+      expect(result.history.senderDisplayNames).toEqual({ "2": "Dena Example" })
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHAT)).toHaveLength(1)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_MESSAGES || method === Method.GET_CHATS)).toHaveLength(0)
+      // Only an author missing from the authorized participant result needs lookup.
+      expect(realtimeSdk.client.invokeRaw.mock.calls[0]?.[1].getUsers.userIds).toEqual([3n])
+    } finally { await api.close() }
+  })
+
+  it("reauthorizes every logical open despite prior success and returns no stale payload on revocation", async () => {
+    const { api, state } = canonicalReadFixture()
+    try {
+      await api.openConversation!({ chatId: 7n })
+      realtimeSdk.client.invoke.mockClear()
+      state.failure = new Error("CHAT_ID_INVALID")
+      await expect(api.openConversation!({ chatId: 7n })).rejects.toBe(state.failure)
+      expect(realtimeSdk.client.invoke.mock.calls.map(([method]) => method)).toEqual([Method.GET_CHAT])
+    } finally { await api.close() }
+  })
+
+  it("starts both open readers after authorization and drains history before a details error", async () => {
+    const { api } = canonicalReadFixture()
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    const failure = new Error("Participants unavailable")
+    let finishHistory!: () => void
+    const historyFinished = new Promise<void>((resolve) => { finishHistory = resolve })
+    let participantsStarted = false
+    let historyStarted = false
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      if (method === Method.GET_CHAT_PARTICIPANTS) { participantsStarted = true; throw failure }
+      if (method === Method.GET_CHAT_HISTORY) { historyStarted = true; await historyFinished; return { getChatHistory: { messages: [] } } }
+      return invokeContext(method, input)
+    })
+    try {
+      let settled = false
+      const opened = api.openConversation!({ chatId: 7n }).finally(() => { settled = true })
+      const rejected = expect(opened).rejects.toBe(failure)
+      await vi.waitFor(() => { expect(participantsStarted).toBe(true); expect(historyStarted).toBe(true) })
+      expect(settled).toBe(false)
+      finishHistory()
+      await rejected
+    } finally { finishHistory(); await api.close() }
+  })
+
+  it("keeps author lookup to one bounded batch for a full fifty-message page", async () => {
+    const { api } = canonicalReadFixture()
+    const invokeContext = realtimeSdk.client.invoke.getMockImplementation()!
+    const rows = Array.from({ length: 50 }, (_, index) => message(BigInt(100 - index), 7n, BigInt(index + 2), "topic"))
+    realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
+      if (method === Method.GET_CHAT_HISTORY) return { getChatHistory: { messages: rows } }
+      return invokeContext(method, input)
+    })
+    try {
+      const result = await api.recentMessages({ chatId: 7n, limit: 50 })
+      expect(result.messages).toHaveLength(50)
+      const lookups = realtimeSdk.client.invokeRaw.mock.calls.filter(([method]) => method === Method.GET_USERS)
+      expect(lookups).toHaveLength(1)
+      expect(lookups[0]?.[1].getUsers.userIds).toEqual(rows.map((message) => message.fromId))
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHATS)).toHaveLength(0)
+    } finally { await api.close() }
+  })
+
+  it("refreshes labels after discovery metadata expires while authorizing the canonical target first", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    const { api, state } = canonicalReadFixture()
+    try {
+      await api.getEligibleChats()
+      vi.setSystemTime(15_001)
+      state.spaceName = "Renamed engineering"
+      state.authorUser = { ...state.authorUser, firstName: "Updated", lastName: "Author" }
+      realtimeSdk.client.invoke.mockClear()
+      const result = await api.searchMessages({ chatId: 7n, query: "topic" })
+      expect(result.chat.spaceName).toBe("Renamed engineering")
+      expect(result.senderDisplayNames).toEqual({ "2": "Updated Author" })
+      expect(realtimeSdk.client.invoke.mock.calls[0]?.[0]).toBe(Method.GET_CHAT)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_SPACE)).toHaveLength(1)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_USERS)).toHaveLength(1)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHATS)).toHaveLength(0)
+    } finally { await api.close(); vi.useRealTimers() }
+  })
+
+  it("expires optional label reuse in a long-lived API without caching authorization", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    const { api, state } = canonicalReadFixture()
+    try {
+      await api.getConversation({ chatId: 7n })
+      vi.setSystemTime(14_999)
+      state.dialog.readMaxId = 99n
+      const second = await api.recentMessages({ chatId: 7n, unreadOnly: true })
+      expect(second.chat.readMaxId).toBe(99n)
+      expect(second.messages.map((message) => message.id)).toEqual([100n])
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_SPACE)).toHaveLength(1)
+      vi.setSystemTime(15_000)
+      await api.getConversation({ chatId: 7n })
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_SPACE)).toHaveLength(2)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_MESSAGES)).toHaveLength(2)
+      expect(realtimeSdk.client.invoke.mock.calls.filter(([method]) => method === Method.GET_CHAT)).toHaveLength(3)
+    } finally { await api.close(); vi.useRealTimers() }
   })
 
   it("continues recent history after the last consumed row without skipping the rest of a fetched page", async () => {
@@ -600,7 +942,7 @@ describe("createInlineApi", () => {
       const second = await api.searchMessages({ chatId: 7n, query: "topic", limit: 2, senderUserId: 2n, until: 98n, offsetId: first.nextOffsetId! })
       expect(second.messages.map((item) => item.id)).toEqual([98n])
       expect(second.nextOffsetId).toBeNull()
-      expect(realtimeSdk.client.invoke).toHaveBeenLastCalledWith(Method.SEARCH_MESSAGES, expect.objectContaining({ searchMessages: expect.objectContaining({ offsetId: 99n }) }))
+      expect(realtimeSdk.client.invoke).toHaveBeenCalledWith(Method.SEARCH_MESSAGES, expect.objectContaining({ searchMessages: expect.objectContaining({ offsetId: 99n }) }))
     } finally { await api.close() }
   })
 
@@ -700,6 +1042,8 @@ describe("createInlineApi", () => {
     const api = createInlineApi({ baseUrl: "https://api.inline.test", token: "test-token", allowed: { allowedSpaceIds: [10n], allowDms: false, allowHomeThreads: false } })
     realtimeSdk.client.invoke.mockImplementation(async (method) => {
       if (method === Method.GET_CHATS) return { getChats: { chats: [spaceChat(7n, "Source", 10n, 100n)], dialogs: [], users: [{ ...user(2n, "Dena", "Example", "dena"), profilePhoto: { cdnUrl } }], spaces: [], messages: [], folders: [] } }
+      if (method === Method.GET_CHAT) return { getChat: { chat: spaceChat(7n, "Source", 10n, 100n) } }
+      if (method === Method.GET_USERS) return { oneofKind: "getUsers", getUsers: { users: [{ ...user(2n, "Dena", "Example", "dena"), profilePhoto: { cdnUrl } }] } }
       if (method === Method.GET_CHAT_HISTORY) return { getChatHistory: { messages: [message(100n, 7n, 2n, "Hello")] } }
       throw new Error(`unexpected method ${method}`)
     })
@@ -715,6 +1059,7 @@ describe("createInlineApi", () => {
     const rows = Array.from({ length: 70 }, (_, index) => message(BigInt(100 - index), 7n, 2n, "Context"))
     realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
       if (method === Method.GET_CHATS) return { getChats: { chats: [spaceChat(7n, "Source", 10n, 100n)], dialogs: [], users: [], spaces: [], messages: [], folders: [] } }
+      if (method === Method.GET_CHAT) return { getChat: { chat: spaceChat(7n, "Source", 10n, 100n) } }
       if (method === Method.GET_CHAT_HISTORY) {
         const offset = input.getChatHistory.offsetId
         return { getChatHistory: { messages: rows.filter((row) => offset == null || row.id < offset).slice(0, input.getChatHistory.limit) } }
@@ -735,6 +1080,7 @@ describe("createInlineApi", () => {
     let rows = [message(100n, 7n, 2n, "Newer"), message(99n, 7n, 2n, "Oldest")]
     realtimeSdk.client.invoke.mockImplementation(async (method) => {
       if (method === Method.GET_CHATS) return { getChats: { chats: [spaceChat(7n, "Source", 10n, 100n)], dialogs: [], users: [], spaces: [], messages: [], folders: [] } }
+      if (method === Method.GET_CHAT) return { getChat: { chat: spaceChat(7n, "Source", 10n, 100n) } }
       if (method === Method.GET_CHAT_HISTORY) return { getChatHistory: { messages: rows } }
       throw new Error(`unexpected method ${method}`)
     })
@@ -752,6 +1098,7 @@ describe("createInlineApi", () => {
     const rows = [message(100n, 7n, 2n, "Source"), message(99n, 7n, 2n, "Source")]
     realtimeSdk.client.invoke.mockImplementation(async (method, input) => {
       if (method === Method.GET_CHATS) return { getChats: { chats: [spaceChat(7n, "Source", 10n, 100n)], dialogs: [], users: [], spaces: [], messages: [], folders: [] } }
+      if (method === Method.GET_CHAT) return { getChat: { chat: spaceChat(7n, "Source", 10n, 100n) } }
       if (method === Method.SEARCH_MESSAGES) return { searchMessages: { messages: rows } }
       if (method === Method.GET_CHAT_HISTORY) return { getChatHistory: { messages: input.getChatHistory.offsetId == null ? rows : [] } }
       throw new Error(`unexpected method ${method}`)

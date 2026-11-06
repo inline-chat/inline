@@ -1946,8 +1946,12 @@ export function createInlineMcpServer(params: {
         return { structuredContent: payload, content: [jsonText(payload)] }
       }
       const target = { chatId: parseChatId(chatId) }
-      const details = await params.inline.getConversation(target)
-      const history = await params.inline.recentMessages({ ...target, limit: 50, freshChatAuthorization: true })
+      const { details, history } = params.inline.openConversation
+        ? await params.inline.openConversation({ ...target, limit: 50 })
+        : {
+            details: await params.inline.getConversation(target),
+            history: await params.inline.recentMessages({ ...target, limit: 50, freshChatAuthorization: true }),
+          }
       let monitoring: { active: boolean; expiresAt?: string } | undefined
       if (auth && params.events) {
         try {

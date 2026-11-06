@@ -339,6 +339,24 @@ describe("minimal thread workflows", () => {
     await server.close()
   })
 
+  it("uses one logical conversation-open read while retaining the existing tool payload", async () => {
+    const base = createConsultationStub({})
+    const details = await base.getConversation({ chatId: 7n })
+    const history: InlineRecentMessagesResult = { chat: details.chat, direction: "all", scannedCount: 1, nextOffsetId: 98n, messages: [Message.create({ id: 99n, chatId: 7n, fromId: 2n, message: "Ready", date: 99n })], senderDisplayNames: { "2": "Fixture Author" } }
+    const openConversation = vi.fn<NonNullable<InlineApi["openConversation"]>>().mockResolvedValue({ details, history })
+    const getConversation = vi.fn()
+    const recentMessages = vi.fn()
+    const server = createInlineMcpServer({ grant, inline: createConsultationStub({ openConversation, getConversation, recentMessages }), contractVersion: "submission-v2" })
+    try {
+      const { response } = await call(server, "conversations.open", { chatId: "7" })
+      expect(response.result.isError).not.toBe(true)
+      expect(response.result.structuredContent).toMatchObject({ chat: { chatId: "7" }, nextOffsetId: "98", capabilities: { canSend: true }, messages: [{ id: "99", senderDisplayName: "Fixture Author" }] })
+      expect(openConversation).toHaveBeenCalledExactlyOnceWith({ chatId: 7n, limit: 50 })
+      expect(getConversation).not.toHaveBeenCalled()
+      expect(recentMessages).not.toHaveBeenCalled()
+    } finally { await server.close() }
+  })
+
   it("checks current auth and exposes only acknowledged, unexpired monitoring", async () => {
     const request = vi.fn<EventsProxy["request"]>(async () => ({ subscriptions: [
       { id: "expired", name: "message.created", refreshBefore: "2000-01-01T00:00:00Z" },
