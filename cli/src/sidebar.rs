@@ -22,6 +22,9 @@ use crate::output::{self, ChatListItem, JsonFormat};
 
 type Error = Box<dyn std::error::Error>;
 
+/// Displayed entries plus the lane's lower and upper ordering bounds.
+type LaneContents = (Vec<SidebarEntry>, Option<String>, Option<String>);
+
 /// macOS manual cleanup: opened at least 6h ago and quiet for at least 3h.
 const CLEANUP_OPENED_AGE_SECONDS: i64 = 6 * 60 * 60;
 const CLEANUP_ACTIVITY_AGE_SECONDS: i64 = 3 * 60 * 60;
@@ -763,10 +766,7 @@ impl Sidebar {
     }
 
     /// Entries of a lane in display order plus the lane's outer bounds.
-    fn lane(
-        &self,
-        lane: Lane,
-    ) -> Result<(Vec<SidebarEntry>, Option<String>, Option<String>), CliError> {
+    fn lane(&self, lane: Lane) -> Result<LaneContents, CliError> {
         match lane {
             Lane::Pinned => Ok((self.pinned.clone(), None, None)),
             Lane::Root => Ok((self.items.clone(), None, None)),
