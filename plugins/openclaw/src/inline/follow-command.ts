@@ -11,6 +11,7 @@ import {
   type InputPeer,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
+import { withInlineAccountClient } from "./client-registry.js"
 import { normalizeInlineTarget } from "./normalize.js"
 
 export type InlineFollowCommand = "follow" | "unfollow"
@@ -187,16 +188,10 @@ export async function withInlineFollowClient<T>(params: {
     throw new Error(`Inline not configured for account "${account.accountId}" (missing token or baseUrl)`)
   }
   const token = await resolveInlineToken(account)
-  const client = new InlineSdkClient({
-    baseUrl: account.baseUrl,
-    token,
-  })
-  await client.connect()
-  try {
-    return await params.fn(client, account.accountId)
-  } finally {
-    await client.close().catch(() => {})
-  }
+  return await withInlineAccountClient(
+    { accountId: account.accountId, baseUrl: account.baseUrl, token },
+    (client) => params.fn(client, account.accountId),
+  )
 }
 
 export async function handleInlineFollowCommand(
