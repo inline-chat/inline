@@ -662,6 +662,35 @@ export interface User {
      * @generated from protobuf field: optional string bio = 15;
      */
     bio?: string;
+    /**
+     * Set only for bots: who the bot acts for.
+     *
+     * @generated from protobuf field: optional BotInfo bot_info = 16;
+     */
+    botInfo?: BotInfo;
+}
+/**
+ * A bot acts for its owner. Inline evaluates what a bot does as the bot plus
+ * its owner, limited to what an owner can delegate (using and steering the
+ * owner's or others' bots, never approving or configuring).
+ *
+ * @generated from protobuf message BotInfo
+ */
+export interface BotInfo {
+    /**
+     * @generated from protobuf oneof: owner
+     */
+    owner: {
+        oneofKind: "ownerUserId";
+        /**
+         * The person the bot acts for. Today, the bot's creator.
+         *
+         * @generated from protobuf field: int64 owner_user_id = 1;
+         */
+        ownerUserId: bigint;
+    } | {
+        oneofKind: undefined;
+    };
 }
 /**
  * @generated from protobuf message UserProfilePhoto
@@ -6297,6 +6326,12 @@ export interface RpcCall {
          */
         getAgentSettings: GetAgentSettingsInput;
     } | {
+        oneofKind: "getContacts";
+        /**
+         * @generated from protobuf field: GetContactsInput getContacts = 166;
+         */
+        getContacts: GetContactsInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -7289,6 +7324,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetAgentSettingsResult getAgentSettings = 165;
          */
         getAgentSettings: GetAgentSettingsResult;
+    } | {
+        oneofKind: "getContacts";
+        /**
+         * @generated from protobuf field: GetContactsResult getContacts = 166;
+         */
+        getContacts: GetContactsResult;
     } | {
         oneofKind: undefined;
     };
@@ -8605,6 +8646,13 @@ export interface GetChatResult {
      * @generated from protobuf field: repeated Message messages = 6;
      */
     messages: Message[];
+    /**
+     * Set when you can only read this chat, through a bot you manage that is in
+     * it (or in a chat above it). Show it read-only: no composer, no dialog.
+     *
+     * @generated from protobuf field: optional int64 read_only_via_bot_user_id = 7;
+     */
+    readOnlyViaBotUserId?: bigint;
 }
 /**
  * @generated from protobuf message ShowInChatListInput
@@ -10922,6 +10970,14 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional string reply_quote = 14;
      */
     replyQuote?: string;
+    /**
+     * Add mentioned users who aren't in this thread yet, when the sender may add
+     * them, before the message is sent, so the message reaches them. Threads
+     * only; mentions in DMs and public threads are never added.
+     *
+     * @generated from protobuf field: optional bool add_mentioned_users = 15;
+     */
+    addMentionedUsers?: boolean;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -10931,6 +10987,19 @@ export interface SendMessageResult {
      * @generated from protobuf field: repeated Update updates = 2;
      */
     updates: Update[];
+    /**
+     * With add_mentioned_users: mentioned users added to the thread.
+     *
+     * @generated from protobuf field: repeated int64 added_user_ids = 3;
+     */
+    addedUserIds: bigint[];
+    /**
+     * With add_mentioned_users: mentioned users not in the thread who could not
+     * be added (not a contact of the sender, or not a member of the space).
+     *
+     * @generated from protobuf field: repeated int64 unadded_user_ids = 4;
+     */
+    unaddedUserIds: bigint[];
 }
 /**
  * @generated from protobuf message InvokeMessageActionInput
@@ -13720,6 +13789,80 @@ export interface SearchUsersInput {
 export interface SearchUsersResult {
     /**
      * @generated from protobuf field: repeated User users = 1;
+     */
+    users: User[];
+}
+/**
+ * People and bots the caller has a relationship with. For a bot, that's its own
+ * relationships plus its owner's. A bot can start a conversation only with its
+ * contacts. Without a query: recent contacts, bots you manage, and bots you can
+ * use. With a query: also members of shared spaces, matched by name or username.
+ *
+ * @generated from protobuf message GetContactsInput
+ */
+export interface GetContactsInput {
+    /**
+     * @generated from protobuf field: optional string query = 1;
+     */
+    query?: string;
+    /**
+     * @generated from protobuf field: optional ContactKind kind = 2;
+     */
+    kind?: ContactKind;
+    /**
+     * Default 20, at most 50.
+     *
+     * @generated from protobuf field: optional int32 limit = 3;
+     */
+    limit?: number;
+}
+/**
+ * @generated from protobuf message Contact
+ */
+export interface Contact {
+    /**
+     * @generated from protobuf field: int64 user_id = 1;
+     */
+    userId: bigint;
+    /**
+     * @generated from protobuf field: repeated ContactRelation relations = 2;
+     */
+    relations: ContactRelation[];
+    /**
+     * Bot callers: the tie exists only through the bot's owner.
+     *
+     * @generated from protobuf field: bool via_owner = 3;
+     */
+    viaOwner: boolean;
+    /**
+     * Last message between you, Unix seconds, when known.
+     *
+     * @generated from protobuf field: optional int64 last_interaction_date = 4;
+     */
+    lastInteractionDate?: bigint;
+    /**
+     * Bots: what the caller may do with this bot. Empty for people.
+     *
+     * @generated from protobuf field: repeated AgentGrantOperation bot_operations = 5;
+     */
+    botOperations: AgentGrantOperation[];
+    /**
+     * Bots: the caller manages this bot (or acts for its manager).
+     *
+     * @generated from protobuf field: bool manages_bot = 6;
+     */
+    managesBot: boolean;
+}
+/**
+ * @generated from protobuf message GetContactsResult
+ */
+export interface GetContactsResult {
+    /**
+     * @generated from protobuf field: repeated Contact contacts = 1;
+     */
+    contacts: Contact[];
+    /**
+     * @generated from protobuf field: repeated User users = 2;
      */
     users: User[];
 }
@@ -17292,7 +17435,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_AGENT_SETTINGS = 164;
      */
-    GET_AGENT_SETTINGS = 164
+    GET_AGENT_SETTINGS = 164,
+    /**
+     * @generated from protobuf enum value: GET_CONTACTS = 165;
+     */
+    GET_CONTACTS = 165
 }
 /**
  * @generated from protobuf enum GridTranscriptionState
@@ -17603,6 +17750,66 @@ export enum ConnectorProvider {
      * @generated from protobuf enum value: CONNECTOR_PROVIDER_GITHUB = 3;
      */
     GITHUB = 3
+}
+/**
+ * @generated from protobuf enum ContactKind
+ */
+export enum ContactKind {
+    /**
+     * @generated from protobuf enum value: CONTACT_KIND_ALL = 0;
+     */
+    ALL = 0,
+    /**
+     * @generated from protobuf enum value: CONTACT_KIND_PEOPLE = 1;
+     */
+    PEOPLE = 1,
+    /**
+     * @generated from protobuf enum value: CONTACT_KIND_BOTS = 2;
+     */
+    BOTS = 2
+}
+/**
+ * @generated from protobuf enum ContactRelation
+ */
+export enum ContactRelation {
+    /**
+     * @generated from protobuf enum value: CONTACT_RELATION_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * A DM or a thread together.
+     *
+     * @generated from protobuf enum value: CONTACT_RELATION_SHARED_CHAT = 1;
+     */
+    SHARED_CHAT = 1,
+    /**
+     * @generated from protobuf enum value: CONTACT_RELATION_SHARED_SPACE = 2;
+     */
+    SHARED_SPACE = 2,
+    /**
+     * A bot you manage, or (for a bot caller) a bot its owner manages.
+     *
+     * @generated from protobuf enum value: CONTACT_RELATION_MANAGED = 3;
+     */
+    MANAGED = 3,
+    /**
+     * Bot callers: the person the bot acts for.
+     *
+     * @generated from protobuf enum value: CONTACT_RELATION_OWNER = 4;
+     */
+    OWNER = 4,
+    /**
+     * A bot you may use (its access list includes you, or your owner).
+     *
+     * @generated from protobuf enum value: CONTACT_RELATION_CAN_USE = 5;
+     */
+    CAN_USE = 5,
+    /**
+     * Someone who may use a bot you manage.
+     *
+     * @generated from protobuf enum value: CONTACT_RELATION_USES_YOUR_BOT = 6;
+     */
+    USES_YOUR_BOT = 6
 }
 /**
  * @generated from protobuf enum HttpUploadKind
@@ -19238,7 +19445,8 @@ class User$Type extends MessageType<User> {
             { no: 12, name: "time_zone", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 13, name: "bot", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 14, name: "bot_avatar", kind: "message", T: () => BotAvatar },
-            { no: 15, name: "bio", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 15, name: "bio", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 16, name: "bot_info", kind: "message", T: () => BotInfo }
         ]);
     }
     create(value?: PartialMessage<User>): User {
@@ -19295,6 +19503,9 @@ class User$Type extends MessageType<User> {
                 case /* optional string bio */ 15:
                     message.bio = reader.string();
                     break;
+                case /* optional BotInfo bot_info */ 16:
+                    message.botInfo = BotInfo.internalBinaryRead(reader, reader.uint32(), options, message.botInfo);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -19349,6 +19560,9 @@ class User$Type extends MessageType<User> {
         /* optional string bio = 15; */
         if (message.bio !== undefined)
             writer.tag(15, WireType.LengthDelimited).string(message.bio);
+        /* optional BotInfo bot_info = 16; */
+        if (message.botInfo)
+            BotInfo.internalBinaryWrite(message.botInfo, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -19359,6 +19573,56 @@ class User$Type extends MessageType<User> {
  * @generated MessageType for protobuf message User
  */
 export const User = new User$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BotInfo$Type extends MessageType<BotInfo> {
+    constructor() {
+        super("BotInfo", [
+            { no: 1, name: "owner_user_id", kind: "scalar", oneof: "owner", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<BotInfo>): BotInfo {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.owner = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<BotInfo>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BotInfo): BotInfo {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 owner_user_id */ 1:
+                    message.owner = {
+                        oneofKind: "ownerUserId",
+                        ownerUserId: reader.int64().toBigInt()
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BotInfo, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 owner_user_id = 1; */
+        if (message.owner.oneofKind === "ownerUserId")
+            writer.tag(1, WireType.Varint).int64(message.owner.ownerUserId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BotInfo
+ */
+export const BotInfo = new BotInfo$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UserProfilePhoto$Type extends MessageType<UserProfilePhoto> {
     constructor() {
@@ -30328,7 +30592,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 162, name: "controlAgentSession", kind: "message", oneof: "input", T: () => ControlAgentSessionInput },
             { no: 163, name: "moveAgentSession", kind: "message", oneof: "input", T: () => MoveAgentSessionInput },
             { no: 164, name: "unpinAllMessages", kind: "message", oneof: "input", T: () => UnpinAllMessagesInput },
-            { no: 165, name: "getAgentSettings", kind: "message", oneof: "input", T: () => GetAgentSettingsInput }
+            { no: 165, name: "getAgentSettings", kind: "message", oneof: "input", T: () => GetAgentSettingsInput },
+            { no: 166, name: "getContacts", kind: "message", oneof: "input", T: () => GetContactsInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -31325,6 +31590,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getAgentSettings: GetAgentSettingsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getAgentSettings)
                     };
                     break;
+                case /* GetContactsInput getContacts */ 166:
+                    message.input = {
+                        oneofKind: "getContacts",
+                        getContacts: GetContactsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getContacts)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -31829,6 +32100,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetAgentSettingsInput getAgentSettings = 165; */
         if (message.input.oneofKind === "getAgentSettings")
             GetAgentSettingsInput.internalBinaryWrite(message.input.getAgentSettings, writer.tag(165, WireType.LengthDelimited).fork(), options).join();
+        /* GetContactsInput getContacts = 166; */
+        if (message.input.oneofKind === "getContacts")
+            GetContactsInput.internalBinaryWrite(message.input.getContacts, writer.tag(166, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -32006,7 +32280,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 162, name: "controlAgentSession", kind: "message", oneof: "result", T: () => ControlAgentSessionResult },
             { no: 163, name: "moveAgentSession", kind: "message", oneof: "result", T: () => MoveAgentSessionResult },
             { no: 164, name: "unpinAllMessages", kind: "message", oneof: "result", T: () => UnpinAllMessagesResult },
-            { no: 165, name: "getAgentSettings", kind: "message", oneof: "result", T: () => GetAgentSettingsResult }
+            { no: 165, name: "getAgentSettings", kind: "message", oneof: "result", T: () => GetAgentSettingsResult },
+            { no: 166, name: "getContacts", kind: "message", oneof: "result", T: () => GetContactsResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -33003,6 +33278,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getAgentSettings: GetAgentSettingsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getAgentSettings)
                     };
                     break;
+                case /* GetContactsResult getContacts */ 166:
+                    message.result = {
+                        oneofKind: "getContacts",
+                        getContacts: GetContactsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getContacts)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -33507,6 +33788,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetAgentSettingsResult getAgentSettings = 165; */
         if (message.result.oneofKind === "getAgentSettings")
             GetAgentSettingsResult.internalBinaryWrite(message.result.getAgentSettings, writer.tag(165, WireType.LengthDelimited).fork(), options).join();
+        /* GetContactsResult getContacts = 166; */
+        if (message.result.oneofKind === "getContacts")
+            GetContactsResult.internalBinaryWrite(message.result.getContacts, writer.tag(166, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -37676,7 +37960,8 @@ class GetChatResult$Type extends MessageType<GetChatResult> {
             { no: 3, name: "pinned_message_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "anchor_message", kind: "message", T: () => Message },
             { no: 5, name: "user", kind: "message", T: () => User },
-            { no: 6, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message }
+            { no: 6, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
+            { no: 7, name: "read_only_via_bot_user_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetChatResult>): GetChatResult {
@@ -37714,6 +37999,9 @@ class GetChatResult$Type extends MessageType<GetChatResult> {
                 case /* repeated Message messages */ 6:
                     message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
                     break;
+                case /* optional int64 read_only_via_bot_user_id */ 7:
+                    message.readOnlyViaBotUserId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -37748,6 +38036,9 @@ class GetChatResult$Type extends MessageType<GetChatResult> {
         /* repeated Message messages = 6; */
         for (let i = 0; i < message.messages.length; i++)
             Message.internalBinaryWrite(message.messages[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 read_only_via_bot_user_id = 7; */
+        if (message.readOnlyViaBotUserId !== undefined)
+            writer.tag(7, WireType.Varint).int64(message.readOnlyViaBotUserId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -45286,7 +45577,8 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 11, name: "initial_agent_context", kind: "message", T: () => AgentThreadContext },
             { no: 12, name: "source_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 13, name: "block_content", kind: "message", T: () => BlockContent },
-            { no: 14, name: "reply_quote", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 14, name: "reply_quote", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 15, name: "add_mentioned_users", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -45348,6 +45640,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional string reply_quote */ 14:
                     message.replyQuote = reader.string();
                     break;
+                case /* optional bool add_mentioned_users */ 15:
+                    message.addMentionedUsers = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -45408,6 +45703,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional string reply_quote = 14; */
         if (message.replyQuote !== undefined)
             writer.tag(14, WireType.LengthDelimited).string(message.replyQuote);
+        /* optional bool add_mentioned_users = 15; */
+        if (message.addMentionedUsers !== undefined)
+            writer.tag(15, WireType.Varint).bool(message.addMentionedUsers);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -45422,12 +45720,16 @@ export const SendMessageInput = new SendMessageInput$Type();
 class SendMessageResult$Type extends MessageType<SendMessageResult> {
     constructor() {
         super("SendMessageResult", [
-            { no: 2, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+            { no: 2, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update },
+            { no: 3, name: "added_user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "unadded_user_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<SendMessageResult>): SendMessageResult {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.updates = [];
+        message.addedUserIds = [];
+        message.unaddedUserIds = [];
         if (value !== undefined)
             reflectionMergePartial<SendMessageResult>(this, message, value);
         return message;
@@ -45439,6 +45741,20 @@ class SendMessageResult$Type extends MessageType<SendMessageResult> {
             switch (fieldNo) {
                 case /* repeated Update updates */ 2:
                     message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated int64 added_user_ids */ 3:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.addedUserIds.push(reader.int64().toBigInt());
+                    else
+                        message.addedUserIds.push(reader.int64().toBigInt());
+                    break;
+                case /* repeated int64 unadded_user_ids */ 4:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.unaddedUserIds.push(reader.int64().toBigInt());
+                    else
+                        message.unaddedUserIds.push(reader.int64().toBigInt());
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -45455,6 +45771,20 @@ class SendMessageResult$Type extends MessageType<SendMessageResult> {
         /* repeated Update updates = 2; */
         for (let i = 0; i < message.updates.length; i++)
             Update.internalBinaryWrite(message.updates[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated int64 added_user_ids = 3; */
+        if (message.addedUserIds.length) {
+            writer.tag(3, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.addedUserIds.length; i++)
+                writer.int64(message.addedUserIds[i]);
+            writer.join();
+        }
+        /* repeated int64 unadded_user_ids = 4; */
+        if (message.unaddedUserIds.length) {
+            writer.tag(4, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.unaddedUserIds.length; i++)
+                writer.int64(message.unaddedUserIds[i]);
+            writer.join();
+        }
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -53564,6 +53894,223 @@ class SearchUsersResult$Type extends MessageType<SearchUsersResult> {
  * @generated MessageType for protobuf message SearchUsersResult
  */
 export const SearchUsersResult = new SearchUsersResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetContactsInput$Type extends MessageType<GetContactsInput> {
+    constructor() {
+        super("GetContactsInput", [
+            { no: 1, name: "query", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "kind", kind: "enum", opt: true, T: () => ["ContactKind", ContactKind, "CONTACT_KIND_"] },
+            { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetContactsInput>): GetContactsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetContactsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetContactsInput): GetContactsInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional string query */ 1:
+                    message.query = reader.string();
+                    break;
+                case /* optional ContactKind kind */ 2:
+                    message.kind = reader.int32();
+                    break;
+                case /* optional int32 limit */ 3:
+                    message.limit = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetContactsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional string query = 1; */
+        if (message.query !== undefined)
+            writer.tag(1, WireType.LengthDelimited).string(message.query);
+        /* optional ContactKind kind = 2; */
+        if (message.kind !== undefined)
+            writer.tag(2, WireType.Varint).int32(message.kind);
+        /* optional int32 limit = 3; */
+        if (message.limit !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.limit);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetContactsInput
+ */
+export const GetContactsInput = new GetContactsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Contact$Type extends MessageType<Contact> {
+    constructor() {
+        super("Contact", [
+            { no: 1, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "relations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["ContactRelation", ContactRelation, "CONTACT_RELATION_"] },
+            { no: 3, name: "via_owner", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 4, name: "last_interaction_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "bot_operations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] },
+            { no: 6, name: "manages_bot", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Contact>): Contact {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.userId = 0n;
+        message.relations = [];
+        message.viaOwner = false;
+        message.botOperations = [];
+        message.managesBot = false;
+        if (value !== undefined)
+            reflectionMergePartial<Contact>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Contact): Contact {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 user_id */ 1:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                case /* repeated ContactRelation relations */ 2:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.relations.push(reader.int32());
+                    else
+                        message.relations.push(reader.int32());
+                    break;
+                case /* bool via_owner */ 3:
+                    message.viaOwner = reader.bool();
+                    break;
+                case /* optional int64 last_interaction_date */ 4:
+                    message.lastInteractionDate = reader.int64().toBigInt();
+                    break;
+                case /* repeated AgentGrantOperation bot_operations */ 5:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.botOperations.push(reader.int32());
+                    else
+                        message.botOperations.push(reader.int32());
+                    break;
+                case /* bool manages_bot */ 6:
+                    message.managesBot = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Contact, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 user_id = 1; */
+        if (message.userId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.userId);
+        /* repeated ContactRelation relations = 2; */
+        if (message.relations.length) {
+            writer.tag(2, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.relations.length; i++)
+                writer.int32(message.relations[i]);
+            writer.join();
+        }
+        /* bool via_owner = 3; */
+        if (message.viaOwner !== false)
+            writer.tag(3, WireType.Varint).bool(message.viaOwner);
+        /* optional int64 last_interaction_date = 4; */
+        if (message.lastInteractionDate !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.lastInteractionDate);
+        /* repeated AgentGrantOperation bot_operations = 5; */
+        if (message.botOperations.length) {
+            writer.tag(5, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.botOperations.length; i++)
+                writer.int32(message.botOperations[i]);
+            writer.join();
+        }
+        /* bool manages_bot = 6; */
+        if (message.managesBot !== false)
+            writer.tag(6, WireType.Varint).bool(message.managesBot);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message Contact
+ */
+export const Contact = new Contact$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetContactsResult$Type extends MessageType<GetContactsResult> {
+    constructor() {
+        super("GetContactsResult", [
+            { no: 1, name: "contacts", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Contact },
+            { no: 2, name: "users", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<GetContactsResult>): GetContactsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.contacts = [];
+        message.users = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetContactsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetContactsResult): GetContactsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Contact contacts */ 1:
+                    message.contacts.push(Contact.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated User users */ 2:
+                    message.users.push(User.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetContactsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Contact contacts = 1; */
+        for (let i = 0; i < message.contacts.length; i++)
+            Contact.internalBinaryWrite(message.contacts[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated User users = 2; */
+        for (let i = 0; i < message.users.length; i++)
+            User.internalBinaryWrite(message.users[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetContactsResult
+ */
+export const GetContactsResult = new GetContactsResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class GetUsersInput$Type extends MessageType<GetUsersInput> {
     constructor() {

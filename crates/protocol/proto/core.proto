@@ -227,6 +227,21 @@ message User {
   optional BotAvatar bot_avatar = 14;
 
   optional string bio = 15;
+
+  // Set only for bots: who the bot acts for.
+  optional BotInfo bot_info = 16;
+}
+
+// A bot acts for its owner. Inline evaluates what a bot does as the bot plus
+// its owner, limited to what an owner can delegate (using and steering the
+// owner's or others' bots, never approving or configuring).
+message BotInfo {
+  oneof owner {
+    // The person the bot acts for. Today, the bot's creator.
+    int64 owner_user_id = 1;
+  }
+  // Reserved for bots owned by a space.
+  reserved 2;
 }
 
 message UserProfilePhoto {
@@ -2349,6 +2364,7 @@ enum Method {
   MOVE_AGENT_SESSION = 162;
   UNPIN_ALL_MESSAGES = 163;
   GET_AGENT_SETTINGS = 164;
+  GET_CONTACTS = 165;
 }
 
 message RpcCall {
@@ -2518,6 +2534,7 @@ message RpcCall {
     MoveAgentSessionInput moveAgentSession = 163;
     UnpinAllMessagesInput unpinAllMessages = 164;
     GetAgentSettingsInput getAgentSettings = 165;
+    GetContactsInput getContacts = 166;
   }
 }
 
@@ -2689,6 +2706,7 @@ message RpcResult {
     MoveAgentSessionResult moveAgentSession = 163;
     UnpinAllMessagesResult unpinAllMessages = 164;
     GetAgentSettingsResult getAgentSettings = 165;
+    GetContactsResult getContacts = 166;
   }
 }
 
@@ -3194,6 +3212,9 @@ message GetChatResult {
   optional User user = 5;
   // Newest-first ordinary messages, capped by the server at 100.
   repeated Message messages = 6;
+  // Set when you can only read this chat, through a bot you manage that is in
+  // it (or in a chat above it). Show it read-only: no composer, no dialog.
+  optional int64 read_only_via_bot_user_id = 7;
 }
 
 message ShowInChatListInput {
@@ -4083,9 +4104,21 @@ message SendMessageInput {
   // Text quoted from the replied message; `message` is only the caption.
   // Ignored without reply_to_msg_id.
   optional string reply_quote = 14;
+
+  // Add mentioned users who aren't in this thread yet, when the sender may add
+  // them, before the message is sent, so the message reaches them. Threads
+  // only; mentions in DMs and public threads are never added.
+  optional bool add_mentioned_users = 15;
 }
 
-message SendMessageResult { repeated Update updates = 2; }
+message SendMessageResult {
+  repeated Update updates = 2;
+  // With add_mentioned_users: mentioned users added to the thread.
+  repeated int64 added_user_ids = 3;
+  // With add_mentioned_users: mentioned users not in the thread who could not
+  // be added (not a contact of the sender, or not a member of the space).
+  repeated int64 unadded_user_ids = 4;
+}
 
 message InvokeMessageActionInput {
   InputPeer peer_id = 1;
@@ -5156,6 +5189,56 @@ message SearchUsersInput {
 }
 
 message SearchUsersResult { repeated User users = 1; }
+
+// People and bots the caller has a relationship with. For a bot, that's its own
+// relationships plus its owner's. A bot can start a conversation only with its
+// contacts. Without a query: recent contacts, bots you manage, and bots you can
+// use. With a query: also members of shared spaces, matched by name or username.
+message GetContactsInput {
+  optional string query = 1;
+  optional ContactKind kind = 2;
+  // Default 20, at most 50.
+  optional int32 limit = 3;
+}
+
+enum ContactKind {
+  CONTACT_KIND_ALL = 0;
+  CONTACT_KIND_PEOPLE = 1;
+  CONTACT_KIND_BOTS = 2;
+}
+
+enum ContactRelation {
+  CONTACT_RELATION_UNSPECIFIED = 0;
+  // A DM or a thread together.
+  CONTACT_RELATION_SHARED_CHAT = 1;
+  CONTACT_RELATION_SHARED_SPACE = 2;
+  // A bot you manage, or (for a bot caller) a bot its owner manages.
+  CONTACT_RELATION_MANAGED = 3;
+  // Bot callers: the person the bot acts for.
+  CONTACT_RELATION_OWNER = 4;
+  // A bot you may use (its access list includes you, or your owner).
+  CONTACT_RELATION_CAN_USE = 5;
+  // Someone who may use a bot you manage.
+  CONTACT_RELATION_USES_YOUR_BOT = 6;
+}
+
+message Contact {
+  int64 user_id = 1;
+  repeated ContactRelation relations = 2;
+  // Bot callers: the tie exists only through the bot's owner.
+  bool via_owner = 3;
+  // Last message between you, Unix seconds, when known.
+  optional int64 last_interaction_date = 4;
+  // Bots: what the caller may do with this bot. Empty for people.
+  repeated AgentGrantOperation bot_operations = 5;
+  // Bots: the caller manages this bot (or acts for its manager).
+  bool manages_bot = 6;
+}
+
+message GetContactsResult {
+  repeated Contact contacts = 1;
+  repeated User users = 2;
+}
 
 // Read-only public profile lookup by stable ID, without creating a DM or dialog.
 // Up to 50 IDs. Missing, deleted, and pending-setup users are omitted.
