@@ -98,7 +98,11 @@ class MentionTableCellView: NSTableCellView {
     let iconView: NSView
     switch item {
     case let .user(user):
-      let newAvatarView = ChatIconSwiftUIBridge(.user(user.userInfo), size: MentionCompletionMenu.Layout.avatarSize)
+      let newAvatarView = ChatIconSwiftUIBridge(
+        .user(user.userInfo),
+        size: MentionCompletionMenu.Layout.avatarSize,
+        showsBotOnlineIndicator: true
+      )
       newAvatarView.translatesAutoresizingMaskIntoConstraints = false
       containerView.addSubview(newAvatarView)
       avatarView = newAvatarView
@@ -116,7 +120,11 @@ class MentionTableCellView: NSTableCellView {
       iconView = imageView
 
     case let .agent(agent):
-      let newAvatarView = ChatIconSwiftUIBridge(.user(agent.botUserInfo), size: MentionCompletionMenu.Layout.avatarSize)
+      let newAvatarView = ChatIconSwiftUIBridge(
+        .user(agent.botUserInfo),
+        size: MentionCompletionMenu.Layout.avatarSize,
+        showsBotOnlineIndicator: true
+      )
       newAvatarView.translatesAutoresizingMaskIntoConstraints = false
       containerView.addSubview(newAvatarView)
       avatarView = newAvatarView
