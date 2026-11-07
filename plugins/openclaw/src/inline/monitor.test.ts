@@ -11733,6 +11733,66 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("never wakes the agent on service notices, new or edited", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 71n,
+          message: {
+            id: 60101n,
+            date: 1_700_000_055n,
+            fromId: 42n,
+            message: "Alice linked a thread",
+            serviceMessage: { event: { oneofKind: "threadBacklink", threadBacklink: {} } },
+          },
+        },
+        {
+          kind: "message.edit",
+          chatId: 71n,
+          message: {
+            id: 60101n,
+            date: 1_700_000_056n,
+            fromId: 42n,
+            message: "Alice linked a thread",
+            raw: { serviceMessage: { event: {} } },
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 71n,
+          message: {
+            id: 60102n,
+            date: 1_700_000_057n,
+            fromId: 42n,
+            message: "real question",
+          },
+        },
+      ],
+      chats: {
+        "71": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: { text: "answer" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+    })
+    const ctx = harness.calls.dispatchReply.mock.calls[0]?.[0]?.ctx
+    expect(ctx?.MessageSid).toBe("60102")
+    expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
   it("includes prior skipped group messages from chat history when a later message mentions the bot", async () => {
     const harness = await setupMonitorHarness({
       events: [
