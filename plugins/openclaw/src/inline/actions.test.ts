@@ -4528,7 +4528,7 @@ describe("inline/actions", () => {
     const rows = sendMessage.mock.calls[0]?.[0]?.actions?.rows
     expect(rows).toHaveLength(2)
     expect(rows?.[0]?.actions.map((action: any) => action.text)).toEqual(["Approve", "Status"])
-    expect(rows?.[0]?.actions.map((action: any) => action.actionId)).toEqual(["agent:1:1", "agent:1:2"])
+    expect(rows?.[0]?.actions.map((action: any) => action.actionId)).toEqual(["agent:1:1", "system:1:2"])
     expect(
       rows?.[0]?.actions.map((action: any) => new TextDecoder().decode(action.action.callback.data)),
     ).toEqual(["approve", "/status"])

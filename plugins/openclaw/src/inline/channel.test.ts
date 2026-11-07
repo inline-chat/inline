@@ -2328,11 +2328,11 @@ describe("inline/channel", () => {
       retryable: true,
     })
 
-    expect(connect).toHaveBeenCalledWith(abortController.signal)
+    expect(connect).not.toHaveBeenCalled()
     expect(onPlatformSendDispatch).not.toHaveBeenCalled()
     expect(assertDirectAdapterHandoff).not.toHaveBeenCalled()
     expect(sendMessage).not.toHaveBeenCalled()
-    expect(close).toHaveBeenCalled()
+    expect(close).not.toHaveBeenCalled()
   })
 
   it.each(["text", "media"] as const)("message %s cancels during dispatch refresh before SDK handoff", async (kind) => {
@@ -3544,7 +3544,7 @@ describe("inline/channel", () => {
           buttons: [
             [
               { text: "Approve", callback_data: "approve" },
-              { text: "Status", callback_data: "/status" },
+              { text: "Status", callback_data: "/status", callback_data_kind: "command" },
             ],
             [{ text: "Fast", callback_data: "model:fast" }],
           ],
@@ -3580,6 +3580,7 @@ describe("inline/channel", () => {
     expect(firstArg?.actions?.rows?.[0]?.actions?.[0]?.actionId).toBe("agent:1:1")
     const callbackData = firstArg?.actions?.rows?.[0]?.actions?.[0]?.action.callback.data
     expect(Buffer.from(callbackData).toString()).toBe("approve")
+    expect(firstArg?.actions?.rows?.[0]?.actions?.[1]?.actionId).toBe("system:1:2")
     expect(firstArg?.actions?.rows?.[0]?.actions).toHaveLength(2)
     expect(firstArg?.actions?.rows?.[1]?.actions?.[0]?.text).toBe("Fast")
   })
