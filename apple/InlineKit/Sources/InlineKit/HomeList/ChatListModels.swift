@@ -30,6 +30,8 @@ public struct ChatListUserAvatarDescriptor: Codable, Hashable, Sendable {
   public let stableAvatarIdentity: String?
   public let remoteURL: URL?
   public let localURL: URL?
+  /// A bot that is online now; drives the avatar's online dot.
+  public let isBotOnline: Bool
 
   public init(
     userID: Int64,
@@ -41,9 +43,11 @@ public struct ChatListUserAvatarDescriptor: Codable, Hashable, Sendable {
     profileFileUniqueID: String? = nil,
     profileLocalPath: String? = nil,
     remoteURL: URL? = nil,
-    localURL: URL? = nil
+    localURL: URL? = nil,
+    isBotOnline: Bool = false
   ) {
     self.userID = userID
+    self.isBotOnline = isBotOnline
     self.firstName = firstName
     self.lastName = lastName
     self.email = email
