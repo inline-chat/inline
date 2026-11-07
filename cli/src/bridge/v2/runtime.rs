@@ -47,6 +47,7 @@ use super::work::{
     AccessSource, ActionData, Agent, Command, Control, Known, OwnerCalls, SessionOp, WorkHandle,
     button_rows, paragraph,
 };
+use super::workspaces::{self, NO_PROJECT_ID};
 
 const DEFAULT_HEARTBEAT: Duration = Duration::from_secs(60);
 /// How long the harness's pickers are reused.
@@ -1373,8 +1374,39 @@ impl Runtime {
     }
 
     fn set_thread_folder(&mut self, chat_id: i64, folder: PathBuf) {
-        self.thread_settings.entry(chat_id).or_default().folder = Some(folder);
+        let previous = self
+            .thread_settings
+            .entry(chat_id)
+            .or_default()
+            .folder
+            .replace(folder.clone());
         self.save_thread(chat_id);
+        if let Some(previous) = previous.filter(|previous| *previous != folder) {
+            workspaces::forget(&previous);
+        }
+    }
+
+    /// The folder a choice id stands for in this thread. No project is the
+    /// thread's own folder in Documents/Inline, made now when it has none.
+    fn chosen_folder(
+        &self,
+        chat_id: i64,
+        id: &str,
+        folders: Option<&Folders>,
+    ) -> Result<PathBuf, String> {
+        if id == NO_PROJECT_ID {
+            let current = self.thread_folder(chat_id);
+            return if workspaces::is_managed(&current) {
+                std::fs::create_dir_all(&current)
+                    .map(|()| current)
+                    .map_err(|error| format!("Couldn't make the No project folder: {error}"))
+            } else {
+                workspaces::allocate(&self.config.agent_name, chat_id)
+            };
+        }
+        folders
+            .and_then(|folders| folders.folder(id).map(PathBuf::from))
+            .ok_or_else(|| "That folder is not available on this machine.".to_owned())
     }
 
     /// A bound thread's project, as its composer chain set it, is the folder
@@ -1393,12 +1425,13 @@ impl Runtime {
             projects.insert(chat_id, project.clone());
         }
         let catalog = self.catalog().await;
-        let Some(folder) = self
-            .folders(&catalog)
-            .and_then(|folders| folders.folder(&project).map(PathBuf::from))
-        else {
-            log::warn!(target: "inline::bridge::v2", "chat={chat_id} project={project} is not on this machine; the thread keeps its folder");
-            return;
+        let folders = self.folders(&catalog);
+        let folder = match self.chosen_folder(chat_id, &project, folders.as_ref()) {
+            Ok(folder) => folder,
+            Err(reason) => {
+                log::warn!(target: "inline::bridge::v2", "chat={chat_id} project={project}: {reason}; the thread keeps its folder");
+                return;
+            }
         };
         if self.thread_folder(chat_id) == folder {
             return;
@@ -1408,12 +1441,13 @@ impl Runtime {
             .get(&chat_id)
             .is_some_and(|work| !work.task.is_finished());
         let result = if alive || self.session_known(chat_id).await.is_ok() {
-            self.choose_folder(chat_id, folder).await
+            self.choose_folder(chat_id, folder.clone()).await
         } else {
-            self.set_thread_folder(chat_id, folder);
+            self.set_thread_folder(chat_id, folder.clone());
             Ok(())
         };
         if let Err(reason) = result {
+            workspaces::forget(&folder);
             log::info!(target: "inline::bridge::v2", "chat={chat_id} keeps its folder: {reason}");
         }
     }
@@ -1513,12 +1547,16 @@ impl Runtime {
                 SessionOp::Settings(change)
             }
             Ok(settings::Invocation::Folder(id)) => {
-                let chosen = self
-                    .folders(&catalog)
-                    .and_then(|folders| folders.folder(&id).map(PathBuf::from))
-                    .ok_or_else(|| "That folder is not available on this machine.".to_owned());
-                let chosen = match chosen {
-                    Ok(folder) => self.choose_folder(chat_id, folder).await,
+                let folders = self.folders(&catalog);
+                let chosen = match self.chosen_folder(chat_id, &id, folders.as_ref()) {
+                    Ok(folder) if folder == self.thread_folder(chat_id) => Ok(()),
+                    Ok(folder) => {
+                        let chosen = self.choose_folder(chat_id, folder.clone()).await;
+                        if chosen.is_err() {
+                            workspaces::forget(&folder);
+                        }
+                        chosen
+                    }
                     Err(message) => Err(message),
                 };
                 let document = self.settings_document(chat_id, &catalog).await;
@@ -2690,12 +2728,18 @@ impl Runtime {
             .await?;
         let chat_id = created.chat_id.get();
         self.own_threads.insert(chat_id, true);
-        // The new thread works where its parent does.
+        // The new thread works where its parent does; a parent in No project
+        // gives it a No project folder of its own.
         if let Some(folder) = self
             .thread_settings
             .get(&group.chat_id)
             .and_then(|settings| settings.folder.clone())
         {
+            let folder = if workspaces::is_managed(&folder) {
+                workspaces::allocate(&self.config.agent_name, chat_id)?
+            } else {
+                folder
+            };
             self.thread_settings.entry(chat_id).or_default().folder = Some(folder);
             self.save_thread(chat_id);
         }
@@ -2829,12 +2873,9 @@ struct FileQuery<'a> {
     limit: Option<u32>,
 }
 
-/// A folder as people know it: its name.
+/// A folder as people know it: its name, or No project.
 fn folder_label(folder: &Path) -> String {
-    folder
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| folder.display().to_string())
+    workspaces::label(folder)
 }
 
 /// The text after `/name` (and an optional `@bot`), trimmed.

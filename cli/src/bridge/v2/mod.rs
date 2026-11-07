@@ -19,3 +19,4 @@ pub(crate) mod settings;
 pub(crate) mod skills;
 pub(crate) mod tools;
 pub(crate) mod work;
+pub(crate) mod workspaces;

@@ -1704,10 +1704,8 @@ impl Actor {
 
     fn set_folder(&mut self, folder: PathBuf) -> Result<(), String> {
         if self.native.is_some() || self.session.is_some() {
-            let current = self.folder();
-            return Err(settings::folder_fixed(&current.file_name().map_or_else(
-                || current.display().to_string(),
-                |name| name.to_string_lossy().into_owned(),
+            return Err(settings::folder_fixed(&super::workspaces::label(
+                &self.folder(),
             )));
         }
         self.settings.folder = Some(folder);
@@ -1715,16 +1713,23 @@ impl Actor {
     }
 
     async fn open_session(&self, mode: OpenMode) -> Result<Arc<dyn Session>, OpenFailure> {
+        let folder = self.folder();
+        let no_project = super::workspaces::is_managed(&folder);
+        if no_project {
+            // A No project folder someone removed comes back empty.
+            let _ = std::fs::create_dir_all(&folder);
+        }
         self.agent
             .harness
             .open(OpenSpec {
                 mode,
-                folder: self.folder(),
+                folder,
                 settings: settings::effective(&self.settings),
                 instructions: Some(trusted_guide(GuideFacts {
                     bot_user_id: self.agent.bot_user_id,
                     owner_user_id: self.agent.owner_user_id,
                     inline_tools: self.agent.tools.is_some(),
+                    no_project,
                 })),
                 title: None,
                 after: None,
@@ -1749,10 +1754,7 @@ impl Actor {
                 provider: self.agent.provider as i32,
                 instance_ref: self.agent.installation_id.clone(),
                 session_ref: native.to_string(),
-                workspace_label: self
-                    .folder()
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned()),
+                workspace_label: Some(super::workspaces::label(&self.folder())),
                 project_ref: self
                     .agent
                     .bound_projects

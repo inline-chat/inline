@@ -13,6 +13,10 @@ pub struct GuideFacts {
     pub owner_user_id: i64,
     /// Whether Inline tools are served to this session.
     pub inline_tools: bool,
+    /// Whether the session works in a folder Inline made for its thread
+    /// because the thread has no project.
+    #[serde(default)]
+    pub no_project: bool,
 }
 
 pub fn trusted_guide(facts: GuideFacts) -> String {
@@ -50,6 +54,14 @@ Replies in that subthread are addressed to your work.\n\
 - When someone asks you to follow a thread (answer everything there) or to stop, use follow_thread.\n",
         );
     }
+    if facts.no_project {
+        guide.push_str(
+            "\n\
+Folder:\n\
+- This thread has no project. Your working folder is one Inline made for this thread under ~/Documents/Inline; keep this work's files there.\n\
+- If someone wants the work in a particular project or folder, say they can start a new thread there, or copy the files there when they ask.\n",
+        );
+    }
     guide
 }
 
@@ -63,6 +75,7 @@ mod tests {
             bot_user_id: 99,
             owner_user_id: 7,
             inline_tools: true,
+            no_project: false,
         });
         assert!(guide.contains("Inline user 99"));
         assert!(guide.contains("Inline user 7"));
@@ -76,8 +89,22 @@ mod tests {
             bot_user_id: 99,
             owner_user_id: 7,
             inline_tools: false,
+            no_project: false,
         });
         assert!(!guide.contains("Inline tools:"));
+        assert!(!guide.contains("no project"));
+    }
+
+    #[test]
+    fn a_thread_with_no_project_hears_where_it_works() {
+        let guide = trusted_guide(GuideFacts {
+            bot_user_id: 99,
+            owner_user_id: 7,
+            inline_tools: false,
+            no_project: true,
+        });
+        assert!(guide.contains("This thread has no project"));
+        assert!(guide.contains("~/Documents/Inline"));
     }
 
     #[test]
@@ -86,6 +113,7 @@ mod tests {
             bot_user_id: 1,
             owner_user_id: 2,
             inline_tools: true,
+            no_project: true,
         };
         assert_eq!(trusted_guide(facts), trusted_guide(facts));
     }
