@@ -132,7 +132,9 @@ async fn read_agent_settings(
                 .runtime;
             Ok(Some(proto::AgentSettings {
                 bot_user_id,
-                default_output_mode: runtime.map(|runtime| runtime.default_output_mode).unwrap_or_default(),
+                default_output_mode: runtime
+                    .map(|runtime| runtime.default_output_mode)
+                    .unwrap_or_default(),
                 ..Default::default()
             }))
         }
@@ -151,7 +153,9 @@ struct ThreadOutputModeOutput {
 
 fn chat_peer(chat_id: i64) -> proto::InputPeer {
     proto::InputPeer {
-        r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat { chat_id })),
+        r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
+            chat_id,
+        })),
     }
 }
 
@@ -435,7 +439,8 @@ pub(crate) async fn handle_bot_management(
                         })
                         .await?;
                 }
-                let thread_mode = read_thread_output_mode(&mut realtime, bot_user_id, chat_id).await?;
+                let thread_mode =
+                    read_thread_output_mode(&mut realtime, bot_user_id, chat_id).await?;
                 let default_mode = read_agent_settings(&mut realtime, bot_user_id)
                     .await?
                     .map(|settings| settings.default_output_mode)
@@ -452,7 +457,9 @@ pub(crate) async fn handle_bot_management(
                     )?;
                 } else {
                     match thread_mode {
-                        Some(mode) => println!("Output mode in chat {chat_id}: {}", output_mode_label(mode)),
+                        Some(mode) => {
+                            println!("Output mode in chat {chat_id}: {}", output_mode_label(mode))
+                        }
                         None => println!(
                             "Output mode in chat {chat_id}: bot default ({})",
                             output_mode_label(default_mode)

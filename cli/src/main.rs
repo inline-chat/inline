@@ -8396,8 +8396,7 @@ mod cli_parsing_tests {
         );
 
         for (name, expected) in [("remove-photo", 0), ("clear-avatar", 1)] {
-            let cli =
-                Cli::try_parse_from(["inline", "bots", name, "--bot-user-id", "9"]).unwrap();
+            let cli = Cli::try_parse_from(["inline", "bots", name, "--bot-user-id", "9"]).unwrap();
             let matched = match cli.command {
                 Command::Bots {
                     command: BotsCommand::RemovePhoto(_),
@@ -8410,8 +8409,8 @@ mod cli_parsing_tests {
             assert_eq!(matched, expected, "{name}");
         }
 
-        let cli = Cli::try_parse_from(["inline", "bots", "rotate-token", "--bot-user-id", "9"])
-            .unwrap();
+        let cli =
+            Cli::try_parse_from(["inline", "bots", "rotate-token", "--bot-user-id", "9"]).unwrap();
         match cli.command {
             Command::Bots {
                 command: BotsCommand::RotateToken(args),
@@ -8419,8 +8418,8 @@ mod cli_parsing_tests {
             _ => panic!("expected bots rotate-token"),
         }
 
-        let cli = Cli::try_parse_from(["inline", "bots", "settings", "--bot-user-id", "9"])
-            .unwrap();
+        let cli =
+            Cli::try_parse_from(["inline", "bots", "settings", "--bot-user-id", "9"]).unwrap();
         match cli.command {
             Command::Bots {
                 command: BotsCommand::Settings(args),
@@ -8477,8 +8476,8 @@ mod cli_parsing_tests {
             .is_err()
         );
 
-        let cli = Cli::try_parse_from(["inline", "bots", "access", "ls", "--bot-user-id", "9"])
-            .unwrap();
+        let cli =
+            Cli::try_parse_from(["inline", "bots", "access", "ls", "--bot-user-id", "9"]).unwrap();
         assert!(matches!(
             cli.command,
             Command::Bots {
@@ -9393,8 +9392,8 @@ mod cli_parsing_tests {
 
     #[test]
     fn destructive_yes_short_aliases_parse() {
-        let cli = Cli::try_parse_from(["inline", "bots", "delete", "--bot-user-id", "1", "-y"])
-            .unwrap();
+        let cli =
+            Cli::try_parse_from(["inline", "bots", "delete", "--bot-user-id", "1", "-y"]).unwrap();
         match cli.command {
             Command::Bots {
                 command: BotsCommand::Delete(args),

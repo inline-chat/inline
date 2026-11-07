@@ -644,7 +644,11 @@ mod tests {
             ("get a bot token", "inline bots reveal-token", 1),
             ("rotate a bot token", "inline bots rotate-token", 1),
             ("change bot photo", "inline bots set-photo", 1),
-            ("give someone access to my bot", "inline bots access grant", 1),
+            (
+                "give someone access to my bot",
+                "inline bots access grant",
+                1,
+            ),
             ("pin a message", "inline messages pin", 1),
             ("pin a chat to the sidebar", "inline sidebar pin", 1),
             ("reorder chats in the sidebar", "inline sidebar move", 1),

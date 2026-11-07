@@ -253,9 +253,7 @@ pub(crate) fn prepare_photo_upload(
     let metadata = fs::metadata(path)
         .map_err(|_| CliError::invalid_args(format!("File not found: {}", path.display())))?;
     if !metadata.is_file() {
-        return Err(
-            CliError::invalid_args(format!("Not a file: {}", path.display())).into(),
-        );
+        return Err(CliError::invalid_args(format!("Not a file: {}", path.display())).into());
     }
     let attachment = prepare_file_attachment(path, metadata.len(), false, true)?;
     if !matches!(attachment.file_type, UploadFileType::Photo) {

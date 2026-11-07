@@ -79,7 +79,10 @@ pub(crate) enum SidebarCommand {
 pub(crate) enum SidebarFolderCommand {
     #[command(about = "Create a folder, optionally with chats")]
     Create(FolderCreateArgs),
-    #[command(about = "Rename a folder or change its emoji", visible_alias = "rename")]
+    #[command(
+        about = "Rename a folder or change its emoji",
+        visible_alias = "rename"
+    )]
     Update(FolderUpdateArgs),
     #[command(about = "Move chats into a folder")]
     Add(FolderAddArgs),
@@ -159,7 +162,12 @@ pub(crate) struct SidebarOpenArgs {
     #[arg(long, help = "Open at the top of the sidebar instead of the bottom")]
     top: bool,
 
-    #[arg(long, value_name = "FOLDER_ID", conflicts_with = "top", help = "Open inside this folder")]
+    #[arg(
+        long,
+        value_name = "FOLDER_ID",
+        conflicts_with = "top",
+        help = "Open inside this folder"
+    )]
     folder: Option<i64>,
 }
 
@@ -168,7 +176,10 @@ pub(crate) struct SidebarPinArgs {
     #[command(flatten)]
     peers: PeersArgs,
 
-    #[arg(long, help = "Pin at the top of the pinned items instead of the bottom")]
+    #[arg(
+        long,
+        help = "Pin at the top of the pinned items instead of the bottom"
+    )]
     top: bool,
 }
 
@@ -216,7 +227,11 @@ pub(crate) struct PlacementArgs {
     #[arg(long, value_name = "CHAT_ID", help = "Place right after this chat")]
     after: Option<i64>,
 
-    #[arg(long, value_name = "FOLDER_ID", help = "Place right before this folder")]
+    #[arg(
+        long,
+        value_name = "FOLDER_ID",
+        help = "Place right before this folder"
+    )]
     before_folder: Option<i64>,
 
     #[arg(long, value_name = "FOLDER_ID", help = "Place right after this folder")]
@@ -257,7 +272,10 @@ pub(crate) struct SidebarSortArgs {
 
 #[derive(Args)]
 pub(crate) struct SidebarCleanupArgs {
-    #[arg(long, help = "Show what would be closed or deleted without changing anything")]
+    #[arg(
+        long,
+        help = "Show what would be closed or deleted without changing anything"
+    )]
     dry_run: bool,
 
     #[arg(long, help = "Do not delete folders left without open chats")]
@@ -344,7 +362,10 @@ pub(crate) struct FolderPinArgs {
     #[arg(value_name = "FOLDER_ID", help = "Folder id")]
     folder_id: i64,
 
-    #[arg(long, help = "Pin at the top of the pinned items instead of the bottom")]
+    #[arg(
+        long,
+        help = "Pin at the top of the pinned items instead of the bottom"
+    )]
     top: bool,
 }
 
@@ -370,7 +391,10 @@ fn digit(value: u8) -> Option<usize> {
 }
 
 /// A key strictly between `left` and `right` (either side may be open).
-pub(crate) fn fractional_between(left: Option<&str>, right: Option<&str>) -> Result<String, CliError> {
+pub(crate) fn fractional_between(
+    left: Option<&str>,
+    right: Option<&str>,
+) -> Result<String, CliError> {
     if let (Some(left), Some(right)) = (left, right)
         && left >= right
     {
@@ -379,13 +403,15 @@ pub(crate) fn fractional_between(left: Option<&str>, right: Option<&str>) -> Res
         ));
     }
     let max = ALPHABET.len() - 1;
-    let digit_at = |value: Option<&str>, position: usize, fallback: usize| -> Result<usize, CliError> {
-        match value.and_then(|value| value.as_bytes().get(position)) {
-            None => Ok(fallback),
-            Some(byte) => digit(*byte)
-                .ok_or_else(|| CliError::invalid_args("The server returned an invalid sidebar position")),
-        }
-    };
+    let digit_at =
+        |value: Option<&str>, position: usize, fallback: usize| -> Result<usize, CliError> {
+            match value.and_then(|value| value.as_bytes().get(position)) {
+                None => Ok(fallback),
+                Some(byte) => digit(*byte).ok_or_else(|| {
+                    CliError::invalid_args("The server returned an invalid sidebar position")
+                }),
+            }
+        };
     let mut prefix = String::new();
     let mut position = 0;
     loop {
@@ -407,7 +433,11 @@ pub(crate) fn fractional_between(left: Option<&str>, right: Option<&str>) -> Res
 
 /// `count` ascending keys strictly between `left` and `right`, split by
 /// midpoints so key length grows logarithmically with `count`.
-pub(crate) fn fractional_keys(left: Option<&str>, right: Option<&str>, count: usize) -> Result<Vec<String>, CliError> {
+pub(crate) fn fractional_keys(
+    left: Option<&str>,
+    right: Option<&str>,
+    count: usize,
+) -> Result<Vec<String>, CliError> {
     if count == 0 {
         return Ok(Vec::new());
     }
@@ -577,8 +607,14 @@ impl SidebarEntry {
 
     fn describe(&self) -> String {
         match self {
-            Self::Chat(chat) => format!("chat {} ({})", chat.chat_id, output::terminal_text(&chat.title)),
-            Self::Folder(folder) => format!("folder {} ({})", folder.folder_id, folder.display_title()),
+            Self::Chat(chat) => format!(
+                "chat {} ({})",
+                chat.chat_id,
+                output::terminal_text(&chat.title)
+            ),
+            Self::Folder(folder) => {
+                format!("folder {} ({})", folder.folder_id, folder.display_title())
+            }
         }
     }
 
@@ -591,7 +627,10 @@ impl SidebarEntry {
 }
 
 impl Sidebar {
-    pub(crate) fn build(payload: proto::GetChatsResult, current_user: Option<&proto::User>) -> Result<Self, Error> {
+    pub(crate) fn build(
+        payload: proto::GetChatsResult,
+        current_user: Option<&proto::User>,
+    ) -> Result<Self, Error> {
         let folders = payload.folders.clone();
         let list = build_chat_list(payload, current_user, None, None, None)?;
         let dialogs: Vec<SidebarChat> = list.items.iter().filter_map(sidebar_chat).collect();
@@ -600,7 +639,8 @@ impl Sidebar {
             .iter()
             .filter(|item| {
                 item.dialog.as_ref().is_some_and(|dialog| {
-                    dialog.archived != Some(true) && (dialog.open == Some(true) || dialog.pinned == Some(true))
+                    dialog.archived != Some(true)
+                        && (dialog.open == Some(true) || dialog.pinned == Some(true))
                 })
             })
             .map(|item| item.chat.id)
@@ -626,7 +666,10 @@ impl Sidebar {
 
         let mut pinned = Vec::new();
         let mut items = Vec::new();
-        for chat in dialogs.iter().filter(|chat| active_dialog_ids.contains(&chat.chat_id)) {
+        for chat in dialogs
+            .iter()
+            .filter(|chat| active_dialog_ids.contains(&chat.chat_id))
+        {
             if let Some(folder) = chat.folder_id.and_then(|id| folder_entries.get_mut(&id)) {
                 folder.chats.push(chat.clone());
             } else if chat.pinned {
@@ -637,7 +680,8 @@ impl Sidebar {
         }
         for mut folder in folder_entries.into_values() {
             folder.chats.sort_by(|lhs, rhs| {
-                key_cmp(lhs.order.as_deref(), rhs.order.as_deref()).then(lhs.chat_id.cmp(&rhs.chat_id))
+                key_cmp(lhs.order.as_deref(), rhs.order.as_deref())
+                    .then(lhs.chat_id.cmp(&rhs.chat_id))
             });
             if folder.pinned {
                 pinned.push(SidebarEntry::Folder(folder));
@@ -649,20 +693,35 @@ impl Sidebar {
             SidebarEntry::Chat(chat) => (0, chat.chat_id),
             SidebarEntry::Folder(folder) => (1, folder.folder_id),
         };
-        pinned.sort_by(|lhs, rhs| key_cmp(lhs.lane_key(true), rhs.lane_key(true)).then(stable(lhs).cmp(&stable(rhs))));
-        items.sort_by(|lhs, rhs| key_cmp(lhs.lane_key(false), rhs.lane_key(false)).then(stable(lhs).cmp(&stable(rhs))));
-        Ok(Self { pinned, items, dialogs })
+        pinned.sort_by(|lhs, rhs| {
+            key_cmp(lhs.lane_key(true), rhs.lane_key(true)).then(stable(lhs).cmp(&stable(rhs)))
+        });
+        items.sort_by(|lhs, rhs| {
+            key_cmp(lhs.lane_key(false), rhs.lane_key(false)).then(stable(lhs).cmp(&stable(rhs)))
+        });
+        Ok(Self {
+            pinned,
+            items,
+            dialogs,
+        })
     }
 
     fn all_chats(&self) -> Vec<&SidebarChat> {
-        self.pinned.iter().chain(&self.items).flat_map(SidebarEntry::chats).collect()
+        self.pinned
+            .iter()
+            .chain(&self.items)
+            .flat_map(SidebarEntry::chats)
+            .collect()
     }
 
     fn folder(&self, folder_id: i64) -> Option<&SidebarFolder> {
-        self.pinned.iter().chain(&self.items).find_map(|entry| match entry {
-            SidebarEntry::Folder(folder) if folder.folder_id == folder_id => Some(folder),
-            _ => None,
-        })
+        self.pinned
+            .iter()
+            .chain(&self.items)
+            .find_map(|entry| match entry {
+                SidebarEntry::Folder(folder) if folder.folder_id == folder_id => Some(folder),
+                _ => None,
+            })
     }
 
     fn require_folder(&self, folder_id: i64) -> Result<&SidebarFolder, CliError> {
@@ -673,7 +732,9 @@ impl Sidebar {
     fn dialog(&self, peer: &proto::InputPeer) -> Option<&SidebarChat> {
         self.dialogs.iter().find(|chat| match &peer.r#type {
             Some(proto::input_peer::Type::Chat(input)) => chat.chat_id == input.chat_id,
-            Some(proto::input_peer::Type::User(input)) => chat.peer_type == "user" && chat.peer_id == input.user_id,
+            Some(proto::input_peer::Type::User(input)) => {
+                chat.peer_type == "user" && chat.peer_id == input.user_id
+            }
             _ => false,
         })
     }
@@ -685,17 +746,27 @@ impl Sidebar {
         if self.items.iter().any(|entry| entry.matches(item)) {
             return Some(Lane::Root);
         }
-        let Moving::Chat(chat_id) = item else { return None };
-        self.pinned.iter().chain(&self.items).find_map(|entry| match entry {
-            SidebarEntry::Folder(folder) if folder.chats.iter().any(|chat| chat.chat_id == chat_id) => {
-                Some(Lane::Folder(folder.folder_id))
-            }
-            _ => None,
-        })
+        let Moving::Chat(chat_id) = item else {
+            return None;
+        };
+        self.pinned
+            .iter()
+            .chain(&self.items)
+            .find_map(|entry| match entry {
+                SidebarEntry::Folder(folder)
+                    if folder.chats.iter().any(|chat| chat.chat_id == chat_id) =>
+                {
+                    Some(Lane::Folder(folder.folder_id))
+                }
+                _ => None,
+            })
     }
 
     /// Entries of a lane in display order plus the lane's outer bounds.
-    fn lane(&self, lane: Lane) -> Result<(Vec<SidebarEntry>, Option<String>, Option<String>), CliError> {
+    fn lane(
+        &self,
+        lane: Lane,
+    ) -> Result<(Vec<SidebarEntry>, Option<String>, Option<String>), CliError> {
         match lane {
             Lane::Pinned => Ok((self.pinned.clone(), None, None)),
             Lane::Root => Ok((self.items.clone(), None, None)),
@@ -703,7 +774,12 @@ impl Sidebar {
                 let folder = self.require_folder(folder_id)?;
                 // Children always live in the folder's root interval, even
                 // when the folder itself is pinned (matches the server).
-                let entries = folder.chats.iter().cloned().map(SidebarEntry::Chat).collect();
+                let entries = folder
+                    .chats
+                    .iter()
+                    .cloned()
+                    .map(SidebarEntry::Chat)
+                    .collect();
                 let upper = self
                     .items
                     .iter()
@@ -718,24 +794,38 @@ impl Sidebar {
     }
 
     /// Computes the lane and one key per moving item, in order, for a placement.
-    fn placement(&self, moving: &[Moving], placement: &Placement) -> Result<(Lane, Vec<String>), CliError> {
+    fn placement(
+        &self,
+        moving: &[Moving],
+        placement: &Placement,
+    ) -> Result<(Lane, Vec<String>), CliError> {
         let current = moving.first().and_then(|item| self.location(*item));
         let lane = match placement {
-            Placement::Top(lane) | Placement::Bottom(lane) => lane.or(current).unwrap_or(Lane::Root),
+            Placement::Top(lane) | Placement::Bottom(lane) => {
+                lane.or(current).unwrap_or(Lane::Root)
+            }
             Placement::Before(target) | Placement::After(target) => {
                 if moving.contains(target) {
-                    return Err(CliError::invalid_args("Chats cannot be placed relative to themselves"));
+                    return Err(CliError::invalid_args(
+                        "Chats cannot be placed relative to themselves",
+                    ));
                 }
                 self.location(*target).ok_or_else(|| match target {
                     Moving::Chat(id) => CliError::invalid_args(format!(
                         "Chat {id} is not in the sidebar; run `inline sidebar` to see ids"
                     )),
-                    Moving::Folder(id) => CliError::invalid_args(format!("Folder {id} was not found")),
+                    Moving::Folder(id) => {
+                        CliError::invalid_args(format!("Folder {id} was not found"))
+                    }
                 })?
             }
         };
-        if moving.iter().any(|item| matches!(item, Moving::Folder(_))) && matches!(lane, Lane::Folder(_)) {
-            return Err(CliError::invalid_args("Folders cannot be nested inside folders"));
+        if moving.iter().any(|item| matches!(item, Moving::Folder(_)))
+            && matches!(lane, Lane::Folder(_))
+        {
+            return Err(CliError::invalid_args(
+                "Folders cannot be nested inside folders",
+            ));
         }
 
         let pinned_lane = lane == Lane::Pinned;
@@ -749,13 +839,26 @@ impl Sidebar {
         let end = |entry: &SidebarEntry| entry.lane_end(pinned_lane).map(str::to_string);
 
         let (left, right) = match placement {
-            Placement::Top(_) => (lower.clone(), keyed.first().and_then(|entry| start(entry)).or(upper.clone())),
-            Placement::Bottom(_) => (keyed.last().and_then(|entry| end(entry)).or(lower.clone()), upper.clone()),
+            Placement::Top(_) => (
+                lower.clone(),
+                keyed
+                    .first()
+                    .and_then(|entry| start(entry))
+                    .or(upper.clone()),
+            ),
+            Placement::Bottom(_) => (
+                keyed.last().and_then(|entry| end(entry)).or(lower.clone()),
+                upper.clone(),
+            ),
             Placement::Before(target) | Placement::After(target) => {
                 let index = keyed
                     .iter()
                     .position(|entry| entry.matches(*target))
-                    .ok_or_else(|| CliError::invalid_args("The target has no stored sidebar position; move it first"))?;
+                    .ok_or_else(|| {
+                        CliError::invalid_args(
+                            "The target has no stored sidebar position; move it first",
+                        )
+                    })?;
                 if matches!(placement, Placement::Before(_)) {
                     let left = index
                         .checked_sub(1)
@@ -763,7 +866,10 @@ impl Sidebar {
                         .or(lower.clone());
                     (left, start(keyed[index]))
                 } else {
-                    let right = keyed.get(index + 1).and_then(|next| start(next)).or(upper.clone());
+                    let right = keyed
+                        .get(index + 1)
+                        .and_then(|next| start(next))
+                        .or(upper.clone());
                     (end(keyed[index]), right)
                 }
             }
@@ -773,7 +879,12 @@ impl Sidebar {
     }
 
     /// Returns the sorted lane with new keys, or `None` when it is already sorted.
-    fn sorted_lane(&self, lane: Lane, by: SortKey, reverse: bool) -> Result<Option<Vec<(SidebarEntry, String)>>, CliError> {
+    fn sorted_lane(
+        &self,
+        lane: Lane,
+        by: SortKey,
+        reverse: bool,
+    ) -> Result<Option<Vec<(SidebarEntry, String)>>, CliError> {
         let pinned_lane = lane == Lane::Pinned;
         let (entries, lower, upper) = self.lane(lane)?;
         let mut sorted = entries.clone();
@@ -784,8 +895,13 @@ impl Sidebar {
         if reverse {
             sorted.reverse();
         }
-        let unchanged = sorted.iter().zip(&entries).all(|(lhs, rhs)| lhs.describe() == rhs.describe())
-            && entries.iter().all(|entry| entry.lane_key(pinned_lane).is_some());
+        let unchanged = sorted
+            .iter()
+            .zip(&entries)
+            .all(|(lhs, rhs)| lhs.describe() == rhs.describe())
+            && entries
+                .iter()
+                .all(|entry| entry.lane_key(pinned_lane).is_some());
         if unchanged {
             return Ok(None);
         }
@@ -793,10 +909,15 @@ impl Sidebar {
             // Allocate below every current root key and apply bottom-up, so a
             // folder's children are always re-laid before its next sibling.
             Lane::Root => {
-                let first = entries.iter().filter_map(|entry| entry.lane_key(false)).min();
+                let first = entries
+                    .iter()
+                    .filter_map(|entry| entry.lane_key(false))
+                    .min();
                 fractional_keys(None, first, sorted.len())?
             }
-            Lane::Pinned | Lane::Folder(_) => fractional_keys(lower.as_deref(), upper.as_deref(), sorted.len())?,
+            Lane::Pinned | Lane::Folder(_) => {
+                fractional_keys(lower.as_deref(), upper.as_deref(), sorted.len())?
+            }
         };
         Ok(Some(sorted.into_iter().zip(keys).collect()))
     }
@@ -814,12 +935,18 @@ impl Sidebar {
         self.all_chats()
             .into_iter()
             .filter(|chat| chat.open && !chat.pinned && !chat.unread)
-            .filter(|chat| !chat.folder_id.is_some_and(|id| pinned_folder_ids.contains(&id)))
+            .filter(|chat| {
+                !chat
+                    .folder_id
+                    .is_some_and(|id| pinned_folder_ids.contains(&id))
+            })
             .filter(|chat| {
                 if chat.empty_untitled {
                     return true;
                 }
-                let Some(opened) = chat.opened_date else { return false };
+                let Some(opened) = chat.opened_date else {
+                    return false;
+                };
                 if chat.has_unknown_last_message {
                     return false;
                 }
@@ -851,7 +978,10 @@ impl Sidebar {
 
 fn sidebar_chat(item: &ChatListItem) -> Option<SidebarChat> {
     let dialog = item.dialog.as_ref()?;
-    let last_activity = item.last_message.as_ref().map(|summary| summary.message.date);
+    let last_activity = item
+        .last_message
+        .as_ref()
+        .map(|summary| summary.message.date);
     let is_dm = item.peer.peer_type == "user";
     Some(SidebarChat {
         chat_id: item.chat.id,
@@ -860,7 +990,8 @@ fn sidebar_chat(item: &ChatListItem) -> Option<SidebarChat> {
         title: item.display_name.clone(),
         space_name: item.space_name.clone(),
         unread_count: item.unread_count.filter(|count| *count > 0),
-        unread: item.unread_count.is_some_and(|count| count > 0) || dialog.unread_mark == Some(true),
+        unread: item.unread_count.is_some_and(|count| count > 0)
+            || dialog.unread_mark == Some(true),
         open: dialog.open == Some(true),
         pinned: dialog.pinned == Some(true),
         folder_id: dialog.folder_id,
@@ -1011,7 +1142,12 @@ impl<T: Serialize> Batch<T> {
         }
     }
 
-    fn record<E: std::fmt::Display>(&mut self, label: &str, result: Result<T, E>, message: impl FnOnce(&T) -> String) {
+    fn record<E: std::fmt::Display>(
+        &mut self,
+        label: &str,
+        result: Result<T, E>,
+        message: impl FnOnce(&T) -> String,
+    ) {
         match result {
             Ok(payload) => {
                 if !self.json {
@@ -1052,13 +1188,19 @@ impl<T: Serialize> Batch<T> {
                 self.failures.len() + self.results.len(),
                 self.failures.join("\n  ")
             ),
-            hint: Some("Run `inline sidebar` to check the current state, then retry the failed chats.".to_string()),
+            hint: Some(
+                "Run `inline sidebar` to check the current state, then retry the failed chats."
+                    .to_string(),
+            ),
             examples: Vec::new(),
         }))
     }
 }
 
-async fn load_sidebar(realtime: &mut crate::AuthenticatedRealtime, current_user: Option<&proto::User>) -> Result<Sidebar, Error> {
+async fn load_sidebar(
+    realtime: &mut crate::AuthenticatedRealtime,
+    current_user: Option<&proto::User>,
+) -> Result<Sidebar, Error> {
     let payload = realtime
         .call(proto::GetChatsInput {
             include_subthreads: Some(false),
@@ -1067,7 +1209,11 @@ async fn load_sidebar(realtime: &mut crate::AuthenticatedRealtime, current_user:
     Sidebar::build(payload, current_user)
 }
 
-fn print_payload<T: Serialize>(ctx: &SidebarContext<'_>, payload: &T, message: impl FnOnce() -> String) -> Result<(), Error> {
+fn print_payload<T: Serialize>(
+    ctx: &SidebarContext<'_>,
+    payload: &T,
+    message: impl FnOnce() -> String,
+) -> Result<(), Error> {
     if ctx.json {
         output::print_json(payload, ctx.json_format)?;
     } else {
@@ -1087,7 +1233,10 @@ async fn resolve_targets(
         Some(peers) => peers.targets(),
         None => {
             let sidebar = load_sidebar(realtime, current_user).await?;
-            select(&sidebar).into_iter().map(SidebarChat::target).collect()
+            select(&sidebar)
+                .into_iter()
+                .map(SidebarChat::target)
+                .collect()
         }
     }
 }
@@ -1095,7 +1244,14 @@ async fn resolve_targets(
 fn moving_chats(sidebar: &Sidebar, targets: &[PeerTarget]) -> Vec<Moving> {
     targets
         .iter()
-        .map(|target| Moving::Chat(sidebar.dialog(&target.peer).map(|chat| chat.chat_id).unwrap_or(0)))
+        .map(|target| {
+            Moving::Chat(
+                sidebar
+                    .dialog(&target.peer)
+                    .map(|chat| chat.chat_id)
+                    .unwrap_or(0),
+            )
+        })
         .collect()
 }
 
@@ -1113,7 +1269,10 @@ fn capitalize(text: &str) -> String {
 
 // MARK: - Handlers
 
-pub(crate) async fn run(command: Option<SidebarCommand>, ctx: SidebarContext<'_>) -> Result<(), Error> {
+pub(crate) async fn run(
+    command: Option<SidebarCommand>,
+    ctx: SidebarContext<'_>,
+) -> Result<(), Error> {
     let command = command.unwrap_or(SidebarCommand::List);
     let mut realtime = crate::connect_authenticated_realtime(ctx.config, ctx.auth_store).await?;
     let current_user = ctx.current_user.clone();
@@ -1157,7 +1316,12 @@ pub(crate) async fn run(command: Option<SidebarCommand>, ctx: SidebarContext<'_>
         SidebarCommand::Close(args) => {
             let targets = resolve_targets(&args, &mut realtime, current_user, |sidebar| {
                 // Everything outside the pinned section, like macOS Close All.
-                sidebar.items.iter().flat_map(SidebarEntry::chats).filter(|chat| chat.open).collect()
+                sidebar
+                    .items
+                    .iter()
+                    .flat_map(SidebarEntry::chats)
+                    .filter(|chat| chat.open)
+                    .collect()
             })
             .await?;
             let mut batch = Batch::new(ctx.json);
@@ -1172,7 +1336,10 @@ pub(crate) async fn run(command: Option<SidebarCommand>, ctx: SidebarContext<'_>
                     .await;
                 batch.record(&target.label, result, |payload| {
                     if payload.deleted_chat == Some(true) {
-                        format!("Closed {} (an empty untitled thread, so it was deleted).", target.label)
+                        format!(
+                            "Closed {} (an empty untitled thread, so it was deleted).",
+                            target.label
+                        )
                     } else {
                         format!("Closed {}.", target.label)
                     }
@@ -1190,7 +1357,8 @@ pub(crate) async fn run(command: Option<SidebarCommand>, ctx: SidebarContext<'_>
             let (lane, keys) = sidebar.placement(&moving, &placement)?;
             let mut batch = Batch::new(ctx.json);
             for (target, key) in targets.into_iter().zip(keys) {
-                let input = move_input(target.peer.clone(), sidebar.dialog(&target.peer), lane, key);
+                let input =
+                    move_input(target.peer.clone(), sidebar.dialog(&target.peer), lane, key);
                 let result = realtime.call(input).await;
                 batch.record(&target.label, result, |_| {
                     format!("Moved {} {}.", target.label, placement.describe(lane))
@@ -1207,7 +1375,9 @@ pub(crate) async fn run(command: Option<SidebarCommand>, ctx: SidebarContext<'_>
                     results: &empty,
                     failed: &[],
                 };
-                return print_payload(&ctx, &output, || format!("{} is already sorted.", capitalize(&lane.describe())));
+                return print_payload(&ctx, &output, || {
+                    format!("{} is already sorted.", capitalize(&lane.describe()))
+                });
             };
             let mut batch: Batch<serde_json::Value> = Batch::new(ctx.json);
             // Bottom-up so root folders re-lay their chats below the next sibling.
@@ -1227,8 +1397,11 @@ pub(crate) async fn run(command: Option<SidebarCommand>, ctx: SidebarContext<'_>
                     SidebarEntry::Folder(folder) => {
                         let mut input = folder_update(folder.folder_id);
                         if lane == Lane::Pinned {
-                            input.pinned_order_update =
-                                Some(proto::update_dialog_folder_input::PinnedOrderUpdate::PinnedOrder(key.clone()));
+                            input.pinned_order_update = Some(
+                                proto::update_dialog_folder_input::PinnedOrderUpdate::PinnedOrder(
+                                    key.clone(),
+                                ),
+                            );
                         } else {
                             input.order = Some(key.clone());
                         }
@@ -1260,13 +1433,19 @@ pub(crate) async fn run(command: Option<SidebarCommand>, ctx: SidebarContext<'_>
                         destination: None,
                     })
                     .await;
-                batch.record(&target.label, result, |_| format!("Pinned {}.", target.label));
+                batch.record(&target.label, result, |_| {
+                    format!("Pinned {}.", target.label)
+                });
             }
             batch.finish(&ctx, "Nothing to pin.")?;
         }
         SidebarCommand::Unpin(args) => {
             let targets = resolve_targets(&args, &mut realtime, current_user, |sidebar| {
-                sidebar.all_chats().into_iter().filter(|chat| chat.pinned).collect()
+                sidebar
+                    .all_chats()
+                    .into_iter()
+                    .filter(|chat| chat.pinned)
+                    .collect()
             })
             .await?;
             let mut batch = Batch::new(ctx.json);
@@ -1280,7 +1459,9 @@ pub(crate) async fn run(command: Option<SidebarCommand>, ctx: SidebarContext<'_>
                         destination: None,
                     })
                     .await;
-                batch.record(&target.label, result, |_| format!("Unpinned {}.", target.label));
+                batch.record(&target.label, result, |_| {
+                    format!("Unpinned {}.", target.label)
+                });
             }
             batch.finish(&ctx, "No pinned chats to unpin.")?;
         }
@@ -1288,7 +1469,11 @@ pub(crate) async fn run(command: Option<SidebarCommand>, ctx: SidebarContext<'_>
         SidebarCommand::Unarchive(args) => archive(&mut realtime, &args, false, &ctx).await?,
         SidebarCommand::MarkRead(args) => {
             let targets = resolve_targets(&args, &mut realtime, current_user, |sidebar| {
-                sidebar.all_chats().into_iter().filter(|chat| chat.unread).collect()
+                sidebar
+                    .all_chats()
+                    .into_iter()
+                    .filter(|chat| chat.unread)
+                    .collect()
             })
             .await?;
             let mut batch = Batch::new(ctx.json);
@@ -1299,17 +1484,26 @@ pub(crate) async fn run(command: Option<SidebarCommand>, ctx: SidebarContext<'_>
                         max_id: None,
                     })
                     .await;
-                batch.record(&target.label, result, |_| format!("Marked {} as read.", target.label));
+                batch.record(&target.label, result, |_| {
+                    format!("Marked {} as read.", target.label)
+                });
             }
             batch.finish(&ctx, "No unread sidebar chats.")?;
         }
         SidebarCommand::Cleanup(args) => cleanup(&mut realtime, current_user, &args, &ctx).await?,
-        SidebarCommand::Folder { command } => run_folder(command, &mut realtime, current_user, &ctx).await?,
+        SidebarCommand::Folder { command } => {
+            run_folder(command, &mut realtime, current_user, &ctx).await?
+        }
     }
     Ok(())
 }
 
-fn move_input(peer: proto::InputPeer, current: Option<&SidebarChat>, lane: Lane, key: String) -> proto::UpdateDialogOrderInput {
+fn move_input(
+    peer: proto::InputPeer,
+    current: Option<&SidebarChat>,
+    lane: Lane,
+    key: String,
+) -> proto::UpdateDialogOrderInput {
     let already_pinned = current.is_some_and(|chat| chat.pinned && chat.folder_id.is_none());
     let in_folder = current.and_then(|chat| chat.folder_id);
     match lane {
@@ -1426,7 +1620,9 @@ async fn cleanup(
             })
             .await
             .map(to_json);
-        batch.record(&target.label, result, |_| format!("Closed {}.", target.label));
+        batch.record(&target.label, result, |_| {
+            format!("Closed {}.", target.label)
+        });
     }
     for folder in &delete_folders {
         let label = format!("folder {} ({})", folder.folder_id, folder.display_title());
@@ -1450,12 +1646,18 @@ fn destination_root() -> proto::DialogFolderDestination {
 
 fn destination_folder(folder_id: i64) -> proto::DialogFolderDestination {
     proto::DialogFolderDestination {
-        destination: Some(proto::dialog_folder_destination::Destination::FolderId(folder_id)),
+        destination: Some(proto::dialog_folder_destination::Destination::FolderId(
+            folder_id,
+        )),
     }
 }
 
 fn folder_label(folder: &proto::DialogFolder) -> String {
-    match folder.title.as_deref().filter(|title| !title.trim().is_empty()) {
+    match folder
+        .title
+        .as_deref()
+        .filter(|title| !title.trim().is_empty())
+    {
         Some(title) => format!("folder {} \"{}\"", folder.id, output::terminal_text(title)),
         None => format!("folder {}", folder.id),
     }
@@ -1491,12 +1693,16 @@ async fn run_folder(
             .collect();
             let pinned_order = if args.pin {
                 let sidebar = load_sidebar(realtime, current_user).await?;
-                let (_, keys) = sidebar.placement(&[Moving::Folder(0)], &Placement::Bottom(Some(Lane::Pinned)))?;
+                let (_, keys) = sidebar
+                    .placement(&[Moving::Folder(0)], &Placement::Bottom(Some(Lane::Pinned)))?;
                 keys.into_iter().next()
             } else {
                 None
             };
-            let title = args.title.map(|title| title.trim().to_string()).filter(|title| !title.is_empty());
+            let title = args
+                .title
+                .map(|title| title.trim().to_string())
+                .filter(|title| !title.is_empty());
             let payload = realtime
                 .call(proto::CreateDialogFolderInput {
                     title,
@@ -1506,7 +1712,11 @@ async fn run_folder(
                 })
                 .await?;
             print_payload(ctx, &payload, || match payload.folder.as_ref() {
-                Some(folder) => format!("Created {} with {} chat(s).", folder_label(folder), payload.dialogs.len()),
+                Some(folder) => format!(
+                    "Created {} with {} chat(s).",
+                    folder_label(folder),
+                    payload.dialogs.len()
+                ),
                 None => "Created folder.".to_string(),
             })?;
         }
@@ -1555,7 +1765,9 @@ async fn run_folder(
                     .dialog(&target.peer)
                     .and_then(|chat| chat.folder_id)
                     .filter(|id| sidebar.folder(*id).is_some())
-                    .ok_or_else(|| CliError::invalid_args(format!("{} is not in a folder", target.label)))?;
+                    .ok_or_else(|| {
+                        CliError::invalid_args(format!("{} is not in a folder", target.label))
+                    })?;
                 match groups.iter_mut().find(|(id, _)| *id == folder_id) {
                     Some((_, targets)) => targets.push(target),
                     None => groups.push((folder_id, vec![target])),
@@ -1563,13 +1775,15 @@ async fn run_folder(
             }
             let mut batch = Batch::new(ctx.json);
             for (folder_id, targets) in groups {
-                let orders: Vec<Option<String>> = if sidebar.location(Moving::Folder(folder_id)) == Some(Lane::Root) {
-                    let moving = moving_chats(&sidebar, &targets);
-                    let (_, keys) = sidebar.placement(&moving, &Placement::After(Moving::Folder(folder_id)))?;
-                    keys.into_iter().map(Some).collect()
-                } else {
-                    vec![None; targets.len()]
-                };
+                let orders: Vec<Option<String>> =
+                    if sidebar.location(Moving::Folder(folder_id)) == Some(Lane::Root) {
+                        let moving = moving_chats(&sidebar, &targets);
+                        let (_, keys) = sidebar
+                            .placement(&moving, &Placement::After(Moving::Folder(folder_id)))?;
+                        keys.into_iter().map(Some).collect()
+                    } else {
+                        vec![None; targets.len()]
+                    };
                 for (target, order) in targets.into_iter().zip(orders) {
                     let result = realtime
                         .call(proto::UpdateDialogOrderInput {
@@ -1595,7 +1809,9 @@ async fn run_folder(
             let key = keys.into_iter().next().unwrap_or_default();
             let mut input = folder_update(args.folder_id);
             match lane {
-                Lane::Pinned => input.pinned_order_update = Some(PinnedOrderUpdate::PinnedOrder(key)),
+                Lane::Pinned => {
+                    input.pinned_order_update = Some(PinnedOrderUpdate::PinnedOrder(key))
+                }
                 Lane::Root => {
                     input.order = Some(key);
                     if sidebar.location(Moving::Folder(args.folder_id)) == Some(Lane::Pinned) {
@@ -1606,7 +1822,11 @@ async fn run_folder(
             }
             let payload = realtime.call(input).await?;
             print_payload(ctx, &payload, || {
-                format!("Moved folder {} {}.", args.folder_id, placement.describe(lane))
+                format!(
+                    "Moved folder {} {}.",
+                    args.folder_id,
+                    placement.describe(lane)
+                )
             })?;
         }
         SidebarFolderCommand::Pin(args) => {
@@ -1621,13 +1841,17 @@ async fn run_folder(
             let mut input = folder_update(args.folder_id);
             input.pinned_order_update = keys.into_iter().next().map(PinnedOrderUpdate::PinnedOrder);
             let payload = realtime.call(input).await?;
-            print_payload(ctx, &payload, || format!("Pinned folder {}.", args.folder_id))?;
+            print_payload(ctx, &payload, || {
+                format!("Pinned folder {}.", args.folder_id)
+            })?;
         }
         SidebarFolderCommand::Unpin(args) => {
             let mut input = folder_update(args.folder_id);
             input.pinned_order_update = Some(PinnedOrderUpdate::ClearPinnedOrder(true));
             let payload = realtime.call(input).await?;
-            print_payload(ctx, &payload, || format!("Unpinned folder {}.", args.folder_id))?;
+            print_payload(ctx, &payload, || {
+                format!("Unpinned folder {}.", args.folder_id)
+            })?;
         }
         SidebarFolderCommand::Delete(args) => {
             let disposition = if args.close_chats {
@@ -1664,7 +1888,11 @@ async fn run_folder(
 // MARK: - Text output
 
 fn chat_line(chat: &SidebarChat, indent: &str) -> String {
-    let mut line = format!("{indent}{:>8}  {}", chat.chat_id, output::terminal_text(&chat.title));
+    let mut line = format!(
+        "{indent}{:>8}  {}",
+        chat.chat_id,
+        output::terminal_text(&chat.title)
+    );
     if let Some(space) = chat.space_name.as_deref() {
         line.push_str(&format!("  · {}", output::terminal_text(space)));
     }
@@ -1685,7 +1913,11 @@ fn folder_lines(folder: &SidebarFolder, lines: &mut Vec<String>) {
         .as_deref()
         .map(|emoji| format!("{} ", output::terminal_text(emoji)))
         .unwrap_or_default();
-    lines.push(format!("  folder {:>2}  {emoji}{}", folder.folder_id, folder.display_title()));
+    lines.push(format!(
+        "  folder {:>2}  {emoji}{}",
+        folder.folder_id,
+        folder.display_title()
+    ));
     if folder.chats.is_empty() {
         lines.push("              (empty)".to_string());
     }
@@ -1777,13 +2009,20 @@ mod tests {
             .flat_map(SidebarEntry::chats)
             .cloned()
             .collect();
-        Sidebar { pinned, items, dialogs }
+        Sidebar {
+            pinned,
+            items,
+            dialogs,
+        }
     }
 
     fn fixture() -> Sidebar {
         // Root: chat 1 (b), folder 9 (d) with chats 3 (d1), 4 (d2), chat 2 (f).
         sidebar(
-            vec![SidebarEntry::Chat(pinned(7, "M")), SidebarEntry::Chat(pinned(8, "P"))],
+            vec![
+                SidebarEntry::Chat(pinned(7, "M")),
+                SidebarEntry::Chat(pinned(8, "P")),
+            ],
             vec![
                 SidebarEntry::Chat(chat(1, "b")),
                 SidebarEntry::Folder(folder(9, "d", vec![chat(3, "d1"), chat(4, "d2")])),
@@ -1792,7 +2031,11 @@ mod tests {
         )
     }
 
-    fn one(sidebar: &Sidebar, moving: Moving, placement: Placement) -> Result<(Lane, String), CliError> {
+    fn one(
+        sidebar: &Sidebar,
+        moving: Moving,
+        placement: Placement,
+    ) -> Result<(Lane, String), CliError> {
         sidebar
             .placement(&[moving], &placement)
             .map(|(lane, keys)| (lane, keys.into_iter().next().unwrap()))
@@ -1818,10 +2061,20 @@ mod tests {
 
     #[test]
     fn root_placement_after_folder_skips_its_children() {
-        let (lane, key) = one(&fixture(), Moving::Chat(1), Placement::After(Moving::Folder(9))).unwrap();
+        let (lane, key) = one(
+            &fixture(),
+            Moving::Chat(1),
+            Placement::After(Moving::Folder(9)),
+        )
+        .unwrap();
         assert_eq!(lane, Lane::Root);
         assert!(key.as_str() > "d2" && key.as_str() < "f", "{key}");
-        let (_, key) = one(&fixture(), Moving::Chat(1), Placement::Before(Moving::Chat(2))).unwrap();
+        let (_, key) = one(
+            &fixture(),
+            Moving::Chat(1),
+            Placement::Before(Moving::Chat(2)),
+        )
+        .unwrap();
         assert!(key.as_str() > "d2" && key.as_str() < "f", "{key}");
     }
 
@@ -1838,19 +2091,35 @@ mod tests {
     #[test]
     fn folder_placement_stays_inside_folder_interval() {
         let sidebar = fixture();
-        let (lane, key) = one(&sidebar, Moving::Chat(1), Placement::Top(Some(Lane::Folder(9)))).unwrap();
+        let (lane, key) = one(
+            &sidebar,
+            Moving::Chat(1),
+            Placement::Top(Some(Lane::Folder(9))),
+        )
+        .unwrap();
         assert_eq!(lane, Lane::Folder(9));
         assert!(key.as_str() > "d" && key.as_str() < "d1", "{key}");
-        let (_, key) = one(&sidebar, Moving::Chat(1), Placement::Bottom(Some(Lane::Folder(9)))).unwrap();
+        let (_, key) = one(
+            &sidebar,
+            Moving::Chat(1),
+            Placement::Bottom(Some(Lane::Folder(9))),
+        )
+        .unwrap();
         assert!(key.as_str() > "d2" && key.as_str() < "f", "{key}");
-        let (lane, key) = one(&sidebar, Moving::Chat(2), Placement::After(Moving::Chat(3))).unwrap();
+        let (lane, key) =
+            one(&sidebar, Moving::Chat(2), Placement::After(Moving::Chat(3))).unwrap();
         assert_eq!(lane, Lane::Folder(9));
         assert!(key.as_str() > "d1" && key.as_str() < "d2", "{key}");
     }
 
     #[test]
     fn target_lane_decides_pinning() {
-        let (lane, key) = one(&fixture(), Moving::Chat(1), Placement::Before(Moving::Chat(8))).unwrap();
+        let (lane, key) = one(
+            &fixture(),
+            Moving::Chat(1),
+            Placement::Before(Moving::Chat(8)),
+        )
+        .unwrap();
         assert_eq!(lane, Lane::Pinned);
         assert!(key.as_str() > "M" && key.as_str() < "P", "{key}");
     }
@@ -1859,22 +2128,54 @@ mod tests {
     fn several_chats_land_together_in_order() {
         let sidebar = fixture();
         let (lane, keys) = sidebar
-            .placement(&[Moving::Chat(2), Moving::Chat(1)], &Placement::Before(Moving::Chat(8)))
+            .placement(
+                &[Moving::Chat(2), Moving::Chat(1)],
+                &Placement::Before(Moving::Chat(8)),
+            )
             .unwrap();
         assert_eq!(lane, Lane::Pinned);
         assert_eq!(keys.len(), 2);
-        assert!(keys[0].as_str() > "M" && keys[0] < keys[1] && keys[1].as_str() < "P", "{keys:?}");
-        assert!(sidebar
-            .placement(&[Moving::Chat(1), Moving::Chat(2)], &Placement::After(Moving::Chat(2)))
-            .is_err());
+        assert!(
+            keys[0].as_str() > "M" && keys[0] < keys[1] && keys[1].as_str() < "P",
+            "{keys:?}"
+        );
+        assert!(
+            sidebar
+                .placement(
+                    &[Moving::Chat(1), Moving::Chat(2)],
+                    &Placement::After(Moving::Chat(2))
+                )
+                .is_err()
+        );
     }
 
     #[test]
     fn folders_cannot_nest_and_unknown_targets_fail() {
         let sidebar = fixture();
-        assert!(one(&sidebar, Moving::Folder(9), Placement::After(Moving::Chat(3))).is_err());
-        assert!(one(&sidebar, Moving::Chat(1), Placement::After(Moving::Chat(99))).is_err());
-        assert!(one(&sidebar, Moving::Chat(1), Placement::After(Moving::Folder(99))).is_err());
+        assert!(
+            one(
+                &sidebar,
+                Moving::Folder(9),
+                Placement::After(Moving::Chat(3))
+            )
+            .is_err()
+        );
+        assert!(
+            one(
+                &sidebar,
+                Moving::Chat(1),
+                Placement::After(Moving::Chat(99))
+            )
+            .is_err()
+        );
+        assert!(
+            one(
+                &sidebar,
+                Moving::Chat(1),
+                Placement::After(Moving::Folder(99))
+            )
+            .is_err()
+        );
         let (lane, key) = one(&sidebar, Moving::Folder(9), Placement::Top(None)).unwrap();
         assert_eq!(lane, Lane::Root);
         assert!(key.as_str() < "b");
@@ -1890,9 +2191,16 @@ mod tests {
         grouped.title = Some("Mid".to_string());
         let sidebar = sidebar(
             Vec::new(),
-            vec![SidebarEntry::Chat(a), SidebarEntry::Folder(grouped), SidebarEntry::Chat(b)],
+            vec![
+                SidebarEntry::Chat(a),
+                SidebarEntry::Folder(grouped),
+                SidebarEntry::Chat(b),
+            ],
         );
-        let sorted = sidebar.sorted_lane(Lane::Root, SortKey::Title, false).unwrap().unwrap();
+        let sorted = sidebar
+            .sorted_lane(Lane::Root, SortKey::Title, false)
+            .unwrap()
+            .unwrap();
         let order: Vec<String> = sorted.iter().map(|(entry, _)| entry.describe()).collect();
         assert_eq!(order, ["chat 2 (alpha)", "folder 9 (Mid)", "chat 1 (Zulu)"]);
         assert!(sorted.windows(2).all(|pair| pair[0].1 < pair[1].1));
@@ -1904,9 +2212,22 @@ mod tests {
         let mut recent = chat(1, "b");
         recent.last_activity = Some(NOW);
         let older = chat(2, "f");
-        let sidebar = sidebar(Vec::new(), vec![SidebarEntry::Chat(recent), SidebarEntry::Chat(older)]);
-        assert!(sidebar.sorted_lane(Lane::Root, SortKey::Activity, false).unwrap().is_none());
-        assert!(sidebar.sorted_lane(Lane::Root, SortKey::Activity, true).unwrap().is_some());
+        let sidebar = sidebar(
+            Vec::new(),
+            vec![SidebarEntry::Chat(recent), SidebarEntry::Chat(older)],
+        );
+        assert!(
+            sidebar
+                .sorted_lane(Lane::Root, SortKey::Activity, false)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            sidebar
+                .sorted_lane(Lane::Root, SortKey::Activity, true)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
@@ -1931,7 +2252,10 @@ mod tests {
         pinned_folder.pinned_order = Some("A".to_string());
         let doomed_folder = folder(12, "i", vec![chat(13, "i1")]);
         let sidebar = sidebar(
-            vec![SidebarEntry::Chat(pinned(7, "M")), SidebarEntry::Folder(pinned_folder)],
+            vec![
+                SidebarEntry::Chat(pinned(7, "M")),
+                SidebarEntry::Folder(pinned_folder),
+            ],
             vec![
                 SidebarEntry::Chat(stale),
                 SidebarEntry::Chat(fresh_open),
@@ -1943,7 +2267,11 @@ mod tests {
                 SidebarEntry::Folder(doomed_folder),
             ],
         );
-        let closing: Vec<i64> = sidebar.cleanup_candidates(NOW).iter().map(|chat| chat.chat_id).collect();
+        let closing: Vec<i64> = sidebar
+            .cleanup_candidates(NOW)
+            .iter()
+            .map(|chat| chat.chat_id)
+            .collect();
         assert_eq!(closing, [1, 5, 13]);
         let folders: Vec<i64> = sidebar
             .empty_folders_after(&closing)
