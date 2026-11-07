@@ -109,13 +109,25 @@ When a legacy binding matches the registered native session, its saved folder
 is retained and persisted for subsequent restarts. Explicit thread folder
 choices and bindings to a different native session take precedence.
 
-OpenCode and Amp use a private ACP process per session, retained for up to
-30 minutes of idle time. Advertised provider slash commands are forwarded as
-typed, including OpenCode `/compact`; unavailable structured operations stay
-out of settings. Native queue, passive input, session browser, and terminal
-handoff are unavailable on this route. Verify restart/resume and multiple
-turns in the same folder before qualifying these experimental providers for
-a release; an initialize handshake alone is insufficient.
+OpenCode 2.2 and newer run natively: the bridge is a client of OpenCode's
+shared background service (reused, or started with `opencode service start`,
+never stopped), follows its event stream, repairs gaps from the durable session
+log, and serves Inline's tools as client-hosted MCP. Steer, queue, passive
+input, approvals, questions, sub-agents, settings, `/plan`, `/undo`,
+`/compact`, fork, resume, the session browser and `/terminal` handoff use
+OpenCode's own API; advertised commands such as `/init` and `/review` run
+through its command API. `INLINE_OPENCODE_DRIVER=acp` in the bridge's service
+environment selects the ACP route instead.
+
+OpenCode 2.0 and 2.1, and Amp, use a private ACP process per session, retained
+for up to 30 minutes of idle time. Advertised provider slash commands are
+forwarded as typed, including OpenCode `/compact`; unavailable structured
+operations stay out of settings. Native queue, passive input, session browser,
+and terminal handoff are unavailable on this route. Verify restart/resume and
+multiple turns in the same folder before qualifying these experimental
+providers for a release; an initialize handshake alone is insufficient. The
+native OpenCode driver has an opt-in live lab against a real service
+(`crates/agent-driver-opencode/tests/live_lab.rs`).
 
 ## Codex runtime freshness
 
