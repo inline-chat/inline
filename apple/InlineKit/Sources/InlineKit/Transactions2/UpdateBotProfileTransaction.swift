@@ -51,10 +51,21 @@ public struct UpdateBotProfileTransaction: Transaction2 {
   }
 
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
-    guard case .updateBotProfile = result else {
+    guard case let .updateBotProfile(response) = result else {
       throw TransactionExecutionError.invalid
     }
     log.trace("updateBotProfile succeeded")
+    if response.hasBot {
+      do {
+        _ = try await AppDatabase.shared.dbWriter.write { db in
+          try User.save(db, user: response.bot)
+        }
+      } catch {
+        log.error("Failed to save updated bot profile", error: error)
+      }
+    }
+    // Mention menus and agent pickers hold the bot's name and photo.
+    NotificationCenter.default.post(name: .botAgentsChanged, object: context.botUserId)
   }
 
   public func failed(error: TransactionError2) async {
