@@ -546,6 +546,7 @@ public final class NewThreadMentionCandidatesViewModel: ObservableObject {
 
   private let db: AppDatabase
   private var spaceID: Int64?
+  private var ownedBotIDs: [Int64] = []
   private var cancellable: AnyCancellable?
   private var isObserving = false
   private let log = Log.scoped("NewThreadMentionCandidatesViewModel")
@@ -569,6 +570,16 @@ public final class NewThreadMentionCandidatesViewModel: ObservableObject {
     }
   }
 
+  /// The user's own bots are offered even without a chat or membership.
+  /// They're read from the database with the rest, so a rename shows live.
+  public func setOwnedBotIDs(_ ids: [Int64]) {
+    guard ownedBotIDs != ids else { return }
+    ownedBotIDs = ids
+    if isObserving {
+      observe()
+    }
+  }
+
   public func refresh() async {
     startObserving()
     guard let spaceID else { return }
@@ -584,13 +595,21 @@ public final class NewThreadMentionCandidatesViewModel: ObservableObject {
   private func observe() {
     cancellable?.cancel()
     let spaceID = spaceID
+    let ownedBotIDs = ownedBotIDs
     db.warnIfInMemoryDatabaseForObservation("NewThreadMentionCandidatesViewModel.candidates")
     cancellable = ValueObservation
       .tracking { db in
-        try ChatParticipantsWithMembersViewModel.newThreadMentionCandidates(
+        let candidates = try ChatParticipantsWithMembersViewModel.newThreadMentionCandidates(
           db,
           spaceID: spaceID
         )
+        guard !ownedBotIDs.isEmpty else { return candidates }
+        let bots = try User
+          .filter(ids: ownedBotIDs)
+          .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+          .asRequest(of: UserInfo.self)
+          .fetchAll(db)
+        return candidates.addingOwnedBots(bots)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(

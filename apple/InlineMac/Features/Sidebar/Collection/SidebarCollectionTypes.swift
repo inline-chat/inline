@@ -257,6 +257,8 @@ struct SidebarCollectionRenderState: Equatable {
     let colorScheme: String
     let themeRevision: Int
     let temporaryItemID: ChatListItem.Identifier?
+    /// Changes when the owned agent bots load, so an agent row's + includes it.
+    var agentBotsRevision: Int = 0
   }
 
   let selectedPeer: Peer?

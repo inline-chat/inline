@@ -740,7 +740,7 @@ class MinimalMessageViewAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     view.setRelatedMessage(fullMessage.message)
     if let embeddedMessage = fullMessage.repliedToMessage {
-      view.update(with: embeddedMessage, kind: .replyInMessage)
+      view.update(with: embeddedMessage, kind: .replyInMessage, quote: fullMessage.leadingReplyQuote?.text)
     }
     return view
   }()
@@ -2098,8 +2098,17 @@ class MinimalMessageViewAppKit: NSView {
     guard let user = fullMessage.senderInfo?.user else { return }
 
     Task { @MainActor in
-      openChat(peer: .user(id: user.id))
+      openSenderProfile(peer: .user(id: user.id))
     }
+  }
+
+  private func openSenderProfile(peer: Peer) {
+    guard let dependencies else {
+      Nav.main.open(.chatInfo(peer: peer))
+      return
+    }
+
+    dependencies.openChatInfo(peer: peer)
   }
 
   func avatarOverlayItem(in coordinateView: NSView) -> MessageAvatarOverlayItem? {
@@ -3070,7 +3079,7 @@ class MinimalMessageViewAppKit: NSView {
     let text = translationText ?? fullMessage.message.text ?? ""
     let entities = translationEntities ?? fullMessage.message.entities
     let richBlockPlan = props.layout.richBlockContent
-    let blockContent = richBlockPlan == nil ? nil : fullMessage.message.blockContent
+    let blockContent = richBlockPlan == nil ? nil : fullMessage.leadingReplyQuote?.body ?? fullMessage.message.blockContent
 
     let renderCacheStyleKey = "\(richTextStyleKey)|links-v1"
     let attributedString: NSAttributedString
@@ -4149,7 +4158,7 @@ class MinimalMessageViewAppKit: NSView {
     if props.layout.hasReply {
       replyView.setRelatedMessage(fullMessage.message)
       if let embeddedMessage = fullMessage.repliedToMessage {
-        replyView.update(with: embeddedMessage, kind: .replyInMessage)
+        replyView.update(with: embeddedMessage, kind: .replyInMessage, quote: fullMessage.leadingReplyQuote?.text)
       }
     }
     updateReplyThreadSummaryView(for: props)

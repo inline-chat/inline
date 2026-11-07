@@ -75,6 +75,8 @@ public enum ChatListDatabaseQuery {
         "lastMessage"."videoId" AS "lastMessageVideoID",
         "lastMessage"."documentId" AS "lastMessageDocumentID",
         "lastMessage"."contentPayload" AS "lastMessageContentPayload",
+        "lastMessage"."repliedToMessageId" AS "lastMessageRepliedToID",
+        "lastMessage"."entities" AS "lastMessageEntities",
         "lastTranslation"."translation" AS "lastMessageTranslation",
         "lastDocument"."fileName" AS "lastDocumentFileName",
         "lastSender"."firstName" AS "senderFirstName",
@@ -351,7 +353,9 @@ public enum ChatListDatabaseQuery {
       videoID: row[.lastMessageVideoID],
       documentID: row[.lastMessageDocumentID],
       documentFileName: row[.lastDocumentFileName],
-      contentPayloadData: row[.lastMessageContentPayload]
+      contentPayloadData: row[.lastMessageContentPayload],
+      repliedToMessageID: row[.lastMessageRepliedToID],
+      entities: row[.lastMessageEntities]
     )) else {
       return nil
     }
@@ -400,6 +404,11 @@ public enum ChatListDatabaseQuery {
     if let payload, payload.hasServiceMessage,
        let fallback = singleLineText(payload.serviceMessage.fallbackText) {
       return fallback
+    }
+    if input.repliedToMessageID != nil, let text = input.text,
+       let caption = singleLineText(ReplyQuote.caption(afterLeadingQuoteIn: text, entities: input.entities))
+    {
+      return caption
     }
     if let text = singleLineText(input.text) {
       return text
@@ -533,4 +542,7 @@ struct ChatListMessagePreviewInput {
   let documentID: Int64?
   let documentFileName: String?
   let contentPayloadData: Data?
+  /// With entities, lets a reply's opening quote give way to its caption, like Telegram.
+  var repliedToMessageID: Int64? = nil
+  var entities: MessageEntities? = nil
 }

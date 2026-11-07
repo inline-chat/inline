@@ -670,7 +670,7 @@ async fn restore(
         format!("api/session/{id}/message"),
     );
     let log_path = format!("api/experimental/session/{id}/log");
-    let (active, inbox, children, latest, floor) = tokio::join!(
+    let (active, inbox, children, latest, floor, newest) = tokio::join!(
         api.get("api/session/active", Query::new()),
         api.get(&inbox_path, Query::new()),
         api.get(
@@ -685,6 +685,10 @@ async fn restore(
                 .with("order", "desc"),
         ),
         log_head(api, &log_path),
+        api.get(
+            &message_path,
+            Query::new().with("limit", 1).with("order", "desc")
+        ),
     );
     let active = active.map(data).unwrap_or_default();
     let running = |session: &str| active.get(session).is_some();
@@ -721,6 +725,20 @@ async fn restore(
             settings.effort = spec.settings.effort.clone();
         }
         state.mapper.set_floor(floor);
+        // History stops here: a later reconciliation adds only newer messages.
+        if let Some(newest) = newest
+            .ok()
+            .and_then(|page| page.get("data").cloned())
+            .and_then(|data| {
+                data.as_array()?
+                    .first()?
+                    .get("id")?
+                    .as_str()
+                    .map(str::to_owned)
+            })
+        {
+            state.mapper.anchor(&newest);
+        }
         state.mapper.set_settings(settings.clone());
         events.push(Event::Settings {
             effective: settings,

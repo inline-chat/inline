@@ -297,4 +297,52 @@ describe("dialog folders", () => {
     expect(dialog?.open).toBe(true)
     expect(dialog?.order).toBe(originalOrder)
   })
+
+  test("ungrouping a pinned folder keeps its chats pinned in the folder's slot", async () => {
+    const owner = await testUtils.createUser("dialog-folder-ungroup-pinned-owner@example.com")
+    const first = await testUtils.createUser("dialog-folder-ungroup-pinned-first@example.com")
+    const second = await testUtils.createUser("dialog-folder-ungroup-pinned-second@example.com")
+    const after = await testUtils.createUser("dialog-folder-ungroup-pinned-after@example.com")
+    const chats = []
+    for (const peer of [first, second, after]) {
+      const { chat } = await testUtils.createPrivateChatWithOptionalDialog({
+        userA: owner,
+        userB: peer,
+        createDialogForUserA: true,
+        createDialogForUserB: false,
+      })
+      chats.push(chat)
+    }
+    const afterChat = chats[2]!
+    await db
+      .update(dialogs)
+      .set({ pinned: true, pinnedOrder: "q" })
+      .where(and(eq(dialogs.userId, owner.id), eq(dialogs.chatId, afterChat.id)))
+
+    const created = await createDialogFolder(
+      { peers: [peerUser(first.id), peerUser(second.id)], pinnedOrder: "p" },
+      testUtils.functionContext({ userId: owner.id, sessionId: 24 }),
+    )
+
+    const result = await deleteDialogFolder(
+      {
+        folderId: Number(created.folder?.id),
+        disposition: DeleteDialogFolderDisposition.KEEP_DIALOGS,
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 24 }),
+    )
+    expect(result.dialogs.every((dialog) => dialog.pinned === true)).toBe(true)
+
+    const rows = await db.select().from(dialogs).where(eq(dialogs.userId, owner.id))
+    const byChat = new Map(rows.map((row) => [row.chatId, row]))
+    const firstRow = byChat.get(chats[0]!.id)
+    const secondRow = byChat.get(chats[1]!.id)
+    expect(firstRow?.folderId).toBeNull()
+    expect(firstRow?.pinned).toBe(true)
+    expect(secondRow?.pinned).toBe(true)
+    expect(firstRow!.pinnedOrder! > "p").toBe(true)
+    expect(firstRow!.pinnedOrder! < secondRow!.pinnedOrder!).toBe(true)
+    expect(secondRow!.pinnedOrder! < "q").toBe(true)
+    expect(byChat.get(afterChat.id)?.pinnedOrder).toBe("q")
+  })
 })

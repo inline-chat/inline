@@ -532,6 +532,7 @@ class GlassComposeAppKit: NSView {
         self?.focus()
       }
     } else {
+      hydrateInitialDraftIfNeeded()
       updateVoiceAvailability(phase: voiceViewModel.phase)
       updateVoiceKeyHandlers(phase: voiceViewModel.phase)
       updateHeight(animate: false)
@@ -1168,6 +1169,7 @@ class GlassComposeAppKit: NSView {
     state.replyingToMsgIdPublisher
       .sink { [weak self] replyingToMsgId in
         guard let self else { return }
+        removeStaleReplyQuote(replyingTo: replyingToMsgId)
         updateAgentReplyTarget(replyingToMsgId)
         updateMessageView(to: replyingToMsgId, kind: .replying, animate: true)
         updateVoiceAvailability()
@@ -3166,15 +3168,37 @@ class GlassComposeAppKit: NSView {
     }
   }
 
-  /// Adds quote lines after anything already typed, through the normal input path, and
-  /// leaves the cursor at the end so the reply is typed below the quote.
+  /// The quote lines Quote put at the top and the message they quote, so quoting again or
+  /// dropping the reply can take them back out.
+  private var insertedReplyQuote: (markdown: String, messageId: Int64)?
+
+  /// Puts quote lines first, replacing the last quote, through the normal input path, and
+  /// leaves the cursor at the end so the reply is typed below the quote. One quote per reply,
+  /// like Telegram, so the reply shows it in its header.
   private func insertQuote(_ markdown: String) {
     let textView = textEditor.textView
-    let insertion = MessageMarkdown.quoteInsertion(markdown, into: textView.string)
+    let insertion = MessageMarkdown.replyQuoteInsertion(
+      markdown,
+      into: textView.string,
+      replacing: insertedReplyQuote?.markdown
+    )
     textView.updateTypingAttributesIfNeeded()
     textView.insertText(insertion.text, replacementRange: insertion.range)
+    insertedReplyQuote = state.replyingToMsgId.map { (markdown, $0) }
     textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
     focus()
+  }
+
+  /// A reply that moved to another message, or was dropped, takes its inserted quote with it
+  /// while the lines are still untouched at the top.
+  private func removeStaleReplyQuote(replyingTo replyingToMsgId: Int64?) {
+    guard let inserted = insertedReplyQuote, replyingToMsgId != inserted.messageId else { return }
+    insertedReplyQuote = nil
+    let textView = textEditor.textView
+    guard let range = MessageMarkdown.replyQuoteRemoval(inserted.markdown, from: textView.string) else { return }
+    let selection = textView.selectedRange()
+    textView.insertText("", replacementRange: range)
+    textView.setSelectedRange(NSRange(location: max(0, selection.location - range.length), length: 0))
   }
 
   // TODO: Abstract setAttributedString out of this
@@ -4239,21 +4263,36 @@ extension GlassComposeAppKit {
 
   /// Loads draft and if nothing found returns false
   func loadDraft() -> Bool {
-    guard let draft = drafts2.load(peer: peerId, legacyDraftMessage: dialog?.draftMessage),
-          !draft.isEmpty
-    else {
-      return false
+    let text: String
+    let entities: MessageEntities?
+    let draftAttachments: [Drafts2Attachment]
+    switch usage {
+      case .chat:
+        guard let draft = drafts2.load(peer: peerId, legacyDraftMessage: dialog?.draftMessage),
+              !draft.isEmpty
+        else {
+          return false
+        }
+        text = draft.text
+        entities = draft.entities
+        draftAttachments = draft.attachments
+      case let .newThread(context):
+        // Only text and entities are kept before the thread exists.
+        guard let draft = context.savedDraft() else { return false }
+        text = draft.text
+        entities = draft.entities
+        draftAttachments = []
     }
 
     // Convert to attributed string. Most drafts are plain text, so avoid entity
     // parsing work when protobuf entities are not present.
-    let attributedString: NSAttributedString = if let entities = draft.entities {
+    let attributedString: NSAttributedString = if let entities {
       toAttributedString(
-        text: draft.text,
+        text: text,
         entities: entities
       )
     } else {
-      textEditor.createAttributedString(draft.text)
+      textEditor.createAttributedString(text)
     }
 
     // `didLayout()` is called after layout in normal flow. Only force layout
@@ -4264,7 +4303,9 @@ extension GlassComposeAppKit {
 
     // Set as compose text
     setAttributedString(attributedString)
-    renderDraftAttachments(draft.attachments)
+    renderDraftAttachments(draftAttachments)
+    // The host reads mentions and the Agent target from the draft.
+    notifyNewThreadDraftChanged()
 
     return true
   }

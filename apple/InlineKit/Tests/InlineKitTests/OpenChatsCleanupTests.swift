@@ -46,6 +46,26 @@ struct OpenChatsCleanupTests {
     ))
   }
 
+  @Test("Automatic cleanup keeps a new empty untitled thread until its timeout")
+  func automaticKeepsNewEmptyUntitledThread() {
+    let policy = OpenChatsCleanupPolicy.automatic(timeout: 12 * 60 * 60)
+
+    #expect(policy.shouldClose(
+      now: now,
+      openedAt: now,
+      lastActivityAt: nil,
+      latestOwnMessageAt: nil,
+      isEmptyUntitled: true
+    ) == false)
+    #expect(policy.shouldClose(
+      now: now,
+      openedAt: now.addingTimeInterval(-12 * 60 * 60),
+      lastActivityAt: nil,
+      latestOwnMessageAt: nil,
+      isEmptyUntitled: true
+    ))
+  }
+
   @Test("Automatic cleanup preserves its opened-or-sent timeout")
   func automaticTimeout() {
     let policy = OpenChatsCleanupPolicy.automatic(timeout: 12 * 60 * 60)

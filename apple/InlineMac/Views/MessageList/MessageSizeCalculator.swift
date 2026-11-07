@@ -990,10 +990,12 @@ class MessageSizeCalculator {
     {
       let richContentInset = hasBubbleColor ? bubbleContentHorizontalInset : 0
       let richViewportWidth = max(1, availableWidth + richContentInset * 2)
+      // A quote reply shows its quote in the reply header, so the body skips it.
+      let replyQuote = message.leadingReplyQuote
       richBlockPlan = RichBlockLayoutPlanner.shared.plan(
-        content: blockContentPayload.content,
-        contentCacheSignature: blockContentPayload.cacheSignature,
-        contentByteCount: blockContentPayload.byteCount,
+        content: replyQuote?.body ?? blockContentPayload.content,
+        contentCacheSignature: replyQuote?.bodyCacheSignature ?? blockContentPayload.cacheSignature,
+        contentByteCount: replyQuote?.bodyByteCount ?? blockContentPayload.byteCount,
         attributedText: attributedString,
         availableWidth: richViewportWidth,
         contentHorizontalInset: richContentInset,
@@ -1809,10 +1811,11 @@ class MessageSizeCalculator {
        text.utf8.elementsEqual((message.message.text ?? "").utf8),
        let blockContentPayload = message.message.blockContentPayload
     {
+      let replyQuote = message.leadingReplyQuote
       richBlockPlan = RichBlockLayoutPlanner.shared.plan(
-        content: blockContentPayload.content,
-        contentCacheSignature: blockContentPayload.cacheSignature,
-        contentByteCount: blockContentPayload.byteCount,
+        content: replyQuote?.body ?? blockContentPayload.content,
+        contentCacheSignature: replyQuote?.bodyCacheSignature ?? blockContentPayload.cacheSignature,
+        contentByteCount: replyQuote?.bodyByteCount ?? blockContentPayload.byteCount,
         attributedText: attributedString,
         availableWidth: textAvailableWidth,
         baseFontSize: fontSize,

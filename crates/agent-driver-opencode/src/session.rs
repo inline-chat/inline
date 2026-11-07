@@ -168,8 +168,36 @@ impl SessionInner {
     pub(crate) async fn resync(&self) {
         let after = self.state().mapper.replay_after();
         self.replay(&self.id, after).await;
+        // OpenCode may keep no durable event rows at all (it projects them
+        // into messages), so the log can replay nothing. The message history
+        // and the active list are the record that always exists.
+        self.reconcile().await;
         self.resync_children().await;
         self.refresh_interactions().await;
+    }
+
+    async fn reconcile(&self) {
+        let api = self.api();
+        let path = self.path("/message");
+        let (messages, active) = tokio::join!(
+            api.get(&path, Query::new().with("order", "desc").with("limit", 50)),
+            api.get("api/session/active", Query::new()),
+        );
+        let (Ok(messages), Ok(active)) = (messages, active) else {
+            return;
+        };
+        let messages = messages
+            .get("data")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let active = data(active).get(&self.id).is_some();
+        let mut state = self.state();
+        if state.released {
+            return;
+        }
+        let events = state.mapper.reconcile(&messages, active);
+        self.emit_locked(&mut state, events);
     }
 
     async fn replay(&self, session: &str, after: Option<u64>) {
@@ -686,32 +714,50 @@ impl SessionInner {
                 if scope != SettingsScope::Thread {
                     return Err(OpError::Unavailable(availability_for_scope(scope)));
                 }
+                // Apply what OpenCode can take and skip the rest, so a value
+                // it has no use for (a speed, a folder, another harness's
+                // permission mode) never blocks a model change.
+                let mut native = Vec::new();
+                let mut skipped = Vec::new();
                 if change.folder.is_some() {
-                    return Err(OpError::Unavailable(Availability::unavailable(
-                        "an OpenCode session keeps its folder; start new work to change it",
-                    )));
+                    skipped.push(
+                        "an OpenCode session keeps its folder; start new work to change it"
+                            .to_owned(),
+                    );
                 }
                 if change.speed.is_some() {
-                    return Err(OpError::Unavailable(Availability::unavailable(
-                        "OpenCode has no speed setting",
-                    )));
+                    skipped.push(
+                        "OpenCode has no speed setting; pick a -fast model instead".to_owned(),
+                    );
                 }
-                let mut native = Vec::new();
-                if change.model.is_some() || change.effort.is_some() {
-                    let current = self
-                        .state()
-                        .mapper
-                        .settings()
-                        .model
-                        .as_ref()
-                        .map(|model| model.value.clone());
-                    let model = change.model.clone().or(current).ok_or_else(|| {
-                        OpError::Rejected("choose a model before its reasoning level".to_owned())
-                    })?;
-                    let reference = crate::catalog::model_ref(&model, change.effort.as_deref())
-                        .ok_or_else(|| {
-                            OpError::Rejected(format!("{model} is not an OpenCode model"))
-                        })?;
+                let current = self
+                    .state()
+                    .mapper
+                    .settings()
+                    .model
+                    .as_ref()
+                    .map(|model| model.value.clone());
+                let reference = match (
+                    change.model.clone().or(current),
+                    &change.model,
+                    &change.effort,
+                ) {
+                    (_, None, None) => None,
+                    (Some(model), _, effort) => {
+                        match crate::catalog::model_ref(&model, effort.as_deref()) {
+                            Some(reference) => Some((model, reference)),
+                            None => {
+                                skipped.push(format!("{model} is not an OpenCode model"));
+                                None
+                            }
+                        }
+                    }
+                    (None, _, _) => {
+                        skipped.push("choose a model before its reasoning level".to_owned());
+                        None
+                    }
+                };
+                if let Some((model, reference)) = reference {
                     api.post(&self.path("/model"), json!({"model": reference}))
                         .await
                         .map_err(op_error)?;
@@ -722,24 +768,34 @@ impl SessionInner {
                     native.push(json!({"model": model}));
                 }
                 if let Some(mode) = &change.permission_mode {
-                    let rules = crate::catalog::permission_rules(mode).ok_or_else(|| {
-                        OpError::Rejected(format!("unknown permission mode {mode}"))
-                    })?;
-                    api.send(
-                        Method::PATCH,
-                        &self.path(""),
-                        Query::new(),
-                        Some(json!({"permissions": rules})),
-                    )
-                    .await
-                    .map_err(op_error)?;
-                    let mut state = self.state();
-                    let event = state.mapper.set_permission_mode(mode.clone());
-                    self.emit_locked(&mut state, vec![event]);
-                    native.push(json!({"permission_mode": mode}));
+                    match crate::catalog::permission_rules(mode) {
+                        Some(rules) => {
+                            api.send(
+                                Method::PATCH,
+                                &self.path(""),
+                                Query::new(),
+                                Some(json!({"permissions": rules})),
+                            )
+                            .await
+                            .map_err(op_error)?;
+                            let mut state = self.state();
+                            let event = state.mapper.set_permission_mode(mode.clone());
+                            self.emit_locked(&mut state, vec![event]);
+                            native.push(json!({"permission_mode": mode}));
+                        }
+                        None => skipped.push(format!("{mode} is not an OpenCode permission mode")),
+                    }
+                }
+                if native.is_empty() && !skipped.is_empty() {
+                    return Err(OpError::Unavailable(Availability::unavailable(
+                        skipped.join("; "),
+                    )));
+                }
+                if !skipped.is_empty() {
+                    log::info!(target: "inline::opencode", "settings partly applied; skipped: {}", skipped.join("; "));
                 }
                 Ok(OpOutcome::Accepted {
-                    native: json!(native),
+                    native: json!({"applied": native, "skipped": skipped}),
                 })
             }
             Op::Compact => {
@@ -813,6 +869,20 @@ impl SessionInner {
                 api.post(&self.path("/agent"), json!({"agent": mode.as_str()}))
                     .await
                     .map_err(op_error)?;
+                Ok(OpOutcome::accepted())
+            }
+            Op::StopChild { child }
+                if child.kind == inline_agent_bridge::harness::ChildKind::BackgroundTask =>
+            {
+                // A background shell stops through the shell API.
+                api.send(
+                    Method::DELETE,
+                    &format!("api/shell/{}", child.id.as_str()),
+                    Query::new(),
+                    None,
+                )
+                .await
+                .map_err(op_error)?;
                 Ok(OpOutcome::accepted())
             }
             Op::StopChild { child } => {

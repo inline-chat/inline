@@ -164,6 +164,78 @@ async fn live_turns_steering_catalog_and_resume() {
         }
     )));
     let id = session.key().session.clone();
+
+    // Real message history rebuilds the same turn (the repair path when
+    // OpenCode keeps no event rows).
+    let info = inline_agent_driver_opencode::service::discover(
+        &inline_agent_driver_opencode::ServiceConfig::new(executable()),
+    )
+    .await
+    .expect("service");
+    let api = inline_agent_driver_opencode::api::Api::new(info.0).unwrap();
+    let messages = api
+        .get(
+            &format!("api/session/{}/message", id.as_str()),
+            inline_agent_driver_opencode::api::Query::new()
+                .with("order", "desc")
+                .with("limit", 50),
+        )
+        .await
+        .unwrap();
+    let messages = messages["data"].as_array().cloned().unwrap();
+    let mut mapper = inline_agent_driver_opencode::mapper::Mapper::new(
+        id.as_str(),
+        Some(folder.path().to_path_buf()),
+    )
+    .with_opened_ms(0);
+    let rebuilt = mapper.reconcile(&messages, false);
+    let started = rebuilt
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                Event::Turn {
+                    phase: TurnPhase::Started { .. },
+                    ..
+                }
+            )
+        })
+        .count();
+    let completed = rebuilt
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                Event::Turn {
+                    phase: TurnPhase::Completed {
+                        outcome: TurnOutcome::Completed,
+                        ..
+                    },
+                    ..
+                }
+            )
+        })
+        .count();
+    let rebuilt_answer = rebuilt.iter().rev().find_map(|event| match event {
+        Event::Item(Item {
+            update:
+                ItemUpdate::Completed {
+                    body:
+                        ItemBody::Message {
+                            role: MessageRole::Assistant,
+                            text,
+                            ..
+                        },
+                    ..
+                },
+            ..
+        }) => Some(text.clone()),
+        _ => None,
+    });
+    eprintln!("rebuilt: {started} started, {completed} completed, answer {rebuilt_answer:?}");
+    assert_eq!((started, completed), (1, 1), "{rebuilt:?}");
+    assert!(rebuilt.iter().any(|event| matches!(event, Event::Input { id, fact: InputFact::Consumed { .. } } if id.as_str() == "live-1")));
+    assert_eq!(rebuilt_answer.as_deref(), Some(answer.as_str()));
     session.release().await.unwrap();
     drop(session);
 

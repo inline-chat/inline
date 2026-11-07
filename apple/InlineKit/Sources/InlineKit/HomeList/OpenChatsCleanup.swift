@@ -15,18 +15,21 @@ public enum OpenChatsCleanupPolicy: Equatable, Sendable {
     latestOwnMessageAt: Date?,
     isEmptyUntitled: Bool
   ) -> Bool {
-    if isEmptyUntitled {
-      return true
-    }
-
     switch self {
     case .manual:
+      // Asked-for cleanup clears empty untitled threads at once.
+      if isEmptyUntitled {
+        return true
+      }
       let openedCutoff = now.addingTimeInterval(-Self.manualOpenedAge)
       let activityCutoff = now.addingTimeInterval(-Self.manualActivityAge)
       return openedAt <= openedCutoff
         && (lastActivityAt ?? openedAt) <= activityCutoff
 
     case let .automatic(timeout):
+      // A new empty thread follows the same timeout as any chat. Closing it
+      // early deletes it on the server, so it would vanish moments after
+      // being created, e.g. when a reconnect triggers a cleanup run.
       let cutoff = now.addingTimeInterval(-max(timeout, 0))
       return max(openedAt, latestOwnMessageAt ?? openedAt) <= cutoff
     }

@@ -901,7 +901,37 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     messageView.highlightMediaOverlay()
   }
 
+  /// Highlights `quote` in the message text; false when the message doesn't show it.
+  func highlightQuote(_ quote: String) -> Bool {
+    guard showsNextMessageView, let nextMessageView, let theme, !isServiceMessage else { return false }
+    // A deeper shade of the message's own bubble, so the text stays clear on it. A near-black
+    // bubble can't get visibly darker; it gets a little lighter instead.
+    let bubble = (outgoing ? theme.outgoingBubble : theme.incomingBubble).uiColor
+      .resolvedColor(with: traitCollection)
+    let isDark = traitCollection.userInterfaceStyle == .dark
+    let color = outgoing || !isDark
+      ? Self.blend(bubble, with: .black, fraction: outgoing ? 0.22 : 0.12)
+      : Self.blend(bubble, with: .white, fraction: 0.14)
+    return nextMessageView.highlightQuote(quote, color: color)
+  }
+
+  /// Where `quote` sits in `target`'s coordinates; nil when the message doesn't show it.
+  func quoteRect(_ quote: String, in target: UIView) -> CGRect? {
+    guard showsNextMessageView, let nextMessageView, !isServiceMessage else { return nil }
+    return nextMessageView.quoteRect(quote, in: target)
+  }
+
+  private static func blend(_ color: UIColor, with other: UIColor, fraction: CGFloat) -> UIColor {
+    var (r, g, b, a): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+    var (r2, g2, b2, a2): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+    guard color.getRed(&r, green: &g, blue: &b, alpha: &a),
+          other.getRed(&r2, green: &g2, blue: &b2, alpha: &a2) else { return color }
+    func mix(_ x: CGFloat, _ y: CGFloat) -> CGFloat { x + (y - x) * fraction }
+    return UIColor(red: mix(r, r2), green: mix(g, g2), blue: mix(b, b2), alpha: a)
+  }
+
   func clearHighlight() {
+    nextMessageView?.clearQuoteHighlight()
     nextMessageView?.bubbleView.clearHighlight()
     guard let messageView else { return }
     guard !isServiceMessage else { return }

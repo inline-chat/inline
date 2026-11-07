@@ -105,6 +105,17 @@ pub struct Mapper {
     completed_order: VecDeque<String>,
     pending: HashMap<String, Pending>,
     children: HashMap<String, ChildState>,
+    /// Shells moved to the background, by shell id.
+    shells: HashMap<String, ChildState>,
+    /// Messages already shown (user prompts and assistant steps), so a
+    /// reconciliation from the message history adds only what was missed.
+    seen: HashSet<String>,
+    seen_order: VecDeque<String>,
+    /// When Inline started following the session (ms); older messages are
+    /// history, never news.
+    opened_ms: u64,
+    /// The newest message when Inline started following the session.
+    anchor: Option<String>,
     last_seq: Option<u64>,
     total: TokenUsage,
     settings: EffectiveSettings,
@@ -155,6 +166,11 @@ impl Mapper {
             completed_order: VecDeque::new(),
             pending: HashMap::new(),
             children: HashMap::new(),
+            shells: HashMap::new(),
+            seen: HashSet::new(),
+            seen_order: VecDeque::new(),
+            opened_ms: now_ms(),
+            anchor: None,
             last_seq: None,
             total: TokenUsage::default(),
             settings: EffectiveSettings::default(),
@@ -199,6 +215,7 @@ impl Mapper {
     pub fn running_children(&self) -> Vec<ChildRef> {
         self.children
             .values()
+            .chain(self.shells.values())
             .filter(|child| child.running)
             .map(|child| child.child.clone())
             .collect()
@@ -531,6 +548,56 @@ impl Mapper {
                 ))]
             }
             "session.shell.started" | "session.shell.ended" => self.shell(&data, event),
+            "session.synthetic"
+                if data.pointer("/metadata/source").and_then(Value::as_str) == Some("shell") =>
+            {
+                let shell = data
+                    .pointer("/metadata/shellID")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let status = match data.pointer("/metadata/state").and_then(Value::as_str) {
+                    Some("completed") => ChildStatus::Completed,
+                    Some("cancelled") => ChildStatus::Stopped,
+                    _ => ChildStatus::Failed,
+                };
+                let mut events = if self.shells.contains_key(&shell) {
+                    self.background_shell(&shell, None, status)
+                } else {
+                    Vec::new()
+                };
+                events.push(Event::Item(Item::new(
+                    item_id(&format!("synthetic:{}", event_id(event))),
+                    self.turn().cloned(),
+                    ItemUpdate::Completed {
+                        body: ItemBody::Command {
+                            command: data
+                                .get("description")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_owned(),
+                            cwd: None,
+                            actions: Vec::new(),
+                            output: data
+                                .pointer("/metadata/output")
+                                .and_then(Value::as_str)
+                                .map(|text| tail(text, MAX_OUTPUT_CHARS)),
+                            exit_code: data
+                                .pointer("/metadata/exit")
+                                .and_then(Value::as_i64)
+                                .and_then(|code| i32::try_from(code).ok()),
+                            duration_ms: None,
+                        },
+                        status: match status {
+                            ChildStatus::Completed => ItemStatus::Completed,
+                            ChildStatus::Stopped => ItemStatus::Interrupted,
+                            _ => ItemStatus::Failed,
+                        },
+                    },
+                    event.clone(),
+                )));
+                events
+            }
             "session.synthetic" => vec![Event::Item(Item::new(
                 item_id(&format!("synthetic:{}", event_id(event))),
                 self.turn().cloned(),
@@ -775,6 +842,7 @@ impl Mapper {
         let Some(id) = data.get("inboxID").and_then(Value::as_str) else {
             return Vec::new();
         };
+        self.see(id);
         let entry = self.inbox.remove(id);
         self.inbox_order.retain(|entry| entry != id);
         let mut events = Vec::new();
@@ -1120,9 +1188,63 @@ impl Mapper {
                 ItemUpdate::Completed { body, status },
                 event.clone(),
             )
-            .with_parent(child),
+            .with_parent(child.clone()),
         ));
+        // A shell moved to the background keeps running after its call
+        // returns; it reports back through a synthetic notification.
+        if child.is_none()
+            && matches!(call.name.as_str(), "shell" | "bash")
+            && let Some(metadata) = &metadata
+            && metadata.get("status").and_then(Value::as_str) == Some("running")
+            && let Some(shell) = metadata.get("shellID").and_then(Value::as_str)
+        {
+            let command = call
+                .input
+                .get("command")
+                .and_then(Value::as_str)
+                .map(|command| bounded(command, MAX_PREVIEW_CHARS));
+            events.extend(self.background_shell(shell, command, ChildStatus::Running));
+        }
         events
+    }
+
+    /// A background shell as a child, like Claude's background tasks.
+    fn background_shell(
+        &mut self,
+        shell: &str,
+        title: Option<String>,
+        status: ChildStatus,
+    ) -> Vec<Event> {
+        let Ok(id) = ChildId::new(shell) else {
+            return Vec::new();
+        };
+        let running = matches!(status, ChildStatus::Started | ChildStatus::Running);
+        let state = self
+            .shells
+            .entry(shell.to_owned())
+            .or_insert_with(|| ChildState {
+                child: ChildRef {
+                    id,
+                    kind: ChildKind::BackgroundTask,
+                },
+                title: None,
+                running,
+            });
+        if title.is_some() {
+            state.title = title;
+        }
+        state.running = running;
+        let update = ChildUpdate {
+            child: state.child.clone(),
+            status,
+            title: state.title.clone(),
+            accepts_direct_input: false,
+            native: Value::Null,
+        };
+        if !running {
+            self.shells.remove(shell);
+        }
+        vec![Event::Child { update }]
     }
 
     /// Completes, as interrupted, the tools still open for the main agent
@@ -1166,6 +1288,9 @@ impl Mapper {
     // MARK: steps and usage
 
     fn step_started(&mut self, data: &Value) -> Vec<Event> {
+        if let Some(message) = data.get("assistantMessageID").and_then(Value::as_str) {
+            self.see(message);
+        }
         let mut events = Vec::new();
         if std::mem::take(&mut self.limited) && self.turn.is_some() {
             events.push(Event::State {
@@ -1655,6 +1780,212 @@ impl Mapper {
         }
     }
 
+    fn see(&mut self, message: &str) {
+        if self.seen.insert(message.to_owned()) {
+            self.seen_order.push_back(message.to_owned());
+            while self.seen_order.len() > MAX_TRACKED {
+                if let Some(oldest) = self.seen_order.pop_front() {
+                    self.seen.remove(&oldest);
+                }
+            }
+        }
+    }
+
+    /// Treats messages from `ms` on as new (tests and labs that rebuild a
+    /// session they did not follow live).
+    pub fn with_opened_ms(mut self, ms: u64) -> Self {
+        self.opened_ms = ms;
+        self
+    }
+
+    /// Marks the newest existing message as the start of what Inline shows.
+    pub fn anchor(&mut self, message: &str) {
+        self.see(message);
+        self.anchor = Some(message.to_owned());
+    }
+
+    /// Rebuilds what was missed while the event stream was down, from the
+    /// session's own message history (OpenCode does not always keep its
+    /// durable event log). `messages` are newest first, as listed; the walk
+    /// stops at the first message already shown and never reaches messages
+    /// from before Inline followed the session. Parts already shown keep
+    /// their ids and are skipped, so nothing is shown twice.
+    pub fn reconcile(&mut self, messages: &[Value], active: bool) -> Vec<Event> {
+        let opened = self.opened_ms.saturating_sub(5_000);
+        let fresh: Vec<Value> = messages
+            .iter()
+            .take_while(|message| {
+                let id = message
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let created = message
+                    .pointer("/time/created")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(u64::MAX);
+                // An assistant step seen when it started may have finished
+                // unseen: its parts are checked one by one. A prompt already
+                // shown, or the open-time anchor, ends the walk.
+                let assistant = message.get("type").and_then(Value::as_str) == Some("assistant");
+                self.anchor.as_deref() != Some(id)
+                    && (assistant || !self.seen.contains(id))
+                    && created >= opened
+            })
+            .cloned()
+            .collect();
+        let mut events = Vec::new();
+        for (index, message) in fresh.iter().rev().enumerate() {
+            let Some(id) = message.get("id").and_then(Value::as_str).map(str::to_owned) else {
+                continue;
+            };
+            let synthetic = |kind: &str, data: Value| json!({"id": format!("reconcile-{id}-{index}-{kind}"), "created": message.pointer("/time/created").cloned().unwrap_or(Value::Null), "type": kind, "data": data});
+            match message
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+            {
+                "user" => {
+                    if !self.inbox.contains_key(&id) {
+                        events.extend(self.apply(&synthetic(
+                            "session.inbox.enqueued",
+                            json!({"inboxID": id, "item": {"type": "user", "delivery": "steer", "payload": {
+                                "text": message.get("text").cloned().unwrap_or_default(),
+                                "metadata": message.get("metadata").cloned().unwrap_or_default(),
+                            }}}),
+                        )));
+                    }
+                    if self.turn.is_none() {
+                        events
+                            .extend(self.apply(&synthetic("session.execution.started", json!({}))));
+                    }
+                    events.extend(self.apply(&synthetic(
+                        "session.inbox.delivered",
+                        json!({"inboxID": id}),
+                    )));
+                }
+                "assistant" => {
+                    self.see(&id);
+                    // A step still streaming completes live; its partial text
+                    // must not be frozen early.
+                    let finished = !active || message.pointer("/time/completed").is_some();
+                    let (mut text, mut reasoning) = (0u64, 0u64);
+                    for part in message
+                        .get("content")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                    {
+                        match part.get("type").and_then(Value::as_str) {
+                            Some("text") => {
+                                if finished {
+                                    events.extend(self.apply(&synthetic("session.text.ended", json!({
+                                        "assistantMessageID": id, "ordinal": text, "text": part.get("text").cloned().unwrap_or_default()}))));
+                                }
+                                text += 1;
+                            }
+                            Some("reasoning") => {
+                                if finished {
+                                    events.extend(self.apply(&synthetic("session.reasoning.ended", json!({
+                                        "assistantMessageID": id, "ordinal": reasoning, "text": part.get("text").cloned().unwrap_or_default()}))));
+                                }
+                                reasoning += 1;
+                            }
+                            Some("tool") => {
+                                events.extend(self.reconcile_tool(&id, part, &synthetic))
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                "idle" => {
+                    let error = message.get("error").map(error_text);
+                    let kind = match message.get("outcome").and_then(Value::as_str) {
+                        Some("succeeded") => "session.execution.succeeded",
+                        Some("failed") => "session.execution.failed",
+                        _ => "session.execution.interrupted",
+                    };
+                    let mut data = json!({});
+                    if let Some(error) = message.get("error") {
+                        data["error"] = error.clone();
+                    }
+                    if kind == "session.execution.interrupted" && error.is_none() {
+                        data["reason"] = json!("user");
+                    }
+                    events.extend(self.apply(&synthetic(kind, data)));
+                }
+                // A background shell that finished while the stream was down.
+                "synthetic"
+                    if message.pointer("/metadata/source").and_then(Value::as_str)
+                        == Some("shell")
+                        && message
+                            .pointer("/metadata/shellID")
+                            .and_then(Value::as_str)
+                            .is_some_and(|shell| self.shells.contains_key(shell)) =>
+                {
+                    events.extend(self.apply(&synthetic(
+                        "session.synthetic",
+                        json!({
+                            "text": message.get("text").cloned().unwrap_or_default(),
+                            "description": message.get("description").cloned().unwrap_or_default(),
+                            "metadata": message.get("metadata").cloned().unwrap_or_default(),
+                        }),
+                    )));
+                }
+                _ => {}
+            }
+            self.see(&id);
+        }
+        // The run ended without an idle record we could read.
+        if !active && self.turn.is_some() {
+            events.extend(self.execution_ended(
+                TurnOutcome::Interrupted,
+                Some("The turn ended while Inline was disconnected".to_owned()),
+                &json!({}),
+            ));
+        }
+        events
+    }
+
+    fn reconcile_tool(
+        &mut self,
+        message: &str,
+        part: &Value,
+        synthetic: &dyn Fn(&str, Value) -> Value,
+    ) -> Vec<Event> {
+        let Some(id) = part.get("id").and_then(Value::as_str) else {
+            return Vec::new();
+        };
+        if self.completed.contains(id) {
+            return Vec::new();
+        }
+        let name = part.get("name").cloned().unwrap_or_else(|| json!("tool"));
+        let state = part.get("state").cloned().unwrap_or_default();
+        let mut events = self.apply(&synthetic(
+            "session.tool.input.started",
+            json!({"assistantMessageID": message, "id": id, "name": name}),
+        ));
+        events.extend(self.apply(&synthetic(
+            "session.tool.called",
+            json!({"assistantMessageID": message, "id": id, "input": state.get("input").cloned().unwrap_or_default(), "executed": true}),
+        )));
+        match state.get("status").and_then(Value::as_str) {
+            Some("completed") => events.extend(self.apply(&synthetic(
+                "session.tool.success",
+                json!({"assistantMessageID": message, "id": id, "content": state.get("content").cloned().unwrap_or_default(),
+                       "metadata": state.get("metadata").cloned().unwrap_or_default(), "executed": true}),
+            ))),
+            Some("error") => events.extend(self.apply(&synthetic(
+                "session.tool.failed",
+                json!({"assistantMessageID": message, "id": id, "error": state.get("error").cloned().unwrap_or_default(),
+                       "content": state.get("content").cloned().unwrap_or(Value::Null),
+                       "metadata": state.get("metadata").cloned().unwrap_or_default(), "executed": true}),
+            ))),
+            // Still running: it completes live, or with its turn.
+            _ => {}
+        }
+        events
+    }
+
     /// Seeds inbox entries read while opening the session.
     pub fn seed_inbox(&mut self, entries: &Value) -> Vec<Event> {
         for entry in entries.as_array().into_iter().flatten() {
@@ -1712,6 +2043,13 @@ fn bound_inputs(map: &mut HashMap<InputId, String>) {
             map.remove(&key);
         }
     }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 fn item_id(id: &str) -> ItemId {

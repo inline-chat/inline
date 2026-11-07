@@ -225,6 +225,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   private let performanceLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
   private let mentionSource: DefaultNewThreadComposeMentionSource
   private let preferences: AllChatsComposePreferences
+  private let draftStore: NewThreadComposeDraftStore
   private var lastSpaceVisibility: NewThreadComposeDestination.SpaceVisibility
   private var accessMentions = AllChatsComposeAccessMentions()
   private var mentionedAgentTargets: [AllChatsAgentMentionTarget] = []
@@ -244,6 +245,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     lockedSpaceID = initialSpaceID
     let preferences = AllChatsComposePreferences(userID: dependencies.auth.currentUserId)
     self.preferences = preferences
+    draftStore = NewThreadComposeDraftStore(userID: dependencies.auth.currentUserId)
     observedAgentChoiceID = preferences.agentChoiceID
     sendSilently = preferences.sendSilently
     lastSpaceVisibility = preferences.visibility
@@ -462,6 +464,29 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     do {
       let result = try await dependencies.realtimeV2.send(.listBots())
       guard case let .listBots(response) = result else { return }
+      // Save the bots so mentions read them, and their later renames, from
+      // the database. A bot set up moments ago may not be saved yet.
+      do {
+        try await dependencies.database.dbWriter.write { db in
+          for bot in response.bots {
+            // This runs on every activation; skip unchanged rows so their
+            // observers don't fire.
+            let listed = InlineKit.User(from: bot)
+            if let saved = try InlineKit.User.fetchOne(db, id: bot.id),
+               saved.firstName == listed.firstName,
+               saved.lastName == listed.lastName,
+               saved.username == listed.username,
+               saved.pendingSetup == listed.pendingSetup,
+               saved.profileFileUniqueId == listed.profileFileUniqueId
+            {
+              continue
+            }
+            _ = try InlineKit.User.save(db, user: bot)
+          }
+        }
+      } catch {
+        log.error("Could not save listed bots", error: error)
+      }
       var choices: [AllChatsAgentChoice] = []
       for bot in response.bots {
         choices.append(AllChatsAgentChoice(bot: bot, agent: nil))
@@ -534,12 +559,14 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       sendSilently: { self.sendSilently },
       setSendSilently: { self.setSendSilently($0) },
       agentContext: { [weak self] in self?.agentThreadContext },
+      savedDraft: { [draftStore] in draftStore.load() },
       mentionSource: mentionSource,
       attachmentStore: attachmentStore,
       overlayHostView: overlayHost,
       supplementaryAccessoryView: supplementaryAccessoryView,
       placeholderSymbolName: "square.and.pencil",
-      didChangeDraft: { [weak self] text, entities, hasAttachments in
+      didChangeDraft: { [weak self, draftStore] text, entities, hasAttachments in
+        draftStore.save(text: text, entities: entities)
         self?.draftDidChange(text: text, entities: entities, hasAttachments: hasAttachments)
       },
       didChangeHeight: { [weak self] height in
@@ -549,14 +576,23 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         AllChatsNewThreadComposeModel.presentSubmissionFeedback(result)
         self?.submissionDidFinish(result)
       },
-      submit: { [weak self] draft, intent in
+      submit: { [weak self, draftStore] draft, intent in
         guard let self else {
           return .failure(NewThreadComposeSubmissionFailure(
             message: "The new thread composer is no longer available.",
             createdPeer: nil
           ))
         }
-        return await submit(draft, intent: intent)
+        // The send owns the content now. Opening the thread may tear Compose
+        // down, so a composer shown later must not restore sent text. A
+        // created thread keeps it as that thread's draft; otherwise it's
+        // saved here again.
+        draftStore.clear()
+        let result = await submit(draft, intent: intent)
+        if case let .failure(failure) = result, failure.createdPeer == nil {
+          draftStore.save(text: draft.text, entities: draft.entities)
+        }
+        return result
       }
     )
   }
@@ -822,8 +858,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
     // Validate locally fixable content before reporting connectivity. Durable
     // Realtime transactions intentionally wait for a connection, but this
-    // transient composer cannot turn an offline click into an indefinite
-    // spinner because it has no persisted pre-chat draft after relaunch.
+    // composer cannot turn an offline click into an indefinite spinner.
     guard dependencies.realtimeV2.stateObject.connectionState != .connecting else {
       return .failure(NewThreadComposeSubmissionFailure(
         message: "You're offline. Reconnect and try again; your message is still here.",
@@ -1281,10 +1316,13 @@ private final class WeakNewThreadComposeHost {
 private final class NewThreadComposeOverlayHostView: NSView {
   override var isFlipped: Bool { true }
 
+  /// Only the menus take clicks; everywhere else passes through to the window.
   override func hitTest(_ point: NSPoint) -> NSView? {
+    // hitTest takes the superview's coordinates, which aren't flipped like
+    // this view's. Subviews expect this view's coordinates.
+    let localPoint = superview.map { convert(point, from: $0) } ?? point
     for subview in subviews.reversed() where !subview.isHidden {
-      let convertedPoint = convert(point, to: subview)
-      if let hitView = subview.hitTest(convertedPoint) {
+      if let hitView = subview.hitTest(localPoint) {
         return hitView
       }
     }

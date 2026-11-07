@@ -14,7 +14,7 @@ public struct MentionableBotAgent: Hashable, Identifiable, Sendable {
   public let handle: String?
   public let emoji: String?
   public let description: String?
-  public let botUserInfo: UserInfo
+  public private(set) var botUserInfo: UserInfo
 
   public init(profile: InlineProtocol.BotAgentProfile, botUserInfo: UserInfo) {
     id = profile.id
@@ -43,6 +43,13 @@ public struct MentionableBotAgent: Hashable, Identifiable, Sendable {
 
   public var botDisplayName: String {
     botUserInfo.user.displayName
+  }
+
+  /// The same agent shown with its bot's current name and photo.
+  public func withBotUserInfo(_ botUserInfo: UserInfo) -> Self {
+    var agent = self
+    agent.botUserInfo = botUserInfo
+    return agent
   }
 }
 

@@ -130,6 +130,9 @@ class ComposeTextView: UITextView {
   private func setupTextView() {
     backgroundColor = .clear
     allowsEditingTextAttributes = true
+    // Keyboard stickers, Memoji and Genmoji arrive as adaptive image glyphs, which keeps them
+    // distinct from dropped images (plain text attachments) so they can be sent as stickers.
+    supportsAdaptiveImageGlyph = true
     font = .systemFont(ofSize: 17)
     typingAttributes[.font] = font
     textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
@@ -493,26 +496,47 @@ class ComposeTextView: UITextView {
     isProcessingInsertedAttachments = true
     defer { isProcessingInsertedAttachments = false }
 
+    enum InsertedMedia {
+      case sticker(Data)
+      case droppedImage(UIImage)
+      case other
+    }
+
+    var stickerImageData: [Data] = []
     var droppedAttachmentImages: [UIImage] = []
-    var actions: [(range: NSRange, attributes: [NSAttributedString.Key: Any], droppedImage: UIImage?)] = []
+    var actions: [(range: NSRange, attributes: [NSAttributedString.Key: Any], media: InsertedMedia)] = []
 
     for range in rangesToProcess where range.location < snapshot.length {
       let attributes = snapshot.attributes(at: range.location, effectiveRange: nil)
-      let droppedImage = imageFromTextAttachment(attributes: attributes)
-      if let droppedImage {
-        droppedAttachmentImages.append(droppedImage)
+      // Check stickers first: a sticker must never fall through to the dropped-photo path.
+      let media: InsertedMedia = if let glyph = attributes[.adaptiveImageGlyph] as? NSAdaptiveImageGlyph {
+        .sticker(glyph.imageContent)
+      } else if let droppedImage = imageFromTextAttachment(attributes: attributes) {
+        .droppedImage(droppedImage)
+      } else {
+        .other
       }
-      actions.append((range, attributes, droppedImage))
+      switch media {
+        case let .sticker(data): stickerImageData.append(data)
+        case let .droppedImage(image): droppedAttachmentImages.append(image)
+        case .other: break
+      }
+      actions.append((range, attributes, media))
     }
 
     // Consume each transient replacement character before handing media to the composer.
     // Descending ranges keep the UTF-16 locations valid while the text storage changes.
     for action in actions.reversed() {
-      if action.droppedImage != nil {
-        safelyRemoveAttachment(at: action.range)
-      } else {
-        processReplacementCharacter(at: action.range, attributes: action.attributes)
+      switch action.media {
+        case .sticker, .droppedImage:
+          safelyRemoveAttachment(at: action.range)
+        case .other:
+          processReplacementCharacter(at: action.range, attributes: action.attributes)
       }
+    }
+
+    for data in stickerImageData {
+      sendStickerImage(data, metadata: ["source": "adaptive_image_glyph"])
     }
 
     guard let composeView, !droppedAttachmentImages.isEmpty else { return }
@@ -836,6 +860,17 @@ class ComposeTextView: UITextView {
     guard let attributedText else { return false }
 
     var hasValidSticker = false
+    attributedText.enumerateAttribute(
+      .adaptiveImageGlyph,
+      in: NSRange(location: 0, length: attributedText.length),
+      options: []
+    ) { value, _, stop in
+      if value is NSAdaptiveImageGlyph {
+        hasValidSticker = true
+        stop.pointee = true
+      }
+    }
+
     attributedText.enumerateAttribute(
       .attachment,
       in: NSRange(location: 0, length: attributedText.length),

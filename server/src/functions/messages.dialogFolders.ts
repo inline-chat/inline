@@ -23,7 +23,7 @@ import { FractionalIndex } from "@in/server/modules/fractionalIndex"
 import { maybeScheduleDialogFolderTitleGeneration } from "@in/server/modules/dialogFolderTitles"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import { and, eq, inArray } from "drizzle-orm"
+import { and, asc, eq, gt, inArray, isNull, ne, or } from "drizzle-orm"
 
 const MAX_FOLDER_TITLE_LENGTH = 80
 const MAX_FOLDER_DIALOGS = 100
@@ -234,15 +234,24 @@ export async function deleteDialogFolder(
     const folder = await ownedDialogFolder(tx, context.currentUserId, input.folderId)
     if (!folder) throw RealtimeRpcError.BadRequest()
     const children = await folderChildren(tx, context.currentUserId, folder.id)
+    const close = input.disposition === DeleteDialogFolderDisposition.CLOSE_DIALOGS
+    // Ungrouping a pinned folder keeps its chats pinned, in the folder's slot.
+    const childPinnedOrders = !close && folder.pinnedOrder != null
+      ? allocateOrdersAfter(
+          folder.pinnedOrder,
+          await nextPinnedPosition(tx, context.currentUserId, folder.id, folder.pinnedOrder),
+          children.length,
+        )
+      : undefined
 
     const changedDialogs: DbDialog[] = []
-    for (const child of children) {
-      const close = input.disposition === DeleteDialogFolderDisposition.CLOSE_DIALOGS
+    for (const [index, child] of children.entries()) {
       const [changed] = await tx
         .update(dialogs)
         .set({
           folderId: null,
           ...(close ? { open: false, openedDate: null, order: null } : {}),
+          ...(childPinnedOrders ? { pinned: true, pinnedOrder: childPinnedOrders[index] } : {}),
         })
         .where(and(eq(dialogs.id, child.id), eq(dialogs.userId, context.currentUserId)))
         .returning()
@@ -361,6 +370,43 @@ function allocateOrdersAfter(anchor: string, right: string | undefined, count: n
 
 function nextPosition(positions: string[], order: string): string | undefined {
   return positions.find((position) => position > order)
+}
+
+/** First pinned-lane key after `order`, ignoring the folder being removed and its children. */
+async function nextPinnedPosition(
+  tx: Transaction,
+  userId: number,
+  folderId: number,
+  order: string,
+): Promise<string | undefined> {
+  const [nextDialog] = await tx
+    .select({ order: dialogs.pinnedOrder })
+    .from(dialogs)
+    .where(
+      and(
+        eq(dialogs.userId, userId),
+        eq(dialogs.pinned, true),
+        or(isNull(dialogs.folderId), ne(dialogs.folderId, folderId)),
+        gt(dialogs.pinnedOrder, order),
+      ),
+    )
+    .orderBy(asc(dialogs.pinnedOrder))
+    .limit(1)
+  const [nextFolder] = await tx
+    .select({ order: dialogFolders.pinnedOrder })
+    .from(dialogFolders)
+    .where(
+      and(
+        eq(dialogFolders.userId, userId),
+        ne(dialogFolders.id, folderId),
+        gt(dialogFolders.pinnedOrder, order),
+      ),
+    )
+    .orderBy(asc(dialogFolders.pinnedOrder))
+    .limit(1)
+  return [nextDialog?.order, nextFolder?.order]
+    .flatMap((value) => (value == null ? [] : [value]))
+    .sort()[0]
 }
 
 async function lockUser(tx: Transaction, userId: number): Promise<void> {

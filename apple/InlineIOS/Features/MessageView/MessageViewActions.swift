@@ -249,13 +249,15 @@ enum MessageViewActions {
     presenter.present(alert, animated: true)
   }
 
-  /// Scrolls to the message a reply quotes.
-  static func openRepliedMessage(of message: Message) {
-    guard let repliedId = message.repliedToMessageId else { return }
+  /// Scrolls to the message a reply answers; with a reply quote, highlights the quoted words.
+  static func openRepliedMessage(of message: FullMessage) {
+    guard let repliedId = message.message.repliedToMessageId else { return }
+    var userInfo: [String: Any] = ["repliedToMessageId": repliedId, "chatId": message.message.chatId]
+    userInfo["quote"] = message.leadingReplyQuote?.text
     NotificationCenter.default.post(
       name: Notification.Name("ScrollToRepliedMessage"),
       object: nil,
-      userInfo: ["repliedToMessageId": repliedId, "chatId": message.chatId]
+      userInfo: userInfo
     )
   }
 

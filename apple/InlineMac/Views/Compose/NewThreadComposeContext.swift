@@ -212,13 +212,25 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
   func setAgents(_ agents: [MentionableBotAgent], ownedBots: [UserInfo]) {
     self.agents = agents
     self.ownedBots = ownedBots
+    // Read the bots from the database too, so a rename or new photo shows
+    // while the menu is open.
+    viewModel.setOwnedBotIDs(ownedBots.map(\.id))
     updates.send(candidates)
   }
 
   private func merged(_ candidates: MentionCompletionCandidates) -> MentionCompletionCandidates {
     // A bot outside the selected space is offered too; sending asks to add it.
-    var candidates = candidates.addingOwnedBots(ownedBots)
-    candidates.agents = agents
+    // The observed rows are current; the listed bots only fill in any that
+    // aren't saved locally yet.
+    let observedIDs = Set(candidates.users.map(\.userInfo.id))
+    var candidates = candidates.addingOwnedBots(ownedBots.filter { !observedIDs.contains($0.id) })
+    let usersByID = Dictionary(
+      candidates.users.map { ($0.userInfo.id, $0.userInfo) },
+      uniquingKeysWith: { first, _ in first }
+    )
+    candidates.agents = agents.map { agent in
+      usersByID[agent.botUserId].map(agent.withBotUserInfo) ?? agent
+    }
     return candidates
   }
 }
@@ -277,6 +289,64 @@ struct PreparedNewThreadDraft {
   }
 }
 
+/// Unsent new-thread text restored when the composer appears again.
+struct NewThreadComposeSavedDraft {
+  let text: String
+  let entities: MessageEntities?
+}
+
+/// Keeps the new-thread composer's unsent text and its entities per account,
+/// so the draft survives leaving the route and relaunching. There is no thread
+/// peer yet, so it lives outside Drafts2. Attachments are not kept.
+struct NewThreadComposeDraftStore {
+  private struct Stored: Codable {
+    let text: String
+    let entities: Data?
+  }
+
+  private static let attachmentMarker = "\u{FFFC}"
+
+  private let defaults: UserDefaults
+  private let key: String
+
+  init(userID: Int64?, defaults: UserDefaults = .standard) {
+    self.defaults = defaults
+    key = "macos.newThread.draft.\(userID.map(String.init) ?? "signed-out")"
+  }
+
+  func load() -> NewThreadComposeSavedDraft? {
+    guard let data = defaults.data(forKey: key),
+          let stored = try? JSONDecoder().decode(Stored.self, from: data),
+          !Self.isBlank(stored.text)
+    else {
+      return nil
+    }
+    let entities = stored.entities.flatMap { try? MessageEntities(serializedBytes: $0) }
+    return NewThreadComposeSavedDraft(text: stored.text, entities: entities)
+  }
+
+  func save(text: String, entities: MessageEntities?) {
+    let cleanText = text.replacingOccurrences(of: Self.attachmentMarker, with: "")
+    guard !Self.isBlank(cleanText) else {
+      clear()
+      return
+    }
+    // Entity offsets no longer line up once markers are removed.
+    let keptEntities = cleanText == text ? Drafts2.normalizedEntities(entities) : nil
+    let stored = Stored(text: cleanText, entities: keptEntities.flatMap { try? $0.serializedData() })
+    guard let data = try? JSONEncoder().encode(stored) else { return }
+    defaults.set(data, forKey: key)
+  }
+
+  func clear() {
+    defaults.removeObject(forKey: key)
+  }
+
+  private static func isBlank(_ text: String) -> Bool {
+    text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+}
+
 struct NewThreadComposeSubmissionFailure: LocalizedError {
   let message: String
   let createdPeer: InlineKit.Peer?
@@ -304,6 +374,7 @@ struct NewThreadComposeContext {
   let sendSilently: @MainActor () -> Bool
   let setSendSilently: @MainActor (Bool) -> Void
   let agentContext: @MainActor () -> InlineProtocol.AgentThreadContext?
+  let savedDraft: @MainActor () -> NewThreadComposeSavedDraft?
   let mentionSource: any NewThreadComposeMentionSource
   let attachmentStore: NewThreadComposeAttachmentStore
   let overlayHostView: @MainActor () -> NSView?
@@ -320,6 +391,7 @@ struct NewThreadComposeContext {
     sendSilently: @escaping @MainActor () -> Bool,
     setSendSilently: @escaping @MainActor (Bool) -> Void,
     agentContext: @escaping @MainActor () -> InlineProtocol.AgentThreadContext? = { nil },
+    savedDraft: @escaping @MainActor () -> NewThreadComposeSavedDraft? = { nil },
     mentionSource: any NewThreadComposeMentionSource,
     attachmentStore: NewThreadComposeAttachmentStore,
     overlayHostView: @escaping @MainActor () -> NSView?,
@@ -335,6 +407,7 @@ struct NewThreadComposeContext {
     self.sendSilently = sendSilently
     self.setSendSilently = setSendSilently
     self.agentContext = agentContext
+    self.savedDraft = savedDraft
     self.mentionSource = mentionSource
     self.attachmentStore = attachmentStore
     self.overlayHostView = overlayHostView

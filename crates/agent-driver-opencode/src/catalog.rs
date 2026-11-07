@@ -342,7 +342,8 @@ fn folders_from(projects: &Value) -> Vec<CatalogFolder> {
         .into_iter()
         .filter_map(|project| {
             let path = PathBuf::from(project.get("canonical")?.as_str()?);
-            if !path.is_absolute() || path == Path::new("/") {
+            // OpenCode remembers every folder it opened, deleted ones included.
+            if !path.is_absolute() || path == Path::new("/") || !path.is_dir() {
                 return None;
             }
             let label = project
@@ -492,6 +493,19 @@ mod tests {
         assert_eq!(modes.len(), 2);
         assert_eq!(modes[1].label, "Plan");
         assert_eq!(subagents_from(&agents)[0].value, "general");
+    }
+
+    #[test]
+    fn folders_skip_deleted_and_root_projects() {
+        let existing = tempfile::tempdir().unwrap();
+        let projects = json!([
+            {"canonical": existing.path(), "time": {"active": 2}},
+            {"canonical": "/private/var/folders/xx/T/.tmpGone", "time": {"active": 3}},
+            {"canonical": "/", "time": {"active": 1}},
+        ]);
+        let folders = folders_from(&projects);
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].path, existing.path());
     }
 
     #[test]

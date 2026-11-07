@@ -452,7 +452,11 @@ final class RichBlockLayoutPlanner {
           } else {
             false
           }
-          height += startsNestedList ? RichBlockListMetrics.itemSpacing : Self.blockSpacing
+          let adjoinsQuote: Bool = if case .quote? = block.kind { true }
+            else if case .quote? = blocks[index - 1].kind { true }
+            else { false }
+          height += startsNestedList ? RichBlockListMetrics.itemSpacing
+            : adjoinsQuote ? RichBlockQuoteMetrics.adjacentSpacing : Self.blockSpacing
           if case let .heading(heading)? = block.kind {
             height += heading.level <= 2 ? 7 : 5
           }

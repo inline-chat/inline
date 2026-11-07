@@ -15,8 +15,8 @@ categories = ["development-tools"]
 [dependencies]
 base64 = "0.22.1"
 futures-util.workspace = true
-inline-agent-bridge = { version = "0.7.22-alpha.1", path = "../agent-bridge" }
-inline-agent-driver-acp = { version = "0.7.22-alpha.1", path = "../agent-driver-acp" }
+inline-agent-bridge = { version = "0.7.22-alpha.3", path = "../agent-bridge" }
+inline-agent-driver-acp = { version = "0.7.22-alpha.3", path = "../agent-driver-acp" }
 log.workspace = true
 reqwest.workspace = true
 semver = "1"

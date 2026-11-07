@@ -1203,7 +1203,20 @@ pub(crate) fn is_service_entry_point(data: &Path, executable: &Path) -> bool {
             .is_file()
 }
 
-pub(crate) fn update_statuses(config: &Config) -> Vec<BridgeUpdateStatus> {
+/// After an explicit `inline update`, asks every bridge behind the staged
+/// runtime to adopt it at its next idle moment. Returns how many will.
+pub(crate) fn request_update_activation(
+    config: &Config,
+    staged: &crate::update::Artifact,
+) -> usize {
+    bridge_roots(config)
+        .into_iter()
+        .filter(|root| root.join("activation.json").is_file())
+        .filter(|root| update_supervisor::request_activation(root, staged).unwrap_or(false))
+        .count()
+}
+
+fn bridge_roots(config: &Config) -> Vec<PathBuf> {
     let root = config.data_dir.join("bridge");
     let mut roots = vec![BridgePaths::legacy(config).root];
     if let Ok(entries) = fs::read_dir(root.join("accounts")) {
@@ -1215,6 +1228,10 @@ pub(crate) fn update_statuses(config: &Config) -> Vec<BridgeUpdateStatus> {
         );
     }
     roots
+}
+
+pub(crate) fn update_statuses(config: &Config) -> Vec<BridgeUpdateStatus> {
+    bridge_roots(config)
         .into_iter()
         .filter_map(|root| {
             if let Ok(state) = crate::update::store::read_json::<update_supervisor::Activation>(
@@ -3284,8 +3301,13 @@ async fn installation_uses_v2(
     let use_v2 = opencode_uses_v2(env::var("INLINE_BRIDGE_V2").ok().as_deref(), &version)
         .map_err(provider_setup_required)?;
     eprintln!(
-        "OpenCode {version}: bridge v{}, transport=acp",
-        if use_v2 { 2 } else { 1 }
+        "OpenCode {version}: bridge v{}, transport={}",
+        if use_v2 { 2 } else { 1 },
+        if use_v2 && opencode_native_for(&version) {
+            "native"
+        } else {
+            "acp"
+        }
     );
     if inline_agent_driver_acp::parse_opencode_version(&version).is_some_and(|v| v.major < 2) {
         eprintln!("{}", inline_agent_driver_acp::OPENCODE_V1_GUIDANCE);
@@ -3369,6 +3391,15 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         folder: workspace.clone(),
         attachments_dir: attachments_dir.clone(),
     });
+    // The version probe runs a process; keep it off the async workers.
+    let opencode_native = if installation.provider_id == "opencode" {
+        let executable = installation.executable.clone();
+        tokio::task::spawn_blocking(move || opencode_native_route(&executable))
+            .await
+            .unwrap_or(false)
+    } else {
+        false
+    };
     let mut owned_acp = None;
     let mut owned_opencode: Option<Arc<inline_agent_driver_opencode::OpenCodeHarness>> = None;
     let mut acp_route = false;
@@ -3411,7 +3442,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
                 executable,
             )
         }
-        "opencode" if opencode_native_route(installation) => {
+        "opencode" if opencode_native => {
             let ProviderLaunch::Acp(descriptor) =
                 ProviderLaunch::from_installation(installation).map_err(provider_setup_required)?
             else {
@@ -3547,19 +3578,20 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
 /// OpenCode v2 runs natively against its shared service from
 /// [`inline_agent_driver_opencode::CORE_FLOOR`] on. Older v2 releases, and
 /// `INLINE_OPENCODE_DRIVER=acp`, keep the ACP route.
-fn opencode_native_route(installation: &ProviderInstallationConfig) -> bool {
+fn opencode_native_route(executable: &std::path::Path) -> bool {
+    opencode_startup_version(executable)
+        .ok()
+        .is_some_and(|version| opencode_native_for(&version))
+}
+
+/// Whether this OpenCode version takes the native route in this environment.
+fn opencode_native_for(version: &str) -> bool {
     if std::env::var("INLINE_OPENCODE_DRIVER").is_ok_and(|value| value.eq_ignore_ascii_case("acp"))
     {
         return false;
     }
-    let version = opencode_startup_version(&installation.executable)
-        .ok()
-        .as_deref()
-        .and_then(inline_agent_driver_opencode::version::parse);
-    match version {
-        Some(version) => inline_agent_driver_opencode::native_supported(&version),
-        None => false,
-    }
+    inline_agent_driver_opencode::version::parse(version)
+        .is_some_and(|version| inline_agent_driver_opencode::native_supported(&version))
 }
 
 /// v2 never runs what v1 accepted, so v1's open work is closed the way a v1
