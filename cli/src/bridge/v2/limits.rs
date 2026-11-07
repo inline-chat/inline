@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn nested_blocks_count_like_the_server() {
         let mut builder = DocBuilder::new();
-        builder.progress("Working", true, |inner| {
+        builder.progress("Working", true, None, |inner| {
             inner.disclosure(
                 "Ran cargo test",
                 None,
