@@ -1816,7 +1816,7 @@ struct SidebarView: View {
       title: "New Folder with Selection",
       systemImage: "folder.badge.plus"
     ) {
-      createFolder(peers: items.map(\.peerId))
+      createFolder(peers: items.map(\.peerId), pinned: items.contains(where: \.pinned))
     }
     folder.isEnabled = dependencies != nil && canCreateFolder && items.count <= 100
       && items.allSatisfy { !isTemporaryItem($0) }
@@ -1857,16 +1857,21 @@ struct SidebarView: View {
   }
 
   private func createFolder(containing item: SidebarViewModel.Item) {
-    createFolder(peers: [item.peerId])
+    createFolder(peers: [item.peerId], pinned: item.pinned)
   }
 
   private func createEmptyFolder() {
-    createFolder(peers: [])
+    createFolder(peers: [], pinned: false)
   }
 
-  private func createFolder(peers: [Peer]) {
+  /// The server unpins chats it moves into a folder, so a folder made from a
+  /// pinned chat must be pinned itself. Otherwise those chats lose their place
+  /// and become eligible for Open Chats cleanup.
+  private func createFolder(peers: [Peer], pinned: Bool) {
     guard let dependencies else { return }
-    let pinnedOrder = settings.sidebarMode == .allChats ? nextSidebarPinnedOrder() : nil
+    let pinnedOrder = settings.sidebarMode == .allChats || pinned
+      ? nextSidebarPinnedOrder()
+      : nil
     Task(priority: .userInitiated) {
       do {
         _ = try await dependencies.realtimeV2.send(.createDialogFolder(
