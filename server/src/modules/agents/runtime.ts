@@ -1,6 +1,4 @@
 import {
-  AgentGrantRequirement,
-  AgentOutputMode,
   AgentRuntimeSetup_Reason,
   AgentRuntimeStatus,
   AgentSessionProvider,
@@ -9,18 +7,16 @@ import {
   type GetAgentRuntimeResult,
   type ReportAgentRuntimeInput,
   type ReportAgentRuntimeResult,
-  type UpdateAgentSettingsInput,
-  type UpdateAgentSettingsResult,
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UsersModel } from "@in/server/db/models/users"
 import type { Transaction } from "@in/server/db/types"
-import { agentParticipations, agentRuntimes, agentSessions, chats, type DbAgentRuntime } from "@in/server/db/schema"
+import { agentParticipations, agentRuntimes, agentSessions, agentSettings, chats, type DbAgentRuntime } from "@in/server/db/schema"
 import { chatRecipientUserIds } from "@in/server/modules/agents/chatUpdates"
 import { Log } from "@in/server/utils/log"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
-import { grantsRevision, resolveAgentAccess, satisfiesGrantRequirement } from "@in/server/modules/agents/grants"
+import { grantsRevision } from "@in/server/modules/agents/grants"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -78,44 +74,6 @@ export function encodeAgentRuntime(row: DbAgentRuntime, viewer: "owner" | "other
   }
 }
 
-export function validOutputMode(mode: AgentOutputMode): boolean {
-  return mode >= AgentOutputMode.UNSPECIFIED && mode <= AgentOutputMode.FRIENDLY
-}
-
-/** Agent Settings: the owner or a CONFIGURE grantee. The owner and the bot get the change. */
-export async function updateAgentSettings(
-  input: UpdateAgentSettingsInput,
-  currentUserId: number,
-): Promise<UpdateAgentSettingsResult> {
-  const botUserId = Number(input.botUserId)
-  if (!Number.isSafeInteger(botUserId) || botUserId <= 0) throw RealtimeRpcError.UserIdInvalid()
-  const bot = await UsersModel.getUserById(botUserId)
-  if (!bot?.bot || UsersModel.isDeleted(bot) || bot.botCreatorId === null) throw RealtimeRpcError.UserIdInvalid()
-  const access = await resolveAgentAccess(bot, currentUserId)
-  if (!satisfiesGrantRequirement(access, AgentGrantRequirement.CONFIGURE)) throw RealtimeRpcError.AgentGrantRequired()
-  if (input.defaultOutputMode !== undefined && !validOutputMode(input.defaultOutputMode)) throw RealtimeRpcError.BadRequest()
-
-  const ownerUserId = bot.botCreatorId
-  // Members of the agent's chats resolve its effective output mode from the
-  // default, so they get the change too (status-only view).
-  const audience = await runtimeAudience(botUserId, ownerUserId)
-  const { row, live } = await db.transaction(async (tx) => {
-    const [saved] = await tx
-      .update(agentRuntimes)
-      .set({
-        ...(input.defaultOutputMode === undefined ? {} : { defaultOutputMode: input.defaultOutputMode }),
-        updatedAt: new Date(),
-      })
-      .where(eq(agentRuntimes.botUserId, botUserId))
-      .returning()
-    // Settings live on the runtime, which exists once the bridge has reported.
-    if (!saved) throw RealtimeRpcError.BadRequest()
-    return { row: saved, live: await enqueueRuntimeChange(tx, saved, ownerUserId, audience, { includeBot: true }) }
-  })
-  pushRuntimeChange(live)
-  return { runtime: encodeAgentRuntime(row, currentUserId === ownerUserId ? "owner" : "other") }
-}
-
 /** Bot heartbeat. Runtime updates reach the owner only when status or setup changes. */
 export async function reportAgentRuntime(
   input: ReportAgentRuntimeInput,
@@ -157,7 +115,12 @@ export async function reportAgentRuntime(
     const [previous] = await tx.select().from(agentRuntimes).where(eq(agentRuntimes.botUserId, bot.id)).for("update").limit(1)
     const [saved] = previous
       ? await tx.update(agentRuntimes).set(values).where(eq(agentRuntimes.botUserId, bot.id)).returning()
-      : await tx.insert(agentRuntimes).values({ botUserId: bot.id, ...values }).returning()
+      : await tx.insert(agentRuntimes).values({
+          botUserId: bot.id,
+          ...values,
+          // Settings can predate the runtime; start its mirror from them.
+          defaultOutputMode: await settingsOutputMode(tx, bot.id),
+        }).returning()
     if (!saved) throw RealtimeRpcError.InternalError()
     const changed = !previous ||
       effectiveRuntimeStatus(previous, now.getTime()) !== saved.status ||
@@ -185,6 +148,12 @@ export async function reportAgentRuntime(
   }
 }
 
+async function settingsOutputMode(tx: Transaction, botUserId: number): Promise<number> {
+  const [row] = await tx.select({ mode: agentSettings.defaultOutputMode }).from(agentSettings)
+    .where(eq(agentSettings.botUserId, botUserId)).limit(1)
+  return row?.mode ?? 0
+}
+
 /** Everyone sees status; the owner and the bot also see paths, hashes and fix text. */
 export async function getAgentRuntime(
   input: GetAgentRuntimeInput,
@@ -208,7 +177,7 @@ const MAX_RUNTIME_AUDIENCE_CHATS = 200
 const MAX_RUNTIME_AUDIENCE_USERS = 500
 
 /** People in chats where the agent takes part or has work, besides the owner and the bot. */
-async function runtimeAudience(botUserId: number, ownerUserId: number): Promise<number[]> {
+export async function runtimeAudience(botUserId: number, ownerUserId: number): Promise<number[]> {
   const [participating, working] = await Promise.all([
     db.select({ chatId: agentParticipations.chatId }).from(agentParticipations)
       .where(eq(agentParticipations.botUserId, botUserId))
@@ -238,7 +207,7 @@ type RuntimeDelivery = { userId: number; runtime: AgentRuntime; durable: UpdateS
  * the status-only view to members of the agent's chats. Enqueued in the
  * transaction that changes the runtime.
  */
-async function enqueueRuntimeChange(
+export async function enqueueRuntimeChange(
   tx: Transaction,
   row: DbAgentRuntime,
   ownerUserId: number,
@@ -263,7 +232,7 @@ async function enqueueRuntimeChange(
   return deliveries
 }
 
-function pushRuntimeChange(deliveries: RuntimeDelivery[]): void {
+export function pushRuntimeChange(deliveries: RuntimeDelivery[]): void {
   for (const { userId, runtime, durable } of deliveries) {
     RealtimeUpdates.pushToUser(userId, [{
       seq: durable.seq,

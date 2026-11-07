@@ -261,6 +261,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "updateAgentSettings", updateAgentSettings: result }
     }
 
+    case Method.GET_AGENT_SETTINGS: {
+      if (call.input.oneofKind !== "getAgentSettings") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.getAgentSettings(call.input.getAgentSettings, handlerContext.userId)
+      return { oneofKind: "getAgentSettings", getAgentSettings: result }
+    }
+
     case Method.CONTROL_AGENT_SESSION: {
       if (call.input.oneofKind !== "controlAgentSession") throw RealtimeRpcError.BadRequest()
       const result = await AgentHandlers.controlAgentSession(call.input.controlAgentSession, handlerContext.userId)

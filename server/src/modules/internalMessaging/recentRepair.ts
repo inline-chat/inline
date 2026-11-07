@@ -415,7 +415,7 @@ export function updateBucket(userId: number, update: Update, peerChatIds?: Pick<
     case "chatPermissions": case "dialogCollapsedMaxId": case "userAddedToChat": case "userRemovedFromChat":
     case "updateUserSettings": case "dialogFolder": case "dialogTranslation":
     case "messageActionInvoked": case "messageActionAnswered":
-    case "agentGrant": case "agentRuntime": case "agentSessionControl": return { kind: "user", userId }
+    case "agentGrant": case "agentRuntime": case "agentSettings": case "agentSessionControl": return { kind: "user", userId }
     default: return undefined
   }
 }

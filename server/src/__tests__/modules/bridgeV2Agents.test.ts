@@ -9,6 +9,7 @@ import {
   AgentSessionProvider,
   AgentAttentionKind,
   BlockFormText_Kind,
+  BotCapability_Kind,
   RpcError_Code,
   type BlockText,
   type InputPeer,
@@ -36,8 +37,9 @@ import {
   reportAgentRuntime,
   stopAgentRuntimeSweeper,
   sweepLapsedAgentRuntimes,
-  updateAgentSettings,
 } from "@in/server/modules/agents/runtime"
+import { getAgentSettings, updateAgentSettings } from "@in/server/modules/agents/settings"
+import { normalizeBotCapabilities, toProtocolBotCapability } from "@in/server/functions/bot.capabilitiesShared"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { and, desc, eq } from "drizzle-orm"
 
@@ -266,13 +268,64 @@ describe("bridge v2 agent server", () => {
     const cleared = await setAgentParticipation({ peerId: peer, botUserId: BigInt(botId), mode: 0, outputMode: AgentOutputMode.UNSPECIFIED }, ownerId)
     expect(cleared.participation?.outputMode).toBeUndefined()
 
-    // The agent default lives on the runtime the bridge reports.
-    await rejects(updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: AgentOutputMode.FRIENDLY }, ownerId), RpcError_Code.BAD_REQUEST)
+    // A runtime's mirror of the default follows the settings.
     await reportAgentRuntime({ provider: AgentSessionProvider.CODEX, status: 1, executablePath: "/opt/codex" }, botId)
     const settings = await updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: AgentOutputMode.FRIENDLY }, ownerId)
     expect([settings.runtime?.defaultOutputMode, settings.runtime?.executablePath]).toEqual([AgentOutputMode.FRIENDLY, "/opt/codex"])
     const [row] = await db.select().from(agentGrants).where(eq(agentGrants.subjectUserId, teammateId)).orderBy(desc(agentGrants.id))
     expect(row?.revokedAt).toBeNull()
+  })
+
+  const latestUserUpdate = async (userId: number) => {
+    const [row] = await db.select().from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, userId)))
+      .orderBy(desc(updates.seq)).limit(1)
+    return row ? UpdatesModel.decrypt(row).payload.update : undefined
+  }
+
+  test("settings exist for any owned bot, without a runtime", async () => {
+    const untouched = await getAgentSettings({ botUserId: 0n }, botId)
+    expect([untouched.settings?.defaultOutputMode, untouched.settings?.revision, untouched.settings?.date])
+      .toEqual([AgentOutputMode.UNSPECIFIED, 0n, undefined])
+
+    const first = await updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: AgentOutputMode.FRIENDLY }, ownerId)
+    expect(first.runtime).toBeUndefined()
+    expect([first.settings?.defaultOutputMode, first.settings?.revision]).toEqual([AgentOutputMode.FRIENDLY, 1n])
+    const second = await updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: AgentOutputMode.DETAILED }, ownerId)
+    expect(second.settings?.revision).toBe(2n)
+    // No fields: nothing changes.
+    const unchanged = await updateAgentSettings({ botUserId: BigInt(botId) }, ownerId)
+    expect([unchanged.settings?.defaultOutputMode, unchanged.settings?.revision]).toEqual([AgentOutputMode.DETAILED, 2n])
+
+    // The harness reads its own settings, and gets the change pushed.
+    expect((await getAgentSettings({ botUserId: 0n }, botId)).settings?.defaultOutputMode).toBe(AgentOutputMode.DETAILED)
+    const pushed = await latestUserUpdate(botId)
+    expect(pushed?.oneofKind === "userAgentSettings" ? pushed.userAgentSettings.settings?.revision : undefined).toBe(2n)
+
+    // Reading needs a grant; changing needs CONFIGURE.
+    await rejects(getAgentSettings({ botUserId: BigInt(botId) }, teammateId), RpcError_Code.AGENT_GRANT_REQUIRED)
+    await grant(teammateId, [AgentGrantOperation.INVOKE])
+    expect((await getAgentSettings({ botUserId: BigInt(botId) }, teammateId)).settings?.revision).toBe(2n)
+    await rejects(updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: AgentOutputMode.FRIENDLY }, teammateId), RpcError_Code.AGENT_GRANT_REQUIRED)
+    await rejects(updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: 9 as AgentOutputMode }, ownerId), RpcError_Code.BAD_REQUEST)
+    // Grantees get the change too.
+    await updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: AgentOutputMode.FRIENDLY }, ownerId)
+    const granteeUpdate = await latestUserUpdate(teammateId)
+    expect(granteeUpdate?.oneofKind === "userAgentSettings" ? granteeUpdate.userAgentSettings.settings?.defaultOutputMode : undefined)
+      .toBe(AgentOutputMode.FRIENDLY)
+
+    // A runtime reported later starts from the settings.
+    const reported = await reportAgentRuntime({ provider: AgentSessionProvider.CODEX, status: 1 }, botId)
+    expect(reported.runtime?.defaultOutputMode).toBe(AgentOutputMode.FRIENDLY)
+
+    // Users and unowned bots have no settings.
+    await rejects(getAgentSettings({ botUserId: 0n }, ownerId), RpcError_Code.USER_ID_INVALID)
+  })
+
+  test("bots can declare the output mode capability", () => {
+    const [stored] = normalizeBotCapabilities([{ kind: BotCapability_Kind.OUTPUT_MODE, version: 1 }])
+    expect(stored && toProtocolBotCapability({ kind: stored.kind, version: stored.version, payload: null })).toEqual({ kind: BotCapability_Kind.OUTPUT_MODE, version: 1, agentConfiguration: undefined })
+    expect(() => normalizeBotCapabilities([{ kind: BotCapability_Kind.OUTPUT_MODE, version: 2 }])).toThrow()
   })
 
   test("a default output mode change reaches the agent's chat members", async () => {
