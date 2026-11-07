@@ -20622,6 +20622,19 @@ public nonisolated struct CreateSubthreadInput: Sendable {
   /// Clears the value of `agentContext`. Subsequent reads from it will return its default value.
   public mutating func clearAgentContext() {self._agentContext = nil}
 
+  /// Optional previously reserved chat id to claim during creation, so the client
+  /// can open the thread before the server responds. When the parent message
+  /// already has a reply thread, that thread is returned and the reservation is
+  /// left unclaimed.
+  public var reservedChatID: Int64 {
+    get {_reservedChatID ?? 0}
+    set {_reservedChatID = newValue}
+  }
+  /// Returns true if `reservedChatID` has been explicitly set.
+  public var hasReservedChatID: Bool {self._reservedChatID != nil}
+  /// Clears the value of `reservedChatID`. Subsequent reads from it will return its default value.
+  public mutating func clearReservedChatID() {self._reservedChatID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -20631,6 +20644,7 @@ public nonisolated struct CreateSubthreadInput: Sendable {
   fileprivate var _description_p: String? = nil
   fileprivate var _emoji: String? = nil
   fileprivate var _agentContext: AgentThreadContext? = nil
+  fileprivate var _reservedChatID: Int64? = nil
 }
 
 public nonisolated struct CreateSubthreadResult: Sendable {
@@ -53571,7 +53585,7 @@ nonisolated extension CreateChatResult: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "CreateSubthreadInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}parent_chat_id\0\u{3}parent_message_id\0\u{1}title\0\u{1}description\0\u{1}emoji\0\u{1}participants\0\u{3}agent_context\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}parent_chat_id\0\u{3}parent_message_id\0\u{1}title\0\u{1}description\0\u{1}emoji\0\u{1}participants\0\u{3}agent_context\0\u{3}reserved_chat_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -53586,6 +53600,7 @@ nonisolated extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf
       case 5: try { try decoder.decodeSingularStringField(value: &self._emoji) }()
       case 6: try { try decoder.decodeRepeatedMessageField(value: &self.participants) }()
       case 7: try { try decoder.decodeSingularMessageField(value: &self._agentContext) }()
+      case 8: try { try decoder.decodeSingularInt64Field(value: &self._reservedChatID) }()
       default: break
       }
     }
@@ -53617,6 +53632,9 @@ nonisolated extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf
     try { if let v = self._agentContext {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
     } }()
+    try { if let v = self._reservedChatID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 8)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -53628,6 +53646,7 @@ nonisolated extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf
     if lhs._emoji != rhs._emoji {return false}
     if lhs.participants != rhs.participants {return false}
     if lhs._agentContext != rhs._agentContext {return false}
+    if lhs._reservedChatID != rhs._reservedChatID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

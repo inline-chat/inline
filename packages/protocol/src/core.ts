@@ -11994,6 +11994,15 @@ export interface CreateSubthreadInput {
      * @generated from protobuf field: optional AgentThreadContext agent_context = 7;
      */
     agentContext?: AgentThreadContext;
+    /**
+     * Optional previously reserved chat id to claim during creation, so the client
+     * can open the thread before the server responds. When the parent message
+     * already has a reply thread, that thread is returned and the reservation is
+     * left unclaimed.
+     *
+     * @generated from protobuf field: optional int64 reserved_chat_id = 8;
+     */
+    reservedChatId?: bigint;
 }
 /**
  * @generated from protobuf message CreateSubthreadResult
@@ -48573,7 +48582,8 @@ class CreateSubthreadInput$Type extends MessageType<CreateSubthreadInput> {
             { no: 4, name: "description", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => InputChatParticipant },
-            { no: 7, name: "agent_context", kind: "message", T: () => AgentThreadContext }
+            { no: 7, name: "agent_context", kind: "message", T: () => AgentThreadContext },
+            { no: 8, name: "reserved_chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<CreateSubthreadInput>): CreateSubthreadInput {
@@ -48610,6 +48620,9 @@ class CreateSubthreadInput$Type extends MessageType<CreateSubthreadInput> {
                 case /* optional AgentThreadContext agent_context */ 7:
                     message.agentContext = AgentThreadContext.internalBinaryRead(reader, reader.uint32(), options, message.agentContext);
                     break;
+                case /* optional int64 reserved_chat_id */ 8:
+                    message.reservedChatId = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -48643,6 +48656,9 @@ class CreateSubthreadInput$Type extends MessageType<CreateSubthreadInput> {
         /* optional AgentThreadContext agent_context = 7; */
         if (message.agentContext)
             AgentThreadContext.internalBinaryWrite(message.agentContext, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 reserved_chat_id = 8; */
+        if (message.reservedChatId !== undefined)
+            writer.tag(8, WireType.Varint).int64(message.reservedChatId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
