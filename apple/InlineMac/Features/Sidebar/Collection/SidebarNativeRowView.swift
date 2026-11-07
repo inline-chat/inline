@@ -2324,10 +2324,12 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     } else {
       var titleTrailing = availableTrailing
       var nestedTitleWidth: CGFloat?
+      // The close control takes over the activity indicator's trailing slot on hover.
+      let showsTitleActivity = titleActivityView.isActivityVisible && !showsCloseControl
       if trailingUnreadBadge.occupiesLayout {
         let badgeWidth = trailingUnreadBadge.fittingWidth
         if keepsNumberedUnreadNearContent {
-          let activityWidth: CGFloat = titleActivityView.isActivityVisible ? 16 : 0
+          let activityWidth: CGFloat = showsTitleActivity ? 16 : 0
           let activitySpacing: CGFloat = activityWidth > 0 ? 8 : 0
           let badgeSpacing: CGFloat = 8
           let accessoryWidth = activitySpacing + activityWidth + badgeSpacing + badgeWidth
@@ -2367,7 +2369,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
           titleTrailing = trailingUnreadBadge.frame.minX - 8
         }
       }
-      if !keepsNumberedUnreadNearContent, titleActivityView.isActivityVisible {
+      if !keepsNumberedUnreadNearContent, showsTitleActivity {
         titleActivityView.frame = CGRect(
           x: titleTrailing - 16,
           y: painted.midY - 6,
