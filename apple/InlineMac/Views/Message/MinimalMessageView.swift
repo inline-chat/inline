@@ -3661,6 +3661,12 @@ class MinimalMessageViewAppKit: NSView {
   ) {
     guard !isAnchorMessage else { return }
     let action = message.isSubthreadPlacement ? ReplyThreadOpenAction.current : action
+    if source == .threadSummary, action == .sidePane,
+       let existingPeer = message.replyThreadPeer,
+       dependencies?.closeReplyThreadPaneIfShowing(existingPeer) == true
+    {
+      return
+    }
     if action.usesCurrentWindowPresentation {
       focusWindowIfNeeded()
     }

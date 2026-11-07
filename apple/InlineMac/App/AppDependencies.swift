@@ -181,6 +181,13 @@ extension AppDependencies {
     nav.open(.chat(peer: peer))
   }
 
+  /// Closes the side pane when it already shows `threadPeer`, so its summary acts as a toggle.
+  func closeReplyThreadPaneIfShowing(_ threadPeer: Peer) -> Bool {
+    guard let nav3, nav3.currentReplyThreadPeer == threadPeer else { return false }
+    nav3.closeReplyThread()
+    return true
+  }
+
   func openReplyThreadInPane(parentPeer: Peer, threadPeer: Peer, sourceMessageId: Int64? = nil) {
     guard nav3?.openReplyThread(
       parentPeer: parentPeer,
