@@ -5,6 +5,7 @@ import os from "node:os"
 import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { BotAvatar_Kind, InlineSdkClient, Method } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
+import { withInlineAccountClient } from "./client-registry.js"
 import { sanitizeInlineVisibleText } from "./outbound-sanitize.js"
 import { jsonResult } from "../openclaw-compat.js"
 import { getInlineRuntime } from "../runtime.js"
@@ -418,16 +419,10 @@ async function withInlineClient<T>(params: {
     throw new Error(`Inline not configured for account "${account.accountId}" (missing token or baseUrl)`)
   }
   const token = await resolveInlineToken(account)
-  const client = new InlineSdkClient({
-    baseUrl: account.baseUrl,
-    token,
-  })
-  await client.connect()
-  try {
-    return await params.fn(client, account.accountId)
-  } finally {
-    await client.close().catch(() => {})
-  }
+  return await withInlineAccountClient(
+    { accountId: account.accountId, baseUrl: account.baseUrl, token },
+    (client) => params.fn(client, account.accountId),
+  )
 }
 
 export function createInlineBotAvatarTool(ctx: {

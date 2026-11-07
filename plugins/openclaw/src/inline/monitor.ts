@@ -95,6 +95,7 @@ import {
   type User,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
+import { shareInlineAccountClient } from "./client-registry.js"
 import { buildInlinePresentationButtons, resolveInlineMessageActionsParam } from "./actions.js"
 import { normalizeMessagePresentation } from "openclaw/plugin-sdk/interactive-runtime"
 import { sendInlineWorkingAction } from "./compose-action.js"
@@ -3468,6 +3469,12 @@ export async function monitorInlineProvider(params: {
   if (!meUser) {
     throw new Error("inline startup getMe failed: missing user")
   }
+  const unshareClient = shareInlineAccountClient({
+    accountId: account.accountId,
+    baseUrl: account.baseUrl,
+    token,
+    client,
+  })
   const meId = meUser.id
   const botUsername = normalizeInlineUsername(meUser.username)?.toLowerCase()
   void registerBotCapabilitiesWithRetry({
@@ -7901,6 +7908,7 @@ export async function monitorInlineProvider(params: {
     try {
       await client.consumeEvents(async (event) => {
         if (abortSignal.aborted) {
+          unshareClient()
           await client.close()
           return
         }
@@ -8120,6 +8128,7 @@ export async function monitorInlineProvider(params: {
     } catch (err) {
       publishStatus({ connected: false, lastError: String(err) })
       runtime.error?.(`inline monitor loop crashed: ${String(err)}`)
+      unshareClient()
       await client.close().catch(() => {})
       throw err
     }
@@ -8140,6 +8149,7 @@ export async function monitorInlineProvider(params: {
       shutdown.abort()
       clearInterval(diagnosticsTimer)
       clearPendingInlineVoiceMessages()
+      unshareClient()
       await client.close().catch(() => {})
       await loop.catch(() => {})
       await drainInboundTasks()

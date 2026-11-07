@@ -23,6 +23,7 @@ import {
   type User,
 } from "@inline-chat/realtime-sdk"
 import { listInlineAccountIds, resolveInlineAccount, resolveInlineToken } from "./accounts.js"
+import { withInlineAccountClient } from "./client-registry.js"
 import { adoptInlineActiveThread, getInlineActiveThreadRoute } from "./active-thread-route.js"
 import { downloadInlineMediaFromUrl, uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
@@ -2480,7 +2481,7 @@ async function findMessageById(params: {
 async function withInlineClient<T>(params: {
   cfg: OpenClawConfig
   accountId: string | null | undefined
-  /** Host authority fence; runs after token resolution, right before connecting. */
+  /** Host authority fence; runs after token resolution, before any Inline request (shared or fresh client). */
   beforeConnect?: (() => void) | undefined
   fn: (client: InlineSdkClient, account: ReturnType<typeof resolveInlineAccount>) => Promise<T>
 }): Promise<T> {
@@ -2489,17 +2490,11 @@ async function withInlineClient<T>(params: {
     throw new Error(`Inline not configured for account "${account.accountId}" (missing token or baseUrl)`)
   }
   const token = await resolveInlineToken(account)
-  const client = new InlineSdkClient({
-    baseUrl: account.baseUrl,
-    token,
-  })
   params.beforeConnect?.()
-  await client.connect()
-  try {
-    return await params.fn(client, account)
-  } finally {
-    await client.close().catch(() => {})
-  }
+  return await withInlineAccountClient(
+    { accountId: account.accountId, baseUrl: account.baseUrl, token },
+    (client) => params.fn(client, account),
+  )
 }
 
 function toJsonSafe(value: unknown): unknown {

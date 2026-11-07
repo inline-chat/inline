@@ -69,6 +69,11 @@ import {
   resolveInlineGroupToolPolicy,
 } from "./policy.js"
 import {
+  acquireInlineAccountClient,
+  withInlineAccountClient,
+  type InlineClientLease,
+} from "./client-registry.js"
+import {
   buildInlinePresentationButtons,
   inlineMessageActions,
   resolveInlineMessageActionsParam,
@@ -874,16 +879,10 @@ async function withInlineClient<T>(params: {
     throw new Error(`Inline not configured for account "${account.accountId}" (missing token or baseUrl)`)
   }
   const token = await resolveInlineToken(account)
-  const client = new InlineSdkClient({
-    baseUrl: account.baseUrl,
-    token,
-  })
-  await client.connect()
-  try {
-    return await params.fn(client, account)
-  } finally {
-    await client.close().catch(() => {})
-  }
+  return await withInlineAccountClient(
+    { accountId: account.accountId, baseUrl: account.baseUrl, token },
+    (client) => params.fn(client, account),
+  )
 }
 
 async function sendTypingInline(params: {
@@ -943,22 +942,16 @@ async function notifyPairingApprovedInline(params: {
   }
 
   const token = await resolveInlineToken(account)
-
-  const client = new InlineSdkClient({
-    baseUrl: account.baseUrl,
-    token,
-  })
-
-  await client.connect()
-  try {
-    await client.sendMessage({
-      userId,
-      text: PAIRING_APPROVED_MESSAGE,
-      parseMarkdown: account.config.parseMarkdown ?? true,
-    })
-  } finally {
-    await client.close().catch(() => {})
-  }
+  await withInlineAccountClient(
+    { accountId: account.accountId, baseUrl: account.baseUrl, token },
+    async (client) => {
+      await client.sendMessage({
+        userId,
+        text: PAIRING_APPROVED_MESSAGE,
+        parseMarkdown: account.config.parseMarkdown ?? true,
+      })
+    },
+  )
 }
 
 async function sendMessageInline(params: {
@@ -973,6 +966,7 @@ async function sendMessageInline(params: {
 } & InlinePlatformSendContext): Promise<InlinePlatformSendResult> {
   let platformSendStarted = false
   let client: InlineSdkClient | null = null
+  let lease: InlineClientLease | null = null
   try {
     const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
     if (!account.configured || !account.baseUrl) {
@@ -993,11 +987,13 @@ async function sendMessageInline(params: {
     }
     const text = sanitizeInlineOutgoingText(visibleText.text)
 
-    client = new InlineSdkClient({
+    lease = await acquireInlineAccountClient({
+      accountId: account.accountId,
       baseUrl: account.baseUrl,
       token,
+      signal: params.signal,
     })
-    await client.connect(params.signal)
+    client = lease.client
 
     // Inline "threads" are modeled as chats (chatId). OpenClaw's threadId is not a message id.
     // Only map OpenClaw replyToId -> Inline replyToMsgId.
@@ -1050,7 +1046,7 @@ async function sendMessageInline(params: {
     if (!platformSendStarted) throw asInlinePlatformNotDispatched(error)
     throw error
   } finally {
-    await client?.close().catch(() => {})
+    await lease?.release()
   }
 }
 
@@ -1070,6 +1066,7 @@ async function sendMediaInline(params: {
 } & InlinePlatformSendContext): Promise<InlinePlatformSendResult> {
   let platformSendStarted = false
   let client: InlineSdkClient | null = null
+  let lease: InlineClientLease | null = null
   try {
     const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
     if (!account.configured || !account.baseUrl) {
@@ -1084,11 +1081,13 @@ async function sendMediaInline(params: {
     const visibleText = sanitizeInlineVisibleText(params.text)
     const caption = visibleText.shouldSkip ? "" : sanitizeInlineOutgoingText(visibleText.text).trim()
 
-    client = new InlineSdkClient({
+    lease = await acquireInlineAccountClient({
+      accountId: account.accountId,
       baseUrl: account.baseUrl,
       token,
+      signal: params.signal,
     })
-    await client.connect(params.signal)
+    client = lease.client
 
     const resolvedTarget = await resolveInlineOutboundTarget({
       client,
@@ -1149,7 +1148,7 @@ async function sendMediaInline(params: {
     if (!platformSendStarted) throw asInlinePlatformNotDispatched(error)
     throw error
   } finally {
-    await client?.close().catch(() => {})
+    await lease?.release()
   }
 }
 
