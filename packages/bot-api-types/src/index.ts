@@ -200,6 +200,8 @@ export type BotRichBlock =
       status?: BotBlockStatus
       /** Trailing secondary text on the summary row, such as "48s". */
       meta?: BotRichText
+      /** Unix seconds. While kind is "progress", clients count up from it in place of meta. */
+      started_at?: number
       is_rtl?: true
     }
   | {

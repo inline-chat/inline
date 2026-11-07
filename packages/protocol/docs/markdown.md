@@ -7,7 +7,7 @@ Inline parses a bounded Markdown authoring surface on the server. Do not assume 
 - Inline formatting: `**bold**` or `__bold__`, `*italic*` or `_italic_`, adaptive backtick code spans, `[label](url)`, email addresses, and plain URLs.
 - Blocks: headings, ordered and unordered lists, task-list checkboxes, block quotes, GFM tables, thematic breaks, and fenced code opened by at least three backticks or tildes. A language may follow a code fence.
 - Images: `![alt](https://example.com/image.png)`. Only HTTP(S) sources are eligible for Inline's asynchronous image projection. Optional exact size hints use `{width=640 height=480}` immediately after the image.
-- Inline extensions: a line containing `<details>` or `<details open>`, followed by `<summary>Title</summary>` or `<summary kind="progress">Title</summary>`, body Markdown, and `</details>`; and a one-line `<footer>Brief metadata</footer>`.
+- Inline extensions: a line containing `<details>` or `<details open>`, followed by `<summary>Title</summary>` or `<summary kind="progress">Title</summary>` (optionally `<summary kind="progress" started="1794000000">` with the work's Unix start time in seconds, which clients show as a live elapsed time), body Markdown, and `</details>`; and a one-line `<footer>Brief metadata</footer>`.
 
 Strikethrough, footnotes, arbitrary HTML, and other unlisted syntax are not formatting contracts. They remain visible as text when Inline cannot represent them.
 
