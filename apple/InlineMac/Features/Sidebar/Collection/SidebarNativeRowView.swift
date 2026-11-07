@@ -303,6 +303,17 @@ private enum SidebarNativeChatRowMetrics {
   static let closeButtonSize: CGFloat = 16
   static let closeTextSpacing: CGFloat = 8
   static let addCloseSpacing: CGFloat = 2
+  static let titleFontSize: CGFloat = 13
+  static let previewFontSize: CGFloat = 11
+  /// Natural single-line heights (16 and 14 for SF), so the title and preview
+  /// frames never clip glyphs or overlap each other.
+  static let titleLineHeight = lineHeight(NSFont.systemFont(ofSize: titleFontSize))
+  static let previewLineHeight = lineHeight(NSFont.systemFont(ofSize: previewFontSize))
+  static let titlePreviewSpacing: CGFloat = 1
+
+  private static func lineHeight(_ font: NSFont) -> CGFloat {
+    ceil(font.ascender - font.descender + font.leading)
+  }
 }
 
 private enum SidebarNativeFolderRowMetrics {
@@ -1023,7 +1034,7 @@ private final class SidebarNativeHeaderRowView: SidebarNativeInteractiveContentV
     self.configuration = configuration
     displayedIsExpanded = configuration.isExpanded
     titleField.stringValue = configuration.title
-    titleField.font = .systemFont(ofSize: 11, weight: .regular)
+    titleField.font = .systemFont(ofSize: 11, weight: .semibold)
     titleField.textColor = .secondaryLabelColor
     titleField.alphaValue = switch configuration.style {
     case .section, .pinnedSection, .timeline:
@@ -1959,7 +1970,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     disclosureView.configure {
       SidebarChatDisclosureIcon(
         isExpanded: displayedExpanded,
-        rowHeight: configuration.size.rowHeight,
+        rowHeight: configuration.size.folderRowHeight,
         animates: allowsAnimations
           && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
       )
@@ -2243,7 +2254,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
 
     let presentation = configuration.presentation
     titleField.stringValue = presentation.title
-    let titleFont = NSFont.systemFont(ofSize: 13)
+    let titleFont = NSFont.systemFont(ofSize: SidebarNativeChatRowMetrics.titleFontSize)
     titleField.font = configuration.isTemporary
       ? NSFontManager.shared.convert(titleFont, toHaveTrait: .italicFontMask)
       : titleFont
@@ -2269,6 +2280,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       peer: presentation.peerID,
       preview: presentation.preview,
       showsText: true,
+      dimmed: configuration.titleDimmed,
       animatesChanges: allowsAnimations
     )
     titleActivityView.configure(
@@ -2352,14 +2364,15 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       && trailingUnreadBadge.occupiesLayout
 
     if showsPreview {
-      let lineHeight: CGFloat = 13
-      let blockHeight = lineHeight * 2 + 2
-      let top = painted.midY - blockHeight / 2
+      let titleHeight = SidebarNativeChatRowMetrics.titleLineHeight
+      let previewHeight = SidebarNativeChatRowMetrics.previewLineHeight
+      let previewTop = titleHeight + SidebarNativeChatRowMetrics.titlePreviewSpacing
+      let top = painted.midY - (previewTop + previewHeight) / 2
       titleField.frame = CGRect(
         x: leading,
         y: top,
         width: max(availableTrailing - leading, 0),
-        height: lineHeight + 2
+        height: titleHeight
       )
       var previewTrailing = availableTrailing
       if badgeBelongsToPreview, trailingUnreadBadge.occupiesLayout {
@@ -2377,7 +2390,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         }
         trailingUnreadBadge.frame = CGRect(
           x: badgeLeading,
-          y: top + lineHeight + 1,
+          y: top + previewTop + previewHeight / 2 - 8,
           width: width,
           height: 16
         )
@@ -2385,9 +2398,9 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       }
       previewView.frame = CGRect(
         x: leading,
-        y: top + lineHeight + 2,
+        y: top + previewTop,
         width: max(previewTrailing - leading, 0),
-        height: lineHeight
+        height: previewHeight
       )
       previewView.isHidden = false
       titleActivityView.frame = .zero
@@ -3290,6 +3303,7 @@ private final class SidebarNativeComposeActivityView: NSView {
   private var activityState: ComposeActionActivityState?
   private var preview = ""
   private var mode = Mode.text
+  private var dimmed = false
   private var allowsAnimations = true
   private var lastPresentation: ComposeActionPresentation?
   private var hasAppliedPresentation = false
@@ -3310,7 +3324,7 @@ private final class SidebarNativeComposeActivityView: NSView {
     clipsToBounds = true
     addSubview(indicatorView)
     addSubview(label)
-    label.font = .systemFont(ofSize: 11)
+    label.font = .systemFont(ofSize: SidebarNativeChatRowMetrics.previewFontSize)
     label.textColor = Theme.sidebarPreviewTextColor
     setAccessibilityElement(false)
     setAccessibilityHidden(true)
@@ -3325,11 +3339,13 @@ private final class SidebarNativeComposeActivityView: NSView {
     peer: Peer,
     preview: String,
     showsText: Bool,
+    dimmed: Bool = false,
     animatesChanges: Bool
   ) {
     activityState = ComposeActions.shared.activityState(for: peer)
     self.preview = preview
     mode = showsText ? .text : .indicator
+    self.dimmed = dimmed
     allowsAnimations = animatesChanges
     hasAppliedPresentation = false
     indicatorView.refreshColor()
@@ -3382,7 +3398,13 @@ private final class SidebarNativeComposeActivityView: NSView {
     switch mode {
     case .text:
       label.stringValue = supported?.text ?? preview
-      label.textColor = supported == nil ? Theme.sidebarPreviewTextColor : Theme.accentColor
+      label.textColor = if supported != nil {
+        Theme.accentColor
+      } else if dimmed {
+        Theme.sidebarInactivePreviewTextColor
+      } else {
+        Theme.sidebarPreviewTextColor
+      }
       label.isHidden = false
     case .indicator:
       label.stringValue = ""

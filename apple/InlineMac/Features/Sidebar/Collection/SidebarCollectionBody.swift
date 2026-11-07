@@ -3943,6 +3943,9 @@ final class SidebarCollectionBodyController: NSViewController {
     let rowHeight = baseRows.first(where: { $0.projectedItem != nil })?.height
       ?? baseRows.first(where: { $0.id == .newThread })?.height
       ?? 44
+    let folderRowHeight = baseRows.first(where: { $0.id.folderID != nil })?.height
+      ?? SidebarItemSize.matching(rowHeight: rowHeight)?.folderRowHeight
+      ?? rowHeight
     let projectedNodes = tree
       .replacing(snapshot: snapshot)
       .projectedNodes(orderLaneOverrides: laneOverrides)
@@ -3959,14 +3962,14 @@ final class SidebarCollectionBodyController: NSViewController {
           var rows = [SidebarCollectionRow(
             id: .folder(folder.id),
             kind: .folder(folder),
-            height: baseRows.first(where: { $0.id == .folder(folder.id) })?.height ?? rowHeight
+            height: baseRows.first(where: { $0.id == .folder(folder.id) })?.height ?? folderRowHeight
           )]
           if folder.childCount == 0, folder.isExpanded {
             rows.append(SidebarCollectionRow(
               id: .folderEmpty(folder.id),
               kind: .folderEmpty(folder.id, lane: folder.lane),
               height: baseRows.first(where: { $0.id == .folderEmpty(folder.id) })?.height
-                ?? rowHeight
+                ?? folderRowHeight
             ))
           }
           return rows
