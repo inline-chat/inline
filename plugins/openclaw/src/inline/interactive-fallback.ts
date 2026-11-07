@@ -30,8 +30,15 @@ export function resolveInlineInteractiveTextFallback(params: {
   text?: string | null | undefined
   interactive?: unknown | undefined
   presentation?: unknown | undefined
+  presentationTextMode?: "fallback" | undefined
 }): string | undefined {
   const text = params.text ?? undefined
+  const presentation = normalizeMessagePresentation(params.presentation)
+  if (presentation) {
+    if (params.presentationTextMode === "fallback" && text?.trim()) return text
+    const fallback = renderMessagePresentationFallbackText({ ...(text !== undefined ? { text } : {}), presentation })
+    if (fallback.trim()) return fallback
+  }
   if (text?.trim()) {
     return text
   }
@@ -43,17 +50,6 @@ export function resolveInlineInteractiveTextFallback(params: {
     .join("\n\n")
   if (legacyText) {
     return legacyText
-  }
-
-  const presentation = normalizeMessagePresentation(params.presentation)
-  if (presentation) {
-    const fallback = renderMessagePresentationFallbackText({
-      ...(params.text != null ? { text: params.text } : {}),
-      presentation,
-    })
-    if (fallback.trim()) {
-      return fallback
-    }
   }
 
   if (!legacy) {

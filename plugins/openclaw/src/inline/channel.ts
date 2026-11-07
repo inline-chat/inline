@@ -1330,8 +1330,9 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
       ...(payload.text !== undefined ? { text: payload.text } : {}),
       presentation,
     })
+    const { presentation: _presentation, presentationTextMode: _textMode, ...rest } = payload
     return {
-      ...payload,
+      ...rest,
       text,
       ...resolveInlinePresentationChannelData(payload.channelData, presentation),
     }
@@ -1361,6 +1362,7 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
         // Untyped legacy input from producers that still emit `interactive`.
         interactive: (payload as Record<string, unknown>).interactive,
         presentation: payload.presentation,
+        ...(payload.presentationTextMode === "fallback" ? { presentationTextMode: "fallback" as const } : {}),
       }) ??
       payload.text ??
       ""
