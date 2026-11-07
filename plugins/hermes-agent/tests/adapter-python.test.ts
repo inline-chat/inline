@@ -6188,6 +6188,73 @@ async def assert_send_voice_accepts_hermes_voice_marker():
 
 asyncio.run(assert_send_voice_accepts_hermes_voice_marker())
 
+async def assert_cron_mentions():
+    prefix = "[@Alice](inline://user?id=42)"
+    calls = []
+
+    async def fake_send_sidecar(path, body):
+        calls.append((path, body))
+        return SendResult(success=True, message_id=str(len(calls)), raw_response=None)
+
+    async def sent_text(adapter, content, metadata=None):
+        calls.clear()
+        adapter._send_sidecar = fake_send_sidecar
+        result = await adapter.send("chat:10", content, metadata=metadata)
+        assert result.success, result
+        return [body["text"] for _, body in calls]
+
+    extra = _apply_yaml_config({}, {"extra": base_extra, "cron_mention_prefix": f"  {prefix}  "})
+    adapter = InlineAdapter(PlatformConfig(extra=extra))
+    metadata = {"job_id": "job-1", "notify": True, "thread_id": "chat:99"}
+    assert await sent_text(adapter, "Morning brief", metadata) == [f"{prefix}\n\nMorning brief"]
+    assert calls[0][0] == "/send"
+    assert calls[0][1]["target"] == {"chatId": "99"}
+    assert calls[0][1]["parseMarkdown"] is True
+    assert metadata == {"job_id": "job-1", "notify": True, "thread_id": "chat:99"}
+
+    assert await sent_text(adapter, "Ordinary reply") == ["Ordinary reply"]
+    assert await sent_text(adapter, "Notifying reply", {"notify": True}) == ["Notifying reply"]
+    assert "sendMode" not in calls[0][1]
+    assert await sent_text(adapter, "Muted cron", {"job_id": "job-1", "notify": False}) == ["Muted cron"]
+    assert calls[0][1]["sendMode"] == "silent"
+    assert await sent_text(adapter, "Muted reply", {"notify": False}) == ["Muted reply"]
+    assert calls[0][1]["sendMode"] == "silent"
+    assert await sent_text(adapter, f"{prefix} Already addressed", metadata) == [f"{prefix} Already addressed"]
+    assert await sent_text(adapter, f"Ask {prefix} later", metadata) == [f"{prefix}\n\nAsk {prefix} later"]
+    body = "    keep indentation\n\nAnd trailing whitespace  "
+    assert await sent_text(adapter, body, metadata) == [f"{prefix}\n\n{body}"]
+    assert await sent_text(adapter, "  \n", metadata) == ["  \n"]
+    chunks = await sent_text(adapter, "x " * 5000, metadata)
+    assert len(chunks) > 1 and chunks[0].startswith(prefix)
+    assert sum(chunk.count(prefix) for chunk in chunks) == 1
+    muted_chunks = await sent_text(adapter, "x " * 5000, {**metadata, "notify": False})
+    assert len(muted_chunks) > 1 and all(prefix not in chunk for chunk in muted_chunks)
+    assert all(body["sendMode"] == "silent" for _, body in calls)
+
+    unconfigured = InlineAdapter(PlatformConfig(extra=base_extra))
+    assert await sent_text(unconfigured, "Brief", metadata) == ["Brief"]
+    literal = InlineAdapter(PlatformConfig(extra={**extra, "parse_markdown": False}))
+    assert await sent_text(literal, "**Literal brief**", metadata) == ["**Literal brief**"]
+    assert calls[0][1]["parseMarkdown"] is False
+
+    # Exercise environment configuration and explicit YAML disable independently
+    # of the parent shell. Config readers remain scoped to the Hermes profile.
+    old_prefix = os.environ.get("INLINE_CRON_MENTION_PREFIX")
+    try:
+        os.environ["INLINE_CRON_MENTION_PREFIX"] = prefix
+        configured = InlineAdapter(PlatformConfig(extra=base_extra))
+        assert await sent_text(configured, "Environment brief", metadata) == [f"{prefix}\n\nEnvironment brief"]
+        disabled_extra = _apply_yaml_config({}, {"extra": base_extra, "cron_mention_prefix": ""})
+        disabled = InlineAdapter(PlatformConfig(extra=disabled_extra))
+        assert await sent_text(disabled, "Disabled brief", metadata) == ["Disabled brief"]
+    finally:
+        if old_prefix is None:
+            os.environ.pop("INLINE_CRON_MENTION_PREFIX", None)
+        else:
+            os.environ["INLINE_CRON_MENTION_PREFIX"] = old_prefix
+
+asyncio.run(assert_cron_mentions())
+
 async def assert_standalone_sender():
     calls = []
     originals = {
@@ -6543,6 +6610,7 @@ describe("python adapter smoke", () => {
         INLINE_GROUP_ALLOW_FROM: "",
         INLINE_ALLOW_ALL_USERS: "",
         INLINE_SYSTEM_EVENTS: "",
+        INLINE_CRON_MENTION_PREFIX: "",
         // Fixtures use small epoch dates; the cold-boot test opts back in explicitly.
         INLINE_DROP_PENDING_ON_COLD_BOOT: "0",
         INLINE_SIDECAR_TEST_MOCK: "1",

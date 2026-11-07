@@ -29,6 +29,10 @@ optional_env:
     description: "Parse supported outbound Inline Markdown (true by default; false preserves literal syntax)"
     prompt: "Parse outbound Markdown?"
     password: false
+  - name: INLINE_CRON_MENTION_PREFIX
+    description: "Inline Markdown mention prefixed to scheduled gateway text deliveries; empty disables it (requires Markdown parsing)"
+    prompt: "Scheduled delivery mention, e.g. [@You](inline://user?id=42)"
+    password: false
   - name: INLINE_SYNC_COMMANDS
     description: "Sync Hermes slash commands into Inline's native / command menu on gateway connect (true/false, default true)"
     prompt: "Sync native slash commands?"
