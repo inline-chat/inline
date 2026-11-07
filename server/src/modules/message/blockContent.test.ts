@@ -313,7 +313,8 @@ describe("block content parser", () => {
   test("round trips a progress row's start time", () => {
     const markdown = '<details>\n<summary kind="progress" started="1794000000" activity="agent">Running a script</summary>\nbun test\n</details>'
     const text = parseMarkdown(markdown).text
-    expect(text.startsWith("▸ Running a script\n")).toBe(true)
+    expect(text).toBe(parseMarkdown(markdown.replace(' started="1794000000"', "")).text)
+    expect(text.trimStart().startsWith("▸ Running a script\n")).toBe(true)
     const parsed = parseBlockContent(markdown)!
     const block = parsed.blockContent.blocks[0]!
     expect(block.kind.oneofKind).toBe("disclosure")
