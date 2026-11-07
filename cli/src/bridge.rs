@@ -3369,6 +3369,15 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
         folder: workspace.clone(),
         attachments_dir: attachments_dir.clone(),
     });
+    // The version probe runs a process; keep it off the async workers.
+    let opencode_native = if installation.provider_id == "opencode" {
+        let executable = installation.executable.clone();
+        tokio::task::spawn_blocking(move || opencode_native_route(&executable))
+            .await
+            .unwrap_or(false)
+    } else {
+        false
+    };
     let mut owned_acp = None;
     let mut owned_opencode: Option<Arc<inline_agent_driver_opencode::OpenCodeHarness>> = None;
     let mut acp_route = false;
@@ -3411,7 +3420,7 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
                 executable,
             )
         }
-        "opencode" if opencode_native_route(installation) => {
+        "opencode" if opencode_native => {
             let ProviderLaunch::Acp(descriptor) =
                 ProviderLaunch::from_installation(installation).map_err(provider_setup_required)?
             else {
@@ -3547,12 +3556,12 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
 /// OpenCode v2 runs natively against its shared service from
 /// [`inline_agent_driver_opencode::CORE_FLOOR`] on. Older v2 releases, and
 /// `INLINE_OPENCODE_DRIVER=acp`, keep the ACP route.
-fn opencode_native_route(installation: &ProviderInstallationConfig) -> bool {
+fn opencode_native_route(executable: &std::path::Path) -> bool {
     if std::env::var("INLINE_OPENCODE_DRIVER").is_ok_and(|value| value.eq_ignore_ascii_case("acp"))
     {
         return false;
     }
-    let version = opencode_startup_version(&installation.executable)
+    let version = opencode_startup_version(executable)
         .ok()
         .as_deref()
         .and_then(inline_agent_driver_opencode::version::parse);
