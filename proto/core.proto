@@ -1408,13 +1408,25 @@ enum AgentGrantOperation {
 message AgentGrant {
   int64 id = 1;
   int64 bot_user_id = 2;
-  // Subject. Space and chat subjects are reserved for later.
+  // The person, for person grants; 0 for space and group grants. Prefer `subject`.
   int64 user_id = 3;
   repeated AgentGrantOperation operations = 4;
   int64 revision = 5;
   optional int64 granted_by = 6;
   // Last change, Unix seconds.
   int64 date = 7;
+  // Who the grant is for. Always set by current servers.
+  optional AccessSubject subject = 8;
+}
+
+// Who an access grant is for. Space and group subjects mean their current
+// members (people only; bots get them through the person they act for).
+message AccessSubject {
+  oneof subject {
+    int64 user_id = 1;
+    int64 space_id = 2;
+    int64 group_id = 3;
+  }
 }
 
 enum AgentParticipationMode {
@@ -1495,6 +1507,9 @@ message GetAgentSessionStatesResult { repeated AgentSession sessions = 1; }
 message ListAgentGrantsInput {
   // Omitted or zero when the calling bot lists its own grants.
   int64 bot_user_id = 1;
+  // Include space and group grants. Older clients leave it unset and see
+  // person grants only.
+  optional bool include_all_subjects = 2;
 }
 
 message ListAgentGrantsResult {
@@ -1508,9 +1523,13 @@ message ListAgentGrantsResult {
 // without APPROVE and CONFIGURE (the bridge's /allowlist).
 message SetAgentGrantInput {
   int64 bot_user_id = 1;
+  // The person; ignored when `subject` is set.
   int64 user_id = 2;
   // Non-empty.
   repeated AgentGrantOperation operations = 3;
+  // A person, a space or a user group. Space and group grants need the owner
+  // to be a member of that space.
+  optional AccessSubject subject = 4;
 }
 
 message SetAgentGrantResult {
@@ -1520,7 +1539,23 @@ message SetAgentGrantResult {
 
 message DeleteAgentGrantInput {
   int64 bot_user_id = 1;
+  // The person; ignored when `subject` is set.
   int64 user_id = 2;
+  optional AccessSubject subject = 3;
+}
+
+// What one person or bot may do with a bot, resolved by the server: their own
+// grants, grants to their spaces and groups, and for a bot what the person it
+// acts for may delegate. Callable by the bot, its owner, or the user asked about.
+message GetAgentAccessInput {
+  // Omitted or zero when the calling bot asks about itself.
+  int64 bot_user_id = 1;
+  int64 user_id = 2;
+}
+
+message GetAgentAccessResult {
+  bool is_owner = 1;
+  repeated AgentGrantOperation operations = 2;
 }
 
 message DeleteAgentGrantResult { int64 revision = 1; }
@@ -2365,6 +2400,7 @@ enum Method {
   UNPIN_ALL_MESSAGES = 163;
   GET_AGENT_SETTINGS = 164;
   GET_CONTACTS = 165;
+  GET_AGENT_ACCESS = 166;
 }
 
 message RpcCall {
@@ -2535,6 +2571,7 @@ message RpcCall {
     UnpinAllMessagesInput unpinAllMessages = 164;
     GetAgentSettingsInput getAgentSettings = 165;
     GetContactsInput getContacts = 166;
+    GetAgentAccessInput getAgentAccess = 167;
   }
 }
 
@@ -2707,6 +2744,7 @@ message RpcResult {
     UnpinAllMessagesResult unpinAllMessages = 164;
     GetAgentSettingsResult getAgentSettings = 165;
     GetContactsResult getContacts = 166;
+    GetAgentAccessResult getAgentAccess = 167;
   }
 }
 
@@ -4949,10 +4987,12 @@ message UpdateAgentParticipation {
 // Sent to a bot's owner, the bot and the grant's subject.
 message UpdateAgentGrant {
   int64 bot_user_id = 1;
+  // The person for person grants; 0 for space and group grants.
   int64 user_id = 2;
   // Absent when the grant was deleted.
   optional AgentGrant grant = 3;
   int64 revision = 4;
+  optional AccessSubject subject = 5;
 }
 
 // Sent to a bot's owner when its runtime status, setup state or settings

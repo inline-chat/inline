@@ -3447,7 +3447,7 @@ export interface AgentGrant {
      */
     botUserId: bigint;
     /**
-     * Subject. Space and chat subjects are reserved for later.
+     * The person, for person grants; 0 for space and group grants. Prefer `subject`.
      *
      * @generated from protobuf field: int64 user_id = 3;
      */
@@ -3470,6 +3470,44 @@ export interface AgentGrant {
      * @generated from protobuf field: int64 date = 7;
      */
     date: bigint;
+    /**
+     * Who the grant is for. Always set by current servers.
+     *
+     * @generated from protobuf field: optional AccessSubject subject = 8;
+     */
+    subject?: AccessSubject;
+}
+/**
+ * Who an access grant is for. Space and group subjects mean their current
+ * members (people only; bots get them through the person they act for).
+ *
+ * @generated from protobuf message AccessSubject
+ */
+export interface AccessSubject {
+    /**
+     * @generated from protobuf oneof: subject
+     */
+    subject: {
+        oneofKind: "userId";
+        /**
+         * @generated from protobuf field: int64 user_id = 1;
+         */
+        userId: bigint;
+    } | {
+        oneofKind: "spaceId";
+        /**
+         * @generated from protobuf field: int64 space_id = 2;
+         */
+        spaceId: bigint;
+    } | {
+        oneofKind: "groupId";
+        /**
+         * @generated from protobuf field: int64 group_id = 3;
+         */
+        groupId: bigint;
+    } | {
+        oneofKind: undefined;
+    };
 }
 /**
  * How one agent takes part in one chat.
@@ -3656,6 +3694,13 @@ export interface ListAgentGrantsInput {
      * @generated from protobuf field: int64 bot_user_id = 1;
      */
     botUserId: bigint;
+    /**
+     * Include space and group grants. Older clients leave it unset and see
+     * person grants only.
+     *
+     * @generated from protobuf field: optional bool include_all_subjects = 2;
+     */
+    includeAllSubjects?: boolean;
 }
 /**
  * @generated from protobuf message ListAgentGrantsResult
@@ -3688,6 +3733,8 @@ export interface SetAgentGrantInput {
      */
     botUserId: bigint;
     /**
+     * The person; ignored when `subject` is set.
+     *
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
@@ -3697,6 +3744,13 @@ export interface SetAgentGrantInput {
      * @generated from protobuf field: repeated AgentGrantOperation operations = 3;
      */
     operations: AgentGrantOperation[];
+    /**
+     * A person, a space or a user group. Space and group grants need the owner
+     * to be a member of that space.
+     *
+     * @generated from protobuf field: optional AccessSubject subject = 4;
+     */
+    subject?: AccessSubject;
 }
 /**
  * @generated from protobuf message SetAgentGrantResult
@@ -3720,9 +3774,47 @@ export interface DeleteAgentGrantInput {
      */
     botUserId: bigint;
     /**
+     * The person; ignored when `subject` is set.
+     *
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
+    /**
+     * @generated from protobuf field: optional AccessSubject subject = 3;
+     */
+    subject?: AccessSubject;
+}
+/**
+ * What one person or bot may do with a bot, resolved by the server: their own
+ * grants, grants to their spaces and groups, and for a bot what the person it
+ * acts for may delegate. Callable by the bot, its owner, or the user asked about.
+ *
+ * @generated from protobuf message GetAgentAccessInput
+ */
+export interface GetAgentAccessInput {
+    /**
+     * Omitted or zero when the calling bot asks about itself.
+     *
+     * @generated from protobuf field: int64 bot_user_id = 1;
+     */
+    botUserId: bigint;
+    /**
+     * @generated from protobuf field: int64 user_id = 2;
+     */
+    userId: bigint;
+}
+/**
+ * @generated from protobuf message GetAgentAccessResult
+ */
+export interface GetAgentAccessResult {
+    /**
+     * @generated from protobuf field: bool is_owner = 1;
+     */
+    isOwner: boolean;
+    /**
+     * @generated from protobuf field: repeated AgentGrantOperation operations = 2;
+     */
+    operations: AgentGrantOperation[];
 }
 /**
  * @generated from protobuf message DeleteAgentGrantResult
@@ -6332,6 +6424,12 @@ export interface RpcCall {
          */
         getContacts: GetContactsInput;
     } | {
+        oneofKind: "getAgentAccess";
+        /**
+         * @generated from protobuf field: GetAgentAccessInput getAgentAccess = 167;
+         */
+        getAgentAccess: GetAgentAccessInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -7330,6 +7428,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetContactsResult getContacts = 166;
          */
         getContacts: GetContactsResult;
+    } | {
+        oneofKind: "getAgentAccess";
+        /**
+         * @generated from protobuf field: GetAgentAccessResult getAgentAccess = 167;
+         */
+        getAgentAccess: GetAgentAccessResult;
     } | {
         oneofKind: undefined;
     };
@@ -13143,6 +13247,8 @@ export interface UpdateAgentGrant {
      */
     botUserId: bigint;
     /**
+     * The person for person grants; 0 for space and group grants.
+     *
      * @generated from protobuf field: int64 user_id = 2;
      */
     userId: bigint;
@@ -13156,6 +13262,10 @@ export interface UpdateAgentGrant {
      * @generated from protobuf field: int64 revision = 4;
      */
     revision: bigint;
+    /**
+     * @generated from protobuf field: optional AccessSubject subject = 5;
+     */
+    subject?: AccessSubject;
 }
 /**
  * Sent to a bot's owner when its runtime status, setup state or settings
@@ -17439,7 +17549,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_CONTACTS = 165;
      */
-    GET_CONTACTS = 165
+    GET_CONTACTS = 165,
+    /**
+     * @generated from protobuf enum value: GET_AGENT_ACCESS = 166;
+     */
+    GET_AGENT_ACCESS = 166
 }
 /**
  * @generated from protobuf enum GridTranscriptionState
@@ -25645,7 +25759,8 @@ class AgentGrant$Type extends MessageType<AgentGrant> {
             { no: 4, name: "operations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] },
             { no: 5, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "granted_by", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 7, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 7, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "subject", kind: "message", T: () => AccessSubject }
         ]);
     }
     create(value?: PartialMessage<AgentGrant>): AgentGrant {
@@ -25690,6 +25805,9 @@ class AgentGrant$Type extends MessageType<AgentGrant> {
                 case /* int64 date */ 7:
                     message.date = reader.int64().toBigInt();
                     break;
+                case /* optional AccessSubject subject */ 8:
+                    message.subject = AccessSubject.internalBinaryRead(reader, reader.uint32(), options, message.subject);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -25727,6 +25845,9 @@ class AgentGrant$Type extends MessageType<AgentGrant> {
         /* int64 date = 7; */
         if (message.date !== 0n)
             writer.tag(7, WireType.Varint).int64(message.date);
+        /* optional AccessSubject subject = 8; */
+        if (message.subject)
+            AccessSubject.internalBinaryWrite(message.subject, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -25737,6 +25858,76 @@ class AgentGrant$Type extends MessageType<AgentGrant> {
  * @generated MessageType for protobuf message AgentGrant
  */
 export const AgentGrant = new AgentGrant$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class AccessSubject$Type extends MessageType<AccessSubject> {
+    constructor() {
+        super("AccessSubject", [
+            { no: 1, name: "user_id", kind: "scalar", oneof: "subject", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "space_id", kind: "scalar", oneof: "subject", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "group_id", kind: "scalar", oneof: "subject", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<AccessSubject>): AccessSubject {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.subject = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<AccessSubject>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: AccessSubject): AccessSubject {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 user_id */ 1:
+                    message.subject = {
+                        oneofKind: "userId",
+                        userId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* int64 space_id */ 2:
+                    message.subject = {
+                        oneofKind: "spaceId",
+                        spaceId: reader.int64().toBigInt()
+                    };
+                    break;
+                case /* int64 group_id */ 3:
+                    message.subject = {
+                        oneofKind: "groupId",
+                        groupId: reader.int64().toBigInt()
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: AccessSubject, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 user_id = 1; */
+        if (message.subject.oneofKind === "userId")
+            writer.tag(1, WireType.Varint).int64(message.subject.userId);
+        /* int64 space_id = 2; */
+        if (message.subject.oneofKind === "spaceId")
+            writer.tag(2, WireType.Varint).int64(message.subject.spaceId);
+        /* int64 group_id = 3; */
+        if (message.subject.oneofKind === "groupId")
+            writer.tag(3, WireType.Varint).int64(message.subject.groupId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message AccessSubject
+ */
+export const AccessSubject = new AccessSubject$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class AgentParticipation$Type extends MessageType<AgentParticipation> {
     constructor() {
@@ -26286,7 +26477,8 @@ export const GetAgentSessionStatesResult = new GetAgentSessionStatesResult$Type(
 class ListAgentGrantsInput$Type extends MessageType<ListAgentGrantsInput> {
     constructor() {
         super("ListAgentGrantsInput", [
-            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "include_all_subjects", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<ListAgentGrantsInput>): ListAgentGrantsInput {
@@ -26304,6 +26496,9 @@ class ListAgentGrantsInput$Type extends MessageType<ListAgentGrantsInput> {
                 case /* int64 bot_user_id */ 1:
                     message.botUserId = reader.int64().toBigInt();
                     break;
+                case /* optional bool include_all_subjects */ 2:
+                    message.includeAllSubjects = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -26319,6 +26514,9 @@ class ListAgentGrantsInput$Type extends MessageType<ListAgentGrantsInput> {
         /* int64 bot_user_id = 1; */
         if (message.botUserId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.botUserId);
+        /* optional bool include_all_subjects = 2; */
+        if (message.includeAllSubjects !== undefined)
+            writer.tag(2, WireType.Varint).bool(message.includeAllSubjects);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26398,7 +26596,8 @@ class SetAgentGrantInput$Type extends MessageType<SetAgentGrantInput> {
         super("SetAgentGrantInput", [
             { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "operations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] }
+            { no: 3, name: "operations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] },
+            { no: 4, name: "subject", kind: "message", T: () => AccessSubject }
         ]);
     }
     create(value?: PartialMessage<SetAgentGrantInput>): SetAgentGrantInput {
@@ -26428,6 +26627,9 @@ class SetAgentGrantInput$Type extends MessageType<SetAgentGrantInput> {
                     else
                         message.operations.push(reader.int32());
                     break;
+                case /* optional AccessSubject subject */ 4:
+                    message.subject = AccessSubject.internalBinaryRead(reader, reader.uint32(), options, message.subject);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -26453,6 +26655,9 @@ class SetAgentGrantInput$Type extends MessageType<SetAgentGrantInput> {
                 writer.int32(message.operations[i]);
             writer.join();
         }
+        /* optional AccessSubject subject = 4; */
+        if (message.subject)
+            AccessSubject.internalBinaryWrite(message.subject, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26522,7 +26727,8 @@ class DeleteAgentGrantInput$Type extends MessageType<DeleteAgentGrantInput> {
     constructor() {
         super("DeleteAgentGrantInput", [
             { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "subject", kind: "message", T: () => AccessSubject }
         ]);
     }
     create(value?: PartialMessage<DeleteAgentGrantInput>): DeleteAgentGrantInput {
@@ -26544,6 +26750,9 @@ class DeleteAgentGrantInput$Type extends MessageType<DeleteAgentGrantInput> {
                 case /* int64 user_id */ 2:
                     message.userId = reader.int64().toBigInt();
                     break;
+                case /* optional AccessSubject subject */ 3:
+                    message.subject = AccessSubject.internalBinaryRead(reader, reader.uint32(), options, message.subject);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -26562,6 +26771,9 @@ class DeleteAgentGrantInput$Type extends MessageType<DeleteAgentGrantInput> {
         /* int64 user_id = 2; */
         if (message.userId !== 0n)
             writer.tag(2, WireType.Varint).int64(message.userId);
+        /* optional AccessSubject subject = 3; */
+        if (message.subject)
+            AccessSubject.internalBinaryWrite(message.subject, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -26572,6 +26784,124 @@ class DeleteAgentGrantInput$Type extends MessageType<DeleteAgentGrantInput> {
  * @generated MessageType for protobuf message DeleteAgentGrantInput
  */
 export const DeleteAgentGrantInput = new DeleteAgentGrantInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetAgentAccessInput$Type extends MessageType<GetAgentAccessInput> {
+    constructor() {
+        super("GetAgentAccessInput", [
+            { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<GetAgentAccessInput>): GetAgentAccessInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.botUserId = 0n;
+        message.userId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<GetAgentAccessInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetAgentAccessInput): GetAgentAccessInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 bot_user_id */ 1:
+                    message.botUserId = reader.int64().toBigInt();
+                    break;
+                case /* int64 user_id */ 2:
+                    message.userId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetAgentAccessInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 bot_user_id = 1; */
+        if (message.botUserId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.botUserId);
+        /* int64 user_id = 2; */
+        if (message.userId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetAgentAccessInput
+ */
+export const GetAgentAccessInput = new GetAgentAccessInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetAgentAccessResult$Type extends MessageType<GetAgentAccessResult> {
+    constructor() {
+        super("GetAgentAccessResult", [
+            { no: 1, name: "is_owner", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "operations", kind: "enum", repeat: 1 /*RepeatType.PACKED*/, T: () => ["AgentGrantOperation", AgentGrantOperation, "AGENT_GRANT_OPERATION_"] }
+        ]);
+    }
+    create(value?: PartialMessage<GetAgentAccessResult>): GetAgentAccessResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.isOwner = false;
+        message.operations = [];
+        if (value !== undefined)
+            reflectionMergePartial<GetAgentAccessResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetAgentAccessResult): GetAgentAccessResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool is_owner */ 1:
+                    message.isOwner = reader.bool();
+                    break;
+                case /* repeated AgentGrantOperation operations */ 2:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.operations.push(reader.int32());
+                    else
+                        message.operations.push(reader.int32());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetAgentAccessResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool is_owner = 1; */
+        if (message.isOwner !== false)
+            writer.tag(1, WireType.Varint).bool(message.isOwner);
+        /* repeated AgentGrantOperation operations = 2; */
+        if (message.operations.length) {
+            writer.tag(2, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.operations.length; i++)
+                writer.int32(message.operations[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetAgentAccessResult
+ */
+export const GetAgentAccessResult = new GetAgentAccessResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class DeleteAgentGrantResult$Type extends MessageType<DeleteAgentGrantResult> {
     constructor() {
@@ -30593,7 +30923,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 163, name: "moveAgentSession", kind: "message", oneof: "input", T: () => MoveAgentSessionInput },
             { no: 164, name: "unpinAllMessages", kind: "message", oneof: "input", T: () => UnpinAllMessagesInput },
             { no: 165, name: "getAgentSettings", kind: "message", oneof: "input", T: () => GetAgentSettingsInput },
-            { no: 166, name: "getContacts", kind: "message", oneof: "input", T: () => GetContactsInput }
+            { no: 166, name: "getContacts", kind: "message", oneof: "input", T: () => GetContactsInput },
+            { no: 167, name: "getAgentAccess", kind: "message", oneof: "input", T: () => GetAgentAccessInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -31596,6 +31927,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getContacts: GetContactsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getContacts)
                     };
                     break;
+                case /* GetAgentAccessInput getAgentAccess */ 167:
+                    message.input = {
+                        oneofKind: "getAgentAccess",
+                        getAgentAccess: GetAgentAccessInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getAgentAccess)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -32103,6 +32440,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetContactsInput getContacts = 166; */
         if (message.input.oneofKind === "getContacts")
             GetContactsInput.internalBinaryWrite(message.input.getContacts, writer.tag(166, WireType.LengthDelimited).fork(), options).join();
+        /* GetAgentAccessInput getAgentAccess = 167; */
+        if (message.input.oneofKind === "getAgentAccess")
+            GetAgentAccessInput.internalBinaryWrite(message.input.getAgentAccess, writer.tag(167, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -32281,7 +32621,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 163, name: "moveAgentSession", kind: "message", oneof: "result", T: () => MoveAgentSessionResult },
             { no: 164, name: "unpinAllMessages", kind: "message", oneof: "result", T: () => UnpinAllMessagesResult },
             { no: 165, name: "getAgentSettings", kind: "message", oneof: "result", T: () => GetAgentSettingsResult },
-            { no: 166, name: "getContacts", kind: "message", oneof: "result", T: () => GetContactsResult }
+            { no: 166, name: "getContacts", kind: "message", oneof: "result", T: () => GetContactsResult },
+            { no: 167, name: "getAgentAccess", kind: "message", oneof: "result", T: () => GetAgentAccessResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -33284,6 +33625,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getContacts: GetContactsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getContacts)
                     };
                     break;
+                case /* GetAgentAccessResult getAgentAccess */ 167:
+                    message.result = {
+                        oneofKind: "getAgentAccess",
+                        getAgentAccess: GetAgentAccessResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getAgentAccess)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -33791,6 +34138,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetContactsResult getContacts = 166; */
         if (message.result.oneofKind === "getContacts")
             GetContactsResult.internalBinaryWrite(message.result.getContacts, writer.tag(166, WireType.LengthDelimited).fork(), options).join();
+        /* GetAgentAccessResult getAgentAccess = 167; */
+        if (message.result.oneofKind === "getAgentAccess")
+            GetAgentAccessResult.internalBinaryWrite(message.result.getAgentAccess, writer.tag(167, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -51851,7 +52201,8 @@ class UpdateAgentGrant$Type extends MessageType<UpdateAgentGrant> {
             { no: 1, name: "bot_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "grant", kind: "message", T: () => AgentGrant },
-            { no: 4, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 4, name: "revision", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "subject", kind: "message", T: () => AccessSubject }
         ]);
     }
     create(value?: PartialMessage<UpdateAgentGrant>): UpdateAgentGrant {
@@ -51880,6 +52231,9 @@ class UpdateAgentGrant$Type extends MessageType<UpdateAgentGrant> {
                 case /* int64 revision */ 4:
                     message.revision = reader.int64().toBigInt();
                     break;
+                case /* optional AccessSubject subject */ 5:
+                    message.subject = AccessSubject.internalBinaryRead(reader, reader.uint32(), options, message.subject);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -51904,6 +52258,9 @@ class UpdateAgentGrant$Type extends MessageType<UpdateAgentGrant> {
         /* int64 revision = 4; */
         if (message.revision !== 0n)
             writer.tag(4, WireType.Varint).int64(message.revision);
+        /* optional AccessSubject subject = 5; */
+        if (message.subject)
+            AccessSubject.internalBinaryWrite(message.subject, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
