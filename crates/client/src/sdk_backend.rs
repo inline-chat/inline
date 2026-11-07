@@ -4271,6 +4271,7 @@ pub(crate) fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::AgentGrant(_) => "agent_grant",
         Update::AgentRuntime(_) => "agent_runtime",
         Update::AgentSessionControl(_) => "agent_session_control",
+        Update::AgentSettings(_) => "agent_settings",
     }
 }
 

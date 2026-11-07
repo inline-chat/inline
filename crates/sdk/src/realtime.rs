@@ -2115,6 +2115,13 @@ rpc_requests!(
         MoveAgentSessionResult,
         MoveAgentSession
     ),
+    (
+        GetAgentSettingsInput,
+        GetAgentSettings,
+        GetAgentSettings,
+        GetAgentSettingsResult,
+        GetAgentSettings
+    ),
 );
 
 fn connection_init_for_token(token: &str, identity: &ClientIdentity) -> proto::ConnectionInit {
