@@ -135,6 +135,26 @@ Chat commands take several chats: repeat `-c`/`-u` or comma-separate ids. Batch 
   - Create a bot. Token is not printed in table output; use `inline bots reveal-token` explicitly. JSON includes the token.
 - `inline bots reveal-token --bot-user-id 42`
   - Print (or JSON-return) an existing bot token by bot user id.
+- `inline bots get --bot-user-id 42`
+  - Show a bot you own with its agent settings and access grants. Alias: `view`.
+- `inline bots update --bot-user-id 42 [--name "Deploy Bot"] [--username deploy_bot]`
+  - Change the name and/or username (needs at least one; usernames must end with `bot`).
+- `inline bots set-photo --bot-user-id 42 --file ./avatar.png`
+  - Upload an image and set it as the bot's profile photo. `inline bots remove-photo --bot-user-id 42` removes it.
+- `inline bots clear-avatar --bot-user-id 42`
+  - Clear the bot's animated avatar (separate from the profile photo).
+- `inline bots rotate-token --bot-user-id 42 [-y]`
+  - Issue a new token and print it; the old token stops working. Prompts unless `--yes`/`-y` (`--json` requires `--yes`/`-y`).
+- `inline bots delete --bot-user-id 42 [-y]`
+  - Delete a bot. Prompts unless `--yes`/`-y` (`--json` requires `--yes`/`-y`).
+- `inline bots settings --bot-user-id 42 [--chat-id 7] [--output-mode detailed|friendly|default]`
+  - Detailed shows every step; friendly shows short updates and the answer. Without `--output-mode`, print the setting. With `--chat-id`, show or set that thread's override (`default` clears it); otherwise the bot's default. Owner or configure access.
+- `inline bots access list --bot-user-id 42`
+  - List people with access to the bot (no grants means owner only).
+- `inline bots access grant --bot-user-id 42 --user-id 7 [--operations invoke,steer,approve,configure]`
+  - Grant or replace one person's access. Defaults to `invoke,steer`.
+- `inline bots access revoke --bot-user-id 42 --user-id 7`
+  - Revoke one person's access.
 
 ### typing
 
@@ -309,6 +329,9 @@ Chat commands take several chats: repeat `-c`/`-u` or comma-separate ids. Batch 
   - `inline bots list`
   - `inline bots create --name "Build Bot" --username build_bot`
   - `inline bots reveal-token --bot-user-id 42` (token is not printed by default)
+  - `inline bots update --bot-user-id 42 --name "Deploy Bot"`
+  - `inline bots set-photo --bot-user-id 42 --file ./avatar.png`
+  - `inline bots access grant --bot-user-id 42 --user-id 7`
 - Tasks:
   - `inline tasks create-linear --chat-id 123 --message-id 456`
   - `inline tasks create-notion --chat-id 123 --message-id 456 --space-id 31`
