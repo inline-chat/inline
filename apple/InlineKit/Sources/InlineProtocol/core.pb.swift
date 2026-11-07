@@ -5225,6 +5225,18 @@ public nonisolated struct BlockDisclosure: Sendable {
   /// Clears the value of `meta`. Subsequent reads from it will return its default value.
   public mutating func clearMeta() {self._meta = nil}
 
+  /// When the work this row shows started, Unix seconds. While kind is
+  /// PROGRESS, clients show the live elapsed time in place of meta's text;
+  /// meta keeps the value as of the last edit for clients that can't.
+  public var startedAt: Int64 {
+    get {_startedAt ?? 0}
+    set {_startedAt = newValue}
+  }
+  /// Returns true if `startedAt` has been explicitly set.
+  public var hasStartedAt: Bool {self._startedAt != nil}
+  /// Clears the value of `startedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearStartedAt() {self._startedAt = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum Kind: SwiftProtobuf.Enum, Swift.CaseIterable {
@@ -5343,6 +5355,7 @@ public nonisolated struct BlockDisclosure: Sendable {
   fileprivate var _initiallyOpen: Bool? = nil
   fileprivate var _isRtl: Bool? = nil
   fileprivate var _meta: BlockText? = nil
+  fileprivate var _startedAt: Int64? = nil
 }
 
 public nonisolated struct BlockQuote: Sendable {
@@ -30644,7 +30657,7 @@ nonisolated extension BlockAlbum: SwiftProtobuf.Message, SwiftProtobuf._MessageI
 
 nonisolated extension BlockDisclosure: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "BlockDisclosure"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}summary\0\u{1}kind\0\u{3}initially_open\0\u{1}children\0\u{3}is_rtl\0\u{3}activity_kind\0\u{1}status\0\u{1}meta\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}summary\0\u{1}kind\0\u{3}initially_open\0\u{1}children\0\u{3}is_rtl\0\u{3}activity_kind\0\u{1}status\0\u{1}meta\0\u{3}started_at\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -30660,6 +30673,7 @@ nonisolated extension BlockDisclosure: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 6: try { try decoder.decodeSingularEnumField(value: &self.activityKind) }()
       case 7: try { try decoder.decodeSingularEnumField(value: &self.status) }()
       case 8: try { try decoder.decodeSingularMessageField(value: &self._meta) }()
+      case 9: try { try decoder.decodeSingularInt64Field(value: &self._startedAt) }()
       default: break
       }
     }
@@ -30694,6 +30708,9 @@ nonisolated extension BlockDisclosure: SwiftProtobuf.Message, SwiftProtobuf._Mes
     try { if let v = self._meta {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
     } }()
+    try { if let v = self._startedAt {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 9)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -30706,6 +30723,7 @@ nonisolated extension BlockDisclosure: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.activityKind != rhs.activityKind {return false}
     if lhs.status != rhs.status {return false}
     if lhs._meta != rhs._meta {return false}
+    if lhs._startedAt != rhs._startedAt {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

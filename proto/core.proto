@@ -690,6 +690,10 @@ message BlockDisclosure {
   BlockStatus status = 7;
   // Trailing secondary text on the summary row, such as "48s" or "3 files".
   optional BlockText meta = 8;
+  // When the work this row shows started, Unix seconds. While kind is
+  // PROGRESS, clients show the live elapsed time in place of meta's text;
+  // meta keeps the value as of the last edit for clients that can't.
+  optional int64 started_at = 9;
 }
 
 message BlockQuote {

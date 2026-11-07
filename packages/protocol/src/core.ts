@@ -1736,6 +1736,14 @@ export interface BlockDisclosure {
      * @generated from protobuf field: optional BlockText meta = 8;
      */
     meta?: BlockText;
+    /**
+     * When the work this row shows started, Unix seconds. While kind is
+     * PROGRESS, clients show the live elapsed time in place of meta's text;
+     * meta keeps the value as of the last edit for clients that can't.
+     *
+     * @generated from protobuf field: optional int64 started_at = 9;
+     */
+    startedAt?: bigint;
 }
 /**
  * @generated from protobuf enum BlockDisclosure.Kind
@@ -21906,7 +21914,8 @@ class BlockDisclosure$Type extends MessageType<BlockDisclosure> {
             { no: 5, name: "is_rtl", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 6, name: "activity_kind", kind: "enum", T: () => ["BlockDisclosure.ActivityKind", BlockDisclosure_ActivityKind, "ACTIVITY_KIND_"] },
             { no: 7, name: "status", kind: "enum", T: () => ["BlockStatus", BlockStatus, "BLOCK_STATUS_"] },
-            { no: 8, name: "meta", kind: "message", T: () => BlockText }
+            { no: 8, name: "meta", kind: "message", T: () => BlockText },
+            { no: 9, name: "started_at", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<BlockDisclosure>): BlockDisclosure {
@@ -21948,6 +21957,9 @@ class BlockDisclosure$Type extends MessageType<BlockDisclosure> {
                 case /* optional BlockText meta */ 8:
                     message.meta = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.meta);
                     break;
+                case /* optional int64 started_at */ 9:
+                    message.startedAt = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21984,6 +21996,9 @@ class BlockDisclosure$Type extends MessageType<BlockDisclosure> {
         /* optional BlockText meta = 8; */
         if (message.meta)
             BlockText.internalBinaryWrite(message.meta, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 started_at = 9; */
+        if (message.startedAt !== undefined)
+            writer.tag(9, WireType.Varint).int64(message.startedAt);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
