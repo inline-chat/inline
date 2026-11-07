@@ -438,10 +438,12 @@ private struct Builder {
     let m = metrics
     let summary = typeset(disclosure.summary, width: .greatestFiniteMagnitude, isRightToLeft: disclosure.isRightToLeft)
     let activity = disclosure.hasActivityIcon ? m.disclosureActivitySide + m.disclosureActivityGap : 0
-    let viewport = max(1, width - m.disclosureChevronSide - m.disclosureChevronGap - activity)
+    let elapsed = disclosure.elapsed.map { m.disclosureElapsedGap + $0.reservedWidth } ?? 0
+    let viewport = max(1, width - m.disclosureChevronSide - m.disclosureChevronGap - activity - elapsed)
     let titleWidth = min(summary.lines.first?.width ?? 0, viewport)
     let height = max(summary.lines.first?.frame.height ?? 0, m.disclosureChevronSide)
-    let nodeWidth = grid.ceil(activity + titleWidth + m.disclosureChevronGap + m.disclosureChevronSide)
+    let lineHeight = summary.lines.first?.frame.height ?? height
+    let nodeWidth = grid.ceil(activity + titleWidth + elapsed + m.disclosureChevronGap + m.disclosureChevronSide)
     let rtl = disclosure.isRightToLeft
     // Activity icon, title, chevron in reading order; mirrored for right-to-left.
     func place(_ minX: CGFloat, _ itemWidth: CGFloat, _ itemHeight: CGFloat) -> CGRect {
@@ -449,11 +451,15 @@ private struct Builder {
     }
     let node = RichLayout.Disclosure(
       summary: summary,
-      titleFrame: grid.round(place(activity, titleWidth, summary.lines.first?.frame.height ?? height)),
-      chevronFrame: grid.round(place(activity + titleWidth + m.disclosureChevronGap, m.disclosureChevronSide, m.disclosureChevronSide)),
+      titleFrame: grid.round(place(activity, titleWidth, lineHeight)),
+      chevronFrame: grid.round(place(activity + titleWidth + elapsed + m.disclosureChevronGap, m.disclosureChevronSide, m.disclosureChevronSide)),
       activityFrame: disclosure.hasActivityIcon ? grid.round(place(0, m.disclosureActivitySide, m.disclosureActivitySide)) : nil,
       isExpanded: disclosure.isExpanded,
-      isInProgress: disclosure.isInProgress
+      isInProgress: disclosure.isInProgress,
+      elapsedFrame: disclosure.elapsed.map {
+        grid.round(place(activity + titleWidth + m.disclosureElapsedGap, $0.reservedWidth, lineHeight))
+      },
+      elapsedStart: disclosure.elapsed?.start
     )
     let frame = CGRect(x: rtl ? x + width - nodeWidth : x, y: y, width: nodeWidth, height: grid.ceil(height))
     guard append(path, frame, .disclosure(node), anchor: rtl ? .trailing : .leading) else { return false }

@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// A rich message as a tree of blocks. Text arrives styled by the host (fonts, colors, links);
 /// the planner only measures and places it.
@@ -97,6 +98,8 @@ public struct RichDisclosure: Hashable, Sendable {
   public var isInProgress: Bool
   public var hasActivityIcon: Bool
   public var isRightToLeft: Bool
+  /// A working row's live time, right after the summary: "Working 2m 12s".
+  public var elapsed: RichElapsed?
 
   public init(
     summary: MessageText,
@@ -104,7 +107,8 @@ public struct RichDisclosure: Hashable, Sendable {
     isExpanded: Bool,
     isInProgress: Bool = false,
     hasActivityIcon: Bool = false,
-    isRightToLeft: Bool = false
+    isRightToLeft: Bool = false,
+    elapsed: RichElapsed? = nil
   ) {
     self.summary = summary
     self.children = children
@@ -112,6 +116,20 @@ public struct RichDisclosure: Hashable, Sendable {
     self.isInProgress = isInProgress
     self.hasActivityIcon = hasActivityIcon
     self.isRightToLeft = isRightToLeft
+    self.elapsed = elapsed
+  }
+}
+
+/// A working row's live time. Layout only reserves its room; the row view counts.
+public struct RichElapsed: Hashable, Sendable {
+  /// When the work started.
+  public var start: Date
+  /// The widest the time gets, so ticking never relays out the message.
+  public var reservedWidth: CGFloat
+
+  public init(start: Date, reservedWidth: CGFloat) {
+    self.start = start
+    self.reservedWidth = reservedWidth
   }
 }
 
@@ -164,6 +182,8 @@ public struct RichLayoutMetrics: Hashable, Sendable {
   public var disclosureChevronGap: CGFloat = 4
   public var disclosureActivitySide: CGFloat = 14
   public var disclosureActivityGap: CGFloat = 5
+  /// About a space between a working row's summary and its live time.
+  public var disclosureElapsedGap: CGFloat = 5
   /// Content past these limits falls back to plain text, as on the server.
   public var maximumDepth = 16
   public var maximumNodes = 2_048
@@ -232,6 +252,10 @@ public struct RichLayout: Sendable {
     public var activityFrame: CGRect?
     public var isExpanded: Bool
     public var isInProgress: Bool
+    /// Room reserved for the live time, between the title and the chevron. The view
+    /// draws the time at its actual width and closes the gap up to the chevron.
+    public var elapsedFrame: CGRect?
+    public var elapsedStart: Date?
   }
 
   public struct Placed: Sendable {

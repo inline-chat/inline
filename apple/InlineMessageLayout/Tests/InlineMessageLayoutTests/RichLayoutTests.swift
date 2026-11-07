@@ -135,6 +135,26 @@ struct RichLayoutTests {
     #expect(summary.chevronFrame.minX >= summary.titleFrame.maxX)
   }
 
+  @Test("A working row reserves its live time between the title and the chevron")
+  func elapsed() throws {
+    let start = Date(timeIntervalSince1970: 1_794_000_000)
+    let plain = RichDisclosure(summary: Fixtures.text("Working"), children: [], isExpanded: false, isInProgress: true)
+    var timed = plain
+    timed.elapsed = RichElapsed(start: start, reservedWidth: 60)
+    let without = try Self.layout([.disclosure(plain)])
+    let with = try Self.layout([.disclosure(timed)])
+    guard case let .disclosure(row) = with.nodes[0].node, case let .disclosure(bare) = without.nodes[0].node else {
+      Issue.record("not a disclosure"); return
+    }
+    let slot = try #require(row.elapsedFrame)
+    #expect(row.elapsedStart == start)
+    #expect(bare.elapsedFrame == nil)
+    #expect(slot.minX > row.titleFrame.maxX)
+    #expect(slot.width == 60)
+    #expect(row.chevronFrame.minX >= slot.maxX)
+    #expect(with.nodes[0].frame.width > without.nodes[0].frame.width)
+  }
+
   @Test("Images keep their aspect inside the width and the height cap")
   func images() throws {
     let layout = try Self.layout([.image(RichImage(id: "a", size: CGSize(width: 1_200, height: 800))), .image(RichImage(id: "b", size: nil))])
