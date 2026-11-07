@@ -225,6 +225,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
   private let performanceLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
   private let mentionSource: DefaultNewThreadComposeMentionSource
   private let preferences: AllChatsComposePreferences
+  private let draftStore: NewThreadComposeDraftStore
   private var lastSpaceVisibility: NewThreadComposeDestination.SpaceVisibility
   private var accessMentions = AllChatsComposeAccessMentions()
   private var mentionedAgentTargets: [AllChatsAgentMentionTarget] = []
@@ -244,6 +245,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     lockedSpaceID = initialSpaceID
     let preferences = AllChatsComposePreferences(userID: dependencies.auth.currentUserId)
     self.preferences = preferences
+    draftStore = NewThreadComposeDraftStore(userID: dependencies.auth.currentUserId)
     observedAgentChoiceID = preferences.agentChoiceID
     sendSilently = preferences.sendSilently
     lastSpaceVisibility = preferences.visibility
@@ -534,12 +536,14 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
       sendSilently: { self.sendSilently },
       setSendSilently: { self.setSendSilently($0) },
       agentContext: { [weak self] in self?.agentThreadContext },
+      savedDraft: { [draftStore] in draftStore.load() },
       mentionSource: mentionSource,
       attachmentStore: attachmentStore,
       overlayHostView: overlayHost,
       supplementaryAccessoryView: supplementaryAccessoryView,
       placeholderSymbolName: "square.and.pencil",
-      didChangeDraft: { [weak self] text, entities, hasAttachments in
+      didChangeDraft: { [weak self, draftStore] text, entities, hasAttachments in
+        draftStore.save(text: text, entities: entities)
         self?.draftDidChange(text: text, entities: entities, hasAttachments: hasAttachments)
       },
       didChangeHeight: { [weak self] height in
@@ -549,14 +553,23 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
         AllChatsNewThreadComposeModel.presentSubmissionFeedback(result)
         self?.submissionDidFinish(result)
       },
-      submit: { [weak self] draft, intent in
+      submit: { [weak self, draftStore] draft, intent in
         guard let self else {
           return .failure(NewThreadComposeSubmissionFailure(
             message: "The new thread composer is no longer available.",
             createdPeer: nil
           ))
         }
-        return await submit(draft, intent: intent)
+        // The send owns the content now. Opening the thread may tear Compose
+        // down, so a composer shown later must not restore sent text. A
+        // created thread keeps it as that thread's draft; otherwise it's
+        // saved here again.
+        draftStore.clear()
+        let result = await submit(draft, intent: intent)
+        if case let .failure(failure) = result, failure.createdPeer == nil {
+          draftStore.save(text: draft.text, entities: draft.entities)
+        }
+        return result
       }
     )
   }
@@ -822,8 +835,7 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
 
     // Validate locally fixable content before reporting connectivity. Durable
     // Realtime transactions intentionally wait for a connection, but this
-    // transient composer cannot turn an offline click into an indefinite
-    // spinner because it has no persisted pre-chat draft after relaunch.
+    // composer cannot turn an offline click into an indefinite spinner.
     guard dependencies.realtimeV2.stateObject.connectionState != .connecting else {
       return .failure(NewThreadComposeSubmissionFailure(
         message: "You're offline. Reconnect and try again; your message is still here.",

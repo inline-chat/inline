@@ -283,6 +283,9 @@ extension AppDelegate {
       AgentWorkStateStore.shared.removeAll()
       AgentGrantStore.shared.removeAll()
       MessageFormDraftStore.shared.reset()
+      if let logoutAccountID {
+        NewThreadComposeDraftStore(userID: logoutAccountID).clear()
+      }
       PeerBotCommandsStore.shared.clear()
     }
     ObjectCache.shared.clear()

@@ -277,6 +277,64 @@ struct PreparedNewThreadDraft {
   }
 }
 
+/// Unsent new-thread text restored when the composer appears again.
+struct NewThreadComposeSavedDraft {
+  let text: String
+  let entities: MessageEntities?
+}
+
+/// Keeps the new-thread composer's unsent text and its entities per account,
+/// so the draft survives leaving the route and relaunching. There is no thread
+/// peer yet, so it lives outside Drafts2. Attachments are not kept.
+struct NewThreadComposeDraftStore {
+  private struct Stored: Codable {
+    let text: String
+    let entities: Data?
+  }
+
+  private static let attachmentMarker = "\u{FFFC}"
+
+  private let defaults: UserDefaults
+  private let key: String
+
+  init(userID: Int64?, defaults: UserDefaults = .standard) {
+    self.defaults = defaults
+    key = "macos.newThread.draft.\(userID.map(String.init) ?? "signed-out")"
+  }
+
+  func load() -> NewThreadComposeSavedDraft? {
+    guard let data = defaults.data(forKey: key),
+          let stored = try? JSONDecoder().decode(Stored.self, from: data),
+          !Self.isBlank(stored.text)
+    else {
+      return nil
+    }
+    let entities = stored.entities.flatMap { try? MessageEntities(serializedBytes: $0) }
+    return NewThreadComposeSavedDraft(text: stored.text, entities: entities)
+  }
+
+  func save(text: String, entities: MessageEntities?) {
+    let cleanText = text.replacingOccurrences(of: Self.attachmentMarker, with: "")
+    guard !Self.isBlank(cleanText) else {
+      clear()
+      return
+    }
+    // Entity offsets no longer line up once markers are removed.
+    let keptEntities = cleanText == text ? Drafts2.normalizedEntities(entities) : nil
+    let stored = Stored(text: cleanText, entities: keptEntities.flatMap { try? $0.serializedData() })
+    guard let data = try? JSONEncoder().encode(stored) else { return }
+    defaults.set(data, forKey: key)
+  }
+
+  func clear() {
+    defaults.removeObject(forKey: key)
+  }
+
+  private static func isBlank(_ text: String) -> Bool {
+    text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+}
+
 struct NewThreadComposeSubmissionFailure: LocalizedError {
   let message: String
   let createdPeer: InlineKit.Peer?
@@ -304,6 +362,7 @@ struct NewThreadComposeContext {
   let sendSilently: @MainActor () -> Bool
   let setSendSilently: @MainActor (Bool) -> Void
   let agentContext: @MainActor () -> InlineProtocol.AgentThreadContext?
+  let savedDraft: @MainActor () -> NewThreadComposeSavedDraft?
   let mentionSource: any NewThreadComposeMentionSource
   let attachmentStore: NewThreadComposeAttachmentStore
   let overlayHostView: @MainActor () -> NSView?
@@ -320,6 +379,7 @@ struct NewThreadComposeContext {
     sendSilently: @escaping @MainActor () -> Bool,
     setSendSilently: @escaping @MainActor (Bool) -> Void,
     agentContext: @escaping @MainActor () -> InlineProtocol.AgentThreadContext? = { nil },
+    savedDraft: @escaping @MainActor () -> NewThreadComposeSavedDraft? = { nil },
     mentionSource: any NewThreadComposeMentionSource,
     attachmentStore: NewThreadComposeAttachmentStore,
     overlayHostView: @escaping @MainActor () -> NSView?,
@@ -335,6 +395,7 @@ struct NewThreadComposeContext {
     self.sendSilently = sendSilently
     self.setSendSilently = setSendSilently
     self.agentContext = agentContext
+    self.savedDraft = savedDraft
     self.mentionSource = mentionSource
     self.attachmentStore = attachmentStore
     self.overlayHostView = overlayHostView

@@ -532,6 +532,7 @@ class GlassComposeAppKit: NSView {
         self?.focus()
       }
     } else {
+      hydrateInitialDraftIfNeeded()
       updateVoiceAvailability(phase: voiceViewModel.phase)
       updateVoiceKeyHandlers(phase: voiceViewModel.phase)
       updateHeight(animate: false)
@@ -4262,21 +4263,36 @@ extension GlassComposeAppKit {
 
   /// Loads draft and if nothing found returns false
   func loadDraft() -> Bool {
-    guard let draft = drafts2.load(peer: peerId, legacyDraftMessage: dialog?.draftMessage),
-          !draft.isEmpty
-    else {
-      return false
+    let text: String
+    let entities: MessageEntities?
+    let draftAttachments: [Drafts2Attachment]
+    switch usage {
+      case .chat:
+        guard let draft = drafts2.load(peer: peerId, legacyDraftMessage: dialog?.draftMessage),
+              !draft.isEmpty
+        else {
+          return false
+        }
+        text = draft.text
+        entities = draft.entities
+        draftAttachments = draft.attachments
+      case let .newThread(context):
+        // Only text and entities are kept before the thread exists.
+        guard let draft = context.savedDraft() else { return false }
+        text = draft.text
+        entities = draft.entities
+        draftAttachments = []
     }
 
     // Convert to attributed string. Most drafts are plain text, so avoid entity
     // parsing work when protobuf entities are not present.
-    let attributedString: NSAttributedString = if let entities = draft.entities {
+    let attributedString: NSAttributedString = if let entities {
       toAttributedString(
-        text: draft.text,
+        text: text,
         entities: entities
       )
     } else {
-      textEditor.createAttributedString(draft.text)
+      textEditor.createAttributedString(text)
     }
 
     // `didLayout()` is called after layout in normal flow. Only force layout
@@ -4287,7 +4303,9 @@ extension GlassComposeAppKit {
 
     // Set as compose text
     setAttributedString(attributedString)
-    renderDraftAttachments(draft.attachments)
+    renderDraftAttachments(draftAttachments)
+    // The host reads mentions and the Agent target from the draft.
+    notifyNewThreadDraftChanged()
 
     return true
   }
