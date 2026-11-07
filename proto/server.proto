@@ -83,6 +83,7 @@ message ServerUpdate {
     UpdateAgentGrant user_agent_grant = 52;
     UpdateAgentRuntime user_agent_runtime = 53;
     UpdateAgentSessionControl user_agent_session_control = 54;
+    UpdateAgentSettings user_agent_settings = 55;
   }
 }
 

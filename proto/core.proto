@@ -1333,16 +1333,33 @@ message AgentRuntime {
   optional string executable_path = 8;
   optional string manifest_hash = 9;
   optional string bridge_version = 10;
-  // The agent's output mode, set in Agent Settings by the owner or a CONFIGURE
-  // grantee. Unspecified means Detailed.
+  // Mirror of AgentSettings.default_output_mode for bridges that read it
+  // here. New readers use AgentSettings. Unspecified means Detailed.
   AgentOutputMode default_output_mode = 11;
 }
 
+// How an agent presents its work. Each harness maps these to its own output.
 enum AgentOutputMode {
   // Use the agent's default.
   AGENT_OUTPUT_MODE_UNSPECIFIED = 0;
+  // For technical work: progress, tool calls and technical detail.
   AGENT_OUTPUT_MODE_DETAILED = 1;
+  // For an assistant: no progress or tool chatter, and a plain-language answer.
   AGENT_OUTPUT_MODE_FRIENDLY = 2;
+}
+
+// Per-bot settings set in Agent Settings by the owner or a CONFIGURE grantee,
+// which the bot's harness reads to configure itself. Every owned bot has
+// settings, whether or not it reports a runtime; unset fields are defaults.
+message AgentSettings {
+  int64 bot_user_id = 1;
+  // Unspecified means Detailed. A participation's output_mode overrides it
+  // for one thread.
+  AgentOutputMode default_output_mode = 2;
+  // Grows with every change; 0 when never set.
+  int64 revision = 3;
+  // Last change, Unix seconds. Absent when never set.
+  optional int64 date = 4;
 }
 
 // Work bar controls, relayed to the bot, which maps them to harness operations.
@@ -1402,7 +1419,7 @@ message AgentParticipation {
   // Last change, Unix seconds.
   int64 date = 7;
   // Per-thread override of the agent's default output mode. Absent means the
-  // default (AgentRuntime.default_output_mode).
+  // default (AgentSettings.default_output_mode).
   optional AgentOutputMode output_mode = 8;
 }
 
@@ -1519,14 +1536,25 @@ message SetAgentParticipationInput {
   optional AgentOutputMode output_mode = 6;
 }
 
-// Owner or a CONFIGURE grantee. Absent fields stay unchanged. The bot must
-// have reported its runtime.
+// Owner or a CONFIGURE grantee. Absent fields stay unchanged.
 message UpdateAgentSettingsInput {
   int64 bot_user_id = 1;
   optional AgentOutputMode default_output_mode = 2;
 }
 
-message UpdateAgentSettingsResult { AgentRuntime runtime = 1; }
+message UpdateAgentSettingsResult {
+  // Absent when the bot has not reported a runtime.
+  AgentRuntime runtime = 1;
+  AgentSettings settings = 2;
+}
+
+// The bot itself, its owner, or anyone it granted access.
+message GetAgentSettingsInput {
+  // Omitted or zero when the calling bot reads its own settings.
+  int64 bot_user_id = 1;
+}
+
+message GetAgentSettingsResult { AgentSettings settings = 1; }
 
 // Work bar stop, pause and resume. The owner, or a STEER grantee of the
 // session's bot.
@@ -2316,6 +2344,7 @@ enum Method {
   CONTROL_AGENT_SESSION = 161;
   MOVE_AGENT_SESSION = 162;
   UNPIN_ALL_MESSAGES = 163;
+  GET_AGENT_SETTINGS = 164;
 }
 
 message RpcCall {
@@ -2484,6 +2513,7 @@ message RpcCall {
     ControlAgentSessionInput controlAgentSession = 162;
     MoveAgentSessionInput moveAgentSession = 163;
     UnpinAllMessagesInput unpinAllMessages = 164;
+    GetAgentSettingsInput getAgentSettings = 165;
   }
 }
 
@@ -2654,6 +2684,7 @@ message RpcResult {
     ControlAgentSessionResult controlAgentSession = 162;
     MoveAgentSessionResult moveAgentSession = 163;
     UnpinAllMessagesResult unpinAllMessages = 164;
+    GetAgentSettingsResult getAgentSettings = 165;
   }
 }
 
@@ -4628,6 +4659,7 @@ message Update {
     UpdateAgentGrant agent_grant = 55;
     UpdateAgentRuntime agent_runtime = 56;
     UpdateAgentSessionControl agent_session_control = 57;
+    UpdateAgentSettings agent_settings = 58;
   }
 }
 
@@ -4883,6 +4915,10 @@ message UpdateAgentGrant {
 // Sent to a bot's owner when its runtime status, setup state or settings
 // change, and to the bot when its settings change.
 message UpdateAgentRuntime { AgentRuntime runtime = 1; }
+
+// To the owner, the bot and the people it granted access when its settings
+// change.
+message UpdateAgentSettings { AgentSettings settings = 1; }
 
 // Sent to the session's bot when someone uses a work bar control.
 message UpdateAgentSessionControl {
@@ -5268,6 +5304,9 @@ message BotCapability {
     KIND_UNSPECIFIED = 0;
     CHAT_SETTINGS = 1;
     AGENT_CONFIGURATION = 2;
+    // The bot applies AgentSettings.default_output_mode. Clients offer the
+    // Output setting only for bots that declare it (or report a runtime).
+    OUTPUT_MODE = 3;
   }
 
   Kind kind = 1;

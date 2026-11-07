@@ -37,6 +37,7 @@ import { Reaction } from "@inline-chat/protocol/core";
 import { AgentThreadContext } from "@inline-chat/protocol/core";
 import { ChatParticipantGroup } from "@inline-chat/protocol/core";
 import { ChatParticipant } from "@inline-chat/protocol/core";
+import { UpdateAgentSettings } from "@inline-chat/protocol/core";
 import { UpdateAgentSessionControl } from "@inline-chat/protocol/core";
 import { UpdateAgentRuntime } from "@inline-chat/protocol/core";
 import { UpdateAgentGrant } from "@inline-chat/protocol/core";
@@ -416,6 +417,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: UpdateAgentSessionControl user_agent_session_control = 54;
          */
         userAgentSessionControl: UpdateAgentSessionControl;
+    } | {
+        oneofKind: "userAgentSettings";
+        /**
+         * @generated from protobuf field: UpdateAgentSettings user_agent_settings = 55;
+         */
+        userAgentSettings: UpdateAgentSettings;
     } | {
         oneofKind: undefined;
     };
@@ -1521,7 +1528,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 51, name: "agent_participation", kind: "message", oneof: "update", T: () => ServerChatUpdateAgentParticipation },
             { no: 52, name: "user_agent_grant", kind: "message", oneof: "update", T: () => UpdateAgentGrant },
             { no: 53, name: "user_agent_runtime", kind: "message", oneof: "update", T: () => UpdateAgentRuntime },
-            { no: 54, name: "user_agent_session_control", kind: "message", oneof: "update", T: () => UpdateAgentSessionControl }
+            { no: 54, name: "user_agent_session_control", kind: "message", oneof: "update", T: () => UpdateAgentSessionControl },
+            { no: 55, name: "user_agent_settings", kind: "message", oneof: "update", T: () => UpdateAgentSettings }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1850,6 +1858,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userAgentSessionControl: UpdateAgentSessionControl.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userAgentSessionControl)
                     };
                     break;
+                case /* UpdateAgentSettings user_agent_settings */ 55:
+                    message.update = {
+                        oneofKind: "userAgentSettings",
+                        userAgentSettings: UpdateAgentSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userAgentSettings)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2021,6 +2035,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* UpdateAgentSessionControl user_agent_session_control = 54; */
         if (message.update.oneofKind === "userAgentSessionControl")
             UpdateAgentSessionControl.internalBinaryWrite(message.update.userAgentSessionControl, writer.tag(54, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateAgentSettings user_agent_settings = 55; */
+        if (message.update.oneofKind === "userAgentSettings")
+            UpdateAgentSettings.internalBinaryWrite(message.update.userAgentSettings, writer.tag(55, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
