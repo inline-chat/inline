@@ -946,3 +946,173 @@ fn a_background_shell_stays_live_work_until_its_notification() {
     ));
     assert!(mapper.running_children().is_empty());
 }
+
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+/// Messages as `GET /message?order=desc` lists them.
+fn missed_turn(at: u64) -> Vec<Value> {
+    vec![
+        json!({"id": "msg_idle", "type": "idle", "outcome": "succeeded", "time": {"created": at + 3}}),
+        json!({"id": "msg_a1", "type": "assistant", "time": {"created": at + 2}, "content": [
+            {"type": "reasoning", "text": "Checking"},
+            {"type": "tool", "id": "call_1", "name": "shell", "state": {"status": "completed",
+                "input": {"command": "ls"}, "content": [{"type": "text", "text": "a.txt"}], "metadata": {"exit": 0}}, "time": {"created": at}},
+            {"type": "text", "text": "One file: a.txt"}
+        ]}),
+        json!({"id": "msg_u1", "type": "user", "text": "list files", "metadata": {"inline.input": "in-1"}, "time": {"created": at + 1}}),
+        json!({"id": "msg_old", "type": "assistant", "time": {"created": at - 60_000}, "content": [{"type": "text", "text": "old history"}]}),
+    ]
+}
+
+#[test]
+fn a_turn_missed_while_disconnected_is_rebuilt_from_the_messages() {
+    let mut mapper = mapper();
+    let events = mapper.reconcile(&missed_turn(now()), false);
+    let kinds: Vec<String> = events
+        .iter()
+        .map(|event| match event {
+            Event::Turn {
+                turn,
+                phase: TurnPhase::Started { .. },
+            } => format!("start:{}", turn.as_str()),
+            Event::Turn {
+                phase:
+                    TurnPhase::Completed {
+                        outcome,
+                        inputs_consumed,
+                        ..
+                    },
+                ..
+            } => {
+                format!("end:{outcome:?}:{}", inputs_consumed.len())
+            }
+            Event::Input { id, .. } => format!("input:{}", id.as_str()),
+            _ => String::new(),
+        })
+        .filter(|kind| !kind.is_empty())
+        .collect();
+    assert_eq!(
+        kinds,
+        vec!["start:msg_u1", "input:in-1", "end:Completed:1"],
+        "{events:?}"
+    );
+    let texts: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Item(Item {
+                update:
+                    ItemUpdate::Completed {
+                        body:
+                            ItemBody::Message {
+                                role: MessageRole::Assistant,
+                                text,
+                                ..
+                            },
+                        ..
+                    },
+                ..
+            }) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["One file: a.txt"],
+        "history from before Inline followed is never news"
+    );
+    assert!(events.iter().any(|event| matches!(event, Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Command { output: Some(output), .. }, .. }, .. }) if output == "a.txt")));
+    // A second reconciliation adds nothing.
+    assert!(mapper.reconcile(&missed_turn(now()), false).is_empty());
+}
+
+#[test]
+fn reconciling_after_partial_live_output_adds_only_what_was_missed() {
+    let mut mapper = mapper();
+    mapper.expect("msg_u1", input("in-1"));
+    mapper.apply(&enqueue(1, "msg_u1", "list files", "steer"));
+    mapper.apply(&durable(2, "session.execution.started", json!({})));
+    mapper.apply(&durable(
+        3,
+        "session.inbox.delivered",
+        json!({"inboxID": "msg_u1"}),
+    ));
+    mapper.apply(&durable(
+        4,
+        "session.step.started",
+        json!({"assistantMessageID": "msg_a1", "agent": "build"}),
+    ));
+    mapper.apply(&durable(
+        5,
+        "session.reasoning.ended",
+        json!({"assistantMessageID": "msg_a1", "ordinal": 0, "text": "Checking"}),
+    ));
+    // The stream drops here; the step finishes and the turn ends.
+    let events = mapper.reconcile(&missed_turn(now()), false);
+    // The step was seen starting; its tool, final text and the turn's end
+    // were not. The reasoning shown live is not repeated.
+    assert!(
+        matches!(
+            events.last(),
+            Some(Event::Turn {
+                phase: TurnPhase::Completed {
+                    outcome: TurnOutcome::Completed,
+                    ..
+                },
+                ..
+            })
+        ),
+        "{events:?}"
+    );
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        Event::Turn {
+            phase: TurnPhase::Started { .. },
+            ..
+        }
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        Event::Item(Item {
+            kind: ItemKind::Reasoning,
+            ..
+        })
+    )));
+    assert!(events.iter().any(|event| matches!(event, Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Message { text, .. }, .. }, .. }) if text == "One file: a.txt")));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::Item(Item {
+            update: ItemUpdate::Completed {
+                body: ItemBody::Command { .. },
+                ..
+            },
+            ..
+        })
+    )));
+    assert!(mapper.reconcile(&missed_turn(now()), false).is_empty());
+}
+
+#[test]
+fn a_session_still_running_keeps_its_turn_and_nothing_before_the_anchor_replays() {
+    let mut mapper = mapper();
+    mapper.anchor("msg_u1");
+    let at = now();
+    let messages = vec![
+        json!({"id": "msg_a2", "type": "assistant", "time": {"created": at + 5}, "content": [{"type": "text", "text": "Working on it"}]}),
+        json!({"id": "msg_u2", "type": "user", "text": "next", "time": {"created": at + 4}}),
+        json!({"id": "msg_u1", "type": "user", "text": "first", "time": {"created": at}}),
+    ];
+    let events = mapper.reconcile(&messages, true);
+    assert!(
+        matches!(&events[0], Event::Turn { turn, phase: TurnPhase::Started { .. } } if turn.as_str() == "msg_u2"),
+        "{events:?}"
+    );
+    assert!(mapper.turn().is_some(), "still running");
+    // msg_a2 is still streaming: its partial text is not frozen.
+    assert!(!events.iter().any(|event| matches!(event, Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Message { text, .. }, .. }, .. }) if text == "Working on it")));
+    assert!(!events.iter().any(|event| matches!(event, Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Message { text, .. }, .. }, .. }) if text == "first")));
+}

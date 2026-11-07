@@ -44,6 +44,9 @@ struct Script {
     interrupted: bool,
     /// `/api/command` lists nothing this many more times (a cold folder).
     cold_commands: u32,
+    /// Keeps no durable event rows, like a real OpenCode that projects
+    /// events into messages: the log knows only its head sequence.
+    no_event_rows: bool,
 }
 
 #[derive(Clone)]
@@ -182,6 +185,7 @@ async fn log(
             .unwrap_or_default()
             .into_iter()
             .filter(|event| event["durable"]["seq"].as_i64().unwrap() > after)
+            .filter(|_| !script.no_event_rows)
             .collect();
         let head = script
             .log
@@ -246,6 +250,20 @@ async fn messages(
         let data: Vec<Value> = ids
             .iter()
             .map(|id| json!({"id": id, "type": "user", "text": "", "time": {"created": 1}}))
+            .collect();
+        return axum::Json(json!({"data": data, "cursor": {}}));
+    }
+    if query.get("order").map(String::as_str) == Some("desc") && !query.contains_key("cursor") {
+        let limit: usize = query
+            .get("limit")
+            .and_then(|limit| limit.parse().ok())
+            .unwrap_or(50);
+        let data: Vec<Value> = script
+            .all_messages
+            .iter()
+            .rev()
+            .take(limit)
+            .cloned()
             .collect();
         return axum::Json(json!({"data": data, "cursor": {}}));
     }
@@ -859,4 +877,111 @@ async fn releasing_an_older_handle_never_detaches_a_newer_one() {
         seen.iter()
             .any(|event| matches!(event, Event::Renamed { title } if title == "Still followed"))
     );
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn without_event_rows_a_lost_stream_is_rebuilt_from_the_messages() {
+    let folder = tempfile::tempdir().unwrap();
+    let (fake, url) = serve(folder.path(), Script {
+        no_event_rows: true,
+        // Created a moment before Inline opens the session: within clock
+        // grace, so only the open-time anchor keeps it out.
+        all_messages: vec![json!({"id": "msg_before", "type": "user", "text": "earlier", "time": {"created": now_ms()}})],
+        ..Script::default()
+    })
+    .await;
+    fake.durable(SESSION, "session.execution.succeeded", json!({}), false);
+    let harness = harness(&fake, url).await;
+    let session = harness.open(resume(folder.path())).await.unwrap();
+    let mut events = session.events();
+    collect(&mut events, Duration::from_millis(200)).await;
+
+    // While the stream is down, a prompt from the terminal runs to the end.
+    fake.cut.send_modify(|generation| *generation += 1);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let at = now_ms();
+    {
+        let mut script = fake.script();
+        script.all_messages.push(json!({"id": "msg_u1", "type": "user", "text": "from the terminal", "time": {"created": at}}));
+        script.all_messages.push(json!({"id": "msg_a1", "type": "assistant", "time": {"created": at + 1, "completed": at + 2},
+            "content": [{"type": "text", "text": "Done while you slept"}]}));
+        script.all_messages.push(json!({"id": "msg_idle", "type": "idle", "outcome": "succeeded", "time": {"created": at + 3}}));
+    }
+    fake.durable(SESSION, "session.execution.started", json!({}), false);
+    fake.durable(SESSION, "session.execution.succeeded", json!({}), false);
+
+    let repaired = until(&mut events, |event| {
+        matches!(
+            event,
+            Event::Turn {
+                phase: TurnPhase::Completed { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    assert!(repaired.iter().any(|event| matches!(event, Event::Turn { turn, phase: TurnPhase::Started { .. } } if turn.as_str() == "msg_u1")), "{repaired:?}");
+    assert!(repaired.iter().any(|event| matches!(event, Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Message { text, .. }, .. }, .. }) if text == "Done while you slept")));
+    assert!(!repaired.iter().any(|event| matches!(event, Event::Item(Item { update: ItemUpdate::Completed { body: ItemBody::Message { text, .. }, .. }, .. }) if text == "earlier")), "history before opening is never replayed");
+    assert!(matches!(
+        repaired.last(),
+        Some(Event::Turn {
+            phase: TurnPhase::Completed {
+                outcome: TurnOutcome::Completed,
+                ..
+            },
+            ..
+        })
+    ));
+    assert!(session.live_work().turn.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn settings_apply_what_opencode_takes_and_skip_the_rest() {
+    let folder = tempfile::tempdir().unwrap();
+    let (fake, url) = serve(folder.path(), Script::default()).await;
+    let harness = harness(&fake, url).await;
+    let session = harness.open(resume(folder.path())).await.unwrap();
+    // A speed and another harness's permission mode ride along with a model.
+    let outcome = session
+        .control(Op::Settings {
+            change: SettingsChange {
+                model: Some("openai/gpt-6-luna".into()),
+                effort: Some("low".into()),
+                speed: Some("fast".into()),
+                permission_mode: Some("bypassPermissions".into()),
+                folder: None,
+            },
+            scope: SettingsScope::Thread,
+        })
+        .await
+        .expect("the model change applies");
+    assert!(
+        matches!(&outcome, OpOutcome::Accepted { native } if native["skipped"].as_array().unwrap().len() == 2),
+        "{outcome:?}"
+    );
+    let switched = fake.requests("other");
+    assert!(
+        switched.iter().any(|body| body["model"]
+            == json!({"providerID": "openai", "id": "gpt-6-luna", "variant": "low"})),
+        "{switched:?}"
+    );
+    // Nothing OpenCode can take: unavailable, with the reason.
+    let nothing = session
+        .control(Op::Settings {
+            change: SettingsChange {
+                speed: Some("fast".into()),
+                ..Default::default()
+            },
+            scope: SettingsScope::Thread,
+        })
+        .await;
+    assert!(matches!(nothing, Err(OpError::Unavailable(_))));
 }
