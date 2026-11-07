@@ -9,6 +9,7 @@ import {
   BotAuthorization,
   makeBotAuthorization,
 } from "./auth.effect"
+import { touchBotOnline } from "@in/server/modules/bots/online"
 
 export const BotAuthorizationLive = Layer.succeed(
   BotAuthorization,
@@ -21,7 +22,10 @@ export const BotAuthorizationLive = Layer.succeed(
           and(eq(users.id, userId), userNotDeleted()),
         )
         .limit(1)
-      return row[0]?.bot === true
+      const isBot = row[0]?.bot === true
+      // Every authenticated Bot API call counts as the bot being online.
+      if (isBot) touchBotOnline(userId)
+      return isBot
     },
   }),
 )

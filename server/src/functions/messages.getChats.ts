@@ -685,6 +685,7 @@ async function readCatalog(input: Input, context: FunctionContext, work: Catalog
         photoFile: user.photoFile ?? undefined,
         min: true,
         includeTimeZone: dmPeerUserIds.has(user.id),
+        includeBotStatus: dmPeerUserIds.has(user.id),
         viewerUserId: currentUserId,
       }),
     )
