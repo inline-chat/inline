@@ -310,6 +310,32 @@ describe("block content parser", () => {
     }
   })
 
+  test("round trips a progress row's start time", () => {
+    const markdown = '<details>\n<summary kind="progress" started="1794000000" activity="agent">Running a script</summary>\nbun test\n</details>'
+    const text = parseMarkdown(markdown).text
+    expect(text.startsWith("▸ Running a script\n")).toBe(true)
+    const parsed = parseBlockContent(markdown)!
+    const block = parsed.blockContent.blocks[0]!
+    expect(block.kind.oneofKind).toBe("disclosure")
+    if (block.kind.oneofKind !== "disclosure") return
+    expect(block.kind.disclosure.startedAt).toBe(1_794_000_000n)
+    expect(block.kind.disclosure.activityKind).toBe(BlockDisclosure_ActivityKind.AGENT)
+    expect(textFor(markdown, block.kind.disclosure.summary)).toBe("Running a script")
+    const encoded = encodeBlockContentToMarkdown({ text, blockContent: parsed.blockContent })
+    expect(encoded).toContain('<summary kind="progress" started="1794000000" activity="agent">Running a script</summary>')
+  })
+
+  test("rejects a progress start time outside Unix seconds", () => {
+    const parsed = parseBlockContent('<details>\n<summary kind="progress" started="1794000000">Working</summary>\nx\n</details>')!
+    const block = parsed.blockContent.blocks[0]!
+    if (block.kind.oneofKind !== "disclosure") throw new Error("expected a disclosure")
+    const text = parseMarkdown('<details>\n<summary kind="progress" started="1794000000">Working</summary>\nx\n</details>').text
+    block.kind.disclosure.startedAt = 1_794_000_000n
+    expect(() => validateBlockContent(text, parsed.blockContent)).not.toThrow()
+    block.kind.disclosure.startedAt = 1_794_000_000_000n
+    expect(() => validateBlockContent(text, parsed.blockContent)).toThrow("Invalid disclosure start time")
+  })
+
   test("preserves semantic activity disclosures through parsing and encoding", () => {
     const markdown = [
       "<details open>",

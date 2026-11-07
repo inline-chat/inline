@@ -379,6 +379,7 @@ const encodeBlocks = (input: {
           kind: block.kind.disclosure.kind === BlockDisclosure_Kind.PROGRESS ? "progress" : undefined,
           status: blockStatus(block.kind.disclosure.status),
           meta: block.kind.disclosure.meta ? richText(block.kind.disclosure.meta) : undefined,
+          started_at: block.kind.disclosure.startedAt !== undefined ? Number(block.kind.disclosure.startedAt) : undefined,
           is_rtl: trueOrUndefined(block.kind.disclosure.isRtl),
         }]
       case "diff": {
