@@ -1,8 +1,8 @@
 import { Method, type InlineSdkClient, type UpdateComposeAction_ComposeAction } from "@inline-chat/realtime-sdk"
 
-// ComposeAction.WORKING = 6. The pinned SDK predates the named enum value. The
-// server shows typing to clients that have not opted in to the Working status.
-const INLINE_COMPOSE_ACTION_WORKING = 6 as UpdateComposeAction_ComposeAction
+// UpdateComposeAction_ComposeAction.WORKING. The server shows typing to clients
+// that have not opted in to the Working status.
+const INLINE_COMPOSE_ACTION_WORKING: UpdateComposeAction_ComposeAction = 6
 
 // Agents show "Working" rather than "typing" while they run, so people don't
 // mistake agent work for someone typing.
