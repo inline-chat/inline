@@ -117,6 +117,10 @@ struct SidebarNativeRowConfiguration {
     var markAllRead: (() -> Void)? = nil
     let toggleArchive: () -> Void
     let folderMenu: () -> SidebarChatFolderMenu?
+    /// + on hover: starts a thread nested under this chat.
+    var newSubthread: (() -> Void)? = nil
+    /// The + tooltip and menu title, e.g. "New Thread with Claude".
+    var newSubthreadTitle = "New Thread"
   }
 
   /// Immutable render input for one native chat row. Collection hierarchy,
@@ -225,6 +229,8 @@ struct SidebarNativeRowConfiguration {
     let close: () -> Void
     let ungroup: () -> Void
     let markAllRead: () -> Void
+    /// + on hover: starts a new thread in this folder.
+    var newThread: (() -> Void)? = nil
   }
 
   struct Folder {
@@ -296,6 +302,7 @@ struct SidebarNativeRowConfiguration {
 private enum SidebarNativeChatRowMetrics {
   static let closeButtonSize: CGFloat = 16
   static let closeTextSpacing: CGFloat = 8
+  static let addCloseSpacing: CGFloat = 2
 }
 
 private enum SidebarNativeFolderRowMetrics {
@@ -1699,6 +1706,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
   private let folderIconView = SidebarNativeHostedVisualView()
   private let titleField = SidebarNativeTextField()
   private let unreadBadge = SidebarNativeUnreadBadgeView()
+  private let newThreadButton = SidebarNativeCloseButton()
   private var configuration: SidebarNativeRowConfiguration.Folder?
   private var displayedExpanded = true
   private var emojiPopover: NSPopover?
@@ -1711,7 +1719,14 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     addSubview(folderIconView)
     addSubview(titleField)
     addSubview(unreadBadge)
+    addSubview(newThreadButton)
     titleField.font = .systemFont(ofSize: 13)
+    newThreadButton.configureSidebarPlus(
+      label: "New Thread in Folder",
+      target: self,
+      action: #selector(newThreadButtonPressed)
+    )
+    newThreadButton.toolTip = "New thread in this folder"
     setAccessibilityRole(.button)
   }
 
@@ -1730,6 +1745,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     configureFolderIcon()
     configureDisclosureVisual()
     updateBackground()
+    updateNewThreadButton()
     updateAccessibility()
     needsLayout = true
   }
@@ -1739,6 +1755,13 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     guard let configuration else { return }
     let painted = bounds.insetBy(dx: 8, dy: SidebarCollectionRow.itemVisualEdgeInset)
     rowBackground.frame = painted
+    let buttonSize = SidebarNativeChatRowMetrics.closeButtonSize
+    newThreadButton.frame = CGRect(
+      x: painted.maxX - Theme.sidebarItemOuterSpacing - buttonSize,
+      y: painted.midY - buttonSize / 2,
+      width: buttonSize,
+      height: buttonSize
+    )
 
     disclosureView.frame = disclosureHitRect(in: painted)
 
@@ -1753,6 +1776,9 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     leading = folderIconView.frame.maxX + 8
 
     var trailing = painted.maxX - Theme.sidebarItemOuterSpacing
+    if showsNewThreadControl {
+      trailing = newThreadButton.frame.minX - SidebarNativeChatRowMetrics.closeTextSpacing
+    }
     if unreadBadge.occupiesLayout {
       let width = unreadBadge.fittingWidth
       unreadBadge.frame = CGRect(
@@ -1773,10 +1799,31 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
 
   override func hoverDidChange() {
     updateBackground()
+    updateNewThreadButton()
+    needsLayout = true
   }
 
   override func pressDidChange() {
     updateBackground()
+  }
+
+  @objc private func newThreadButtonPressed() {
+    configuration?.actions.newThread?()
+  }
+
+  private var showsNewThreadControl: Bool {
+    configuration?.actions.newThread != nil && hasHoverPresentation
+  }
+
+  private func updateNewThreadButton() {
+    newThreadButton.isHidden = !showsNewThreadControl
+  }
+
+  override func blocksReorder(at point: NSPoint) -> Bool {
+    if showsNewThreadControl, newThreadButton.frame.contains(point) {
+      return true
+    }
+    return interactionTarget(at: point) == .accessory(1)
   }
 
   override func keyDown(with event: NSEvent) {
@@ -1798,6 +1845,14 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
   override func menu(for _: NSEvent) -> NSMenu? {
     guard let configuration else { return nil }
     let menu = NSMenu()
+    if let newThread = configuration.actions.newThread {
+      menu.addItem(SidebarNativeMenuItem(
+        title: "New Thread in Folder",
+        systemImage: "square.and.pencil",
+        action: newThread
+      ))
+      menu.addItem(.separator())
+    }
     menu.addItem(SidebarNativeMenuItem(
       title: configuration.presentation.isPinned ? "Unpin" : "Pin",
       systemImage: configuration.presentation.isPinned ? "pin.slash.fill" : "pin.fill",
@@ -1854,6 +1909,7 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     disclosureView.prepareForReuse()
     folderIconView.prepareForReuse()
     unreadBadge.prepareForReuse()
+    newThreadButton.isHidden = true
     setAccessibilityCustomActions([])
   }
 
@@ -1861,10 +1917,6 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
     if folderIconHitRect().contains(point) { return .accessory(0) }
     if disclosureView.frame.contains(point) { return .accessory(1) }
     return .primary
-  }
-
-  override func blocksReorder(at point: NSPoint) -> Bool {
-    interactionTarget(at: point) == .accessory(1)
   }
 
   override func performAccessoryAction(_ target: InteractionTarget) {
@@ -1966,6 +2018,12 @@ private final class SidebarNativeFolderRowView: SidebarNativeInteractiveContentV
       configuration.actions.markAllRead()
       return true
     })
+    if let newThread = configuration.actions.newThread {
+      actions.append(NSAccessibilityCustomAction(name: "New thread in folder") {
+        newThread()
+        return true
+      })
+    }
     actions.append(NSAccessibilityCustomAction(name: "Rename folder") {
       configuration.actions.rename()
       return true
@@ -2089,6 +2147,8 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
   private let titleActivityView = SidebarNativeComposeActivityView()
   private let trailingUnreadBadge = SidebarNativeUnreadBadgeView()
   private let closeButton = SidebarNativeCloseButton()
+  /// In the trailing slot on hover; × sits to its left.
+  private let newSubthreadButton = SidebarNativeCloseButton()
   private let disclosureView = SidebarNativeHostedVisualView()
   private var configuration: SidebarNativeRowConfiguration.Chat?
   private var displayedDisclosureExpanded: Bool?
@@ -2107,9 +2167,15 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     addSubview(titleActivityView)
     addSubview(trailingUnreadBadge)
     addSubview(closeButton)
+    addSubview(newSubthreadButton)
     addSubview(disclosureView)
 
     titleField.font = .systemFont(ofSize: 13)
+    newSubthreadButton.configureSidebarPlus(
+      label: "New Thread",
+      target: self,
+      action: #selector(newSubthreadButtonPressed)
+    )
     closeButton.title = ""
     closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close from Sidebar")
     closeButton.symbolConfiguration = .init(pointSize: 9, weight: .semibold)
@@ -2269,9 +2335,13 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     disclosureView.frame = disclosureHitRect(in: painted)
 
     var availableTrailing = painted.maxX - Theme.sidebarItemOuterSpacing
+    newSubthreadButton.frame = newSubthreadButtonRect(in: painted)
     closeButton.frame = closeButtonRect(in: painted)
     if showsCloseControl {
       availableTrailing = closeButton.frame.minX
+        - SidebarNativeChatRowMetrics.closeTextSpacing
+    } else if showsNewSubthreadControl {
+      availableTrailing = newSubthreadButton.frame.minX
         - SidebarNativeChatRowMetrics.closeTextSpacing
     }
     let showsPreview = configuration.size != .compact
@@ -2324,8 +2394,10 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     } else {
       var titleTrailing = availableTrailing
       var nestedTitleWidth: CGFloat?
-      // The close control takes over the activity indicator's trailing slot on hover.
-      let showsTitleActivity = titleActivityView.isActivityVisible && !showsCloseControl
+      // The hover controls take over the activity indicator's trailing slot.
+      let showsTitleActivity = titleActivityView.isActivityVisible
+        && !showsCloseControl
+        && !showsNewSubthreadControl
       if trailingUnreadBadge.occupiesLayout {
         let badgeWidth = trailingUnreadBadge.fittingWidth
         if keepsNumberedUnreadNearContent {
@@ -2526,6 +2598,14 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     let presentation = configuration.presentation
     let actions = configuration.actions
     let menu = NSMenu()
+    if let newSubthread = actions.newSubthread {
+      menu.addItem(SidebarNativeMenuItem(
+        title: actions.newSubthreadTitle,
+        systemImage: "square.and.pencil",
+        action: newSubthread
+      ))
+      menu.addItem(.separator())
+    }
     menu.addItem(SidebarNativeMenuItem(
       title: "Open in New Tab",
       systemImage: "plus.rectangle.on.rectangle",
@@ -2670,6 +2750,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     leadingUnreadBadge.prepareForReuse()
     trailingUnreadBadge.prepareForReuse()
     closeButton.isHidden = true
+    newSubthreadButton.isHidden = true
     disclosureView.prepareForReuse()
     setAccessibilityCustomActions([])
   }
@@ -2699,6 +2780,9 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     if showsCloseControl, closeButton.frame.contains(point) {
       return true
     }
+    if showsNewSubthreadControl, newSubthreadButton.frame.contains(point) {
+      return true
+    }
     return configuration.disclosureExpanded != nil
       && disclosureHitRect(in: painted).contains(point)
   }
@@ -2720,6 +2804,14 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     configuration?.showsCloseButton == true && hasHoverPresentation
   }
 
+  @objc private func newSubthreadButtonPressed() {
+    configuration?.actions.newSubthread?()
+  }
+
+  private var showsNewSubthreadControl: Bool {
+    configuration?.actions.newSubthread != nil && hasHoverPresentation
+  }
+
   private func updateControlPresentation(animated: Bool) {
     guard let configuration else { return }
     let hasHoverAppearance = hasHoverPresentation
@@ -2728,6 +2820,8 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     } ?? false
     disclosureView.isHidden = displayedDisclosureExpanded == nil
     closeButton.isHidden = !showsCloseControl
+    newSubthreadButton.isHidden = !showsNewSubthreadControl
+    newSubthreadButton.toolTip = configuration.actions.newSubthreadTitle
     // The row's Close accessibility action remains available without hover.
     closeButton.isEnabled = configuration.showsCloseButton
     leadingUnreadBadge.setObscured(
@@ -2749,8 +2843,25 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     needsLayout = true
   }
 
+  /// The trailing slot; the close button moves to its left while it shows.
+  private func newSubthreadButtonRect(in painted: CGRect) -> CGRect {
+    let size = SidebarNativeChatRowMetrics.closeButtonSize
+    return CGRect(
+      x: painted.maxX - Theme.sidebarItemOuterSpacing - size,
+      y: painted.midY - size / 2,
+      width: size,
+      height: size
+    )
+  }
+
   private func closeButtonRect(in painted: CGRect) -> CGRect {
     let size = SidebarNativeChatRowMetrics.closeButtonSize
+    guard !showsNewSubthreadControl else {
+      return newSubthreadButtonRect(in: painted).offsetBy(
+        dx: -(size + SidebarNativeChatRowMetrics.addCloseSpacing),
+        dy: 0
+      )
+    }
     return CGRect(
       x: painted.maxX - Theme.sidebarItemOuterSpacing - size,
       y: painted.midY - size / 2,
@@ -2797,6 +2908,12 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     setAccessibilitySelected(interactionPresentation.selected)
 
     var actions: [NSAccessibilityCustomAction] = []
+    if let newSubthread = configuration.actions.newSubthread {
+      actions.append(NSAccessibilityCustomAction(name: configuration.actions.newSubthreadTitle) {
+        newSubthread()
+        return true
+      })
+    }
     if configuration.canCloseFromSidebar {
       actions.append(NSAccessibilityCustomAction(name: "Close from Sidebar") {
         configuration.actions.close()
@@ -3494,5 +3611,22 @@ private final class SidebarNativeIdentityView: NSView {
 
   override func hitTest(_: NSPoint) -> NSView? {
     nil
+  }
+}
+
+private extension SidebarNativeCloseButton {
+  /// The hover + that starts a thread from a sidebar row.
+  func configureSidebarPlus(label: String, target: AnyObject, action: Selector) {
+    title = ""
+    image = NSImage(systemSymbolName: "plus", accessibilityDescription: label)
+    symbolConfiguration = .init(pointSize: 11, weight: .regular)
+    imagePosition = .imageOnly
+    controlSize = .small
+    isBordered = false
+    contentTintColor = .secondaryLabelColor
+    self.target = target
+    self.action = action
+    setAccessibilityLabel(label)
+    isHidden = true
   }
 }

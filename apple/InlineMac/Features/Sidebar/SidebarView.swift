@@ -51,6 +51,7 @@ struct SidebarView: View {
   @ObservedObject private var settings = AppSettings.shared
   @ObservedObject private var auth = Auth.shared
   private let audioPlayer = AudioPlaybackCenter.shared
+  private let agents = SidebarAgents.shared
   private let sidebarInteractionLog = Log.scoped("SidebarInteractions")
   @State private var isHomeHovering = false
   @State private var isLocationHovering = false
@@ -230,6 +231,10 @@ struct SidebarView: View {
         cancelSidebarDropImports()
       }
     }
+    .task(id: auth.currentUserId) {
+      guard let dependencies else { return }
+      await agents.loadBots(using: dependencies)
+    }
     .onChange(of: effectiveSidebarSort, initial: true) { _, sortMode in
       viewModel.setSortMode(sortMode)
     }
@@ -367,7 +372,8 @@ struct SidebarView: View {
         unreadBadgeStyle: settings.unreadBadgeStyle.rawValue,
         colorScheme: String(describing: colorScheme),
         themeRevision: settings.themeRevision,
-        temporaryItemID: visibleTemporaryItem?.id
+        temporaryItemID: visibleTemporaryItem?.id,
+        agentBotsRevision: agents.ownedBotIDs.hashValue
       )
     )
   }
@@ -727,7 +733,8 @@ struct SidebarView: View {
           },
           close: { removeFolder(folder, disposition: .closeDialogs) },
           ungroup: { removeFolder(folder, disposition: .keepDialogs) },
-          markAllRead: { markAllRead(in: folder.nodeID) }
+          markAllRead: { markAllRead(in: folder.nodeID) },
+          newThread: isArchiveVisible ? nil : { createNewThread(inFolder: folder.id) }
         )
       ))
     case .folderEmpty:
@@ -819,9 +826,37 @@ struct SidebarView: View {
             dependencies: dependencies
           )
         },
-        folderMenu: { sidebarFolderMenu(for: item) }
+        folderMenu: { sidebarFolderMenu(for: item) },
+        newSubthread: newSubthreadAction(for: item),
+        newSubthreadTitle: newSubthreadTitle(for: item)
       )
     )
+  }
+
+  /// The hover + on a chat row starts a thread nested under it. On a direct
+  /// chat with an agent, the thread includes the agent.
+  private func newSubthreadAction(for item: SidebarViewModel.Item) -> (() -> Void)? {
+    guard isArchiveVisible == false, isTemporaryItem(item) == false else { return nil }
+    let botID = agents.agentBotID(for: item.peerId)
+    return {
+      guard let dependencies else { return }
+      // The new thread nests under this row, so make sure it's visible.
+      if collapsedAppKitThreadParentIDs.remove(item.id) != nil {
+        persistCollapsedAppKitThreadParentIDs()
+      }
+      NewThreadAction.startSubthread(
+        dependencies: dependencies,
+        parentChatId: item.chatId,
+        agentBotUserId: botID,
+        bindsAgent: botID.map(agents.isOwnedBot) ?? false
+      )
+    }
+  }
+
+  private func newSubthreadTitle(for item: SidebarViewModel.Item) -> String {
+    agents.agentBotID(for: item.peerId) == nil
+      ? "New Thread in \(item.title)"
+      : "New Thread with \(item.title)"
   }
 
   private func appKitFolderRow(

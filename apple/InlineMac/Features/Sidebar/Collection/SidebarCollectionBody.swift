@@ -2973,6 +2973,7 @@ final class SidebarCollectionBodyController: NSViewController {
       || oldRenderState.preview.unreadBadgeStyle != newRenderState.preview.unreadBadgeStyle
       || oldRenderState.preview.colorScheme != newRenderState.preview.colorScheme
       || oldRenderState.preview.themeRevision != newRenderState.preview.themeRevision
+      || oldRenderState.preview.agentBotsRevision != newRenderState.preview.agentBotsRevision
       || oldRenderState.preview.renderer != newRenderState.preview.renderer {
       return .all
     }
