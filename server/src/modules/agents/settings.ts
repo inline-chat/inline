@@ -23,7 +23,7 @@ import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { and, eq, isNull, sql } from "drizzle-orm"
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm"
 
 /** Grantees past this many get the change on their next read instead of a push. */
 const MAX_SETTINGS_AUDIENCE_GRANTEES = 500
@@ -149,11 +149,11 @@ async function enqueueSettingsChange(
   const grantees = await tx
     .select({ userId: agentGrants.subjectUserId })
     .from(agentGrants)
-    .where(and(eq(agentGrants.botUserId, botUserId), isNull(agentGrants.revokedAt)))
+    .where(and(eq(agentGrants.botUserId, botUserId), isNull(agentGrants.revokedAt), isNotNull(agentGrants.subjectUserId)))
     .limit(MAX_SETTINGS_AUDIENCE_GRANTEES)
   const payload = { settings: encodeAgentSettings(botUserId, row) }
   const live: Array<{ userId: number; update: Update }> = []
-  for (const userId of new Set([ownerUserId, botUserId, ...grantees.map((grantee) => grantee.userId)])) {
+  for (const userId of new Set([ownerUserId, botUserId, ...grantees.map((grantee) => grantee.userId!)])) {
     const durable = await UserBucketUpdates.enqueue(
       { userId, update: { oneofKind: "userAgentSettings", userAgentSettings: payload } },
       { tx },

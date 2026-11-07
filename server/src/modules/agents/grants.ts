@@ -1,9 +1,12 @@
 import {
   AgentGrantOperation,
   AgentGrantRequirement,
+  type AccessSubject,
   type AgentGrant,
   type DeleteAgentGrantInput,
   type DeleteAgentGrantResult,
+  type GetAgentAccessInput,
+  type GetAgentAccessResult,
   type ImportAgentGrantsInput,
   type ImportAgentGrantsResult,
   type ListAgentGrantsInput,
@@ -15,12 +18,21 @@ import {
 import { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
 import { UsersModel } from "@in/server/db/models/users"
-import { agentGrants, type DbAgentGrant, type DbUser } from "@in/server/db/schema"
+import {
+  agentGrants,
+  members,
+  spaces,
+  userGroupMembers,
+  userGroups,
+  type DbAgentGrant,
+  type DbUser,
+} from "@in/server/db/schema"
+import { getCurrentSpaceMembership } from "@in/server/modules/authorization/spaceMembershipLifecycle"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { and, eq, inArray, isNull, max, sql } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, isNull, max, sql } from "drizzle-orm"
 
 const MAX_IMPORT_USERS = 256
 
@@ -130,22 +142,91 @@ export async function resolveAgentAccess(
   const actorUser = actor?.id === userId ? actor : await UsersModel.getUserById(userId)
   const actingFor = actingForUserId(actorUser)
   const viaOwner = actingFor !== null && actingFor !== userId && actingFor !== bot.id ? actingFor : null
-  const subjects = viaOwner === null ? [userId] : [userId, viaOwner]
+  const isBot = actorUser?.bot === true
+
   const rows = await db
-    .select({ subjectUserId: agentGrants.subjectUserId, operations: agentGrants.operations })
+    .select({
+      subjectUserId: agentGrants.subjectUserId,
+      subjectSpaceId: agentGrants.subjectSpaceId,
+      subjectGroupId: agentGrants.subjectGroupId,
+      operations: agentGrants.operations,
+    })
     .from(agentGrants)
-    .where(and(
-      eq(agentGrants.botUserId, bot.id),
-      inArray(agentGrants.subjectUserId, subjects),
-      isNull(agentGrants.revokedAt),
-    ))
-  const own = rows.find((row) => row.subjectUserId === userId)?.operations ?? 0
+    .where(and(eq(agentGrants.botUserId, bot.id), isNull(agentGrants.revokedAt)))
+
+  // Space and group grants reach people only; a bot gets them through its owner.
+  const people = [...(isBot ? [] : [userId]), ...(viaOwner === null ? [] : [viaOwner])]
+  const memberships = await spaceAndGroupMemberships(people, rows)
+  const opsFor = (subject: number) =>
+    rows.reduce((mask, row) => {
+      const applies =
+        row.subjectUserId === subject ||
+        (row.subjectSpaceId !== null && memberships.spaces.get(subject)?.has(row.subjectSpaceId) === true) ||
+        (row.subjectGroupId !== null && memberships.groups.get(subject)?.has(row.subjectGroupId) === true)
+      return applies ? mask | row.operations : mask
+    }, 0)
+
+  const own = opsFor(userId)
   const inherited = viaOwner === null
     ? 0
     : viaOwner === ownerUserId
       ? actingForMask
-      : (rows.find((row) => row.subjectUserId === viaOwner)?.operations ?? 0) & actingForMask
+      : opsFor(viaOwner) & actingForMask
   return { botUserId: bot.id, ownerUserId, isOwner: false, operations: own | inherited }
+}
+
+/** Which of the grants' spaces and groups each person currently belongs to. */
+async function spaceAndGroupMemberships(
+  people: number[],
+  rows: Array<{ subjectSpaceId: number | null; subjectGroupId: number | null }>,
+): Promise<{ spaces: Map<number, Set<number>>; groups: Map<number, Set<number>> }> {
+  const spaceIds = [...new Set(rows.flatMap((row) => row.subjectSpaceId === null ? [] : [row.subjectSpaceId]))]
+  const groupIds = [...new Set(rows.flatMap((row) => row.subjectGroupId === null ? [] : [row.subjectGroupId]))]
+  const result = { spaces: new Map<number, Set<number>>(), groups: new Map<number, Set<number>>() }
+  if (people.length === 0) return result
+  const add = (map: Map<number, Set<number>>, userId: number, id: number) => {
+    const set = map.get(userId) ?? new Set<number>()
+    set.add(id)
+    map.set(userId, set)
+  }
+  if (spaceIds.length > 0) {
+    const inSpaces = await db
+      .select({ userId: members.userId, spaceId: members.spaceId })
+      .from(members)
+      .innerJoin(spaces, and(eq(spaces.id, members.spaceId), isNull(spaces.deleted)))
+      .where(and(inArray(members.spaceId, spaceIds), inArray(members.userId, people)))
+    for (const row of inSpaces) add(result.spaces, row.userId, row.spaceId)
+  }
+  if (groupIds.length > 0) {
+    const inGroups = await db
+      .select({ userId: userGroupMembers.userId, groupId: userGroupMembers.groupId })
+      .from(userGroupMembers)
+      .innerJoin(userGroups, eq(userGroups.id, userGroupMembers.groupId))
+      .innerJoin(members, and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, userGroupMembers.userId)))
+      .innerJoin(spaces, and(eq(spaces.id, userGroups.spaceId), isNull(spaces.deleted)))
+      .where(and(inArray(userGroupMembers.groupId, groupIds), inArray(userGroupMembers.userId, people)))
+    for (const row of inGroups) add(result.groups, row.userId, row.groupId)
+  }
+  return result
+}
+
+/** What `userId` may do with a bot, for the bot itself, its owner, or the user asking about themselves. */
+export async function getAgentAccess(input: GetAgentAccessInput, currentUserId: number): Promise<GetAgentAccessResult> {
+  const botUserId = input.botUserId === 0n ? currentUserId : Number(input.botUserId)
+  const userId = Number(input.userId)
+  if (!Number.isSafeInteger(botUserId) || botUserId <= 0) throw RealtimeRpcError.UserIdInvalid()
+  if (!Number.isSafeInteger(userId) || userId <= 0) throw RealtimeRpcError.UserIdInvalid()
+  const bot = await UsersModel.getUserById(botUserId)
+  const ownerUserId = activeBotOwner(bot)
+  if (!bot || ownerUserId === null) throw RealtimeRpcError.UserIdInvalid()
+  if (currentUserId !== bot.id && currentUserId !== ownerUserId && currentUserId !== userId) {
+    throw RealtimeRpcError.UserIdInvalid()
+  }
+  const access = await resolveAgentAccess(bot, userId)
+  return {
+    isOwner: access.isOwner,
+    operations: access.isOwner ? [...grantableOperations] : maskToOperations(access.operations),
+  }
 }
 
 export async function grantsRevision(botUserId: number, query: Pick<Transaction, "select"> = db): Promise<bigint> {
@@ -156,11 +237,55 @@ export async function grantsRevision(botUserId: number, query: Pick<Transaction,
   return row?.revision ?? 0n
 }
 
+type GrantSubject = { kind: "user" | "space" | "group"; id: number }
+
+function subjectOf(row: Pick<DbAgentGrant, "subjectUserId" | "subjectSpaceId" | "subjectGroupId">): GrantSubject {
+  if (row.subjectUserId !== null) return { kind: "user", id: row.subjectUserId }
+  if (row.subjectSpaceId !== null) return { kind: "space", id: row.subjectSpaceId }
+  return { kind: "group", id: row.subjectGroupId ?? 0 }
+}
+
+function encodeSubject(subject: GrantSubject): AccessSubject {
+  switch (subject.kind) {
+    case "user":
+      return { subject: { oneofKind: "userId", userId: BigInt(subject.id) } }
+    case "space":
+      return { subject: { oneofKind: "spaceId", spaceId: BigInt(subject.id) } }
+    case "group":
+      return { subject: { oneofKind: "groupId", groupId: BigInt(subject.id) } }
+  }
+}
+
+function subjectFromInput(subject: AccessSubject | undefined, userId: bigint): GrantSubject {
+  const raw = subject?.subject
+  const [kind, id]: [GrantSubject["kind"], bigint] =
+    raw?.oneofKind === "spaceId" ? ["space", raw.spaceId]
+      : raw?.oneofKind === "groupId" ? ["group", raw.groupId]
+        : raw?.oneofKind === "userId" ? ["user", raw.userId]
+          : ["user", userId]
+  const value = Number(id)
+  if (!Number.isSafeInteger(value) || value <= 0) throw RealtimeRpcError.BadRequest()
+  return { kind, id: value }
+}
+
+function subjectColumn(kind: GrantSubject["kind"]) {
+  return kind === "user" ? agentGrants.subjectUserId : kind === "space" ? agentGrants.subjectSpaceId : agentGrants.subjectGroupId
+}
+
+function subjectValues(subject: GrantSubject) {
+  return {
+    subjectUserId: subject.kind === "user" ? subject.id : null,
+    subjectSpaceId: subject.kind === "space" ? subject.id : null,
+    subjectGroupId: subject.kind === "group" ? subject.id : null,
+  }
+}
+
 function encodeGrant(row: DbAgentGrant): AgentGrant {
   return {
     id: row.id,
     botUserId: BigInt(row.botUserId),
-    userId: BigInt(row.subjectUserId),
+    userId: BigInt(row.subjectUserId ?? 0),
+    subject: encodeSubject(subjectOf(row)),
     operations: maskToOperations(row.operations),
     revision: row.revision,
     grantedBy: row.grantedBy === null ? undefined : BigInt(row.grantedBy),
@@ -182,14 +307,22 @@ async function grantEditor(botUserIdInput: bigint, currentUserId: number): Promi
   throw RealtimeRpcError.UserIdInvalid()
 }
 
-async function validSubject(userIdInput: bigint, editor: GrantEditor): Promise<number> {
-  const userId = Number(userIdInput)
-  if (!Number.isSafeInteger(userId) || userId <= 0) throw RealtimeRpcError.UserIdInvalid()
-  // The owner needs no grant, and a bot's grant on itself means nothing.
-  if (userId === editor.ownerUserId || userId === editor.bot.id) throw RealtimeRpcError.BadRequest()
-  const subject = await UsersModel.getUserById(userId)
-  if (!subject || UsersModel.isDeleted(subject)) throw RealtimeRpcError.UserIdInvalid()
-  return userId
+async function validSubject(subject: GrantSubject, editor: GrantEditor): Promise<GrantSubject> {
+  if (subject.kind === "user") {
+    // The owner needs no grant, and a bot's grant on itself means nothing.
+    if (subject.id === editor.ownerUserId || subject.id === editor.bot.id) throw RealtimeRpcError.BadRequest()
+    const user = await UsersModel.getUserById(subject.id)
+    if (!user || UsersModel.isDeleted(user)) throw RealtimeRpcError.UserIdInvalid()
+    return subject
+  }
+  // Only the owner opens a bot to a whole space or group, and only one they're in.
+  if (editor.actor !== "owner") throw RealtimeRpcError.UserIdInvalid()
+  const spaceId = subject.kind === "space"
+    ? subject.id
+    : (await db.select({ spaceId: userGroups.spaceId }).from(userGroups).where(eq(userGroups.id, subject.id)).limit(1))[0]?.spaceId
+  if (spaceId === undefined) throw RealtimeRpcError.BadRequest()
+  if (!(await getCurrentSpaceMembership(spaceId, editor.ownerUserId))) throw RealtimeRpcError.SpaceIdInvalid()
+  return subject
 }
 
 export async function listAgentGrants(
@@ -210,6 +343,7 @@ export async function listAgentGrants(
       eq(agentGrants.botUserId, botUserId),
       isNull(agentGrants.revokedAt),
       seesAll ? undefined : eq(agentGrants.subjectUserId, currentUserId),
+      input.includeAllSubjects === true ? undefined : isNotNull(agentGrants.subjectUserId),
     ))
     .orderBy(agentGrants.id)
   return {
@@ -222,7 +356,7 @@ export async function listAgentGrants(
 
 export async function setAgentGrant(input: SetAgentGrantInput, currentUserId: number): Promise<SetAgentGrantResult> {
   const editor = await grantEditor(input.botUserId, currentUserId)
-  const subjectUserId = await validSubject(input.userId, editor)
+  const subject = await validSubject(subjectFromInput(input.subject, input.userId), editor)
   const operations = operationsToMask(input.operations)
   if (editor.actor === "bot" && (operations & ~botGrantableMask) !== 0) throw RealtimeRpcError.UserIdInvalid()
 
@@ -233,13 +367,14 @@ export async function setAgentGrant(input: SetAgentGrantInput, currentUserId: nu
       .insert(agentGrants)
       .values({
         botUserId: editor.bot.id,
-        subjectUserId,
+        ...subjectValues(subject),
         operations,
         revision: nextRevision(),
         grantedBy: currentUserId,
       })
       .onConflictDoUpdate({
-        target: [agentGrants.botUserId, agentGrants.subjectUserId],
+        target: [agentGrants.botUserId, subjectColumn(subject.kind)],
+        targetWhere: sql`${subjectColumn(subject.kind)} is not null`,
         set: {
           operations,
           revision: nextRevision(),
@@ -250,7 +385,7 @@ export async function setAgentGrant(input: SetAgentGrantInput, currentUserId: nu
       })
       .returning()
     if (!saved) throw RealtimeRpcError.InternalError()
-    live.push(...await enqueueGrantUpdates(tx, editor, subjectUserId, saved))
+    live.push(...await enqueueGrantUpdates(tx, editor, subject, saved))
     return saved
   })
   publishGrantUpdates(live)
@@ -262,8 +397,8 @@ export async function deleteAgentGrant(
   currentUserId: number,
 ): Promise<DeleteAgentGrantResult> {
   const editor = await grantEditor(input.botUserId, currentUserId)
-  const subjectUserId = Number(input.userId)
-  if (!Number.isSafeInteger(subjectUserId) || subjectUserId <= 0) throw RealtimeRpcError.UserIdInvalid()
+  const subject = subjectFromInput(input.subject, input.userId)
+  if (subject.kind !== "user" && editor.actor !== "owner") throw RealtimeRpcError.UserIdInvalid()
 
   const live: LiveGrantUpdate[] = []
   await db.transaction(async (tx) => {
@@ -278,11 +413,11 @@ export async function deleteAgentGrant(
       })
       .where(and(
         eq(agentGrants.botUserId, editor.bot.id),
-        eq(agentGrants.subjectUserId, subjectUserId),
+        eq(subjectColumn(subject.kind), subject.id),
         isNull(agentGrants.revokedAt),
       ))
       .returning()
-    if (revoked) live.push(...await enqueueGrantUpdates(tx, editor, subjectUserId, revoked))
+    if (revoked) live.push(...await enqueueGrantUpdates(tx, editor, subject, revoked))
   })
   publishGrantUpdates(live)
   return { revision: await grantsRevision(editor.bot.id) }
@@ -322,7 +457,7 @@ export async function importAgentGrants(
       })))
       .onConflictDoNothing()
       .returning()
-    for (const row of saved) live.push(...await enqueueGrantUpdates(tx, editor, row.subjectUserId, row))
+    for (const row of saved) live.push(...await enqueueGrantUpdates(tx, editor, subjectOf(row), row))
   })
   publishGrantUpdates(live)
 
@@ -344,17 +479,20 @@ type LiveGrantUpdate = { userId: number; update: Update }
 async function enqueueGrantUpdates(
   tx: Transaction,
   editor: GrantEditor,
-  subjectUserId: number,
+  subject: GrantSubject,
   row: DbAgentGrant,
 ): Promise<LiveGrantUpdate[]> {
   const live: LiveGrantUpdate[] = []
   const payload = {
     botUserId: BigInt(editor.bot.id),
-    userId: BigInt(subjectUserId),
+    userId: BigInt(subject.kind === "user" ? subject.id : 0),
     grant: row.revokedAt === null ? encodeGrant(row) : undefined,
     revision: row.revision,
+    subject: encodeSubject(subject),
   }
-  for (const userId of new Set([editor.ownerUserId, editor.bot.id, subjectUserId])) {
+  // A space or group grant reaches its members through access checks, not updates.
+  const subjectUser = subject.kind === "user" ? [subject.id] : []
+  for (const userId of new Set([editor.ownerUserId, editor.bot.id, ...subjectUser])) {
     const durable = await UserBucketUpdates.enqueue(
       { userId, update: { oneofKind: "userAgentGrant", userAgentGrant: payload } },
       { tx },
@@ -376,6 +514,7 @@ function publishGrantUpdates(live: readonly LiveGrantUpdate[]): void {
 }
 
 export const AgentGrants = {
+  getAccess: getAgentAccess,
   resolveAccess: resolveAgentAccess,
   satisfies: satisfiesGrantRequirement,
   revision: grantsRevision,

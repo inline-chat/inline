@@ -8,7 +8,18 @@ import {
 } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { UsersModel } from "@in/server/db/models/users"
-import { agentGrants, chatParticipants, chats, members, messages, spaces, users, type DbUser } from "@in/server/db/schema"
+import {
+  agentGrants,
+  chatParticipants,
+  chats,
+  members,
+  messages,
+  spaces,
+  userGroupMembers,
+  userGroups,
+  users,
+  type DbUser,
+} from "@in/server/db/schema"
 import { actingForUserId, maskToOperations, resolveAgentAccess } from "@in/server/modules/agents/grants"
 import { encodePublicUser } from "@in/server/modules/privacy/userPrivacy"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
@@ -66,7 +77,7 @@ export async function getContacts(input: GetContactsInput, actor: DbUser): Promi
   await Promise.all([
     addSharedChats(candidates, principals.ids),
     addManagedBots(candidates, principals.ids),
-    addGrants(candidates, principals.ids),
+    addGrants(candidates, principals.ids, actor.bot === true ? (principals.owner === null ? [] : [principals.owner]) : [actor.id]),
     query.length >= 2 ? addSpaceMembers(candidates, principals.ids, query) : Promise.resolve(),
   ])
 
@@ -183,13 +194,34 @@ async function addManagedBots(candidates: Candidates, principals: number[]) {
   }
 }
 
-async function addGrants(candidates: Candidates, principals: number[]) {
+async function addGrants(candidates: Candidates, principals: number[], people: number[]) {
   // Bots whose access list includes a principal.
   const usable = await db
     .select({ botUserId: agentGrants.botUserId, subject: agentGrants.subjectUserId })
     .from(agentGrants)
     .where(and(inArray(agentGrants.subjectUserId, principals), isNull(agentGrants.revokedAt), gt(agentGrants.operations, 0)))
-  for (const row of usable) candidates.add(row.botUserId, ContactRelation.CAN_USE, row.subject)
+  for (const row of usable) {
+    if (row.subject !== null) candidates.add(row.botUserId, ContactRelation.CAN_USE, row.subject)
+  }
+
+  // Bots open to a space or user group a person (the caller, or a bot's owner) belongs to.
+  if (people.length > 0) {
+    const viaSpace = await db
+      .select({ botUserId: agentGrants.botUserId, userId: members.userId })
+      .from(agentGrants)
+      .innerJoin(members, eq(members.spaceId, agentGrants.subjectSpaceId))
+      .innerJoin(spaces, and(eq(spaces.id, members.spaceId), isNull(spaces.deleted)))
+      .where(and(inArray(members.userId, people), isNull(agentGrants.revokedAt), gt(agentGrants.operations, 0)))
+    for (const row of viaSpace) candidates.add(row.botUserId, ContactRelation.CAN_USE, row.userId)
+    const viaGroup = await db
+      .select({ botUserId: agentGrants.botUserId, userId: userGroupMembers.userId })
+      .from(agentGrants)
+      .innerJoin(userGroupMembers, eq(userGroupMembers.groupId, agentGrants.subjectGroupId))
+      .innerJoin(userGroups, eq(userGroups.id, userGroupMembers.groupId))
+      .innerJoin(members, and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, userGroupMembers.userId)))
+      .where(and(inArray(userGroupMembers.userId, people), isNull(agentGrants.revokedAt), gt(agentGrants.operations, 0)))
+    for (const row of viaGroup) candidates.add(row.botUserId, ContactRelation.CAN_USE, row.userId)
+  }
 
   // People who may use a bot a principal manages.
   const usesYours = await db
@@ -198,7 +230,7 @@ async function addGrants(candidates: Candidates, principals: number[]) {
     .innerJoin(users, eq(users.id, agentGrants.botUserId))
     .where(and(inArray(users.botCreatorId, principals), isNull(agentGrants.revokedAt), gt(agentGrants.operations, 0)))
   for (const row of usesYours) {
-    if (row.owner != null) candidates.add(row.subject, ContactRelation.USES_YOUR_BOT, row.owner)
+    if (row.owner != null && row.subject !== null) candidates.add(row.subject, ContactRelation.USES_YOUR_BOT, row.owner)
   }
 }
 

@@ -3,6 +3,7 @@ import { moveAgentSession } from "@in/server/modules/agentSessions/move"
 import { getAgentSessionStates, updateAgentSessionState } from "@in/server/modules/agentSessions/state"
 import {
   deleteAgentGrant,
+  getAgentAccess,
   importAgentGrants,
   listAgentGrants,
   setAgentGrant,
@@ -28,6 +29,7 @@ export const AgentHandlers = {
   setAgentGrant,
   deleteAgentGrant,
   importAgentGrants,
+  getAgentAccess,
   getAgentParticipations,
   setAgentParticipation,
 }

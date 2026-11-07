@@ -280,3 +280,91 @@ describe("getChat through a managed bot", () => {
     expect(own.readOnlyViaBotUserId).toBeUndefined()
   })
 })
+
+describe("bot access for a space or a user group", () => {
+  setupTestLifecycle()
+
+  const ops = (operations: AgentGrantOperation[]) => operations
+
+  test("members of a granted space or group may use the bot; their bots get it capped", async () => {
+    const { deleteAgentGrant, getAgentAccess, listAgentGrants, setAgentGrant } = await import("@in/server/modules/agents/grants")
+    const { space, users } = await testUtils.createSpaceWithMembers("Acme", ["dena@acme.com", "mo@acme.com", "zed@acme.com"] as const)
+    const [dena, mo, zed] = users
+    const outsider = await person("Outsider")
+    const denaCodex = await bot("Dena Codex", dena)
+    const moClaude = await bot("Mo Claude", mo)
+    const strayBot = await bot("Stray", outsider)
+    await db.insert(schema.members).values({ spaceId: space.id, userId: strayBot.id, role: "member" })
+
+    await setAgentGrant(
+      {
+        botUserId: BigInt(denaCodex.id),
+        userId: 0n,
+        operations: ops([AgentGrantOperation.INVOKE, AgentGrantOperation.APPROVE]),
+        subject: { subject: { oneofKind: "spaceId", spaceId: BigInt(space.id) } },
+      },
+      dena.id,
+    )
+    expect((await resolveAgentAccess(denaCodex, mo.id)).operations).toBe(
+      bit(AgentGrantOperation.INVOKE) | bit(AgentGrantOperation.APPROVE),
+    )
+    expect((await resolveAgentAccess(denaCodex, moClaude.id)).operations).toBe(bit(AgentGrantOperation.INVOKE))
+    expect((await resolveAgentAccess(denaCodex, outsider.id)).operations).toBe(0)
+    // A bot in the space doesn't get space grants itself, only through its owner.
+    expect((await resolveAgentAccess(denaCodex, strayBot.id)).operations).toBe(0)
+
+    // Older clients see person grants only.
+    expect((await listAgentGrants({ botUserId: BigInt(denaCodex.id) }, dena.id)).grants).toHaveLength(0)
+    const all = await listAgentGrants({ botUserId: BigInt(denaCodex.id), includeAllSubjects: true }, dena.id)
+    expect(all.grants.map((g) => [g.userId, g.subject?.subject])).toEqual([
+      [0n, { oneofKind: "spaceId", spaceId: BigInt(space.id) }],
+    ])
+
+    expect(await getAgentAccess({ botUserId: BigInt(denaCodex.id), userId: BigInt(moClaude.id) }, moClaude.id)).toEqual({
+      isOwner: false,
+      operations: [AgentGrantOperation.INVOKE],
+    })
+    await expect(
+      getAgentAccess({ botUserId: BigInt(denaCodex.id), userId: BigInt(mo.id) }, zed.id),
+    ).rejects.toBeInstanceOf(RealtimeRpcError)
+
+    const contacts = await getContacts({ kind: ContactKind.BOTS }, moClaude)
+    expect(contacts.contacts.find((c) => Number(c.userId) === denaCodex.id)?.relations).toContain(ContactRelation.CAN_USE)
+
+    await deleteAgentGrant(
+      { botUserId: BigInt(denaCodex.id), userId: 0n, subject: { subject: { oneofKind: "spaceId", spaceId: BigInt(space.id) } } },
+      dena.id,
+    )
+    expect((await resolveAgentAccess(denaCodex, mo.id)).operations).toBe(0)
+
+    const [group] = await db.insert(schema.userGroups).values({ spaceId: space.id, name: "Eng", createdBy: dena.id }).returning()
+    await db.insert(schema.userGroupMembers).values({ groupId: group!.id, userId: zed.id })
+    await setAgentGrant(
+      {
+        botUserId: BigInt(denaCodex.id),
+        userId: 0n,
+        operations: ops([AgentGrantOperation.INVOKE]),
+        subject: { subject: { oneofKind: "groupId", groupId: BigInt(group!.id) } },
+      },
+      dena.id,
+    )
+    expect((await resolveAgentAccess(denaCodex, zed.id)).operations).toBe(bit(AgentGrantOperation.INVOKE))
+    expect((await resolveAgentAccess(denaCodex, mo.id)).operations).toBe(0)
+  })
+
+  test("only the owner opens a bot to a space, and only one they're in", async () => {
+    const { setAgentGrant } = await import("@in/server/modules/agents/grants")
+    const { space } = await testUtils.createSpaceWithMembers("Other", ["someone@other.com"] as const)
+    const dena = await person("Dena")
+    const denaCodex = await bot("Dena Codex", dena)
+    const subject = { subject: { oneofKind: "spaceId" as const, spaceId: BigInt(space.id) } }
+    await expect(
+      setAgentGrant({ botUserId: BigInt(denaCodex.id), userId: 0n, operations: [AgentGrantOperation.INVOKE], subject }, dena.id),
+    ).rejects.toBeInstanceOf(RealtimeRpcError)
+    await db.insert(schema.members).values({ spaceId: space.id, userId: dena.id, role: "member" })
+    await expect(
+      setAgentGrant({ botUserId: BigInt(denaCodex.id), userId: 0n, operations: [AgentGrantOperation.INVOKE], subject }, denaCodex.id),
+    ).rejects.toBeInstanceOf(RealtimeRpcError)
+    await setAgentGrant({ botUserId: BigInt(denaCodex.id), userId: 0n, operations: [AgentGrantOperation.INVOKE], subject }, dena.id)
+  })
+})

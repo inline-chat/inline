@@ -220,6 +220,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "getAgentSessionStates", getAgentSessionStates: result }
     }
 
+    case Method.GET_AGENT_ACCESS: {
+      if (call.input.oneofKind !== "getAgentAccess") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.getAgentAccess(call.input.getAgentAccess, handlerContext.userId)
+      return { oneofKind: "getAgentAccess", getAgentAccess: result }
+    }
+
     case Method.LIST_AGENT_GRANTS: {
       if (call.input.oneofKind !== "listAgentGrants") throw RealtimeRpcError.BadRequest()
       const result = await AgentHandlers.listAgentGrants(call.input.listAgentGrants, handlerContext.userId)
