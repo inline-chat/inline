@@ -815,6 +815,20 @@ impl SessionInner {
                     .map_err(op_error)?;
                 Ok(OpOutcome::accepted())
             }
+            Op::StopChild { child }
+                if child.kind == inline_agent_bridge::harness::ChildKind::BackgroundTask =>
+            {
+                // A background shell stops through the shell API.
+                api.send(
+                    Method::DELETE,
+                    &format!("api/shell/{}", child.id.as_str()),
+                    Query::new(),
+                    None,
+                )
+                .await
+                .map_err(op_error)?;
+                Ok(OpOutcome::accepted())
+            }
             Op::StopChild { child } => {
                 let session = self
                     .state()

@@ -105,6 +105,8 @@ pub struct Mapper {
     completed_order: VecDeque<String>,
     pending: HashMap<String, Pending>,
     children: HashMap<String, ChildState>,
+    /// Shells moved to the background, by shell id.
+    shells: HashMap<String, ChildState>,
     last_seq: Option<u64>,
     total: TokenUsage,
     settings: EffectiveSettings,
@@ -155,6 +157,7 @@ impl Mapper {
             completed_order: VecDeque::new(),
             pending: HashMap::new(),
             children: HashMap::new(),
+            shells: HashMap::new(),
             last_seq: None,
             total: TokenUsage::default(),
             settings: EffectiveSettings::default(),
@@ -199,6 +202,7 @@ impl Mapper {
     pub fn running_children(&self) -> Vec<ChildRef> {
         self.children
             .values()
+            .chain(self.shells.values())
             .filter(|child| child.running)
             .map(|child| child.child.clone())
             .collect()
@@ -531,6 +535,56 @@ impl Mapper {
                 ))]
             }
             "session.shell.started" | "session.shell.ended" => self.shell(&data, event),
+            "session.synthetic"
+                if data.pointer("/metadata/source").and_then(Value::as_str) == Some("shell") =>
+            {
+                let shell = data
+                    .pointer("/metadata/shellID")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let status = match data.pointer("/metadata/state").and_then(Value::as_str) {
+                    Some("completed") => ChildStatus::Completed,
+                    Some("cancelled") => ChildStatus::Stopped,
+                    _ => ChildStatus::Failed,
+                };
+                let mut events = if self.shells.contains_key(&shell) {
+                    self.background_shell(&shell, None, status)
+                } else {
+                    Vec::new()
+                };
+                events.push(Event::Item(Item::new(
+                    item_id(&format!("synthetic:{}", event_id(event))),
+                    self.turn().cloned(),
+                    ItemUpdate::Completed {
+                        body: ItemBody::Command {
+                            command: data
+                                .get("description")
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_owned(),
+                            cwd: None,
+                            actions: Vec::new(),
+                            output: data
+                                .pointer("/metadata/output")
+                                .and_then(Value::as_str)
+                                .map(|text| tail(text, MAX_OUTPUT_CHARS)),
+                            exit_code: data
+                                .pointer("/metadata/exit")
+                                .and_then(Value::as_i64)
+                                .and_then(|code| i32::try_from(code).ok()),
+                            duration_ms: None,
+                        },
+                        status: match status {
+                            ChildStatus::Completed => ItemStatus::Completed,
+                            ChildStatus::Stopped => ItemStatus::Interrupted,
+                            _ => ItemStatus::Failed,
+                        },
+                    },
+                    event.clone(),
+                )));
+                events
+            }
             "session.synthetic" => vec![Event::Item(Item::new(
                 item_id(&format!("synthetic:{}", event_id(event))),
                 self.turn().cloned(),
@@ -1120,9 +1174,63 @@ impl Mapper {
                 ItemUpdate::Completed { body, status },
                 event.clone(),
             )
-            .with_parent(child),
+            .with_parent(child.clone()),
         ));
+        // A shell moved to the background keeps running after its call
+        // returns; it reports back through a synthetic notification.
+        if child.is_none()
+            && matches!(call.name.as_str(), "shell" | "bash")
+            && let Some(metadata) = &metadata
+            && metadata.get("status").and_then(Value::as_str) == Some("running")
+            && let Some(shell) = metadata.get("shellID").and_then(Value::as_str)
+        {
+            let command = call
+                .input
+                .get("command")
+                .and_then(Value::as_str)
+                .map(|command| bounded(command, MAX_PREVIEW_CHARS));
+            events.extend(self.background_shell(shell, command, ChildStatus::Running));
+        }
         events
+    }
+
+    /// A background shell as a child, like Claude's background tasks.
+    fn background_shell(
+        &mut self,
+        shell: &str,
+        title: Option<String>,
+        status: ChildStatus,
+    ) -> Vec<Event> {
+        let Ok(id) = ChildId::new(shell) else {
+            return Vec::new();
+        };
+        let running = matches!(status, ChildStatus::Started | ChildStatus::Running);
+        let state = self
+            .shells
+            .entry(shell.to_owned())
+            .or_insert_with(|| ChildState {
+                child: ChildRef {
+                    id,
+                    kind: ChildKind::BackgroundTask,
+                },
+                title: None,
+                running,
+            });
+        if title.is_some() {
+            state.title = title;
+        }
+        state.running = running;
+        let update = ChildUpdate {
+            child: state.child.clone(),
+            status,
+            title: state.title.clone(),
+            accepts_direct_input: false,
+            native: Value::Null,
+        };
+        if !running {
+            self.shells.remove(shell);
+        }
+        vec![Event::Child { update }]
     }
 
     /// Completes, as interrupted, the tools still open for the main agent

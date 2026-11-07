@@ -903,3 +903,46 @@ fn tools_left_open_close_with_the_turn_whatever_turn_saw_them() {
     let ended = mapper.apply(&durable(3, "session.execution.succeeded", json!({})));
     assert!(ended.iter().any(|event| matches!(event, Event::Item(Item { id, update: ItemUpdate::Completed { status: ItemStatus::Interrupted, .. }, .. }) if id.as_str() == "call_early")));
 }
+
+#[test]
+fn a_background_shell_stays_live_work_until_its_notification() {
+    let mut mapper = mapper();
+    mapper.apply(&durable(1, "session.execution.started", json!({})));
+    mapper.apply(&durable(
+        2,
+        "session.tool.input.started",
+        json!({"assistantMessageID": "m", "id": "call_bg", "name": "shell"}),
+    ));
+    mapper.apply(&durable(3, "session.tool.called", json!({"assistantMessageID": "m", "id": "call_bg", "input": {"command": "ffmpeg -i in.mov out.mp4", "background": true}, "executed": true})));
+    let moved = mapper.apply(&durable(4, "session.tool.success", json!({"assistantMessageID": "m", "id": "call_bg",
+        "content": [{"type": "text", "text": "Command moved to the background (shell ID: sh_1)."}],
+        "metadata": {"status": "running", "shellID": "sh_1", "truncated": false}, "executed": true})));
+    assert!(
+        matches!(moved.last(), Some(Event::Child { update }) if update.child.kind == ChildKind::BackgroundTask
+        && update.status == ChildStatus::Running && update.title.as_deref() == Some("ffmpeg -i in.mov out.mp4"))
+    );
+    mapper.apply(&durable(5, "session.execution.succeeded", json!({})));
+    // The turn ended; the encode is still live work.
+    assert_eq!(mapper.running_children().len(), 1);
+    let done = mapper.apply(&durable(
+        6,
+        "session.synthetic",
+        json!({"text": "<shell ...>", "description": "ffmpeg -i in.mov out.mp4",
+        "metadata": {"source": "shell", "shellID": "sh_1", "state": "completed", "exit": 0}}),
+    ));
+    assert!(matches!(&done[0], Event::Child { update } if update.status == ChildStatus::Completed));
+    assert!(matches!(
+        &done[1],
+        Event::Item(Item {
+            update: ItemUpdate::Completed {
+                body: ItemBody::Command {
+                    exit_code: Some(0),
+                    ..
+                },
+                status: ItemStatus::Completed
+            },
+            ..
+        })
+    ));
+    assert!(mapper.running_children().is_empty());
+}
