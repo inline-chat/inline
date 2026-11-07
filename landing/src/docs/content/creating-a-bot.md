@@ -60,6 +60,34 @@ Reveal the token using the ID from creation or the list. Replace `123` below wit
 inline bots reveal-token --bot-user-id 123
 ```
 
+## Edit a Bot
+
+Only the bot's owner can change it.
+
+In the apps, open the bot's chat info:
+
+- **Mac:** **Profile** changes the photo, name, and username. **Bot Settings** sets how it replies by default and manages its token.
+- **iOS:** **Manage Bot** changes the photo and name and who can use it. Its **Bot Settings** page has the username, default output, and token.
+
+Both apps also list your bots under **Settings → Bots**.
+
+Output mode decides how an agent bot shows its work: **Detailed** posts every step, and **Friendly** posts short updates and the answer. Each bot has a default, and any thread can override it in that chat's **Agent Settings**.
+
+From the CLI:
+
+```bash
+inline bots get --bot-user-id 123
+inline bots update --bot-user-id 123 --name "Deploy Bot" --username deploy_bot
+inline bots set-photo --bot-user-id 123 --file ./photo.png
+inline bots remove-photo --bot-user-id 123
+inline bots settings --bot-user-id 123 --output-mode friendly
+inline bots settings --bot-user-id 123 --chat-id 456 --output-mode detailed
+inline bots access grant --bot-user-id 123 --user-id 456
+inline bots access revoke --bot-user-id 123 --user-id 456
+```
+
+`inline bots rotate-token` replaces the token and stops the old one immediately. `inline bots delete` deletes the bot and revokes its token. Both ask for confirmation.
+
 ## Verify
 
 Make the token available to your shell as `INLINE_BOT_TOKEN`. The following command uses curl and a POSIX-compatible shell; it fails before sending a request if the variable is empty. It calls Bot API `0.1`:
