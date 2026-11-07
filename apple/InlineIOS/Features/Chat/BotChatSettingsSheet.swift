@@ -20,12 +20,21 @@ struct BotChatSettingsSheet: View {
     }
     .task(id: coordinator.selectedBotID) {
       coordinator.refreshSelectedIfStale()
+      if let botUserID = coordinator.selectedBotID {
+        await AgentWorkStateStore.shared.loadOutputModes(peer: coordinator.peer, botUserID: botUserID)
+      }
     }
   }
 }
 
 private struct BotChatSettingsSheetContent: View {
   let coordinator: BotChatSettingsCoordinator
+  @ObservedObject private var agentWork = AgentWorkStateStore.shared
+
+  /// Output mode applies to bridge v2 agents, which report a runtime.
+  private var outputModeBotUserID: Int64? {
+    coordinator.selectedBotID.flatMap { agentWork.runtimeBotUserIDs.contains($0) ? $0 : nil }
+  }
 
   var body: some View {
     let state = coordinator.selectedState
@@ -47,6 +56,9 @@ private struct BotChatSettingsSheetContent: View {
             pendingItemIDs: state.pendingItemIDs,
             onInvoke: coordinator.invoke(itemID:value:)
           )
+        }
+        if let botUserID = outputModeBotUserID {
+          AgentOutputModeSection(peer: coordinator.peer, botUserID: botUserID)
         }
         if let status = state.surfaceStatus {
           BotChatSettingsIOSStatusSection(status: status, onRetry: coordinator.refreshSelected)

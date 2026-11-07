@@ -6,7 +6,8 @@ import Logger
 import RealtimeV2
 import SwiftUI
 
-/// Manages a bot the viewer owns from a chat's info: its name and who may use it.
+/// Manages a bot the viewer owns from a chat's info: its photo, name, settings
+/// and who may use it.
 struct OwnedBotAccessSheet: View {
   let bot: UserInfo
   /// The chat's direct participants, offered for access in place.
@@ -15,6 +16,11 @@ struct OwnedBotAccessSheet: View {
   @Environment(\.realtimeV2) private var realtimeV2
   @Environment(\.dismiss) private var dismiss
   @ObservedObject private var grants = AgentGrantStore.shared
+  /// The owner's bot record, for photo and settings edits.
+  @State private var model = IOSBotsSettingsModel()
+  @State private var showsImagePicker = false
+  @State private var showsCropper = false
+  @State private var pickedImage: UIImage?
 
   @State private var name: String
   @State private var savedName: String
@@ -68,8 +74,19 @@ struct OwnedBotAccessSheet: View {
       List {
         Section {
           VStack(spacing: 6) {
-            UserAvatar(userInfo: bot, size: 72)
-            if let username = bot.user.username, !username.isEmpty {
+            if let managed = model.bot(botUserID) {
+              IOSManagedBotPhotoEditor(
+                bot: managed,
+                isBusy: model.busyBotIDs.contains(botUserID),
+                choosePhoto: { showsImagePicker = true },
+                removePhoto: {
+                  Task { await model.removePhoto(botUserID, realtimeV2: realtimeV2) }
+                }
+              )
+            } else {
+              UserAvatar(userInfo: bot, size: 96)
+            }
+            if let username = model.bot(botUserID)?.username ?? bot.user.username, !username.isEmpty {
               Text("@\(username)")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -87,7 +104,7 @@ struct OwnedBotAccessSheet: View {
             .disabled(isSavingName)
         }
 
-        if let errorMessage {
+        if let errorMessage = errorMessage ?? model.errorMessage {
           Section {
             Text(errorMessage)
               .font(.footnote)
@@ -95,26 +112,46 @@ struct OwnedBotAccessSheet: View {
           }
         }
 
-        Section {
-          if chatPeople.isEmpty {
-            Text("No one else is in this chat.")
-              .foregroundStyle(.secondary)
+        // No participants means the bot's own chat, where only existing access applies.
+        if !participants.isEmpty {
+          Section {
+            if chatPeople.isEmpty {
+              Text("No one else is in this chat.")
+                .foregroundStyle(.secondary)
+            }
+            ForEach(chatPeople) { person in
+              accessRow(userID: person.user.id, userInfo: person)
+            }
+          } header: {
+            Text("In This Chat")
+          } footer: {
+            Text("People with access can start and steer \(displayName). You always have access.")
           }
-          ForEach(chatPeople) { person in
-            accessRow(userID: person.user.id, userInfo: person)
-          }
-        } header: {
-          Text("In This Chat")
-        } footer: {
-          Text("People with access can start and steer \(displayName). You always have access.")
         }
 
         if !otherGrantedUserIDs.isEmpty {
-          Section("Others With Access") {
+          Section(participants.isEmpty ? "People With Access" : "Others With Access") {
             ForEach(otherGrantedUserIDs, id: \.self) { userID in
               accessRow(userID: userID, userInfo: cachedUser(userID))
             }
           }
+        }
+
+        Section {
+          NavigationLink {
+            IOSManagedBotSettingsView(
+              botID: botUserID,
+              model: model,
+              showsOpenChat: false,
+              onDeleted: { dismiss() },
+              copyToken: { BotsSettingsView.copyToken($0) }
+            )
+          } label: {
+            Label("Bot Settings", systemImage: "gearshape")
+          }
+          .disabled(model.bot(botUserID) == nil)
+        } footer: {
+          Text("Username, output, token, skills, and more.")
         }
       }
       .listStyle(.insetGrouped)
@@ -137,6 +174,26 @@ struct OwnedBotAccessSheet: View {
       .task(id: botUserID) {
         // The cached list renders first; this only picks up missed changes.
         grants.refresh(botUserID: botUserID)
+        await model.load(realtimeV2, failure: "Couldn’t load this bot. Close and reopen to try again.")
+      }
+      .onChange(of: model.bot(botUserID).map { User(from: $0).displayName }) { _, newName in
+        // Picks up a rename from Bot Settings unless a local edit is pending.
+        guard let newName, !isSavingName, name == savedName else { return }
+        name = newName
+        savedName = newName
+      }
+      .sheet(isPresented: $showsImagePicker) {
+        ImagePicker(sourceType: .photoLibrary) { image in
+          pickedImage = image
+          showsCropper = true
+        }
+      }
+      .sheet(isPresented: $showsCropper, onDismiss: { pickedImage = nil }) {
+        if let pickedImage {
+          CircularCropView(image: pickedImage) { croppedImage in
+            Task { await model.uploadPhoto(botUserID, image: croppedImage, realtimeV2: realtimeV2) }
+          }
+        }
       }
       .task(id: otherGrantedUserIDs) {
         let missing = otherGrantedUserIDs.filter { ObjectCache.shared.getCachedUser(id: $0) == nil }
@@ -224,6 +281,7 @@ struct OwnedBotAccessSheet: View {
       try await AppDatabase.shared.dbWriter.write { db in
         _ = try User.save(db, user: response.bot)
       }
+      model.upsert(response.bot)
       savedName = User(from: response.bot).displayName
       name = savedName
       return true
@@ -231,6 +289,54 @@ struct OwnedBotAccessSheet: View {
       log.error("Failed to rename bot \(botUserID)", error: error)
       errorMessage = "Couldn’t rename the bot. Try again."
       return false
+    }
+  }
+}
+
+/// Opens bot management from a direct chat with a bot the viewer owns.
+/// Renders nothing for other people's bots.
+struct OwnedBotManageCard: View {
+  let bot: UserInfo
+  @ObservedObject private var grants = AgentGrantStore.shared
+  @State private var isPresented = false
+
+  var body: some View {
+    VStack(spacing: 0) {
+      if grants.ownedGrants(botUserID: bot.user.id) != nil {
+        Button {
+          isPresented = true
+        } label: {
+          HStack(spacing: 12) {
+            Image(systemName: "slider.horizontal.3")
+              .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Manage Bot")
+                .foregroundStyle(.primary)
+              Text("Photo, name, access, and settings")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "chevron.right")
+              .font(.footnote.weight(.semibold))
+              .foregroundStyle(.tertiary)
+          }
+          .padding(.horizontal, 16)
+          .padding(.vertical, 12)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+      }
+    }
+    .task(id: bot.user.id) {
+      grants.ensureLoaded(botUserID: bot.user.id)
+    }
+    .sheet(isPresented: $isPresented) {
+      OwnedBotAccessSheet(bot: bot, participants: [])
     }
   }
 }

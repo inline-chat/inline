@@ -146,6 +146,12 @@ struct BotsSettingsView: View {
   }
 
   private func copyToken(_ token: String) {
+    copiedTokenPasteboardChangeCount = Self.copyToken(token)
+  }
+
+  /// Copies a token that expires from the pasteboard after a minute. Returns the pasteboard change count.
+  @discardableResult
+  static func copyToken(_ token: String) -> Int {
     UIPasteboard.general.setItems(
       [[UTType.plainText.identifier: token]],
       options: [
@@ -153,12 +159,12 @@ struct BotsSettingsView: View {
         .expirationDate: Date().addingTimeInterval(60),
       ]
     )
-    copiedTokenPasteboardChangeCount = UIPasteboard.general.changeCount
     ToastManager.shared.showToast(
       "Token copied for 60 seconds",
       type: .success,
       systemImage: "doc.on.doc.fill"
     )
+    return UIPasteboard.general.changeCount
   }
 
   private func clearSensitiveState() {
@@ -203,7 +209,7 @@ final class IOSBotsSettingsModel {
     bots.first { $0.id == botID }
   }
 
-  func load(_ realtimeV2: RealtimeV2) async {
+  func load(_ realtimeV2: RealtimeV2, failure: String = "Could not load bots. Pull to try again.") async {
     guard !isLoading else { return }
     isLoading = true
     errorMessage = nil
@@ -220,7 +226,7 @@ final class IOSBotsSettingsModel {
       await saveLocally(response.bots)
     } catch {
       log.error("Failed to load bots", error: error)
-      errorMessage = "Could not load bots. Pull to try again."
+      errorMessage = failure
     }
   }
 
@@ -392,7 +398,7 @@ final class IOSBotsSettingsModel {
     }
   }
 
-  private func upsert(_ bot: InlineProtocol.User) {
+  func upsert(_ bot: InlineProtocol.User) {
     if let index = bots.firstIndex(where: { $0.id == bot.id }) {
       bots[index] = bot
     } else {
@@ -510,7 +516,7 @@ private struct IOSManagedBotSummary: View {
   }
 }
 
-private struct IOSManagedBotSettingsView: View {
+struct IOSManagedBotSettingsView: View {
   @Environment(\.realtimeV2) private var realtimeV2
   @Environment(Router.self) private var router
   @Environment(\.dismiss) private var dismiss
@@ -518,6 +524,10 @@ private struct IOSManagedBotSettingsView: View {
   let botID: Int64
   let model: IOSBotsSettingsModel
   let copyToken: (String) -> Void
+  /// Off where the bot's chat is already open, such as its chat info.
+  var showsOpenChat = true
+  /// Replaces popping back after a delete, for hosts that close entirely.
+  var onDeleted: (() -> Void)?
 
   @State private var name: String
   @State private var username: String
@@ -527,9 +537,17 @@ private struct IOSManagedBotSettingsView: View {
   @State private var showsCropper = false
   @State private var pickedImage: UIImage?
 
-  init(botID: Int64, model: IOSBotsSettingsModel, copyToken: @escaping (String) -> Void) {
+  init(
+    botID: Int64,
+    model: IOSBotsSettingsModel,
+    showsOpenChat: Bool = true,
+    onDeleted: (() -> Void)? = nil,
+    copyToken: @escaping (String) -> Void
+  ) {
     self.botID = botID
     self.model = model
+    self.showsOpenChat = showsOpenChat
+    self.onDeleted = onDeleted
     self.copyToken = copyToken
     let bot = model.bot(botID)
     _name = State(initialValue: bot.map { User(from: $0).displayName } ?? "")
@@ -591,13 +609,17 @@ private struct IOSManagedBotSettingsView: View {
         }
       }
 
-      Section {
-        Button {
-          openChat()
-        } label: {
-          Label("Open Chat", systemImage: "bubble.left.and.bubble.right")
+      IOSManagedBotOutputSection(botUserID: botID)
+
+      if showsOpenChat {
+        Section {
+          Button {
+            openChat()
+          } label: {
+            Label("Open Chat", systemImage: "bubble.left.and.bubble.right")
+          }
+          .disabled(isBusy)
         }
-        .disabled(isBusy)
       }
 
       IOSManagedBotAccessSection(
@@ -664,7 +686,7 @@ private struct IOSManagedBotSettingsView: View {
       Button("Delete Bot", role: .destructive) {
         Task {
           if await model.delete(botID, realtimeV2: realtimeV2) {
-            dismiss()
+            if let onDeleted { onDeleted() } else { dismiss() }
           }
         }
       }
@@ -719,7 +741,7 @@ private struct IOSManagedBotSettingsView: View {
   }
 }
 
-private struct IOSManagedBotPhotoEditor: View {
+struct IOSManagedBotPhotoEditor: View {
   let bot: InlineProtocol.User
   let isBusy: Bool
   let choosePhoto: () -> Void
@@ -759,6 +781,63 @@ private struct IOSManagedBotPhotoEditor: View {
     .frame(maxWidth: .infinity)
     .padding(.vertical, 8)
     .listRowBackground(Color.clear)
+  }
+}
+
+/// The agent-wide default for how the bot replies. Threads can override it.
+/// Output mode applies to agents, which report a runtime.
+private struct IOSManagedBotOutputSection: View {
+  let botUserID: Int64
+  @ObservedObject private var store = AgentWorkStateStore.shared
+  @State private var isUpdating = false
+
+  var body: some View {
+    Group {
+      if store.runtimeBotUserIDs.contains(botUserID) {
+        section
+      }
+    }
+    .task(id: botUserID) {
+      await store.loadAgentSettings(botUserID: botUserID)
+    }
+  }
+
+  private var section: some View {
+    let mode = store.defaultOutputMode(botUserID: botUserID)
+    return Section {
+      Picker("Default Output", selection: selection) {
+        ForEach(AgentThreadOutputMode.allCases, id: \.self) { mode in
+          Text(mode.title).tag(mode)
+        }
+      }
+      .disabled(isUpdating)
+    } header: {
+      Text("Agent Settings")
+    } footer: {
+      Text("\(mode.summary) Threads can override this in their agent settings.")
+    }
+  }
+
+  private var selection: Binding<AgentThreadOutputMode> {
+    Binding(
+      get: { store.defaultOutputMode(botUserID: botUserID) },
+      set: { mode in
+        guard !isUpdating, mode != store.defaultOutputMode(botUserID: botUserID) else { return }
+        isUpdating = true
+        Task { @MainActor in
+          defer { isUpdating = false }
+          do {
+            try await store.updateDefaultOutputMode(mode, botUserID: botUserID)
+          } catch {
+            ToastManager.shared.showToast(
+              "Couldn’t change the output mode",
+              type: .error,
+              systemImage: "exclamationmark.triangle.fill"
+            )
+          }
+        }
+      }
+    )
   }
 }
 

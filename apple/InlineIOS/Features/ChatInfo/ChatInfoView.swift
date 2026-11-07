@@ -250,6 +250,9 @@ struct ChatInfoView: View {
                   username: directMessageUsername,
                   notificationSelection: notificationSelectionBinding
                 )
+                if let userInfo = chatItem.userInfo, userInfo.user.bot == true {
+                  OwnedBotManageCard(bot: userInfo)
+                }
               } else {
                 InfoTabView()
                   .environmentObject(ChatInfoViewEnvironment(
