@@ -40,7 +40,7 @@
     "zod": "4.6.7"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.8.2"
+    "openclaw": ">=2026.11.1"
   },
   "peerDependenciesMeta": {
     "openclaw": {
@@ -100,10 +100,10 @@
       "npmSpec": "@inline-openclaw/inline",
       "localPath": "openclaw",
       "defaultChoice": "clawhub",
-      "minHostVersion": ">=2026.8.2"
+      "minHostVersion": ">=2026.11.1"
     },
     "compat": {
-      "pluginApi": ">=2026.8.2"
+      "pluginApi": ">=2026.11.1"
     },
     "build": {
       "openclawVersion": "2026.11.1"

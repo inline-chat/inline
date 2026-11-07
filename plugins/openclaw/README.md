@@ -30,10 +30,11 @@ Reply-thread behavior:
 - Threads the bot follows continue without a mention. A thread's first message decides who follows; a bot mentioned later answers once without following.
 - Authorized users can run `/follow` in a group or reply thread to keep eligible unmentioned activity relevant, and `/unfollow` to explicitly opt out.
 
-## Upgrading from 0.0.72
+## Upgrading to 1.0
 
-Breaking changes in the next release. They match the rules Hermes 1.0 follows; see [How bots behave](https://inline.chat/docs/openclaw).
+Breaking changes in 1.0. The behavior changes match the rules Hermes 1.0 follows; see [How bots behave](https://inline.chat/docs/openclaw).
 
+- **OpenClaw `2026.11.1` or newer is required.** 1.0 uses the host's async SDK APIs, which older hosts don't have, and drops the synchronous ones that OpenClaw removes in January 2027. Stay on `0.0.72` for older hosts.
 - **`/threadreply` is now `/threads`**, with `auto`, `on`, `reset`, and `status`, and it works in DMs.
 - **`replyThreadMode` is Auto or On, per chat.** On a chat, `thread` reads as `on` and `main` as `auto`. A bot-wide or `groups."*"` On is ignored with a startup warning; run `/threads on` in each chat that should use threads.
 - **Words no longer open a thread.** The agent understands the request and opens one.
@@ -46,18 +47,18 @@ Breaking changes in the next release. They match the rules Hermes 1.0 follows; s
 
 ## Install
 
-The Inline plugin supports OpenClaw `2026.8.2` and newer, including
-`2026.9.x`, with no upper version cap. It is built against `2026.11.1`. Install
-the plugin version for your OpenClaw release line. The current stable release
-is `0.0.72`.
+The next major, `1.0`, supports OpenClaw `2026.11.1` and newer with no upper
+version cap. Install the plugin version for your OpenClaw release line. The
+current stable release is `0.0.72`.
 
 | OpenClaw line | Inline plugin | Exact install |
 | --- | --- | --- |
-| `2026.8.2` and newer, including `2026.10.5` | `0.0.72` | `openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities` |
+| `2026.11.1` and newer | `1.0` (unreleased) | Published with the 1.0 release |
+| `2026.8.2` through `2026.10.x` | `0.0.72` | `openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities` |
 | `2026.7.x` (`>=2026.7.1`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 | `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 
-The minimum supported host remains `2026.8.2`. Newer host versions are not
+The minimum supported host for 1.0 is `2026.11.1`. Newer host versions are not
 blocked by package metadata. OpenClaw 2026.9.3 and newer require Node 24.16+
 on the 24.x line or Node 26.1+; Node 26 is recommended.
 
@@ -65,12 +66,12 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0.0.72` | `>=2026.8.2` | `0.0.19` | Stable | Loads on OpenClaw `2026.10.5` and newer, which removed `readJsonFileWithFallback`; `0.0.71` and older fail to register the channel there. Matches `toolsBySender` on numeric sender ids only. |
+| `1.0.0` | `>=2026.11.1` | `0.0.19` | Next (unreleased) | Moves to the host's async SDK APIs and `MessagePresentation`; older hosts stay on `0.0.72`. |
+| `0.0.72` | `>=2026.8.2` | `0.0.19` | Stable, legacy line for `2026.8.2`–`2026.10.x` | Loads on OpenClaw `2026.10.5` and newer, which removed `readJsonFileWithFallback`; `0.0.71` and older fail to register the channel there. Matches `toolsBySender` on numeric sender ids only. |
 | `0.0.71` | `>=2026.8.2` | `0.0.19` | Previous | Adds opt-in quiet agent activity timelines and the expanded chat-history protocol while retaining recovery and install provenance diagnostics. |
 | `0.0.70` | `>=2026.8.2` | `0.0.18` | Previous | Preserves native reply suppression and send-policy decisions, with September approvals and shutdown cancellation. |
 | `0.0.69` | `>=2026.8.2` | `0.0.18` | Previous | Added September system change approvals and shutdown cancellation. |
 | `0.0.68` | `2026.8.2` | `0.0.18` | Previous | Retries stalled sync autonomously and isolates unrelated chat handlers while retaining ordered acknowledgements. |
-| `0.0.67` | `2026.8.2` | `0.0.17` | Previous | Keeps the manifest compatible with ClawHub's metadata transport without changing the channel schema. |
 
 ### Release 0.0.72
 
@@ -91,7 +92,7 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 - Carries forward native reply suppression, September approvals, cancellation-safe shutdown, and realtime SDK `0.0.19` recovery behavior.
 - Tests the extracted package against released hosts and checks that the bundled SDK matches the validated build.
 
-The CI host matrix runs on `2026.8.2`, `2026.9.1`, and npm `latest`.
+The CI host matrix runs on `2026.11.1` and npm `latest`.
 To check an installed host locally after building the SDK:
 
 ```sh
