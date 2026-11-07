@@ -32,6 +32,7 @@ import { decryptBinary } from "@in/server/modules/encryption/encryption"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { isUserMentioned } from "@in/server/modules/message/helpers"
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
+import { displayMessageText } from "@in/server/modules/message/displayText"
 import type { SystemMessage } from "@in/server/modules/systemMessages"
 import { projectReadyBlockPhotos } from "@in/server/modules/message/blockContent"
 
@@ -229,7 +230,7 @@ export const encodeMessage = ({
     fromId: BigInt(message.fromId),
     peerId: peerId,
     chatId: BigInt(message.chatId),
-    message: text,
+    message: displayMessageText(text),
     out: encodingForUserId === message.fromId,
     date: encodeDateStrict(message.date),
     editDate: message.editDate ? encodeDateStrict(message.editDate) : undefined,
@@ -376,7 +377,7 @@ export const encodeFullMessage = ({
     fromId: BigInt(message.fromId),
     peerId: peerId,
     chatId: BigInt(message.chatId),
-    message: message.text ?? undefined,
+    message: displayMessageText(message.text) ?? undefined,
     out: encodingForUserId === message.fromId,
     date: encodeDateStrict(message.date),
     editDate: message.editDate ? encodeDateStrict(message.editDate) : undefined,

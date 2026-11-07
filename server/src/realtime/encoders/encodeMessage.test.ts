@@ -4,6 +4,7 @@ import type { DbFullMessage } from "@in/server/db/models/messages"
 import type { DbFullPhoto, DbFullVoice } from "@in/server/db/models/files"
 import { encodeFullMessage, encodeMessage } from "@in/server/realtime/encoders/encodeMessage"
 import {
+  BlockContent,
   BlockDisclosure_ActivityKind,
   BlockDisclosure_Kind,
   MessageEntities,
@@ -13,6 +14,10 @@ import {
   type Peer,
 } from "@inline-chat/protocol/core"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
+import { MessageModel, type DbInputFullMessage } from "@in/server/db/models/messages"
+import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
+import { encryptStoredBlockContent } from "@in/server/modules/message/blockContentPayload"
+import { displayMessageText } from "@in/server/modules/message/displayText"
 
 const peer: Peer = {
   type: {
@@ -571,5 +576,103 @@ describe("service messages", () => {
       throw new Error("Expected pinned message service metadata")
     }
     expect(result.serviceMessage.event.pinnedMessage.messageId).toBe(13n)
+  })
+})
+
+describe("NUL in message text", () => {
+  // "before" + NUL? + "🚀 " + bold "after"; the code block covers everything after the summary.
+  const storedProgressRow = (text: string, mirrorText = text) => {
+    const boldStart = text.indexOf("after")
+    const entities = MessageEntities.create({
+      entities: [{ type: MessageEntity_Type.BOLD, offset: BigInt(boldStart), length: 5n, entity: { oneofKind: undefined } }],
+    })
+    const blockContent = BlockContent.create({
+      blocks: [
+        {
+          kind: {
+            oneofKind: "disclosure",
+            disclosure: {
+              summary: { offset: 0n, length: 6n },
+              children: [
+                { kind: { oneofKind: "code", code: { text: { offset: 6n, length: BigInt(text.length - 6) } } } },
+              ],
+              kind: BlockDisclosure_Kind.PROGRESS,
+              activityKind: BlockDisclosure_ActivityKind.UNSPECIFIED,
+              status: 0,
+            },
+          },
+        },
+      ],
+    })
+    const payload = encryptStoredBlockContent({ text: mirrorText, entities, blockContent })
+    const encrypted = encryptMessage(text)
+    const encryptedEntities = encryptBinary(MessageEntities.toBinary(entities))
+    const row: DbInputFullMessage = {
+      ...buildMessage({
+        textEncrypted: encrypted.encrypted,
+        textIv: encrypted.iv,
+        textTag: encrypted.authTag,
+        entitiesEncrypted: encryptedEntities.encrypted,
+        entitiesIv: encryptedEntities.iv,
+        entitiesTag: encryptedEntities.authTag,
+        blockContentId: 1n,
+      }),
+      blockContent: {
+        id: 1n,
+        payloadEncrypted: payload.encrypted,
+        payloadIv: payload.iv,
+        payloadTag: payload.authTag,
+        schemaVersion: 1,
+        revision: 0,
+        createdAt: new Date("2026-10-31T00:00:00Z"),
+        updatedAt: new Date("2026-10-31T00:00:00Z"),
+      },
+      from: baseUser,
+      reactions: [],
+      photo: null,
+      video: null,
+      document: null,
+      voice: null,
+      messageAttachments: [],
+    }
+    return { row, blockContent, entities }
+  }
+
+  for (const text of ["before🚀 after", "before\0🚀 after\0"]) {
+    it(`keeps blocks and ranges on live and fetched messages (${text.includes("\0") ? "NUL" : "control"})`, () => {
+      const { row, blockContent, entities } = storedProgressRow(text)
+      const shown = text.replaceAll("\0", "�")
+
+      const live = encodeMessage({ message: { ...row, blockContent }, encodingForUserId: 100, encodingForPeer: { peer } })
+      expect(live.message).toBe(shown)
+      expect(live.message?.length).toBe(text.length)
+      expect(live.blockContent).toEqual(blockContent)
+
+      // Storage stays exact, so the block-content mirror still matches.
+      const processed = MessageModel.processMessage(row)
+      expect(processed.text).toBe(text)
+      expect(processed.blockContent).toEqual(blockContent)
+
+      const fetched = encodeFullMessage({ message: processed, encodingForUserId: 100, encodingForPeer: { peer } })
+      expect(fetched.message).toBe(shown)
+      expect(fetched.blockContent).toEqual(blockContent)
+      expect(fetched.entities).toEqual(entities)
+      const bold = fetched.entities!.entities[0]!
+      expect(fetched.message!.slice(Number(bold.offset), Number(bold.offset + bold.length))).toBe("after")
+    })
+  }
+
+  it("still drops blocks whose stored mirror does not match the text", () => {
+    const { row } = storedProgressRow("before\0🚀 after", "before🚀 after!")
+    const processed = MessageModel.processMessage(row)
+    expect(processed.blockContent).toBeNull()
+    expect(encodeFullMessage({ message: processed, encodingForUserId: 100, encodingForPeer: { peer } }).blockContent).toBeUndefined()
+  })
+
+  it("replaces NUL only for display", () => {
+    expect(displayMessageText("a\0b\0")).toBe("a�b�")
+    expect(displayMessageText("plain")).toBe("plain")
+    expect(displayMessageText(null)).toBeNull()
+    expect(displayMessageText(undefined)).toBeUndefined()
   })
 })

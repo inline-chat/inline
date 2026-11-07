@@ -1782,9 +1782,12 @@ pub(super) async fn recover_session_picker_commands(
     bot: &InlineClient,
     store: &BridgeStore,
     installation_id: &InstallationId,
+    bridge_updated: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for picker in store.session_picker_recovery_cards(installation_id)? {
-        if let Err(error) = repair_recovered_session_picker_card(bot, store, &picker).await {
+        if let Err(error) =
+            repair_recovered_session_picker_card(bot, store, &picker, bridge_updated).await
+        {
             eprintln!(
                 "Could not repair an interrupted session picker card: {}",
                 safe_diagnostic(&error.to_string())
@@ -1829,6 +1832,7 @@ async fn repair_recovered_session_picker_card(
     bot: &InlineClient,
     store: &BridgeStore,
     picker: &SessionPickerRecord,
+    bridge_updated: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let message_id = picker.picker_message_id.ok_or_else(|| {
         io::Error::new(
@@ -1837,6 +1841,12 @@ async fn repair_recovered_session_picker_card(
         )
     })?;
     let (text, actions, terminal) = match picker.state {
+        SessionPickerState::Expired | SessionPickerState::Failed if bridge_updated => (
+            "This session picker expired when the bridge was updated. Start a new thread with /new."
+                .to_string(),
+            MessageActions { rows: Vec::new() },
+            true,
+        ),
         SessionPickerState::Retryable => {
             let (card, actions) = session_picker_record_card(picker)?;
             (card, actions, false)

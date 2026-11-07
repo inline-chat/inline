@@ -436,6 +436,7 @@ pub(super) async fn stop_service(
     secrets: &AccountBridgeSecrets,
     installation: &ProviderInstallationConfig,
 ) -> Result<BridgeStatus, Box<dyn std::error::Error>> {
+    record_stop_intent(paths);
     #[cfg(target_os = "macos")]
     let mut stopped_cleanly = false;
     if let Ok(response) = control_request(paths, secrets, ControlCommand::Shutdown).await
@@ -663,6 +664,7 @@ async fn restart_installed_service(
         refresh_systemd_user_unit(paths, account)?;
         let unit_name = systemd_unit_name(&account.service_label);
         run_systemctl(["--user", "enable", &unit_name])?;
+        record_stop_intent(paths);
         run_systemctl(["--user", "restart", &unit_name])?;
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -730,15 +732,20 @@ pub(super) async fn status(
                 provider_detail(&response, &installation.installation_id);
             let provider_ready = matches!(provider_state, ProviderRuntimeState::Ready);
             let account_running = response.status == "running";
-            let detail = response.detail.or(provider_connection_detail).or_else(|| {
-                (!provider_ready).then(|| {
-                    format!(
-                        "{} is {}",
-                        installation.display_name,
-                        provider_state.status()
-                    )
-                })
-            });
+            let detail = response
+                .detail
+                .clone()
+                .or(provider_connection_detail)
+                .or_else(|| {
+                    (!provider_ready).then(|| {
+                        format!(
+                            "{} is {}",
+                            installation.display_name,
+                            provider_state.status()
+                        )
+                    })
+                });
+            let detail = with_update_detail(paths, Some(&response.cli_version), detail);
             BridgeStatus {
                 status: if account_running {
                     provider_state.status().to_string()
@@ -783,13 +790,38 @@ pub(super) async fn status(
                 process_id: None,
                 inline_connected: false,
                 provider_ready: false,
-                detail: with_service_lifecycle_detail(if process_running {
-                    Some(safe_diagnostic(&error.to_string()))
-                } else {
-                    setup_required
-                }),
+                detail: with_service_lifecycle_detail(with_update_detail(
+                    paths,
+                    None,
+                    if process_running {
+                        Some(safe_diagnostic(&error.to_string()))
+                    } else {
+                        setup_required
+                    },
+                )),
             }
         }
+    }
+}
+
+fn record_stop_intent(paths: &BridgePaths) {
+    if let Err(error) = super::update_supervisor::request_stop(paths) {
+        // Stopping must remain possible when disk/journal access is broken.
+        log::warn!("could not record deliberate bridge stop: {}", error.stage());
+    }
+}
+
+fn with_update_detail(
+    paths: &BridgePaths,
+    version: Option<&str>,
+    detail: Option<String>,
+) -> Option<String> {
+    match (
+        detail,
+        super::update_supervisor::status_detail(paths, version),
+    ) {
+        (Some(detail), Some(update)) => Some(format!("{detail}; {update}")),
+        (detail, update) => detail.or(update),
     }
 }
 

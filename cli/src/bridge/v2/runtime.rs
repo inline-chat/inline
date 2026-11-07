@@ -5,18 +5,18 @@
 //! records direct input in the ledger before acknowledging the delivery, and
 //! hands it to the thread's work actor (`work.rs`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use inline_agent_bridge::ProviderSessionId;
 use inline_agent_bridge::group::{
-    ContextAuthorRole, ContextMessage, Conversation, DEFAULT_DAILY_SPEAK_GATE_BUDGET,
-    DEFAULT_LOOP_CAP_HOPS, DailySpeakGateBudget, DayKey, DirectReason, Grants, GroupMessage,
-    IntakeDecision, IntakeFacts, LoopGuards, LoopVerdict, ObserveReason, Operation,
-    ParticipationMode, PendingInput, ReleaseCause, WorkPhase, decide_intake, direct_input,
-    origin_of, required_operation,
+    AddresseeKind, ContextAuthorRole, ContextMessage, Conversation,
+    DEFAULT_DAILY_SPEAK_GATE_BUDGET, DEFAULT_LOOP_CAP_HOPS, DailySpeakGateBudget, DayKey,
+    DirectReason, Grants, GroupMessage, IntakeDecision, IntakeFacts, LoopGuards, LoopVerdict,
+    ObserveReason, Operation, ParticipationMode, PendingInput, ReleaseCause, WorkPhase,
+    classify_addressee, decide_intake, direct_input, origin_of, required_operation,
 };
 use inline_agent_bridge::harness::{
     Catalog, CatalogScope, Delivery, HarnessDriver, Input, InputContent, InputId, OpKind,
@@ -224,6 +224,8 @@ pub(crate) struct Runtime {
     /// Skills by thread folder, briefly: Amp takes seconds to list them.
     listed_skills: HashMap<PathBuf, (tokio::time::Instant, Vec<Skill>)>,
     agent_profiles: Option<(BotAgentResolver, SqliteStore)>,
+    seen_agent_messages: HashSet<(i64, i64)>,
+    agent_message_order: VecDeque<(i64, i64)>,
 }
 
 impl Runtime {
@@ -308,6 +310,8 @@ impl Runtime {
             skills: None,
             listed_skills: HashMap::new(),
             agent_profiles: None,
+            seen_agent_messages: HashSet::new(),
+            agent_message_order: VecDeque::new(),
         })
     }
 
@@ -2019,6 +2023,48 @@ impl Runtime {
         } else {
             message
         };
+        // Streamed progress is one agent message, not a new bot-to-bot
+        // invocation on every edit. Keep its latest context without counting
+        // another loop hop or replaying a command/mention.
+        let agent_message = (message.chat_id.get(), message.message_id.get());
+        let already_handled = || -> Result<bool, Box<dyn std::error::Error>> {
+            if self.seen_agent_messages.contains(&agent_message) {
+                return Ok(true);
+            }
+            for kind in ["direct", "command"] {
+                if self
+                    .agent
+                    .ledger
+                    .get(&input_id(
+                        self.config.bot_user_id,
+                        agent_message.0,
+                        agent_message.1,
+                        kind,
+                    ))?
+                    .is_some()
+                {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        };
+        if super::intake::is_agent_edit(message) && already_handled()? {
+            if let Some(work) = self.works.get(&message.chat_id.get()) {
+                let _ = work
+                    .tx
+                    .send(Command::Passive {
+                        message: ContextMessage {
+                            message_id: message.message_id.get(),
+                            author_name: self.agent.names.of(message.sender_id.get()).await,
+                            role: ContextAuthorRole::Agent,
+                            reply_to: message.reply_to_message_id.map(InlineId::get),
+                            text: super::intake::message_text(&message.content).to_owned(),
+                        },
+                    })
+                    .await;
+            }
+            return Ok(());
+        }
         let chat_id = message.chat_id.get();
         // The agent's own threads are the ones it made (`/new`, a moved work's
         // subthread, `create_chat`) or that are bound to it. A shared thread it
@@ -2079,7 +2125,17 @@ impl Runtime {
             .get(&chat_id)
             .map_or(WorkPhase::None, |work| *work.phase.borrow());
         let scope = self.loop_scope(chat_id).await;
-        let loop_verdict = self.loop_guards.record(scope, group.author.kind.is_agent());
+        // Only agent messages addressed to this agent can start a loop with it;
+        // others talking in the thread never count toward its cap.
+        let loop_verdict = if group.author.kind.is_agent()
+            && !matches!(
+                classify_addressee(&group, self.config.bot_user_id),
+                AddresseeKind::Me { .. }
+            ) {
+            LoopVerdict::Allowed { hops: 0 }
+        } else {
+            self.loop_guards.record(scope, group.author.kind.is_agent())
+        };
         if let LoopVerdict::CapReached {
             limit,
             notify_owners: true,
@@ -2124,7 +2180,10 @@ impl Runtime {
             }
             decision => decision,
         };
-        match decision {
+        // Only an acted-on agent message counts as handled: a streamed reply
+        // that was observed can still be edited into a handoff later.
+        let acted = matches!(decision, IntakeDecision::Act { .. });
+        let result = match decision {
             IntakeDecision::Act { join, required, .. } => {
                 if join
                     && conversation == Conversation::Group
@@ -2172,7 +2231,20 @@ impl Runtime {
                 Ok(())
             }
             IntakeDecision::Skip { .. } => Ok(()),
+        };
+        if result.is_ok()
+            && acted
+            && group.author.kind.is_agent()
+            && self.seen_agent_messages.insert(agent_message)
+        {
+            self.agent_message_order.push_back(agent_message);
+            if self.agent_message_order.len() > 4096
+                && let Some(oldest) = self.agent_message_order.pop_front()
+            {
+                self.seen_agent_messages.remove(&oldest);
+            }
         }
+        result
     }
 
     async fn act(

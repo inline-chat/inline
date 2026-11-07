@@ -27,6 +27,15 @@ pub(crate) fn message_text(content: &MessageContent) -> &str {
     }
 }
 
+pub(crate) fn is_agent_edit(message: &MessageRecord) -> bool {
+    message.metadata.sender_is_bot == Some(true)
+        && (message
+            .metadata
+            .revision
+            .is_some_and(|revision| revision > 0)
+            || message.metadata.edit_timestamp.is_some())
+}
+
 pub(crate) fn group_message(message: &MessageRecord, facts: MessageFacts<'_>) -> GroupMessage {
     let text = message_text(&message.content).to_owned();
     let units = text.encode_utf16().collect::<Vec<_>>();
@@ -52,6 +61,12 @@ pub(crate) fn group_message(message: &MessageRecord, facts: MessageFacts<'_>) ->
                 }),
                 "TYPE_BOT_COMMAND" => {
                     let start = offset as usize;
+                    // A pasted transcript can carry command entities far
+                    // inside its tool output. Only a command at the start,
+                    // optionally after structured mentions, is an action.
+                    if !has_command_prefix(message, &units, start) {
+                        return None;
+                    }
                     let end = start.checked_add(length as usize)?.min(units.len());
                     let raw = String::from_utf16_lossy(units.get(start..end)?);
                     let (name, text_target) =
@@ -107,6 +122,44 @@ pub(crate) fn group_message(message: &MessageRecord, facts: MessageFacts<'_>) ->
         ),
         sent_at: message.timestamp,
     }
+}
+
+fn has_command_prefix(message: &MessageRecord, units: &[u16], start: usize) -> bool {
+    let Some(prefix) = units.get(..start) else {
+        return false;
+    };
+    let mut prefix = prefix.to_vec();
+    let mut mentioned = false;
+    for entity in &message.metadata.entities {
+        if matches!(entity.kind.as_str(), "TYPE_CODE" | "TYPE_PRE")
+            && entity.offset >= 0
+            && entity.length > 0
+            && entity.offset as u64 <= start as u64
+            && (start as u64) < (entity.offset as u64).saturating_add(entity.length as u64)
+        {
+            return false;
+        }
+        if !matches!(entity.kind.as_str(), "TYPE_MENTION" | "TYPE_GROUP_MENTION") {
+            continue;
+        }
+        let (Ok(offset), Ok(length)) = (
+            usize::try_from(entity.offset),
+            usize::try_from(entity.length),
+        ) else {
+            continue;
+        };
+        if let Some(end) = offset.checked_add(length)
+            && let Some(mention) = prefix.get_mut(offset..end)
+        {
+            mention.fill(u16::from(b' '));
+            mentioned = true;
+        }
+    }
+    String::from_utf16(&prefix).is_ok_and(|prefix| {
+        prefix.chars().all(|character| {
+            character.is_whitespace() || (mentioned && matches!(character, ',' | ':' | ';' | '&'))
+        })
+    })
 }
 
 /// `/stop@claude_bot` → (`stop`, target). A suffix naming another bot gets a
@@ -256,6 +309,104 @@ mod tests {
             facts(),
         );
         assert_eq!(classify_addressee(&theirs, BOT), AddresseeKind::Others);
+    }
+
+    #[test]
+    fn pasted_command_examples_are_content() {
+        for text in [
+            "Working\n2588: * command: /model <name>, the /config Model row",
+            "Please explain /stop without stopping this run",
+            "```\n/model opus\n```",
+        ] {
+            let start = text.find('/').unwrap();
+            let command = text[start..].split_whitespace().next().unwrap();
+            let message = group_message(
+                &record(
+                    text,
+                    vec![entity(
+                        "TYPE_BOT_COMMAND",
+                        start as i64,
+                        command.len() as i64,
+                        None,
+                    )],
+                ),
+                facts(),
+            );
+            assert_eq!(message.command(), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn commands_after_leading_mentions_still_work_with_utf16_offsets() {
+        let text = "  @🤖 /model opus";
+        let offset = text[..text.find('/').unwrap()].encode_utf16().count() as i64;
+        let message = group_message(
+            &record(
+                text,
+                vec![
+                    entity("TYPE_MENTION", 2, 3, Some(BOT)),
+                    entity("TYPE_BOT_COMMAND", offset, 6, None),
+                ],
+            ),
+            facts(),
+        );
+        assert_eq!(message.command(), Some(("model", None)));
+    }
+
+    #[test]
+    fn a_literal_command_in_a_code_block_is_not_an_action() {
+        for kind in ["TYPE_CODE", "TYPE_PRE"] {
+            let message = group_message(
+                &record(
+                    "/stop",
+                    vec![
+                        entity("TYPE_BOT_COMMAND", 0, 5, None),
+                        entity(kind, 0, 5, None),
+                    ],
+                ),
+                facts(),
+            );
+            assert_eq!(message.command(), None);
+        }
+    }
+
+    #[test]
+    fn leading_mention_separators_keep_commands_actionable() {
+        for prefix in ["@Codex: ", "@Codex; ", "@Alice, @Codex & "] {
+            let text = format!("{prefix}/stop");
+            let mentions: Vec<_> = ["@Alice", "@Codex"]
+                .into_iter()
+                .filter_map(|name| {
+                    prefix.find(name).map(|offset| {
+                        entity("TYPE_MENTION", offset as i64, name.len() as i64, Some(BOT))
+                    })
+                })
+                .chain(std::iter::once(entity(
+                    "TYPE_BOT_COMMAND",
+                    prefix.len() as i64,
+                    5,
+                    None,
+                )))
+                .collect();
+            assert_eq!(
+                group_message(&record(&text, mentions), facts()).command(),
+                Some(("stop", None))
+            );
+        }
+    }
+
+    #[test]
+    fn streamed_agent_edits_are_distinct_from_new_input_and_human_edits() {
+        let mut message = record("Working", vec![]);
+        message.metadata.sender_is_bot = Some(true);
+        assert!(!is_agent_edit(&message));
+        message.metadata.revision = Some(90);
+        assert!(is_agent_edit(&message));
+        message.metadata.revision = Some(0);
+        message.metadata.edit_timestamp = Some(1);
+        assert!(is_agent_edit(&message));
+        message.metadata.sender_is_bot = Some(false);
+        assert!(!is_agent_edit(&message));
     }
 
     #[test]

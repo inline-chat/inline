@@ -180,6 +180,63 @@ fn startup_path(paths: &BridgePaths) -> PathBuf {
     paths.root.join("startup.json")
 }
 
+fn stop_path(paths: &BridgePaths) -> PathBuf {
+    paths.root.join("stop.json")
+}
+
+/// Record the operator's intent before shutting down the child or OS service.
+/// The selected hash scopes the request to this activation, and the next
+/// supervisor consumes it before starting any work.
+pub(super) fn request_stop(paths: &BridgePaths) -> Result<(), UpdateError> {
+    if enabled(paths) {
+        let state = read_activation(paths).map_err(journal_failure)?;
+        atomic_json(&stop_path(paths), &state.current.sha256)?;
+    }
+    Ok(())
+}
+
+fn stop_requested(paths: &BridgePaths, state: &Activation) -> bool {
+    read_json::<String>(&stop_path(paths)).is_ok_and(|hash| hash == state.current.sha256)
+}
+
+pub(super) fn status_detail(paths: &BridgePaths, running_version: Option<&str>) -> Option<String> {
+    if !enabled(paths) {
+        return running_version.map(|version| format!("Runtime CLI: {version}"));
+    }
+    let state = match read_activation(paths) {
+        Ok(state) => state,
+        Err(_) => {
+            return Some("Bridge update state is unavailable; run `inline bridge doctor`".into());
+        }
+    };
+    let mut detail = match running_version {
+        Some(version) => format!("Runtime CLI: {version}"),
+        None => format!("Selected CLI: {}", state.current.version),
+    };
+    if let Some(supervisor) = &state.supervisor {
+        detail.push_str(&format!("; supervisor CLI: {}", supervisor.version));
+    }
+    match state.phase.as_str() {
+        "rolled_back" => detail.push_str(&format!(
+            "; update rolled back ({}); {} rejected candidate(s)",
+            state.failure.as_deref().unwrap_or("unknown failure"),
+            state.rejected.len(),
+        )),
+        "waiting_for_idle" | "trial" | "maintenance_required" => {
+            if let Some(candidate) = &state.candidate {
+                let phase = match state.phase.as_str() {
+                    "trial" => "in probation",
+                    "maintenance_required" => "requires storage maintenance",
+                    _ => "waiting for active work to finish",
+                };
+                detail.push_str(&format!("; update {} {phase}", candidate.version));
+            }
+        }
+        _ => {}
+    }
+    Some(super::safe_diagnostic(&detail))
+}
+
 pub(super) fn request_restart(
     paths: &BridgePaths,
     candidate: &Artifact,
@@ -236,6 +293,11 @@ async fn start_selected(
                 false,
             )
             .await;
+            if stop_requested(paths, state) {
+                // Preserve the startup request so a deliberate restart can
+                // retry this exact candidate without quarantining it.
+                return result;
+            }
             let _ = fs::remove_file(startup_path(paths));
             if let Ok(child) = result {
                 return Ok(child);
@@ -243,6 +305,9 @@ async fn start_selected(
         } else {
             let _ = fs::remove_file(startup_path(paths));
         }
+    }
+    if stop_requested(paths, state) {
+        return Err(UpdateError::Busy);
     }
     launch(&state.current, paths, store)
 }
@@ -335,6 +400,9 @@ async fn local_trial(
     let deadline = tokio::time::Instant::now() + policy.deadline;
     let mut ready_since = None;
     loop {
+        if stop_path(paths).exists() {
+            return Err(UpdateError::Busy);
+        }
         if let Some(status) = child.try_wait()? {
             let setup = super::FailureLedger::service(paths)
                 .load()
@@ -377,6 +445,9 @@ async fn activate(
     policy: TrialPolicy,
     rollback: bool,
 ) -> Result<Child, UpdateError> {
+    if stop_requested(paths, state) {
+        return Err(UpdateError::Busy);
+    }
     update::validate_cached(store, &candidate)?;
     if candidate.minimum_reader_schema_version > state.current.bridge_schema_version {
         return Err(UpdateError::Verification("storage_maintenance_required"));
@@ -389,9 +460,20 @@ async fn activate(
     }
     let mut failure = "candidate_launch";
     for _ in 0..3 {
+        if stop_requested(paths, state) {
+            pending(state, Some(&candidate), "waiting_for_idle", paths)?;
+            return Err(UpdateError::Busy);
+        }
         match launch(&candidate, paths, store) {
             Ok(mut child) => {
-                match local_trial(&mut child, &candidate, paths, secrets, policy).await {
+                let trial = local_trial(&mut child, &candidate, paths, secrets, policy).await;
+                if stop_requested(paths, state) {
+                    let _ = stop_with_timeout(&mut child, paths, secrets, policy.stop).await;
+                    // Interrupted by the operator, not a failed health check.
+                    pending(state, Some(&candidate), "waiting_for_idle", paths)?;
+                    return Err(UpdateError::Busy);
+                }
+                match trial {
                     Ok(()) => {
                         let from = state.current.version.clone();
                         let mut committed = state.clone();
@@ -434,6 +516,10 @@ async fn activate(
         }
         tokio::time::sleep(policy.retry).await;
     }
+    if stop_requested(paths, state) {
+        pending(state, Some(&candidate), "waiting_for_idle", paths)?;
+        return Err(UpdateError::Busy);
+    }
     reject(state, &candidate, failure);
     // Recovery still runs if the disk became full/read-only during probation.
     // The persisted trial already identifies the old selection for a reboot.
@@ -452,18 +538,26 @@ fn recover_interrupted(state: &mut Activation, paths: &BridgePaths, channel: &st
     if state.phase == "trial"
         && let Some(candidate) = state.candidate.clone()
     {
-        reject(state, &candidate, "interrupted_trial");
-        // The persisted trial already selects the previous runtime. A
-        // full disk must not prevent that runtime from starting on reboot.
-        let _ = atomic_json(&journal(paths), state);
-        crate::telemetry::report_update(
-            "rolled_back",
-            channel,
-            &candidate.version,
-            &state.current.version,
-            "interrupted_trial",
-        );
+        if stop_requested(paths, state) {
+            // The old selection is still authoritative. Retry a deliberately
+            // interrupted candidate normally on the next startup/idle handoff.
+            state.phase = "waiting_for_idle".into();
+            let _ = atomic_json(&journal(paths), state);
+        } else {
+            reject(state, &candidate, "interrupted_trial");
+            // The persisted trial already selects the previous runtime. A
+            // full disk must not prevent that runtime from starting on reboot.
+            let _ = atomic_json(&journal(paths), state);
+            crate::telemetry::report_update(
+                "rolled_back",
+                channel,
+                &candidate.version,
+                &state.current.version,
+                "interrupted_trial",
+            );
+        }
     }
+    let _ = fs::remove_file(stop_path(paths));
 }
 
 fn pending(
@@ -667,6 +761,16 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
             }
             _ = poll.tick() => {}
         }
+        if stop_requested(&paths, &state) {
+            if let Some(child) = &mut child {
+                let _ = stop(child, &paths, &secrets).await;
+            }
+            if let Some(worker) = &mut worker {
+                let _ = worker.start_kill();
+                let _ = worker.wait().await;
+            }
+            return Ok(());
+        }
         let now = tokio::time::Instant::now();
         if worker
             .as_mut()
@@ -752,13 +856,9 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                             .unwrap_or(false)
                 })
             }) {
-                let throttled = state
-                    .last_activation
-                    .is_some_and(|at| unix_now().saturating_sub(at) < 6 * 60 * 60);
                 if candidate.minimum_reader_schema_version > state.current.bridge_schema_version {
                     let _ = pending(&mut state, Some(&candidate), "maintenance_required", &paths);
-                } else if (manual || !throttled)
-                    && pending(&mut state, Some(&candidate), "waiting_for_idle", &paths).is_ok()
+                } else if pending(&mut state, Some(&candidate), "waiting_for_idle", &paths).is_ok()
                 {
                     if let Some(current) = &mut child {
                         let ready = service::control_request(
@@ -793,6 +893,7 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                             }
                             match activated {
                                 Ok(updated) => child = Some(updated),
+                                Err(_) if stop_requested(&paths, &state) => continue,
                                 Err(_) => {
                                     // A failed preflight or journal write must not
                                     // drop the still-working process handle.
@@ -861,7 +962,7 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                 let _ = pending(&mut state, None, "committed", &paths);
             }
         }
-        if child.is_none() && !parked && now >= next_start {
+        if child.is_none() && !parked && now >= next_start && !stop_requested(&paths, &state) {
             child = launch(&state.current, &paths, &store).ok().or_else(|| {
                 recover_failed_launch(
                     &mut state,
@@ -1128,6 +1229,120 @@ mod tests {
         stop_with_timeout(&mut updated, &f.paths, &f.secrets, QUICK.stop)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn deliberate_stop_during_probation_keeps_candidate_retryable_on_restart() {
+        let f = Fixture::new();
+        let old = f.artifact("old");
+        let candidate = f.artifact("healthy");
+        let mut state = f.state(old.clone());
+        atomic_json(&journal(&f.paths), &state).unwrap();
+        request_restart(&f.paths, &candidate).unwrap();
+        let stop_during_trial = async {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+            loop {
+                if fs::read_to_string(f.paths.root.join("trace"))
+                    .is_ok_and(|trace| trace.contains("start healthy"))
+                {
+                    request_stop(&f.paths).unwrap();
+                    break;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "candidate never started"
+                );
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        };
+        let (result, ()) = tokio::join!(
+            start_selected(
+                &mut state,
+                &f.paths,
+                &f.store,
+                &f.secrets,
+                "alpha",
+                TrialPolicy {
+                    probation: Duration::from_secs(1),
+                    ..QUICK
+                }
+            ),
+            stop_during_trial,
+        );
+        assert!(matches!(result, Err(UpdateError::Busy)));
+        assert_eq!(state.current, old);
+        assert_eq!(state.phase, "waiting_for_idle");
+        assert!(state.rejected.is_empty());
+        assert!(state.failure.is_none());
+        assert!(startup_path(&f.paths).is_file());
+        assert_eq!(
+            fs::read_to_string(f.paths.root.join("trace"))
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            ["start healthy", "stop healthy"],
+            "a deliberate stop must not launch a fallback or retry behind the operator",
+        );
+
+        let mut restarted = read_activation(&f.paths).unwrap();
+        recover_interrupted(&mut restarted, &f.paths, "alpha");
+        assert!(!stop_path(&f.paths).exists());
+        let mut child = start_selected(
+            &mut restarted,
+            &f.paths,
+            &f.store,
+            &f.secrets,
+            "alpha",
+            QUICK,
+        )
+        .await
+        .unwrap();
+        assert_eq!(restarted.current, candidate);
+        assert_eq!(restarted.phase, "committed");
+        assert!(restarted.rejected.is_empty());
+        f.assert_account_unchanged();
+        stop_with_timeout(&mut child, &f.paths, &f.secrets, QUICK.stop)
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn intentional_stop_survives_parent_exit_during_trial_without_quarantine() {
+        let f = Fixture::new();
+        let old = f.artifact("old");
+        let candidate = f.artifact("healthy");
+        let mut state = f.state(old.clone());
+        pending(&mut state, Some(&candidate), "trial", &f.paths).unwrap();
+        request_stop(&f.paths).unwrap();
+        let mut restarted = read_activation(&f.paths).unwrap();
+        recover_interrupted(&mut restarted, &f.paths, "alpha");
+        assert_eq!(restarted.current, old);
+        assert_eq!(restarted.candidate, Some(candidate));
+        assert_eq!(restarted.phase, "waiting_for_idle");
+        assert!(restarted.rejected.is_empty());
+        assert!(restarted.failure.is_none());
+        assert!(!stop_path(&f.paths).exists());
+        f.assert_account_unchanged();
+    }
+
+    #[test]
+    fn status_distinguishes_running_runtime_parent_pending_and_rollback() {
+        let f = Fixture::new();
+        let old = f.artifact("old");
+        let mut candidate = f.artifact("healthy");
+        candidate.version = "9.0.0".into();
+        let mut state = f.state(old);
+        pending(&mut state, Some(&candidate), "waiting_for_idle", &f.paths).unwrap();
+        let detail = status_detail(&f.paths, Some("8.0.0")).unwrap();
+        assert!(detail.contains("Runtime CLI: 8.0.0"));
+        assert!(detail.contains("supervisor CLI:"));
+        assert!(detail.contains("update 9.0.0 waiting for active work to finish"));
+        reject(&mut state, &candidate, "candidate_exit");
+        atomic_json(&journal(&f.paths), &state).unwrap();
+        let detail = status_detail(&f.paths, None).unwrap();
+        assert!(detail.contains("Selected CLI:"));
+        assert!(detail.contains("update rolled back (candidate_exit)"));
+        assert!(detail.contains("1 rejected candidate(s)"));
     }
 
     #[tokio::test]

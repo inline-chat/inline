@@ -268,16 +268,7 @@ extension ComposeView {
     let button = ComposeVoiceButton()
     button.addTarget(self, action: #selector(buttonTouchDown), for: .touchDown)
     button.addTarget(self, action: #selector(startVoiceRecordingTapped), for: .touchUpInside)
-
-    let recordAction = UIAction(
-      title: "Record voice message",
-      image: UIImage(systemName: "mic.fill"),
-      handler: { [weak self] _ in
-        self?.startVoiceRecordingTapped()
-      }
-    )
-    button.menu = UIMenu(children: [recordAction])
-    button.showsMenuAsPrimaryAction = false
+    // Press-and-hold recording is handled by `voiceHoldGesture` on the compose view.
 
     return button
   }

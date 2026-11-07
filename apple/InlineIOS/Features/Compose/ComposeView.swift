@@ -47,6 +47,19 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   weak var sendAnimationCoordinator: SendMessageAnimationCoordinator?
   var phaseObserver: AnyCancellable?
   private var voicePhaseObserver: AnyCancellable?
+  /// Installed on the compose view, not the mic button, so the hold survives the
+  /// button hiding when the recorder UI takes its place.
+  private lazy var voiceHoldGesture: UILongPressGestureRecognizer = {
+    let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handleVoiceHold(_:)))
+    gesture.minimumPressDuration = 0.25
+    gesture.allowableMovement = 20
+    gesture.delegate = self
+    return gesture
+  }()
+  /// The current recording was started by press-and-hold and stops on release.
+  private var isVoiceHoldRecording = false
+  /// Released before the recorder reached `.recording`; stop once it does.
+  private var stopVoiceWhenRecordingStarts = false
   private var sceneObserverTokens: [NSObjectProtocol] = []
   private var pendingSendAnimationHeightChange = false
   private var composeLeadingToPlusConstraint: NSLayoutConstraint?
@@ -417,6 +430,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     composeContent.addSubview(voiceButton)
     composeContent.addSubview(voiceInputView)
     composeContent.addSubview(agentRowView)
+    addGestureRecognizer(voiceHoldGesture)
 
     setupInitialHeight()
     setupConstraints()
@@ -832,8 +846,50 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         // `@Published` emits before storing; reconcile once the phase lands,
         // or a reset from the recorder (too short, system stop) leaves the
         // voice controls up with nothing in them.
-        Task { @MainActor [weak self] in self?.reconcileVoiceControls(animated: true) }
+        Task { @MainActor [weak self] in
+          self?.reconcileVoiceControls(animated: true)
+          self?.applyPendingVoiceHoldStop()
+        }
       }
+  }
+
+  @objc private func handleVoiceHold(_ gesture: UILongPressGestureRecognizer) {
+    switch gesture.state {
+    case .began:
+      guard canStartVoiceRecording else { return }
+      // A first-use permission prompt steals the touch; leave that recording
+      // running as a tap recording instead of stopping it on the cancelled hold.
+      isVoiceHoldRecording = AVAudioApplication.shared.recordPermission == .granted
+      stopVoiceWhenRecordingStarts = false
+      UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+      startVoiceRecordingTapped()
+    case .ended, .cancelled, .failed:
+      guard isVoiceHoldRecording else { return }
+      isVoiceHoldRecording = false
+      if voiceViewModel.phase == .recording {
+        stopVoiceRecording()
+      } else {
+        stopVoiceWhenRecordingStarts = true
+        applyPendingVoiceHoldStop()
+      }
+    default:
+      break
+    }
+  }
+
+  private func applyPendingVoiceHoldStop() {
+    guard stopVoiceWhenRecordingStarts else { return }
+    switch voiceViewModel.phase {
+    case .recording:
+      stopVoiceWhenRecordingStarts = false
+      stopVoiceRecording()
+    case .finishing, .review:
+      stopVoiceWhenRecordingStarts = false
+    case .idle, .starting:
+      // `.idle` here is either still preparing (permission/activation) or a failed start;
+      // a failed start leaves nothing to stop, and the next hold resets the flag.
+      break
+    }
   }
 
   private func reconcileVoiceControls(animated: Bool) {
@@ -968,6 +1024,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   @objc func startVoiceRecordingTapped() {
     guard canStartVoiceRecording, let peerId else { return }
     dismissOverlay()
+    // A hold that released into a failed start must not stop this new recording.
+    stopVoiceWhenRecordingStarts = false
 
     Task { @MainActor [weak self] in
       guard let self else { return }
@@ -2812,5 +2870,17 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     guard let fileName else { return nil }
     let ext = URL(fileURLWithPath: fileName).pathExtension
     return ext.isEmpty ? nil : ext
+  }
+}
+
+// MARK: - Voice hold gesture
+
+extension ComposeView: UIGestureRecognizerDelegate {
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    guard gestureRecognizer === voiceHoldGesture else { return true }
+    guard !voiceButton.isHidden, voiceButton.alpha > 0.01, voiceButton.isUserInteractionEnabled else {
+      return false
+    }
+    return voiceButton.point(inside: touch.location(in: voiceButton), with: nil)
   }
 }
