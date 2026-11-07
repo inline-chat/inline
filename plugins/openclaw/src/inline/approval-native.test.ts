@@ -6,6 +6,7 @@ import { inlineApprovalCapability } from "./approval-native"
 import {
   getInlineExecApprovalApprovers,
   isInlineExecApprovalClientEnabled,
+  shouldHandleInlineExecApprovalRequest,
 } from "./exec-approvals"
 
 const SET_BOT_PRESENCE_STATE = 59
@@ -108,33 +109,38 @@ describe("inline/native approvals", () => {
     const request = buildExecRequest({ turnSourceThreadId: "8" })
 
     expect(isInlineExecApprovalClientEnabled({ cfg })).toBe(true)
-    expect(
-      inlineApprovalCapability.authorizeActorAction?.({
+    // Only the async (worker-owned) surfaces are registered.
+    for (const legacySurface of ["authorizeActorAction", "native", "nativeRuntime"] as const) {
+      expect(inlineApprovalCapability[legacySurface]).toBeUndefined()
+    }
+    expect(inlineApprovalCapability.nativeRuntimeAsync).toBeDefined()
+    await expect(
+      inlineApprovalCapability.authorizeActorActionAsync!({
         cfg,
         accountId: "default",
         senderId: "user:51",
         action: "approve",
         approvalKind: "exec",
       }),
-    ).toEqual({ authorized: true })
-    expect(
-      inlineApprovalCapability.authorizeActorAction?.({
+    ).resolves.toEqual({ authorized: true })
+    await expect(
+      inlineApprovalCapability.authorizeActorActionAsync!({
         cfg,
         accountId: "default",
         senderId: "chat:51",
         action: "approve",
         approvalKind: "plugin",
       }),
-    ).toMatchObject({ authorized: false })
+    ).resolves.toMatchObject({ authorized: false })
 
-    expect(
-      inlineApprovalCapability.native?.describeDeliveryCapabilities?.({
+    await expect(
+      inlineApprovalCapability.nativeAsync!.describeDeliveryCapabilities({
         cfg,
         accountId: "default",
         approvalKind: "exec",
         request,
       }),
-    ).toMatchObject({
+    ).resolves.toMatchObject({
       enabled: true,
       preferredSurface: "both",
       supportsOriginSurface: true,
@@ -142,7 +148,7 @@ describe("inline/native approvals", () => {
       notifyOriginWhenDmOnly: true,
     })
     expect(
-      await inlineApprovalCapability.native?.resolveOriginTarget?.({
+      await inlineApprovalCapability.nativeAsync!.resolveOriginTarget!({
         cfg,
         accountId: "default",
         approvalKind: "exec",
@@ -150,13 +156,71 @@ describe("inline/native approvals", () => {
       }),
     ).toEqual({ to: "chat:7", threadId: "8" })
     expect(
-      await inlineApprovalCapability.native?.resolveApproverDmTargets?.({
+      await inlineApprovalCapability.nativeAsync!.resolveApproverDmTargets!({
         cfg,
         accountId: "default",
         approvalKind: "exec",
         request,
       }),
     ).toEqual([{ to: "user:51" }])
+  })
+
+  it("matches approval requests to Inline accounts asynchronously", async () => {
+    const accounts = {
+      a: { token: "token-a", execApprovals: { approvers: ["51"] } },
+      b: { token: "token-b", execApprovals: { approvers: ["52"] } },
+    }
+    const cfg = { channels: { inline: { accounts } } } as unknown as OpenClawConfig
+    const handles = (config: OpenClawConfig, accountId: string, request: ExecApprovalRequest) =>
+      shouldHandleInlineExecApprovalRequest({ cfg: config, accountId, request })
+
+    // Bound turn-source account wins.
+    const bound = buildExecRequest({ turnSourceAccountId: "b" })
+    const boundResult = handles(cfg, "b", bound)
+    expect(boundResult).toBeInstanceOf(Promise)
+    await expect(boundResult).resolves.toBe(true)
+    await expect(handles(cfg, "a", bound)).resolves.toBe(false)
+
+    // Explicit Inline forwarding targets scope delivery to their accounts.
+    const targeted = {
+      ...cfg,
+      approvals: {
+        exec: {
+          enabled: true,
+          mode: "targets",
+          targets: [{ channel: "inline", to: "user:52", accountId: "b" }],
+        },
+      },
+    } as unknown as OpenClawConfig
+    const unbound = buildExecRequest({ turnSourceAccountId: undefined })
+    await expect(handles(targeted, "b", unbound)).resolves.toBe(true)
+    await expect(handles(targeted, "a", unbound)).resolves.toBe(false)
+
+    // Foreign-channel requests without a bound account only route when exactly
+    // one Inline account is eligible.
+    const foreign = buildExecRequest({
+      turnSourceChannel: "slack",
+      turnSourceAccountId: undefined,
+      turnSourceTo: "channel:C1",
+    })
+    await expect(handles(cfg, "a", foreign)).resolves.toBe(false)
+    const single = {
+      channels: { inline: { accounts: { a: accounts.a } } },
+    } as unknown as OpenClawConfig
+    await expect(handles(single, "a", foreign)).resolves.toBe(true)
+
+    // The runtime availability gate awaits the same account matching.
+    const context = { client: {} }
+    await expect(
+      Promise.resolve(inlineApprovalNativeRuntime.availability.shouldHandle({
+        cfg, accountId: "a", context, request: bound, approvalKind: "exec",
+      })),
+    ).resolves.toBe(false)
+    await expect(
+      Promise.resolve(inlineApprovalNativeRuntime.availability.shouldHandle({
+        cfg, accountId: "b", context, request: bound, approvalKind: "exec",
+      })),
+    ).resolves.toBe(true)
   })
 
   it("renders, delivers, and clears Inline approval buttons", async () => {

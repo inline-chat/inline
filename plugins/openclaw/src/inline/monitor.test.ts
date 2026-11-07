@@ -9,8 +9,8 @@ import {
 const modelRuntimeMocks = vi.hoisted(() => ({
   buildModelsProviderData: vi.fn(),
   resolveDefaultModelForAgent: vi.fn(),
-  getSessionEntry: vi.fn(),
-  patchSessionEntry: vi.fn(),
+  getSessionEntryAsync: vi.fn(),
+  applySessionEntryPatch: vi.fn(),
   applyModelOverrideToSessionEntry: vi.fn(),
 }))
 
@@ -51,8 +51,8 @@ vi.mock("openclaw/plugin-sdk/session-store-runtime", async () => {
   )
   return {
     ...actual,
-    getSessionEntry: modelRuntimeMocks.getSessionEntry,
-    patchSessionEntry: modelRuntimeMocks.patchSessionEntry,
+    getSessionEntryAsync: modelRuntimeMocks.getSessionEntryAsync,
+    applySessionEntryPatch: modelRuntimeMocks.applySessionEntryPatch,
   }
 })
 
@@ -73,7 +73,7 @@ type MonitorHarness = {
     sendMessage: ReturnType<typeof vi.fn>
     invokeRaw: ReturnType<typeof vi.fn>
     uploadFile: ReturnType<typeof vi.fn>
-    fetchRemoteMedia: ReturnType<typeof vi.fn>
+    readRemoteMediaBuffer: ReturnType<typeof vi.fn>
     saveMediaBuffer: ReturnType<typeof vi.fn>
     resolveAgentRoute: ReturnType<typeof vi.fn>
     recordInboundSession: ReturnType<typeof vi.fn>
@@ -495,11 +495,11 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     }
   })
   modelRuntimeMocks.resolveDefaultModelForAgent.mockReset().mockImplementation(({ cfg }: any) => resolveMockModelRef(cfg))
-  modelRuntimeMocks.getSessionEntry.mockReset().mockReturnValue(undefined)
-  modelRuntimeMocks.patchSessionEntry.mockReset().mockImplementation(async ({ fallbackEntry, update }: any) => {
-    const entry = structuredClone(fallbackEntry ?? { sessionId: "test-session", updatedAt: 1 })
-    return await update(entry, { existingEntry: fallbackEntry ? undefined : entry })
-  })
+  modelRuntimeMocks.getSessionEntryAsync.mockReset().mockReturnValue(undefined)
+  modelRuntimeMocks.applySessionEntryPatch.mockReset().mockImplementation(async ({ fallbackEntry, patch }: any) => ({
+    ...structuredClone(fallbackEntry ?? { sessionId: "test-session", updatedAt: 1 }),
+    ...patch,
+  }))
   modelRuntimeMocks.applyModelOverrideToSessionEntry.mockReset().mockImplementation(({ entry, selection }: any) => {
     entry.provider = selection.provider
     entry.model = selection.model
@@ -537,7 +537,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     error.name = "InlineSdkAuthenticationError"
     onAuthenticationError?.(error)
   })
-  const fetchRemoteMedia = vi.fn(async ({ url }: { url: string }) => {
+  const readRemoteMediaBuffer = vi.fn(async ({ url }: { url: string }) => {
     const media = setup.mediaByUrl?.[url]
     return {
       buffer: Buffer.from(media?.buffer ?? [1, 2, 3]),
@@ -1114,7 +1114,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     )
     return {
       ...actual,
-      listSkillCommandsForAgents: vi.fn(() => setup.skillCommands ?? []),
+      prepareSkillCommandsForAgents: vi.fn(() => setup.skillCommands ?? []),
     }
   })
   vi.doMock("openclaw/plugin-sdk/plugin-runtime", async () => {
@@ -1199,7 +1199,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         shouldHandleTextCommands: setup.shouldHandleTextCommands ?? (() => true),
       },
       media: {
-        fetchRemoteMedia,
+        readRemoteMediaBuffer,
         saveMediaBuffer,
       },
       text: {
@@ -1243,7 +1243,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       sendTyping,
       invokeRaw,
       uploadFile,
-      fetchRemoteMedia,
+      readRemoteMediaBuffer,
       saveMediaBuffer,
       resolveAgentRoute,
       recordInboundSession,
@@ -1409,7 +1409,7 @@ describe("inline/monitor", () => {
         agents: { defaults: { model: "openai/gpt-5.6-sol" } },
       },
     })
-    modelRuntimeMocks.getSessionEntry.mockReturnValue({
+    modelRuntimeMocks.getSessionEntryAsync.mockReturnValue({
       sessionId: "fallback-session",
       updatedAt: Date.now(),
       providerOverride: "minimax",
@@ -1685,7 +1685,7 @@ describe("inline/monitor", () => {
       },
     })
     configureCatalog()
-    modelRuntimeMocks.getSessionEntry.mockImplementation(() => selectedEntry as any)
+    modelRuntimeMocks.getSessionEntryAsync.mockImplementation(() => selectedEntry as any)
     const mutationHandle = await mutationHarness.monitorInlineProvider({
       cfg: {} as any,
       account: buildAccount({ groupPolicy: "open" }),
@@ -1710,7 +1710,7 @@ describe("inline/monitor", () => {
       oneofKind: "select",
       select: { value: "minimax/MiniMax-M3" },
     })
-    expect(modelRuntimeMocks.patchSessionEntry).not.toHaveBeenCalled()
+    expect(modelRuntimeMocks.applySessionEntryPatch).not.toHaveBeenCalled()
 
     await mutationHandle.stop()
   })
@@ -3259,7 +3259,7 @@ describe("inline/monitor", () => {
         MessageSid: "1001",
       }),
     )
-    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+    expect(harness.calls.readRemoteMediaBuffer).not.toHaveBeenCalled()
 
     await handle.stop()
   })
@@ -3352,7 +3352,7 @@ describe("inline/monitor", () => {
         }),
       )
     })
-    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+    expect(harness.calls.readRemoteMediaBuffer).not.toHaveBeenCalled()
     expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
       expect.objectContaining({
         Body: "/stop",
@@ -3448,7 +3448,7 @@ describe("inline/monitor", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 80))
     expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+    expect(harness.calls.readRemoteMediaBuffer).not.toHaveBeenCalled()
     expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
     expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4776,7 +4776,7 @@ describe("inline/monitor", () => {
     })
 
     await waitFor(() => {
-      expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+      expect(harness.calls.readRemoteMediaBuffer).not.toHaveBeenCalled()
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: "what about this image?",
@@ -7174,7 +7174,7 @@ describe("inline/monitor", () => {
     })
 
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
-    expect(modelRuntimeMocks.patchSessionEntry).not.toHaveBeenCalled()
+    expect(modelRuntimeMocks.applySessionEntryPatch).not.toHaveBeenCalled()
 
     await handle.stop()
   })
@@ -7494,6 +7494,61 @@ describe("inline/monitor", () => {
     const button = sent?.actions?.rows?.[0]?.actions?.[0]
     expect(button?.text).toBe("Approve")
     expect(new TextDecoder().decode(button?.action?.callback?.data)).toBe("approve")
+
+    await handle.stop()
+  })
+
+  it("maps presentation-only buttons to inline message actions on text replies", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 72n,
+          message: {
+            id: 10022n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "show options",
+          },
+        },
+      ],
+      chats: {
+        "72": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "choose one",
+        presentation: {
+          blocks: [
+            {
+              type: "buttons",
+              buttons: [
+                { label: "Approve", action: { type: "callback", value: "approve" } },
+                { label: "Docs", action: { type: "url", url: "https://inline.chat/docs" } },
+              ],
+            },
+          ],
+        },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ chatId: 72n, actions: expect.any(Object) }),
+      )
+    })
+
+    const sent = harness.calls.sendMessage.mock.calls[0]?.[0]
+    const buttons = sent?.actions?.rows?.flatMap((row: any) => row.actions) ?? []
+    expect(buttons.map((button: any) => button.text)).toEqual(["Approve"])
+    expect(new TextDecoder().decode(buttons[0]?.action?.callback?.data)).toBe("approve")
 
     await handle.stop()
   })
@@ -13307,7 +13362,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/current-photo.jpg",
         }),
@@ -13507,7 +13562,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/spec.pdf",
           filePathHint: "spec.pdf",
@@ -13602,7 +13657,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/image-document",
           filePathHint: "image-document.png",
@@ -13684,7 +13739,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/flattened-photo.jpg",
           filePathHint: "flattened-photo.jpg",
@@ -13787,7 +13842,7 @@ describe("inline/monitor", () => {
         }),
       )
     })
-    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+    expect(harness.calls.readRemoteMediaBuffer).not.toHaveBeenCalled()
     expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
 
     await handle.stop()
@@ -13848,7 +13903,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/fallback-voice.ogg",
           filePathHint: "fallback-voice.ogg",
@@ -13945,7 +14000,7 @@ describe("inline/monitor", () => {
       },
     })
 
-    harness.calls.fetchRemoteMedia.mockRejectedValueOnce(new Error("network failed"))
+    harness.calls.readRemoteMediaBuffer.mockRejectedValueOnce(new Error("network failed"))
 
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
@@ -14023,7 +14078,7 @@ describe("inline/monitor", () => {
       },
     })
 
-    harness.calls.fetchRemoteMedia.mockRejectedValueOnce(
+    harness.calls.readRemoteMediaBuffer.mockRejectedValueOnce(
       new Error(
         "Failed to fetch media from https://cdn.inline.chat/huge-spec.pdf: content length 500000000 exceeds maxBytes 1048576",
       ),
@@ -14043,7 +14098,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/huge-spec.pdf",
           maxBytes: 1 * 1024 * 1024,

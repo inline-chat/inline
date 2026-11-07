@@ -9,13 +9,13 @@ import {
   formatCommandArgMenuTitle,
   listNativeCommandSpecsForConfig,
   parseCommandArgs,
-  resolveCommandArgMenu,
+  resolveCommandArgMenuAsync,
 } from "openclaw/plugin-sdk/native-command-registry"
 import { CHANNEL_APPROVAL_NATIVE_RUNTIME_CONTEXT_CAPABILITY } from "openclaw/plugin-sdk/approval-handler-adapter-runtime"
 import { registerChannelRuntimeContext } from "openclaw/plugin-sdk/channel-runtime-context"
 import {
-  resolveCommandAuthorization,
-  resolveStoredModelOverride,
+  resolveCommandAuthorizationAsync,
+  resolveStoredModelOverrideAsync,
 } from "openclaw/plugin-sdk/command-auth-native"
 import { expandAllowFromWithAccessGroups } from "openclaw/plugin-sdk/security-runtime"
 import { buildCommandsMessagePaginated } from "openclaw/plugin-sdk/command-status"
@@ -40,12 +40,13 @@ import {
   resolveThinkingDefault,
 } from "openclaw/plugin-sdk/agent-runtime"
 import {
-  getSessionEntry,
-  patchSessionEntry,
+  getSessionEntryAsync,
+  type SessionEntry,
+  applySessionEntryPatch,
   resolveStorePath,
 } from "openclaw/plugin-sdk/session-store-runtime"
 import { buildModelsProviderData } from "openclaw/plugin-sdk/models-provider-runtime"
-import { listSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
+import { prepareSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
 import { getPluginCommandSpecs } from "openclaw/plugin-sdk/plugin-runtime"
 import { isReasoningReplyPayload } from "openclaw/plugin-sdk/reply-payload"
 import {
@@ -94,7 +95,8 @@ import {
   type User,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
-import { resolveInlineMessageActionsParam } from "./actions.js"
+import { buildInlinePresentationButtons, resolveInlineMessageActionsParam } from "./actions.js"
+import { normalizeMessagePresentation } from "openclaw/plugin-sdk/interactive-runtime"
 import { sendInlineWorkingAction } from "./compose-action.js"
 import {
   INLINE_DEFAULT_GROUP_POLICY,
@@ -110,7 +112,6 @@ import {
   resolveInlineGroupReplyThreadParentHistoryLimit,
   resolveInlineGroupReplyThreadRequireExplicitMention,
   resolveInlineGroupSystemPrompt,
-  type InlineReplyThreadMode,
 } from "./policy.js"
 import { getInlineRuntime } from "../runtime.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
@@ -1233,15 +1234,15 @@ async function resolveInlineGroupSenderAllowlist(params: {
   }
 }
 
-function resolveInlineCommandAuthorized(params: {
+async function resolveInlineCommandAuthorized(params: {
   cfg: OpenClawConfig
   accountId: string
   isGroup: boolean
   chatId: string
   senderId: string
   commandAuthorized: boolean
-}): boolean {
-  return resolveCommandAuthorization({
+}): Promise<boolean> {
+  const authorization = await resolveCommandAuthorizationAsync({
     ctx: {
       Provider: CHANNEL_ID,
       Surface: CHANNEL_ID,
@@ -1254,7 +1255,8 @@ function resolveInlineCommandAuthorized(params: {
     },
     cfg: params.cfg,
     commandAuthorized: params.commandAuthorized,
-  }).isAuthorizedSender
+  })
+  return authorization.isAuthorizedSender
 }
 
 function hasExplicitInlineCommandAuthorizationPolicy(cfg: OpenClawConfig): boolean {
@@ -1463,12 +1465,12 @@ function parseInlineCommandArgs(commandBody: string): string {
   return match?.[1]?.trim() ?? ""
 }
 
-function isInlineNativeCommandBody(params: {
+async function isInlineNativeCommandBody(params: {
   cfg: OpenClawConfig
   account: ResolvedInlineAccount
   commandBody: string
   agentId: string
-}): boolean {
+}): Promise<boolean> {
   if (!shouldSyncInlineNativeCommandsForAccount({ cfg: params.cfg, account: params.account })) {
     return false
   }
@@ -1479,7 +1481,7 @@ function isInlineNativeCommandBody(params: {
     cfg: params.cfg,
     account: params.account,
   })
-    ? listSkillCommandsForAgents({
+    ? await prepareSkillCommandsForAgents({
         cfg: params.cfg,
         agentIds: [params.agentId],
       })
@@ -1885,7 +1887,7 @@ function resolveInlineParentSessionKeyCandidate(
   return undefined
 }
 
-type InlineSessionModelEntry = NonNullable<ReturnType<typeof getSessionEntry>> & {
+type InlineSessionModelEntry = SessionEntry & {
   fallbackNoticeSelectedModel?: string
   fallbackNoticeActiveModel?: string
 }
@@ -1967,17 +1969,17 @@ function resolveInlineFallbackModelContext(params: {
   return { selected, activeFallback }
 }
 
-function resolveInlineCommandMenuModelContext(params: {
+async function resolveInlineCommandMenuModelContext(params: {
   cfg: OpenClawConfig
   agentId: string
   sessionKey: string
-}): {
+}): Promise<{
   provider?: string
   model?: string
   activeProvider?: string
   activeModel?: string
   thinkingLevel?: string
-} {
+}> {
   if (!params.sessionKey.trim()) {
     return {}
   }
@@ -1987,7 +1989,7 @@ function resolveInlineCommandMenuModelContext(params: {
       cfg: params.cfg,
       agentId: params.agentId,
     })
-    const entry = getSessionEntry({
+    const entry = await getSessionEntryAsync({
       agentId: params.agentId,
       sessionKey: params.sessionKey,
       storePath,
@@ -1996,14 +1998,14 @@ function resolveInlineCommandMenuModelContext(params: {
     const thinkingLevel = normalizeOptionalString(entry?.thinkingLevel)
     const parentSessionKey = resolveInlineParentSessionKeyCandidate(params.sessionKey, entry)
     const parentEntry = parentSessionKey
-      ? getSessionEntry({
+      ? await getSessionEntryAsync({
           agentId: params.agentId,
           sessionKey: parentSessionKey,
           storePath,
           readConsistency: "latest",
         }) as InlineSessionModelEntry | undefined
       : undefined
-    const override = resolveStoredModelOverride({
+    const override = await resolveStoredModelOverrideAsync({
       ...(entry ? { sessionEntry: entry } : {}),
       ...(parentSessionKey ? { parentSessionKey } : {}),
       ...(parentSessionKey && parentEntry ? { sessionStore: { [parentSessionKey]: parentEntry } } : {}),
@@ -2068,7 +2070,7 @@ function resolveInlineThinkMenuCurrentLevel(params: {
 
 function formatInlineCommandArgMenuTitle(params: {
   command: NonNullable<ReturnType<typeof findCommandByNativeName>>
-  menu: NonNullable<ReturnType<typeof resolveCommandArgMenu>>
+  menu: NonNullable<Awaited<ReturnType<typeof resolveCommandArgMenuAsync>>>
   currentThinkingLevel?: string
 }): string {
   const title = formatCommandArgMenuTitle({ command: params.command, menu: params.menu })
@@ -2078,15 +2080,15 @@ function formatInlineCommandArgMenuTitle(params: {
   return `Current thinking level: ${params.currentThinkingLevel}.\n${title}`
 }
 
-function resolveInlineNativeCommandMenu(params: {
+async function resolveInlineNativeCommandMenu(params: {
   commandBody: string
   cfg: OpenClawConfig
   agentId: string
   sessionKey: string
-}): {
+}): Promise<{
   title: string
   buttons: InlineReplyMarkupButton[][]
-} | null {
+} | null> {
   const normalized = params.commandBody.trim()
   const match = normalized.match(/^\/([^\s]+)(?:\s+([\s\S]+))?$/)
   if (!match?.[1]) return null
@@ -2102,13 +2104,13 @@ function resolveInlineNativeCommandMenu(params: {
       (arg) => typeof arg.choices === "function" && args?.values?.[arg.name] == null,
     )
   const menuModelContext = menuNeedsModelContext
-    ? resolveInlineCommandMenuModelContext({
+    ? await resolveInlineCommandMenuModelContext({
         cfg: params.cfg,
         agentId: params.agentId,
         sessionKey: params.sessionKey,
       })
     : {}
-  const menu = resolveCommandArgMenu({
+  const menu = await resolveCommandArgMenuAsync({
     command,
     ...(args ? { args } : {}),
     cfg: params.cfg,
@@ -2324,7 +2326,13 @@ function resolveInlineReplyActions(
   }
 
   if (!hasExplicitButtons) {
-    return resolveInlineMessageActionsParam(payload, { owner })
+    const legacyActions = resolveInlineMessageActionsParam(payload, { owner })
+    if (legacyActions) return legacyActions
+    // Host replies can carry buttons only as a MessagePresentation.
+    const presentation = normalizeMessagePresentation(payload.presentation)
+    if (!presentation) return undefined
+    rawButtons = buildInlinePresentationButtons(presentation).filter((row) => row.length > 0)
+    if ((rawButtons as unknown[]).length === 0) return undefined
   }
 
   const rows = normalizeReplyMarkupButtonsWith(
@@ -3045,7 +3053,7 @@ async function resolveInlineInboundMedia(params: {
   for (const [url, candidate] of candidates.entries()) {
     try {
       const filePathHint = resolveFilePathHint({ sourceUrl: url, preferredName: candidate.fileName })
-      const fetched = await params.core.channel.media.fetchRemoteMedia({
+      const fetched = await params.core.channel.media.readRemoteMediaBuffer({
         url,
         maxBytes: params.maxBytes,
         ...(filePathHint ? { filePathHint } : {}),
@@ -4244,7 +4252,7 @@ export async function monitorInlineProvider(params: {
       cfg,
       botUsername ? { botUsername } : undefined,
     )
-    const isRegisteredNativeCommand = isInlineNativeCommandBody({
+    const isRegisteredNativeCommand = await isInlineNativeCommandBody({
       cfg,
       account,
       commandBody: normalizedCommandBody,
@@ -4288,7 +4296,7 @@ export async function monitorInlineProvider(params: {
       allowTextCommands,
       hasControlCommand,
     })
-    const commandAuthorized = resolveInlineCommandAuthorized({
+    const commandAuthorized = await resolveInlineCommandAuthorized({
       cfg,
       accountId: account.accountId,
       isGroup,
@@ -4698,7 +4706,7 @@ export async function monitorInlineProvider(params: {
       const agentId = commandsPageCallback.agentId ?? route.agentId
       const paginated = buildCommandsMessagePaginated(
         cfg,
-        listSkillCommandsForAgents({
+        await prepareSkillCommandsForAgents({
           cfg,
           agentIds: [agentId],
         }),
@@ -4747,7 +4755,7 @@ export async function monitorInlineProvider(params: {
       return
     }
 
-    const nativeCommandMenu = resolveInlineNativeCommandMenu({
+    const nativeCommandMenu = await resolveInlineNativeCommandMenu({
       commandBody: normalizedCommandBody,
       cfg,
       agentId: route.agentId,
@@ -7092,7 +7100,7 @@ export async function monitorInlineProvider(params: {
       hasControlCommand: true,
     })
 
-    return resolveInlineCommandAuthorized({
+    return await resolveInlineCommandAuthorized({
       cfg,
       accountId: account.accountId,
       isGroup: true,
@@ -7225,15 +7233,15 @@ export async function monitorInlineProvider(params: {
     return [...options.values()]
   }
 
-  const resolveOpenClawBotSettingsReasoningOptions = (params: {
+  const resolveOpenClawBotSettingsReasoningOptions = async (params: {
     cfg: OpenClawConfig
     provider: string
     model: string
     currentLevel: string
-  }): OpenClawBotChatSettingsOption[] => {
+  }): Promise<OpenClawBotChatSettingsOption[]> => {
     const command = findInlineNativeCommandFromBody("/think")
     const menu = command
-      ? resolveCommandArgMenu({
+      ? await resolveCommandArgMenuAsync({
           command,
           cfg: params.cfg,
           provider: params.provider,
@@ -7280,7 +7288,7 @@ export async function monitorInlineProvider(params: {
       resolvedContext: ingress,
     })
     const currentConfig = core.config.current() as OpenClawConfig
-    const modelContext = resolveInlineCommandMenuModelContext({
+    const modelContext = await resolveInlineCommandMenuModelContext({
       cfg: currentConfig,
       agentId: ingress.agentId,
       sessionKey: ingress.sessionKey,
@@ -7330,7 +7338,7 @@ export async function monitorInlineProvider(params: {
         defaultModel: defaultModelValue,
         modelOptions,
         reasoningLevel,
-        reasoningOptions: resolveOpenClawBotSettingsReasoningOptions({
+        reasoningOptions: await resolveOpenClawBotSettingsReasoningOptions({
           cfg: currentConfig,
           provider,
           model,
@@ -7435,7 +7443,7 @@ export async function monitorInlineProvider(params: {
     })
 
     const currentConfig = core.config.current() as OpenClawConfig
-    const applied = resolveInlineCommandMenuModelContext({
+    const applied = await resolveInlineCommandMenuModelContext({
       cfg: currentConfig,
       agentId: params.ingress.agentId,
       sessionKey: params.ingress.sessionKey,
@@ -7460,14 +7468,13 @@ export async function monitorInlineProvider(params: {
   ): Promise<void> => {
     const currentConfig = core.config.current() as OpenClawConfig
     const storePath = resolveStorePath(currentConfig.session?.store, { agentId: ingress.agentId })
-    await patchSessionEntry({
+    await applySessionEntryPatch({
       agentId: ingress.agentId,
       sessionKey: ingress.sessionKey,
       storePath,
       fallbackEntry: { sessionId: ingress.sessionKey, updatedAt: Date.now() },
       preserveActivity: true,
-      replaceEntry: true,
-      update: (entry) => ({ ...entry, thinkingLevel: reasoningLevel }),
+      patch: { thinkingLevel: reasoningLevel },
     })
   }
 

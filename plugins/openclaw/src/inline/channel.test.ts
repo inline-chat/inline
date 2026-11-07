@@ -281,8 +281,8 @@ describe("inline/channel", () => {
     expect(inlineChannelPlugin.threading).toBeDefined()
     expect(inlineChannelPlugin.setup).toBeDefined()
     expect(inlineChannelPlugin.setupWizard).toBeDefined()
-    expect(inlineChannelPlugin.approvalCapability?.nativeRuntime).toBeDefined()
-    expect(inlineChannelPlugin.approvalCapability?.native?.describeDeliveryCapabilities?.({
+    expect(inlineChannelPlugin.approvalCapability?.nativeRuntimeAsync).toBeDefined()
+    await expect(inlineChannelPlugin.approvalCapability?.nativeAsync?.describeDeliveryCapabilities({
       cfg: {
         channels: {
           inline: {
@@ -305,7 +305,7 @@ describe("inline/channel", () => {
         createdAtMs: 1,
         expiresAtMs: 2,
       } as any,
-    })).toMatchObject({
+    })).resolves.toMatchObject({
       enabled: true,
       preferredSurface: "approver-dm",
       supportsOriginSurface: true,
@@ -337,6 +337,8 @@ describe("inline/channel", () => {
       selects: true,
       context: true,
       divider: false,
+      charts: false,
+      tables: false,
     })
     expect(inlineChannelPlugin.outbound.extractMarkdownImages).toBe(true)
     expect(inlineChannelPlugin.outbound.preferFinalAssistantVisibleText).toBe(true)
@@ -3517,11 +3519,39 @@ describe("inline/channel", () => {
       presentation: {
         blocks: [
           { type: "text", text: "Approve deploy?" },
-          { type: "buttons", buttons: [{ label: "Approve", value: "approve" }] },
+          {
+            type: "buttons",
+            buttons: [
+              { label: "Approve", action: { type: "callback", value: "approve" } },
+              { label: "Status", action: { type: "command", command: "/status" } },
+              { label: "Docs", action: { type: "url", url: "https://inline.chat/docs" } },
+            ],
+          },
+          {
+            type: "select",
+            placeholder: "Model",
+            options: [{ label: "Fast", action: { type: "callback", value: "model:fast" } }],
+          },
         ],
       },
       ctx: {} as any,
     } as any)
+
+    expect(rendered).toEqual({
+      text: "Approve deploy?\n\n- Approve\n- Status: `/status`\n- Docs: https://inline.chat/docs\n\nModel:\n- Fast",
+      channelData: {
+        inline: {
+          buttons: [
+            [
+              { text: "Approve", callback_data: "approve" },
+              { text: "Status", callback_data: "/status" },
+            ],
+            [{ text: "Fast", callback_data: "model:fast" }],
+          ],
+        },
+      },
+    })
+    expect(rendered).not.toHaveProperty("interactive")
 
     await inlineChannelPlugin.outbound.sendPayload?.({
       cfg: {
@@ -3547,8 +3577,53 @@ describe("inline/channel", () => {
       }),
     )
     expect(firstArg?.actions?.rows?.[0]?.actions?.[0]?.text).toBe("Approve")
+    expect(firstArg?.actions?.rows?.[0]?.actions?.[0]?.actionId).toBe("agent:1:1")
     const callbackData = firstArg?.actions?.rows?.[0]?.actions?.[0]?.action.callback.data
     expect(Buffer.from(callbackData).toString()).toBe("approve")
+    expect(firstArg?.actions?.rows?.[0]?.actions).toHaveLength(2)
+    expect(firstArg?.actions?.rows?.[1]?.actions?.[0]?.text).toBe("Fast")
+  })
+
+  it("outbound renderPresentation keeps explicit Inline buttons over presentation controls", async () => {
+    vi.resetModules()
+    mockRealtimeSdk({ InlineSdkClient: class {} })
+    await setInlineTestRuntime()
+
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const explicitButtons = [[{ text: "Keep", callback_data: "keep" }]]
+    const rendered = await inlineChannelPlugin.outbound.renderPresentation?.({
+      payload: { text: "Pick", channelData: { inline: { buttons: explicitButtons } } },
+      presentation: {
+        blocks: [{ type: "buttons", buttons: [{ label: "Drop", action: { type: "callback", value: "drop" } }] }],
+      },
+      ctx: {} as any,
+    } as any)
+
+    expect(rendered?.channelData).toEqual({ inline: { buttons: explicitButtons } })
+    expect(rendered?.text).toBe("Pick\n\n- Drop")
+  })
+
+  it("outbound renderPresentation leaves channelData alone when no control maps to an Inline button", async () => {
+    vi.resetModules()
+    mockRealtimeSdk({ InlineSdkClient: class {} })
+    await setInlineTestRuntime()
+
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const rendered = await inlineChannelPlugin.outbound.renderPresentation?.({
+      payload: {},
+      presentation: {
+        title: "Release",
+        blocks: [
+          { type: "context", text: "Build 12" },
+          { type: "buttons", buttons: [{ label: "Notes", action: { type: "url", url: "https://inline.chat" } }] },
+        ],
+      },
+      ctx: {} as any,
+    } as any)
+
+    expect(rendered).toEqual({ text: "Release\n\nBuild 12\n\n- Notes: https://inline.chat" })
   })
 
   it("outbound sendPayload uses interactive labels as fallback text", async () => {
