@@ -15,6 +15,13 @@ class MentionTableCellView: NSTableCellView {
   // state
   private var currentItem: MentionCompletionItem?
   private var _isSelected: Bool = false
+  private var hoverTrackingArea: NSTrackingArea?
+  private var isHovered = false {
+    didSet {
+      guard isHovered != oldValue else { return }
+      updateAppearance()
+    }
+  }
 
   // Custom selection state property
   var isSelected: Bool {
@@ -156,6 +163,39 @@ class MentionTableCellView: NSTableCellView {
     updateAppearance()
   }
 
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let hoverTrackingArea {
+      removeTrackingArea(hoverTrackingArea)
+    }
+    let trackingArea = NSTrackingArea(
+      rect: .zero,
+      options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+      owner: self
+    )
+    addTrackingArea(trackingArea)
+    hoverTrackingArea = trackingArea
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    isHovered = true
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    isHovered = false
+  }
+
+  override func prepareForReuse() {
+    super.prepareForReuse()
+    isHovered = false
+  }
+
+  /// A hidden menu gets no exit event, so it would reappear with a stale hover.
+  override func viewDidHide() {
+    super.viewDidHide()
+    isHovered = false
+  }
+
   private func updateAppearance() {
     if isSelected {
       // Selected state: accent background with white text
@@ -165,8 +205,13 @@ class MentionTableCellView: NSTableCellView {
       nameLabel.textColor = .alternateSelectedControlTextColor
       usernameLabel.textColor = NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.9)
     } else {
-      // Normal state: clear background with standard text colors
-      containerView.layer?.backgroundColor = NSColor.clear.cgColor
+      // Normal state: standard text colors, with a light fill under the pointer
+      let backgroundColor: NSColor = isHovered
+        ? NSColor.labelColor.withAlphaComponent(0.08)
+        : .clear
+      containerView.layer?.backgroundColor = backgroundColor
+        .resolvedColor(with: effectiveAppearance)
+        .cgColor
       nameLabel.textColor = .labelColor
       usernameLabel.textColor = .secondaryLabelColor
     }

@@ -212,13 +212,25 @@ final class DefaultNewThreadComposeMentionSource: NewThreadComposeMentionSource 
   func setAgents(_ agents: [MentionableBotAgent], ownedBots: [UserInfo]) {
     self.agents = agents
     self.ownedBots = ownedBots
+    // Read the bots from the database too, so a rename or new photo shows
+    // while the menu is open.
+    viewModel.setOwnedBotIDs(ownedBots.map(\.id))
     updates.send(candidates)
   }
 
   private func merged(_ candidates: MentionCompletionCandidates) -> MentionCompletionCandidates {
     // A bot outside the selected space is offered too; sending asks to add it.
-    var candidates = candidates.addingOwnedBots(ownedBots)
-    candidates.agents = agents
+    // The observed rows are current; the listed bots only fill in any that
+    // aren't saved locally yet.
+    let observedIDs = Set(candidates.users.map(\.userInfo.id))
+    var candidates = candidates.addingOwnedBots(ownedBots.filter { !observedIDs.contains($0.id) })
+    let usersByID = Dictionary(
+      candidates.users.map { ($0.userInfo.id, $0.userInfo) },
+      uniquingKeysWith: { first, _ in first }
+    )
+    candidates.agents = agents.map { agent in
+      usersByID[agent.botUserId].map(agent.withBotUserInfo) ?? agent
+    }
     return candidates
   }
 }

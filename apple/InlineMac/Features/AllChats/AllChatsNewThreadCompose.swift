@@ -464,6 +464,29 @@ final class AllChatsNewThreadComposeModel: ObservableObject {
     do {
       let result = try await dependencies.realtimeV2.send(.listBots())
       guard case let .listBots(response) = result else { return }
+      // Save the bots so mentions read them, and their later renames, from
+      // the database. A bot set up moments ago may not be saved yet.
+      do {
+        try await dependencies.database.dbWriter.write { db in
+          for bot in response.bots {
+            // This runs on every activation; skip unchanged rows so their
+            // observers don't fire.
+            let listed = InlineKit.User(from: bot)
+            if let saved = try InlineKit.User.fetchOne(db, id: bot.id),
+               saved.firstName == listed.firstName,
+               saved.lastName == listed.lastName,
+               saved.username == listed.username,
+               saved.pendingSetup == listed.pendingSetup,
+               saved.profileFileUniqueId == listed.profileFileUniqueId
+            {
+              continue
+            }
+            _ = try InlineKit.User.save(db, user: bot)
+          }
+        }
+      } catch {
+        log.error("Could not save listed bots", error: error)
+      }
       var choices: [AllChatsAgentChoice] = []
       for bot in response.bots {
         choices.append(AllChatsAgentChoice(bot: bot, agent: nil))
@@ -1293,10 +1316,13 @@ private final class WeakNewThreadComposeHost {
 private final class NewThreadComposeOverlayHostView: NSView {
   override var isFlipped: Bool { true }
 
+  /// Only the menus take clicks; everywhere else passes through to the window.
   override func hitTest(_ point: NSPoint) -> NSView? {
+    // hitTest takes the superview's coordinates, which aren't flipped like
+    // this view's. Subviews expect this view's coordinates.
+    let localPoint = superview.map { convert(point, from: $0) } ?? point
     for subview in subviews.reversed() where !subview.isHidden {
-      let convertedPoint = convert(point, to: subview)
-      if let hitView = subview.hitTest(convertedPoint) {
+      if let hitView = subview.hitTest(localPoint) {
         return hitView
       }
     }
