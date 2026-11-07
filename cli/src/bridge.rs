@@ -3284,8 +3284,13 @@ async fn installation_uses_v2(
     let use_v2 = opencode_uses_v2(env::var("INLINE_BRIDGE_V2").ok().as_deref(), &version)
         .map_err(provider_setup_required)?;
     eprintln!(
-        "OpenCode {version}: bridge v{}, transport=acp",
-        if use_v2 { 2 } else { 1 }
+        "OpenCode {version}: bridge v{}, transport={}",
+        if use_v2 { 2 } else { 1 },
+        if use_v2 && opencode_native_for(&version) {
+            "native"
+        } else {
+            "acp"
+        }
     );
     if inline_agent_driver_acp::parse_opencode_version(&version).is_some_and(|v| v.major < 2) {
         eprintln!("{}", inline_agent_driver_acp::OPENCODE_V1_GUIDANCE);
@@ -3557,18 +3562,19 @@ async fn run_v2_provider(launch: V2Launch<'_>) -> Result<(), Box<dyn std::error:
 /// [`inline_agent_driver_opencode::CORE_FLOOR`] on. Older v2 releases, and
 /// `INLINE_OPENCODE_DRIVER=acp`, keep the ACP route.
 fn opencode_native_route(executable: &std::path::Path) -> bool {
+    opencode_startup_version(executable)
+        .ok()
+        .is_some_and(|version| opencode_native_for(&version))
+}
+
+/// Whether this OpenCode version takes the native route in this environment.
+fn opencode_native_for(version: &str) -> bool {
     if std::env::var("INLINE_OPENCODE_DRIVER").is_ok_and(|value| value.eq_ignore_ascii_case("acp"))
     {
         return false;
     }
-    let version = opencode_startup_version(executable)
-        .ok()
-        .as_deref()
-        .and_then(inline_agent_driver_opencode::version::parse);
-    match version {
-        Some(version) => inline_agent_driver_opencode::native_supported(&version),
-        None => false,
-    }
+    inline_agent_driver_opencode::version::parse(version)
+        .is_some_and(|version| inline_agent_driver_opencode::native_supported(&version))
 }
 
 /// v2 never runs what v1 accepted, so v1's open work is closed the way a v1
