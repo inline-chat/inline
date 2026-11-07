@@ -1203,7 +1203,20 @@ pub(crate) fn is_service_entry_point(data: &Path, executable: &Path) -> bool {
             .is_file()
 }
 
-pub(crate) fn update_statuses(config: &Config) -> Vec<BridgeUpdateStatus> {
+/// After an explicit `inline update`, asks every bridge behind the staged
+/// runtime to adopt it at its next idle moment. Returns how many will.
+pub(crate) fn request_update_activation(
+    config: &Config,
+    staged: &crate::update::Artifact,
+) -> usize {
+    bridge_roots(config)
+        .into_iter()
+        .filter(|root| root.join("activation.json").is_file())
+        .filter(|root| update_supervisor::request_activation(root, staged).unwrap_or(false))
+        .count()
+}
+
+fn bridge_roots(config: &Config) -> Vec<PathBuf> {
     let root = config.data_dir.join("bridge");
     let mut roots = vec![BridgePaths::legacy(config).root];
     if let Ok(entries) = fs::read_dir(root.join("accounts")) {
@@ -1215,6 +1228,10 @@ pub(crate) fn update_statuses(config: &Config) -> Vec<BridgeUpdateStatus> {
         );
     }
     roots
+}
+
+pub(crate) fn update_statuses(config: &Config) -> Vec<BridgeUpdateStatus> {
+    bridge_roots(config)
         .into_iter()
         .filter_map(|root| {
             if let Ok(state) = crate::update::store::read_json::<update_supervisor::Activation>(

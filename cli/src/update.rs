@@ -541,6 +541,11 @@ pub async fn perform(
         state.consecutive_failures = 0;
         Ok(())
     })?;
+    // Asked for by hand: running bridges adopt the staged runtime when next
+    // idle, without waiting out the automatic spacing between activations.
+    if !background && let Some(staged) = store.read()?.staged {
+        crate::bridge::request_update_activation(config, &staged);
+    }
     status(config)
 }
 

@@ -513,6 +513,59 @@ pub(super) fn request_rollback(paths: &BridgePaths, store: &Store) -> Result<Str
     Ok(previous.version.clone())
 }
 
+/// An explicit `inline update` asks the bridge to adopt the staged runtime at
+/// its next idle moment rather than after the automatic six-hour spacing.
+#[derive(Deserialize, Serialize)]
+struct ActivationRequest {
+    /// The runtime the request was made against.
+    from: String,
+    /// The staged runtime to adopt.
+    candidate: String,
+}
+
+fn activation_request_path(root: &Path) -> PathBuf {
+    root.join("activate-now.json")
+}
+
+/// Records the request for one bridge root; `false` when that bridge already
+/// runs this release or newer, or rejected it in an earlier trial.
+pub(crate) fn request_activation(root: &Path, staged: &Artifact) -> Result<bool, UpdateError> {
+    let state: Activation = read_json(&root.join("activation.json"))?;
+    if state.schema_version != 1
+        || state.rejected.contains(&staged.sha256)
+        || !update::newer(&staged.version, &state.current.version)?
+    {
+        return Ok(false);
+    }
+    atomic_json(
+        &activation_request_path(root),
+        &ActivationRequest {
+            from: state.current.sha256,
+            candidate: staged.sha256.clone(),
+        },
+    )?;
+    Ok(true)
+}
+
+/// Whether the owner asked for this staged runtime now. A request made
+/// against another runtime or candidate is stale and is removed.
+fn activation_requested(
+    state: &Activation,
+    paths: &BridgePaths,
+    staged: Option<&Artifact>,
+) -> bool {
+    let path = activation_request_path(&paths.root);
+    let Ok(request) = read_json::<ActivationRequest>(&path) else {
+        return false;
+    };
+    let current = request.from == state.current.sha256
+        && staged.is_some_and(|staged| staged.sha256 == request.candidate);
+    if !current {
+        let _ = fs::remove_file(path);
+    }
+    current
+}
+
 fn rollback_candidate(state: &Activation, paths: &BridgePaths) -> Option<Artifact> {
     let request: RollbackRequest = read_json(&rollback_path(paths)).ok()?;
     state
@@ -744,7 +797,10 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
         let policy = read_policy(&store);
         let rollback = rollback_candidate(&state, &paths);
         let manual = rollback.is_some();
-        if manual || (update::automatic_allowed() && policy.auto_update) {
+        // An explicit update skips the automatic spacing and policy, never
+        // the idle wait or the trial; `manual` still means rollback.
+        let requested = !manual && activation_requested(&state, &paths, policy.staged.as_ref());
+        if manual || requested || (update::automatic_allowed() && policy.auto_update) {
             if let Some(candidate) = rollback.or_else(|| {
                 policy.staged.clone().filter(|candidate| {
                     !state.rejected.contains(&candidate.sha256)
@@ -757,7 +813,7 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                     .is_some_and(|at| unix_now().saturating_sub(at) < 6 * 60 * 60);
                 if candidate.minimum_reader_schema_version > state.current.bridge_schema_version {
                     let _ = pending(&mut state, Some(&candidate), "maintenance_required", &paths);
-                } else if (manual || !throttled)
+                } else if (manual || requested || !throttled)
                     && pending(&mut state, Some(&candidate), "waiting_for_idle", &paths).is_ok()
                 {
                     if let Some(current) = &mut child {
@@ -774,7 +830,9 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                         // A preference change always wins before stopping a working process.
                         if ready && {
                             let latest = read_policy(&store);
-                            manual || (latest.revision == policy.revision && latest.auto_update)
+                            manual
+                                || requested
+                                || (latest.revision == policy.revision && latest.auto_update)
                         } {
                             let activated = activate(
                                 &mut state,
@@ -790,6 +848,9 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                             .await;
                             if manual {
                                 let _ = fs::remove_file(rollback_path(&paths));
+                            }
+                            if requested {
+                                let _ = fs::remove_file(activation_request_path(&paths.root));
                             }
                             match activated {
                                 Ok(updated) => child = Some(updated),
@@ -843,6 +904,9 @@ pub(super) async fn run(config_path: PathBuf) -> Result<(), Box<dyn std::error::
                         .ok();
                         if manual {
                             let _ = fs::remove_file(rollback_path(&paths));
+                        }
+                        if requested {
+                            let _ = fs::remove_file(activation_request_path(&paths.root));
                         }
                     }
                 }
@@ -1287,6 +1351,49 @@ mod tests {
         stop_with_timeout(&mut restored, &f.paths, &f.secrets, QUICK.stop)
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn update_explicit_request_names_one_newer_runtime_and_expires_when_stale() {
+        let f = Fixture::new();
+        let current = f.artifact("old");
+        let mut staged = f.artifact("healthy");
+        staged.version = "999.0.0".into();
+        let mut state = f.state(current.clone());
+        atomic_json(&journal(&f.paths), &state).unwrap();
+
+        // Nothing is asked for a runtime that is not newer.
+        assert!(!request_activation(&f.paths.root, &current).unwrap());
+        assert!(!activation_requested(&state, &f.paths, Some(&staged)));
+
+        assert!(request_activation(&f.paths.root, &staged).unwrap());
+        assert!(activation_requested(&state, &f.paths, Some(&staged)));
+        assert!(
+            activation_requested(&state, &f.paths, Some(&staged)),
+            "a request lasts until the activation consumes it"
+        );
+
+        // Another staged runtime is not what the owner asked for.
+        let mut other = staged.clone();
+        other.sha256 = "other".into();
+        assert!(!activation_requested(&state, &f.paths, Some(&other)));
+        assert!(
+            !activation_request_path(&f.paths.root).exists(),
+            "stale requests are removed"
+        );
+
+        // Once the bridge moved on, an old request is stale too.
+        assert!(request_activation(&f.paths.root, &staged).unwrap());
+        state.current = staged.clone();
+        assert!(!activation_requested(&state, &f.paths, Some(&staged)));
+        assert!(!activation_request_path(&f.paths.root).exists());
+
+        // A runtime that failed its trial is never requested again.
+        let mut rejected = f.state(current);
+        rejected.rejected.push(staged.sha256.clone());
+        atomic_json(&journal(&f.paths), &rejected).unwrap();
+        assert!(!request_activation(&f.paths.root, &staged).unwrap());
+        f.assert_account_unchanged();
     }
 
     #[test]
