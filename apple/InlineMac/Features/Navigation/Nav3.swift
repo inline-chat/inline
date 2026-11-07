@@ -157,6 +157,7 @@ class Nav3 {
   /// Message a side-pane thread was opened from, kept so the parent chat can anchor
   /// and highlight it before the message's thread card syncs. Not persisted.
   @ObservationIgnored private var replyThreadSourceMessage: (threadPeer: Peer, parentPeer: Peer, messageId: Int64)?
+  @ObservationIgnored private var replyThreadRedirectObserver: NSObjectProtocol?
 
   var history: [Nav3RouteState] = []
   var historyIndex: Int = -1
@@ -214,6 +215,34 @@ class Nav3 {
     )
     lastUsagePeer = currentReplyThreadPeer ?? currentRoute.selectedPeer
     isRestoringInitialState = false
+    replyThreadRedirectObserver = NotificationCenter.default.addObserver(
+      forName: ReplyThreadRedirect.notification,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let redirect = notification.object as? ReplyThreadRedirect else { return }
+      MainActor.assumeIsolated {
+        self?.redirectThread(from: .thread(id: redirect.reservedChatId), to: .thread(id: redirect.chatId))
+      }
+    }
+  }
+
+  deinit {
+    if let replyThreadRedirectObserver {
+      NotificationCenter.default.removeObserver(replyThreadRedirectObserver)
+    }
+  }
+
+  /// A reply thread opened on a reserved id turned out to already exist under
+  /// another id. Swap it everywhere in history so the pane and back stack follow.
+  func redirectThread(from oldPeer: Peer, to newPeer: Peer) {
+    let updated = history.map { $0.replacingThread(oldPeer, with: newPeer) }
+    if replyThreadSourceMessage?.threadPeer == oldPeer {
+      replyThreadSourceMessage?.threadPeer = newPeer
+    }
+    guard updated != history else { return }
+    history = updated
+    notifyRouteChange()
   }
 
   func open(_ route: Nav3Route, tracksChatNavigation: Bool = true) {
@@ -586,6 +615,19 @@ private enum Nav3ActiveSpaceStore {
 }
 
 private extension Nav3RouteState {
+  func replacingThread(_ oldPeer: Peer, with newPeer: Peer) -> Nav3RouteState {
+    let newRoute: Nav3Route = switch route {
+    case .chat(peer: oldPeer): .chat(peer: newPeer)
+    case let .chatInfo(peer: peer, query: query) where peer == oldPeer: .chatInfo(peer: newPeer, query: query)
+    default: route
+    }
+    return Nav3RouteState(
+      route: newRoute,
+      selectedSpaceId: selectedSpaceId,
+      replyThreadPeer: replyThreadPeer == oldPeer ? newPeer : replyThreadPeer
+    )
+  }
+
   func clearingReplyThread(_ peer: Peer) -> Nav3RouteState {
     guard replyThreadPeer == peer else { return self }
     return Nav3RouteState(route: route, selectedSpaceId: selectedSpaceId)

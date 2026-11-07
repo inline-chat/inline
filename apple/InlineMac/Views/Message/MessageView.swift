@@ -3780,6 +3780,15 @@ class MessageViewAppKit: NSView {
         return
       }
 
+      // Open on a reserved id right away; history and sends wait for the server.
+      if let reservedChatId = await dependencies.realtimeV2.createReplyThreadLocally(
+        parentChatId: message.chatId,
+        parentMessageId: message.messageId
+      ) {
+        openReplyThread(peer: .thread(id: reservedChatId), dependencies: dependencies, action: action)
+        return
+      }
+
       if !useInlineSpinner {
         ToastCenter.shared.showLoading("Creating thread…")
       }
