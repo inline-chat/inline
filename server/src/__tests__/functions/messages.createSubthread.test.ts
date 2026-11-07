@@ -426,6 +426,108 @@ describe("messages.createSubthread", () => {
     expect(children).toHaveLength(1)
   })
 
+  describe("reserved chat ids", () => {
+    async function setupAnchoredParent(email: string) {
+      const creator = await testUtils.createUser(email)
+      const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, creator.id)
+      if (!parentChat) {
+        throw new Error("Parent chat not created")
+      }
+      await testUtils.addParticipant(parentChat.id, creator.id)
+      await db.insert(schema.messages).values({
+        chatId: parentChat.id,
+        messageId: 1,
+        fromId: creator.id,
+        text: "reserved reply anchor",
+      })
+      return { creator, parentChat }
+    }
+
+    async function reserve(chatId: number, userId: number) {
+      await db.insert(schema.chatIdReservations).values({
+        chatId,
+        userId,
+        expiresAt: new Date(Date.now() + 86_400_000),
+      })
+    }
+
+    async function reservation(chatId: number) {
+      const [row] = await db
+        .select()
+        .from(schema.chatIdReservations)
+        .where(eq(schema.chatIdReservations.chatId, chatId))
+      return row
+    }
+
+    test("creates the reply thread under the reserved id and claims it", async () => {
+      const { creator, parentChat } = await setupAnchoredParent("subthread-reserved-creator@example.com")
+      const reservedChatId = 710_001
+      await reserve(reservedChatId, creator.id)
+
+      const result = await createSubthread(
+        {
+          parentChatId: BigInt(parentChat.id),
+          parentMessageId: 1n,
+          reservedChatId: BigInt(reservedChatId),
+        },
+        testUtils.functionContext({ userId: creator.id }),
+      )
+
+      expect(Number(result.chat.id)).toBe(reservedChatId)
+      expect(Number(result.chat.parentMessageId)).toBe(1)
+      expect((await reservation(reservedChatId))?.claimedAt).not.toBeNull()
+    })
+
+    test("rejects another user's reservation without creating a thread", async () => {
+      const { creator, parentChat } = await setupAnchoredParent("subthread-reserved-thief@example.com")
+      const owner = await testUtils.createUser("subthread-reserved-owner@example.com")
+      const reservedChatId = 710_002
+      await reserve(reservedChatId, owner.id)
+
+      await expect(
+        createSubthread(
+          {
+            parentChatId: BigInt(parentChat.id),
+            parentMessageId: 1n,
+            reservedChatId: BigInt(reservedChatId),
+          },
+          testUtils.functionContext({ userId: creator.id }),
+        ),
+      ).rejects.toBeInstanceOf(RealtimeRpcError)
+
+      const children = await db
+        .select({ id: schema.chats.id })
+        .from(schema.chats)
+        .where(eq(schema.chats.parentChatId, parentChat.id))
+      expect(children).toHaveLength(0)
+      expect((await reservation(reservedChatId))?.claimedAt).toBeNull()
+    })
+
+    test("returns the existing reply thread and leaves a losing reservation unclaimed", async () => {
+      const { creator, parentChat } = await setupAnchoredParent("subthread-reserved-race@example.com")
+      const existing = await createSubthread(
+        { parentChatId: BigInt(parentChat.id), parentMessageId: 1n },
+        testUtils.functionContext({ userId: creator.id }),
+      )
+      const reservedChatId = 710_003
+      await reserve(reservedChatId, creator.id)
+
+      const result = await createSubthread(
+        {
+          parentChatId: BigInt(parentChat.id),
+          parentMessageId: 1n,
+          reservedChatId: BigInt(reservedChatId),
+        },
+        testUtils.functionContext({ userId: creator.id }),
+      )
+
+      expect(result.chat.id).toBe(existing.chat.id)
+      expect((await reservation(reservedChatId))?.claimedAt).toBeNull()
+      const reservedChat = await db.select().from(schema.chats).where(eq(schema.chats.id, reservedChatId))
+      expect(reservedChat).toHaveLength(0)
+    })
+  })
+
   test("does not re-follow unfollowed anchor author when reusing existing reply thread", async () => {
     const creator = await testUtils.createUser("subthread-reuse-creator@example.com")
     const anchorAuthor = await testUtils.createUser("subthread-reuse-anchor-author@example.com")

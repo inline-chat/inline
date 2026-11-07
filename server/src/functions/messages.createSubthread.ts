@@ -1,7 +1,9 @@
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
+import type { Transaction } from "@in/server/db/types"
 import { chats, chatParticipants, userNotDeleted, users, type DbChat, type DbDialog } from "@in/server/db/schema"
+import { chatIdReservations } from "@in/server/db/schema/chatIdReservations"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
@@ -41,6 +43,7 @@ type Input = {
   emoji?: string
   participants?: { userId: bigint }[]
   agentContext?: AgentThreadContext
+  reservedChatId?: bigint
 }
 
 type Output = {
@@ -64,6 +67,11 @@ export async function createSubthread(input: Input, context: FunctionContext): P
   const parentMessageId = input.parentMessageId !== undefined ? Number(input.parentMessageId) : undefined
   if (parentMessageId !== undefined && (!Number.isSafeInteger(parentMessageId) || parentMessageId <= 0)) {
     throw RealtimeRpcError.MessageIdInvalid()
+  }
+
+  const reservedChatId = input.reservedChatId !== undefined ? Number(input.reservedChatId) : undefined
+  if (reservedChatId !== undefined && (!Number.isSafeInteger(reservedChatId) || reservedChatId <= 0)) {
+    throw RealtimeRpcError.BadRequest()
   }
 
   const parentChat = await getChatById(parentChatId)
@@ -164,6 +172,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     createdBy: context.currentUserId,
     directParticipantUserIds,
     agentContext,
+    reservedChatId,
   })
 
   const { dialogs: materializedDialogs } =
@@ -281,6 +290,7 @@ async function createSubthreadChat(input: {
   createdBy: number
   directParticipantUserIds: number[]
   agentContext?: AgentThreadContext
+  reservedChatId?: number
 }): Promise<DbChat> {
   try {
     const result = await db.transaction(async (tx): Promise<{
@@ -293,9 +303,15 @@ async function createSubthreadChat(input: {
         spaceId !== null ? { type: "space", id: spaceId } : { type: "user", id: input.createdBy },
       )
 
+      const reservedChatId = input.reservedChatId
+      if (reservedChatId !== undefined) {
+        await claimChatIdReservation(tx, { chatId: reservedChatId, userId: input.createdBy })
+      }
+
       const [chat] = await tx
         .insert(chats)
         .values({
+          ...(reservedChatId !== undefined ? { id: reservedChatId } : {}),
           type: "thread",
           spaceId,
           ...chatTitleFields(input.title ?? null, { spaceId, createdBy: input.createdBy }),
@@ -355,6 +371,34 @@ async function createSubthreadChat(input: {
 
     throw error
   }
+}
+
+/**
+ * Claims a client reservation inside the creating transaction. A unique-parent
+ * conflict rolls the claim back, so a client that lost the race keeps nothing
+ * claimed and receives the existing thread instead.
+ */
+async function claimChatIdReservation(tx: Transaction, input: { chatId: number; userId: number }): Promise<void> {
+  const [reservation] = await tx
+    .select()
+    .from(chatIdReservations)
+    .where(eq(chatIdReservations.chatId, input.chatId))
+    .for("update")
+    .limit(1)
+
+  if (
+    !reservation ||
+    reservation.userId !== input.userId ||
+    reservation.claimedAt !== null ||
+    reservation.expiresAt.getTime() <= Date.now()
+  ) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  await tx
+    .update(chatIdReservations)
+    .set({ claimedAt: new Date() })
+    .where(eq(chatIdReservations.chatId, input.chatId))
 }
 
 function requireMatchingAgentContext(chat: DbChat, requested: AgentThreadContext | undefined): void {
