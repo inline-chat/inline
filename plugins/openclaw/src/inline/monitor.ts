@@ -1404,6 +1404,14 @@ function isInlineBotCommandForOtherBot(msg: Message, meId: bigint): boolean {
   return target != null && target !== String(meId)
 }
 
+// Service notices (thread backlinks, member changes, ...) are system records, not
+// requests. They never wake the agent; Hermes and the bridge skip them the same way.
+function isInlineServiceMessage(msg: Message): boolean {
+  const record = msg as unknown as Record<string, unknown>
+  const raw = isRecord(record.raw) ? record.raw : undefined
+  return isRecord(record.serviceMessage) || isRecord(raw?.serviceMessage)
+}
+
 function isInlineAbortRequestMessage(msg: Message, botUsername: string | undefined, meId: bigint): boolean {
   const text = typeof msg.message === "string" ? msg.message : ""
   if (isInlineBotCommandForOtherBot(msg, meId)) return false
@@ -7938,6 +7946,7 @@ export async function monitorInlineProvider(params: {
             chatId: event.chatId,
           } as Message
           if (msg.out || msg.fromId === meId) return
+          if (isInlineServiceMessage(msg)) return
           if (!claimInlineInboundMessageInstance({
             seen: seenInboundMessageInstances,
             chatId: event.chatId,
@@ -7975,6 +7984,7 @@ export async function monitorInlineProvider(params: {
             chatId: event.chatId,
           } as Message
           if (msg.out || msg.fromId === meId) return
+          if (isInlineServiceMessage(msg)) return
           if (await handlePendingInlineVoiceEdit({ chatId: event.chatId, msg })) {
             return
           }
