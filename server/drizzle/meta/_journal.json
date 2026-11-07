@@ -1149,6 +1149,13 @@
       "when": 1794047630442,
       "tag": "0163_agent-settings",
       "breakpoints": true
+    },
+    {
+      "idx": 164,
+      "version": "7",
+      "when": 1794084603628,
+      "tag": "0164_agent-settings-legacy-writes",
+      "breakpoints": true
     }
   ]
 }

@@ -102,6 +102,10 @@ export async function updateAgentSettings(
   const memberAudience = currentRuntime ? await runtimeAudience(bot.id, ownerUserId) : []
   const now = new Date()
   const { saved, runtime, liveRuntime, liveSettings } = await db.transaction(async (tx) => {
+    // Legacy setters lock the runtime before the compatibility trigger writes
+    // settings. Keep that order during overlap and rollback to avoid deadlocks.
+    await tx.select({ botUserId: agentRuntimes.botUserId }).from(agentRuntimes)
+      .where(eq(agentRuntimes.botUserId, bot.id)).for("update").limit(1)
     const [saved] = await tx
       .insert(agentSettings)
       .values({ botUserId: bot.id, defaultOutputMode, updatedBy: currentUserId, updatedAt: now })

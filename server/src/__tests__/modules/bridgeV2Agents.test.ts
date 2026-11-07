@@ -322,6 +322,46 @@ describe("bridge v2 agent server", () => {
     await rejects(getAgentSettings({ botUserId: 0n }, ownerId), RpcError_Code.USER_ID_INVALID)
   })
 
+  test("legacy server writes preserve settings during rollout and rollback", async () => {
+    await reportAgentRuntime({ provider: AgentSessionProvider.CODEX, status: 1 }, botId)
+    await updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: AgentOutputMode.FRIENDLY }, ownerId)
+
+    // The deployed predecessor changes only the runtime table.
+    await db.update(agentRuntimes).set({ defaultOutputMode: AgentOutputMode.DETAILED, updatedAt: new Date() })
+      .where(eq(agentRuntimes.botUserId, botId))
+    const changed = await getAgentSettings({ botUserId: 0n }, botId)
+    expect([changed.settings?.defaultOutputMode, changed.settings?.revision])
+      .toEqual([AgentOutputMode.DETAILED, 2n])
+
+    await db.update(agentRuntimes).set({ defaultOutputMode: AgentOutputMode.UNSPECIFIED, updatedAt: new Date() })
+      .where(eq(agentRuntimes.botUserId, botId))
+    expect((await getAgentSettings({ botUserId: 0n }, botId)).settings?.defaultOutputMode)
+      .toBe(AgentOutputMode.UNSPECIFIED)
+
+    // The new setter's own mirror write does not increment the revision twice.
+    const saved = await updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: AgentOutputMode.FRIENDLY }, ownerId)
+    expect(saved.settings?.revision).toBe(4n)
+  })
+
+  test("a legacy first heartbeat inherits a bot's existing settings", async () => {
+    await updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: AgentOutputMode.FRIENDLY }, ownerId)
+    const [runtime] = await db.insert(agentRuntimes).values({
+      botUserId: botId, provider: AgentSessionProvider.CODEX, status: 1, lastSeenAt: new Date(),
+    }).returning()
+    expect(runtime?.defaultOutputMode).toBe(AgentOutputMode.FRIENDLY)
+    expect((await getAgentSettings({ botUserId: 0n }, botId)).settings?.revision).toBe(1n)
+  })
+
+  test("a legacy setter creates settings when the runtime used its default", async () => {
+    await reportAgentRuntime({ provider: AgentSessionProvider.CODEX, status: 1 }, botId)
+    expect((await getAgentSettings({ botUserId: 0n }, botId)).settings?.revision).toBe(0n)
+    await db.update(agentRuntimes).set({ defaultOutputMode: AgentOutputMode.FRIENDLY, updatedAt: new Date() })
+      .where(eq(agentRuntimes.botUserId, botId))
+    const changed = await getAgentSettings({ botUserId: 0n }, botId)
+    expect([changed.settings?.defaultOutputMode, changed.settings?.revision])
+      .toEqual([AgentOutputMode.FRIENDLY, 1n])
+  })
+
   test("bots can declare the output mode capability", () => {
     const [stored] = normalizeBotCapabilities([{ kind: BotCapability_Kind.OUTPUT_MODE, version: 1 }])
     expect(stored && toProtocolBotCapability({ kind: stored.kind, version: stored.version, payload: null })).toEqual({ kind: BotCapability_Kind.OUTPUT_MODE, version: 1, agentConfiguration: undefined })
