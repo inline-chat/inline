@@ -6,9 +6,11 @@ import type {
   ChannelMessageToolSchemaContribution,
 } from "openclaw/plugin-sdk/channel-contract"
 import {
-  normalizeInteractiveReply,
-  reduceInteractiveReply,
-  type InteractiveReplyButton,
+  isMessagePresentationInteractiveBlock,
+  resolveMessagePresentationButtonAction,
+  resolveMessagePresentationOptionAction,
+  type MessagePresentation,
+  type MessagePresentationAction,
 } from "openclaw/plugin-sdk/interactive-runtime"
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import {
@@ -37,7 +39,10 @@ import {
   sanitizeInlineActionLabel,
   sanitizeInlineVisibleText,
 } from "./outbound-sanitize.js"
-import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
+import {
+  normalizeInlineLegacyInteractivePresentation,
+  resolveInlineInteractiveTextFallback,
+} from "./interactive-fallback.js"
 import { assertInlineReadAllowed, captureInlineReadFence } from "./read-authority.js"
 import { buildInlineUserDisplayName, getSpaceMembersWithUsers } from "./space-members.js"
 import {
@@ -999,15 +1004,33 @@ function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] 
   return rows
 }
 
-function chunkInteractiveButtons(
-  buttons: readonly InteractiveReplyButton[],
+type InlinePresentationControl = {
+  label: string
+  action: MessagePresentationAction | undefined
+}
+
+/**
+ * Inline callback data for a presentation action. Commands and callbacks both
+ * travel as agent-owned callback data; URL, web-app, approval, question, and
+ * model-picker actions have no Inline callback form and stay in fallback text.
+ */
+function resolveInlinePresentationCallbackData(action: MessagePresentationAction | undefined) {
+  if (action?.type === "callback") return action.value
+  if (action?.type === "command") return action.command
+  return undefined
+}
+
+function chunkPresentationControls(
+  controls: readonly InlinePresentationControl[],
   rows: InlineReplyMarkupButton[][],
 ) {
-  for (let i = 0; i < buttons.length; i += INLINE_ACTION_MAX_PER_ROW) {
+  for (let i = 0; i < controls.length; i += INLINE_ACTION_MAX_PER_ROW) {
     const row: InlineReplyMarkupButton[] = []
-    for (const button of buttons.slice(i, i + INLINE_ACTION_MAX_PER_ROW)) {
-      const text = sanitizeInlineActionLabel(button.label)
-      const callbackData = sanitizeInlineActionCallbackData(button.value)
+    for (const control of controls.slice(i, i + INLINE_ACTION_MAX_PER_ROW)) {
+      const text = sanitizeInlineActionLabel(control.label)
+      const callbackData = sanitizeInlineActionCallbackData(
+        resolveInlinePresentationCallbackData(control.action),
+      )
       if (!text || !callbackData) continue
       row.push({ text, kind: "callback", callbackData })
     }
@@ -1016,6 +1039,40 @@ function chunkInteractiveButtons(
     rows.push(row)
     if (rows.length >= INLINE_ACTION_MAX_ROWS) return
   }
+}
+
+function buildInlinePresentationRows(presentation: MessagePresentation): InlineReplyMarkupButton[][] {
+  const rows: InlineReplyMarkupButton[][] = []
+  for (const block of presentation.blocks) {
+    if (rows.length >= INLINE_ACTION_MAX_ROWS) break
+    if (!isMessagePresentationInteractiveBlock(block)) continue
+    const controls: InlinePresentationControl[] =
+      block.type === "buttons"
+        ? block.buttons.map((button) => ({
+            label: button.label,
+            action: resolveMessagePresentationButtonAction(button),
+          }))
+        : block.options.map((option) => ({
+            label: option.label,
+            action: resolveMessagePresentationOptionAction(option),
+          }))
+    chunkPresentationControls(controls, rows)
+  }
+  return rows
+}
+
+/**
+ * Render presentation buttons/selects as Inline `channelData.inline.buttons`
+ * rows, the same shape agent-authored `buttons` use.
+ */
+export function buildInlinePresentationButtons(
+  presentation: MessagePresentation,
+): Array<Array<{ text: string; callback_data: string }>> {
+  return buildInlinePresentationRows(presentation).map((row) =>
+    row.flatMap((button) =>
+      button.kind === "callback" ? [{ text: button.text, callback_data: button.callbackData }] : [],
+    ),
+  )
 }
 
 function resolveInlineInteractiveButtonsParam(
@@ -1038,30 +1095,12 @@ function resolveInlineInteractiveButtonsParam(
     }
   }
 
-  const interactive = normalizeInteractiveReply(rawInteractive)
-  if (!interactive) {
+  const presentation = normalizeInlineLegacyInteractivePresentation(rawInteractive)
+  if (!presentation) {
     return undefined
   }
 
-  const rows = reduceInteractiveReply(interactive, [] as InlineReplyMarkupButton[][], (state, block) => {
-    if (state.length >= INLINE_ACTION_MAX_ROWS) {
-      return state
-    }
-    if (block.type === "buttons") {
-      chunkInteractiveButtons(block.buttons, state)
-      return state
-    }
-    if (block.type === "select") {
-      chunkInteractiveButtons(
-        block.options.map((option) => ({
-          label: option.label,
-          ...(option.value !== undefined ? { value: option.value } : {}),
-        })),
-        state,
-      )
-    }
-    return state
-  })
+  const rows = buildInlinePresentationRows(presentation)
   return rows.length > 0 ? rows : undefined
 }
 

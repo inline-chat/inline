@@ -3,7 +3,7 @@ import type {
   ChannelApprovalKind,
   PendingApprovalView,
 } from "openclaw/plugin-sdk/approval-handler-runtime"
-import { createChannelApprovalNativeRuntimeAdapter } from "openclaw/plugin-sdk/approval-handler-runtime"
+import { createChannelApprovalNativeRuntimeAdapterAsync } from "openclaw/plugin-sdk/approval-handler-runtime"
 import { buildChannelApprovalNativeTargetKey } from "openclaw/plugin-sdk/approval-native-runtime"
 import {
   buildExecApprovalPendingReplyPayload,
@@ -221,7 +221,17 @@ function buildPendingPayload(params: {
   }
 }
 
-export const inlineApprovalNativeRuntime = createChannelApprovalNativeRuntimeAdapter<
+// Named through the public factory because the SDK does not export the async adapter type.
+type InlineApprovalNativeRuntimeAdapter = ReturnType<
+  typeof createChannelApprovalNativeRuntimeAdapterAsync<
+    InlinePendingDelivery,
+    InlinePreparedTarget,
+    InlinePendingApproval,
+    never
+  >
+>
+
+export const inlineApprovalNativeRuntime: InlineApprovalNativeRuntimeAdapter = createChannelApprovalNativeRuntimeAdapterAsync<
   InlinePendingDelivery,
   InlinePreparedTarget,
   InlinePendingApproval,
@@ -238,10 +248,10 @@ export const inlineApprovalNativeRuntime = createChannelApprovalNativeRuntimeAda
           })
         : false
     },
-    shouldHandle: (params) => {
+    shouldHandle: async (params) => {
       const resolved = resolveHandlerContext(params)
       return resolved
-        ? shouldHandleInlineExecApprovalRequest({
+        ? await shouldHandleInlineExecApprovalRequest({
             cfg: params.cfg,
             accountId: resolved.accountId,
             request: params.request,

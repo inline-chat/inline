@@ -1,11 +1,14 @@
 import { resolveApprovalApprovers } from "openclaw/plugin-sdk/approval-auth-runtime"
 import {
-  createChannelExecApprovalProfile,
+  createChannelExecApprovalProfileAsync,
   isChannelExecApprovalClientEnabledFromConfig,
   isChannelExecApprovalTargetRecipient,
   matchesApprovalRequestFilters,
 } from "openclaw/plugin-sdk/approval-client-runtime"
-import { resolveApprovalRequestChannelAccountId } from "openclaw/plugin-sdk/approval-native-runtime"
+import {
+  resolveApprovalRequestChannelAccountIdAsync,
+  type ApprovalRequestSessionDelivery,
+} from "openclaw/plugin-sdk/approval-native-runtime"
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import {
   normalizeLowercaseStringOrEmpty,
@@ -154,11 +157,15 @@ function matchesExplicitInlineForwardTargetAccount(params: {
   )
 }
 
-function matchesInlineRequestAccount(params: {
+type InlineApprovalRequestParams = {
   cfg: OpenClawConfig
   accountId?: string | null
   request: ApprovalRequest
-}): boolean {
+  /** Host-prepared session routing facts; reused instead of re-reading the session store. */
+  sessionDelivery?: ApprovalRequestSessionDelivery | null
+}
+
+async function matchesInlineRequestAccount(params: InlineApprovalRequestParams): Promise<boolean> {
   const explicitTargetMatch = matchesExplicitInlineForwardTargetAccount(params)
   if (explicitTargetMatch !== undefined) {
     return explicitTargetMatch
@@ -166,10 +173,11 @@ function matchesInlineRequestAccount(params: {
   const turnSourceChannel = normalizeLowercaseStringOrEmpty(
     params.request.request.turnSourceChannel,
   )
-  const boundAccountId = resolveApprovalRequestChannelAccountId({
+  const boundAccountId = await resolveApprovalRequestChannelAccountIdAsync({
     cfg: params.cfg,
     request: params.request,
     channel: "inline",
+    ...(params.sessionDelivery !== undefined ? { sessionDelivery: params.sessionDelivery } : {}),
   })
   if (turnSourceChannel && turnSourceChannel !== "inline" && !boundAccountId) {
     return (
@@ -186,7 +194,7 @@ function matchesInlineRequestAccount(params: {
   )
 }
 
-const inlineExecApprovalProfile = createChannelExecApprovalProfile({
+const inlineExecApprovalProfile = createChannelExecApprovalProfileAsync({
   resolveConfig: resolveInlineExecApprovalConfig,
   resolveApprovers: getInlineExecApprovalApprovers,
   normalizeSenderId: normalizeInlineDirectUserId,
@@ -201,8 +209,17 @@ export const isInlineExecApprovalApprover = inlineExecApprovalProfile.isApprover
 export const isInlineExecApprovalAuthorizedSender =
   inlineExecApprovalProfile.isAuthorizedSender
 export const resolveInlineExecApprovalTarget = inlineExecApprovalProfile.resolveTarget
-export const shouldHandleInlineExecApprovalRequest =
-  inlineExecApprovalProfile.shouldHandleRequest
+
+/**
+ * Whether this Inline account should handle a forwarded approval request.
+ * Async because request-to-account binding may read the owning session through
+ * the host worker; pass `sessionDelivery` when the host already supplied it.
+ */
+export function shouldHandleInlineExecApprovalRequest(
+  params: InlineApprovalRequestParams,
+): Promise<boolean> {
+  return inlineExecApprovalProfile.shouldHandleRequest(params)
+}
 
 export function isInlineExecApprovalHandlerConfigured(params: {
   cfg: OpenClawConfig

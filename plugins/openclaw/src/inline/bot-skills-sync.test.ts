@@ -17,7 +17,7 @@ describe("inline/bot-skills-sync", () => {
       resolveAgentRoute: () => ({ agentId: "main" }),
     }))
     vi.doMock("openclaw/plugin-sdk/skill-commands-runtime", () => ({
-      listSkillCommandsForAgents: () => [
+      prepareSkillCommandsForAgents: () => [
         {
           name: "data_analysis",
           displayName: "Data Analysis",
@@ -73,7 +73,7 @@ describe("inline/bot-skills-sync", () => {
       resolveAgentRoute: () => ({ agentId: "main" }),
     }))
     vi.doMock("openclaw/plugin-sdk/skill-commands-runtime", () => ({
-      listSkillCommandsForAgents: () => [],
+      prepareSkillCommandsForAgents: () => [],
     }))
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true, result: {} }), {

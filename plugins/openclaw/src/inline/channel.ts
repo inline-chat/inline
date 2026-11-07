@@ -15,8 +15,8 @@ import {
 } from "openclaw/plugin-sdk/channel-outbound"
 import { PlatformMessageNotDispatchedError } from "openclaw/plugin-sdk/error-runtime"
 import {
-  presentationToInteractiveReply,
   renderMessagePresentationFallbackText,
+  type MessagePresentation,
 } from "openclaw/plugin-sdk/interactive-runtime"
 import {
   buildDmGroupAccountAllowlistAdapter,
@@ -69,6 +69,7 @@ import {
   resolveInlineGroupToolPolicy,
 } from "./policy.js"
 import {
+  buildInlinePresentationButtons,
   inlineMessageActions,
   resolveInlineMessageActionsParam,
   supportsInlineMessageButtonsForConfig,
@@ -725,6 +726,32 @@ function resolveInlinePayloadActions(payload: Record<string, unknown>): MessageA
   return resolveInlineMessageActionsParam(payload)
 }
 
+/**
+ * Carry rendered presentation controls to sendPayload as Inline button rows.
+ * Explicit Inline or Telegram-compatible buttons already on the payload win,
+ * matching resolveInlinePayloadActions precedence.
+ */
+function resolveInlinePresentationChannelData(
+  channelData: Record<string, unknown> | undefined,
+  presentation: MessagePresentation,
+): { channelData?: Record<string, unknown> } {
+  const inlineData = asRecord(channelData?.inline)
+  const telegramData = asRecord(channelData?.telegram)
+  if (Object.hasOwn(inlineData ?? {}, "buttons") || Object.hasOwn(telegramData ?? {}, "buttons")) {
+    return {}
+  }
+  const buttons = buildInlinePresentationButtons(presentation)
+  if (buttons.length === 0) {
+    return {}
+  }
+  return {
+    channelData: {
+      ...channelData,
+      inline: { ...inlineData, buttons },
+    },
+  }
+}
+
 function formatInlineResultChatId(target: InlineParsedOutboundTarget): string {
   if (target.kind === "user") {
     return `user:${target.normalizedNumeric}`
@@ -1296,17 +1323,18 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
     selects: true,
     context: true,
     divider: false,
+    charts: false,
+    tables: false,
   },
   renderPresentation: ({ payload, presentation }) => {
     const text = renderMessagePresentationFallbackText({
       ...(payload.text !== undefined ? { text: payload.text } : {}),
       presentation,
     })
-    const interactive = presentationToInteractiveReply(presentation)
     return {
       ...payload,
       text,
-      ...(interactive ? { interactive } : {}),
+      ...resolveInlinePresentationChannelData(payload.channelData, presentation),
     }
   },
   sendPayload: async (context) => {
@@ -1331,7 +1359,8 @@ const inlineOutbound: NonNullable<ChannelPlugin<ResolvedInlineAccount>["outbound
     const text =
       resolveInlineInteractiveTextFallback({
         text: payload.text ?? undefined,
-        interactive: payload.interactive,
+        // Untyped legacy input from producers that still emit `interactive`.
+        interactive: (payload as Record<string, unknown>).interactive,
         presentation: payload.presentation,
       }) ??
       payload.text ??
