@@ -355,6 +355,66 @@ pub(crate) async fn send_markdown(
     sent_message_id(&result.updates, random_id).ok_or(ApiError::UnexpectedResult("SendMessage"))
 }
 
+/// A message sent with mentioned users added to its thread.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct SentMessage {
+    pub message_id: i64,
+    /// Mentioned users Inline added to the thread for this message.
+    pub added_user_ids: Vec<i64>,
+    /// Mentioned users not in the thread whom this bot may not add.
+    pub unadded_user_ids: Vec<i64>,
+}
+
+/// Sends Markdown text like [`send_markdown`], asking Inline to add mentioned
+/// users who are not in the thread yet (when this bot may add them), so the
+/// message reaches them.
+pub(crate) async fn send_markdown_adding_mentions(
+    bot: &InlineClient,
+    chat_id: i64,
+    reply_to: Option<i64>,
+    text: &str,
+    random_id: i64,
+) -> ApiResult<SentMessage> {
+    let result = call!(
+        bot,
+        SendMessage,
+        proto::SendMessageInput {
+            peer_id: Some(chat_peer(chat_id)),
+            message: Some(text.to_owned()),
+            reply_to_msg_id: reply_to,
+            random_id: Some(random_id),
+            parse_markdown: Some(true),
+            add_mentioned_users: Some(true),
+            ..Default::default()
+        }
+    )?;
+    let message_id = sent_message_id(&result.updates, random_id)
+        .ok_or(ApiError::UnexpectedResult("SendMessage"))?;
+    Ok(SentMessage {
+        message_id,
+        added_user_ids: result.added_user_ids,
+        unadded_user_ids: result.unadded_user_ids,
+    })
+}
+
+/// People and agents this bot or its owner has a relationship with.
+pub(crate) async fn get_contacts(
+    bot: &InlineClient,
+    query: Option<String>,
+    kind: proto::ContactKind,
+    limit: i32,
+) -> ApiResult<proto::GetContactsResult> {
+    call!(
+        bot,
+        GetContacts,
+        proto::GetContactsInput {
+            query,
+            kind: Some(kind as i32),
+            limit: Some(limit),
+        }
+    )
+}
+
 /// Moves a work's publication into a subthread of its chat (spec §5.2).
 pub(crate) async fn move_session(
     bot: &InlineClient,
@@ -395,8 +455,32 @@ pub(crate) async fn edit_markdown(
 pub(crate) struct Names {
     bot: InlineClient,
     cache: tokio::sync::Mutex<std::collections::HashMap<i64, String>>,
-    /// Whether each user is a bot, for senders the local store has not met.
-    bots: tokio::sync::Mutex<std::collections::HashMap<i64, bool>>,
+    /// Whether each user is a bot (an agent), and the person a bot acts for.
+    bots: tokio::sync::Mutex<std::collections::HashMap<i64, Kind>>,
+}
+
+/// Whether a user is a bot, and for whom it acts (`User.bot_info`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Kind {
+    pub bot: bool,
+    pub owner_user_id: Option<i64>,
+}
+
+impl Kind {
+    pub(crate) fn of(user: &proto::User) -> Self {
+        let bot = user.bot.unwrap_or(false);
+        Self {
+            bot,
+            owner_user_id: bot.then(|| bot_owner(user)).flatten(),
+        }
+    }
+}
+
+/// The person a bot acts for, from `User.bot_info`.
+pub(crate) fn bot_owner(user: &proto::User) -> Option<i64> {
+    match user.bot_info.as_ref()?.owner.as_ref()? {
+        proto::bot_info::Owner::OwnerUserId(id) => Some(*id).filter(|id| *id > 0),
+    }
 }
 
 impl Names {
@@ -411,22 +495,37 @@ impl Names {
     /// Whether the user is a bot (an agent), asking Inline once when the
     /// store does not know. Unknown counts as a person.
     pub(crate) async fn is_bot(&self, user_id: i64) -> bool {
-        if let Some(bot) = self.bots.lock().await.get(&user_id) {
-            return *bot;
+        self.kind(user_id).await.bot
+    }
+
+    /// The person a bot acts for; `None` for people and unknown owners.
+    pub(crate) async fn owner_of(&self, user_id: i64) -> Option<i64> {
+        self.kind(user_id).await.owner_user_id
+    }
+
+    /// Whether the user is a bot and whom it acts for, asking Inline once.
+    /// A failed lookup is not cached and counts as a person.
+    pub(crate) async fn kind(&self, user_id: i64) -> Kind {
+        if let Some(kind) = self.bots.lock().await.get(&user_id) {
+            return *kind;
         }
         let Some(user) = get_users(&self.bot, vec![user_id])
             .await
             .ok()
             .and_then(|users| users.into_iter().find(|user| user.id == user_id))
         else {
-            return false;
+            return Kind::default();
         };
-        let bot = user.bot.unwrap_or(false);
-        self.bots.lock().await.insert(user_id, bot);
-        if let Some(name) = display_name(&user) {
-            self.remember(user_id, name).await;
+        self.learn(&user).await;
+        Kind::of(&user)
+    }
+
+    /// Caches what a fetched user says about itself.
+    pub(crate) async fn learn(&self, user: &proto::User) {
+        self.bots.lock().await.insert(user.id, Kind::of(user));
+        if let Some(name) = display_name(user) {
+            self.remember(user.id, name).await;
         }
-        bot
     }
 
     pub(crate) async fn remember(&self, user_id: i64, name: String) {
@@ -453,7 +552,7 @@ impl Names {
     }
 }
 
-fn display_name(user: &proto::User) -> Option<String> {
+pub(crate) fn display_name(user: &proto::User) -> Option<String> {
     let full = [user.first_name.as_deref(), user.last_name.as_deref()]
         .into_iter()
         .flatten()

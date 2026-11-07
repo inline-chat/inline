@@ -353,7 +353,6 @@ async fn service_messages_are_skipped_but_identical_human_text_still_runs() {
     message.metadata.is_service = false;
     message.metadata.sender_is_bot = Some(false);
     runtime.agent.names.remember(1, "Owner".into()).await;
-    runtime.loop_roots.insert(10, 10);
     runtime.on_message(&message).await.unwrap();
     cleanup.tasks.push(runtime.works.remove(&10).unwrap().task);
     until(|| harness.session.sends.load(Ordering::SeqCst) == 1).await;

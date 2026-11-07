@@ -108,6 +108,10 @@ pub enum MessageEntity {
 pub struct ReplyRef {
     pub message_id: i64,
     pub author_user_id: i64,
+    /// The replied-to message has a mention entity of this message's author:
+    /// its author asked them, so this reply may be the answer (a hand-back).
+    #[serde(default)]
+    pub mentions_author: bool,
 }
 
 /// One inbound Inline message with the facts the group layer needs.
@@ -405,6 +409,7 @@ mod tests {
         message.reply_to = Some(ReplyRef {
             message_id: 1,
             author_user_id: 99,
+            mentions_author: true,
         });
         let back: GroupMessage =
             serde_json::from_value(serde_json::to_value(&message).unwrap()).unwrap();

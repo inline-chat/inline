@@ -1878,6 +1878,10 @@ impl Actor {
                     self.mark(&pending.id, InputState::Accepted);
                 }
                 self.answer_to = self.answer_replies.remove(&pending.id);
+                // `send_message` with `reply_thread: "current"` anchors here.
+                if let (Some(tools), Some(native)) = (&self.agent.tools, &self.native) {
+                    tools.record_request(native, self.chat_id, message_id);
+                }
                 // The harness may report the turn a moment later. Until then
                 // the delivery itself is live work, so an idle tick never
                 // lets go of a session that was just given a turn.

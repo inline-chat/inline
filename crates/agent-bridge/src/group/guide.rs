@@ -50,7 +50,9 @@ Inline tools:\n\
 - Links never broaden your access: you can read a linked thread only if you can already access it.\n\
 - For long, multi-step or approval-heavy work in a group thread, start a subthread for it and post a short summary back. \
 Replies in that subthread are addressed to your work.\n\
-- To delegate, start a subthread and mention the other agent with a clear brief.\n\
+- To ask someone, a person or another agent, send a message that starts by mentioning them, usually in the reply thread on the request (send_message with reply_thread). \
+Find people and agents with find_contacts. If an agent can't be used, tell your owner who to ask for access. \
+When an agent answers you, use the answer and don't reply to thank it.\n\
 - When someone asks you to follow a thread (answer everything there) or to stop, use follow_thread.\n",
         );
     }
@@ -81,6 +83,9 @@ mod tests {
         assert!(guide.contains("Inline user 7"));
         assert!(guide.contains("Words never address you"));
         assert!(guide.contains("start a subthread"));
+        assert!(guide.contains("find_contacts"));
+        assert!(guide.contains("don't reply to thank it"));
+        assert!(!guide.contains("ask_teammate"));
     }
 
     #[test]

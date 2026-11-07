@@ -1810,6 +1810,14 @@ fn validate_schema_value(
     schema: &serde_json::Value,
     multiline: bool,
 ) -> Result<(), ()> {
+    // One of several shapes (`integer | "current"`).
+    if let Some(options) = schema.get("anyOf").and_then(serde_json::Value::as_array) {
+        return options
+            .iter()
+            .any(|option| validate_schema_value(value, option, multiline).is_ok())
+            .then_some(())
+            .ok_or(());
+    }
     match schema.get("type").and_then(serde_json::Value::as_str) {
         Some("integer") => {
             let value = value.as_i64().ok_or(())?;

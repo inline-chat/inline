@@ -5336,7 +5336,10 @@ async fn send_messages_with_attachments(
     }
 
     let _ = (peer_summary, caption);
-    Ok(proto::SendMessageResult { updates })
+    Ok(proto::SendMessageResult {
+        updates,
+        ..Default::default()
+    })
 }
 
 async fn handle_messages_export(

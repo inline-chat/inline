@@ -70,7 +70,9 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     read("list_my_threads", ToolTarget::None),
     read("get_reactions", ToolTarget::Accessible),
     read("list_pins", ToolTarget::Accessible),
-    // Send, reply, mention, react, pin.
+    // People and agents the agent (or its owner) knows, to mention and ask.
+    read("find_contacts", ToolTarget::None),
+    // Send, reply, mention (asking a person or agent), react, pin.
     write("send_message", ToolTarget::Accessible, false),
     write("add_reaction", ToolTarget::Accessible, false),
     write("remove_reaction", ToolTarget::Accessible, false),
@@ -81,8 +83,6 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     write("create_chat", ToolTarget::None, true),
     write("start_subthread", ToolTarget::CurrentWork, false),
     write("return_attachment", ToolTarget::CurrentWork, true),
-    // Ask a teammate (a question mention in the current work).
-    write("ask_teammate", ToolTarget::CurrentWork, false),
     // Follow or unfollow a thread, as people do with /follow.
     write("follow_thread", ToolTarget::Accessible, false),
 ];
@@ -224,7 +224,7 @@ mod tests {
             "create_chat",
             "start_subthread",
             "return_attachment",
-            "ask_teammate",
+            "find_contacts",
         ] {
             assert!(tool(name).is_some(), "{name}");
         }
@@ -235,6 +235,8 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), TOOL_CATALOG.len());
+        // Asking someone is a message that mentions them.
+        assert!(tool("ask_teammate").is_none());
         assert!(
             TOOL_CATALOG
                 .iter()

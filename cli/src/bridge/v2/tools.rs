@@ -19,9 +19,9 @@ use inline_agent_bridge::{
     HostToolSpec, ProviderId, ProviderSessionId,
 };
 use inline_client::{
-    ChatCreateParticipant, CreateThreadRequest, DialogRecord, DialogsOrder, DialogsRequest,
-    EditMessageRequest, ExternalId, HistoryPage, HistoryRequest, InlineClient, InlineId,
-    PinMessageRequest, ReactRequest,
+    ChatCreateParticipant, CreateReplyThreadRequest, CreateThreadRequest, DialogRecord,
+    DialogsOrder, DialogsRequest, EditMessageRequest, ExternalId, HistoryPage, HistoryRequest,
+    InlineClient, InlineId, PinMessageRequest, ReactRequest,
 };
 use inline_protocol::proto;
 use serde_json::{Value, json};
@@ -76,6 +76,9 @@ pub(crate) struct Tools {
     /// Follow choices made here or by /follow, newest wins, so intake sees
     /// them on the next message.
     follows: Mutex<HashMap<i64, bool>>,
+    /// Session → the message (chat, message) that started its latest turn,
+    /// for `reply_thread: "current"`.
+    requests: Mutex<HashMap<String, (i64, i64)>>,
 }
 
 impl Tools {
@@ -87,6 +90,7 @@ impl Tools {
             folders: Mutex::new(HashMap::new()),
             sent: Arc::new(Mutex::new(HashSet::new())),
             follows: Mutex::new(HashMap::new()),
+            requests: Mutex::new(HashMap::new()),
         })
     }
 
@@ -101,6 +105,14 @@ impl Tools {
 
     pub(crate) fn record_follow(&self, chat: i64, follow: bool) {
         self.follows.lock().expect("follows").insert(chat, follow);
+    }
+
+    /// The work's harness took the input from `message` in `chat`.
+    pub(crate) fn record_request(&self, session: &ProviderSessionId, chat: i64, message: i64) {
+        self.requests
+            .lock()
+            .expect("tool requests")
+            .insert(session.as_str().to_owned(), (chat, message));
     }
 
     pub(crate) fn configuration(self: &Arc<Self>) -> HostToolConfiguration {
@@ -176,6 +188,10 @@ impl Tools {
         self.folders
             .lock()
             .expect("tool folders")
+            .remove(session.as_str());
+        self.requests
+            .lock()
+            .expect("tool requests")
             .remove(session.as_str());
     }
 
@@ -333,19 +349,8 @@ impl Tools {
                 ),
                 Err(_) => HostToolResult::failure("Inline chat is unavailable to this agent."),
             },
-            "send_message" => {
-                let Some(text) = string_arg(arguments, "text", MAX_TEXT_CHARS) else {
-                    return HostToolResult::failure("text is required.");
-                };
-                self.send(
-                    chat,
-                    positive_i64(arguments, "reply_to_message_id"),
-                    &text,
-                    "v2-send-message",
-                    &call.call_id,
-                )
-                .await
-            }
+            "send_message" => self.send_message(arguments, work, chat, call).await,
+            "find_contacts" => self.find_contacts(arguments).await,
             "add_reaction" | "remove_reaction" => {
                 let (Some(message_id), Some(reaction)) = (
                     positive_i64(arguments, "message_id"),
@@ -464,7 +469,6 @@ impl Tools {
                 )
                 .await
             }
-            "ask_teammate" => self.ask_teammate(arguments, work.chat, call).await,
             _ => HostToolResult::failure("Unknown Inline tool."),
         }
     }
@@ -683,30 +687,164 @@ impl Tools {
         }
     }
 
-    async fn ask_teammate(
+    /// `send_message`: in the chat, or in the reply thread on a message
+    /// (created or reused), adding mentioned users who aren't there yet. The
+    /// result says, per mention, whether they were added and whether a
+    /// mentioned agent will answer.
+    async fn send_message(
         &self,
         arguments: &Value,
+        work: &Work,
         chat: i64,
         call: &HostToolCall,
     ) -> HostToolResult {
-        let (Some(user_id), Some(question)) = (
-            positive_i64(arguments, "user_id"),
-            string_arg(arguments, "question", MAX_TEXT_CHARS),
-        ) else {
-            return HostToolResult::failure("user_id and question are required.");
+        let Some(text) = string_arg(arguments, "text", MAX_TEXT_CHARS) else {
+            return HostToolResult::failure("text is required.");
         };
-        let name = match string_arg(arguments, "name", 120) {
-            Some(name) => name,
-            None => api::get_users(&self.config.bot, vec![user_id])
+        let anchor = match arguments.get("reply_thread") {
+            None => None,
+            Some(Value::String(current)) if current == "current" => {
+                match self
+                    .requests
+                    .lock()
+                    .expect("tool requests")
+                    .get(work.session.as_str())
+                    .copied()
+                {
+                    Some(request) => Some(request),
+                    None => {
+                        return HostToolResult::failure(
+                            "No message started this work's current turn; pass a message ID as reply_thread.",
+                        );
+                    }
+                }
+            }
+            Some(value) => match value.as_i64().filter(|id| *id > 0) {
+                Some(message_id) => Some((chat, message_id)),
+                None => {
+                    return HostToolResult::failure("reply_thread is a message ID or \"current\".");
+                }
+            },
+        };
+        let destination = match anchor {
+            None => chat,
+            Some((parent, message_id)) => match self
+                .config
+                .bot
+                .create_reply_thread(CreateReplyThreadRequest {
+                    parent_chat_id: InlineId::new(parent),
+                    parent_message_id: Some(InlineId::new(message_id)),
+                    title: None,
+                    description: None,
+                    emoji: None,
+                    participants: Vec::new(),
+                    agent_context: None,
+                })
                 .await
-                .ok()
-                .and_then(|users| users.into_iter().next())
-                .and_then(|user| user.first_name.or(user.username))
-                .unwrap_or_else(|| "teammate".to_owned()),
+            {
+                Ok(created) => created.chat_id.get(),
+                Err(_) => {
+                    return HostToolResult::failure(
+                        "Inline could not open the reply thread on that message.",
+                    );
+                }
+            },
         };
-        let text = format!("{} {question}", mention(&name, user_id));
-        self.send(chat, None, &text, "v2-ask-teammate", &call.call_id)
+        // A retried call reuses its random ID, so the server deduplicates it.
+        let random_id = interaction_random_id("v2-send-message", &call.call_id).get();
+        let sent = match api::send_markdown_adding_mentions(
+            &self.config.bot,
+            destination,
+            positive_i64(arguments, "reply_to_message_id"),
+            &text,
+            random_id,
+        )
+        .await
+        {
+            Ok(sent) => sent,
+            Err(_) => return HostToolResult::failure("Inline could not send the message."),
+        };
+        self.sent.lock().expect("sent").insert(sent.message_id);
+        let mentioned: Vec<i64> = mentioned_user_ids(&text)
+            .into_iter()
+            .filter(|id| *id != self.config.bot_user_id)
+            .collect();
+        let reach = self.reach(&mentioned).await;
+        let mut result = json!({"chat_id": destination, "message_id": sent.message_id});
+        if anchor.is_some() {
+            result["link"] = json!(format!("inline://chat?id={destination}"));
+        }
+        if !mentioned.is_empty() {
+            result["mentions"] = json!(mention_report(&mentioned, &sent, &reach));
+        }
+        HostToolResult::success(result.to_string())
+    }
+
+    /// Whether each mentioned bot would answer this agent: `None` for people
+    /// and for what Inline did not say.
+    async fn reach(&self, user_ids: &[i64]) -> HashMap<i64, Reach> {
+        let mut reach = HashMap::new();
+        if user_ids.is_empty() {
+            return reach;
+        }
+        let Ok(users) = api::get_users(&self.config.bot, user_ids.to_vec()).await else {
+            return reach;
+        };
+        for user in users.iter().filter(|user| user.bot.unwrap_or(false)) {
+            // Contacts carry what this agent (and its owner) may do with the
+            // bot. Looked up by username, the most specific query.
+            let query = user
+                .username
+                .clone()
+                .or_else(|| api::display_name(user))
+                .unwrap_or_default();
+            let can_use = match api::get_contacts(
+                &self.config.bot,
+                Some(query),
+                proto::ContactKind::Bots,
+                50,
+            )
             .await
+            {
+                Ok(result) => Some(
+                    result
+                        .contacts
+                        .iter()
+                        .find(|contact| contact.user_id == user.id)
+                        .is_some_and(contact_can_use),
+                ),
+                Err(_) => None,
+            };
+            reach.insert(
+                user.id,
+                Reach {
+                    can_use,
+                    offline: is_offline(user),
+                },
+            );
+        }
+        reach
+    }
+
+    /// `find_contacts`: people and agents this agent or its owner knows, with
+    /// what this agent may do with each agent.
+    async fn find_contacts(&self, arguments: &Value) -> HostToolResult {
+        let kind = match arguments.get("kind").and_then(Value::as_str) {
+            Some("people") => proto::ContactKind::People,
+            Some("bots") => proto::ContactKind::Bots,
+            _ => proto::ContactKind::All,
+        };
+        match api::get_contacts(
+            &self.config.bot,
+            string_arg(arguments, "query", 200),
+            kind,
+            bounded_limit(arguments, 20, 50) as i32,
+        )
+        .await
+        {
+            Ok(result) => json_value_result(&project_contacts(&result)),
+            Err(_) => HostToolResult::failure("Inline contacts are unavailable."),
+        }
     }
 
     async fn through_work(&self, work: &Work, tool: WorkTool) -> HostToolResult {
@@ -818,6 +956,147 @@ fn mention(name: &str, user_id: i64) -> String {
     format!("[@{label}](inline://user?id={user_id})")
 }
 
+/// Users mentioned in Markdown text (`[@Name](inline://user?id=N)`), in order,
+/// without repeats.
+fn mentioned_user_ids(text: &str) -> Vec<i64> {
+    const LINK: &str = "inline://user?id=";
+    let mut ids = Vec::new();
+    for (start, _) in text.match_indices(LINK) {
+        let digits: String = text[start + LINK.len()..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        if let Some(id) = digits.parse::<i64>().ok().filter(|id| *id > 0)
+            && !ids.contains(&id)
+        {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+/// Whether a mentioned bot will answer this agent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Reach {
+    /// This agent (or its owner) may use the bot; `None` when unknown.
+    can_use: Option<bool>,
+    offline: bool,
+}
+
+/// This agent may start work on the contact: it (or its owner) manages the
+/// bot or holds INVOKE on it.
+fn contact_can_use(contact: &proto::Contact) -> bool {
+    contact.manages_bot
+        || contact
+            .bot_operations
+            .contains(&(proto::AgentGrantOperation::Invoke as i32))
+}
+
+fn is_offline(user: &proto::User) -> bool {
+    user.status
+        .as_ref()
+        .is_some_and(|status| status.online == proto::user_status::Status::Offline as i32)
+}
+
+/// Per mention: `added` to the thread, `already_in` it, or `cant_add` (not a
+/// contact of this agent or its owner, or not in the space). Mentioned agents
+/// that won't answer get `wont_respond`: `no_access` (no INVOKE, not managed)
+/// or `offline`. Notes for the agent to pass on, not failures.
+fn mention_report(
+    mentioned: &[i64],
+    sent: &api::SentMessage,
+    reach: &HashMap<i64, Reach>,
+) -> Vec<Value> {
+    mentioned
+        .iter()
+        .map(|user_id| {
+            let status = if sent.added_user_ids.contains(user_id) {
+                "added"
+            } else if sent.unadded_user_ids.contains(user_id) {
+                "cant_add"
+            } else {
+                "already_in"
+            };
+            let mut row = json!({"user_id": user_id, "status": status});
+            if let Some(reach) = reach.get(user_id) {
+                row["is_bot"] = json!(true);
+                if reach.can_use == Some(false) {
+                    row["wont_respond"] = json!("no_access");
+                } else if reach.offline {
+                    row["wont_respond"] = json!("offline");
+                }
+            }
+            row
+        })
+        .collect()
+}
+
+fn relation_name(relation: i32) -> Option<&'static str> {
+    use proto::ContactRelation as Relation;
+    Some(match Relation::try_from(relation).ok()? {
+        Relation::Unspecified => return None,
+        Relation::SharedChat => "shared_chat",
+        Relation::SharedSpace => "shared_space",
+        Relation::Managed => "managed",
+        Relation::Owner => "owner",
+        Relation::CanUse => "can_use",
+        Relation::UsesYourBot => "uses_your_bot",
+    })
+}
+
+/// Compact contact rows: who they are, how they're known, whether this agent
+/// may use a bot, and how to mention them.
+fn project_contacts(result: &proto::GetContactsResult) -> Value {
+    let users: HashMap<i64, &proto::User> =
+        result.users.iter().map(|user| (user.id, user)).collect();
+    let name = |user_id: i64| {
+        users
+            .get(&user_id)
+            .and_then(|user| api::display_name(user))
+            .unwrap_or_else(|| format!("user {user_id}"))
+    };
+    let rows: Vec<Value> = result
+        .contacts
+        .iter()
+        .map(|contact| {
+            let user = users.get(&contact.user_id);
+            let is_bot = user.is_some_and(|user| user.bot.unwrap_or(false));
+            let display = name(contact.user_id);
+            let mut row = json!({
+                "user_id": contact.user_id,
+                "name": display,
+                "username": user.and_then(|user| user.username.clone()),
+                "is_bot": is_bot,
+                "relations": contact
+                    .relations
+                    .iter()
+                    .filter_map(|relation| relation_name(*relation))
+                    .collect::<Vec<_>>(),
+                "via_owner": contact.via_owner,
+                "mention": mention(&display, contact.user_id),
+            });
+            if let Some(status) = user.and_then(|user| user.status.as_ref()) {
+                match proto::user_status::Status::try_from(status.online) {
+                    Ok(proto::user_status::Status::Online) => row["online"] = json!(true),
+                    Ok(proto::user_status::Status::Offline) => row["online"] = json!(false),
+                    _ => {}
+                }
+            }
+            if is_bot {
+                row["can_use"] = json!(contact_can_use(contact));
+                if let Some(owner) = user.and_then(|user| api::bot_owner(user)) {
+                    row["owner"] = json!({"user_id": owner, "name": name(owner)});
+                }
+            }
+            if let Some(date) = contact.last_interaction_date {
+                row["last_interaction_date"] = json!(date);
+            }
+            row
+        })
+        .collect();
+    json!({"contacts": rows})
+}
+
 fn project_chat(result: &proto::GetChatResult) -> Value {
     let chat = result.chat.as_ref();
     json!({
@@ -897,11 +1176,15 @@ pub(crate) fn specs() -> Vec<HostToolSpec> {
         ),
         ("get_reactions", "Get the reactions on one message."),
         ("list_pins", "List pinned message IDs in a chat."),
+        (
+            "find_contacts",
+            "Find people and agents you or your owner know, to mention and ask. Each row has the mention to use; for agents, can_use says whether you may ask them and owner says whose they are.",
+        ),
     ];
     let writes = [
         (
             "send_message",
-            "Send a message (default: this work's thread). Markdown; mention with [@Name](inline://user?id=ID), link a thread with [Title](inline://chat?id=ID). Mentioning an agent wakes it: never start reciprocal agent loops.",
+            "Send a message (default: this work's thread). Markdown; mention with [@Name](inline://user?id=ID), link a thread with [Title](inline://chat?id=ID). To ask a person or agent, start the message with their mention, usually with reply_thread to post in the reply thread on a message (\"current\": the message that started this turn). Mentioned people and agents not in the thread are added when you may. The result reports each mention: added, already_in or cant_add, and wont_respond (no_access, offline) for agents that won't answer. Mentioning an agent wakes it: never start reciprocal agent loops.",
         ),
         ("add_reaction", "Add a reaction to a message."),
         ("remove_reaction", "Remove your reaction from a message."),
@@ -925,10 +1208,6 @@ pub(crate) fn specs() -> Vec<HostToolSpec> {
         (
             "return_attachment",
             "Send a local file from your folder to this work's thread as native Inline media, only when a person asked to receive it. Choose image, video or file from their request.",
-        ),
-        (
-            "ask_teammate",
-            "Ask a person or agent in this work's thread a question, mentioning them.",
         ),
         (
             "follow_thread",
@@ -995,8 +1274,26 @@ fn input_schema(name: &str) -> Value {
             &["message_id"],
         ),
         "send_message" => (
-            json!({"chat_id": chat_id, "text": text, "reply_to_message_id": message_id}),
+            json!({
+                "chat_id": chat_id,
+                "text": text,
+                "reply_to_message_id": message_id,
+                "reply_thread": {
+                    "anyOf": [
+                        {"type": "integer", "minimum": 1},
+                        {"type": "string", "const": "current"},
+                    ],
+                },
+            }),
             &["text"],
+        ),
+        "find_contacts" => (
+            json!({
+                "query": {"type": "string", "minLength": 1, "maxLength": 200},
+                "kind": {"type": "string", "enum": ["all", "people", "bots"]},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+            }),
+            &[],
         ),
         "add_reaction" | "remove_reaction" => (
             json!({
@@ -1054,14 +1351,6 @@ fn input_schema(name: &str) -> Value {
                 "action": {"type": "string", "enum": ["status", "follow", "unfollow"]},
             }),
             &["action"],
-        ),
-        "ask_teammate" => (
-            json!({
-                "user_id": {"type": "integer", "minimum": 1},
-                "question": text,
-                "name": {"type": "string", "minLength": 1, "maxLength": 120},
-            }),
-            &["user_id", "question"],
         ),
         _ => (json!({}), &[]),
     };
@@ -1123,6 +1412,166 @@ mod tests {
         assert_eq!(parse_link("inline://user/5"), None);
         assert_eq!(parse_link("in://chat/-3"), None);
         assert_eq!(parse_link("not a link"), None);
+    }
+
+    #[test]
+    fn mentions_are_read_from_markdown_links() {
+        assert_eq!(
+            mentioned_user_ids(
+                "[@Dena](inline://user?id=8) and [@Codex](inline://user?id=41), [@Dena](inline://user?id=8)"
+            ),
+            vec![8, 41]
+        );
+        assert!(mentioned_user_ids("no mentions, inline://user?id=x").is_empty());
+    }
+
+    #[test]
+    fn each_mention_reports_whether_it_was_added_and_will_answer() {
+        let sent = api::SentMessage {
+            message_id: 1,
+            added_user_ids: vec![8, 41],
+            unadded_user_ids: vec![9],
+        };
+        let reach = HashMap::from([
+            (
+                41,
+                Reach {
+                    can_use: Some(false),
+                    offline: true,
+                },
+            ),
+            (
+                42,
+                Reach {
+                    can_use: Some(true),
+                    offline: true,
+                },
+            ),
+            (
+                43,
+                Reach {
+                    can_use: Some(true),
+                    offline: false,
+                },
+            ),
+        ]);
+        let report = mention_report(&[8, 9, 41, 42, 43], &sent, &reach);
+        assert_eq!(report[0], json!({"user_id": 8, "status": "added"}));
+        assert_eq!(report[1], json!({"user_id": 9, "status": "cant_add"}));
+        assert_eq!(
+            report[2],
+            json!({"user_id": 41, "status": "added", "is_bot": true, "wont_respond": "no_access"})
+        );
+        assert_eq!(
+            report[3],
+            json!({"user_id": 42, "status": "already_in", "is_bot": true, "wont_respond": "offline"})
+        );
+        assert_eq!(
+            report[4],
+            json!({"user_id": 43, "status": "already_in", "is_bot": true})
+        );
+    }
+
+    #[test]
+    fn contacts_project_to_compact_rows() {
+        let owner = proto::User {
+            id: 7,
+            first_name: Some("Dena".into()),
+            username: Some("dena".into()),
+            status: Some(proto::UserStatus {
+                online: proto::user_status::Status::Online as i32,
+                last_online: None,
+            }),
+            ..Default::default()
+        };
+        let codex = proto::User {
+            id: 41,
+            first_name: Some("Dena's Codex".into()),
+            username: Some("dena_codex_bot".into()),
+            bot: Some(true),
+            bot_info: Some(proto::BotInfo {
+                owner: Some(proto::bot_info::Owner::OwnerUserId(7)),
+            }),
+            status: Some(proto::UserStatus {
+                online: proto::user_status::Status::Offline as i32,
+                last_online: None,
+            }),
+            ..Default::default()
+        };
+        let result = proto::GetContactsResult {
+            contacts: vec![
+                proto::Contact {
+                    user_id: 41,
+                    relations: vec![
+                        proto::ContactRelation::SharedSpace as i32,
+                        proto::ContactRelation::CanUse as i32,
+                    ],
+                    via_owner: true,
+                    bot_operations: vec![proto::AgentGrantOperation::Invoke as i32],
+                    ..Default::default()
+                },
+                proto::Contact {
+                    user_id: 7,
+                    relations: vec![proto::ContactRelation::SharedChat as i32],
+                    last_interaction_date: Some(100),
+                    ..Default::default()
+                },
+            ],
+            users: vec![owner, codex],
+        };
+        let rows = project_contacts(&result);
+        assert_eq!(
+            rows["contacts"][0],
+            json!({
+                "user_id": 41,
+                "name": "Dena's Codex",
+                "username": "dena_codex_bot",
+                "is_bot": true,
+                "relations": ["shared_space", "can_use"],
+                "via_owner": true,
+                "mention": "[@Dena's Codex](inline://user?id=41)",
+                "online": false,
+                "can_use": true,
+                "owner": {"user_id": 7, "name": "Dena"},
+            })
+        );
+        let person = &rows["contacts"][1];
+        assert_eq!(person["is_bot"], json!(false));
+        assert_eq!(person["online"], json!(true));
+        assert_eq!(person["last_interaction_date"], json!(100));
+        assert!(person.get("can_use").is_none());
+        // Without INVOKE or management, an agent can't be used.
+        assert!(!contact_can_use(&proto::Contact {
+            bot_operations: vec![proto::AgentGrantOperation::Steer as i32],
+            ..Default::default()
+        }));
+        assert!(contact_can_use(&proto::Contact {
+            manages_bot: true,
+            ..Default::default()
+        }));
+    }
+
+    #[test]
+    fn reply_thread_takes_a_message_or_current() {
+        let schema = input_schema("send_message");
+        for arguments in [
+            json!({"text": "hi", "reply_thread": 12}),
+            json!({"text": "hi", "reply_thread": "current"}),
+        ] {
+            assert!(
+                validate_tool_arguments(&arguments, &schema).is_ok(),
+                "{arguments}"
+            );
+        }
+        for arguments in [
+            json!({"text": "hi", "reply_thread": 0}),
+            json!({"text": "hi", "reply_thread": "latest"}),
+        ] {
+            assert!(
+                validate_tool_arguments(&arguments, &schema).is_err(),
+                "{arguments}"
+            );
+        }
     }
 
     #[test]

@@ -37,7 +37,7 @@ use crate::bridge::runtime::{BotAgentResolver, mentioned_agent_id};
 use super::api::{self, Notify, chat_peer};
 use super::doc::DocBuilder;
 use super::folders::{FolderSource, Folders};
-use super::intake::{MessageFacts, grants_by_user, group_message};
+use super::intake::{MessageFacts, grants_by_user, group_message, mentions_user};
 use super::ledger::{Begin, InputState, Ledger, input_id};
 use super::render::{ActionStyle, QUESTION_FORM_ID, Vocabulary};
 use super::settings;
@@ -68,8 +68,6 @@ struct Reconnect {
 /// Messages of a group thread an agent sees when it joins.
 const JOIN_CONTEXT_MESSAGES: u32 = 40;
 const JOIN_CONTEXT_BYTES: usize = 24 * 1024;
-/// Parents followed to find a subthread tree's root.
-const LOOP_SCOPE_DEPTH: usize = 8;
 /// Ancestors of the trigger's reply chain read into the join context.
 const JOIN_REPLY_CHAIN: usize = 5;
 /// Settled ledger records are kept this long for replay detection.
@@ -110,10 +108,14 @@ impl V2Config {
     }
 }
 
-/// Grants from `listAgentGrants`, cached until a grant update arrives.
+/// Grants from `listAgentGrants`, cached until a grant update arrives. An
+/// agent sender acts for its owner: it also gets what its owner may delegate
+/// here (use and steer), so the owner's other agents and agents of people
+/// with access work without grants of their own.
 struct Access {
     bot: InlineClient,
     owner_user_id: i64,
+    names: Arc<api::Names>,
     cache: tokio::sync::Mutex<Option<HashMap<i64, Grants>>>,
 }
 
@@ -121,29 +123,43 @@ impl Access {
     async fn invalidate(&self) {
         *self.cache.lock().await = None;
     }
+
+    /// The user's own grants, without acting-for.
+    async fn own(&self, user_id: i64) -> Grants {
+        if user_id == self.owner_user_id {
+            return Grants::OWNER;
+        }
+        let mut cache = self.cache.lock().await;
+        if cache.is_none() {
+            match api::list_grants(&self.bot).await {
+                Ok(result) => *cache = Some(grants_by_user(&result)),
+                Err(error) => {
+                    // Unknown grants admit nobody but the owner.
+                    log::warn!(target: "inline::bridge::v2", "grants unavailable: {error}");
+                    return Grants::NONE;
+                }
+            }
+        }
+        cache
+            .as_ref()
+            .and_then(|grants| grants.get(&user_id).copied())
+            .unwrap_or_default()
+    }
 }
 
 impl AccessSource for Access {
     fn grants(&self, user_id: i64) -> futures_util::future::BoxFuture<'_, Grants> {
         Box::pin(async move {
-            if user_id == self.owner_user_id {
-                return Grants::OWNER;
+            let own = self.own(user_id).await;
+            if own.owner {
+                return own;
             }
-            let mut cache = self.cache.lock().await;
-            if cache.is_none() {
-                match api::list_grants(&self.bot).await {
-                    Ok(result) => *cache = Some(grants_by_user(&result)),
-                    Err(error) => {
-                        // Unknown grants admit nobody but the owner.
-                        log::warn!(target: "inline::bridge::v2", "grants unavailable: {error}");
-                        return Grants::NONE;
-                    }
-                }
-            }
-            cache
-                .as_ref()
-                .and_then(|grants| grants.get(&user_id).copied())
-                .unwrap_or_default()
+            let owner = match self.names.owner_of(user_id).await {
+                // A bot never inherits from itself.
+                Some(owner) if owner != user_id => Some(self.own(owner).await),
+                _ => None,
+            };
+            Grants::acting_for(own, owner)
         })
     }
 }
@@ -218,9 +234,8 @@ pub(crate) struct Runtime {
     published: Option<Vec<BotCapability>>,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
+    /// Agent-only hops per thread (the chat the messages are in).
     loop_guards: LoopGuards,
-    /// Chat → the root of its subthread tree, the loop cap's scope.
-    loop_roots: HashMap<i64, i64>,
     skills: Option<SkillPublisher>,
     /// Skills by thread folder, briefly: Amp takes seconds to list them.
     listed_skills: HashMap<PathBuf, (tokio::time::Instant, Vec<Skill>)>,
@@ -237,12 +252,13 @@ impl Runtime {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let ledger = Arc::new(Ledger::open(&config.ledger_path)?);
         let (moves_tx, moves) = mpsc::unbounded_channel();
+        let names = Arc::new(api::Names::new(bot.clone()));
         let access = Arc::new(Access {
             bot: bot.clone(),
             owner_user_id: config.owner_user_id,
+            names: names.clone(),
             cache: tokio::sync::Mutex::new(None),
         });
-        let names = Arc::new(api::Names::new(bot.clone()));
         // Each thread's settings, as a previous run left them.
         let mut thread_settings = HashMap::new();
         let mut bound_configs = HashMap::new();
@@ -305,7 +321,6 @@ impl Runtime {
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
             loop_guards: LoopGuards::default(),
-            loop_roots: HashMap::new(),
             skills: None,
             listed_skills: HashMap::new(),
             agent_profiles: None,
@@ -956,31 +971,6 @@ impl Runtime {
         }
     }
 
-    /// The loop cap counts a whole subthread tree, so agents handing work
-    /// to each other through subthreads share one count (spec §5.1 rule 6).
-    async fn loop_scope(&mut self, chat_id: i64) -> i64 {
-        if let Some(root) = self.loop_roots.get(&chat_id) {
-            return *root;
-        }
-        let mut root = chat_id;
-        for _ in 0..LOOP_SCOPE_DEPTH {
-            let parent = self
-                .agent
-                .bot
-                .chat_state(InlineId::new(root))
-                .await
-                .ok()
-                .and_then(|state| state.dialog)
-                .and_then(|dialog| dialog.parent_chat_id);
-            match parent {
-                Some(parent) => root = parent.get(),
-                None => break,
-            }
-        }
-        self.loop_roots.insert(chat_id, root);
-        root
-    }
-
     /// Agents went back and forth here without a person: this agent stops
     /// answering other agents and says so, with one tap to allow more.
     async fn loop_cap_reached(&self, chat_id: i64, limit: u32) {
@@ -1012,8 +1002,7 @@ impl Runtime {
         {
             return Some(NO_ACCESS.to_owned());
         }
-        let scope = self.loop_scope(chat_id).await;
-        self.loop_guards.extend(scope, DEFAULT_LOOP_CAP_HOPS);
+        self.loop_guards.extend(chat_id, DEFAULT_LOOP_CAP_HOPS);
         let text = format!(
             "{} answers other agents here again, for {DEFAULT_LOOP_CAP_HOPS} more agent messages.",
             self.config.agent_name
@@ -2076,13 +2065,22 @@ impl Runtime {
         } else {
             Conversation::Group
         };
-        let reply_author = message.reply_to_message_id.map(|id| {
-            if self.agent.sent.lock().expect("sent").contains(&id.get()) {
-                self.config.bot_user_id
-            } else {
-                0
+        let sender_is_bot = message.metadata.sender_is_bot.unwrap_or(false);
+        // The person an agent sender acts for (`User.bot_info`).
+        let author_owner = if sender_is_bot {
+            self.agent.names.owner_of(message.sender_id.get()).await
+        } else {
+            None
+        };
+        let (reply_author, reply_mentions_author) = match message.reply_to_message_id {
+            Some(id) => {
+                let (author, mentions) = self
+                    .replied_to(chat_id, id.get(), message.sender_id.get(), sender_is_bot)
+                    .await;
+                (Some(author), mentions)
             }
-        });
+            None => (None, false),
+        };
         let group = group_message(
             message,
             MessageFacts {
@@ -2090,6 +2088,8 @@ impl Runtime {
                 bot_username: &self.config.bot_username,
                 conversation,
                 reply_author,
+                reply_mentions_author,
+                author_owner,
                 author_name: self.agent.names.of(message.sender_id.get()).await,
             },
         );
@@ -2116,8 +2116,9 @@ impl Runtime {
             .works
             .get(&chat_id)
             .map_or(WorkPhase::None, |work| *work.phase.borrow());
-        let scope = self.loop_scope(chat_id).await;
-        let loop_verdict = self.loop_guards.record(scope, group.author.kind.is_agent());
+        let loop_verdict = self
+            .loop_guards
+            .record(chat_id, group.author.kind.is_agent());
         if let LoopVerdict::CapReached {
             limit,
             notify_owners: true,
@@ -2210,6 +2211,37 @@ impl Runtime {
                 Ok(())
             }
             IntakeDecision::Skip { .. } => Ok(()),
+        }
+    }
+
+    /// Who wrote the replied-to message (0 when unknown), and whether it
+    /// mentioned `sender`: a reply to this agent's message from someone it
+    /// mentioned is the answer it asked for (a hand-back). Read from Inline,
+    /// not remembered, so it holds across restarts. Only this agent's known
+    /// messages and agent senders' replies are looked up.
+    async fn replied_to(
+        &self,
+        chat_id: i64,
+        reply_id: i64,
+        sender: i64,
+        sender_is_bot: bool,
+    ) -> (i64, bool) {
+        let mine = self.agent.sent.lock().expect("sent").contains(&reply_id);
+        let known = if mine { self.config.bot_user_id } else { 0 };
+        if !mine && !sender_is_bot {
+            return (known, false);
+        }
+        match api::get_messages(&self.agent.bot, chat_id, vec![reply_id]).await {
+            Ok(messages) => messages
+                .iter()
+                .find(|replied| replied.id == reply_id)
+                .map_or((known, false), |replied| {
+                    (replied.from_id, mentions_user(replied, sender))
+                }),
+            Err(error) => {
+                log::debug!(target: "inline::bridge::v2", "chat={chat_id} reply lookup failed: {error}");
+                (known, false)
+            }
         }
     }
 
@@ -2406,7 +2438,10 @@ impl Runtime {
                 input: Box::new(input),
                 pending,
                 message_id: group.message_id,
-                answer_reply: matches!(group.conversation, Conversation::Group),
+                // An agent's answer to this agent's request is not quoted:
+                // quoting would wake it again.
+                answer_reply: matches!(group.conversation, Conversation::Group)
+                    && !(required == Operation::HandBack && group.author.kind.is_agent()),
                 reply_to: group.reply_to.as_ref().map(|reply| reply.message_id),
             })
             .await

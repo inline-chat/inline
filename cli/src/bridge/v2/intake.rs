@@ -14,8 +14,13 @@ pub(crate) struct MessageFacts<'a> {
     pub bot_user_id: i64,
     pub bot_username: &'a str,
     pub conversation: Conversation,
-    /// Author of the replied-to message, when it is known locally.
+    /// Author of the replied-to message (0 when unknown); `None` without a
+    /// reply.
     pub reply_author: Option<i64>,
+    /// The replied-to message mentions this message's author.
+    pub reply_mentions_author: bool,
+    /// For a bot author, the person it acts for, when known.
+    pub author_owner: Option<i64>,
     pub author_name: String,
 }
 
@@ -88,7 +93,7 @@ pub(crate) fn group_message(message: &MessageRecord, facts: MessageFacts<'_>) ->
             display_name: facts.author_name,
             kind: if is_bot {
                 AuthorKind::Agent {
-                    owner_user_id: None,
+                    owner_user_id: facts.author_owner,
                     work: None,
                 }
             } else {
@@ -103,10 +108,21 @@ pub(crate) fn group_message(message: &MessageRecord, facts: MessageFacts<'_>) ->
             |(message_id, author)| ReplyRef {
                 message_id: message_id.get(),
                 author_user_id: author,
+                mentions_author: facts.reply_mentions_author,
             },
         ),
         sent_at: message.timestamp,
     }
+}
+
+/// Whether a fetched message has a mention entity of `user_id`.
+pub(crate) fn mentions_user(message: &proto::Message, user_id: i64) -> bool {
+    use proto::message_entity::Entity;
+    message.entities.as_ref().is_some_and(|entities| {
+        entities.entities.iter().any(|entity| {
+            matches!(&entity.entity, Some(Entity::Mention(mention)) if mention.user_id == user_id)
+        })
+    })
 }
 
 /// `/stop@claude_bot` → (`stop`, target). A suffix naming another bot gets a
@@ -190,6 +206,8 @@ mod tests {
             bot_username: "codex_bot",
             conversation: Conversation::Group,
             reply_author: None,
+            reply_mentions_author: false,
+            author_owner: None,
             author_name: "Mo".into(),
         }
     }
@@ -256,6 +274,63 @@ mod tests {
             facts(),
         );
         assert_eq!(classify_addressee(&theirs, BOT), AddresseeKind::Others);
+    }
+
+    #[test]
+    fn bot_authors_carry_their_owner_and_replies_their_hand_back_fact() {
+        let mut bot_record = record("The tests pass.", Vec::new());
+        bot_record.metadata.sender_is_bot = Some(true);
+        bot_record.reply_to_message_id = Some(InlineId::new(4));
+        let message = group_message(
+            &bot_record,
+            MessageFacts {
+                reply_author: Some(BOT),
+                reply_mentions_author: true,
+                author_owner: Some(3),
+                ..facts()
+            },
+        );
+        assert_eq!(
+            message.author.kind,
+            AuthorKind::Agent {
+                owner_user_id: Some(3),
+                work: None
+            }
+        );
+        assert_eq!(
+            message.reply_to,
+            Some(ReplyRef {
+                message_id: 4,
+                author_user_id: BOT,
+                mentions_author: true,
+            })
+        );
+        assert!(inline_agent_bridge::group::is_hand_back(&message, BOT));
+    }
+
+    #[test]
+    fn fetched_mentions_are_read_from_entities() {
+        let replied = proto::Message {
+            id: 4,
+            from_id: BOT,
+            entities: Some(proto::MessageEntities {
+                entities: vec![proto::MessageEntity {
+                    r#type: proto::message_entity::Type::Mention as i32,
+                    offset: 0,
+                    length: 6,
+                    entity: Some(proto::message_entity::Entity::Mention(
+                        proto::message_entity::MessageEntityMention {
+                            user_id: 41,
+                            agent_id: None,
+                        },
+                    )),
+                }],
+            }),
+            ..Default::default()
+        };
+        assert!(mentions_user(&replied, 41));
+        assert!(!mentions_user(&replied, 42));
+        assert!(!mentions_user(&proto::Message::default(), 41));
     }
 
     #[test]
