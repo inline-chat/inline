@@ -205,7 +205,26 @@ pub(crate) async fn list_grants(bot: &InlineClient) -> ApiResult<proto::ListAgen
     call!(
         bot,
         ListAgentGrants,
-        proto::ListAgentGrantsInput { bot_user_id: 0 }
+        proto::ListAgentGrantsInput {
+            bot_user_id: 0,
+            include_all_subjects: Some(true),
+        }
+    )
+}
+
+/// What one user may do with this bot, as the server resolves it: their grants,
+/// their spaces' and groups', and what the person a bot acts for may delegate.
+pub(crate) async fn get_agent_access(
+    bot: &InlineClient,
+    user_id: i64,
+) -> ApiResult<proto::GetAgentAccessResult> {
+    call!(
+        bot,
+        GetAgentAccess,
+        proto::GetAgentAccessInput {
+            bot_user_id: 0,
+            user_id,
+        }
     )
 }
 
@@ -249,6 +268,7 @@ pub(crate) async fn grant_use(bot: &InlineClient, user_id: i64) -> ApiResult<()>
                 proto::AgentGrantOperation::Invoke as i32,
                 proto::AgentGrantOperation::Steer as i32,
             ],
+            subject: None,
         }
     )?;
     Ok(())
@@ -261,6 +281,7 @@ pub(crate) async fn delete_grant(bot: &InlineClient, user_id: i64) -> ApiResult<
         proto::DeleteAgentGrantInput {
             bot_user_id: 0,
             user_id,
+            subject: None,
         }
     )?;
     Ok(())

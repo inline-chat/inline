@@ -1555,8 +1555,8 @@ struct BotsAccessGrantArgs {
     #[arg(long, help = "Bot user id")]
     bot_user_id: i64,
 
-    #[arg(long, help = "User id to grant access to")]
-    user_id: i64,
+    #[command(flatten)]
+    subject: BotsAccessSubjectArgs,
 
     #[arg(
         long,
@@ -1573,8 +1573,22 @@ struct BotsAccessUserArgs {
     #[arg(long, help = "Bot user id")]
     bot_user_id: i64,
 
-    #[arg(long, help = "User id to revoke")]
-    user_id: i64,
+    #[command(flatten)]
+    subject: BotsAccessSubjectArgs,
+}
+
+/// Who an access grant is for: one person, everyone in a space, or everyone in a user group.
+#[derive(Args, Clone, Debug)]
+#[group(required = true, multiple = false)]
+pub(crate) struct BotsAccessSubjectArgs {
+    #[arg(long, help = "A person's user id")]
+    pub(crate) user_id: Option<i64>,
+
+    #[arg(long, help = "Everyone in this space (you must be a member)")]
+    pub(crate) space_id: Option<i64>,
+
+    #[arg(long, help = "Everyone in this user group")]
+    pub(crate) group_id: Option<i64>,
 }
 
 #[derive(Args)]
@@ -8508,7 +8522,7 @@ mod cli_parsing_tests {
                         command: BotsAccessCommand::Grant(args),
                     },
             } => {
-                assert_eq!(args.user_id, 7);
+                assert_eq!(args.subject.user_id, Some(7));
                 assert!(args.operations.is_empty());
             }
             _ => panic!("expected bots access grant"),
@@ -8561,7 +8575,7 @@ mod cli_parsing_tests {
                     BotsCommand::Access {
                         command: BotsAccessCommand::Revoke(args),
                     },
-            } => assert_eq!((args.bot_user_id, args.user_id), (9, 7)),
+            } => assert_eq!((args.bot_user_id, args.subject.user_id), (9, Some(7))),
             _ => panic!("expected bots access revoke"),
         }
     }

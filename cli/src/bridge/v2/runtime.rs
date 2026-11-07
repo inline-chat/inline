@@ -37,7 +37,10 @@ use crate::bridge::runtime::{BotAgentResolver, mentioned_agent_id};
 use super::api::{self, Notify, chat_peer};
 use super::doc::DocBuilder;
 use super::folders::{FolderSource, Folders};
-use super::intake::{MessageFacts, grants_by_user, group_message, mentions_user};
+use super::intake::{
+    MessageFacts, grants_by_user, grants_from_operations, group_message, has_scoped_grants,
+    mentions_user,
+};
 use super::ledger::{Begin, InputState, Ledger, input_id};
 use super::render::{ActionStyle, QUESTION_FORM_ID, Vocabulary};
 use super::settings;
@@ -116,12 +119,57 @@ struct Access {
     bot: InlineClient,
     owner_user_id: i64,
     names: Arc<api::Names>,
-    cache: tokio::sync::Mutex<Option<HashMap<i64, Grants>>>,
+    cache: tokio::sync::Mutex<Option<GrantCache>>,
+    /// Server-resolved access per user, used once any grant names a space or a
+    /// group. Expires so membership changes show up without a grant update.
+    resolved: tokio::sync::Mutex<HashMap<i64, (Grants, std::time::Instant)>>,
 }
+
+#[derive(Default)]
+struct GrantCache {
+    by_user: HashMap<i64, Grants>,
+    scoped: bool,
+}
+
+const RESOLVED_ACCESS_TTL: std::time::Duration = std::time::Duration::from_secs(300);
 
 impl Access {
     async fn invalidate(&self) {
         *self.cache.lock().await = None;
+        self.resolved.lock().await.clear();
+    }
+
+    /// Whether any grant names a space or a group (loads the grants if needed).
+    async fn scoped(&self) -> bool {
+        self.own(0).await;
+        self.cache.lock().await.as_ref().is_some_and(|cache| cache.scoped)
+    }
+
+    /// The server's answer for `user_id`, cached for a few minutes.
+    async fn resolved(&self, user_id: i64) -> Option<Grants> {
+        if let Some((grants, at)) = self.resolved.lock().await.get(&user_id).copied()
+            && at.elapsed() < RESOLVED_ACCESS_TTL
+        {
+            return Some(grants);
+        }
+        match api::get_agent_access(&self.bot, user_id).await {
+            Ok(result) => {
+                let grants = if result.is_owner {
+                    Grants::OWNER
+                } else {
+                    grants_from_operations(&result.operations)
+                };
+                self.resolved
+                    .lock()
+                    .await
+                    .insert(user_id, (grants, std::time::Instant::now()));
+                Some(grants)
+            }
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "access for {user_id} unavailable: {error}");
+                None
+            }
+        }
     }
 
     /// The user's own grants, without acting-for.
@@ -132,7 +180,12 @@ impl Access {
         let mut cache = self.cache.lock().await;
         if cache.is_none() {
             match api::list_grants(&self.bot).await {
-                Ok(result) => *cache = Some(grants_by_user(&result)),
+                Ok(result) => {
+                    *cache = Some(GrantCache {
+                        by_user: grants_by_user(&result),
+                        scoped: has_scoped_grants(&result),
+                    })
+                }
                 Err(error) => {
                     // Unknown grants admit nobody but the owner.
                     log::warn!(target: "inline::bridge::v2", "grants unavailable: {error}");
@@ -142,7 +195,7 @@ impl Access {
         }
         cache
             .as_ref()
-            .and_then(|grants| grants.get(&user_id).copied())
+            .and_then(|cache| cache.by_user.get(&user_id).copied())
             .unwrap_or_default()
     }
 }
@@ -153,6 +206,12 @@ impl AccessSource for Access {
             let own = self.own(user_id).await;
             if own.owner {
                 return own;
+            }
+            // Space and group grants need the server to know who's a member.
+            if self.scoped().await
+                && let Some(grants) = self.resolved(user_id).await
+            {
+                return grants;
             }
             let owner = match self.names.owner_of(user_id).await {
                 // A bot never inherits from itself.
@@ -258,6 +317,7 @@ impl Runtime {
             owner_user_id: config.owner_user_id,
             names: names.clone(),
             cache: tokio::sync::Mutex::new(None),
+            resolved: tokio::sync::Mutex::new(HashMap::new()),
         });
         // Each thread's settings, as a previous run left them.
         let mut thread_settings = HashMap::new();

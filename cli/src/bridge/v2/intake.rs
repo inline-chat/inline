@@ -140,24 +140,33 @@ fn command_parts(raw: &str, bot_user_id: i64, bot_username: &str) -> (String, Op
 
 /// Grants by user from `listAgentGrants`. The owner is never in the list.
 pub(crate) fn grants_by_user(result: &proto::ListAgentGrantsResult) -> HashMap<i64, Grants> {
-    use proto::AgentGrantOperation as Operation;
     result
         .grants
         .iter()
-        .map(|grant| {
-            let mut grants = Grants::NONE;
-            for operation in &grant.operations {
-                match Operation::try_from(*operation) {
-                    Ok(Operation::Invoke) => grants.invoke = true,
-                    Ok(Operation::Steer) => grants.steer = true,
-                    Ok(Operation::Approve) => grants.approve = true,
-                    Ok(Operation::Configure) => grants.configure = true,
-                    _ => {}
-                }
-            }
-            (grant.user_id, grants)
-        })
+        .filter(|grant| grant.user_id > 0)
+        .map(|grant| (grant.user_id, grants_from_operations(&grant.operations)))
         .collect()
+}
+
+/// Whether any grant names a space or a user group: their members can only be
+/// resolved by the server (`getAgentAccess`).
+pub(crate) fn has_scoped_grants(result: &proto::ListAgentGrantsResult) -> bool {
+    result.grants.iter().any(|grant| grant.user_id <= 0)
+}
+
+pub(crate) fn grants_from_operations(operations: &[i32]) -> Grants {
+    use proto::AgentGrantOperation as Operation;
+    let mut grants = Grants::NONE;
+    for operation in operations {
+        match Operation::try_from(*operation) {
+            Ok(Operation::Invoke) => grants.invoke = true,
+            Ok(Operation::Steer) => grants.steer = true,
+            Ok(Operation::Approve) => grants.approve = true,
+            Ok(Operation::Configure) => grants.configure = true,
+            _ => {}
+        }
+    }
+    grants
 }
 
 #[cfg(test)]
