@@ -1960,6 +1960,27 @@ rpc_requests!(
         UpdateDialogArchivedResult,
         UpdateDialogArchived
     ),
+    (
+        CreateDialogFolderInput,
+        CreateDialogFolder,
+        CreateDialogFolder,
+        CreateDialogFolderResult,
+        CreateDialogFolder
+    ),
+    (
+        UpdateDialogFolderInput,
+        UpdateDialogFolder,
+        UpdateDialogFolder,
+        UpdateDialogFolderResult,
+        UpdateDialogFolder
+    ),
+    (
+        DeleteDialogFolderInput,
+        DeleteDialogFolder,
+        DeleteDialogFolder,
+        DeleteDialogFolderResult,
+        DeleteDialogFolder
+    ),
     (GetSpaceInput, GetSpace, GetSpace, GetSpaceResult, GetSpace),
     (
         ConnectAgentSessionInput,
