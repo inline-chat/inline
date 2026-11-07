@@ -14,7 +14,7 @@ exclude = ["vendor/agent-client-protocol"]
 resolver = "3"
 
 [workspace.package]
-version = "0.7.22-alpha.1"
+version = "0.7.22-alpha.2"
 edition = "2024"
 rust-version = "1.96"
 license = "Apache-2.0"
