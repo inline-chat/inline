@@ -8,7 +8,8 @@ import {
   setAgentGrant,
 } from "@in/server/modules/agents/grants"
 import { getAgentParticipations, setAgentParticipation } from "@in/server/modules/agents/participation"
-import { getAgentRuntime, reportAgentRuntime, updateAgentSettings } from "@in/server/modules/agents/runtime"
+import { getAgentRuntime, reportAgentRuntime } from "@in/server/modules/agents/runtime"
+import { getAgentSettings, updateAgentSettings } from "@in/server/modules/agents/settings"
 
 /**
  * Bridge v2 agent RPCs. Each service authorizes the authenticated user itself
@@ -17,6 +18,7 @@ import { getAgentRuntime, reportAgentRuntime, updateAgentSettings } from "@in/se
 export const AgentHandlers = {
   reportAgentRuntime,
   getAgentRuntime,
+  getAgentSettings,
   updateAgentSettings,
   updateAgentSessionState,
   getAgentSessionStates,

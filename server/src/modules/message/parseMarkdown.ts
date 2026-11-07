@@ -356,7 +356,7 @@ function findBlockExtensionSyntax(text: string, matches: Match[]): void {
       continue
     }
 
-    const summary = /^<summary(?: kind="progress")?(?: activity="(?:reasoning|explore|read|search|edit|delete|move|command|web|tool|agent)")?>(.*)<\/summary>$/.exec(line.value)
+    const summary = /^<summary(?: kind="progress")?(?: started="\d{1,12}")?(?: activity="(?:reasoning|explore|read|search|edit|delete|move|command|web|tool|agent)")?>(.*)<\/summary>$/.exec(line.value)
     if (summary && detailsDepth > 0) {
       const openingEnd = line.start + line.value.indexOf(">") + 1
       const closingStart = line.contentEnd - "</summary>".length

@@ -188,6 +188,7 @@ describe("sidecar runtime", () => {
         text: "hello",
         replyToMsgId: "7",
         parseMarkdown: false,
+        sendMode: "silent",
         actions: {
           rows: [{
             actions: [{ id: "ok", text: "OK", callback: "ok" }],
@@ -279,6 +280,10 @@ describe("sidecar runtime", () => {
       }
       expect(attachmentDiagnostics.calls).toEqual(
         expect.arrayContaining([
+          expect.objectContaining({
+            method: "sendMessage",
+            params: expect.objectContaining({ text: "hello", sendMode: "silent" }),
+          }),
           expect.objectContaining({
             method: "sendMessage",
             params: expect.objectContaining({

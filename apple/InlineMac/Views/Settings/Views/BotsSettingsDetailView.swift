@@ -724,6 +724,7 @@ private struct ManagedBotSettingsSheet: View {
           onEditProfile: { botToEdit = BotEditItem(bot: bot) },
           onEditAvatar: { botToEditAvatar = BotAvatarEditItem(bot: bot) }
         )
+        ManagedBotOutputSection(botUserID: bot.id)
         ManagedBotAccessSection(
           token: token,
           isBusy: isBusy,
@@ -761,6 +762,92 @@ private struct ManagedBotSettingsSheet: View {
     } message: {
       Text("This will revoke the existing token. Any integrations using the old token will stop working until updated.")
     }
+  }
+}
+
+/// A bot the viewer owns, managed outside Settings (from chat info).
+struct OwnedBotSettingsSheet: View {
+  @Environment(\.realtimeV2) private var realtimeV2
+  @StateObject private var viewModel = BotsSettingsViewModel()
+  @State private var bot: InlineProtocol.User
+
+  init(bot: InlineProtocol.User) {
+    _bot = State(initialValue: bot)
+  }
+
+  var body: some View {
+    ManagedBotSettingsSheet(
+      bot: bot,
+      token: viewModel.revealedTokens[bot.id],
+      isBusy: viewModel.isBusy(bot.id),
+      onRevealToken: {
+        Task { await viewModel.revealToken(for: bot.id, realtimeV2: realtimeV2) }
+      },
+      onHideToken: { viewModel.hideToken(for: bot.id) },
+      onCopyToken: { token in
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(token, forType: .string)
+      },
+      onRotateToken: {
+        Task { await viewModel.rotateToken(for: bot.id, realtimeV2: realtimeV2) }
+      },
+      onBotUpdated: { bot = $0 }
+    )
+    .onDisappear { viewModel.hideToken(for: bot.id) }
+  }
+}
+
+/// The agent-wide default for how the bot replies. Threads can override it in
+/// their Agent Settings. Output mode applies to agents, which report a runtime.
+private struct ManagedBotOutputSection: View {
+  let botUserID: Int64
+  @ObservedObject private var store = AgentWorkStateStore.shared
+  @State private var isUpdating = false
+
+  var body: some View {
+    Group {
+      if store.runtimeBotUserIDs.contains(botUserID) {
+        section
+      }
+    }
+    .task(id: botUserID) {
+      await store.loadAgentSettings(botUserID: botUserID)
+    }
+  }
+
+  private var section: some View {
+    Section {
+      Picker("Default Output", selection: selection) {
+        ForEach(AgentThreadOutputMode.allCases, id: \.self) { mode in
+          Text(mode.title).tag(mode)
+        }
+      }
+      .disabled(isUpdating)
+    } header: {
+      Text("Agent Settings")
+    } footer: {
+      Text(store.defaultOutputMode(botUserID: botUserID).summary
+        + " " + String(localized: "Threads can override this in their agent settings."))
+    }
+  }
+
+  private var selection: Binding<AgentThreadOutputMode> {
+    Binding(
+      get: { store.defaultOutputMode(botUserID: botUserID) },
+      set: { mode in
+        guard !isUpdating, mode != store.defaultOutputMode(botUserID: botUserID) else { return }
+        isUpdating = true
+        Task { @MainActor in
+          defer { isUpdating = false }
+          do {
+            try await store.updateDefaultOutputMode(mode, botUserID: botUserID)
+          } catch {
+            ToastCenter.shared.showError("Couldn’t change the output mode.")
+          }
+        }
+      }
+    )
   }
 }
 

@@ -555,6 +555,172 @@ class MessageListAppKit: NSViewController {
     }
   }
 
+  // MARK: - Reply thread side pane source
+
+  /// Thread showing in this window's side pane while this chat is the primary chat.
+  private var replyThreadPanePeer: Peer?
+  private var replyThreadSourceMessageId: Int64?
+  /// Holds the source message's viewport offset while the pane slides in or out.
+  private var replyThreadSourceAnchor: VisibleMessageAnchor?
+  private var replyThreadSourceAnchorWidth: CGFloat?
+  private var replyThreadSourceAnchorExpiry: DispatchWorkItem?
+  private var isObservingReplyThreadPane = false
+
+  /// Long enough to cover the pane's open and close animations plus a frame of slack.
+  private static let replyThreadSourceAnchorDuration: TimeInterval = 0.4
+
+  private func observeReplyThreadPane() {
+    guard !isDisposed, let nav3 = dependencies.nav3 else { return }
+    let isInitial = !isObservingReplyThreadPane
+    isObservingReplyThreadPane = true
+    let threadPeer = withObservationTracking {
+      nav3.currentReplyThreadPeer
+    } onChange: { [weak self] in
+      // Fires on willSet; read the new value on the next main-actor turn. The pane's
+      // first width change lands on a later display frame, after this has run.
+      Task { @MainActor [weak self] in
+        self?.observeReplyThreadPane()
+      }
+    }
+
+    let panePeer = threadPeer == peerId ? nil : threadPeer
+    let sourceMessageId = panePeer.flatMap {
+      nav3.replyThreadSourceMessageId(threadPeer: $0, parentPeer: peerId)
+    }
+    guard panePeer != replyThreadPanePeer || sourceMessageId != replyThreadSourceMessageId else { return }
+
+    let previousPanePeer = replyThreadPanePeer
+    let previousSourceMessageId = replyThreadSourceMessageId
+    replyThreadPanePeer = panePeer
+    replyThreadSourceMessageId = sourceMessageId
+
+    if !isInitial, isViewLoaded {
+      // Opening anchors the new source; closing anchors the one that is leaving.
+      captureReplyThreadSourceAnchor(
+        threadPeer: panePeer ?? previousPanePeer,
+        sourceMessageId: panePeer == nil ? previousSourceMessageId : sourceMessageId
+      )
+    }
+    refreshReplyThreadSourceHighlights(animated: !isInitial)
+  }
+
+  private func isReplyThreadSource(
+    _ message: FullMessage,
+    threadPeer: Peer?,
+    sourceMessageId: Int64?
+  ) -> Bool {
+    if let sourceMessageId, message.message.messageId == sourceMessageId {
+      return true
+    }
+    guard let threadPeer else { return false }
+    return message.message.replyThreadPeer == threadPeer
+  }
+
+  private func isReplyThreadSourceRow(_ row: Int) -> Bool {
+    guard replyThreadPanePeer != nil,
+          case .message? = rowItem(at: row),
+          let message = message(forRow: row)
+    else { return false }
+    return isReplyThreadSource(
+      message,
+      threadPeer: replyThreadPanePeer,
+      sourceMessageId: replyThreadSourceMessageId
+    )
+  }
+
+  private func configureReplyThreadSourceHighlight(_ cell: MessageTableCell, row: Int, animated: Bool = false) {
+    cell.setReplyThreadSourceHighlighted(isReplyThreadSourceRow(row), animated: animated)
+  }
+
+  private func refreshReplyThreadSourceHighlights(animated: Bool) {
+    guard isViewLoaded else { return }
+    let visible = tableView.rows(in: tableView.visibleRect)
+    guard visible.location != NSNotFound else { return }
+    for row in visible.location ..< min(NSMaxRange(visible), tableView.numberOfRows) {
+      if let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell {
+        configureReplyThreadSourceHighlight(cell, row: row, animated: animated)
+      }
+    }
+  }
+
+  private func captureReplyThreadSourceAnchor(threadPeer: Peer?, sourceMessageId: Int64?) {
+    clearReplyThreadSourceAnchor()
+    guard !needsInitialScroll, threadPeer != nil || sourceMessageId != nil else { return }
+
+    let visibleRect = tableView.visibleRect
+    let visible = tableView.rows(in: visibleRect)
+    guard visible.location != NSNotFound else { return }
+
+    for row in visible.location ..< min(NSMaxRange(visible), tableView.numberOfRows) {
+      guard case .message? = rowItem(at: row),
+            let message = message(forRow: row),
+            isReplyThreadSource(message, threadPeer: threadPeer, sourceMessageId: sourceMessageId),
+            let stableId = messageStableId(forRow: row)
+      else { continue }
+
+      replyThreadSourceAnchor = VisibleMessageAnchor(
+        stableId: stableId,
+        offset: tableView.rect(ofRow: row).minY - visibleRect.minY
+      )
+      replyThreadSourceAnchorWidth = measurementWidth()
+
+      let expiry = DispatchWorkItem { [weak self] in
+        self?.finishReplyThreadSourceAnchor()
+      }
+      replyThreadSourceAnchorExpiry = expiry
+      DispatchQueue.main.asyncAfter(deadline: .now() + Self.replyThreadSourceAnchorDuration, execute: expiry)
+      return
+    }
+  }
+
+  private func clearReplyThreadSourceAnchor() {
+    replyThreadSourceAnchorExpiry?.cancel()
+    replyThreadSourceAnchorExpiry = nil
+    replyThreadSourceAnchor = nil
+    replyThreadSourceAnchorWidth = nil
+  }
+
+  private func finishReplyThreadSourceAnchor() {
+    let startWidth = replyThreadSourceAnchorWidth
+    clearReplyThreadSourceAnchor()
+    guard !isDisposed, let startWidth, let width = measurementWidth(), abs(width - startWidth) > 0.5 else { return }
+    // Per-frame passes only remeasure visible rows; settle the rest like a finished live resize.
+    fullWidthAsyncCalc(maintainScroll: !isAtAbsoluteBottom)
+  }
+
+  /// Runs last in `viewDidLayout`, after width remeasurement and bottom pinning.
+  private func maintainReplyThreadSourceAnchorIfNeeded() {
+    guard let anchor = replyThreadSourceAnchor,
+          !isUserScrolling,
+          !isPerformingUpdate,
+          !needsInitialScroll,
+          let row = chatRows.rowIndex(forMessageStableId: anchor.stableId)
+    else { return }
+
+    let rowRect = tableView.rect(ofRow: row)
+    let bounds = scrollView.contentView.bounds
+    let insets = scrollView.contentInsets
+    let visibleTop = bounds.minY + insets.top
+    let visibleBottom = bounds.maxY - insets.bottom
+
+    // Staying pinned to the live bottom wins while the source is still fully visible there.
+    if isAtAbsoluteBottom, rowRect.minY >= visibleTop, rowRect.maxY <= visibleBottom {
+      return
+    }
+
+    var target = rowRect.minY - anchor.offset
+    // Rewrapping can grow the row; keep all of it inside the unobscured viewport.
+    if rowRect.maxY > target + bounds.height - insets.bottom {
+      target = rowRect.maxY - bounds.height + insets.bottom
+    }
+    if rowRect.minY < target + insets.top {
+      target = rowRect.minY - insets.top
+    }
+    target = clampScrollOffset(target)
+    guard abs(target - bounds.minY) >= 0.5 else { return }
+    scrollView.contentView.updateBounds(NSPoint(x: 0, y: target), cancel: true)
+  }
+
   private var threadAnchor: FullMessage? {
     chatRows.threadAnchor
   }
@@ -709,6 +875,7 @@ class MessageListAppKit: NSViewController {
     super.viewDidLoad()
     setupScrollObserver()
     setupMessageHoverTracking()
+    observeReplyThreadPane()
     hideScrollbars() // until initial scroll is done
 
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -1921,6 +2088,7 @@ class MessageListAppKit: NSViewController {
   @objc private func scrollWheelBegan() {
     log.trace("scroll wheel began")
     isUserScrolling = true
+    clearReplyThreadSourceAnchor()
     pendingArrivalMessageID = nil
     scrollState = .scrolling
     clearHoveredMessage()
@@ -2267,6 +2435,8 @@ class MessageListAppKit: NSViewController {
         scrollToBottom(animated: false)
       }
     }
+
+    maintainReplyThreadSourceAnchorIfNeeded()
   }
 
   /// Positions the first viewport on the initial target without animation.
@@ -3929,6 +4099,7 @@ extension MessageListAppKit: NSTableViewDelegate {
     cell.setScrollState(scrollState)
     cell.configure(with: message, props: props, animate: animateUpdates && NSAnimationContext.current.duration > 0)
     configureForwardSelection(cell, row: row)
+    configureReplyThreadSourceHighlight(cell, row: row)
     let shouldHover = shouldHoverMessageCell(cell, stableId: stableId)
     cell.setMessageHoverState(shouldHover)
     if shouldHover {
@@ -4472,6 +4643,7 @@ extension MessageListAppKit {
   func dispose() {
     isDisposed = true
     cancellables.removeAll()
+    clearReplyThreadSourceAnchor()
 
     // Cancel any tasks
     eventMonitorTask?.cancel()

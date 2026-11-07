@@ -842,6 +842,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       case "userAgentGrant":
       case "userAgentRuntime":
       case "userAgentSessionControl":
+      case "userAgentSettings":
       case "reaction":
       case "reactionDeleted":
         inflatedUpdates.push(chatSkipPts(update, chatId))
@@ -1848,6 +1849,7 @@ function convertSpaceUpdate(update: DecryptedUpdate, options?: { sanitizeUsers?:
     case "userAgentGrant":
     case "userAgentRuntime":
     case "userAgentSessionControl":
+    case "userAgentSettings":
       return null
     case undefined:
       log.warn("Skipping unknown durable space update", { spaceId: update.entityId, seq: update.seq })
@@ -2207,6 +2209,8 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
       return { seq, date, update: { oneofKind: "agentGrant", agentGrant: payload.userAgentGrant } }
     case "userAgentRuntime":
       return { seq, date, update: { oneofKind: "agentRuntime", agentRuntime: payload.userAgentRuntime } }
+    case "userAgentSettings":
+      return { seq, date, update: { oneofKind: "agentSettings", agentSettings: payload.userAgentSettings } }
     case "userAgentSessionControl":
       return {
         seq,

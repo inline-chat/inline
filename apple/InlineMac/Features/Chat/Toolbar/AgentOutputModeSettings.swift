@@ -131,42 +131,14 @@ struct AgentOutputModeSettingsSection: View {
   }
 
   private func setThreadMode(_ mode: AgentThreadOutputMode?) {
-    let previous = store.outputModeOverride(peer: peer, botUserID: botUserID)
-    store.setOutputModeOverride(mode, peer: peer, botUserID: botUserID)
-    perform(revert: { store.setOutputModeOverride(previous, peer: peer, botUserID: botUserID) }) {
-      let response = try await Api.realtime.callRpcDirect(
-        method: .setAgentParticipation,
-        input: .setAgentParticipation(.with {
-          $0.peerID = peer.toInputPeer()
-          $0.botUserID = botUserID
-          // Unspecified clears the override back to the agent's default.
-          $0.outputMode = mode?.protocolValue ?? .unspecified
-        })
-      )
-      if case let .setAgentParticipation(result)? = response {
-        store.apply(participation: result.participation)
-      }
-    }
+    perform { try await store.updateOutputModeOverride(mode, peer: peer, botUserID: botUserID) }
   }
 
   private func setDefaultMode(_ mode: AgentThreadOutputMode) {
-    let previous = store.defaultOutputMode(botUserID: botUserID)
-    store.setDefaultOutputMode(mode, botUserID: botUserID)
-    perform(revert: { store.setDefaultOutputMode(previous, botUserID: botUserID) }) {
-      let response = try await Api.realtime.callRpcDirect(
-        method: .updateAgentSettings,
-        input: .updateAgentSettings(.with {
-          $0.botUserID = botUserID
-          $0.defaultOutputMode = mode.protocolValue
-        })
-      )
-      if case let .updateAgentSettings(result)? = response {
-        store.apply(runtime: result.runtime)
-      }
-    }
+    perform { try await store.updateDefaultOutputMode(mode, botUserID: botUserID) }
   }
 
-  private func perform(revert: @escaping () -> Void, _ operation: @escaping () async throws -> Void) {
+  private func perform(_ operation: @escaping () async throws -> Void) {
     guard !isUpdating else { return }
     isUpdating = true
     Task { @MainActor in
@@ -174,7 +146,6 @@ struct AgentOutputModeSettingsSection: View {
       do {
         try await operation()
       } catch {
-        revert()
         ToastCenter.shared.showError("Couldn’t change the output mode.")
       }
     }
@@ -182,23 +153,10 @@ struct AgentOutputModeSettingsSection: View {
 }
 
 enum AgentOutputModeSettingsLoader {
-  /// Loads the bot's runtime (agent default) and this chat's participations
-  /// (thread override) when Agent Settings opens.
+  /// Loads the agent default and this chat's override when Agent Settings opens.
   @MainActor
   static func load(peer: InlineKit.Peer, botUserID: Int64) async {
     AgentGrantStore.shared.ensureLoaded(botUserID: botUserID)
-    let store = AgentWorkStateStore.shared
-    if case let .getAgentRuntime(result)? = try? await Api.realtime.callRpcDirect(
-      method: .getAgentRuntime,
-      input: .getAgentRuntime(.with { $0.botUserID = botUserID })
-    ), result.hasRuntime {
-      store.apply(runtime: result.runtime)
-    }
-    if case let .getAgentParticipations(result)? = try? await Api.realtime.callRpcDirect(
-      method: .getAgentParticipations,
-      input: .getAgentParticipations(.with { $0.peerID = peer.toInputPeer() })
-    ) {
-      result.participations.forEach { store.apply(participation: $0) }
-    }
+    await AgentWorkStateStore.shared.loadOutputModes(peer: peer, botUserID: botUserID)
   }
 }

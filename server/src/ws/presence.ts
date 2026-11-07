@@ -12,11 +12,13 @@ import { UsersModel } from "@in/server/db/models/users"
 import { sendTransientUpdateFor } from "@in/server/modules/updates/sendUpdate"
 import { connectionDirectory } from "@in/server/modules/internalMessaging/directory"
 import { Log, LogLevel } from "@in/server/utils/log"
+import { markBotOnline } from "@in/server/modules/bots/online"
 import { SessionActivityTracker } from "./sessionActivity"
 
 interface SessionInput {
   userId: number
   sessionId: number
+  isBot?: boolean
 }
 
 type OfflineEvaluation = {
@@ -94,7 +96,9 @@ export class PresenceManager {
 
     this.sessionActivity.activate(session.sessionId, generation)
 
-    // Do not mark users online automatically. That's controlled by the clients.
+    // Do not mark people online automatically. That's controlled by the clients.
+    // Bots never report presence, so a bot's connection is its online signal.
+    if (session.isBot) await markBotOnline(session.userId)
   }
 
   /** Coalesced by SessionActivityTracker; safe to call for every authenticated frame. */

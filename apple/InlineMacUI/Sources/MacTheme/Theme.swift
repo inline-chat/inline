@@ -195,8 +195,18 @@ public enum Theme {
     (Theme.sidebarItemInnerSpacing - Theme.sidebarItemUnreadDotSize) / 2
   public static let sidebarNativeDefaultEdgeInsets: CGFloat = 16.0
   /// Resolve before applying opacity so previews stay legible in vibrant appearances.
+  /// Matches secondary label strength (0.50 light, 0.55 dark) so the title leads.
   public static let sidebarPreviewTextColor: NSColor = .init(name: nil) { appearance in
-    NSColor.labelColor.resolvedColor(with: appearance).withAlphaComponent(0.70)
+    let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    return NSColor.labelColor.resolvedColor(with: appearance)
+      .withAlphaComponent(isDark ? 0.55 : 0.50)
+  }
+
+  /// Inactive windows dim titles to secondary label; previews stay a step below them.
+  public static let sidebarInactivePreviewTextColor: NSColor = .init(name: nil) { appearance in
+    let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    return NSColor.labelColor.resolvedColor(with: appearance)
+      .withAlphaComponent(isDark ? 0.35 : 0.32)
   }
 
   // MARK: - Message View

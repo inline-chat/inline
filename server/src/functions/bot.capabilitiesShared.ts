@@ -13,20 +13,26 @@ import {
 
 export const BOT_CAPABILITY_LIMIT = 100
 export const BOT_CHAT_SETTINGS_VERSION = 1
+export const OUTPUT_MODE_CAPABILITY_KIND = "output_mode"
+export const OUTPUT_MODE_CAPABILITY_VERSION = 1
 
 const capabilityKindToStorage = (kind: BotCapability_Kind): string | undefined =>
   kind === BotCapability_Kind.CHAT_SETTINGS
     ? "chat_settings"
     : kind === BotCapability_Kind.AGENT_CONFIGURATION
       ? AGENT_CONFIGURATION_CAPABILITY_KIND
-      : undefined
+      : kind === BotCapability_Kind.OUTPUT_MODE
+        ? OUTPUT_MODE_CAPABILITY_KIND
+        : undefined
 
 const capabilityKindFromStorage = (kind: string): BotCapability_Kind | undefined =>
   kind === "chat_settings"
     ? BotCapability_Kind.CHAT_SETTINGS
     : kind === AGENT_CONFIGURATION_CAPABILITY_KIND
       ? BotCapability_Kind.AGENT_CONFIGURATION
-      : undefined
+      : kind === OUTPUT_MODE_CAPABILITY_KIND
+        ? BotCapability_Kind.OUTPUT_MODE
+        : undefined
 
 export async function getCurrentBotOrThrow(currentUserId: number): Promise<DbUser> {
   const [bot] = await db
@@ -49,7 +55,9 @@ export function normalizeBotCapabilities(
     const kind = capabilityKindToStorage(capability.kind)
     const expectedVersion = kind === AGENT_CONFIGURATION_CAPABILITY_KIND
       ? AGENT_CONFIGURATION_VERSION
-      : BOT_CHAT_SETTINGS_VERSION
+      : kind === OUTPUT_MODE_CAPABILITY_KIND
+        ? OUTPUT_MODE_CAPABILITY_VERSION
+        : BOT_CHAT_SETTINGS_VERSION
     if (
       !kind ||
       seen.has(kind) ||

@@ -397,13 +397,14 @@ public extension User {
       email = user.hasEmail ? user.email : nil
       phoneNumber = user.hasPhoneNumber ? user.phoneNumber : nil
       pendingSetup = user.hasPendingSetup ? user.pendingSetup : nil
+    }
 
-      if user.hasStatus {
-        online = user.status.online == .online
-        lastOnline = user.status.hasLastOnline
-          ? Self.lastOnlineDate(from: user.status.lastOnline.date)
-          : nil
-      }
+    // Min users carry status only for bots, whose presence is server-derived.
+    if user.hasStatus {
+      online = user.status.online == .online
+      lastOnline = user.status.hasLastOnline
+        ? Self.lastOnlineDate(from: user.status.lastOnline.date)
+        : nil
     }
 
     if user.hasProfilePhoto {

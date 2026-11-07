@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import Logger
 import SwiftUI
 import UIKit
@@ -226,10 +227,7 @@ public class MentionCompletionView: UIView {
     let iconView: UIView
     switch item {
       case let .user(user):
-        let avatarView = UserAvatarView()
-        avatarView.configure(with: user.userInfo, size: 36)
-        avatarView.translatesAutoresizingMaskIntoConstraints = false
-        iconView = avatarView
+        iconView = Self.mentionAvatar(user.userInfo)
 
       case .group:
         let imageView = UIImageView(image: UIImage(systemName: "person.2.fill"))
@@ -242,10 +240,7 @@ public class MentionCompletionView: UIView {
         iconView = imageView
 
       case let .agent(agent):
-        let avatarView = UserAvatarView()
-        avatarView.configure(with: agent.botUserInfo, size: 36)
-        avatarView.translatesAutoresizingMaskIntoConstraints = false
-        iconView = avatarView
+        iconView = Self.mentionAvatar(agent.botUserInfo)
     }
 
     let nameLabel = UILabel()
@@ -301,6 +296,20 @@ public class MentionCompletionView: UIView {
     return containerView
   }
 
+  /// Online bots get the green dot, cut out of the avatar so it reads on the blur.
+  private static func mentionAvatar(_ userInfo: UserInfo) -> UIView {
+    let view: UIView
+    if BotOnlineStatus.isOnline(userInfo.user) {
+      view = OnlineBotMentionAvatarView(userInfo: userInfo, size: 36)
+    } else {
+      let avatarView = UserAvatarView()
+      avatarView.configure(with: userInfo, size: 36)
+      view = avatarView
+    }
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }
+
   @objc private func rowTapped(_ gesture: UITapGestureRecognizer) {
     guard let view = gesture.view,
           let item = model.item(at: view.tag)
@@ -342,5 +351,33 @@ public class MentionCompletionView: UIView {
     } else {
       heightAnchor.constraint(equalToConstant: constrainedHeight).isActive = true
     }
+  }
+}
+
+private final class OnlineBotMentionAvatarView: UIView {
+  private let hostingController: UIHostingController<AnyView>
+
+  init(userInfo: UserInfo, size: CGFloat) {
+    hostingController = UIHostingController(rootView: AnyView(
+      UserAvatar(userInfo: userInfo, size: size)
+        .onlineIndicator(true, avatarSize: size)
+        .frame(width: size, height: size)
+    ))
+    super.init(frame: .zero)
+    let hosted = hostingController.view!
+    hosted.backgroundColor = .clear
+    hosted.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(hosted)
+    NSLayoutConstraint.activate([
+      hosted.topAnchor.constraint(equalTo: topAnchor),
+      hosted.bottomAnchor.constraint(equalTo: bottomAnchor),
+      hosted.leadingAnchor.constraint(equalTo: leadingAnchor),
+      hosted.trailingAnchor.constraint(equalTo: trailingAnchor),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
   }
 }

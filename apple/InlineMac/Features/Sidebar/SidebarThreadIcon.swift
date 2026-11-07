@@ -118,6 +118,7 @@ struct SidebarChatIdentityIcon: View, Equatable {
         size: size
       )
       .equatable()
+      .onlineIndicator(descriptor.isBotOnline, avatarSize: size)
     case nil:
       Circle()
         .fill(Color.primary.opacity(0.08))

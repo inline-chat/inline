@@ -9,6 +9,7 @@ Every entry below is guarded: when the seam is missing or changes shape, the ada
 one feature. Message delivery never depends on these seams.
 
 Audited against Hermes main `93ce7e34` (2026-11-05) and the minimum host `v2026.9.14`.
+The cron metadata gap below was rechecked against main `9ffa7dff` on 2026-11-07.
 
 ## Already moved to public surfaces
 
@@ -141,3 +142,25 @@ Each draft is ready to file on NousResearch/hermes-agent.
 > **Read-only plugin load status.** A documented `hermes_cli.plugins.plugin_status(name) ->
 > {path, enabled, error, tools_registered, deprecated_imports}` would let plugin CLIs report
 > health without walking the manager's private state.
+
+### 9. Cron delivery metadata across transports
+
+- Uses: the public adapter `send(..., metadata=...)` contract. No scheduler
+  import or patch is needed for scheduled gateway text.
+- Current gap: `cron.scheduler_delivery` supplies `job_id` and `notify` on live
+  text, but only `notify` on media. The public `standalone_sender_fn` contract
+  does not accept delivery metadata, including during live-to-standalone fallback.
+- Without it: `cron_mention_prefix` can identify only scheduled gateway text.
+  Applying it to other sends would also mention people in ordinary replies or
+  manual CLI sends. `notify` alone cannot distinguish them: Hermes marks ordinary
+  final replies with it too.
+
+> **Preserve cron identity on every delivery transport.** Pass optional delivery
+> metadata (`job_id`, `notify`, and a first-payload marker) through live media and
+> standalone plugin callbacks. Keep existing callbacks compatible by forwarding
+> the new keyword only when supported. The first-payload marker lets adapters
+> mention once for a media-only post or a chunked standalone send, while retaining
+> the job identity on subsequent payloads. This would let Inline reopen the right
+> thread consistently without guessing from message text, process environment,
+> or scheduler internals. Include normal-send, muted-cron, media-only, chunking,
+> and standalone-fallback cases in the host contract tests.

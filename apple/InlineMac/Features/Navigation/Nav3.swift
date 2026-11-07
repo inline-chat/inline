@@ -154,6 +154,9 @@ class Nav3 {
   @ObservationIgnored var onRouteChange: (() -> Void)?
   @ObservationIgnored private var isRestoringInitialState = true
   @ObservationIgnored private var inviteSessions: [UUID: InviteFlowSession] = [:]
+  /// Message a side-pane thread was opened from, kept so the parent chat can anchor
+  /// and highlight it before the message's thread card syncs. Not persisted.
+  @ObservationIgnored private var replyThreadSourceMessage: (threadPeer: Peer, parentPeer: Peer, messageId: Int64)?
 
   var history: [Nav3RouteState] = []
   var historyIndex: Int = -1
@@ -258,12 +261,17 @@ class Nav3 {
   }
 
   @discardableResult
-  func openReplyThread(parentPeer: Peer, threadPeer: Peer) -> Bool {
+  func openReplyThread(parentPeer: Peer, threadPeer: Peer, sourceMessageId: Int64? = nil) -> Bool {
     guard threadPeer.isThread else { return false }
     guard case .chat = currentRoute else { return false }
     let opensFromPrimaryChat = currentRoute.selectedPeer == parentPeer
     let opensFromCurrentPane = currentReplyThreadPeer == parentPeer
     guard opensFromPrimaryChat || opensFromCurrentPane else { return false }
+
+    // Set before the route change so observers see it with the new pane peer.
+    replyThreadSourceMessage = sourceMessageId.map {
+      (threadPeer: threadPeer, parentPeer: parentPeer, messageId: $0)
+    }
 
     open(
       Nav3RouteState(
@@ -274,6 +282,15 @@ class Nav3 {
       tracksChatNavigation: false
     )
     return true
+  }
+
+  /// The message in `parentPeer` that opened `threadPeer` in the side pane, when known.
+  func replyThreadSourceMessageId(threadPeer: Peer, parentPeer: Peer) -> Int64? {
+    guard let source = replyThreadSourceMessage,
+          source.threadPeer == threadPeer,
+          source.parentPeer == parentPeer
+    else { return nil }
+    return source.messageId
   }
 
   func closeReplyThread() {

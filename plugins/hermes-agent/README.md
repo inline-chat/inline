@@ -322,6 +322,7 @@ Access control follows Hermes' native platform model:
 | `INLINE_SETTINGS_PATH` | JSON settings file for per-chat `/threads` overrides. `/threads` shows native Auto/On buttons; `reset` clears the chat override back to the global default. Defaults next to `INLINE_STATE_PATH`; `.env`-like paths are refused. |
 | `INLINE_SYSTEM_EVENTS` | Delivers Inline lifecycle events such as edits, deletes, and participant changes as synthetic messages. Defaults to `false`. Reactions on bot messages are always delivered. |
 | `INLINE_REACTIONS` | Shows 👀 while Hermes handles an inbound message, then ✅ on success or ❌ on failure. Cancellation clears the working marker. Defaults to `false`. |
+| `INLINE_CRON_MENTION_PREFIX` | Opt-in Inline Markdown mention prepended once to scheduled gateway text deliveries, for example `[@You](inline://user?id=42)`. Defaults to empty. See [Scheduled mentions](#scheduled-mentions). |
 | `INLINE_PARSE_MARKDOWN` | Controls whether supported outbound Inline Markdown is parsed. Defaults to `true`; `false` preserves the supplied syntax literally. |
 | `INLINE_SYNC_COMMANDS` | Syncs Hermes slash commands into Inline's native `/` bot command menu on gateway connect. Defaults to `true`. |
 | `INLINE_COMMAND_LIMIT` | Caps native Inline bot command sync. Must be `1` through `100`; defaults to `100`. |
@@ -368,9 +369,10 @@ Equivalent Hermes YAML can use `allow_from`, `allowed_users`,
 `observed_context_limit`, `observe_unmentioned_messages`, `settings_path`, and
 `reactions` under the Inline platform config. Operational settings such
 as `base_url`, `parse_markdown`, `media_max_mb`, `upload_max_mb`,
-`state_path`, `sidecar_port`, `connect_timeout_ms`, `sync_commands`, and
-`command_limit` can also be set there.
+`state_path`, `sidecar_port`, `connect_timeout_ms`, `sync_commands`,
+`cron_mention_prefix`, and `command_limit` can also be set there.
 Prefer Hermes YAML for behavioral settings. Environment variables remain supported for compatibility and secret-backed deployment inputs.
+
 Use a JSON list for mention regexes that contain commas, for example
 `["hermes\\b[:,]?"]`.
 
@@ -454,6 +456,36 @@ what the bot may change. `delete_chat` always needs an explicit `chat_id`.
 
 The plugin id is `inline`, which is intentionally the same id an eventual
 bundled Hermes adapter should use.
+
+### Scheduled mentions
+
+To bring scheduled text posts back into your Inline sidebar, configure a mention
+for the person who should receive them, then restart the Hermes gateway:
+
+```yaml
+platforms:
+  inline:
+    cron_mention_prefix: "[@You](inline://user?id=42)"
+```
+
+Replace `42` with that person's Inline user ID. This setting applies to this
+profile's scheduled gateway text deliveries; set it to `""` to disable it,
+including when `INLINE_CRON_MENTION_PREFIX` is exported. A structured mention
+can reopen an eligible recipient's closed thread. Their notification settings
+still apply.
+
+The adapter uses Hermes' `job_id` delivery metadata to identify scheduled posts.
+It adds the prefix before splitting a long post and skips an existing leading
+prefix. `cron.delivery.notify: false` suppresses the added prefix and sends the
+text silently, using Inline's existing notification opt-out. Ordinary replies
+do not get a prefix, and the selected destination stays the same. Markdown
+parsing must be enabled (the default); with `parse_markdown: false` the setting
+is ignored with a warning, preserving the caller's literal text.
+
+Hermes currently omits cron identity from standalone/CLI fallback and media-only
+sends. Those deliveries remain unchanged. Media accompanied by scheduled text
+gets the mention in the text post. The required upstream metadata extension is
+described in [Hermes upstream seams](docs/hermes-upstream-seams.md#9-cron-delivery-metadata-across-transports).
 
 ## Shared transcripts in groups and threads
 

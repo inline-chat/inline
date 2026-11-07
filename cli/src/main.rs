@@ -3,6 +3,7 @@ mod agents;
 mod attachments;
 mod auth;
 mod auth_flow;
+mod bots;
 mod bridge;
 mod chat_output;
 mod cli_search;
@@ -30,6 +31,7 @@ mod owner_session;
 mod peer;
 mod plugin;
 mod session_output;
+mod sidebar;
 mod skill;
 mod state;
 mod telemetry;
@@ -519,6 +521,14 @@ enum Command {
         #[command(subcommand)]
         command: ChatsCommand,
     },
+    #[command(
+        about = "Arrange your sidebar: open, close, reorder, pin, archive, and folders",
+        after_help = "Examples:\n  inline sidebar\n  inline sidebar open -c 123 --top\n  inline sidebar move -c 123 --after 456\n  inline sidebar pin -u 42\n  inline sidebar folder create --title Launch -c 123 -c 456\n  inline sidebar folder move 7 --top"
+    )]
+    Sidebar {
+        #[command(subcommand)]
+        command: Option<sidebar::SidebarCommand>,
+    },
     #[command(about = "List users or fetch a user by id", visible_alias = "user")]
     Users {
         #[command(subcommand)]
@@ -682,6 +692,7 @@ impl Command {
             Self::Tasks { .. } => "tasks",
             Self::Bots { .. } => "bots",
             Self::Typing { .. } => "typing",
+            Self::Sidebar { .. } => "sidebar",
             Self::Me => "me",
             Self::Search(_) => "search",
             Self::Transcript(_) => "transcript",
@@ -1092,7 +1103,50 @@ enum BotsCommand {
     #[command(about = "Create a new bot")]
     Create(BotsCreateArgs),
     #[command(about = "Reveal a bot token by bot user id")]
-    RevealToken(BotsRevealTokenArgs),
+    RevealToken(BotsBotArgs),
+    #[command(
+        about = "Show a bot you own with its agent settings and access",
+        visible_alias = "view"
+    )]
+    Get(BotsBotArgs),
+    #[command(
+        about = "Change a bot's name or username",
+        after_help = "Examples:\n  inline bots update --bot-user-id 42 --name \"Deploy Bot\"\n  inline bots update --bot-user-id 42 --username deploy_bot\n\nUsernames must end with \"bot\"."
+    )]
+    Update(BotsUpdateArgs),
+    #[command(about = "Upload an image and set it as a bot's profile photo")]
+    SetPhoto(BotsSetPhotoArgs),
+    #[command(about = "Remove a bot's profile photo")]
+    RemovePhoto(BotsBotArgs),
+    #[command(about = "Clear a bot's animated avatar")]
+    ClearAvatar(BotsBotArgs),
+    #[command(about = "Rotate a bot token and print the new one (asks for confirmation)")]
+    RotateToken(BotsConfirmArgs),
+    #[command(about = "Delete a bot (asks for confirmation)")]
+    Delete(BotsConfirmArgs),
+    #[command(
+        about = "Show or change a bot's agent settings, such as friendly or detailed output",
+        after_help = "Examples:\n  inline bots settings --bot-user-id 42\n  inline bots settings --bot-user-id 42 --output-mode friendly\n  inline bots settings --bot-user-id 42 --chat-id 7 --output-mode detailed\n  inline bots settings --bot-user-id 42 --chat-id 7 --output-mode default\n\nWithout --output-mode, prints the current settings. Detailed shows every step; friendly shows short updates and the answer.\nThe owner and people with configure access can change them."
+    )]
+    Settings(BotsSettingsArgs),
+    #[command(about = "List, grant, or revoke people's access to a bot")]
+    Access {
+        #[command(subcommand)]
+        command: BotsAccessCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum BotsAccessCommand {
+    #[command(about = "List people with access to a bot", visible_alias = "ls")]
+    List(BotsBotArgs),
+    #[command(
+        about = "Grant or replace one person's access to a bot",
+        after_help = "Examples:\n  inline bots access grant --bot-user-id 42 --user-id 7\n  inline bots access grant --bot-user-id 42 --user-id 7 --operations invoke,steer,approve\n\nReplaces the person's existing operations. Defaults to invoke,steer."
+    )]
+    Grant(BotsAccessGrantArgs),
+    #[command(about = "Revoke one person's access to a bot")]
+    Revoke(BotsAccessUserArgs),
 }
 
 #[derive(Subcommand)]
@@ -1444,9 +1498,83 @@ struct BotsCreateArgs {
 }
 
 #[derive(Args)]
-struct BotsRevealTokenArgs {
+struct BotsBotArgs {
     #[arg(long, help = "Bot user id")]
     bot_user_id: i64,
+}
+
+#[derive(Args)]
+struct BotsConfirmArgs {
+    #[arg(long, help = "Bot user id")]
+    bot_user_id: i64,
+
+    #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+    yes: bool,
+}
+
+#[derive(Args)]
+#[command(group(clap::ArgGroup::new("changes").required(true).multiple(true).args(["name", "username"])))]
+struct BotsUpdateArgs {
+    #[arg(long, help = "Bot user id")]
+    bot_user_id: i64,
+
+    #[arg(long, help = "New display name")]
+    name: Option<String>,
+
+    #[arg(long, help = "New username (without @; must end with \"bot\")")]
+    username: Option<String>,
+}
+
+#[derive(Args)]
+struct BotsSetPhotoArgs {
+    #[arg(long, help = "Bot user id")]
+    bot_user_id: i64,
+
+    #[arg(long, value_name = "PATH", help = "Image file to upload")]
+    file: PathBuf,
+}
+
+#[derive(Args)]
+struct BotsSettingsArgs {
+    #[arg(long, help = "Bot user id")]
+    bot_user_id: i64,
+
+    #[arg(
+        long,
+        value_enum,
+        help = "Output mode: the bot's default, or this thread's with --chat-id (`default` clears a thread's override)"
+    )]
+    output_mode: Option<bots::BotOutputMode>,
+
+    #[arg(long, help = "Thread to show or change the output mode for")]
+    chat_id: Option<i64>,
+}
+
+#[derive(Args)]
+struct BotsAccessGrantArgs {
+    #[arg(long, help = "Bot user id")]
+    bot_user_id: i64,
+
+    #[arg(long, help = "User id to grant access to")]
+    user_id: i64,
+
+    #[arg(
+        long,
+        value_enum,
+        value_delimiter = ',',
+        num_args = 1..,
+        help = "Allowed operations (comma-separated; default invoke,steer)"
+    )]
+    operations: Vec<bots::BotGrantOperation>,
+}
+
+#[derive(Args)]
+struct BotsAccessUserArgs {
+    #[arg(long, help = "Bot user id")]
+    bot_user_id: i64,
+
+    #[arg(long, help = "User id to revoke")]
+    user_id: i64,
 }
 
 #[derive(Args)]
@@ -3441,6 +3569,17 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         println!("{}", payload.token);
                     }
                 }
+                command => {
+                    // Boxed so its state machine stays off main's stack.
+                    Box::pin(bots::handle_bot_management(
+                        command,
+                        &config,
+                        &auth_store,
+                        cli.json,
+                        json_format,
+                    ))
+                    .await?;
+                }
             },
             Command::Typing { command } => {
                 let (label, args, action) = match command {
@@ -3464,6 +3603,19 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 } else {
                     println!("Typing {label} for {}.", peer_label_from_input(&peer));
                 }
+            }
+            Command::Sidebar { command } => {
+                sidebar::run(
+                    command,
+                    sidebar::SidebarContext {
+                        config: &config,
+                        auth_store: &auth_store,
+                        current_user: local_db.load()?.current_user,
+                        json: cli.json,
+                        json_format,
+                    },
+                )
+                .await?;
             }
             Command::Chats { command } => match command {
                 ChatsCommand::List(args) => {
@@ -8188,6 +8340,231 @@ mod cli_parsing_tests {
     }
 
     #[test]
+    fn parses_bot_management_commands() {
+        let cli = Cli::try_parse_from(["inline", "bots", "view", "--bot-user-id", "9"]).unwrap();
+        match cli.command {
+            Command::Bots {
+                command: BotsCommand::Get(args),
+            } => assert_eq!(args.bot_user_id, 9),
+            _ => panic!("expected bots get"),
+        }
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bots",
+            "update",
+            "--bot-user-id",
+            "9",
+            "--name",
+            "Deploy",
+            "--username",
+            "deploy_bot",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bots {
+                command: BotsCommand::Update(args),
+            } => {
+                assert_eq!(args.name.as_deref(), Some("Deploy"));
+                assert_eq!(args.username.as_deref(), Some("deploy_bot"));
+            }
+            _ => panic!("expected bots update"),
+        }
+        assert!(
+            Cli::try_parse_from(["inline", "bots", "update", "--bot-user-id", "9"]).is_err(),
+            "update needs --name or --username"
+        );
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bots",
+            "set-photo",
+            "--bot-user-id",
+            "9",
+            "--file",
+            "./avatar.png",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bots {
+                command: BotsCommand::SetPhoto(args),
+            } => assert_eq!(args.file, PathBuf::from("./avatar.png")),
+            _ => panic!("expected bots set-photo"),
+        }
+        assert!(
+            Cli::try_parse_from(["inline", "bots", "set-photo", "--bot-user-id", "9"]).is_err()
+        );
+
+        for (name, expected) in [("remove-photo", 0), ("clear-avatar", 1)] {
+            let cli =
+                Cli::try_parse_from(["inline", "bots", name, "--bot-user-id", "9"]).unwrap();
+            let matched = match cli.command {
+                Command::Bots {
+                    command: BotsCommand::RemovePhoto(_),
+                } => 0,
+                Command::Bots {
+                    command: BotsCommand::ClearAvatar(_),
+                } => 1,
+                _ => -1,
+            };
+            assert_eq!(matched, expected, "{name}");
+        }
+
+        let cli = Cli::try_parse_from(["inline", "bots", "rotate-token", "--bot-user-id", "9"])
+            .unwrap();
+        match cli.command {
+            Command::Bots {
+                command: BotsCommand::RotateToken(args),
+            } => assert!(!args.yes),
+            _ => panic!("expected bots rotate-token"),
+        }
+
+        let cli = Cli::try_parse_from(["inline", "bots", "settings", "--bot-user-id", "9"])
+            .unwrap();
+        match cli.command {
+            Command::Bots {
+                command: BotsCommand::Settings(args),
+            } => assert_eq!(args.output_mode, None),
+            _ => panic!("expected bots settings"),
+        }
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bots",
+            "settings",
+            "--bot-user-id",
+            "9",
+            "--output-mode",
+            "friendly",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bots {
+                command: BotsCommand::Settings(args),
+            } => assert_eq!(args.output_mode, Some(bots::BotOutputMode::Friendly)),
+            _ => panic!("expected bots settings"),
+        }
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bots",
+            "settings",
+            "--bot-user-id",
+            "9",
+            "--chat-id",
+            "7",
+            "--output-mode",
+            "default",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bots {
+                command: BotsCommand::Settings(args),
+            } => {
+                assert_eq!(args.chat_id, Some(7));
+                assert_eq!(args.output_mode, Some(bots::BotOutputMode::Default));
+            }
+            _ => panic!("expected bots settings"),
+        }
+        assert!(
+            Cli::try_parse_from([
+                "inline",
+                "bots",
+                "settings",
+                "--bot-user-id",
+                "9",
+                "--output-mode",
+                "loud",
+            ])
+            .is_err()
+        );
+
+        let cli = Cli::try_parse_from(["inline", "bots", "access", "ls", "--bot-user-id", "9"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bots {
+                command: BotsCommand::Access {
+                    command: BotsAccessCommand::List(_)
+                }
+            }
+        ));
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bots",
+            "access",
+            "grant",
+            "--bot-user-id",
+            "9",
+            "--user-id",
+            "7",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bots {
+                command:
+                    BotsCommand::Access {
+                        command: BotsAccessCommand::Grant(args),
+                    },
+            } => {
+                assert_eq!(args.user_id, 7);
+                assert!(args.operations.is_empty());
+            }
+            _ => panic!("expected bots access grant"),
+        }
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bots",
+            "access",
+            "grant",
+            "--bot-user-id",
+            "9",
+            "--user-id",
+            "7",
+            "--operations",
+            "invoke,steer,approve",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bots {
+                command:
+                    BotsCommand::Access {
+                        command: BotsAccessCommand::Grant(args),
+                    },
+            } => assert_eq!(
+                args.operations,
+                vec![
+                    bots::BotGrantOperation::Invoke,
+                    bots::BotGrantOperation::Steer,
+                    bots::BotGrantOperation::Approve
+                ]
+            ),
+            _ => panic!("expected bots access grant"),
+        }
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bots",
+            "access",
+            "revoke",
+            "--bot-user-id",
+            "9",
+            "--user-id",
+            "7",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bots {
+                command:
+                    BotsCommand::Access {
+                        command: BotsAccessCommand::Revoke(args),
+                    },
+            } => assert_eq!((args.bot_user_id, args.user_id), (9, 7)),
+            _ => panic!("expected bots access revoke"),
+        }
+    }
+
+    #[test]
     fn parses_hidden_codex_bridge_dev_command() {
         let cli = Cli::try_parse_from([
             "inline",
@@ -9016,6 +9393,15 @@ mod cli_parsing_tests {
 
     #[test]
     fn destructive_yes_short_aliases_parse() {
+        let cli = Cli::try_parse_from(["inline", "bots", "delete", "--bot-user-id", "1", "-y"])
+            .unwrap();
+        match cli.command {
+            Command::Bots {
+                command: BotsCommand::Delete(args),
+            } => assert!(args.yes),
+            _ => panic!("expected bots delete"),
+        }
+
         let cli =
             Cli::try_parse_from(["inline", "chats", "delete", "--chat-id", "1", "-y"]).unwrap();
         match cli.command {

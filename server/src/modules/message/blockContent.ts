@@ -323,7 +323,7 @@ function parseRegion(
     if (details) {
       const summaryLine = line.next < end ? readLine(markdown, line.next, end) : undefined
       const summary = summaryLine
-        ? /^<summary(?: kind="(progress)")?(?: activity="(reasoning|explore|read|search|edit|delete|move|command|web|tool|agent)")?>(.*)<\/summary>$/.exec(summaryLine.value)
+        ? /^<summary(?: kind="(progress)")?(?: started="(\d{1,12})")?(?: activity="(reasoning|explore|read|search|edit|delete|move|command|web|tool|agent)")?>(.*)<\/summary>$/.exec(summaryLine.value)
         : undefined
 
       if (summaryLine && summary) {
@@ -332,7 +332,7 @@ function parseRegion(
         const childrenEnd = close?.start ?? end
         const summaryPrefixLength = summaryLine.value.indexOf(">") + 1
         const summaryStart = summaryLine.start + summaryPrefixLength
-        const summaryEnd = summaryStart + (summary[3]?.length ?? 0)
+        const summaryEnd = summaryStart + (summary[4]?.length ?? 0)
         blocks.push({
           kind: {
             oneofKind: "disclosure",
@@ -341,8 +341,9 @@ function parseRegion(
               kind:
                 summary[1] === "progress" ? BlockDisclosure_Kind.PROGRESS : BlockDisclosure_Kind.DEFAULT,
               activityKind:
-                disclosureActivityKinds[summary[2] ?? ""] ?? BlockDisclosure_ActivityKind.UNSPECIFIED,
+                disclosureActivityKinds[summary[3] ?? ""] ?? BlockDisclosure_ActivityKind.UNSPECIFIED,
               initiallyOpen: details[1] !== undefined,
+              ...(summary[2] !== undefined ? { startedAt: BigInt(summary[2]) } : {}),
               status: BlockStatus.UNSPECIFIED,
               children: coalesceImages(
                 parseRegion(markdown, legacy, summaryLine.next, childrenEnd, context),
@@ -900,6 +901,10 @@ export function validateBlockContent(
             throw new Error("Invalid disclosure status")
           }
           if (block.kind.disclosure.meta) validateText(block.kind.disclosure.meta)
+          if (block.kind.disclosure.startedAt !== undefined
+            && (block.kind.disclosure.startedAt < 0n || block.kind.disclosure.startedAt >= 1_000_000_000_000n)) {
+            throw new Error("Invalid disclosure start time")
+          }
           visit(block.kind.disclosure.children, depth + 1, listDepth, suppressLeafDirection)
           break
         case "diff": {

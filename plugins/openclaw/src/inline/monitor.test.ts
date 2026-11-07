@@ -8815,7 +8815,7 @@ describe("inline/monitor", () => {
       ].filter((text): text is string => typeof text === "string")
       const progress = messages.filter((text) => text.includes('kind="progress"'))
       expect(progress.length).toBeGreaterThan(1)
-      for (const text of progress) expect(text.split("\n")[1]).toBe('<summary kind="progress" activity="agent">Checking the EPUB</summary>')
+      for (const text of progress) expect(text.split("\n")[1]).toMatch(/^<summary kind="progress" started="\d+" activity="agent">Checking the EPUB<\/summary>$/)
       const terminal = messages.find((text) => text.includes('<summary activity="agent">Worked'))!
       expect(terminal).toContain("python3 check.py")
       expect(terminal.match(/^- /gm)).toHaveLength(1)
@@ -8963,7 +8963,7 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           chatId: 773n,
           sendMode: "silent",
-          text: expect.stringContaining('<summary kind="progress" activity="agent">'),
+          text: expect.stringMatching(/<summary kind="progress" started="\d+" activity="agent">/),
           parseMarkdown: true,
         }),
       )

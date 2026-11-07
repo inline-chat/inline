@@ -43,6 +43,7 @@ struct ChatListDatabaseRow {
     case peerLastName
     case peerEmail
     case peerUsername
+    case peerIsBotOnline
     case peerPhoneNumber
     case profileFileID
     case profileFileUniqueID

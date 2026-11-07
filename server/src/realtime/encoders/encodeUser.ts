@@ -11,6 +11,7 @@ export const encodeUser = ({
   botAvatarFile,
   min = false,
   includeTimeZone = false,
+  includeBotStatus = false,
   viewerUserId,
 }: {
   user: DbUser
@@ -19,6 +20,8 @@ export const encodeUser = ({
   botAvatarFile?: DbFile
   min?: boolean
   includeTimeZone?: boolean
+  /** Bot presence in a min projection, for viewers with a DM with the bot or its owner. */
+  includeBotStatus?: boolean
   viewerUserId?: number
 }): User => {
   let cdnUrl: string | undefined = undefined
@@ -40,7 +43,7 @@ export const encodeUser = ({
     phoneNumber: includeContact ? user.phoneNumber ?? undefined : undefined,
     pendingSetup: min ? undefined : user.pendingSetup === true ? true : undefined,
     min: min ?? false,
-    status: min
+    status: min && !(includeBotStatus && user.bot === true)
       ? undefined
       : {
           online: user.online ? UserStatus_Status.ONLINE : UserStatus_Status.OFFLINE,

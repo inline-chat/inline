@@ -86,11 +86,13 @@ function encodeBlock(block: Block, path: number[], input: EncoderInput): string 
     case "disclosure": {
       const open = block.kind.disclosure.initiallyOpen ? " open" : ""
       const progress = block.kind.disclosure.kind === BlockDisclosure_Kind.PROGRESS ? ' kind="progress"' : ""
+      const startedAt = block.kind.disclosure.startedAt
+      const started = startedAt !== undefined && startedAt >= 0n && startedAt < 1_000_000_000_000n ? ` started="${startedAt}"` : ""
       const activityName = disclosureActivityNames[block.kind.disclosure.activityKind]
       const activity = activityName ? ` activity="${activityName}"` : ""
       const summary = encodeText(block.kind.disclosure.summary!, input)
       const children = encodeBlocks(block.kind.disclosure.children, path, input).join("\n\n")
-      return `<details${open}>\n<summary${progress}${activity}>${summary}</summary>${children ? `\n${children}` : ""}\n</details>`
+      return `<details${open}>\n<summary${progress}${started}${activity}>${summary}</summary>${children ? `\n${children}` : ""}\n</details>`
     }
     case "footer":
       return `<footer>${encodeText(block.kind.footer, input)}</footer>`

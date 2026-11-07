@@ -387,9 +387,68 @@ class MessageTableCell: NSView {
     }
   }
 
+  // MARK: - Reply thread source
+
+  private var replyThreadSourceLayer: CALayer?
+  private var isReplyThreadSource = false
+
+  /// Tints the row while the reply thread it opened is showing in the side pane.
+  /// Uses its own sublayer so flash highlights on the cell layer keep working on top.
+  func setReplyThreadSourceHighlighted(_ highlighted: Bool, animated: Bool) {
+    guard highlighted != isReplyThreadSource else { return }
+    isReplyThreadSource = highlighted
+
+    if highlighted, replyThreadSourceLayer == nil, let layer {
+      let sourceLayer = CALayer()
+      sourceLayer.opacity = 0
+      sourceLayer.actions = ["bounds": NSNull(), "position": NSNull()]
+      sourceLayer.frame = bounds
+      layer.insertSublayer(sourceLayer, at: 0)
+      replyThreadSourceLayer = sourceLayer
+    }
+    updateReplyThreadSourceColor()
+
+    guard let replyThreadSourceLayer else { return }
+    let fromOpacity = replyThreadSourceLayer.presentation()?.opacity ?? replyThreadSourceLayer.opacity
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    replyThreadSourceLayer.opacity = highlighted ? 1 : 0
+    CATransaction.commit()
+    guard animated else {
+      replyThreadSourceLayer.removeAnimation(forKey: "opacity")
+      return
+    }
+    let fade = CABasicAnimation(keyPath: "opacity")
+    fade.fromValue = fromOpacity
+    fade.duration = 0.2
+    replyThreadSourceLayer.add(fade, forKey: "opacity")
+  }
+
+  private func updateReplyThreadSourceColor() {
+    guard let replyThreadSourceLayer else { return }
+    effectiveAppearance.performAsCurrentDrawingAppearance {
+      replyThreadSourceLayer.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
+    }
+  }
+
+  override func layout() {
+    super.layout()
+    replyThreadSourceLayer?.frame = bounds
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateReplyThreadSourceColor()
+  }
+
   override func prepareForReuse() {
     super.prepareForReuse()
     layer?.removeAllAnimations()
+    if isReplyThreadSource {
+      isReplyThreadSource = false
+      replyThreadSourceLayer?.removeAllAnimations()
+      replyThreadSourceLayer?.opacity = 0
+    }
     wasTranslated = nil
     messageView?.reset()
     forwardSelectionCheckmark?.isHidden = true

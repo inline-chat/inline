@@ -18,6 +18,18 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     return view
   }()
   private let metaSurface = RichBlockTextSurface(frame: .zero)
+  /// "2m 12s" after a working row's summary, ticking once a second.
+  private let elapsedLabel: NSTextField = {
+    let label = NSTextField(labelWithString: "")
+    label.isHidden = true
+    label.lineBreakMode = .byClipping
+    label.setAccessibilityElement(false)
+    return label
+  }()
+  private var elapsedStart: Date?
+  private var elapsedWidth: CGFloat = 0
+  private var isTicking = false
+  private var summaryAccessibilityLabel = ""
   private var decoration: RichBlockDisclosureDecoration?
   private let toggleButton: NSButton = {
     let button = RichBlockDisclosureButton(title: "", target: nil, action: nil)
@@ -52,6 +64,7 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     addSubview(shimmer)
     addSubview(statusIcon)
     addSubview(metaSurface)
+    addSubview(elapsedLabel)
     metaSurface.isHidden = true
   }
 
@@ -104,7 +117,8 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     decoration = text.disclosure
     applyDecoration(context: context)
     let statusName = decoration?.status.map { ", \($0.accessibilityName)" } ?? ""
-    toggleButton.setAccessibilityLabel(attributed.string + statusName)
+    summaryAccessibilityLabel = attributed.string + statusName
+    applyElapsed(context: context)
     toggleButton.setAccessibilityValue(isEmpty ? nil : (expanded ? "Expanded" : "Collapsed"))
     toggleButton.setAccessibilityRole(isEmpty ? .staticText : .button)
     setContentVisible(context.isContentVisible)
@@ -118,6 +132,7 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
       && window != nil
       && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     shimmer.setAnimating(shouldAnimate)
+    updateTicking(visible: visible)
   }
 
   override func viewDidMoveToWindow() {
@@ -136,6 +151,57 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     decoration = nil
     statusIcon.isHidden = true
     metaSurface.isHidden = true
+    elapsedStart = nil
+    elapsedLabel.isHidden = true
+    elapsedWidth = 0
+    updateTicking(visible: false)
+  }
+
+  // MARK: Live time
+
+  private func applyElapsed(context: RichBlockRenderContext) {
+    if let elapsed = decoration?.elapsed {
+      elapsedStart = ProgressElapsed.start(startedAt: elapsed.startedAt, messageDate: context.relatedMessage.date)
+      elapsedLabel.font = RichBlockElapsedMetrics.font(size: context.baseFontSize)
+      elapsedLabel.textColor = context.palette.tertiary
+    } else {
+      elapsedStart = nil
+    }
+    updateElapsed()
+  }
+
+  /// Ticks only while on screen; a row past the cap stops for good.
+  private func updateTicking(visible: Bool) {
+    let shouldTick = visible && window != nil && elapsedStart != nil
+    guard shouldTick != isTicking else { return }
+    isTicking = shouldTick
+    if shouldTick {
+      ProgressElapsedTicker.shared.add(self) { [weak self] in self?.updateElapsed() }
+      updateElapsed()
+    } else {
+      ProgressElapsedTicker.shared.remove(self)
+    }
+  }
+
+  private func updateElapsed() {
+    let text = elapsedStart.flatMap { ProgressElapsed.text(since: $0) }
+    if let text {
+      if elapsedLabel.stringValue != text { elapsedLabel.stringValue = text }
+      toggleButton.setAccessibilityLabel("\(summaryAccessibilityLabel), \(text)")
+    } else {
+      toggleButton.setAccessibilityLabel(summaryAccessibilityLabel)
+      if elapsedStart != nil {
+        elapsedStart = nil
+        updateTicking(visible: false)
+      }
+    }
+    let width = text.map { _ in ceil(elapsedLabel.attributedStringValue.size().width) } ?? 0
+    elapsedLabel.isHidden = text == nil
+    // The width changes only at 10s, 1m, 10m and 1h; only then does the chevron move.
+    if width != elapsedWidth {
+      elapsedWidth = width
+      needsLayout = true
+    }
   }
 
   private func applyDecoration(context: RichBlockRenderContext) {
@@ -178,14 +244,34 @@ final class RichBlockDisclosureNodeView: RichBlockRenderableView {
     let rowBounds = isRTL
       ? CGRect(x: bounds.minX + reserved, y: bounds.minY, width: bounds.width - reserved, height: bounds.height)
       : CGRect(x: bounds.minX, y: bounds.minY, width: bounds.width - reserved, height: bounds.height)
+    // The live time reads as part of the title: "Working 2m 12s", then the chevron.
+    let elapsedExtent = elapsedLabel.isHidden ? 0 : RichBlockElapsedMetrics.gap + elapsedWidth
     let horizontalLayout = RichBlockDisclosureMetrics.horizontalLayout(
       bounds: rowBounds,
-      intrinsicTitleWidth: surface.measuredWidth,
+      intrinsicTitleWidth: surface.measuredWidth + elapsedExtent,
       isRTL: isRTL,
       hasActivityIcon: activity != nil,
       hasChevron: !isEmpty
     )
-    surface.frame = horizontalLayout.titleFrame
+    var titleFrame = horizontalLayout.titleFrame
+    if elapsedExtent > 0 {
+      let titleWidth = max(0, titleFrame.width - elapsedExtent)
+      let labelHeight = ceil(elapsedLabel.intrinsicContentSize.height)
+      let labelY = titleFrame.minY + floor((titleFrame.height - labelHeight) / 2)
+      if isRTL {
+        elapsedLabel.frame = CGRect(x: titleFrame.minX, y: labelY, width: elapsedWidth, height: labelHeight)
+        titleFrame.origin.x = titleFrame.maxX - titleWidth
+      } else {
+        elapsedLabel.frame = CGRect(
+          x: titleFrame.minX + titleWidth + RichBlockElapsedMetrics.gap,
+          y: labelY,
+          width: elapsedWidth,
+          height: labelHeight
+        )
+      }
+      titleFrame.size.width = titleWidth
+    }
+    surface.frame = titleFrame
     chevron.frame = horizontalLayout.chevronFrame
     activityIcon.frame = horizontalLayout.activityIconFrame ?? .zero
     shimmer.frame = surface.frame

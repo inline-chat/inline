@@ -396,14 +396,22 @@ impl DocBuilder {
     }
 
     /// A progress message's outer row, as v1 drew it: "Working" (animated
-    /// and open) while `working`, then its final summary, closed.
+    /// and open) while `working`, then its final summary, closed. While
+    /// working, `elapsed` lets clients count up from its start; its text is
+    /// the time as of this edit, for clients that can't.
     pub(crate) fn progress(
         &mut self,
         summary: &str,
         working: bool,
+        elapsed: Option<Elapsed<'_>>,
         build: impl FnOnce(&mut DocBuilder),
     ) {
         let summary = self.inline_text(summary);
+        let elapsed = elapsed.filter(|_| working);
+        let meta = elapsed.as_ref().map(|elapsed| {
+            self.push_raw(" · ");
+            self.inline_text(elapsed.text)
+        });
         self.push_raw("\n");
         let mut children = DocBuilder {
             text: std::mem::take(&mut self.text),
@@ -423,9 +431,18 @@ impl DocBuilder {
             kind: kind as i32,
             initially_open: Some(working),
             children: children.blocks,
+            meta,
+            started_at: elapsed.map(|elapsed| elapsed.started_at),
             ..Default::default()
         }));
     }
+}
+
+/// How long a progress message's work has run: its start, Unix seconds, and
+/// the time as of this edit, such as "1m 40s".
+pub(crate) struct Elapsed<'a> {
+    pub started_at: i64,
+    pub text: &'a str,
 }
 
 pub(crate) use proto::block_callout::Kind as CalloutKind;
@@ -498,7 +515,7 @@ mod tests {
     #[test]
     fn binary_tool_output_is_sanitized_before_block_ranges_are_written() {
         let mut builder = DocBuilder::new();
-        builder.progress("Work\0ing", true, |progress| {
+        builder.progress("Work\0ing", true, None, |progress| {
             progress.disclosure(
                 "Ran\0 command 🚀",
                 Some("1\u{1b}[31ms\u{1b}[0m"),

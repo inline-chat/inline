@@ -33,7 +33,18 @@ enum SidebarItemSize: String, CaseIterable, Identifiable {
     case .compact:
       30
     case .standard:
-      44
+      40
+    }
+  }
+
+  /// Folders are single-line, so they don't take the preview row's height.
+  /// The icon column keeps `iconSize` width so folder and chat titles align.
+  var folderRowHeight: CGFloat {
+    switch self {
+    case .compact:
+      30
+    case .standard:
+      32
     }
   }
 
@@ -42,8 +53,12 @@ enum SidebarItemSize: String, CaseIterable, Identifiable {
     case .compact:
       22
     case .standard:
-      32
+      30
     }
+  }
+
+  static func matching(rowHeight: CGFloat) -> SidebarItemSize? {
+    allCases.first { $0.rowHeight == rowHeight }
   }
 }
 
@@ -241,7 +256,7 @@ struct SidebarChatItemView: Equatable, View {
             .transition(.opacity)
         }
 
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 1) {
           titleBlock
 
           if showsPreview {
@@ -250,6 +265,7 @@ struct SidebarChatItemView: Equatable, View {
                 peer: peerId,
                 preview: item.preview,
                 font: Self.subtitleFont,
+                dimmed: titleDimmed,
                 fillsAvailableWidth: !keepsPreviewAccessoryNearContent
               )
               .id(peerId)
@@ -732,7 +748,7 @@ struct SidebarChatDisclosureIcon: View {
 
   var body: some View {
     Image(systemName: "chevron.right")
-      .font(.system(size: 6.5, weight: .bold))
+      .font(.system(size: 7, weight: .bold))
       .foregroundStyle(.secondary)
       .rotationEffect(.degrees(isExpanded ? 90 : 0))
       .animation(animates ? SidebarDisclosureMotion.animation : nil, value: isExpanded)
@@ -746,14 +762,16 @@ private struct SidebarComposeActivityPreview: View {
   let peer: Peer
   let preview: String
   let font: Font
+  let dimmed: Bool
   let fillsAvailableWidth: Bool
 
   @State private var activityState: ComposeActionActivityState
 
-  init(peer: Peer, preview: String, font: Font, fillsAvailableWidth: Bool) {
+  init(peer: Peer, preview: String, font: Font, dimmed: Bool, fillsAvailableWidth: Bool) {
     self.peer = peer
     self.preview = preview
     self.font = font
+    self.dimmed = dimmed
     self.fillsAvailableWidth = fillsAvailableWidth
     _activityState = State(initialValue: ComposeActions.shared.activityState(for: peer))
   }
@@ -777,7 +795,9 @@ private struct SidebarComposeActivityPreview: View {
       } else {
         Text(preview)
           .font(font)
-          .foregroundStyle(Color(nsColor: Theme.sidebarPreviewTextColor))
+          .foregroundStyle(Color(nsColor: dimmed
+            ? Theme.sidebarInactivePreviewTextColor
+            : Theme.sidebarPreviewTextColor))
           .lineLimit(1)
           .id("preview")
           .transition(Self.swapTransition)
@@ -785,7 +805,8 @@ private struct SidebarComposeActivityPreview: View {
     }
     .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
     .layoutPriority(1)
-    .frame(height: 13, alignment: .center)
+    // Full 11pt line height; 13 clipped descenders.
+    .frame(height: 14, alignment: .center)
     .clipped()
     .animation(.easeInOut(duration: 0.18), value: activityState.presentation)
   }

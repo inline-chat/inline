@@ -246,6 +246,28 @@ fn prepare_file_attachment(
     })
 }
 
+/// Native photo upload for a profile photo. Rejects anything that is not an image.
+pub(crate) fn prepare_photo_upload(
+    path: &Path,
+) -> Result<NativeUploadInput, Box<dyn std::error::Error>> {
+    let metadata = fs::metadata(path)
+        .map_err(|_| CliError::invalid_args(format!("File not found: {}", path.display())))?;
+    if !metadata.is_file() {
+        return Err(
+            CliError::invalid_args(format!("Not a file: {}", path.display())).into(),
+        );
+    }
+    let attachment = prepare_file_attachment(path, metadata.len(), false, true)?;
+    if !matches!(attachment.file_type, UploadFileType::Photo) {
+        return Err(CliError::invalid_args(format!(
+            "Not an image file: {} (use a .jpg, .png, .webp, .gif, or .heic file)",
+            path.display()
+        ))
+        .into());
+    }
+    Ok(attachment.to_native_upload_input())
+}
+
 fn ensure_attachment_size(
     label: &str,
     size: u64,

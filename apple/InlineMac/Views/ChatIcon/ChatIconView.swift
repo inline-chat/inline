@@ -1,4 +1,6 @@
 import AppKit
+import InlineKit
+import InlineUI
 import SwiftUI
 
 class ChatIconSwiftUIBridge: NSView {
@@ -6,6 +8,7 @@ class ChatIconSwiftUIBridge: NSView {
   private var size: CGFloat
   private var backgroundOpacity: Double
   private var ignoresSafeArea: Bool
+  private var showsBotOnlineIndicator: Bool
 
   private var hostingView: NSHostingView<AnyView>?
 
@@ -13,12 +16,14 @@ class ChatIconSwiftUIBridge: NSView {
     _ peerType: ChatIcon.PeerType,
     size: CGFloat,
     backgroundOpacity: Double = 1.0,
-    ignoresSafeArea: Bool = false
+    ignoresSafeArea: Bool = false,
+    showsBotOnlineIndicator: Bool = false
   ) {
     self.peerType = peerType
     self.size = size
     self.backgroundOpacity = backgroundOpacity
     self.ignoresSafeArea = ignoresSafeArea
+    self.showsBotOnlineIndicator = showsBotOnlineIndicator
 
     super.init(frame: NSRect(
       x: 0,
@@ -76,7 +81,12 @@ class ChatIconSwiftUIBridge: NSView {
   }
 
   private func makeRootView(peerType: ChatIcon.PeerType) -> AnyView {
+    var botUser: InlineKit.User?
+    if showsBotOnlineIndicator, case let .user(userInfo) = peerType {
+      botUser = userInfo.user
+    }
     let view = ChatIcon(peer: peerType, size: size, backgroundOpacity: backgroundOpacity)
+      .botOnlineIndicator(botUser, avatarSize: size)
     return ignoresSafeArea ? AnyView(view.ignoresSafeArea()) : AnyView(view)
   }
 

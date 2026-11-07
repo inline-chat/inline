@@ -47,6 +47,29 @@ describe("getUsersHandler", () => {
     expect(result.users[0]?.bot).toBe(true)
   })
 
+  test("shows a bot's online status only to its owner and people with a DM with it", async () => {
+    const owner = await testUtils.createUser("lookup-bot-owner@example.com")
+    const friend = await testUtils.createUser("lookup-bot-friend@example.com")
+    const stranger = await testUtils.createUser("lookup-bot-stranger@example.com")
+    const [bot] = await db.insert(users).values({
+      email: "lookup-online-bot@example.com", bot: true, botCreatorId: owner.id, online: true, firstName: "Agent",
+    }).returning()
+    if (!bot) throw new Error("Missing bot")
+    const [chat] = await db.insert(chats).values({
+      type: "private", minUserId: Math.min(friend.id, bot.id), maxUserId: Math.max(friend.id, bot.id),
+    }).returning()
+    if (!chat) throw new Error("Missing chat")
+    await db.insert(dialogs).values({ chatId: chat.id, userId: friend.id, peerUserId: bot.id })
+
+    const status = async (viewerId: number) =>
+      (await getUsersHandler({ userIds: [BigInt(bot.id), BigInt(stranger.id)] }, context(viewerId))).users
+        .map((user) => user.status?.online)
+    expect(await status(owner.id)).toEqual([1, undefined])
+    expect(await status(friend.id)).toEqual([1, undefined])
+    // A known ID alone never reveals when someone's agent is running.
+    expect(await status(stranger.id)).toEqual([undefined, undefined])
+  })
+
   test("deduplicates and preserves requested order", async () => {
     const first = await testUtils.createUser("lookup-first@example.com")
     const second = await testUtils.createUser("lookup-second@example.com")

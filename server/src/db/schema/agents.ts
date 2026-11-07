@@ -30,9 +30,26 @@ export const agentRuntimes = pgTable("agent_runtimes", {
   executableVersion: text("executable_version"),
   manifestHash: text("manifest_hash"),
   bridgeVersion: text("bridge_version"),
-  // AgentOutputMode set in Agent Settings; 0 means Detailed.
+  // Mirror of agent_settings.default_output_mode for bridges that read it from
+  // the runtime; agent_settings is the source of truth.
   defaultOutputMode: smallint("default_output_mode").default(0).notNull(),
   lastSeenAt: timestamp("last_seen_at", { mode: "date", precision: 3 }).notNull(),
+  createdAt: timestamp("created_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
+})
+
+/**
+ * Per-bot settings from Agent Settings, read by the bot's harness. One row per
+ * bot, created on first change; a missing row means every setting is default.
+ */
+export const agentSettings = pgTable("agent_settings", {
+  botUserId: integer("bot_user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  // AgentOutputMode; 0 means Detailed.
+  defaultOutputMode: smallint("default_output_mode").default(0).notNull(),
+  revision: bigint("revision", { mode: "bigint" }).default(sql`1`).notNull(),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
 })
@@ -94,5 +111,6 @@ export const agentParticipations = pgTable(
 )
 
 export type DbAgentRuntime = typeof agentRuntimes.$inferSelect
+export type DbAgentSettings = typeof agentSettings.$inferSelect
 export type DbAgentGrant = typeof agentGrants.$inferSelect
 export type DbAgentParticipation = typeof agentParticipations.$inferSelect

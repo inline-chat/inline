@@ -1,6 +1,7 @@
 //! The folders a thread can pick: the agent's own, the ones its harness
 //! knows (Codex's projects) and the ones registered with the bridge. Each is
 //! offered once, by canonical path, under an opaque id the apps keep.
+//! No project comes first; its folders (see `workspaces`) are never listed.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use inline_agent_bridge::{BridgeStore, InstallationId};
 use inline_client::{AgentProjectCatalog, AgentProjectOption};
 
 use super::settings::Folder;
+use super::workspaces::{self, NO_PROJECT_ID};
 
 /// Where folders registered with the bridge are read from.
 pub(crate) struct FolderSource {
@@ -68,6 +70,8 @@ impl Folders {
             let Some(path) = std::fs::canonicalize(&path)
                 .ok()
                 .filter(|path| path.is_dir() && path.parent().is_some())
+                // Claude lists every folder it worked in, No project's too.
+                .filter(|path| !workspaces::is_managed(path))
             else {
                 continue;
             };
@@ -103,10 +107,10 @@ impl Folders {
         }
     }
 
-    /// The apps' project catalog: the folders Inline takes (at most 500),
-    /// the agent's own among them and the default.
+    /// The apps' project catalog: No project, then the folders Inline takes
+    /// (500 in all), the agent's own among them and the default.
     pub(crate) fn catalog(&self, machine_label: &str) -> Option<AgentProjectCatalog> {
-        const MAX_CATALOG_FOLDERS: usize = 500;
+        const MAX_CATALOG_FOLDERS: usize = 500 - 1;
         let mut entries: Vec<&Entry> = self.entries.iter().take(MAX_CATALOG_FOLDERS).collect();
         if let Some(default) = self.default_id.as_deref()
             && !entries.iter().any(|entry| entry.id == default)
@@ -115,39 +119,45 @@ impl Folders {
             entries.pop();
             entries.push(own);
         }
-        (!entries.is_empty()).then(|| AgentProjectCatalog {
-            options: entries
-                .into_iter()
-                .map(|entry| AgentProjectOption {
-                    id: entry.id.clone(),
-                    label: entry.label.clone(),
-                    description: Some(format!("On {machine_label}")),
-                })
-                .collect(),
+        let none = workspaces::choice();
+        Some(AgentProjectCatalog {
+            options: std::iter::once(AgentProjectOption {
+                id: none.id,
+                label: none.label,
+                description: none.description,
+            })
+            .chain(entries.into_iter().map(|entry| AgentProjectOption {
+                id: entry.id.clone(),
+                label: entry.label.clone(),
+                description: Some(format!("On {machine_label}")),
+            }))
+            .collect(),
             can_select_folder: None,
             default_project_id: self.default_id.clone(),
         })
     }
 
-    /// The choices for a thread's settings; two folders of the same name say
-    /// where they are.
+    /// The choices for a thread's settings, No project first; two folders of
+    /// the same name say where they are.
     pub(crate) fn options(&self) -> Vec<Folder> {
         let mut names: HashMap<&str, usize> = HashMap::new();
         for entry in &self.entries {
             *names.entry(entry.label.as_str()).or_default() += 1;
         }
-        self.entries
-            .iter()
-            .map(|entry| Folder {
-                id: entry.id.clone(),
-                label: entry.label.clone(),
-                description: (names[entry.label.as_str()] > 1)
-                    .then(|| entry.path.parent().map(home_relative))
-                    .flatten(),
-            })
+        std::iter::once(workspaces::choice())
+            .chain(self.entries.iter().map(|entry| {
+                Folder {
+                    id: entry.id.clone(),
+                    label: entry.label.clone(),
+                    description: (names[entry.label.as_str()] > 1)
+                        .then(|| entry.path.parent().map(home_relative))
+                        .flatten(),
+                }
+            }))
             .collect()
     }
 
+    /// A listed folder by its id; No project has none until a thread takes it.
     pub(crate) fn folder(&self, id: &str) -> Option<&Path> {
         self.entries
             .iter()
@@ -157,6 +167,9 @@ impl Folders {
 
     /// The id of a folder, as the thread keeps it.
     pub(crate) fn id_of(&self, folder: &Path) -> Option<&str> {
+        if workspaces::is_managed(folder) {
+            return Some(NO_PROJECT_ID);
+        }
         let folder = std::fs::canonicalize(folder).ok()?;
         self.entries
             .iter()
@@ -258,8 +271,14 @@ mod tests {
         let folders = source.read(&own, &harness).unwrap();
         let options = folders.options();
         let labels: Vec<&str> = options.iter().map(|option| option.label.as_str()).collect();
-        // Registered folders follow, by name; the harness's own name wins.
-        assert_eq!(labels, ["inline", "Website", "inline", "notes"]);
+        // No project first; registered folders follow, by name; the harness's
+        // own name wins.
+        assert_eq!(
+            labels,
+            ["No project", "inline", "Website", "inline", "notes"]
+        );
+        assert_eq!(options[0].id, NO_PROJECT_ID);
+        let options = &options[1..];
         assert!(options[0].description.is_some() && options[2].description.is_some());
         assert_ne!(
             options[0].description, options[2].description,
@@ -278,13 +297,36 @@ mod tests {
 
         let catalog = folders.catalog("MacBook").unwrap();
         assert_eq!(catalog.default_project_id.as_deref(), Some(own_id.as_str()));
-        assert_eq!(catalog.options.len(), 4);
+        assert_eq!(catalog.options.len(), 5);
+        assert_eq!(catalog.options[0].id, NO_PROJECT_ID);
         assert!(
-            catalog
-                .options
+            catalog.options[1..]
                 .iter()
                 .all(|option| option.description.as_deref() == Some("On MacBook"))
         );
+        assert!(folders.folder(NO_PROJECT_ID).is_none());
+    }
+
+    #[test]
+    fn no_project_folders_a_harness_lists_stay_unlisted() {
+        let dir = tempfile::tempdir().unwrap();
+        let own = std::fs::canonicalize(dir.path()).unwrap().join("work");
+        std::fs::create_dir(&own).unwrap();
+        let managed = workspaces::allocate("Claude", 7).unwrap();
+        let source = FolderSource::listing(&dir.path().join("bridge.sqlite"), "agent", &[]);
+        let harness = [CatalogFolder {
+            path: managed.clone(),
+            label: "claude-7".to_owned(),
+        }];
+        let folders = source.read(&own, &harness).unwrap();
+        let labels: Vec<String> = folders
+            .options()
+            .into_iter()
+            .map(|option| option.label)
+            .collect();
+        assert_eq!(labels, ["No project", "work"]);
+        assert_eq!(folders.id_of(&managed), Some(NO_PROJECT_ID));
+        assert_eq!(folders.catalog("MacBook").unwrap().options.len(), 2);
     }
 
     #[test]
@@ -295,7 +337,8 @@ mod tests {
         let source = FolderSource::listing(&dir.path().join("bridge.sqlite"), "agent", &[]);
         let folders = source.read(&own, &[]).unwrap();
         let options = folders.options();
-        assert_eq!(options.len(), 1);
-        assert_eq!(options[0].label, "work");
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].label, "No project");
+        assert_eq!(options[1].label, "work");
     }
 }

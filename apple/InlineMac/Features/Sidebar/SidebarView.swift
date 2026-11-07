@@ -557,13 +557,13 @@ struct SidebarView: View {
         rows.append(SidebarCollectionRow(
           id: .folder(folder.id),
           kind: .folder(folder),
-          height: settings.sidebarItemSize.rowHeight
+          height: settings.sidebarItemSize.folderRowHeight
         ))
         if folder.childCount == 0, folder.isExpanded {
           rows.append(SidebarCollectionRow(
             id: .folderEmpty(folder.id),
             kind: .folderEmpty(folder.id, lane: folder.lane),
-            height: settings.sidebarItemSize.rowHeight
+            height: settings.sidebarItemSize.folderRowHeight
           ))
         }
       }

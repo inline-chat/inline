@@ -156,6 +156,7 @@ struct ExperimentalChatListRow: View, @MainActor Equatable {
         size: metrics.avatarSize
       )
         .equatable()
+        .onlineIndicator(descriptor.isBotOnline, avatarSize: metrics.avatarSize)
         .frame(width: metrics.identityContainerSize, height: metrics.identityContainerSize)
     case let .thread(descriptor):
       ThreadIconView(

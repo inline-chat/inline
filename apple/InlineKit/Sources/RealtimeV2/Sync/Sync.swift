@@ -3216,7 +3216,7 @@ actor Sync {
         .chat(peer: payload.hasBucketPeerID ? payload.bucketPeerID : payload.agentSession.peerID)
       case let .agentParticipation(payload):
         .chat(peer: payload.participation.peerID)
-      case .agentGrant, .agentRuntime, .agentSessionControl:
+      case .agentGrant, .agentRuntime, .agentSessionControl, .agentSettings:
         .user
       default:
         nil
@@ -3509,7 +3509,7 @@ actor BucketActor {
         true
       case .messageActionInvoked, .messageActionAnswered:
         true
-      case .agentSessionState, .agentParticipation, .agentGrant, .agentRuntime, .agentSessionControl:
+      case .agentSessionState, .agentParticipation, .agentGrant, .agentRuntime, .agentSessionControl, .agentSettings:
         // Thin agent state; catch-up repairs work bars and sidebar badges.
         true
       case .dialogFollowMode, .dialogCollapsedMaxID, .dialogTranslation:

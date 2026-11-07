@@ -38,7 +38,7 @@ struct MessageRichContent {
     if message.translationText == nil, let payload = message.message.blockContentPayload {
       // A quote reply shows its quote in the reply header, so the body skips it.
       let content = message.leadingReplyQuote?.body ?? payload.content
-      var builder = Builder(body: body, style: style, expanded: expanded)
+      var builder = Builder(body: body, style: style, expanded: expanded, messageDate: message.message.date)
       guard builder.withinLimits(content), let blocks = builder.blocks(content.blocks, path: RichPath()),
             !blocks.isEmpty
       else { return nil }
@@ -83,12 +83,28 @@ struct MessageRichContent {
     let body: NSAttributedString
     let style: Style
     let expanded: [RichPath: Bool]
+    /// Where a working row counts from when it sent no start of its own.
+    let messageDate: Date
     var photos: [String: PhotoInfo] = [:]
 
-    init(body: NSAttributedString, style: Style, expanded: [RichPath: Bool]) {
+    init(body: NSAttributedString, style: Style, expanded: [RichPath: Bool], messageDate: Date = .distantPast) {
       self.body = body
       self.style = style
       self.expanded = expanded
+      self.messageDate = messageDate
+    }
+
+    /// A working row's live time: from its own start, else the message's.
+    func elapsed(_ disclosure: BlockDisclosure) -> RichElapsed? {
+      guard disclosure.kind == .progress else { return nil }
+      let font = UIFont.monospacedDigitSystemFont(ofSize: style.baseFont.pointSize, weight: .regular)
+      let widest = ProgressElapsed.widestSamples
+        .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+        .max() ?? 0
+      return RichElapsed(
+        start: ProgressElapsed.start(startedAt: disclosure.hasStartedAt ? disclosure.startedAt : nil, messageDate: messageDate),
+        reservedWidth: ceil(widest)
+      )
     }
 
     /// Mirrors the server's limits, so a forged snapshot falls back to plain text.
@@ -200,7 +216,8 @@ struct MessageRichContent {
           isExpanded: expanded[path] ?? (disclosure.hasInitiallyOpen && disclosure.initiallyOpen),
           isInProgress: disclosure.kind == .progress,
           hasActivityIcon: activity != .unspecified && activity != .agent,
-          isRightToLeft: disclosure.hasIsRtl && disclosure.isRtl
+          isRightToLeft: disclosure.hasIsRtl && disclosure.isRtl,
+          elapsed: elapsed(disclosure)
         ))
       default:
         // Kinds this view doesn't draw yet, such as agent steps and forms, fall back to the

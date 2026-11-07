@@ -29,7 +29,9 @@ enum SidebarSectionHeaderMetrics {
   static let controlSize: CGFloat = 24
   static let openSeparatorControlSpacing: CGFloat = 4
   static let openSeparatorOpacity: CGFloat = 0.7
-  static let sectionTitleOpacity: CGFloat = 0.5
+  /// Semibold at most of secondary label strength: the old regular @ 0.5
+  /// landed near a quarter of full contrast on the translucent sidebar.
+  static let sectionTitleOpacity: CGFloat = 0.85
 }
 
 /// SwiftUI-hosted content for the collection's app-owned logical sections.
@@ -54,7 +56,7 @@ struct SidebarCollectionSectionHeaderView: View {
     HStack(alignment: .center, spacing: 0) {
       Button(action: onToggle) {
         Text(title)
-          .font(.system(size: 11, weight: .regular))
+          .font(.system(size: 11, weight: .semibold))
           .foregroundStyle(.secondary)
           .opacity(Double(SidebarSectionHeaderMetrics.sectionTitleOpacity))
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -149,7 +151,7 @@ struct SidebarCollectionTimelineHeaderView: View {
 
   var body: some View {
     Text(title)
-      .font(.system(size: 11, weight: .regular))
+      .font(.system(size: 11, weight: .semibold))
       .foregroundStyle(.secondary)
       .opacity(Double(SidebarSectionHeaderMetrics.sectionTitleOpacity))
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)

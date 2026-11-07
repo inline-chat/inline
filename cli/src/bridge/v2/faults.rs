@@ -1240,6 +1240,108 @@ async fn a_folder_picked_in_settings_is_where_the_session_opens_and_stays() {
 }
 
 #[tokio::test]
+async fn no_project_gives_a_thread_its_own_unlisted_folder() {
+    use super::super::workspaces::{self, NO_PROJECT_ID};
+    let (mut runtime, harness, mut cleanup, own, _other) = folder_fixture(Arc::new(NoSessionYet));
+    let own_id = crate::bridge::workspace_id(&own).unwrap();
+    let catalog = runtime.catalog().await;
+    let published = runtime
+        .folders(&catalog)
+        .unwrap()
+        .catalog("faults")
+        .unwrap();
+    assert_eq!(published.options[0].id, NO_PROJECT_ID);
+    assert_eq!(published.options[0].label, "No project");
+    // The default stays the agent's own folder.
+    assert_eq!(
+        published.default_project_id.as_deref(),
+        Some(own_id.as_str())
+    );
+
+    // Choosing No project makes the thread a folder of its own and shows
+    // "No project", not the folder's name.
+    let shown = runtime.chat_settings(9, 1, 1, None).await;
+    let none = BotSettingsValue::String(NO_PROJECT_ID.to_owned());
+    let chosen = runtime
+        .chat_settings(
+            9,
+            1,
+            1,
+            Some((settings::ITEM_FOLDER_CHOICE, Some(&none), &revision(&shown))),
+        )
+        .await;
+    assert_eq!(selected(&folder_item(&chosen)), NO_PROJECT_ID);
+    let folder = runtime.thread_folder(9);
+    assert!(workspaces::is_managed(&folder) && folder.is_dir());
+    assert!(folder.starts_with(workspaces::root().unwrap()));
+    assert_eq!(super::folder_label(&folder), "No project");
+
+    // Back to the agent's folder: the unused folder goes. No project again
+    // brings the same one back.
+    let own_value = BotSettingsValue::String(own_id.as_str().to_owned());
+    let shown = runtime
+        .chat_settings(
+            9,
+            1,
+            1,
+            Some((
+                settings::ITEM_FOLDER_CHOICE,
+                Some(&own_value),
+                &revision(&chosen),
+            )),
+        )
+        .await;
+    assert!(!folder.exists());
+    runtime
+        .chat_settings(
+            9,
+            1,
+            1,
+            Some((settings::ITEM_FOLDER_CHOICE, Some(&none), &revision(&shown))),
+        )
+        .await;
+    assert_eq!(runtime.thread_folder(9), folder);
+
+    // The work opens there; the folder never joins the agent's folders.
+    runtime.ensure_work(9, None).await.unwrap();
+    let (id, command) = input(&runtime, 94);
+    runtime.works[&9].tx.send(command).await.unwrap();
+    until(|| state(&runtime, &id) == Some(InputState::Accepted)).await;
+    assert_eq!(
+        harness.opened.lock().unwrap().last().unwrap().folder,
+        folder
+    );
+    // The agent hears that its thread has no project.
+    assert!(
+        harness
+            .opened
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .instructions
+            .as_deref()
+            .is_some_and(|guide| guide.contains("This thread has no project"))
+    );
+    let listed = runtime.folders(&catalog).unwrap();
+    assert_eq!(listed.folder(NO_PROJECT_ID), None);
+    assert!(
+        listed
+            .options()
+            .iter()
+            .all(|option| option.label != folder.file_name().unwrap().to_string_lossy())
+    );
+
+    // Another thread bound to No project gets a different folder.
+    runtime
+        .bound_project(10, Some(NO_PROJECT_ID.to_owned()))
+        .await;
+    let other = runtime.thread_folder(10);
+    assert!(workspaces::is_managed(&other) && other != folder);
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
 async fn a_bound_thread_runs_in_its_project_and_a_restart_keeps_it() {
     let (mut runtime, harness, mut cleanup, _own, other) = folder_fixture(Arc::new(NoSessionYet));
     let other_id = crate::bridge::workspace_id(&other).unwrap();

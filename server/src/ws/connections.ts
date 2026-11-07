@@ -248,7 +248,7 @@ class ConnectionManager {
     connection.presenceGeneration = this.presenceGeneration ?? presenceManager.start?.()
     connectionDirectory.register({ connectionId: id, userId, sessionId, clientType, isBot })
 
-    void presenceManager.handleConnectionOpen({ userId, sessionId }, connection.presenceGeneration).catch((e) => {
+    void presenceManager.handleConnectionOpen({ userId, sessionId, isBot }, connection.presenceGeneration).catch((e) => {
       log.error("presenceManager.handleConnectionOpen failed", { userId, sessionId, error: e })
     })
 

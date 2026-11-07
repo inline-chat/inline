@@ -114,6 +114,10 @@ struct ChatToolbarLeadingView: View {
   }
 
   private var subtitleFallback: ChatSubtitle {
+    let botPresence = isPrivateChat
+      ? fullChatViewModel.peerUserInfo.flatMap { BotOnlineStatus.subtitle(for: $0.user) }
+      : nil
+
     if isPrivateChat,
        let user = fullChatViewModel.peerUserInfo?.user,
        let timeZone = user.timeZone,
@@ -132,7 +136,11 @@ struct ChatToolbarLeadingView: View {
     }
 
     if let agentFolder, !agentFolder.title.isEmpty {
-      return .folder(agentFolder)
+      return .folder(agentFolder, presence: botPresence)
+    }
+
+    if let botPresence {
+      return .presence(botPresence)
     }
 
     return .empty
@@ -192,6 +200,10 @@ struct ChatToolbarLeadingView: View {
     // navigation buttons instead of truncating within the available space.
     .task(id: toolbarContextKey) {
       await loadToolbarContext()
+    }
+    .task(id: isPrivateChat ? fullChatViewModel.peerUserInfo?.user.id : nil) {
+      guard isPrivateChat else { return }
+      BotOnlineStatus.refreshIfBot(fullChatViewModel.peerUserInfo?.user)
     }
   }
 
@@ -264,7 +276,9 @@ enum ChatSubtitle: Equatable {
   case composeAction(ComposeActionPresentation)
   case timezone(String)
   case breadcrumb(ReplyThreadToolbarContext, reference: ThreadReference?)
-  case folder(ChatAgentFolder)
+  /// A bot's online status: "online", "last seen 3:04 PM".
+  case presence(String)
+  case folder(ChatAgentFolder, presence: String?)
   case empty
 
   var transitionID: String {
@@ -284,8 +298,10 @@ enum ChatSubtitle: Equatable {
         context.parent?.title ?? "",
         reference?.label ?? "",
       ].joined(separator: ":")
-    case let .folder(folder):
-      "folder:\(folder.title)"
+    case let .presence(text):
+      "presence:\(text)"
+    case let .folder(folder, presence):
+      "folder:\(folder.title):\(presence ?? "")"
     case .empty:
       "empty"
     }
@@ -432,8 +448,18 @@ private struct ChatToolbarSubtitleContent: View {
         onOpenSpace: onOpenSpace,
         onOpenParentThread: onOpenParentThread
       )
-    case let .folder(folder):
-      ChatToolbarFolderSubtitle(folder: folder, onSelect: onSelectAgentFolder)
+    case let .presence(text):
+      ChatToolbarSubtitleText(text: text, color: .secondary)
+    case let .folder(folder, presence):
+      if let presence {
+        HStack(spacing: 4) {
+          ChatToolbarSubtitleText(text: "\(presence) ·", color: .secondary)
+            .fixedSize()
+          ChatToolbarFolderSubtitle(folder: folder, onSelect: onSelectAgentFolder)
+        }
+      } else {
+        ChatToolbarFolderSubtitle(folder: folder, onSelect: onSelectAgentFolder)
+      }
     case .empty:
       EmptyView()
     }

@@ -3729,7 +3729,11 @@ class MinimalMessageViewAppKit: NSView {
   ) {
     switch action {
     case .sidePane:
-      dependencies.openReplyThreadInPane(parentPeer: message.peerId, threadPeer: peer)
+      dependencies.openReplyThreadInPane(
+        parentPeer: message.peerId,
+        threadPeer: peer,
+        sourceMessageId: message.messageId
+      )
     case .current:
       dependencies.openChatRoute(peer: peer)
     case .newTab:

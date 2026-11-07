@@ -614,4 +614,80 @@ async def exercise_ordinary_presentation():
 
 
 asyncio.run(exercise_ordinary_presentation())
-print("Real Hermes admission, registration, authorization/pairing, receipt recovery, fatal teardown, local effects, inbound/reply delivery, deduplication and media safety passed (offline transport).")
+
+
+async def exercise_cron_mentions():
+    # Compatibility CI also checks older published adapters, before this option
+    # existed. An install advertising the setting must pass the whole contract.
+    if not any(item.get("name") == "INLINE_CRON_MENTION_PREFIX" for item in manifest.get("optional_env", [])):
+        return
+    from gateway.config import Platform, load_gateway_config
+    from cron.scheduler_delivery import _deliver_result
+
+    prefix = "[@Recipient](inline://user?id=42)"
+    config_path = home / "config.yaml"
+    previous_config = config_path.read_text() if config_path.exists() else None
+    sent = []
+
+    def transport(request):
+        if request.url.path == "/send":
+            sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"ok": True, "result": {"messageId": str(len(sent))}})
+
+    # Read real YAML, discover the platform config through Hermes, then run its
+    # real scheduler/router/chunker. Only the external Inline HTTP is replaced.
+    scenarios = [
+        ("nested", prefix, True, True, "Morning brief", f"{prefix}\n\nMorning brief"),
+        ("root", prefix, True, True, "Root config", f"{prefix}\n\nRoot config"),
+        ("nested", prefix, False, True, "Muted brief", "Muted brief"),
+        ("nested", "", True, True, "Disabled brief", "Disabled brief"),
+        ("nested", prefix, True, False, "**Literal brief**", "**Literal brief**"),
+        ("nested", prefix, True, True, f"{prefix} Already addressed", f"{prefix} Already addressed"),
+        ("nested", prefix, True, True, "x " * 5000, None),
+    ]
+    platform = Platform("inline")
+    try:
+        for shape, configured_prefix, notify, parse_markdown, text, expected in scenarios:
+            platform_config = {
+                "enabled": True, "token": "offline-test-token", "sync_commands": False,
+                "context_backfill": "off", "parse_markdown": parse_markdown,
+                "cron_mention_prefix": configured_prefix,
+            }
+            raw_config = {
+                "plugins": {"enabled": ["inline-platform"]},
+                "cron": {"wrap_response": False, "delivery": {"notify": notify}},
+            }
+            raw_config.update({"platforms": {"inline": platform_config}} if shape == "nested" else {"inline": platform_config})
+            config_path.write_text(yaml.safe_dump(raw_config))
+            cfg = load_gateway_config()
+            scheduled = platform_registry.create_adapter("inline", cfg.platforms[platform])
+            scheduled._http_client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+            sent.clear()
+            try:
+                error = await asyncio.wait_for(asyncio.to_thread(
+                    _deliver_result,
+                    {"id": "inline-cron-fixture", "name": "Brief", "deliver": "inline:99", "attach_to_session": False},
+                    text, {platform: scheduled}, asyncio.get_running_loop(),
+                ), timeout=10)
+                assert error is None, error
+                assert sent and all(body["target"] == {"chatId": "99"} for body in sent), sent
+                assert all(body["parseMarkdown"] is parse_markdown for body in sent)
+                assert all((body.get("sendMode") == "silent") is (notify is False) for body in sent)
+                if expected is None:
+                    assert len(sent) > 1 and sent[0]["text"].startswith(prefix)
+                    assert sum(body["text"].count(prefix) for body in sent) == 1
+                else:
+                    assert [body["text"] for body in sent] == [expected], sent
+                result = await scheduled.send("99", "Ordinary reply", metadata={"notify": True})
+                assert result.success and sent[-1]["text"] == "Ordinary reply"
+            finally:
+                await scheduled._http_client.aclose()
+    finally:
+        if previous_config is None:
+            config_path.unlink(missing_ok=True)
+        else:
+            config_path.write_text(previous_config)
+
+
+asyncio.run(exercise_cron_mentions())
+print("Real Hermes admission, registration, authorization/pairing, receipt recovery, fatal teardown, local effects, inbound/reply and cron delivery, deduplication and media safety passed (offline transport).")

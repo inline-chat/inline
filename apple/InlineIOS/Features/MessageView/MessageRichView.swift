@@ -483,6 +483,10 @@ private final class RichDisclosureView: UIControl {
   private let title = MessageTextView()
   private let chevron = UIImageView(image: UIImage(systemName: "chevron.right", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold)))
   private let activity = UIImageView(image: UIImage(systemName: "sparkle", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)))
+  /// "2m 12s" after a working row's title, ticking once a second.
+  private let elapsedLabel = UILabel()
+  private var elapsedWidth: CGFloat = 0
+  private var isTicking = false
   private var disclosure: RichLayout.Disclosure?
   var onToggle: (() -> Void)?
 
@@ -492,7 +496,9 @@ private final class RichDisclosureView: UIControl {
     title.clipsToBounds = true
     chevron.contentMode = .center
     activity.contentMode = .center
-    for view in [title, chevron, activity] as [UIView] {
+    elapsedLabel.isHidden = true
+    elapsedLabel.lineBreakMode = .byClipping
+    for view in [title, elapsedLabel, chevron, activity] as [UIView] {
       view.isUserInteractionEnabled = false
       addSubview(view)
     }
@@ -511,21 +517,72 @@ private final class RichDisclosureView: UIControl {
     chevron.tintColor = palette.secondary
     activity.tintColor = palette.secondary
     activity.isHidden = disclosure.activityFrame == nil
-    accessibilityLabel = disclosure.summary.text.string
     accessibilityValue = disclosure.isExpanded ? "Expanded" : "Collapsed"
     if disclosure.isInProgress {
       startShimmer()
     } else {
       title.layer.removeAnimation(forKey: "shimmer")
     }
+    if disclosure.elapsedStart != nil {
+      let titleFont = disclosure.summary.text.length > 0
+        ? disclosure.summary.text.attributedString.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        : nil
+      elapsedLabel.font = .monospacedDigitSystemFont(ofSize: titleFont?.pointSize ?? 17, weight: .regular)
+      elapsedLabel.textColor = palette.secondary.withAlphaComponent(0.7)
+    }
+    updateElapsed()
+    updateTicking()
     setNeedsLayout()
+  }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    updateTicking()
+  }
+
+  /// Ticks only while on screen and the row is still counting.
+  private func updateTicking() {
+    let shouldTick = window != nil && disclosure?.elapsedStart != nil && !elapsedLabel.isHidden
+    guard shouldTick != isTicking else { return }
+    isTicking = shouldTick
+    if shouldTick {
+      ProgressElapsedTicker.shared.add(self) { [weak self] in self?.updateElapsed() }
+    } else {
+      ProgressElapsedTicker.shared.remove(self)
+    }
+  }
+
+  private func updateElapsed() {
+    let text = disclosure?.elapsedStart.flatMap { ProgressElapsed.text(since: $0) }
+    let summary = disclosure?.summary.text.string ?? ""
+    accessibilityLabel = text.map { "\(summary), \($0)" } ?? summary
+    if let text, elapsedLabel.text != text { elapsedLabel.text = text }
+    let wasHidden = elapsedLabel.isHidden
+    elapsedLabel.isHidden = text == nil
+    if text == nil, !wasHidden { updateTicking() }
+    // The width changes only at 10s, 1m, 10m and 1h; only then does the chevron move.
+    let width = text == nil ? 0 : ceil(elapsedLabel.intrinsicContentSize.width)
+    if width != elapsedWidth || wasHidden != elapsedLabel.isHidden {
+      elapsedWidth = width
+      setNeedsLayout()
+    }
   }
 
   override func layoutSubviews() {
     super.layoutSubviews()
     guard let disclosure else { return }
     title.textFrame = disclosure.titleFrame
-    chevron.frame = disclosure.chevronFrame
+    // The plan reserves the widest time; the chevron closes up to the time actually shown.
+    var chevronFrame = disclosure.chevronFrame
+    if let slot = disclosure.elapsedFrame {
+      let isRightToLeft = slot.midX < disclosure.titleFrame.midX
+      let gap = isRightToLeft ? disclosure.titleFrame.minX - slot.maxX : slot.minX - disclosure.titleFrame.maxX
+      let width = min(elapsedWidth, slot.width)
+      let unused = elapsedLabel.isHidden ? slot.width + gap : slot.width - width
+      elapsedLabel.frame = CGRect(x: isRightToLeft ? slot.maxX - width : slot.minX, y: slot.minY, width: width, height: slot.height)
+      chevronFrame.origin.x += isRightToLeft ? unused : -unused
+    }
+    chevron.frame = chevronFrame
     chevron.transform = disclosure.isExpanded ? CGAffineTransform(rotationAngle: .pi / 2) : .identity
     if let frame = disclosure.activityFrame { activity.frame = frame }
   }

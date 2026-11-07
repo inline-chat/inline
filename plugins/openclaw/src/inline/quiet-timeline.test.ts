@@ -34,9 +34,16 @@ describe("quiet activity timeline", () => {
     expect(activityTitle(appended[1])).toBe("Running a script")
   })
   it("formats monotonic durations and cannot emit invalid numeric labels", () => {
-    for (const [seconds, label] of [[0.2, "less than 1s"], [60, "1m"], [62, "1m 2s"], [3661, "1h 1m 1s"], [NaN, "less than 1s"]] as const) {
+    for (const [seconds, label] of [[0.2, "less than 1s"], [60, "1m 0s"], [62, "1m 2s"], [3661, "1h 1m"], [NaN, "less than 1s"]] as const) {
       expect(formatQuietTimeline(["Reading the EPUB"], false, seconds)).toContain(`>Worked for ${label}</summary>`)
     }
+  })
+  it("marks only a working row with its start time", () => {
+    expect(formatQuietTimeline(["Reading the EPUB"], true, undefined, "success", false, undefined, 1794000000.7))
+      .toContain('<summary kind="progress" started="1794000000" activity="agent">')
+    expect(formatQuietTimeline(["Reading the EPUB"], false, 18, "success", false, undefined, 1794000000))
+      .toContain('<summary activity="agent">Worked for 18s</summary>')
+    expect(formatQuietTimeline(["Reading the EPUB"], true)).toContain('<summary kind="progress" activity="agent">')
   })
   it("uses explicit terminal lifecycle metadata for cancellation and timeout", () => {
     expect(activityLifecycleOutcome({ phase: "end", aborted: true, stopReason: "aborted" })).toBe("cancelled")

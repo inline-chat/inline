@@ -100,6 +100,48 @@ public final class CLIAgentSetupRunner: AgentSetupCLIRunning, @unchecked Sendabl
     } onCancel: { self.cancel() }
   }
 
+  /// Runs a bridge lifecycle command and returns each agent's resulting status.
+  public func bridge(installation: CLIInstallation, command: CLIBridgeCommand) async throws -> [CLIBridgeStatus] {
+    let output = try await runCommand(installation: installation, arguments: command.arguments, timeout: command.timeout)
+    // Unhealthy agents are printed before a nonzero exit; they are still a valid status.
+    if let statuses = CLIBridgeStatus.parseList(output.standardOutput) { return statuses }
+    throw bridgeFailure(from: output)
+  }
+
+  public func bridgeLogs(installation: CLIInstallation, lines: Int) async throws -> [String] {
+    let count = min(max(lines, 1), 500)
+    let output = try await runCommand(
+      installation: installation,
+      arguments: ["bridge", "logs", "--lines", String(count), "--json"],
+      timeout: 30
+    )
+    guard output.status == 0,
+          let logs = try? JSONDecoder().decode(CLIBridgeLogs.self, from: output.standardOutput)
+    else { throw bridgeFailure(from: output) }
+    return logs.lines
+  }
+
+  private func runCommand(installation: CLIInstallation, arguments: [String], timeout: TimeInterval) async throws -> CommandOutput {
+    let operationID = try beginOperation()
+    defer { finishOperation(operationID) }
+    return try await withTaskCancellationHandler {
+      let output = try await Task.detached(priority: .utility) { [self] in
+        try run(operationID: operationID, installation: installation, arguments: arguments, timeout: timeout)
+      }.value
+      try Task.checkCancellation()
+      return output
+    } onCancel: { self.cancel() }
+  }
+
+  private func bridgeFailure(from output: CommandOutput) -> AgentSetupFailure {
+    Self.parseFailure(output.standardError) ?? AgentSetupFailure(
+      code: "bridge_command_failed",
+      message: "Inline CLI couldn’t reach the agent bridge.",
+      hint: "Run `inline bridge doctor` in Terminal for details.",
+      recoveryURL: Self.documentationURL
+    )
+  }
+
   static func isUnsupportedUpdateEngine(status: Int32, standardError: Data) -> Bool {
     let text = String(decoding: standardError, as: UTF8.self)
     return status == 2 && text.contains("status")

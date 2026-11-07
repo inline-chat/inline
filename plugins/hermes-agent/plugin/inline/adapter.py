@@ -843,6 +843,7 @@ def _apply_yaml_config(yaml_cfg: dict, platform_cfg: dict) -> Optional[dict]:
         "state_path",
         "settings_path",
         "parse_markdown",
+        "cron_mention_prefix",
         "require_mention",
         "strict_mention",
         "allowed_chats",
@@ -910,6 +911,10 @@ class InlineAdapter(BasePlatformAdapter):
         _configure_tool_sidecar(bind=self._sidecar_bind, port=self._sidecar_port, token=self._sidecar_token)
         self._node_bin = _find_node_bin() or "node"
         self._parse_markdown = _truthy(extra.get("parse_markdown") if "parse_markdown" in extra else inline_env("INLINE_PARSE_MARKDOWN"), True)
+        cron_mention_prefix = extra.get("cron_mention_prefix") if "cron_mention_prefix" in extra else inline_env("INLINE_CRON_MENTION_PREFIX")
+        self._cron_mention_prefix = cron_mention_prefix.strip() if isinstance(cron_mention_prefix, str) else ""
+        if self._cron_mention_prefix and not self._parse_markdown:
+            logger.warning("[inline] cron_mention_prefix needs parse_markdown=true; scheduled mentions are disabled")
         self._media_max_bytes = int(
             _normalize_positive_float(
                 extra.get("media_max_mb") if "media_max_mb" in extra else inline_env("INLINE_MEDIA_MAX_MB"),
@@ -4890,8 +4895,10 @@ class InlineAdapter(BasePlatformAdapter):
         metadata: Optional[Dict[str, Any]] = None,
         actions: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
+        content = self._with_cron_mention(content, metadata)
         metadata = self._with_turn_thread(chat_id, reply_to, metadata)
         target = self._target_for(chat_id, metadata)
+        send_options = {"sendMode": "silent"} if (metadata or {}).get("notify") is False else {}
         agent_action_target = parse_inline_agent_action_reply_target(reply_to)
         if agent_action_target:
             chunks = self.truncate_message(self.format_message(content), self.MAX_MESSAGE_LENGTH)
@@ -4916,6 +4923,7 @@ class InlineAdapter(BasePlatformAdapter):
                         "text": chunk,
                         "parseMarkdown": self._parse_markdown,
                         "replyToMsgId": previous_id,
+                        **send_options,
                     })
                     raw_responses.append(continuation.raw_response)
                     if not continuation.success:
@@ -4945,6 +4953,7 @@ class InlineAdapter(BasePlatformAdapter):
                 "target": target,
                 "text": chunk,
                 "parseMarkdown": self._parse_markdown,
+                **send_options,
             }
             if reply_to and index == 0:
                 body["replyToMsgId"] = str(reply_to)
@@ -5641,6 +5650,18 @@ class InlineAdapter(BasePlatformAdapter):
         if parent_message_id:
             out["parent_message_id"] = parent_message_id
         return out
+
+    def _with_cron_mention(self, content: str, metadata: Optional[Dict[str, Any]]) -> str:
+        # Hermes identifies scheduled text sends with job_id. notify also appears
+        # on ordinary replies, so it cannot identify a cron on its own. Decorate
+        # before chunking to mention once, while preserving the supplied body.
+        meta = metadata or {}
+        prefix = self._cron_mention_prefix
+        if not prefix or not self._parse_markdown or not meta.get("job_id") or meta.get("notify") is False:
+            return content
+        if not content or not content.strip() or content.startswith(prefix):
+            return content
+        return f"{prefix}\n\n{content}"
 
     def format_message(self, content: str) -> str:
         # parseMarkdown=false means literal input at every Inline API boundary.

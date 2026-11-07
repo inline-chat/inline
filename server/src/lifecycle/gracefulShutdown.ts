@@ -7,6 +7,7 @@ import { stopDatabaseHealthMonitor } from "@in/server/modules/monitoring/databas
 import { stopGridProviderEffectWorker } from "@in/server/modules/grid/providerEffects"
 import { stopGridExpirySweeper } from "@in/server/modules/grid/expirySweeper"
 import { stopAgentRuntimeSweeper } from "@in/server/modules/agents/runtime"
+import { stopBotOnlineSweeper } from "@in/server/modules/bots/online"
 import { shutdownBotChatSettingsBroker } from "@in/server/modules/botChatSettings/broker"
 import { stopBotWebhookDeliveryWorker } from "@in/server/modules/botUpdates/delivery"
 import { stopBlockContentImageWorker } from "@in/server/modules/message/blockContentImageWorker"
@@ -84,7 +85,7 @@ const createDefaultDeps = (): GracefulShutdownDeps => ({
   stopBotChatSettings: async () => {
     shutdownBotChatSettingsBroker()
     botFilesystemBroker.shutdown()
-    await stopAgentRuntimeSweeper()
+    await Promise.all([stopAgentRuntimeSweeper(), stopBotOnlineSweeper()])
   },
   stopServer: (server, closeActiveConnections) => server.stop(closeActiveConnections),
   closeConnections: () => connectionManager.shutdown(),

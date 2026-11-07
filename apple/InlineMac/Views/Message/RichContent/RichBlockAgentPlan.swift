@@ -73,6 +73,16 @@ struct RichBlockDisclosureDecoration: Codable, Hashable {
   var status: RichBlockStatus?
   var meta: RichBlockTextRange?
   var metaWidth: CGFloat
+  /// A working row's live time, right after the summary: "Working 2m 12s".
+  var elapsed: RichBlockElapsed? = nil
+}
+
+/// A progress row's live time. The plan only reserves its room; the row counts.
+struct RichBlockElapsed: Codable, Hashable {
+  /// Unix seconds the work started; nil counts from the message's time.
+  var startedAt: Int64?
+  /// The widest the time gets, so ticking never relays out the message.
+  var reservedWidth: CGFloat
 }
 
 struct RichBlockFieldsNode: Codable, Hashable {

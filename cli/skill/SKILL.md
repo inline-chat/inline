@@ -108,6 +108,23 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline chats delete --chat-id 123`
   - Delete a chat (space thread). Prompts for confirmation unless `--yes`/`-y` is provided (`--json` requires `--yes`/`-y`).
 
+### sidebar
+
+Chat commands take several chats: repeat `-c`/`-u` or comma-separate ids. Batch JSON is `{results, failed}`.
+
+- `inline sidebar [--json]`
+  - Show the user's sidebar: pinned items, open chats, and folders with their chats. JSON has `pinned[]` and `items[]` entries tagged `kind: chat|folder`.
+- `inline sidebar open -c 1,2 [--top | --folder ID]` / `inline sidebar close (-c 1,2 | --all)`
+  - Open or close chats. `close --all` closes everything outside the pinned section. Closing an empty untitled thread deletes it.
+- `inline sidebar move -c 1,2 (--top | --bottom | --before CHAT_ID | --after CHAT_ID | --before-folder ID | --after-folder ID)`
+  - Reorder; several chats land together in the order given. The target's section decides placement. `--pinned`, `--root`, or `--folder ID` pick the section for `--top`/`--bottom`.
+- `inline sidebar sort --by title|activity [--reverse] [--pinned | --folder ID]`
+  - Sort a section (root by default). Folders sort as single items.
+- `inline sidebar pin -c 1,2 [--top]`, `unpin (-c 1,2 | --all)`, `archive|unarchive -c 1,2`, `mark-read (-c 1,2 | --all)`
+- `inline sidebar cleanup [--dry-run] [--keep-folders]`
+  - Like the macOS Cleanup action: closes inactive read chats (opened 6h+ ago, quiet 3h+) and empty untitled threads, then deletes empty folders. Cannot see app-only drafts; preview with `--dry-run`.
+- `inline sidebar folder create [--title T] [-c 1,2] [--pin]`, `folder update ID --title T|--emoji E`, `folder add ID -c 1,2`, `folder remove -c 1,2`, `folder move ID --top|--before CHAT_ID|...`, `folder pin|unpin ID`, `folder delete ID --keep-chats|--close-chats`
+
 ### bots
 
 - Alias: `inline bot ...` maps to `inline bots ...`.
@@ -118,6 +135,26 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - Create a bot. Token is not printed in table output; use `inline bots reveal-token` explicitly. JSON includes the token.
 - `inline bots reveal-token --bot-user-id 42`
   - Print (or JSON-return) an existing bot token by bot user id.
+- `inline bots get --bot-user-id 42`
+  - Show a bot you own with its agent settings and access grants. Alias: `view`.
+- `inline bots update --bot-user-id 42 [--name "Deploy Bot"] [--username deploy_bot]`
+  - Change the name and/or username (needs at least one; usernames must end with `bot`).
+- `inline bots set-photo --bot-user-id 42 --file ./avatar.png`
+  - Upload an image and set it as the bot's profile photo. `inline bots remove-photo --bot-user-id 42` removes it.
+- `inline bots clear-avatar --bot-user-id 42`
+  - Clear the bot's animated avatar (separate from the profile photo).
+- `inline bots rotate-token --bot-user-id 42 [-y]`
+  - Issue a new token and print it; the old token stops working. Prompts unless `--yes`/`-y` (`--json` requires `--yes`/`-y`).
+- `inline bots delete --bot-user-id 42 [-y]`
+  - Delete a bot. Prompts unless `--yes`/`-y` (`--json` requires `--yes`/`-y`).
+- `inline bots settings --bot-user-id 42 [--chat-id 7] [--output-mode detailed|friendly|default]`
+  - Detailed shows every step; friendly shows short updates and the answer. Without `--output-mode`, print the setting. With `--chat-id`, show or set that thread's override (`default` clears it); otherwise the bot's default. Owner or configure access.
+- `inline bots access list --bot-user-id 42`
+  - List people with access to the bot (no grants means owner only).
+- `inline bots access grant --bot-user-id 42 --user-id 7 [--operations invoke,steer,approve,configure]`
+  - Grant or replace one person's access. Defaults to `invoke,steer`.
+- `inline bots access revoke --bot-user-id 42 --user-id 7`
+  - Revoke one person's access.
 
 ### typing
 
@@ -292,6 +329,9 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - `inline bots list`
   - `inline bots create --name "Build Bot" --username build_bot`
   - `inline bots reveal-token --bot-user-id 42` (token is not printed by default)
+  - `inline bots update --bot-user-id 42 --name "Deploy Bot"`
+  - `inline bots set-photo --bot-user-id 42 --file ./avatar.png`
+  - `inline bots access grant --bot-user-id 42 --user-id 7`
 - Tasks:
   - `inline tasks create-linear --chat-id 123 --message-id 456`
   - `inline tasks create-notion --chat-id 123 --message-id 456 --space-id 31`

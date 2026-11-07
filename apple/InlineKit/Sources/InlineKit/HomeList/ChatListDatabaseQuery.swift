@@ -59,6 +59,7 @@ public enum ChatListDatabaseQuery {
         "peerUser"."lastName" AS "peerLastName",
         "peerUser"."email" AS "peerEmail",
         "peerUser"."username" AS "peerUsername",
+        COALESCE("peerUser"."bot" = 1 AND "peerUser"."online" = 1, 0) AS "peerIsBotOnline",
         "peerUser"."phoneNumber" AS "peerPhoneNumber",
         "peerUser"."profileFileId" AS "profileFileID",
         "peerUser"."profileFileUniqueId" AS "profileFileUniqueID",
@@ -215,7 +216,8 @@ public enum ChatListDatabaseQuery {
         localURL: preparedAvatarLocalURL(
           path: profileLocalPath,
           directory: profileCacheDirectory
-        )
+        ),
+        isBotOnline: (row[.peerIsBotOnline] as Bool?) ?? false
       )
       title = userDisplayName(
         firstName: descriptor.firstName,

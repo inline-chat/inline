@@ -74,7 +74,7 @@ struct SidebarFolderItemView: View, Equatable {
       Button(action: onToggle) {
         SidebarChatDisclosureIcon(
           isExpanded: isExpanded,
-          rowHeight: size.rowHeight,
+          rowHeight: size.folderRowHeight,
           animates: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         )
       }
@@ -100,7 +100,7 @@ struct SidebarFolderItemView: View, Equatable {
         }
       }
     }
-    .frame(maxWidth: .infinity, minHeight: SidebarCollectionRow.paintedItemHeight(for: size.rowHeight))
+    .frame(maxWidth: .infinity, minHeight: SidebarCollectionRow.paintedItemHeight(for: size.folderRowHeight))
     .contentShape(.rect)
     .background(
       rowBackground,
@@ -232,7 +232,7 @@ struct SidebarFolderEmptyRow: View {
     )
       .font(.system(size: 13))
       .foregroundStyle(.tertiary)
-      .frame(maxWidth: .infinity, minHeight: size.rowHeight, alignment: .leading)
+      .frame(maxWidth: .infinity, minHeight: size.folderRowHeight, alignment: .leading)
       .padding(.leading, leadingInset)
       .padding(.horizontal, Theme.sidebarItemOuterSpacing)
   }

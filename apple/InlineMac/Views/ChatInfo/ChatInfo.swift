@@ -364,6 +364,10 @@ struct ChatInfo: View {
         .frame(maxWidth: .infinity, alignment: .leading)
       }
 
+      if let user = fullChat.chatItem?.userInfo?.user, user.bot == true {
+        ChatInfoOwnedBotSection(botUserID: user.id)
+      }
+
       if shouldShowVisibilityRow, !canToggleVisibility {
         Text("Only the chat creator, owner, or admin can change visibility.")
           .font(.footnote)
@@ -1812,12 +1816,27 @@ private struct ChatInfoParticipantRow: View {
     .padding(.vertical, 7)
     .contentShape(Rectangle())
     .contextMenu {
+      // The bot's own chat info carries its profile and settings.
+      if isOwnedBot {
+        Button(action: onOpenChatInfo) {
+          Label("Manage Bot…", systemImage: "slider.horizontal.3")
+        }
+      }
       if canRemove {
         Button(role: .destructive, action: onRequestRemove) {
           Label("Remove Participant", systemImage: "minus.circle")
         }
       }
     }
+    .task(id: participant.user.id) {
+      if participant.user.bot == true {
+        AgentGrantStore.shared.ensureLoaded(botUserID: participant.user.id)
+      }
+    }
+  }
+
+  private var isOwnedBot: Bool {
+    participant.user.bot == true && AgentGrantStore.shared.ownedGrants(botUserID: participant.user.id) != nil
   }
 }
 

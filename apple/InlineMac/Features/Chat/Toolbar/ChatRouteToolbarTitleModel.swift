@@ -115,6 +115,10 @@ final class ChatRouteToolbarTitleModel {
   @ObservationIgnored private var displayedConnectionState: RealtimeConnectionState? {
     didSet {
       guard oldValue != displayedConnectionState else { return }
+      // Back online after time away: presence changes may have been missed.
+      if displayedConnectionState == nil, peer.isPrivate {
+        BotOnlineStatus.refreshIfBot(resolvedUserInfo()?.user)
+      }
       refreshStatus()
     }
   }
@@ -131,6 +135,9 @@ final class ChatRouteToolbarTitleModel {
     loadInitialSnapshot()
     observe()
     sync()
+    if peer.isPrivate {
+      BotOnlineStatus.refreshIfBot(resolvedUserInfo()?.user)
+    }
     loadSnapshot()
     refreshRenameEligibility()
   }
@@ -370,6 +377,9 @@ final class ChatRouteToolbarTitleModel {
     }
 
     if peer.isPrivate {
+      if let user = resolvedUserInfo()?.user, let presence = BotOnlineStatus.subtitle(for: user) {
+        return .text(presence)
+      }
       return resolvedLocalTime().map(Status.text) ?? .none
     }
 

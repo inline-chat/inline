@@ -25,7 +25,7 @@ use inline_agent_bridge::harness::{
 use inline_agent_bridge::{AgentMessagePhase, PlanStepStatus, TurnId, TurnOutcome};
 use serde_json::Value;
 
-use super::doc::{ActivityKind, CalloutKind, DiffChange, Doc, DocBuilder, Status};
+use super::doc::{ActivityKind, CalloutKind, DiffChange, Doc, DocBuilder, Elapsed, Status};
 use super::limits;
 
 /// Harness vocabulary for row titles.
@@ -377,11 +377,19 @@ impl Renderer {
         if limits::progress_fits(&doc) {
             return doc;
         }
+        // The bounded view keeps the live elapsed time a working row shows.
+        let (started_at, elapsed_text) = self.progress_elapsed(slot);
+        let elapsed = || {
+            Some(Elapsed {
+                started_at,
+                text: &elapsed_text,
+            })
+        };
         let mut keep = slot.rows.len() / 2;
         while keep > 0 {
             let recent = recent_rows(slot, keep);
             let mut builder = DocBuilder::new();
-            builder.progress(summary, working, |inner| {
+            builder.progress(summary, working, elapsed(), |inner| {
                 inner.paragraph(
                     "Showing recent activity; earlier details remain in the agent session.",
                 );
@@ -404,7 +412,7 @@ impl Renderer {
             .rev()
             .collect();
         let mut builder = DocBuilder::new();
-        builder.progress(summary, working, |inner| {
+        builder.progress(summary, working, elapsed(), |inner| {
             inner.paragraph("Showing recent output; full details remain in the agent session.");
             inner.code(&tail, None);
         });
@@ -477,7 +485,7 @@ impl Renderer {
         if slot.rows.is_empty() {
             builder.footer(summary);
         } else {
-            builder.progress(summary, false, |inner| self.write_slot(inner, slot));
+            builder.progress(summary, false, None, |inner| self.write_slot(inner, slot));
         }
         builder.finish()
     }
@@ -657,8 +665,21 @@ impl Renderer {
 
     fn progress_doc(&self) -> Doc {
         let mut builder = DocBuilder::new();
-        builder.progress("Working", true, |inner| self.write_rows(inner));
+        let elapsed = self.slot.as_ref().map(|slot| self.progress_elapsed(slot));
+        let elapsed = elapsed.as_ref().map(|(started_at, text)| Elapsed {
+            started_at: *started_at,
+            text,
+        });
+        builder.progress("Working", true, elapsed, |inner| self.write_rows(inner));
         builder.finish()
+    }
+
+    /// A slot's start, Unix seconds, and its time so far.
+    fn progress_elapsed(&self, slot: &Slot) -> (i64, String) {
+        (
+            (slot.started_ms / 1000) as i64,
+            elapsed_text(self.now_ms.saturating_sub(slot.started_ms)),
+        )
     }
 
     fn write_rows(&self, builder: &mut DocBuilder) {
@@ -1979,21 +2000,20 @@ mod tests {
         let RenderOp::Progress { slot: 1, doc } = &ops[0] else {
             panic!("the turn start posts Working: {ops:?}");
         };
-        assert_eq!(doc.text, "Working");
+        assert_eq!(doc.text, "Working · 1s");
         let working = outer(doc);
         assert_eq!(
             working.kind,
             inline_protocol::proto::block_disclosure::Kind::Progress as i32
         );
         assert_eq!(working.initially_open, Some(true));
+        assert_eq!(working.started_at, Some(0));
+        assert!(working.meta.is_some(), "the time as of this edit");
         let RenderOp::Progress { doc, .. } = &ops[1] else {
             panic!("rows edit the same message");
         };
         assert!(
-            doc.text.starts_with(
-                "Working
-Ran cargo test"
-            ),
+            doc.text.starts_with("Working · ") && doc.text.contains("\nRan cargo test"),
             "{}",
             doc.text
         );

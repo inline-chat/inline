@@ -53,4 +53,23 @@ with `hermes plugins update inline-platform` after a new pin is accepted, then
 restart the gateway. A newer npm version does not automatically change a
 catalog installation.
 
+### Scheduled mentions
+
+To reopen your closed Inline threads when scheduled text arrives, add an opt-in
+mention to your Hermes config and restart the gateway:
+
+```yaml
+platforms:
+  inline:
+    cron_mention_prefix: "[@You](inline://user?id=42)"
+```
+
+Use your Inline user ID in place of `42`. `INLINE_CRON_MENTION_PREFIX` is the
+environment equivalent; an explicit empty YAML value disables it. Markdown
+parsing must stay enabled. The prefix applies once to each scheduled gateway
+text delivery, respects Hermes' cron notification opt-out, and leaves ordinary
+replies alone. Recipient notification settings still apply. Current Hermes
+hosts do not identify standalone fallback or media-only sends as cron deliveries,
+so those paths cannot add the prefix; scheduled text accompanying media does.
+
 The plugin is distributed under the Apache-2.0 license; see [LICENSE](LICENSE).

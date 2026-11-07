@@ -17,6 +17,12 @@ final class CLIUpdateController {
   private(set) var bridgeMigrationRequired = false
   private(set) var bridgeVersionText: String?
   private(set) var followsAppChannel = true
+  private(set) var updateReady = false
+  private(set) var bridges: [CLIBridgeStatus] = []
+  private(set) var bridgeAction: BridgeAction?
+  private(set) var bridgeFailureText: String?
+  private(set) var bridgeLogs: [String]?
+  @ObservationIgnored private var lastStatus: CLIUpdateStatus?
   @ObservationIgnored private var terminalVersion: String?
   var automaticUpdatesEnabled = true {
     didSet {
@@ -106,10 +112,82 @@ final class CLIUpdateController {
     }
   }
 
-  func applyNow() { Task { await refresh(automatic: true, manual: true) } }
+  /// Installs the latest CLI, then restarts any bridge still on an older runtime
+  /// instead of waiting for agents to go idle.
+  func updateNow() {
+    Task {
+      guard !isBusy, bridgeAction == nil else { return }
+      bridgeAction = .updating
+      defer { bridgeAction = nil }
+      lastStatus = nil
+      await refresh(automatic: true, manual: true)
+      // A failed update keeps the working version; don't interrupt agents for it.
+      guard failureText == nil, let installation, let status = lastStatus else { return }
+      let outdated = status.bridges?.contains { $0.version != status.currentVersion } ?? false
+      if outdated { await executeBridge(.restart, at: installation) }
+      else { await executeBridge(.status, at: installation) }
+    }
+  }
+
+  var installedBridges: [CLIBridgeStatus] { bridges.filter(\.installed) }
+
+  func refreshBridges() async {
+    guard bridgeAction == nil, let installation else { return }
+    bridgeAction = .checking
+    defer { bridgeAction = nil }
+    await executeBridge(.status, at: installation)
+  }
+
+  func controlBridge(_ command: CLIBridgeCommand) {
+    Task {
+      guard !isBusy, bridgeAction == nil, let installation else { return }
+      bridgeAction = BridgeAction(command)
+      defer { bridgeAction = nil }
+      await executeBridge(command, at: installation)
+    }
+  }
+
+  func showBridgeLogs() {
+    Task {
+      guard bridgeAction == nil, let installation else { return }
+      bridgeAction = .loadingLogs
+      defer { bridgeAction = nil }
+      do {
+        bridgeLogs = try await runner().bridgeLogs(installation: installation, lines: 300)
+      } catch {
+        bridgeFailureText = bridgeFailureMessage(error)
+      }
+    }
+  }
+
+  func dismissBridgeLogs() { bridgeLogs = nil }
+
+  private func executeBridge(_ command: CLIBridgeCommand, at installation: CLIInstallation) async {
+    do {
+      bridges = try await runner().bridge(installation: installation, command: command)
+      bridgeFailureText = nil
+    } catch is CancellationError {
+      return
+    } catch {
+      bridgeFailureText = bridgeFailureMessage(error)
+    }
+    // Lifecycle changes move the bridge runtime; reread its version and update phase.
+    if command != .status, let status = try? await run(.status, at: installation) { show(status) }
+  }
+
+  private func bridgeFailureMessage(_ error: Error) -> String {
+    guard let failure = error as? AgentSetupFailure else { return "Inline CLI couldn’t reach the agent bridge." }
+    if failure.timedOut { return "The agent bridge didn’t respond in time. Check its logs, then retry." }
+    if failure.code == "operation_in_progress" { return "Another CLI operation is running. Retry in a moment." }
+    return failure.message
+  }
+
+  private func runner() -> CLIAgentSetupRunner {
+    CLIAgentSetupRunner(configuration: .production(channel: channel()))
+  }
 
   func refresh(automatic: Bool, manual: Bool = false) async {
-    guard !isBusy else { return }
+    guard !isBusy, bridgeAction?.changesBridge != true || bridgeAction == .updating else { return }
     isBusy = true
     defer { isBusy = false }
     let localService = CLIInstallerService(configuration: .production(channel: channel()))
@@ -225,6 +303,8 @@ final class CLIUpdateController {
 
   private func show(_ status: CLIUpdateStatus) {
     guard coordinator.accepts(status) else { return }
+    lastStatus = status
+    updateReady = status.staged.map { $0.version != status.currentVersion } ?? false
     readingStatus = true
     automaticUpdatesEnabled = (UserDefaults.standard.object(forKey: Self.pendingKey) as? Bool) ?? status.autoUpdate
     readingStatus = false
@@ -244,7 +324,7 @@ final class CLIUpdateController {
     }
     let phases = status.bridges?.map(\.phase) ?? []
     bridgeMigrationRequired = phases.contains("migration_required")
-    if bridgeMigrationRequired { statusText = "Bridge Update Ready — Restart When Agents Finish" }
+    if bridgeMigrationRequired { statusText = "Bridge Restart Required" }
     else if phases.contains("waiting_for_idle") { statusText = "Waiting for Agents to Finish" }
     else if phases.contains("maintenance_required") { statusText = "Bridge Update Needs Maintenance" }
     else if phases.contains("trial") { statusText = "Starting Updated Bridge" }
@@ -254,6 +334,32 @@ final class CLIUpdateController {
     else if status.outcome == "staged" { statusText = "CLI Update Ready" }
     else { statusText = "Up to Date" }
     if !status.automaticUpdatesAvailable, automaticUpdatesEnabled { statusText = "Automatic Updates Unavailable in This Environment" }
+  }
+
+  enum BridgeAction: Equatable {
+    case checking, starting, stopping, restarting, updating, loadingLogs
+
+    init(_ command: CLIBridgeCommand) {
+      switch command {
+      case .status: self = .checking
+      case .start: self = .starting
+      case .stop: self = .stopping
+      case .restart: self = .restarting
+      }
+    }
+
+    var changesBridge: Bool { [.starting, .stopping, .restarting, .updating].contains(self) }
+
+    var title: LocalizedStringResource {
+      switch self {
+      case .checking: "Checking Bridge"
+      case .starting: "Starting Bridge"
+      case .stopping: "Stopping Bridge"
+      case .restarting: "Restarting Bridge"
+      case .updating: "Updating CLI and Bridge"
+      case .loadingLogs: "Loading Bridge Logs"
+      }
+    }
   }
 
   private func reportFailure(stage: String) { report(outcome: "failed", stage: stage) }

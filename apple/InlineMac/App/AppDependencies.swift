@@ -181,8 +181,12 @@ extension AppDependencies {
     nav.open(.chat(peer: peer))
   }
 
-  func openReplyThreadInPane(parentPeer: Peer, threadPeer: Peer) {
-    guard nav3?.openReplyThread(parentPeer: parentPeer, threadPeer: threadPeer) == true else {
+  func openReplyThreadInPane(parentPeer: Peer, threadPeer: Peer, sourceMessageId: Int64? = nil) {
+    guard nav3?.openReplyThread(
+      parentPeer: parentPeer,
+      threadPeer: threadPeer,
+      sourceMessageId: sourceMessageId
+    ) == true else {
       openChatRoute(peer: threadPeer)
       return
     }
