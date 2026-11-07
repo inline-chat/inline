@@ -30,6 +30,8 @@ type Output = {
   anchorMessage?: Message
   user?: User
   messages: Message[]
+  /** Read-only: opened through this bot the viewer manages. */
+  readOnlyViaBotUserId?: number
 }
 
 const log = new Log("functions.getChat")
@@ -181,7 +183,11 @@ async function getChatAndDialogForThread(
     return { chat, dialog: newDialog }
   }
 
-  await AccessGuards.ensureChatAccess(chat, currentUserId)
+  if (!(await AccessGuards.hasChatAccess(chat, currentUserId))) {
+    // Opening through a bot you manage: read-only, and no dialog or sidebar entry.
+    await AccessGuards.ensureChatReadAccess(chat, currentUserId)
+    return { chat, dialog }
+  }
 
   if (dialog) {
     return { chat, dialog }
@@ -248,7 +254,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
     async (tx): Promise<Output> => {
       const [snapshotChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).limit(1)
       if (!snapshotChat) throw RealtimeRpcError.ChatIdInvalid()
-      await AccessGuards.ensureChatAccess(snapshotChat, currentUserId, tx)
+      const readOnlyViaBotUserId = await AccessGuards.ensureChatReadAccess(snapshotChat, currentUserId, tx)
 
       const [snapshotDialog] = await tx
         .select()
@@ -343,6 +349,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
           ? Encoders.user({ user: peer.user, photoFile: peer.photoFile, viewerUserId: currentUserId })
           : undefined,
         messages: encodedMessages,
+        readOnlyViaBotUserId,
       }
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },

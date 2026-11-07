@@ -20,7 +20,7 @@ import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { and, eq, isNull, max, sql } from "drizzle-orm"
+import { and, eq, inArray, isNull, max, sql } from "drizzle-orm"
 
 const MAX_IMPORT_USERS = 256
 
@@ -104,21 +104,48 @@ function activeBotOwner(bot: DbUser | undefined): number | null {
   return bot.botCreatorId ?? null
 }
 
-export async function resolveAgentAccess(bot: DbUser, userId: number): Promise<AgentAccess> {
+/** What a bot can do through the person it acts for: use and steer, never approve or configure. */
+export const actingForMask = maskOf([AgentGrantOperation.INVOKE, AgentGrantOperation.STEER])
+
+/** The person a bot acts for, or null for people, deleted bots and ownerless bots. */
+export function actingForUserId(actor: DbUser | undefined): number | null {
+  return activeBotOwner(actor)
+}
+
+/**
+ * A person's access, or a bot's: a bot is evaluated as itself plus the person it
+ * acts for. What it gets through that person is capped to `actingForMask`, so a
+ * bot never approves or configures because its owner may. Same-owner bots fall
+ * out of this: the owner manages the target, so the sibling may use and steer it.
+ */
+export async function resolveAgentAccess(
+  bot: DbUser,
+  userId: number,
+  actor?: DbUser,
+): Promise<AgentAccess> {
   const ownerUserId = activeBotOwner(bot)
   if (ownerUserId === userId) {
     return { botUserId: bot.id, ownerUserId, isOwner: true, operations: 0 }
   }
-  const [row] = await db
-    .select({ operations: agentGrants.operations })
+  const actorUser = actor?.id === userId ? actor : await UsersModel.getUserById(userId)
+  const actingFor = actingForUserId(actorUser)
+  const viaOwner = actingFor !== null && actingFor !== userId && actingFor !== bot.id ? actingFor : null
+  const subjects = viaOwner === null ? [userId] : [userId, viaOwner]
+  const rows = await db
+    .select({ subjectUserId: agentGrants.subjectUserId, operations: agentGrants.operations })
     .from(agentGrants)
     .where(and(
       eq(agentGrants.botUserId, bot.id),
-      eq(agentGrants.subjectUserId, userId),
+      inArray(agentGrants.subjectUserId, subjects),
       isNull(agentGrants.revokedAt),
     ))
-    .limit(1)
-  return { botUserId: bot.id, ownerUserId, isOwner: false, operations: row?.operations ?? 0 }
+  const own = rows.find((row) => row.subjectUserId === userId)?.operations ?? 0
+  const inherited = viaOwner === null
+    ? 0
+    : viaOwner === ownerUserId
+      ? actingForMask
+      : (rows.find((row) => row.subjectUserId === viaOwner)?.operations ?? 0) & actingForMask
+  return { botUserId: bot.id, ownerUserId, isOwner: false, operations: own | inherited }
 }
 
 export async function grantsRevision(botUserId: number, query: Pick<Transaction, "select"> = db): Promise<bigint> {

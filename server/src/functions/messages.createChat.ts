@@ -1,4 +1,5 @@
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
+import { ensureBotReachesParticipants } from "@in/server/modules/contacts/contacts"
 import { chatTitleFields, chatTitleMatches } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
@@ -117,6 +118,7 @@ export async function createChat(
   }
 
   const participantUserIds = input.participants?.map((p) => Number(p.userId)) ?? []
+  await ensureBotReachesParticipants(context.currentUserId, participantUserIds, "create_chat")
   if (participantUserIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
     throw RealtimeRpcError.UserIdInvalid()
   }

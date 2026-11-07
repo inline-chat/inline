@@ -133,6 +133,7 @@ import {
   prepareConnectorOAuth,
 } from "@in/server/functions/connectors"
 import { searchUsersHandler } from "@in/server/realtime/handlers/users.search"
+import { getContactsHandler } from "@in/server/realtime/handlers/contacts.get"
 import { getUsersHandler } from "@in/server/realtime/handlers/users.get"
 import { inviteToInline } from "@in/server/functions/user.inviteToInline"
 import { resolveUrlPreviewHandler } from "@in/server/realtime/handlers/urlPreview.resolve"
@@ -1046,6 +1047,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await disconnectConnector(call.input.disconnectConnector, handlerContext)
       return { oneofKind: "disconnectConnector", disconnectConnector: result }
+    }
+
+    case Method.GET_CONTACTS: {
+      if (call.input.oneofKind !== "getContacts") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getContactsHandler(call.input.getContacts, handlerContext)
+      return { oneofKind: "getContacts", getContacts: result }
     }
 
     case Method.SEARCH_USERS: {
