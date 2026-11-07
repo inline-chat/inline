@@ -108,6 +108,23 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline chats delete --chat-id 123`
   - Delete a chat (space thread). Prompts for confirmation unless `--yes`/`-y` is provided (`--json` requires `--yes`/`-y`).
 
+### sidebar
+
+Chat commands take several chats: repeat `-c`/`-u` or comma-separate ids. Batch JSON is `{results, failed}`.
+
+- `inline sidebar [--json]`
+  - Show the user's sidebar: pinned items, open chats, and folders with their chats. JSON has `pinned[]` and `items[]` entries tagged `kind: chat|folder`.
+- `inline sidebar open -c 1,2 [--top | --folder ID]` / `inline sidebar close (-c 1,2 | --all)`
+  - Open or close chats. `close --all` closes everything outside the pinned section. Closing an empty untitled thread deletes it.
+- `inline sidebar move -c 1,2 (--top | --bottom | --before CHAT_ID | --after CHAT_ID | --before-folder ID | --after-folder ID)`
+  - Reorder; several chats land together in the order given. The target's section decides placement. `--pinned`, `--root`, or `--folder ID` pick the section for `--top`/`--bottom`.
+- `inline sidebar sort --by title|activity [--reverse] [--pinned | --folder ID]`
+  - Sort a section (root by default). Folders sort as single items.
+- `inline sidebar pin -c 1,2 [--top]`, `unpin (-c 1,2 | --all)`, `archive|unarchive -c 1,2`, `mark-read (-c 1,2 | --all)`
+- `inline sidebar cleanup [--dry-run] [--keep-folders]`
+  - Like the macOS Cleanup action: closes inactive read chats (opened 6h+ ago, quiet 3h+) and empty untitled threads, then deletes empty folders. Cannot see app-only drafts; preview with `--dry-run`.
+- `inline sidebar folder create [--title T] [-c 1,2] [--pin]`, `folder update ID --title T|--emoji E`, `folder add ID -c 1,2`, `folder remove -c 1,2`, `folder move ID --top|--before CHAT_ID|...`, `folder pin|unpin ID`, `folder delete ID --keep-chats|--close-chats`
+
 ### bots
 
 - Alias: `inline bot ...` maps to `inline bots ...`.

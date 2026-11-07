@@ -30,6 +30,7 @@ mod owner_session;
 mod peer;
 mod plugin;
 mod session_output;
+mod sidebar;
 mod skill;
 mod state;
 mod telemetry;
@@ -519,6 +520,14 @@ enum Command {
         #[command(subcommand)]
         command: ChatsCommand,
     },
+    #[command(
+        about = "Arrange your sidebar: open, close, reorder, pin, archive, and folders",
+        after_help = "Examples:\n  inline sidebar\n  inline sidebar open -c 123 --top\n  inline sidebar move -c 123 --after 456\n  inline sidebar pin -u 42\n  inline sidebar folder create --title Launch -c 123 -c 456\n  inline sidebar folder move 7 --top"
+    )]
+    Sidebar {
+        #[command(subcommand)]
+        command: Option<sidebar::SidebarCommand>,
+    },
     #[command(about = "List users or fetch a user by id", visible_alias = "user")]
     Users {
         #[command(subcommand)]
@@ -682,6 +691,7 @@ impl Command {
             Self::Tasks { .. } => "tasks",
             Self::Bots { .. } => "bots",
             Self::Typing { .. } => "typing",
+            Self::Sidebar { .. } => "sidebar",
             Self::Me => "me",
             Self::Search(_) => "search",
             Self::Transcript(_) => "transcript",
@@ -3464,6 +3474,19 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 } else {
                     println!("Typing {label} for {}.", peer_label_from_input(&peer));
                 }
+            }
+            Command::Sidebar { command } => {
+                sidebar::run(
+                    command,
+                    sidebar::SidebarContext {
+                        config: &config,
+                        auth_store: &auth_store,
+                        current_user: local_db.load()?.current_user,
+                        json: cli.json,
+                        json_format,
+                    },
+                )
+                .await?;
             }
             Command::Chats { command } => match command {
                 ChatsCommand::List(args) => {

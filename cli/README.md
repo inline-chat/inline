@@ -363,6 +363,45 @@ Session revocation asks for confirmation; JSON automation must pass `--yes`.
 Use `inline logout` to end the current session; `auth revoke-session` ends
 another account session.
 
+### Sidebar
+
+`inline sidebar` shows your personal sidebar (pinned items, open chats, and
+folders with their chats) and arranges it. Chat commands take several chats:
+repeat `-c`/`-u` or comma-separate ids. Moves compute positions next to a
+target, so the target's section decides where chats land: next to a pinned
+item pins them, next to a folder child moves them into that folder.
+
+```bash
+inline sidebar
+inline sidebar open -c 123,124 --top
+inline sidebar close -c 123
+inline sidebar close --all
+inline sidebar move -c 123,124,125 --after 456
+inline sidebar move -u 42 --top --pinned
+inline sidebar sort --by activity
+inline sidebar sort --by title --pinned
+inline sidebar pin -c 123,124
+inline sidebar unpin --all
+inline sidebar mark-read --all
+inline sidebar archive -c 123
+inline sidebar cleanup --dry-run
+inline sidebar folder create --title Launch -c 123,456
+inline sidebar folder add 7 -c 789
+inline sidebar folder move 7 --before 123
+inline sidebar folder pin 7
+inline sidebar folder delete 7 --keep-chats
+```
+
+`close --all` closes everything outside the pinned section, like the macOS
+Close All action. `cleanup` follows the macOS Cleanup action: it closes open,
+unpinned, read chats opened over 6 hours ago with no activity for 3 hours, plus
+empty untitled threads, then deletes folders left without open chats. The CLI
+cannot see drafts kept only in an app, so preview with `--dry-run`. Closing an
+empty untitled thread deletes it. Batch commands keep going after a failure and
+exit nonzero listing what failed; their JSON is `{results, failed}`.
+`sidebar --json` returns `pinned[]` and `items[]` entries tagged `kind: chat`
+or `kind: folder` (folders carry `chats[]`).
+
 Scope filters combine with `--filter` and run before `--limit`/`--offset` in
 both human and JSON output. `--home` means chats outside spaces, including DMs
 and Home threads; use `--type thread` to exclude DMs. `--unread` includes manual
