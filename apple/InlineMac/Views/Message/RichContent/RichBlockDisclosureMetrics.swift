@@ -1,4 +1,23 @@
 import AppKit
+import InlineKit
+
+/// The live time after a working row's summary.
+enum RichBlockElapsedMetrics {
+  /// About a space between the summary and its time.
+  static let gap: CGFloat = 5
+
+  static func font(size: CGFloat) -> NSFont {
+    .monospacedDigitSystemFont(ofSize: size, weight: .regular)
+  }
+
+  static func reservedWidth(size: CGFloat) -> CGFloat {
+    let font = font(size: size)
+    let widest = ProgressElapsed.widestSamples
+      .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+      .max() ?? 0
+    return ceil(widest)
+  }
+}
 
 enum RichBlockDisclosureMetrics {
   /// Matches the sidebar's section chevron: a 9 pt semibold glyph.

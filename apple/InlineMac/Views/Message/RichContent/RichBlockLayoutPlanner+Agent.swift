@@ -119,16 +119,25 @@ extension RichBlockLayoutPlanner.Builder {
     case .waiting?, .failed?, .cancelled?: true
     default: false
     }
+    // A working row counts its time live after the summary; meta then only
+    // carries the bot's last value for clients that can't.
+    let elapsed: RichBlockElapsed? = disclosure.kind == .progress
+      ? .init(
+        startedAt: disclosure.hasStartedAt ? disclosure.startedAt : nil,
+        reservedWidth: RichBlockElapsedMetrics.reservedWidth(size: baseFontSize)
+      )
+      : nil
     var metaWidth: CGFloat = 0
-    if let meta, meta.length > 0, let text = styled(meta, role: .footer, isRTL: false) {
+    if elapsed == nil, let meta, meta.length > 0, let text = styled(meta, role: .footer, isRTL: false) {
       metaWidth = min(ceil(measureText(text, width: .greatestFiniteMagnitude, singleLine: true).maxLineUsedWidth), width * 0.4)
     }
-    guard status != nil || metaWidth > 0 else { return nil }
+    guard status != nil || metaWidth > 0 || elapsed != nil else { return nil }
     let reserved = (showsGlyph ? RichBlockAgentMetrics.disclosureStatusSide + 4 : 0)
       + metaWidth
       + (showsGlyph || metaWidth > 0 ? RichBlockAgentMetrics.disclosureTrailingGap : 0)
+      + (elapsed.map { $0.reservedWidth + RichBlockElapsedMetrics.gap } ?? 0)
     return .init(
-      value: .init(status: status, meta: metaWidth > 0 ? meta : nil, metaWidth: metaWidth),
+      value: .init(status: status, meta: metaWidth > 0 ? meta : nil, metaWidth: metaWidth, elapsed: elapsed),
       reservedWidth: min(reserved, max(0, width - 40))
     )
   }

@@ -940,7 +940,7 @@ private enum DeveloperMessageCatalogFactory {
     let first = builder.segment("Inspect protocol ranges")
     let second = builder.segment("Reconcile the next snapshot")
     let code = builder.segment("await renderer.apply(nextRevision)")
-    let progress = disclosureBlock(
+    var progress = disclosureBlock(
       summary: summary,
       kind: .progress,
       initiallyOpen: true,
@@ -953,6 +953,8 @@ private enum DeveloperMessageCatalogFactory {
         codeBlock(code, language: "swift"),
       ]
     )
+    // Started 2m 12s before the playground opens, so its live time is visible.
+    progress.disclosure.startedAt = Int64(Date().timeIntervalSince1970) - 132
     return builder.finish(blocks: [progress])
   }
 
