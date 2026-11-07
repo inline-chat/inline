@@ -5450,9 +5450,20 @@ export async function monitorInlineProvider(params: {
       pendingClosures: new Set(),
     }
     const progressMaxLineChars = resolveChannelProgressDraftMaxLineChars(account.config)
+    // The row's start on the wall clock, for the clients' live timer; the
+    // monotonic clock stays the source of truth for "Worked for".
+    // Kept per start, so clock jitter can't change the text and force an edit.
+    let progressStartedAtWall: { at: number; unix: number } | null = null
+    const progressStartedAtUnix = (): number => {
+      const startedAt = progressState.startedAt ?? performance.now()
+      if (progressStartedAtWall?.at !== startedAt) {
+        progressStartedAtWall = { at: startedAt, unix: Math.floor((Date.now() - (performance.now() - startedAt)) / 1000) }
+      }
+      return progressStartedAtWall.unix
+    }
     const formatProgress = (lines: Array<string | ChannelProgressDraftLine>, working: boolean, elapsed?: number, outcome?: ActivityOutcome, toolFailed?: boolean) =>
       agentActivityEnabled
-        ? formatQuietTimeline(lines, working, elapsed, outcome, toolFailed, progressMaxLineChars)
+        ? formatQuietTimeline(lines, working, elapsed, outcome, toolFailed, progressMaxLineChars, working ? progressStartedAtUnix() : undefined)
         : sanitizeInlineDeliveryText(formatChannelProgressDraftText({
             entry: account.config, lines, seed: progressSeed,
           })).trim()

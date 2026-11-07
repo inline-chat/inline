@@ -76,6 +76,8 @@ export function formatQuietTimeline(
   lines: ReadonlyArray<ActivityLine>, working: boolean, elapsedSeconds?: number,
   outcome: ActivityOutcome = "success", recordedToolFailure = false,
   maxLineChars = ACTIVITY_PREVIEW_MAX_CHARS,
+  /** Unix seconds the work started; clients show a live elapsed time from it. */
+  startedAt?: number,
 ): string {
   const previewLimit = Math.max(1, Math.min(ACTIVITY_PREVIEW_MAX_CHARS, Math.floor(maxLineChars) || ACTIVITY_PREVIEW_MAX_CHARS))
   const text = lines.map((line) => {
@@ -93,12 +95,16 @@ export function formatQuietTimeline(
   // Cap the source before escaping so previews cannot split an escape sequence.
   // Escaping can at most double this budget; one step still fits in a row.
   const body = text.length ? text.map((line) => `- ${escape(truncatePreview(line, previewLimit))}`).join("\n") : "No tool preview supplied."
-  return `<details>\n<summary${working ? ' kind="progress"' : ""} activity="agent">${escape(summary)}</summary>\n\n${body}\n\n</details>`
+  const started = working && startedAt !== undefined && Number.isFinite(startedAt) && startedAt >= 0
+    ? ` started="${Math.floor(startedAt)}"` : ""
+  return `<details>\n<summary${working ? ' kind="progress"' : ""}${started} activity="agent">${escape(summary)}</summary>\n\n${body}\n\n</details>`
 }
 
 export function formatWorkDuration(seconds: number): string {
   const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0
   if (total < 1) return "less than 1s"
-  const hours = Math.floor(total / 3600), minutes = Math.floor((total % 3600) / 60), remainder = total % 60
-  return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", remainder ? `${remainder}s` : ""].filter(Boolean).join(" ")
+  // Matches the Inline CLI bridge and the clients' live timer: 8s, 1m 4s, 1h 2m.
+  if (total < 60) return `${total}s`
+  if (total < 3600) return `${Math.floor(total / 60)}m ${total % 60}s`
+  return `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m`
 }
