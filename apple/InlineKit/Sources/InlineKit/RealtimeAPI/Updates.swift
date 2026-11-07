@@ -309,6 +309,10 @@ public actor UpdatesEngine: Sendable {
           // Addressed to the session's bot; the app has nothing to project.
           break
 
+        case .agentSettings:
+          // Agent Settings still read the mode from the runtime's mirror.
+          break
+
         default:
           break
       }
@@ -1737,6 +1741,7 @@ enum RealtimeUpdateDiagnostics {
       case .agentGrant: return "agentGrant"
       case .agentRuntime: return "agentRuntime"
       case .agentSessionControl: return "agentSessionControl"
+      case .agentSettings: return "agentSettings"
     }
   }
 }
