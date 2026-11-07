@@ -18,10 +18,13 @@ service; agent processes and project files remain on the user's computer.
 
 ## Updates and restarts
 
-The bridge applies a staged update as soon as active work and pending
-publication finish. Open idle sessions do not block it, and there is no extra
-quiet period or cooldown between successfully staged releases. Admission closes
-atomically before the old runtime stops, so new work cannot race the handoff.
+The bridge applies a staged update once active work and pending publication
+finish; open idle sessions do not block it, and there is no extra quiet period.
+Automatic activations stay at least six hours apart. Running `inline update` by
+hand asks the bridge to adopt the staged runtime at its next idle moment
+instead, skipping that spacing but not the idle wait or the trial. Admission
+closes atomically before the old runtime stops, so new work cannot race the
+handoff.
 
 `inline bridge status` and `inline bridge doctor` show the running CLI version,
 the retained supervisor's version, and pending updates or rollbacks. The binary
