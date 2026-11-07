@@ -1190,6 +1190,7 @@ async fn handle_claude_history_command_inner(
         bot,
         EditInteractiveMessageRequest {
             message: EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(record.binding.chat_id),
                 message_id,
                 text: reconcile_text,
@@ -1288,6 +1289,7 @@ pub(super) async fn handle_claude_history_action(
                 bot,
                 EditInteractiveMessageRequest {
                     message: EditMessageRequest {
+                        entities: Vec::new(),
                         chat_id: *chat_id,
                         message_id: *message_id,
                         text,
@@ -1593,6 +1595,7 @@ async fn edit_history_opened(
         bot,
         EditInteractiveMessageRequest {
             message: EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(chat_id),
                 message_id: InlineId::new(message_id),
                 text: format!(
@@ -1638,6 +1641,7 @@ async fn edit_history_failure(
         bot,
         EditInteractiveMessageRequest {
             message: EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(import.chat_id),
                 message_id: InlineId::new(import.message_id),
                 text: format!("{text}{link}"),

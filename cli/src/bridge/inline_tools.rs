@@ -928,6 +928,7 @@ impl InlineToolHost {
         match self
             .bot
             .edit_message(EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(chat_id),
                 message_id: InlineId::new(message_id),
                 text,
@@ -1153,6 +1154,7 @@ pub(in crate::bridge) async fn return_local_file(
     let idempotency_key =
         return_attachment_idempotency_key(request.idempotency_seed, media_kind.as_str(), &bytes);
     let upload = UploadRequest {
+        entities: Vec::new(),
         peer: PeerRef::Chat {
             chat_id: InlineId::new(request.chat_id),
         },

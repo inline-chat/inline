@@ -474,6 +474,9 @@ pub struct SendTextRequest {
     /// Notification behavior for this message.
     #[serde(default)]
     pub notification_mode: SendNotificationMode,
+    /// Explicit UTF-16 entities for the text or media caption.
+    #[serde(default)]
+    pub entities: Vec<MessageEntityRecord>,
 }
 
 impl SendTextRequest {
@@ -482,6 +485,7 @@ impl SendTextRequest {
         Self {
             peer,
             text: text.into(),
+            entities: Vec::new(),
             external_id: None,
             random_id: None,
             reply_to_message_id: None,
@@ -496,6 +500,7 @@ impl fmt::Debug for SendTextRequest {
         f.debug_struct("SendTextRequest")
             .field("peer", &self.peer)
             .field("text_len", &self.text.len())
+            .field("entity_count", &self.entities.len())
             .field("external_id", &self.external_id)
             .field("random_id", &self.random_id)
             .field("reply_to_message_id", &self.reply_to_message_id)
@@ -519,6 +524,9 @@ pub struct EditMessageRequest {
     /// Whether the server should parse supported Markdown into message entities.
     #[serde(default)]
     pub parse_markdown: bool,
+    /// Explicit UTF-16 entities for the text or media caption.
+    #[serde(default)]
+    pub entities: Vec<MessageEntityRecord>,
 }
 
 /// Bot-authored interactive action attached to a message.
@@ -586,6 +594,7 @@ impl fmt::Debug for EditMessageRequest {
             .field("chat_id", &self.chat_id)
             .field("message_id", &self.message_id)
             .field("text_len", &self.text.len())
+            .field("entity_count", &self.entities.len())
             .field("external_id", &self.external_id)
             .field("parse_markdown", &self.parse_markdown)
             .finish()
@@ -719,6 +728,9 @@ pub struct UploadRequest {
     pub random_id: Option<RandomId>,
     /// Optional reply target.
     pub reply_to_message_id: Option<InlineId>,
+    /// Explicit UTF-16 entities for the text or media caption.
+    #[serde(default)]
+    pub entities: Vec<MessageEntityRecord>,
 }
 
 impl fmt::Debug for UploadRequest {
@@ -730,6 +742,7 @@ impl fmt::Debug for UploadRequest {
             .field("mime_type", &self.mime_type)
             .field("size_bytes", &self.size_bytes)
             .field("caption_len", &self.caption.as_ref().map(String::len))
+            .field("entity_count", &self.entities.len())
             .field("width", &self.width)
             .field("height", &self.height)
             .field("duration_ms", &self.duration_ms)
@@ -780,11 +793,78 @@ impl ClientStatusSnapshot {
     }
 }
 
+/// Source-backed chat kind. No group-DM primitive is established by this model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DialogKind {
+    /// A one-to-one conversation with an explicit user peer.
+    Direct,
+    /// An ordinary thread, at home or in a workspace.
+    Channel,
+    /// A separate child chat, optionally anchored to a parent message.
+    ReplyChild,
+}
+
+/// A complete observation of structural fields from a canonical source Chat.
+///
+/// Nulls are intentional clears. This does not establish membership, read-state
+/// or notification completeness. Every nullable field must be present in JSON;
+/// omitting a field is not an intentional clear. The normal sync checkpoint is the
+/// observation boundary; legacy cached fields alone never establish authority.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DialogStructure {
+    /// Source-backed kind.
+    pub kind: DialogKind,
+    /// User peer for a direct conversation, otherwise null.
+    #[serde(deserialize_with = "present_nullable")]
+    pub peer_user_id: Option<InlineId>,
+    /// Workspace, or null for a home chat.
+    #[serde(deserialize_with = "present_nullable")]
+    pub space_id: Option<InlineId>,
+    /// Parent chat, or null for a top-level chat.
+    #[serde(deserialize_with = "present_nullable")]
+    pub parent_chat_id: Option<InlineId>,
+    /// Parent message anchor, or null when unanchored.
+    #[serde(deserialize_with = "present_nullable")]
+    pub parent_message_id: Option<InlineId>,
+}
+
+/// Durable evidence of this account's access to one space.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpaceAccessRecord {
+    /// Source space ID.
+    pub space_id: InlineId,
+    /// Last explicitly established self-access result.
+    pub status: SpaceAccessStatus,
+}
+
+/// Self-access is independent of cached space, member and chat summaries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpaceAccessStatus {
+    /// Explicit self-membership was observed.
+    Accessible,
+    /// Explicit self-removal or a source access denial was observed.
+    Removed,
+    /// No authoritative self-access observation is available.
+    Unknown,
+}
+
 /// Dialog item returned by the client.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DialogRecord {
     /// Inline chat ID.
     pub chat_id: InlineId,
+    /// Complete source-backed structural observation, absent for unknown/legacy
+    /// records. Partial source patches preserve the last complete observation.
+    #[serde(default)]
+    pub structure: Option<DialogStructure>,
+    /// Source description, when loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Source creator, when loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<InlineId>,
     /// Other user ID when this dialog is a direct message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer_user_id: Option<InlineId>,
@@ -848,6 +928,9 @@ impl DialogRecord {
     pub fn new(chat_id: InlineId) -> Self {
         Self {
             chat_id,
+            structure: None,
+            description: None,
+            created_by: None,
             peer_user_id: None,
             title: None,
             emoji: None,
@@ -1319,6 +1402,14 @@ pub struct UploadHandle {
     pub size_bytes: Option<u64>,
 }
 
+fn present_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1442,6 +1533,7 @@ mod tests {
     #[test]
     fn edit_markdown_is_backward_compatible_and_debug_safe() {
         let request = EditMessageRequest {
+            entities: Vec::new(),
             chat_id: InlineId::new(7),
             message_id: InlineId::new(8),
             text: "private terminal result".to_string(),

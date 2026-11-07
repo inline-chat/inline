@@ -28,5 +28,6 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+hegeltest = "0.52.0"
 prost.workspace = true
 tokio-tungstenite.workspace = true

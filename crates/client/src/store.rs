@@ -22,9 +22,34 @@ use crate::{
     AuthCredential, ChatParticipantRecord, ClientErrorCategory, ClientEvent, ClientFailure,
     DialogFollowMode, DialogNotificationMode, DialogRecord, DialogsOrder, DialogsPage,
     DialogsRequest, EventReliability, HistoryPage, HistoryRequest, InlineId, MessageContent,
-    MessageMetadata, MessageRecord, SpaceMemberRecord, SpaceRecord, TransactionEvent,
-    TransactionId, TransactionIdentity, TransactionState, UserRecord, UserSettingsRecord,
+    MessageMetadata, MessageRecord, SpaceAccessRecord, SpaceMemberRecord, SpaceRecord,
+    TransactionEvent, TransactionId, TransactionIdentity, TransactionState, UserRecord,
+    UserSettingsRecord,
 };
+
+/// Read lease held across a repair's final writes and cursor commit.
+/// Built-in store clones share it; account clearing takes the write lease.
+pub type SourceAccountGuard = tokio::sync::OwnedRwLockReadGuard<()>;
+
+/// Durable source-observation token. Account clear invalidates every old token.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SourceVersion {
+    /// Account generation, increased on clear even if the session is reused.
+    pub epoch: i64,
+    /// Local revision for this observation key.
+    pub revision: i64,
+    /// Greatest observed sequence in this key's source bucket.
+    pub seq: i64,
+}
+
+/// Cached self-membership fields committed in the same transaction as access.
+#[derive(Clone, Debug, Default)]
+pub struct SourceSpaceProjection {
+    /// Optional authoritative space summary accompanying a GetSpace proof.
+    pub space: Option<SpaceRecord>,
+    /// Explicitly authenticated self membership, never an arbitrary member.
+    pub self_member: Option<SpaceMemberRecord>,
+}
 
 /// Selects a history page by the monotonic message-ID cursor before applying
 /// presentation ordering. Keeping this shared prevents timestamp skew from
@@ -211,6 +236,22 @@ pub struct StoredReadState {
 pub struct AccountStateSnapshot {
     /// Chats that were removed after being observed by this account store.
     pub deleted_chat_ids: Vec<InlineId>,
+    /// Cached summaries, not an authoritative directory or permission result.
+    #[serde(default)]
+    pub spaces: Vec<SpaceRecord>,
+    /// Cached members, which may be incomplete or stale.
+    #[serde(default)]
+    pub space_members: Vec<SpaceMemberRecord>,
+    /// Account-local cached profiles; presence does not imply current access.
+    #[serde(default)]
+    pub users: Vec<UserRecord>,
+    /// Durable explicit self-access observations, including removal tombstones.
+    #[serde(default)]
+    pub space_access: Vec<SpaceAccessRecord>,
+    /// True only when a source operation proves the entire active access set.
+    /// Current getChats/cache operations do not offer that contract.
+    #[serde(default)]
+    pub space_access_complete: bool,
 }
 
 /// Durable per-chat state that complements paged dialog/history queries during
@@ -436,6 +477,61 @@ pub trait ClientStore: fmt::Debug + Send + Sync + 'static {
     /// Loads one stored dialog by chat ID.
     fn dialog(&self, chat_id: InlineId) -> BoxFuture<'static, StoreResult<Option<DialogRecord>>>;
 
+    /// Prevents account clear while a checked local repair commits.
+    fn source_account_guard(&self) -> BoxFuture<'static, StoreResult<SourceAccountGuard>> {
+        Box::pin(async {
+            Err(StoreError::new(
+                ClientErrorCategory::Unsupported,
+                "store does not provide a source account lifecycle guard",
+            ))
+        })
+    }
+
+    /// Reads durable freshness for an internal source key (chat:<id>, access:<id>).
+    fn source_version(&self, _key: String) -> BoxFuture<'static, StoreResult<SourceVersion>> {
+        Box::pin(async {
+            Err(StoreError::new(
+                ClientErrorCategory::Unsupported,
+                "store does not persist source freshness",
+            ))
+        })
+    }
+
+    /// Atomically writes a chat and its source sequence, rejecting older source
+    /// observations and responses from a cleared account generation.
+    fn record_source_dialog(
+        &self,
+        _dialog: DialogRecord,
+        _seq: i64,
+        _epoch: i64,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        Box::pin(async {
+            Err(StoreError::new(
+                ClientErrorCategory::Unsupported,
+                "store does not persist source freshness",
+            ))
+        })
+    }
+
+    /// Atomically writes self-access and its observation token. RPC responses
+    /// use the pre-request token; replay cannot clear a tombstone. Only a fresh
+    /// sequenced GetSpace proof may restore denied access.
+    fn record_source_space_access(
+        &self,
+        _access: SpaceAccessRecord,
+        _seq: i64,
+        _expected: SourceVersion,
+        _source_proof: bool,
+        _projection: SourceSpaceProjection,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        Box::pin(async {
+            Err(StoreError::new(
+                ClientErrorCategory::Unsupported,
+                "store does not persist source freshness",
+            ))
+        })
+    }
+
     /// Records a dialog in local state.
     fn record_dialog(&self, dialog: DialogRecord) -> BoxFuture<'static, StoreResult<()>>;
 
@@ -444,6 +540,48 @@ pub trait ClientStore: fmt::Debug + Send + Sync + 'static {
 
     /// Lists durable chat deletion tombstones.
     fn deleted_chat_ids(&self) -> BoxFuture<'static, StoreResult<Vec<InlineId>>>;
+
+    /// Atomically reads cached account records. Default empty arrays mean
+    /// unknown, never an authoritative empty directory.
+    fn account_state(&self) -> BoxFuture<'static, StoreResult<AccountStateSnapshot>> {
+        let deleted = self.deleted_chat_ids();
+        Box::pin(async move {
+            Ok(AccountStateSnapshot {
+                deleted_chat_ids: deleted.await?,
+                ..Default::default()
+            })
+        })
+    }
+
+    /// Persists an explicitly authenticated self identity, never inferred from
+    /// an arbitrary cached user/member. Cleared with account data on logout.
+    fn record_self_user_id(&self, _user_id: InlineId) -> BoxFuture<'static, StoreResult<()>> {
+        Box::pin(async {
+            Err(StoreError::new(
+                ClientErrorCategory::Unsupported,
+                "store does not persist self identity",
+            ))
+        })
+    }
+
+    /// Loads the last authenticated self identity.
+    fn self_user_id(&self) -> BoxFuture<'static, StoreResult<Option<InlineId>>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    /// Durably records self-access, including tombstones. Cached space upserts
+    /// must never overwrite this evidence.
+    fn record_space_access(
+        &self,
+        _access: SpaceAccessRecord,
+    ) -> BoxFuture<'static, StoreResult<()>> {
+        Box::pin(async {
+            Err(StoreError::new(
+                ClientErrorCategory::Unsupported,
+                "store does not persist space access",
+            ))
+        })
+    }
 
     /// Records user summaries in local state.
     fn record_users(&self, users: Vec<UserRecord>) -> BoxFuture<'static, StoreResult<()>>;
@@ -699,6 +837,7 @@ impl StoredTransaction {
 #[derive(Clone, Debug, Default)]
 pub struct InMemoryStore {
     state: Arc<Mutex<InMemoryStoreState>>,
+    account_lifecycle: Arc<tokio::sync::RwLock<()>>,
 }
 
 #[derive(Debug, Default)]
@@ -715,6 +854,10 @@ struct InMemoryStoreState {
     users: HashMap<i64, UserRecord>,
     spaces: HashMap<i64, SpaceRecord>,
     space_members: HashMap<(i64, i64), SpaceMemberRecord>,
+    source_epoch: i64,
+    source_versions: HashMap<String, SourceVersion>,
+    self_user_id: Option<InlineId>,
+    space_access: HashMap<i64, SpaceAccessRecord>,
     user_settings: Option<UserSettingsRecord>,
     participants: HashMap<i64, HashMap<i64, ChatParticipantRecord>>,
     participant_snapshots: HashSet<i64>,
@@ -866,10 +1009,13 @@ impl ClientStore for InMemoryStore {
     fn clear_account_data(&self) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
         Box::pin(async move {
+            let _guard = store.account_lifecycle.write().await;
             let mut state = store.state.lock().expect("in-memory store poisoned");
             let session = state.session.take();
             let logout_in_progress = state.logout_in_progress;
+            let epoch = state.source_epoch + 1;
             *state = InMemoryStoreState::default();
+            state.source_epoch = epoch;
             state.session = session;
             state.logout_in_progress = logout_in_progress;
             Ok(())
@@ -1178,6 +1324,87 @@ impl ClientStore for InMemoryStore {
         })
     }
 
+    fn source_account_guard(&self) -> BoxFuture<'static, StoreResult<SourceAccountGuard>> {
+        let lifecycle = self.account_lifecycle.clone();
+        Box::pin(async move { Ok(lifecycle.read_owned().await) })
+    }
+
+    fn source_version(&self, key: String) -> BoxFuture<'static, StoreResult<SourceVersion>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let state = store.state.lock().expect("in-memory store poisoned");
+            Ok(memory_source_version(&state, &key))
+        })
+    }
+
+    fn record_source_dialog(
+        &self,
+        dialog: DialogRecord,
+        seq: i64,
+        epoch: i64,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let mut state = store.state.lock().expect("in-memory store poisoned");
+            let key = format!("chat:{}", dialog.chat_id);
+            let version = memory_source_version(&state, &key);
+            if version.epoch != epoch || seq < version.seq {
+                return Ok(false);
+            }
+            state.chat_tombstones.remove(&dialog.chat_id.get());
+            upsert_dialog(&mut state.dialogs, dialog);
+            state
+                .source_versions
+                .insert(key, next_source_version(version, seq));
+            Ok(true)
+        })
+    }
+
+    fn record_source_space_access(
+        &self,
+        access: SpaceAccessRecord,
+        seq: i64,
+        expected: SourceVersion,
+        source_proof: bool,
+        projection: SourceSpaceProjection,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let mut state = store.state.lock().expect("in-memory store poisoned");
+            let key = format!("access:{}", access.space_id);
+            let version = memory_source_version(&state, &key);
+            let removed = state
+                .space_access
+                .get(&access.space_id.get())
+                .is_some_and(|v| v.status == crate::SpaceAccessStatus::Removed);
+            if !accept_access_observation(&access, seq, expected, version, removed, source_proof) {
+                return Ok(false);
+            }
+            validate_source_projection(&access, &projection, state.self_user_id)?;
+            if let Some(member) = projection.self_member {
+                state.self_user_id = Some(member.user_id);
+                state
+                    .space_members
+                    .insert((member.space_id.get(), member.user_id.get()), member);
+            }
+            if let Some(space) = projection.space {
+                state.spaces.insert(space.space_id.get(), space);
+            }
+            if access.status == crate::SpaceAccessStatus::Removed
+                && let Some(user_id) = state.self_user_id
+            {
+                state
+                    .space_members
+                    .remove(&(access.space_id.get(), user_id.get()));
+            }
+            state.space_access.insert(access.space_id.get(), access);
+            state
+                .source_versions
+                .insert(key, next_source_version(version, seq));
+            Ok(true)
+        })
+    }
+
     fn record_dialog(&self, dialog: DialogRecord) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
         Box::pin(async move {
@@ -1226,6 +1453,73 @@ impl ClientStore for InMemoryStore {
                 .collect::<Vec<_>>();
             ids.sort_by_key(|id| id.get());
             Ok(ids)
+        })
+    }
+
+    fn account_state(&self) -> BoxFuture<'static, StoreResult<AccountStateSnapshot>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let state = store.state.lock().expect("in-memory store poisoned");
+            let mut snapshot = AccountStateSnapshot {
+                deleted_chat_ids: state
+                    .chat_tombstones
+                    .iter()
+                    .copied()
+                    .map(InlineId::new)
+                    .collect(),
+                spaces: state.spaces.values().cloned().collect(),
+                space_members: state.space_members.values().cloned().collect(),
+                users: state.users.values().cloned().collect(),
+                space_access: state.space_access.values().cloned().collect(),
+                space_access_complete: false,
+            };
+            snapshot.deleted_chat_ids.sort_by_key(|id| id.get());
+            snapshot.spaces.sort_by_key(|r| r.space_id.get());
+            snapshot
+                .space_members
+                .sort_by_key(|r| (r.space_id.get(), r.user_id.get()));
+            snapshot.users.sort_by_key(|r| r.user_id.get());
+            snapshot.space_access.sort_by_key(|r| r.space_id.get());
+            Ok(snapshot)
+        })
+    }
+
+    fn record_self_user_id(&self, user_id: InlineId) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move {
+            store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .self_user_id = Some(user_id);
+            Ok(())
+        })
+    }
+
+    fn self_user_id(&self) -> BoxFuture<'static, StoreResult<Option<InlineId>>> {
+        let store = self.clone();
+        Box::pin(async move {
+            Ok(store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .self_user_id)
+        })
+    }
+
+    fn record_space_access(
+        &self,
+        access: SpaceAccessRecord,
+    ) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move {
+            store
+                .state
+                .lock()
+                .expect("in-memory store poisoned")
+                .space_access
+                .insert(access.space_id.get(), access);
+            Ok(())
         })
     }
 
@@ -1874,6 +2168,7 @@ impl ClientStore for InMemoryStore {
 #[derive(Clone)]
 pub struct SqliteStore {
     connection: Arc<Mutex<Connection>>,
+    account_lifecycle: Arc<tokio::sync::RwLock<()>>,
 }
 
 impl fmt::Debug for SqliteStore {
@@ -1911,6 +2206,7 @@ impl SqliteStore {
         migrate_sqlite(&connection)?;
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
+            account_lifecycle: Arc::new(tokio::sync::RwLock::new(())),
         })
     }
 
@@ -2030,6 +2326,12 @@ impl SqliteStore {
     fn clear_account_data_sync(&self) -> StoreResult<()> {
         let mut connection = self.connection.lock().expect("sqlite store poisoned");
         let transaction = connection.transaction().map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "UPDATE account_generation SET epoch = epoch + 1 WHERE id=1",
+                [],
+            )
+            .map_err(sqlite_error)?;
         for table in [
             "sync_state",
             "sync_buckets",
@@ -2040,6 +2342,9 @@ impl SqliteStore {
             "users",
             "spaces",
             "space_members",
+            "space_access",
+            "source_versions",
+            "account_identity",
             "user_settings",
             "chat_participants",
             "chat_participant_snapshots",
@@ -2358,7 +2663,7 @@ impl SqliteStore {
                             d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                             d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
                             d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
-                            d.parent_chat_id, d.parent_message_id, d.agent_context_json
+                            d.parent_chat_id, d.parent_message_id, d.agent_context_json, d.structure_json, d.description, d.created_by
                      FROM dialogs d
                      ORDER BY COALESCE(last_message_id, 0) DESC, chat_id ASC
                      LIMIT ?1 OFFSET ?2",
@@ -2379,7 +2684,7 @@ impl SqliteStore {
                             d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                             d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
                             d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
-                            d.parent_chat_id, d.parent_message_id, d.agent_context_json
+                            d.parent_chat_id, d.parent_message_id, d.agent_context_json, d.structure_json, d.description, d.created_by
                      FROM dialogs d
                      WHERE d.chat_id > ?1
                      ORDER BY d.chat_id ASC
@@ -2424,7 +2729,7 @@ impl SqliteStore {
                         d.unread_count, d.space_id, d.is_public, d.archived, d.pinned,
                         d.open, d.chat_list_hidden, d.list_order, d.pinned_order,
                         d.notification_mode, d.follow_mode, d.pinned_message_ids_json,
-                        d.parent_chat_id, d.parent_message_id, d.agent_context_json
+                        d.parent_chat_id, d.parent_message_id, d.agent_context_json, d.structure_json, d.description, d.created_by
                  FROM dialogs d WHERE d.chat_id = ?1",
                 params![chat_id.get()],
                 sqlite_dialog_from_row,
@@ -2602,20 +2907,10 @@ impl SqliteStore {
     }
 
     fn record_space_sync(&self, space: SpaceRecord) -> StoreResult<()> {
-        let payload = serde_json::to_string(&space)
-            .map_err(|error| StoreError::internal(format!("encode space: {error}")))?;
-        let connection = self.connection.lock().expect("sqlite store poisoned");
-        connection
-            .execute(
-                "INSERT INTO spaces (space_id, record_json, updated_at)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(space_id) DO UPDATE SET
-                   record_json = excluded.record_json,
-                   updated_at = excluded.updated_at",
-                params![space.space_id.get(), payload, now_seconds()],
-            )
-            .map_err(sqlite_error)?;
-        Ok(())
+        upsert_sqlite_space(
+            &self.connection.lock().expect("sqlite store poisoned"),
+            space,
+        )
     }
 
     fn space_sync(&self, space_id: InlineId) -> StoreResult<Option<SpaceRecord>> {
@@ -2636,25 +2931,10 @@ impl SqliteStore {
     }
 
     fn record_space_member_sync(&self, member: SpaceMemberRecord) -> StoreResult<()> {
-        let payload = serde_json::to_string(&member)
-            .map_err(|error| StoreError::internal(format!("encode space member: {error}")))?;
-        let connection = self.connection.lock().expect("sqlite store poisoned");
-        connection
-            .execute(
-                "INSERT INTO space_members (space_id, user_id, record_json, updated_at)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(space_id, user_id) DO UPDATE SET
-                   record_json = excluded.record_json,
-                   updated_at = excluded.updated_at",
-                params![
-                    member.space_id.get(),
-                    member.user_id.get(),
-                    payload,
-                    now_seconds()
-                ],
-            )
-            .map_err(sqlite_error)?;
-        Ok(())
+        upsert_sqlite_space_member(
+            &self.connection.lock().expect("sqlite store poisoned"),
+            member,
+        )
     }
 
     fn record_space_members_sync(
@@ -3432,7 +3712,10 @@ impl ClientStore for SqliteStore {
 
     fn clear_account_data(&self) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
-        Box::pin(async move { store.clear_account_data_sync() })
+        Box::pin(async move {
+            let _guard = store.account_lifecycle.write().await;
+            store.clear_account_data_sync()
+        })
     }
 
     fn sync_state(&self) -> BoxFuture<'static, StoreResult<SyncState>> {
@@ -3561,6 +3844,102 @@ impl ClientStore for SqliteStore {
         Box::pin(async move { store.dialog_sync(chat_id) })
     }
 
+    fn source_account_guard(&self) -> BoxFuture<'static, StoreResult<SourceAccountGuard>> {
+        let lifecycle = self.account_lifecycle.clone();
+        Box::pin(async move { Ok(lifecycle.read_owned().await) })
+    }
+
+    fn source_version(&self, key: String) -> BoxFuture<'static, StoreResult<SourceVersion>> {
+        let store = self.clone();
+        Box::pin(async move {
+            sqlite_source_version(
+                &store.connection.lock().expect("sqlite store poisoned"),
+                &key,
+            )
+        })
+    }
+
+    fn record_source_dialog(
+        &self,
+        dialog: DialogRecord,
+        seq: i64,
+        epoch: i64,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let mut connection = store.connection.lock().expect("sqlite store poisoned");
+            let transaction = connection.transaction().map_err(sqlite_error)?;
+            let key = format!("chat:{}", dialog.chat_id);
+            let version = sqlite_source_version(&transaction, &key)?;
+            if version.epoch != epoch || seq < version.seq {
+                return Ok(false);
+            }
+            upsert_sqlite_dialog(&transaction, dialog)?;
+            write_sqlite_source_version(&transaction, &key, next_source_version(version, seq))?;
+            transaction.commit().map_err(sqlite_error)?;
+            Ok(true)
+        })
+    }
+
+    fn record_source_space_access(
+        &self,
+        access: SpaceAccessRecord,
+        seq: i64,
+        expected: SourceVersion,
+        source_proof: bool,
+        projection: SourceSpaceProjection,
+    ) -> BoxFuture<'static, StoreResult<bool>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let mut connection = store.connection.lock().expect("sqlite store poisoned");
+            let transaction = connection.transaction().map_err(sqlite_error)?;
+            let key = format!("access:{}", access.space_id);
+            let version = sqlite_source_version(&transaction, &key)?;
+            let old = transaction
+                .query_row(
+                    "SELECT record_json FROM space_access WHERE space_id=?1",
+                    params![access.space_id.get()],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?;
+            let removed = old
+                .map(|v| serde_json::from_str::<SpaceAccessRecord>(&v))
+                .transpose()
+                .map_err(|e| StoreError::internal(format!("decode access: {e}")))?
+                .is_some_and(|v| v.status == crate::SpaceAccessStatus::Removed);
+            if !accept_access_observation(&access, seq, expected, version, removed, source_proof) {
+                return Ok(false);
+            }
+            let self_user_id = transaction
+                .query_row(
+                    "SELECT user_id FROM account_identity WHERE id=1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?
+                .map(InlineId::new);
+            validate_source_projection(&access, &projection, self_user_id)?;
+            if let Some(member) = projection.self_member {
+                transaction.execute("INSERT INTO account_identity (id, user_id) VALUES (1, ?1) ON CONFLICT(id) DO UPDATE SET user_id=excluded.user_id", params![member.user_id.get()]).map_err(sqlite_error)?;
+                upsert_sqlite_space_member(&transaction, member)?;
+            }
+            if let Some(space) = projection.space {
+                upsert_sqlite_space(&transaction, space)?;
+            }
+            if access.status == crate::SpaceAccessStatus::Removed {
+                transaction.execute("DELETE FROM space_members WHERE space_id=?1 AND user_id=(SELECT user_id FROM account_identity WHERE id=1)", params![access.space_id.get()]).map_err(sqlite_error)?;
+            }
+            let payload = serde_json::to_string(&access)
+                .map_err(|e| StoreError::internal(format!("encode access: {e}")))?;
+            transaction.execute("INSERT INTO space_access (space_id, record_json) VALUES (?1, ?2) ON CONFLICT(space_id) DO UPDATE SET record_json=excluded.record_json", params![access.space_id.get(), payload]).map_err(sqlite_error)?;
+            write_sqlite_source_version(&transaction, &key, next_source_version(version, seq))?;
+            transaction.commit().map_err(sqlite_error)?;
+            Ok(true)
+        })
+    }
+
     fn record_dialog(&self, dialog: DialogRecord) -> BoxFuture<'static, StoreResult<()>> {
         let store = self.clone();
         Box::pin(async move { store.upsert_dialog(dialog) })
@@ -3574,6 +3953,81 @@ impl ClientStore for SqliteStore {
     fn deleted_chat_ids(&self) -> BoxFuture<'static, StoreResult<Vec<InlineId>>> {
         let store = self.clone();
         Box::pin(async move { store.deleted_chat_ids_sync() })
+    }
+
+    fn account_state(&self) -> BoxFuture<'static, StoreResult<AccountStateSnapshot>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let connection = store.connection.lock().expect("sqlite store poisoned");
+            let deleted_chat_ids = connection
+                .prepare("SELECT chat_id FROM chat_tombstones ORDER BY chat_id")
+                .map_err(sqlite_error)?
+                .query_map([], |row| row.get::<_, i64>(0).map(InlineId::new))
+                .map_err(sqlite_error)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(sqlite_error)?;
+            let users = connection.prepare("SELECT user_id, display_name, username, first_name, last_name, avatar_url, is_bot FROM users ORDER BY user_id").map_err(sqlite_error)?
+                .query_map([], sqlite_user_from_row).map_err(sqlite_error)?.collect::<Result<Vec<_>,_>>().map_err(sqlite_error)?;
+            Ok(AccountStateSnapshot {
+                deleted_chat_ids,
+                users,
+                spaces: sqlite_json_records(
+                    &connection,
+                    "SELECT record_json FROM spaces ORDER BY space_id",
+                )?,
+                space_members: sqlite_json_records(
+                    &connection,
+                    "SELECT record_json FROM space_members ORDER BY space_id, user_id",
+                )?,
+                space_access: sqlite_json_records(
+                    &connection,
+                    "SELECT record_json FROM space_access ORDER BY space_id",
+                )?,
+                space_access_complete: false,
+            })
+        })
+    }
+
+    fn record_self_user_id(&self, user_id: InlineId) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move {
+            store.connection.lock().expect("sqlite store poisoned").execute(
+                "INSERT INTO account_identity (id, user_id) VALUES (1, ?1) ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id", params![user_id.get()]
+            ).map_err(sqlite_error)?;
+            Ok(())
+        })
+    }
+
+    fn self_user_id(&self) -> BoxFuture<'static, StoreResult<Option<InlineId>>> {
+        let store = self.clone();
+        Box::pin(async move {
+            store
+                .connection
+                .lock()
+                .expect("sqlite store poisoned")
+                .query_row(
+                    "SELECT user_id FROM account_identity WHERE id=1",
+                    [],
+                    |row| row.get::<_, i64>(0).map(InlineId::new),
+                )
+                .optional()
+                .map_err(sqlite_error)
+        })
+    }
+
+    fn record_space_access(
+        &self,
+        access: SpaceAccessRecord,
+    ) -> BoxFuture<'static, StoreResult<()>> {
+        let store = self.clone();
+        Box::pin(async move {
+            let payload = serde_json::to_string(&access)
+                .map_err(|e| StoreError::internal(format!("encode space access: {e}")))?;
+            store.connection.lock().expect("sqlite store poisoned").execute(
+                "INSERT INTO space_access (space_id, record_json) VALUES (?1, ?2) ON CONFLICT(space_id) DO UPDATE SET record_json = excluded.record_json", params![access.space_id.get(), payload]
+            ).map_err(sqlite_error)?;
+            Ok(())
+        })
     }
 
     fn record_users(&self, users: Vec<UserRecord>) -> BoxFuture<'static, StoreResult<()>> {
@@ -4080,6 +4534,22 @@ fn migrate_sqlite(connection: &Connection) -> StoreResult<()> {
     ensure_sqlite_column(connection, "dialogs", "parent_chat_id", "INTEGER")?;
     ensure_sqlite_column(connection, "dialogs", "parent_message_id", "INTEGER")?;
     ensure_sqlite_column(connection, "dialogs", "agent_context_json", "TEXT")?;
+    ensure_sqlite_column(connection, "dialogs", "structure_json", "TEXT")?;
+    ensure_sqlite_column(connection, "dialogs", "description", "TEXT")?;
+    ensure_sqlite_column(connection, "dialogs", "created_by", "INTEGER")?;
+    connection
+        .execute_batch(
+            "CREATE TABLE IF NOT EXISTS account_generation (id INTEGER PRIMARY KEY CHECK(id=1), epoch INTEGER NOT NULL);
+        INSERT OR IGNORE INTO account_generation (id, epoch) VALUES (1, 0);
+        CREATE TABLE IF NOT EXISTS source_versions (key TEXT PRIMARY KEY, revision INTEGER NOT NULL, seq INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS account_identity (
+            id INTEGER PRIMARY KEY CHECK (id = 1), user_id INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS space_access (
+            space_id INTEGER PRIMARY KEY, record_json TEXT NOT NULL
+        );",
+        )
+        .map_err(sqlite_error)?;
     ensure_sqlite_column(
         connection,
         "dialogs",
@@ -4242,6 +4712,22 @@ fn upsert_sqlite_participant(
     Ok(())
 }
 
+fn sqlite_json_records<T: serde::de::DeserializeOwned>(
+    connection: &Connection,
+    sql: &str,
+) -> StoreResult<Vec<T>> {
+    let mut statement = connection.prepare(sql).map_err(sqlite_error)?;
+    let payloads = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(sqlite_error)?;
+    payloads
+        .map(|p| {
+            serde_json::from_str(&p.map_err(sqlite_error)?)
+                .map_err(|e| StoreError::internal(format!("decode account record: {e}")))
+        })
+        .collect()
+}
+
 fn sqlite_dialog_from_row(row: &Row<'_>) -> rusqlite::Result<DialogRecord> {
     let pinned_json = row.get::<_, String>(17)?;
     let pinned_message_ids = serde_json::from_str(&pinned_json).map_err(|error| {
@@ -4256,6 +4742,16 @@ fn sqlite_dialog_from_row(row: &Row<'_>) -> rusqlite::Result<DialogRecord> {
         })
         .transpose()?;
     Ok(DialogRecord {
+        structure: row
+            .get::<_, Option<String>>(21)?
+            .map(|json| {
+                serde_json::from_str(&json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(21, Type::Text, Box::new(error))
+                })
+            })
+            .transpose()?,
+        description: row.get(22)?,
+        created_by: row.get::<_, Option<i64>>(23)?.map(InlineId::new),
         chat_id: InlineId::new(row.get(0)?),
         peer_user_id: row.get::<_, Option<i64>>(1)?.map(InlineId::new),
         title: row.get(2)?,
@@ -4288,8 +4784,125 @@ fn sqlite_dialog_from_row(row: &Row<'_>) -> rusqlite::Result<DialogRecord> {
     })
 }
 
+fn validate_source_projection(
+    access: &SpaceAccessRecord,
+    projection: &SourceSpaceProjection,
+    self_user_id: Option<InlineId>,
+) -> StoreResult<()> {
+    let invalid_member = projection.self_member.as_ref().is_some_and(|member| {
+        member.space_id != access.space_id
+            || member.user_id.get() <= 0
+            || self_user_id.is_some_and(|id| id != member.user_id)
+            || access.status != crate::SpaceAccessStatus::Accessible
+    });
+    if invalid_member
+        || projection
+            .space
+            .as_ref()
+            .is_some_and(|space| space.space_id != access.space_id)
+    {
+        return Err(StoreError::new(
+            ClientErrorCategory::ProtocolMismatch,
+            "source projection does not match self access",
+        ));
+    }
+    Ok(())
+}
+
+fn upsert_sqlite_space(connection: &Connection, space: SpaceRecord) -> StoreResult<()> {
+    let payload = serde_json::to_string(&space)
+        .map_err(|error| StoreError::internal(format!("encode space: {error}")))?;
+    connection.execute("INSERT INTO spaces (space_id, record_json, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(space_id) DO UPDATE SET record_json=excluded.record_json, updated_at=excluded.updated_at", params![space.space_id.get(), payload, now_seconds()]).map_err(sqlite_error)?;
+    Ok(())
+}
+
+fn upsert_sqlite_space_member(
+    connection: &Connection,
+    member: SpaceMemberRecord,
+) -> StoreResult<()> {
+    let payload = serde_json::to_string(&member)
+        .map_err(|error| StoreError::internal(format!("encode space member: {error}")))?;
+    connection.execute("INSERT INTO space_members (space_id, user_id, record_json, updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(space_id, user_id) DO UPDATE SET record_json=excluded.record_json, updated_at=excluded.updated_at", params![member.space_id.get(), member.user_id.get(), payload, now_seconds()]).map_err(sqlite_error)?;
+    Ok(())
+}
+
+fn memory_source_version(state: &InMemoryStoreState, key: &str) -> SourceVersion {
+    SourceVersion {
+        epoch: state.source_epoch,
+        ..state.source_versions.get(key).copied().unwrap_or_default()
+    }
+}
+
+fn next_source_version(version: SourceVersion, seq: i64) -> SourceVersion {
+    SourceVersion {
+        revision: version.revision + 1,
+        seq: version.seq.max(seq),
+        ..version
+    }
+}
+
+fn accept_access_observation(
+    access: &SpaceAccessRecord,
+    seq: i64,
+    expected: SourceVersion,
+    current: SourceVersion,
+    removed: bool,
+    source_proof: bool,
+) -> bool {
+    if expected != current || (seq > 0 && seq < current.seq) {
+        return false;
+    }
+    // A denial carries no source sequence. Replayed Add/Join can never prove
+    // it obsolete, even if its unrelated user-bucket seq is numerically larger.
+    if removed && access.status != crate::SpaceAccessStatus::Removed {
+        return source_proof
+            && access.status == crate::SpaceAccessStatus::Accessible
+            && seq >= current.seq;
+    }
+    true
+}
+
+fn sqlite_source_version(connection: &Connection, key: &str) -> StoreResult<SourceVersion> {
+    let epoch = connection
+        .query_row(
+            "SELECT epoch FROM account_generation WHERE id=1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    let (revision, seq) = connection
+        .query_row(
+            "SELECT revision, seq FROM source_versions WHERE key=?1",
+            params![key],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .unwrap_or((0, 0));
+    Ok(SourceVersion {
+        epoch,
+        revision,
+        seq,
+    })
+}
+
+fn write_sqlite_source_version(
+    connection: &Connection,
+    key: &str,
+    version: SourceVersion,
+) -> StoreResult<()> {
+    connection.execute("INSERT INTO source_versions (key, revision, seq) VALUES (?1, ?2, ?3) ON CONFLICT(key) DO UPDATE SET revision=excluded.revision, seq=excluded.seq", params![key, version.revision, version.seq]).map_err(sqlite_error)?;
+    Ok(())
+}
+
 fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreResult<()> {
     let chat_id = dialog.chat_id;
+    let structure_json = dialog
+        .structure
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| StoreError::internal(format!("encode dialog structure: {error}")))?;
     let pinned_message_ids_json = serde_json::to_string(&dialog.pinned_message_ids)
         .map_err(|error| StoreError::internal(format!("encode pinned message IDs: {error}")))?;
     let agent_context_json = dialog
@@ -4305,10 +4918,10 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
                space_id, is_public, archived, pinned, open, chat_list_hidden,
                list_order, pinned_order, notification_mode, follow_mode,
                pinned_message_ids_json, parent_chat_id, parent_message_id,
-               agent_context_json, updated_at
+               agent_context_json, updated_at, structure_json, description, created_by
              ) VALUES (
                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-               ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21
+               ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24
              )
              ON CONFLICT(chat_id) DO UPDATE SET
                peer_user_id = excluded.peer_user_id,
@@ -4330,6 +4943,9 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
                parent_chat_id = excluded.parent_chat_id,
                parent_message_id = excluded.parent_message_id,
                agent_context_json = excluded.agent_context_json,
+               structure_json = excluded.structure_json,
+               description = excluded.description,
+               created_by = excluded.created_by,
                updated_at = excluded.updated_at",
             params![
                 dialog.chat_id.get(),
@@ -4355,6 +4971,9 @@ fn upsert_sqlite_dialog(connection: &Connection, dialog: DialogRecord) -> StoreR
                 dialog.parent_message_id.map(InlineId::get),
                 agent_context_json,
                 now_seconds(),
+                structure_json,
+                dialog.description,
+                dialog.created_by.map(InlineId::get),
             ],
         )
         .map_err(sqlite_error)?;
@@ -5152,6 +5771,9 @@ mod tests {
                 notification_mode: Some(DialogNotificationMode::Mentions),
                 follow_mode: Some(DialogFollowMode::Following),
                 pinned_message_ids: vec![InlineId::new(99), InlineId::new(98)],
+                structure: None,
+                description: None,
+                created_by: None,
             })
             .unwrap();
         store
@@ -5192,6 +5814,10 @@ mod tests {
         let dialogs = reopened.dialogs(DialogsRequest::default()).await.unwrap();
         assert_eq!(dialogs.dialogs.len(), 1);
         assert_eq!(dialogs.dialogs[0].chat_id, InlineId::new(7));
+        assert!(
+            dialogs.dialogs[0].structure.is_none(),
+            "legacy rows have no authority"
+        );
         assert_eq!(dialogs.dialogs[0].peer_user_id, Some(InlineId::new(2)));
         assert_eq!(dialogs.dialogs[0].title.as_deref(), Some("general"));
         assert_eq!(dialogs.dialogs[0].emoji.as_deref(), Some("🚀"));

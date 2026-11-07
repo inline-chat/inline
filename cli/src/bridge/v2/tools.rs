@@ -408,6 +408,7 @@ impl Tools {
                     .config
                     .bot
                     .edit_message(EditMessageRequest {
+                        entities: Vec::new(),
                         chat_id: InlineId::new(chat),
                         message_id: InlineId::new(message_id),
                         text,

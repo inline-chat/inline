@@ -2614,6 +2614,7 @@ mod tests {
 
         client
             .edit_message(EditMessageRequest {
+                entities: Vec::new(),
                 chat_id: InlineId::new(7),
                 message_id: InlineId::new(1),
                 text: "edited".to_owned(),
@@ -2667,6 +2668,7 @@ mod tests {
         let mutation = client
             .send_media(
                 UploadRequest {
+                    entities: Vec::new(),
                     peer: PeerRef::Chat {
                         chat_id: InlineId::new(7),
                     },

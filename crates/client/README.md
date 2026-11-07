@@ -83,14 +83,63 @@ local account state.
 Cold chat repair intentionally fetches the current chat snapshot and the latest
 50 messages, matching InlineKit's ownership boundary. Older history is paged by
 normal history APIs and host checkpoints; a cold user bucket does not walk every
-chat, download an account's complete message history, or fetch every space's
-membership. Space membership remains owned by its independently repairable
-space bucket.
+chat or download an account's complete message history. A user-bucket repair
+also revalidates cached spaces with `getSpace`, so a lost self-removal cannot
+resurrect workspace navigation. Normal space membership remains owned by its
+independently repairable space bucket.
+
+Live `dialogs()` discovery deduplicates source and cached space candidates and
+checks at most eight `getSpace` self memberships per call. Each RPC has a two
+second timeout and the RPC refresh has a five second budget, including cursor
+contention. Cached store reads and local directory processing are outside that
+network deadline.
+A process-local rotating cursor shared by backend clones prevents the first
+spaces from starving later candidates. Unattempted spaces remain pending; later
+live dialog scans continue and retry failures. A transient refresh failure
+records unknown access, while an explicit source denial records removed access
+and keeps independently accessible chats. Removal tombstones survive transient
+failures, cache upserts and restart. Cached `account_state()` never performs
+network requests, and `space_access_complete` remains false: cached users,
+spaces and memberships are not an authoritative directory or a permission
+guarantee. Legacy rows have no authoritative structural descriptor until a
+canonical source observation establishes one.
+
+Source chat sequences are persisted atomically with their projections, so older
+snapshots and queued sidecars cannot undo a newer move or detach after restart.
+GetSpace responses and failure fallbacks compare the pre-request access revision;
+account clear advances a durable generation and invalidates in-flight replies.
+Accepted access, self identity, space and self membership commit atomically;
+removal cleanup shares that transaction. Repairs check the generation captured
+before their RPCs, then hold a shared store lifecycle lease across final local
+writes and the cold cursor commit. Raw account clearing through any built-in
+store clone takes the write lease, so it cannot split that final section.
+No lifecycle lease spans a network request.
+A replayed member Add or Join cannot clear a removal tombstone. Only events
+from a proven matching space sync bucket advance the access space frontier;
+user-bucket and unsequenced removals invalidate access without comparing clocks.
+A fresh GetSpace membership proof can restore access at the same or a later
+space frontier if its pre-request revision still matches. Thus a real
+unsequenced eviction is honored immediately and a subsequent source request
+can reconcile it without waiting for an unrelated sequence increment. GetChats preserves cached pin
+IDs because its chat/dialog summaries do not contain a pin-ID snapshot.
+
+Custom stores used with `SdkBackend` must implement the source-version and atomic
+source-write and lifecycle-guard methods on `ClientStore`; their defaults return `Unsupported` rather
+than applying unguarded authority.
 
 Message sends expose their durable transaction state. Retriable or uncertain
 stored sends are reconciled by reissuing the same server-idempotent random ID;
 terminal failures are returned explicitly instead of masquerading as pending
 messages.
+
+Text sends, edits, and media captions accept default-empty `entities` in UTF-16
+coordinates. The client checks signed ranges, overflow, and scalar boundaries
+before authentication, transaction writes or uploads. Supported native styles,
+links and typed mention/group/thread/command payloads reach the RPC unchanged;
+unknown kinds and thread-title payloads that need a source space ID absent from
+the record return `Unsupported`. Explicit entities can accompany
+`parse_markdown`; the source remaps their raw-text ranges while parsing.
+Incoming metadata and unknown entity records remain readable and unchanged.
 
 Host-only protocol envelopes, HTTP/WebSocket routes, process flags, Matrix
 projection, and deployment behavior remain outside this crate. Production

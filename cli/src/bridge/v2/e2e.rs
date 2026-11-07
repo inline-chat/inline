@@ -920,6 +920,7 @@ async fn codex_round_trip_through_inline() {
     let requests_before = model.request_count();
     owner
         .edit_message(inline_client::EditMessageRequest {
+            entities: Vec::new(),
             chat_id: InlineId::new(chat_id),
             message_id: first,
             text: "Say the first answer, edited".to_owned(),
