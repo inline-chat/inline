@@ -622,6 +622,7 @@ public enum ComposeAgentSettingsItem {
   public static let usage = "account.usage"
   public static let usageWindow = "account.usage.window"
   public static let context = "session.context"
+  public static let compact = "session.compact"
   /// The select value meaning "the harness's own default".
   public static let defaultValue = "__inline_provider_default__"
 }
