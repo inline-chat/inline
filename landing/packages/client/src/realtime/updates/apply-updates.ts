@@ -756,6 +756,8 @@ const applyUpdate = (
     case "agentRuntime":
     case "agentSettings":
     case "agentSessionControl":
+    // Unread mention and reaction counts: the web client does not show them yet.
+    case "unreadActivity":
       deferUpdate(db, update)
       return "deferred"
 
