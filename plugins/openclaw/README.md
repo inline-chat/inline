@@ -467,11 +467,16 @@ channels:
 While OpenClaw works on a turn, Inline shows **Working** instead of Typing, with or
 without agent activity. Apps that don't support Working yet show Typing.
 
+By default the bot is quiet while it works: Inline shows Working, then the answer
+arrives as one message, with no progress message in the chat. Set
+`channels.inline.streaming: { mode: "progress" }` to post a progress card that
+lists what the agent is doing.
+
 Agent activity is experimental and **off by default**. Set
 `channels.inline.experimentalAgentActivity: true` (or the same field on an
 individual Inline account), then restart the gateway to opt in. Unset it or set
-it to `false` and restart to restore the existing temporary progress placeholder,
-which is deleted when the reply arrives.
+it to `false` and restart to restore the temporary progress placeholder (in
+progress mode), which is deleted when the reply arrives.
 
 In Inline on each device, enable **Settings → Experimental → Agents → Agent
 Activity** and restart the app. Expanded logs also need **Rich Content Renderer**
