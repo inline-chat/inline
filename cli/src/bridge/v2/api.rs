@@ -214,15 +214,17 @@ pub(crate) async fn list_grants(bot: &InlineClient) -> ApiResult<proto::ListAgen
 
 /// What one user may do with this bot, as the server resolves it: their grants,
 /// their spaces' and groups', and what the person a bot acts for may delegate.
+/// `bot_user_id` 0 is this bot; another bot is allowed when `user_id` is this bot.
 pub(crate) async fn get_agent_access(
     bot: &InlineClient,
+    bot_user_id: i64,
     user_id: i64,
 ) -> ApiResult<proto::GetAgentAccessResult> {
     call!(
         bot,
         GetAgentAccess,
         proto::GetAgentAccessInput {
-            bot_user_id: 0,
+            bot_user_id,
             user_id,
         }
     )

@@ -39,7 +39,7 @@ use super::doc::DocBuilder;
 use super::folders::{FolderSource, Folders};
 use super::intake::{
     MessageFacts, grants_by_user, grants_from_operations, group_message, has_scoped_grants,
-    mentions_user,
+    asked,
 };
 use super::ledger::{Begin, InputState, Ledger, input_id};
 use super::render::{ActionStyle, QUESTION_FORM_ID, Vocabulary};
@@ -75,6 +75,8 @@ const JOIN_CONTEXT_BYTES: usize = 24 * 1024;
 const JOIN_REPLY_CHAIN: usize = 5;
 /// Settled ledger records are kept this long for replay detection.
 const LEDGER_RETENTION_SECS: i64 = 14 * 24 * 3600;
+/// Parents followed to find a thread tree's root, the loop cap's scope.
+const LOOP_SCOPE_DEPTH: usize = 8;
 
 /// Identity and settings of one v2 agent.
 #[derive(Clone, Debug)]
@@ -123,6 +125,9 @@ struct Access {
     /// Server-resolved access per user, used once any grant names a space or a
     /// group. Expires so membership changes show up without a grant update.
     resolved: tokio::sync::Mutex<HashMap<i64, (Grants, std::time::Instant)>>,
+    /// Bumped on every grant update, so an answer fetched before a revocation
+    /// isn't cached after it.
+    generation: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Default)]
@@ -135,6 +140,8 @@ const RESOLVED_ACCESS_TTL: std::time::Duration = std::time::Duration::from_secs(
 
 impl Access {
     async fn invalidate(&self) {
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         *self.cache.lock().await = None;
         self.resolved.lock().await.clear();
     }
@@ -152,17 +159,18 @@ impl Access {
         {
             return Some(grants);
         }
-        match api::get_agent_access(&self.bot, user_id).await {
+        let generation = self.generation.load(std::sync::atomic::Ordering::SeqCst);
+        match api::get_agent_access(&self.bot, 0, user_id).await {
             Ok(result) => {
                 let grants = if result.is_owner {
                     Grants::OWNER
                 } else {
                     grants_from_operations(&result.operations)
                 };
-                self.resolved
-                    .lock()
-                    .await
-                    .insert(user_id, (grants, std::time::Instant::now()));
+                let mut resolved = self.resolved.lock().await;
+                if self.generation.load(std::sync::atomic::Ordering::SeqCst) == generation {
+                    resolved.insert(user_id, (grants, std::time::Instant::now()));
+                }
                 Some(grants)
             }
             Err(error) => {
@@ -293,8 +301,11 @@ pub(crate) struct Runtime {
     published: Option<Vec<BotCapability>>,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
-    /// Agent-only hops per thread (the chat the messages are in).
+    /// Agent-only hops per thread tree: reply threads and subthreads count
+    /// with the chat they hang off, so asking in a new thread doesn't reset it.
     loop_guards: LoopGuards,
+    /// Chat → the root of its thread tree, the loop cap's scope.
+    loop_roots: HashMap<i64, i64>,
     skills: Option<SkillPublisher>,
     /// Skills by thread folder, briefly: Amp takes seconds to list them.
     listed_skills: HashMap<PathBuf, (tokio::time::Instant, Vec<Skill>)>,
@@ -318,6 +329,7 @@ impl Runtime {
             names: names.clone(),
             cache: tokio::sync::Mutex::new(None),
             resolved: tokio::sync::Mutex::new(HashMap::new()),
+            generation: std::sync::atomic::AtomicU64::new(0),
         });
         // Each thread's settings, as a previous run left them.
         let mut thread_settings = HashMap::new();
@@ -381,6 +393,7 @@ impl Runtime {
             participation: HashMap::new(),
             default_output_mode: OutputMode::Detailed,
             loop_guards: LoopGuards::default(),
+            loop_roots: HashMap::new(),
             skills: None,
             listed_skills: HashMap::new(),
             agent_profiles: None,
@@ -1033,6 +1046,30 @@ impl Runtime {
 
     /// Agents went back and forth here without a person: this agent stops
     /// answering other agents and says so, with one tap to allow more.
+    /// The root of `chat_id`'s thread tree, cached.
+    async fn loop_scope(&mut self, chat_id: i64) -> i64 {
+        if let Some(root) = self.loop_roots.get(&chat_id) {
+            return *root;
+        }
+        let mut root = chat_id;
+        for _ in 0..LOOP_SCOPE_DEPTH {
+            let parent = self
+                .agent
+                .bot
+                .chat_state(InlineId::new(root))
+                .await
+                .ok()
+                .and_then(|state| state.dialog)
+                .and_then(|dialog| dialog.parent_chat_id);
+            match parent {
+                Some(parent) => root = parent.get(),
+                None => break,
+            }
+        }
+        self.loop_roots.insert(chat_id, root);
+        root
+    }
+
     async fn loop_cap_reached(&self, chat_id: i64, limit: u32) {
         let text = format!(
             "{} stopped answering other agents here after {limit} agent messages in a row. A message from a person resets this.",
@@ -1062,7 +1099,8 @@ impl Runtime {
         {
             return Some(NO_ACCESS.to_owned());
         }
-        self.loop_guards.extend(chat_id, DEFAULT_LOOP_CAP_HOPS);
+        let scope = self.loop_scope(chat_id).await;
+        self.loop_guards.extend(scope, DEFAULT_LOOP_CAP_HOPS);
         let text = format!(
             "{} answers other agents here again, for {DEFAULT_LOOP_CAP_HOPS} more agent messages.",
             self.config.agent_name
@@ -2135,7 +2173,7 @@ impl Runtime {
         let (reply_author, reply_mentions_author) = match message.reply_to_message_id {
             Some(id) => {
                 let (author, mentions) = self
-                    .replied_to(chat_id, id.get(), message.sender_id.get(), sender_is_bot)
+                    .replied_to(chat_id, id.get(), message.sender_id.get())
                     .await;
                 (Some(author), mentions)
             }
@@ -2176,9 +2214,8 @@ impl Runtime {
             .works
             .get(&chat_id)
             .map_or(WorkPhase::None, |work| *work.phase.borrow());
-        let loop_verdict = self
-            .loop_guards
-            .record(chat_id, group.author.kind.is_agent());
+        let scope = self.loop_scope(chat_id).await;
+        let loop_verdict = self.loop_guards.record(scope, group.author.kind.is_agent());
         if let LoopVerdict::CapReached {
             limit,
             notify_owners: true,
@@ -2276,27 +2313,17 @@ impl Runtime {
 
     /// Who wrote the replied-to message (0 when unknown), and whether it
     /// mentioned `sender`: a reply to this agent's message from someone it
-    /// mentioned is the answer it asked for (a hand-back). Read from Inline,
-    /// not remembered, so it holds across restarts. Only this agent's known
-    /// messages and agent senders' replies are looked up.
-    async fn replied_to(
-        &self,
-        chat_id: i64,
-        reply_id: i64,
-        sender: i64,
-        sender_is_bot: bool,
-    ) -> (i64, bool) {
+    /// asked is the answer it asked for (a hand-back). Read from Inline, not
+    /// remembered, so it holds across restarts.
+    async fn replied_to(&self, chat_id: i64, reply_id: i64, sender: i64) -> (i64, bool) {
         let mine = self.agent.sent.lock().expect("sent").contains(&reply_id);
         let known = if mine { self.config.bot_user_id } else { 0 };
-        if !mine && !sender_is_bot {
-            return (known, false);
-        }
         match api::get_messages(&self.agent.bot, chat_id, vec![reply_id]).await {
             Ok(messages) => messages
                 .iter()
                 .find(|replied| replied.id == reply_id)
                 .map_or((known, false), |replied| {
-                    (replied.from_id, mentions_user(replied, sender))
+                    (replied.from_id, asked(replied, sender))
                 }),
             Err(error) => {
                 log::debug!(target: "inline::bridge::v2", "chat={chat_id} reply lookup failed: {error}");

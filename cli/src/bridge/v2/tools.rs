@@ -791,30 +791,19 @@ impl Tools {
             return reach;
         };
         for user in users.iter().filter(|user| user.bot.unwrap_or(false)) {
-            // Contacts carry what this agent (and its owner) may do with the
-            // bot. Looked up by username, the most specific query.
-            let query = user
-                .username
-                .clone()
-                .or_else(|| api::display_name(user))
-                .unwrap_or_default();
-            let can_use = match api::get_contacts(
-                &self.config.bot,
-                Some(query),
-                proto::ContactKind::Bots,
-                50,
-            )
-            .await
-            {
-                Ok(result) => Some(
-                    result
-                        .contacts
-                        .iter()
-                        .find(|contact| contact.user_id == user.id)
-                        .is_some_and(contact_can_use),
-                ),
-                Err(_) => None,
-            };
+            // What this agent (acting for its owner) may do with that bot.
+            let can_use =
+                match api::get_agent_access(&self.config.bot, user.id, self.config.bot_user_id)
+                    .await
+                {
+                    Ok(access) => Some(
+                        access.is_owner
+                            || access
+                                .operations
+                                .contains(&(proto::AgentGrantOperation::Invoke as i32)),
+                    ),
+                    Err(_) => None,
+                };
             reach.insert(
                 user.id,
                 Reach {

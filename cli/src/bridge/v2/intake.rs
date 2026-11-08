@@ -115,14 +115,59 @@ pub(crate) fn group_message(message: &MessageRecord, facts: MessageFacts<'_>) ->
     }
 }
 
-/// Whether a fetched message has a mention entity of `user_id`.
-pub(crate) fn mentions_user(message: &proto::Message, user_id: i64) -> bool {
+/// How long a request stays open for its answer to come back as a hand-back.
+pub(crate) const HAND_BACK_WINDOW_SECS: i64 = 7 * 24 * 3600;
+
+/// Whether this agent's fetched message asked `user_id` something: it starts
+/// by mentioning them (the leading run of mentions, as addressing works) and
+/// is recent. A mention later in the text ("as @sam said") isn't a request.
+pub(crate) fn asked(message: &proto::Message, user_id: i64) -> bool {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs() as i64);
+    asked_at(message, user_id, now)
+}
+
+fn asked_at(message: &proto::Message, user_id: i64, now: i64) -> bool {
     use proto::message_entity::Entity;
-    message.entities.as_ref().is_some_and(|entities| {
-        entities.entities.iter().any(|entity| {
-            matches!(&entity.entity, Some(Entity::Mention(mention)) if mention.user_id == user_id)
+    if message.date <= 0 || now.saturating_sub(message.date) > HAND_BACK_WINDOW_SECS {
+        return false;
+    }
+    let text = message.message.as_deref().unwrap_or_default();
+    let units = text.encode_utf16().collect::<Vec<_>>();
+    let mut mentions = message
+        .entities
+        .iter()
+        .flat_map(|entities| entities.entities.iter())
+        .filter_map(|entity| match &entity.entity {
+            Some(Entity::Mention(mention)) => Some((entity.offset, entity.length, mention.user_id)),
+            _ => None,
         })
-    })
+        .collect::<Vec<_>>();
+    mentions.sort_by_key(|(offset, _, _)| *offset);
+    let mut cursor = 0_usize;
+    for (offset, length, mentioned) in mentions {
+        let (Ok(offset), Ok(length)) = (usize::try_from(offset), usize::try_from(length)) else {
+            break;
+        };
+        if offset < cursor {
+            continue;
+        }
+        let Some(end) = offset.checked_add(length).filter(|end| *end <= units.len()) else {
+            break;
+        };
+        let gap_ok = char::decode_utf16(units[cursor..offset].iter().copied()).all(|unit| {
+            unit.is_ok_and(|c| c.is_whitespace() || [',', ':', ';', '&'].contains(&c))
+        });
+        if length == 0 || !gap_ok {
+            break;
+        }
+        if mentioned == user_id {
+            return true;
+        }
+        cursor = end;
+    }
+    false
 }
 
 /// `/stop@claude_bot` → (`stop`, target). A suffix naming another bot gets a
@@ -317,29 +362,45 @@ mod tests {
         assert!(inline_agent_bridge::group::is_hand_back(&message, BOT));
     }
 
-    #[test]
-    fn fetched_mentions_are_read_from_entities() {
-        let replied = proto::Message {
+    fn mention_at(offset: i64, length: i64, user_id: i64) -> proto::MessageEntity {
+        proto::MessageEntity {
+            r#type: proto::message_entity::Type::Mention as i32,
+            offset,
+            length,
+            entity: Some(proto::message_entity::Entity::Mention(
+                proto::message_entity::MessageEntityMention {
+                    user_id,
+                    agent_id: None,
+                },
+            )),
+        }
+    }
+
+    fn sent(text: &str, date: i64, entities: Vec<proto::MessageEntity>) -> proto::Message {
+        proto::Message {
             id: 4,
             from_id: BOT,
-            entities: Some(proto::MessageEntities {
-                entities: vec![proto::MessageEntity {
-                    r#type: proto::message_entity::Type::Mention as i32,
-                    offset: 0,
-                    length: 6,
-                    entity: Some(proto::message_entity::Entity::Mention(
-                        proto::message_entity::MessageEntityMention {
-                            user_id: 41,
-                            agent_id: None,
-                        },
-                    )),
-                }],
-            }),
+            date,
+            message: Some(text.to_owned()),
+            entities: Some(proto::MessageEntities { entities }),
             ..Default::default()
-        };
-        assert!(mentions_user(&replied, 41));
-        assert!(!mentions_user(&replied, 42));
-        assert!(!mentions_user(&proto::Message::default(), 41));
+        }
+    }
+
+    #[test]
+    fn only_a_recent_message_that_starts_by_mentioning_them_asked_them() {
+        let now = 1_000_000_000;
+        let ask = sent("@Dena, @Sam: is it out?", now - 60, vec![mention_at(0, 5, 41), mention_at(7, 4, 42)]);
+        assert!(asked_at(&ask, 41, now));
+        assert!(asked_at(&ask, 42, now));
+        assert!(!asked_at(&ask, 43, now));
+        // A mention later in the text is a reference, not a request.
+        let reference = sent("as @Dena said, done", now - 60, vec![mention_at(3, 5, 41)]);
+        assert!(!asked_at(&reference, 41, now));
+        // Old requests don't keep a door open.
+        let old = sent("@Dena ok?", now - HAND_BACK_WINDOW_SECS - 1, vec![mention_at(0, 5, 41)]);
+        assert!(!asked_at(&old, 41, now));
+        assert!(!asked_at(&proto::Message::default(), 41, now));
     }
 
     #[test]
