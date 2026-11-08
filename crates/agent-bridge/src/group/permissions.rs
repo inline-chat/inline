@@ -8,9 +8,12 @@
 //! | approve | APPROVE (owner + delegates) |
 //! | answer a question | any grant |
 //! | participation mode, output-mode override, agent settings | CONFIGURE |
+//! | hand back an answer this agent asked for | nothing |
 //!
 //! The owner always qualifies. A mention or a passive message is never
-//! authority. Callers recheck with the sender's current grants after any wait:
+//! authority. Another agent acts for its owner: it holds its own grants plus
+//! what its owner may delegate, using and steering only
+//! ([`Grants::acting_for`]). Callers recheck with the sender's current grants after any wait:
 //! pending input, replay, queue admission and action claims.
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +30,9 @@ pub enum Operation {
     Approve,
     Answer,
     Configure,
+    /// The answer to a request this agent made: a reply to its message from
+    /// someone that message mentioned. The agent asked, so no grant is needed.
+    HandBack,
 }
 
 /// One sender's grants on this agent, from the server's `agent_grants` rows
@@ -84,6 +90,39 @@ impl Grants {
             Operation::Approve => self.approve,
             Operation::Answer => self.any(),
             Operation::Configure => self.configure,
+            Operation::HandBack => true,
+        }
+    }
+
+    /// Both sets of grants.
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            owner: self.owner || other.owner,
+            invoke: self.invoke || other.invoke,
+            steer: self.steer || other.steer,
+            approve: self.approve || other.approve,
+            configure: self.configure || other.configure,
+        }
+    }
+
+    /// What a person can pass on to a bot acting for them: using and steering
+    /// what they may use and steer. Never ownership, approval or settings.
+    pub const fn delegable(self) -> Self {
+        Self {
+            invoke: self.owner || self.invoke,
+            steer: self.owner || self.steer,
+            ..Self::NONE
+        }
+    }
+
+    /// An agent sender's grants on this agent: its own, plus what the person
+    /// it acts for may delegate. `owner` is that person's grants (the owner of
+    /// this agent has [`Grants::OWNER`], so same-owner agents may use and
+    /// steer each other); `None` when the sender's owner is unknown.
+    pub const fn acting_for(own: Self, owner: Option<Self>) -> Self {
+        match owner {
+            Some(owner) => own.union(owner.delegable()),
+            None => own,
         }
     }
 }
@@ -169,6 +208,53 @@ mod tests {
             allowed(configure),
             [Operation::Answer, Operation::Configure]
         );
+    }
+
+    #[test]
+    fn agents_inherit_only_use_and_steer_from_the_person_they_act_for() {
+        let use_and_steer = Grants::MIGRATED_ALLOWLIST;
+        // Same owner: this agent's owner may do everything, the other agent
+        // only uses and steers.
+        assert_eq!(
+            Grants::acting_for(Grants::NONE, Some(Grants::OWNER)),
+            use_and_steer
+        );
+        // The other agent's owner holds a grant: capped to use and steer.
+        let full = Grants {
+            invoke: true,
+            steer: true,
+            approve: true,
+            configure: true,
+            ..Grants::NONE
+        };
+        let inherited = Grants::acting_for(Grants::NONE, Some(full));
+        assert_eq!(inherited, use_and_steer);
+        assert!(!inherited.permits(Operation::Approve));
+        assert!(!inherited.permits(Operation::Configure));
+        let invoke_only = Grants {
+            invoke: true,
+            ..Grants::NONE
+        };
+        assert_eq!(
+            Grants::acting_for(Grants::NONE, Some(invoke_only)),
+            invoke_only
+        );
+        // The agent's own grants stay whole, approval included.
+        let approve = Grants {
+            approve: true,
+            ..Grants::NONE
+        };
+        let both = Grants::acting_for(approve, Some(invoke_only));
+        assert!(both.permits(Operation::Approve) && both.permits(Operation::StartWork));
+        assert!(!both.permits(Operation::Steer));
+        // An owner without grants, or an unknown owner, passes nothing on.
+        assert_eq!(Grants::acting_for(approve, Some(Grants::NONE)), approve);
+        assert_eq!(Grants::acting_for(Grants::NONE, None), Grants::NONE);
+    }
+
+    #[test]
+    fn a_hand_back_needs_no_grant() {
+        assert!(Grants::NONE.permits(Operation::HandBack));
     }
 
     #[test]

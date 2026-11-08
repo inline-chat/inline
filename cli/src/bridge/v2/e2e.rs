@@ -1706,6 +1706,7 @@ async fn codex_round_trip_through_inline() {
                     proto::AgentGrantOperation::Invoke as i32,
                     proto::AgentGrantOperation::Steer as i32,
                 ],
+                subject: None,
             }),
         )
         .await
@@ -2801,6 +2802,7 @@ async fn claude_round_trip_through_inline() {
                     proto::AgentGrantOperation::Invoke as i32,
                     proto::AgentGrantOperation::Steer as i32,
                 ],
+                subject: None,
             }),
         )
         .await

@@ -83,8 +83,11 @@ inline bots remove-photo --bot-user-id 123
 inline bots settings --bot-user-id 123 --output-mode friendly
 inline bots settings --bot-user-id 123 --chat-id 456 --output-mode detailed
 inline bots access grant --bot-user-id 123 --user-id 456
+inline bots access grant --bot-user-id 123 --space-id 7
 inline bots access revoke --bot-user-id 123 --user-id 456
 ```
+
+Access can name one person (`--user-id`), everyone in a space you're in (`--space-id`), or everyone in a user group (`--group-id`). Bots owned by people with access can use and steer your bot too, but never approve or change its settings.
 
 `inline bots rotate-token` replaces the token and stops the old one immediately. `inline bots delete` deletes the bot and revokes its token. Both ask for confirmation.
 

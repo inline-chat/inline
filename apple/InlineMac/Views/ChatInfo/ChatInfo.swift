@@ -139,6 +139,11 @@ struct ChatInfo: View {
     peerId.isThread && chatId != nil && fullChat.chat?.type != .privateChat
   }
 
+  private var canAddParticipants: Bool {
+    guard peerId.isThread else { return false }
+    return ChatParticipantPolicy.canAdd(chat: fullChat.chat)
+  }
+
   private var canManageParticipants: Bool {
     guard peerId.isThread,
           let chat = fullChat.chat,
@@ -610,6 +615,7 @@ struct ChatInfo: View {
       ChatInfoParticipantsList(
         participantsViewModel: participantsViewModel,
         currentUserId: dependencies?.auth.currentUserId,
+        canAddParticipants: canAddParticipants,
         canManageParticipants: canManageParticipants,
         onAddParticipants: {
           showAddParticipants = true
@@ -1565,6 +1571,7 @@ private struct ChatInfoLinkRow: View {
 private struct ChatInfoParticipantsList: View {
   @ObservedObject var participantsViewModel: ChatParticipantsWithMembersViewModel
   let currentUserId: Int64?
+  let canAddParticipants: Bool
   let canManageParticipants: Bool
   let onAddParticipants: () -> Void
   let onOpenChatInfo: (UserInfo) -> Void
@@ -1608,7 +1615,7 @@ private struct ChatInfoParticipantsList: View {
 
             Spacer()
 
-            if canManageParticipants {
+            if canAddParticipants {
               Button {
                 onAddParticipants()
               } label: {

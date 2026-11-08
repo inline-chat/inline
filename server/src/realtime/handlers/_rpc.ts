@@ -62,6 +62,7 @@ import { deleteMemberHandler } from "@in/server/realtime/handlers/space.deleteMe
 import { updateMemberAccessHandler } from "@in/server/realtime/handlers/space.updateMemberAccess"
 import { markAsUnread } from "./messages.markAsUnread"
 import { readMessages } from "./messages.readMessages"
+import { getUnreadActivity, readActivity } from "./messages.unreadActivity"
 import { getUpdatesState } from "@in/server/realtime/handlers/updates.getUpdatesState"
 import { getUpdates } from "@in/server/realtime/handlers/updates.getUpdates"
 import { forwardMessagesHandler } from "@in/server/realtime/handlers/messages.forwardMessages"
@@ -133,6 +134,7 @@ import {
   prepareConnectorOAuth,
 } from "@in/server/functions/connectors"
 import { searchUsersHandler } from "@in/server/realtime/handlers/users.search"
+import { getContactsHandler } from "@in/server/realtime/handlers/contacts.get"
 import { getUsersHandler } from "@in/server/realtime/handlers/users.get"
 import { inviteToInline } from "@in/server/functions/user.inviteToInline"
 import { resolveUrlPreviewHandler } from "@in/server/realtime/handlers/urlPreview.resolve"
@@ -217,6 +219,12 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       if (call.input.oneofKind !== "getAgentSessionStates") throw RealtimeRpcError.BadRequest()
       const result = await AgentHandlers.getAgentSessionStates(call.input.getAgentSessionStates, handlerContext.userId)
       return { oneofKind: "getAgentSessionStates", getAgentSessionStates: result }
+    }
+
+    case Method.GET_AGENT_ACCESS: {
+      if (call.input.oneofKind !== "getAgentAccess") throw RealtimeRpcError.BadRequest()
+      const result = await AgentHandlers.getAgentAccess(call.input.getAgentAccess, handlerContext.userId)
+      return { oneofKind: "getAgentAccess", getAgentAccess: result }
     }
 
     case Method.LIST_AGENT_GRANTS: {
@@ -922,6 +930,18 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       let result = await readMessages(call.input.readMessages, handlerContext)
       return { oneofKind: "readMessages", readMessages: result }
     }
+
+    case Method.GET_UNREAD_ACTIVITY: {
+      if (call.input.oneofKind !== "getUnreadActivity") throw RealtimeRpcError.BadRequest()
+      const result = await getUnreadActivity(call.input.getUnreadActivity, handlerContext)
+      return { oneofKind: "getUnreadActivity", getUnreadActivity: result }
+    }
+
+    case Method.READ_ACTIVITY: {
+      if (call.input.oneofKind !== "readActivity") throw RealtimeRpcError.BadRequest()
+      const result = await readActivity(call.input.readActivity, handlerContext)
+      return { oneofKind: "readActivity", readActivity: result }
+    }
     
     case Method.GET_UPDATES_STATE: {
       if (call.input.oneofKind !== "getUpdatesState") {
@@ -1046,6 +1066,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await disconnectConnector(call.input.disconnectConnector, handlerContext)
       return { oneofKind: "disconnectConnector", disconnectConnector: result }
+    }
+
+    case Method.GET_CONTACTS: {
+      if (call.input.oneofKind !== "getContacts") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await getContactsHandler(call.input.getContacts, handlerContext)
+      return { oneofKind: "getContacts", getContacts: result }
     }
 
     case Method.SEARCH_USERS: {

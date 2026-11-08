@@ -1,3 +1,4 @@
+import { removeActivityForMessages } from "@in/server/modules/activityItems"
 import {
   MessageActions,
   MessageEntities,
@@ -923,6 +924,9 @@ async function deleteMessages(
     await tx.update(chats).set({ lastMsgId: null }).where(eq(chats.id, chatId))
 
     const orphanedChatIds = await orphanReplyThreadsForDeletedMessages(tx, chatId, messageIdsNum)
+
+    // Tell mentioned and replied-to users before the cascade removes their activity rows.
+    await removeActivityForMessages(tx, { chat, messageIds: messageIdsNum })
 
     // Delete message
     let deleted = await tx

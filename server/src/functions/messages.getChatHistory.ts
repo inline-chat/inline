@@ -3,6 +3,7 @@ import type { InputPeer, Message, ChatAcknowledgements } from "@inline-chat/prot
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { applyUnreadActivityFlags } from "@in/server/modules/activityItems"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { getMessageThreadProjectionsMap } from "@in/server/modules/subthreads"
 
@@ -125,6 +126,7 @@ export const getChatHistory = async (input: Input, context: FunctionContext): Pr
         subthread: threadProjection?.subthread,
       })
     })
+    await applyUnreadActivityFlags({ userId: context.currentUserId, chatId: chat.id, messages: encodedMessages, tx })
 
     return {
       seq: BigInt(chat.updateSeq ?? 0),

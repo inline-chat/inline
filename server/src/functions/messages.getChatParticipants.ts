@@ -33,7 +33,7 @@ export async function getChatParticipants(
       throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)
     }
 
-    await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+    await AccessGuards.ensureChatReadAccess(chat, context.currentUserId)
 
     const participants = await db.query.chatParticipants.findMany({
       where: {

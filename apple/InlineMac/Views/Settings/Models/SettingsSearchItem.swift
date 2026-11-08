@@ -89,7 +89,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case inlineMathAttachments
   case richMessageMultiBlockSelection
   case richCopyMarkdownEditing
-  case selectMultipleMessages
   case quickForward
   case fileBrowser
   case nativeFileDownloads
@@ -141,7 +140,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .updates
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .richMessageMultiBlockSelection, .richCopyMarkdownEditing, .selectMultipleMessages, .quickForward,
+         .richMessageMultiBlockSelection, .richCopyMarkdownEditing, .quickForward,
          .fileBrowser, .nativeFileDownloads:
       .experimental
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground,
@@ -213,7 +212,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .inlineMathAttachments: "Inline Math Attachments"
     case .richMessageMultiBlockSelection: "Rich Message Multi-Block Selection"
     case .richCopyMarkdownEditing: "Rich Copy & Markdown Editing"
-    case .selectMultipleMessages: "Select Multiple Messages"
     case .quickForward: "Quick Forward"
     case .fileBrowser: "File Browser"
     case .nativeFileDownloads: "Native File Downloads"
@@ -272,7 +270,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
          .richMessageMultiBlockSelection:
       "Agents"
-    case .richCopyMarkdownEditing, .selectMultipleMessages, .quickForward: "Messages"
+    case .richCopyMarkdownEditing, .quickForward: "Messages"
     case .fileBrowser, .nativeFileDownloads: "Files"
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground: "Tools"
     case .appCache, .mediaCache, .dismissedPopovers: "Recovery"
@@ -345,7 +343,6 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .inlineMathAttachments: ["latex", "formula", "math"]
     case .richMessageMultiBlockSelection: ["select", "copy"]
     case .richCopyMarkdownEditing: ["copy", "paste", "markdown", "formatting"]
-    case .selectMultipleMessages: ["select", "forward", "delete"]
     case .quickForward: ["forward"]
     case .fileBrowser: ["files window", "browse"]
     case .nativeFileDownloads: ["download", "realtime"]

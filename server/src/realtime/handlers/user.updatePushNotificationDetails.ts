@@ -65,8 +65,8 @@ export const updatePushNotificationDetailsHandler = async (
           }
         : undefined,
       pushContentVersion: input.pushContentVersion !== undefined ? Number(input.pushContentVersion) : undefined,
-      // Only APNs sessions have a notification service extension.
-      supportsFilteredSyncPushes: pushNotificationProvider !== "expo_android" && input.supportsFilteredSyncPushes === true,
+      // `supportsFilteredSyncPushes` is ignored: Inline has no notification filtering entitlement,
+      // so read/delete sync always travels as a background push.
     },
     {
       currentSessionId: handlerContext.sessionId,

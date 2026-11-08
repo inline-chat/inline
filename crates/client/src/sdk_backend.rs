@@ -8718,6 +8718,7 @@ mod tests {
                             date: 101,
                             ..Default::default()
                         }],
+                        ..Default::default()
                     }),
                 ),
             )
@@ -9405,6 +9406,7 @@ mod tests {
                                 },
                             )),
                         }],
+                        ..Default::default()
                     }),
                 ),
             )
@@ -9843,6 +9845,7 @@ mod tests {
                     }),
                 })),
             }],
+            ..Default::default()
         };
 
         let applied = apply_send_message_updates(&request, identity, InlineId::new(7), result);

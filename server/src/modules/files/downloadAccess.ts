@@ -30,7 +30,7 @@ export async function resolveDownloadFile(
   const chat = accessScope?.chat
   if (!chat || (chat.spaceId !== null && accessScope.spaceDeleted !== null)) return undefined
   try {
-    await AccessGuards.ensureChatAccess(chat, userId)
+    await AccessGuards.ensureChatReadAccess(chat, userId)
   } catch (error) {
     // Preserve operational errors, but make missing/inaccessible files alike.
     if (error instanceof RealtimeRpcError) return undefined

@@ -40,7 +40,7 @@ export const sessions = pgTable(
     pushContentKeyId: text("push_content_key_id"),
     pushContentKeyAlgorithm: text("push_content_key_algorithm"),
     pushContentVersion: integer("push_content_version"),
-    // Notification extension can silently consume read/delete sync pushes.
+    // @deprecated Unused: no notification filtering entitlement. Drop in a later migration.
     pushFilteredSyncPushes: boolean("push_filtered_sync_pushes"),
 
     // device id

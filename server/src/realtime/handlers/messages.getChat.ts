@@ -26,5 +26,7 @@ export const getChat = async (input: GetChatInput, handlerContext: HandlerContex
     anchorMessage: result.anchorMessage,
     user: result.user,
     messages: result.messages,
+    readOnlyViaBotUserId:
+      result.readOnlyViaBotUserId === undefined ? undefined : BigInt(result.readOnlyViaBotUserId),
   }
 }

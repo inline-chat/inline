@@ -508,7 +508,7 @@ const resolveBucket = async (
       }
 
       const chat = await getChatOrThrow(inputPeer, context)
-      await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+      await AccessGuards.ensureChatReadAccess(chat, context.currentUserId)
 
       // Always replay a canonical output peer. A DM bucket may be addressed by
       // chat ID, but message/update identity on clients is the other user's peer.

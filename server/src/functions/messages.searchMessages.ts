@@ -6,6 +6,8 @@ import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { getMessageThreadProjectionsMap } from "@in/server/modules/subthreads"
 import { MessageSearchModule } from "@in/server/modules/search/messagesSearch"
+import { dialogs } from "@in/server/db/schema"
+import { and, eq } from "drizzle-orm"
 
 import { historyLimit, validateHistoryId, withHistorySnapshot } from "@in/server/modules/message/historySnapshot"
 
@@ -15,11 +17,15 @@ type Input = {
   limit?: number
   offsetId?: bigint
   filter?: SearchMessagesFilter
+  /** Count every match instead of returning a page; requires queries. */
+  countOnly?: boolean
 }
 
 type Output = {
   messages: Message[]
   seq: bigint
+  /** Set for count-only requests. */
+  totalCount?: number
 }
 
 const log = new Log("functions.searchMessages")
@@ -33,6 +39,29 @@ export const searchMessages = async (input: Input, context: FunctionContext): Pr
   const hasFilter = mediaFilter !== undefined
   if (!hasQueries && !hasFilter) {
     throw RealtimeRpcError.BadRequest()
+  }
+  if (input.countOnly && !hasQueries) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  if (input.countOnly) {
+    return withHistorySnapshot(input.peerId, context.currentUserId, async (tx, chat) => {
+      // History the viewer cleared for themselves is hidden in the app, so it is not counted.
+      const [dialog] = await tx
+        .select({ collapsedMaxId: dialogs.collapsedMaxId })
+        .from(dialogs)
+        .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, context.currentUserId)))
+        .limit(1)
+      const totalCount = await MessageSearchModule.countMessagesInChat({
+        chatId: chat.id,
+        keywordGroups,
+        afterMessageId: dialog?.collapsedMaxId ?? undefined,
+        mediaFilter,
+        tx,
+      })
+      log.debug("searchMessages count", { chatId: chat.id, totalCount })
+      return { messages: [], seq: BigInt(chat.updateSeq ?? 0), totalCount }
+    })
   }
 
   const maxResults = historyLimit(input.limit, DEFAULT_LIMIT)

@@ -5,6 +5,7 @@ import { db } from "../../db"
 import * as schema from "../../db/schema"
 import { encrypt } from "../../modules/encryption/encryption"
 import { SearchMessagesFilter } from "@inline-chat/protocol/core"
+import { and, eq } from "drizzle-orm"
 
 const makeFunctionContext = (userId: number): any => ({
   currentUserId: userId,
@@ -498,5 +499,84 @@ describe("searchMessages", () => {
     expect(result.messages.map((message) => Number(message.id))).toEqual(expectedIds)
     expect(durationMs).toBeLessThan(5000)
     expect(memoryDelta).toBeLessThan(250 * 1024 * 1024)
+  })
+  test("count_only returns the exact total and no messages", async () => {
+    const userA = (await testUtils.createUser("search-count-a@example.com"))!
+    const userB = (await testUtils.createUser("search-count-b@example.com"))!
+    const { chat } = await testUtils.createPrivateChatWithOptionalDialog({
+      userA,
+      userB,
+      createDialogForUserA: true,
+      createDialogForUserB: true,
+    })
+
+    for (let messageId = 1; messageId <= 7; messageId++) {
+      await testUtils.createTestMessage({
+        messageId,
+        chatId: chat.id,
+        fromId: userA.id,
+        text: messageId % 2 === 1 ? `deploy ${messageId}` : `other ${messageId}`,
+      })
+    }
+
+    const result = await searchMessages(
+      {
+        peerId: { type: { oneofKind: "user", user: { userId: BigInt(userB.id) } } },
+        queries: ["deploy"],
+        limit: 1,
+        countOnly: true,
+      },
+      makeFunctionContext(userA.id),
+    )
+
+    expect(result.messages).toEqual([])
+    expect(result.totalCount).toBe(4)
+  })
+
+  test("count_only skips history the viewer cleared", async () => {
+    const userA = (await testUtils.createUser("search-count-c@example.com"))!
+    const userB = (await testUtils.createUser("search-count-d@example.com"))!
+    const { chat } = await testUtils.createPrivateChatWithOptionalDialog({
+      userA,
+      userB,
+      createDialogForUserA: true,
+      createDialogForUserB: true,
+    })
+
+    for (let messageId = 1; messageId <= 6; messageId++) {
+      await testUtils.createTestMessage({ messageId, chatId: chat.id, fromId: userA.id, text: `deploy ${messageId}` })
+    }
+    await db
+      .update(schema.dialogs)
+      .set({ collapsedMaxId: 4 })
+      .where(and(eq(schema.dialogs.chatId, chat.id), eq(schema.dialogs.userId, userA.id)))
+
+    const peerId = { type: { oneofKind: "user" as const, user: { userId: BigInt(userB.id) } } }
+    const forA = await searchMessages({ peerId, queries: ["deploy"], countOnly: true }, makeFunctionContext(userA.id))
+    expect(forA.totalCount).toBe(2)
+
+    const forB = await searchMessages(
+      { peerId: { type: { oneofKind: "user" as const, user: { userId: BigInt(userA.id) } } }, queries: ["deploy"], countOnly: true },
+      makeFunctionContext(userB.id),
+    )
+    expect(forB.totalCount).toBe(6)
+  })
+
+  test("count_only requires a query", async () => {
+    const userA = (await testUtils.createUser("search-count-e@example.com"))!
+    const userB = (await testUtils.createUser("search-count-f@example.com"))!
+    await testUtils.createPrivateChat(userA, userB)
+
+    await expect(
+      searchMessages(
+        {
+          peerId: { type: { oneofKind: "user", user: { userId: BigInt(userB.id) } } },
+          queries: [],
+          filter: SearchMessagesFilter.FILTER_DOCUMENTS,
+          countOnly: true,
+        },
+        makeFunctionContext(userA.id),
+      ),
+    ).rejects.toThrow()
   })
 })

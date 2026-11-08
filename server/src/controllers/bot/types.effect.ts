@@ -2,6 +2,7 @@ import type {
   BotAgent as NeutralBotAgent,
   BotAttachment as NeutralBotAttachment,
   BotChat as NeutralBotChat,
+  BotContact as NeutralBotContact,
   BotCommand as NeutralBotCommand,
   BotSkill as NeutralBotSkill,
   BotFile as NeutralBotFile,
@@ -894,6 +895,10 @@ export const SendMessageInput = Schema.Struct({
   source_chat_id: OptionalChatId.annotateKey({
     description: "Source chat for an explicit same-bot cross-thread Agent handoff.",
   }),
+  add_mentioned_users: Schema.optionalKey(Schema.Boolean).annotateKey({
+    description:
+      "Add mentioned users who can't see this private thread yet, when the bot may add them. The result then reports added_user_ids and unadded_user_ids.",
+  }),
 }).annotate({
   identifier: "SendMessageInput",
   description:
@@ -1182,6 +1187,25 @@ export const GetChatParticipantCountInput = Schema.Struct({
   chat_id: ChatIdFromString,
 }).annotate({ identifier: "GetChatParticipantCountInput" })
 
+export const BotContactKind = Schema.Literals(["all", "people", "bots"]).annotate({ identifier: "BotContactKind" })
+
+export const GetContactsInput = Schema.Struct({
+  query: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))).annotateKey({
+    description: "Matches names and usernames. A leading @ is ignored; at least 2 characters also searches shared spaces.",
+  }),
+  kind: Schema.optionalKey(BotContactKind).annotateKey({
+    description: "Limit results to people or bots. Defaults to all.",
+  }),
+  limit: Schema.optionalKey(
+    WireSafeIntegerFromString.check(Schema.isBetween({ minimum: 1, maximum: 50 })),
+  ).annotateKey({
+    description: "Maximum number of contacts to return, from 1 to 50. Defaults to 20.",
+  }),
+}).annotate({
+  identifier: "GetContactsInput",
+  description: "Filters the people and bots the authenticated bot, or the person it acts for, works with.",
+})
+
 export const ThreadParticipantMutationInput = Schema.Struct({
   chat_id: ChatId,
   user_id: UserId,
@@ -1220,6 +1244,42 @@ export const BotChatParticipant = Schema.Struct({
   user: BotUser,
   member: Schema.optionalKey(BotSpaceMember),
 }).annotate({ identifier: "BotChatParticipant" })
+
+export const BotContactRelation = Schema.Literals([
+  "shared_chat",
+  "shared_space",
+  "managed",
+  "owner",
+  "can_use",
+  "uses_your_bot",
+]).annotate({
+  identifier: "BotContactRelation",
+  description:
+    "shared_chat: a DM or thread together. shared_space: a space together. managed: a bot the owner manages. owner: the person this bot acts for. can_use: a bot whose access list includes the bot or its owner. uses_your_bot: someone who may use a bot the owner manages.",
+})
+
+export const BotAgentOperation = Schema.Literals(["invoke", "steer", "approve", "configure"]).annotate({
+  identifier: "BotAgentOperation",
+})
+
+export const BotContact = Schema.Struct({
+  user: BotUser,
+  relations: Schema.mutable(Schema.Array(BotContactRelation)).annotateKey({
+    description: "Why this user is a contact.",
+  }),
+  via_owner: Schema.Boolean.annotateKey({
+    description: "True when every relation comes through the bot's owner rather than the bot itself.",
+  }),
+  last_interaction_date: Schema.optionalKey(WireNonNegativeInteger).annotateKey({
+    description: "Unix time in seconds of the latest shared-chat activity, when known.",
+  }),
+  bot_operations: Schema.optionalKey(Schema.mutable(Schema.Array(BotAgentOperation))).annotateKey({
+    description: "Bot contacts only: what the authenticated bot may do with this bot.",
+  }),
+  manages_bot: Schema.optionalKey(Schema.Boolean).annotateKey({
+    description: "Bot contacts only: true when this bot is managed by the authenticated bot's owner.",
+  }),
+}).annotate({ identifier: "BotContact" })
 
 export const BotUploadFilePayload = Schema.Struct({
   type: Schema.Literals(["photo", "video", "document", "voice"]),
@@ -1317,6 +1377,25 @@ export const BotMessageResult = Schema.Struct({
 export const BotMessageRuntimeResult = Schema.Struct({
   message: BotMessageCompatibility,
 })
+const MentionAddResultFields = {
+  added_user_ids: Schema.optionalKey(Schema.mutable(Schema.Array(UserId))).annotateKey({
+    description: "With add_mentioned_users: mentioned users added to the thread.",
+  }),
+  unadded_user_ids: Schema.optionalKey(Schema.mutable(Schema.Array(UserId))).annotateKey({
+    description: "With add_mentioned_users: mentioned users who can't see the chat and couldn't be added.",
+  }),
+} as const
+export const BotSendMessageResult = Schema.Struct({
+  ...BotMessageResult.fields,
+  ...MentionAddResultFields,
+}).annotate({
+  identifier: "BotSendMessageResult",
+  description: "The sent message, plus mention adds when add_mentioned_users was set.",
+})
+export const BotSendMessageRuntimeResult = Schema.Struct({
+  ...BotMessageRuntimeResult.fields,
+  ...MentionAddResultFields,
+})
 export const BotForwardMessagesResult = Schema.Struct({
   message_ids: Schema.mutable(Schema.Array(MessageId)),
 }).annotate({
@@ -1344,6 +1423,12 @@ export const BotGetMySkillsResult = Schema.Struct({
 
 export const BotGetChatParticipantResult = Schema.Struct({ participant: BotChatParticipant }).annotate({ identifier: "BotGetChatParticipantResult" })
 export const BotGetChatParticipantCountResult = Schema.Struct({ count: WireNonNegativeInteger }).annotate({ identifier: "BotGetChatParticipantCountResult" })
+export const BotGetContactsResult = Schema.Struct({
+  contacts: Schema.mutable(Schema.Array(BotContact)),
+}).annotate({
+  identifier: "BotGetContactsResult",
+  description: "Contacts ordered with the owner and managed bots first, then by recent interaction.",
+})
 
 const exampleBotUserId = UserId.make(284_901)
 const exampleMemberId = UserId.make(391_204)
@@ -1479,7 +1564,7 @@ export const BotMessageSuccess = botApiSuccess(
 ).annotate({
   identifier: "BotMessageSuccess",
   description:
-    "Successful sendMessage, editMessageText, or editMessageActions response.",
+    "Successful editMessageText, editMessageActions, or forwardMessage response.",
   examples: [
     {
       ok: true,
@@ -1492,6 +1577,19 @@ export const BotMessageSuccess = botApiSuccess(
 export const BotMessageRuntimeSuccess = botApiSuccess(
   BotMessageRuntimeResult,
 )
+export const BotSendMessageSuccess = botApiSuccess(BotSendMessageResult).annotate({
+  identifier: "BotSendMessageSuccess",
+  description: "Successful sendMessage response.",
+  examples: [
+    {
+      ok: true,
+      result: {
+        message: exampleMessage,
+      },
+    },
+  ],
+})
+export const BotSendMessageRuntimeSuccess = botApiSuccess(BotSendMessageRuntimeResult)
 export const BotGetChatHistoryRuntimeSuccess = botApiSuccess(
   BotGetChatHistoryRuntimeResult,
 )
@@ -1552,6 +1650,7 @@ export const BotGetMySkillsSuccess = botApiSuccess(
 })
 export const BotGetChatParticipantSuccess = botApiSuccess(BotGetChatParticipantResult).annotate({ identifier: "BotGetChatParticipantSuccess" })
 export const BotGetChatParticipantCountSuccess = botApiSuccess(BotGetChatParticipantCountResult).annotate({ identifier: "BotGetChatParticipantCountSuccess" })
+export const BotGetContactsSuccess = botApiSuccess(BotGetContactsResult).annotate({ identifier: "BotGetContactsSuccess" })
 export const BotEmptySuccess = botApiSuccess(
   BotEmptyResult,
 ).annotate({
@@ -1738,4 +1837,7 @@ type _BotMessageReferenceMatchesNeutral = Assert<
 >
 type _BotMessageMatchesNeutral = Assert<
   Extends<typeof BotMessage.Type, NeutralBotMessage>
+>
+type _BotContactMatchesNeutral = Assert<
+  Extends<typeof BotContact.Type, NeutralBotContact>
 >

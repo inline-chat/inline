@@ -1,4 +1,4 @@
-import { chats, type DbChat } from "@in/server/db/schema"
+import { chatParticipants, chats, users, type DbChat } from "@in/server/db/schema"
 import { db } from "@in/server/db"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { hasThreadAccessGrant } from "@in/server/modules/authorization/threadAccess"
@@ -6,12 +6,13 @@ import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuards
 import { resolveChatPermissions } from "@in/server/modules/authorization/chatPermissions"
 import type { Transaction } from "@in/server/db/types"
 import { getCurrentSpaceMembership } from "@in/server/modules/authorization/spaceMembershipLifecycle"
-import { eq } from "drizzle-orm"
+import { and, eq, inArray, isNull, or } from "drizzle-orm"
 
 type AccessQuery = Pick<typeof db, "select"> | Pick<Transaction, "select">
 
 export const AccessGuards = {
   ensureChatAccess,
+  ensureChatReadAccess,
   hasChatAccess,
   ensureChatInfoEditAccess,
   ensureSpaceMember,
@@ -62,6 +63,64 @@ async function hasChatAccess(chat: DbChat, userId: number, query: AccessQuery = 
     if (error instanceof RealtimeRpcError) return false
     throw error
   }
+}
+
+const MAX_CHAT_DEPTH = 8
+
+/**
+ * Read-only access for opening a chat: the person's own access, or else the
+ * access of a bot they manage that is directly in this chat or a chat above it
+ * (a participant, or the DM peer). The bot runs on its owner's machine, which
+ * already sees what the bot sees. Space-wide public access through the bot
+ * doesn't count, and neither do the bot's DMs themselves (threads under them
+ * do). Use only where a person opens and reads; every write keeps
+ * `ensureChatAccess`, so owners read and approve but don't post or manage.
+ * Returns the bot when access came through it.
+ */
+async function ensureChatReadAccess(chat: DbChat, userId: number, query: AccessQuery = db): Promise<number | undefined> {
+  try {
+    await ensureChatAccess(chat, userId, query)
+    return undefined
+  } catch (error) {
+    // DMs are addressed by the other person, so a third party can't open one.
+    if (!(error instanceof RealtimeRpcError) || chat.type === "private") throw error
+    for (const botUserId of await managedBotsDirectlyIn(chat, userId, query)) {
+      if (await hasChatAccess(chat, botUserId, query)) return botUserId
+    }
+    throw error
+  }
+}
+
+/** Bots `userId` manages that are a participant or the DM peer of `chat` or an ancestor. */
+async function managedBotsDirectlyIn(chat: DbChat, userId: number, query: AccessQuery): Promise<number[]> {
+  const managed = await query
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.botCreatorId, userId), eq(users.bot, true), or(isNull(users.deleted), eq(users.deleted, false))))
+  if (managed.length === 0) return []
+  const managedIds = new Set(managed.map((row) => row.id))
+
+  const found = new Set<number>()
+  const threadIds: number[] = []
+  let current: DbChat | undefined = chat
+  for (let depth = 0; current && depth < MAX_CHAT_DEPTH; depth++) {
+    if (current.type === "private") {
+      for (const peer of [current.minUserId, current.maxUserId]) {
+        if (peer != null && managedIds.has(peer)) found.add(peer)
+      }
+    } else {
+      threadIds.push(current.id)
+    }
+    current = current.parentChatId == null ? undefined : await getChatByIdFrom(current.parentChatId, query)
+  }
+  if (threadIds.length > 0) {
+    const rows = await query
+      .select({ userId: chatParticipants.userId })
+      .from(chatParticipants)
+      .where(and(inArray(chatParticipants.chatId, threadIds), inArray(chatParticipants.userId, [...managedIds])))
+    for (const row of rows) found.add(row.userId)
+  }
+  return [...found]
 }
 
 async function ensureChatInfoEditAccess(chat: DbChat, userId: number, query?: Pick<Transaction, "select">) {

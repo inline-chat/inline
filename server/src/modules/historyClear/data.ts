@@ -1,3 +1,4 @@
+import { removeActivityForChatHistory } from "@in/server/modules/activityItems"
 import { chatSubtreeIds, syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import { chatParticipants, chats, dialogs, messages, translations } from "@in/server/db/schema"
 import type { DbChat } from "@in/server/db/schema"
@@ -253,6 +254,8 @@ async function deleteMessagesForChat(
   const predicate = beforeDate
     ? and(eq(messages.chatId, chatId), lt(messages.date, beforeDate))
     : eq(messages.chatId, chatId)
+
+  await removeActivityForChatHistory(tx, { chatId, beforeDate })
 
   const deleted = await tx
     .delete(messages)

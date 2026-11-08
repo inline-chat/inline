@@ -251,6 +251,13 @@ class ChatViewAppKit: NSViewController {
     guard !isDisposed else { return }
     clearCurrentViews()
 
+    if case .error = state {
+      toolbarState?.dismissPresentation()
+      toolbarState?.isContentUnavailable = true
+    } else {
+      toolbarState?.isContentUnavailable = false
+    }
+
     switch state {
       case .initial:
         break // Handled in transitionFromInitialState
@@ -285,6 +292,7 @@ class ChatViewAppKit: NSViewController {
 
   private func showError(error _: Error) {
     let errorView = ChatLoadErrorView(
+      peer: peerId,
       retryAction: { [weak self] in
         self?.state = .loading
         self?.fetchChat()
@@ -292,14 +300,17 @@ class ChatViewAppKit: NSViewController {
     )
 
     let hostingController = NSHostingController(rootView: errorView)
+    hostingController.sizingOptions = []
 
-    // Add as child view controller
+    // Fill the content area so the empty state centers like other native ones.
     addChild(hostingController)
     view.addSubview(hostingController.view)
     hostingController.view.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
-      hostingController.view.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-      hostingController.view.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+      hostingController.view.topAnchor.constraint(equalTo: view.topAnchor),
+      hostingController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      hostingController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
 
     errorVC = hostingController
@@ -376,6 +387,7 @@ class ChatViewAppKit: NSViewController {
         showUnreadAfter: unreadBoundaryAtOpen(),
         initialState: preparedPayload?.messagesInitialState,
         initialTargetMessageId: preparedPayload?.targetMessageId,
+        unreadFetchBoundary: preparedPayload?.unreadFetchBoundary,
         collapsedMaxId: dialog?.collapsedMaxId,
         initialPinnedMessage: preparedPayload?.pinnedMessage,
         surfaceStyle: appearance.surfaceStyle,
@@ -445,13 +457,10 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func unreadBoundaryAtOpen() -> Int64? {
+    // The preloader chose the window from this same dialog snapshot.
     let openDialog = preparedPayload?.chatItem?.dialog ?? dialog
     guard let openDialog else { return nil }
-
-    let hasUnread = (openDialog.unreadCount ?? 0) > 0
-    guard hasUnread else { return nil }
-
-    return openDialog.readInboxMaxId
+    return ChatUnreadOpening.boundary(unreadCount: openDialog.unreadCount, readInboxMaxId: openDialog.readInboxMaxId)
   }
 
   private func fetchChat() {
@@ -547,6 +556,7 @@ class ChatViewAppKit: NSViewController {
   func dispose() {
     guard !isDisposed else { return }
     isDisposed = true
+    toolbarState?.isContentUnavailable = false
     fetchChatTask?.cancel()
     fetchChatTask = nil
     chatItemCancellable?.cancel()

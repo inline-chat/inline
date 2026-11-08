@@ -1,4 +1,5 @@
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
+import { ensureBotReachesParticipants } from "@in/server/modules/contacts/contacts"
 import { chatTitleFields } from "@in/server/modules/encryption/chatTitleStorage"
 import { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
@@ -98,6 +99,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     directParticipantUserIds.push(context.currentUserId)
   }
   await ensureUsersExist(directParticipantUserIds)
+  await ensureBotReachesParticipants(context.currentUserId, directParticipantUserIds, "create_subthread")
 
   const agentContext = input.agentContext
     ? await validateAgentThreadContext(input.agentContext, {

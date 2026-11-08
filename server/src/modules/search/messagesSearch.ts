@@ -8,9 +8,11 @@ import { decryptBinary } from "@in/server/modules/encryption/encryption"
 import { documents } from "@in/server/db/schema/media"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { decrypt } from "@in/server/modules/encryption/encryption"
-import { and, desc, eq, lt, sql } from "drizzle-orm"
+import { and, desc, eq, gt, lt, sql } from "drizzle-orm"
 
 const DEFAULT_BATCH_SIZE = 1000
+/** Counting reads every row anyway, so larger batches mean fewer round trips. */
+const COUNT_BATCH_SIZE = 5000
 
 type SearchRow = {
   messageId: number
@@ -34,12 +36,27 @@ type SearchMessagesInput = {
   maxResults: number
   batchSize?: number
   beforeMessageId?: number
+  /** Only messages with a larger ID: the viewer's cleared history ends at this ID. */
+  afterMessageId?: number
   mediaFilter?: MessageMediaFilter
   tx?: Transaction
 }
 
 export const MessageSearchModule = {
   searchMessagesInChat,
+  countMessagesInChat,
+}
+
+type CountMessagesInput = Omit<SearchMessagesInput, "maxResults" | "beforeMessageId">
+
+/** Counts every message in the chat that matches, scanning the whole history once. */
+async function countMessagesInChat(input: CountMessagesInput): Promise<number> {
+  const matched = await searchMessagesInChat({
+    ...input,
+    maxResults: Number.MAX_SAFE_INTEGER,
+    batchSize: input.batchSize ?? COUNT_BATCH_SIZE,
+  })
+  return matched.length
 }
 
 export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents" | "links" | "voice_memos"
@@ -61,6 +78,7 @@ async function searchMessagesInChat(input: SearchMessagesInput): Promise<bigint[
       input.mediaFilter,
       input.tx,
       input.keywordGroups.length > 0,
+      input.afterMessageId,
     )
 
     if (batch.length === 0) {
@@ -120,10 +138,13 @@ async function fetchSearchBatch(
   mediaFilter: MessageMediaFilter | undefined,
   tx?: Transaction,
   needsText = true,
+  afterMessageId?: number,
 ): Promise<SearchRow[]> {
-  const baseWhereClause = beforeMessageId
-    ? and(eq(messages.chatId, chatId), lt(messages.messageId, beforeMessageId))
-    : eq(messages.chatId, chatId)
+  const baseWhereClause = and(
+    eq(messages.chatId, chatId),
+    beforeMessageId ? lt(messages.messageId, beforeMessageId) : undefined,
+    afterMessageId ? gt(messages.messageId, afterMessageId) : undefined,
+  )
   const mediaClause = buildMediaFilterClause(mediaFilter)
   const whereClause = mediaClause ? and(baseWhereClause, mediaClause) : baseWhereClause
 

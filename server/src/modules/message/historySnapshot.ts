@@ -76,7 +76,7 @@ export async function withHistorySnapshot<T>(
   return withHistoryReadSnapshot(async (tx) => {
     const [snapshotChat] = await tx.select().from(chats).where(eq(chats.id, chatId)).limit(1)
     if (!snapshotChat) throw RealtimeRpcError.ChatIdInvalid()
-    await AccessGuards.ensureChatAccess(snapshotChat, currentUserId, tx)
+    await AccessGuards.ensureChatReadAccess(snapshotChat, currentUserId, tx)
     return read(tx, snapshotChat)
   })
 }

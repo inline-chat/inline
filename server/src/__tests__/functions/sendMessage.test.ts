@@ -38,7 +38,7 @@ const runId = Date.now()
 const nextEmail = (label: string) => `${label}-${runId}-${userIndex++}@example.com`
 
 // Helpers
-function extractMessage(result: SendMessageResult): Message | null {
+function extractMessage(result: Pick<SendMessageResult, "updates">): Message | null {
   const update = result.updates[1]
   if (update?.update.oneofKind !== "newMessage") {
     return null

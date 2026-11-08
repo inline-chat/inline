@@ -15,6 +15,7 @@ export const TBotUser = t.Object({
   username: t.Optional(t.String()),
   first_name: t.Optional(t.String()),
   last_name: t.Optional(t.String()),
+  owner_id: t.Optional(t.Number()),
 })
 
 export const TBotAgent = t.Object({
@@ -237,6 +238,7 @@ export const TSendMessageInput = t.Object({
   actions: t.Optional(t.Array(t.Array(TBotMessageAction, { maxItems: 8 }), { maxItems: 8 })),
   silent: t.Optional(t.Boolean()),
   source_chat_id: t.Optional(TTargetId),
+  add_mentioned_users: t.Optional(t.Boolean()),
 })
 
 export const TGetChatInput = t.Object({
@@ -367,6 +369,12 @@ export const TGetChatParticipantInput = t.Object({
 
 export const TGetChatParticipantCountInput = t.Object({ chat_id: TTargetId })
 
+export const TGetContactsInput = t.Object({
+  query: t.Optional(t.String({ maxLength: 64 })),
+  kind: t.Optional(t.Union([t.Literal("all"), t.Literal("people"), t.Literal("bots")])),
+  limit: t.Optional(t.Number({ minimum: 1, maximum: 50 })),
+})
+
 export const TThreadParticipantMutationInput = t.Object({
   chat_id: TTargetId,
   user_id: TTargetId,
@@ -389,6 +397,27 @@ export const TBotSpaceMember = t.Object({
 export const TBotChatParticipant = t.Object({
   user: TBotUser,
   member: t.Optional(TBotSpaceMember),
+})
+
+export const TBotContact = t.Object({
+  user: TBotUser,
+  relations: t.Array(t.Union([
+    t.Literal("shared_chat"),
+    t.Literal("shared_space"),
+    t.Literal("managed"),
+    t.Literal("owner"),
+    t.Literal("can_use"),
+    t.Literal("uses_your_bot"),
+  ])),
+  via_owner: t.Boolean(),
+  last_interaction_date: t.Optional(t.Number()),
+  bot_operations: t.Optional(t.Array(t.Union([
+    t.Literal("invoke"),
+    t.Literal("steer"),
+    t.Literal("approve"),
+    t.Literal("configure"),
+  ]))),
+  manages_bot: t.Optional(t.Boolean()),
 })
 
 export const TBotUploadFileInput = t.Object({

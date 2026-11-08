@@ -3058,7 +3058,9 @@ final class SidebarCollectionBodyController: NSViewController {
          let oldItem = previous.rowByID[row.id]?.projectedItem {
         return item.item.unread != oldItem.item.unread
           || item.item.prominentUnreadDot != oldItem.item.prominentUnreadDot
+          || item.item.activityBadge != oldItem.item.activityBadge
           || item.descendantProminentUnreadCount != oldItem.descendantProminentUnreadCount
+          || item.descendantActivityBadge != oldItem.descendantActivityBadge
           || item.isExpanded != oldItem.isExpanded
       }
       if let folder = row.projectedFolder,
@@ -3581,6 +3583,7 @@ final class SidebarCollectionBodyController: NSViewController {
           childCount: item.childCount,
           descendantUnreadCount: item.descendantUnreadCount,
           descendantProminentUnreadCount: item.descendantProminentUnreadCount,
+          descendantActivityBadge: item.descendantActivityBadge,
           isExpanded: item.isExpanded
         )
         return SidebarCollectionRow(id: row.id, kind: .chat(item), height: row.height)
@@ -5487,8 +5490,11 @@ final class SidebarCollectionBodyController: NSViewController {
           minimumY: Double(attributes.frame.minY),
           maximumY: Double(attributes.frame.maxY),
           prominentUnreadCount: row.projectedItem.map {
-            ($0.item.unread && $0.item.prominentUnreadDot ? 1 : 0)
-              + ($0.isExpanded ? 0 : $0.descendantProminentUnreadCount)
+            let ownMention = $0.item.activityBadge == .mention
+            let childMention = $0.descendantActivityBadge == .mention
+            // An unseen mention or reply is always worth jumping to, even in a standard row.
+            return ($0.item.unread && $0.item.prominentUnreadDot || ownMention ? 1 : 0)
+              + ($0.isExpanded ? 0 : max($0.descendantProminentUnreadCount, childMention ? 1 : 0))
           } ?? row.projectedFolder.map {
             $0.isExpanded ? 0 : $0.prominentUnreadCount
           } ?? 0

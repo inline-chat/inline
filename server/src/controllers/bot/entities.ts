@@ -61,6 +61,7 @@ export const TBotUserInline = t.Object({
   username: t.Optional(t.String()),
   first_name: t.Optional(t.String()),
   last_name: t.Optional(t.String()),
+  owner_id: t.Optional(t.Number()),
 })
 
 export const TBotMessageEntityOutput = t.Object({

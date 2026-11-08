@@ -23,10 +23,12 @@ public struct InChatSearchTiming: Sendable {
 /// Telegram-style search inside one chat: matches newest first, a current match, and
 /// older/newer stepping across pages from the local index and the server.
 ///
-/// Local hits appear first; server hits merge in by message ID. After the first page, each
-/// source keeps paging in the background until it runs out, so the total is exact ("3 of 47").
-/// Stepping older never skips a hit: when a source that still has pages could hold a message
-/// between the current match and the next loaded one, the step waits for that page.
+/// Local hits appear first; server hits merge in by message ID. Like Telegram, pages are 100
+/// results and the next page loads only when the list scrolls near its end or a step goes past
+/// the loaded matches. The exact total comes from a separate server count request sent with
+/// the first page ("3 of 47"). Stepping older never skips a hit: when a source that still has
+/// pages could hold a message between the current match and the next loaded one, the step
+/// waits for that page.
 @MainActor
 @Observable
 public final class InChatSearchViewModel {
@@ -34,6 +36,8 @@ public final class InChatSearchViewModel {
   public private(set) var matches: [InChatSearchHit] = []
   public private(set) var currentMessageId: Int64?
   public private(set) var remoteFailed = false
+  /// Every match in the chat according to the server, once its count arrives.
+  public private(set) var totalCount: Int?
 
   /// Called when the current match changes so the chat can scroll to it.
   @ObservationIgnored public var onSelect: (@MainActor (InChatSearchSelection) -> Void)?
@@ -65,9 +69,19 @@ public final class InChatSearchViewModel {
     sources.contains { $0.enabled && $0.hasMore }
   }
 
-  /// Results are showing and older pages are still loading, so the total can still grow.
+  /// A next page is loading after the first one (the list's footer spinner).
+  public var isLoadingMore: Bool {
+    sources.contains { $0.loaded && $0.isLoading }
+  }
+
+  /// Results are showing and the server's total has not arrived yet.
   public var isCounting: Bool {
-    !query.isEmpty && !matches.isEmpty && hasMore
+    !query.isEmpty && !matches.isEmpty && countTask != nil
+  }
+
+  /// The number shown as the total: the server count, never less than what is loaded.
+  private var displayedTotal: Int {
+    max(totalCount ?? 0, matches.count)
   }
 
   public var canGoOlder: Bool {
@@ -86,16 +100,16 @@ public final class InChatSearchViewModel {
     guard !query.isEmpty else { return nil }
     guard !matches.isEmpty else { return isSearching ? nil : "No results" }
     guard let index = currentIndex else { return resultsText }
-    return "\(index + 1) of \(matches.count)"
+    return "\(index + 1) of \(displayedTotal)"
   }
 
   /// "47 messages", "1 message", "No results", or nil while the query is empty or loading.
   public var resultsText: String? {
     guard !query.isEmpty else { return nil }
-    switch matches.count {
+    switch matches.isEmpty ? 0 : displayedTotal {
       case 0: return isSearching ? nil : "No results"
       case 1: return "1 message"
-      default: return "\(matches.count) messages"
+      default: return "\(displayedTotal) messages"
     }
   }
 
@@ -108,8 +122,8 @@ public final class InChatSearchViewModel {
   @ObservationIgnored private let source: any InChatSearchSource
   @ObservationIgnored private let timing: InChatSearchTiming
   @ObservationIgnored private let pageLimit: Int
-  @ObservationIgnored private let countPageLimit: Int
   @ObservationIgnored private var token: UInt64 = 0
+  private var countTask: Task<Void, Never>?
   /// The user moved off the newest match, so later pages must not move the selection.
   @ObservationIgnored private var userNavigated = false
   /// `matches` still shows the previous query's results while the new query's first page
@@ -142,13 +156,11 @@ public final class InChatSearchViewModel {
   public init(
     source: any InChatSearchSource,
     timing: InChatSearchTiming = InChatSearchTiming(),
-    pageLimit: Int = InChatMessageSearch.pageLimit,
-    countPageLimit: Int = InChatMessageSearch.countPageLimit
+    pageLimit: Int = InChatMessageSearch.pageLimit
   ) {
     self.source = source
     self.timing = timing
     self.pageLimit = pageLimit
-    self.countPageLimit = max(pageLimit, countPageLimit)
   }
 
   public convenience init(db: AppDatabase, peer: Peer, collapsedMaxId: Int64? = nil) {
@@ -179,6 +191,7 @@ public final class InChatSearchViewModel {
     remoteFailed = false
     rebuildMatches()
     load(sourceAt: index, debounce: .zero)
+    if totalCount == nil { loadCount(debounce: .zero) }
   }
 
   public func dispose() {
@@ -209,6 +222,20 @@ public final class InChatSearchViewModel {
     select(hit, byUser: true)
   }
 
+  /// Loads the next page when a list shows one of its last rows, like Telegram's results list.
+  public func loadMoreIfNeeded(after hit: InChatSearchHit) {
+    guard !showsStaleMatches,
+          let index = matches.firstIndex(where: { $0.messageId == hit.messageId }),
+          matches.count - index <= Self.prefetchDistance
+    else { return }
+    for sourceIndex in sources.indices {
+      load(sourceAt: sourceIndex, debounce: .zero)
+    }
+  }
+
+  /// How close to the end of the loaded matches the next page starts loading.
+  private static let prefetchDistance = 10
+
   // MARK: Loading
 
   private func restart() {
@@ -219,6 +246,7 @@ public final class InChatSearchViewModel {
     userNavigated = false
     pendingStep = nil
     if remoteFailed { remoteFailed = false }
+    if totalCount != nil { totalCount = nil }
     guard !query.isEmpty else {
       showsStaleMatches = false
       if !matches.isEmpty { matches = [] }
@@ -238,6 +266,28 @@ public final class InChatSearchViewModel {
       let debounce = sources[index].kind == .local ? timing.localDebounce : timing.remoteDebounce
       load(sourceAt: index, debounce: debounce)
     }
+    loadCount(debounce: timing.remoteDebounce)
+  }
+
+  /// Asks the server for the exact total next to the first page; it scans the whole chat, so
+  /// the first results never wait on it.
+  private func loadCount(debounce: Duration) {
+    countTask?.cancel()
+    let token = token
+    let query = query
+    let source = source
+    countTask = Task { [weak self] in
+      if debounce > .zero {
+        try? await Task.sleep(for: debounce)
+        guard !Task.isCancelled else { return }
+      }
+      let count = try? await source.remoteCount(query: query)
+      guard !Task.isCancelled, let self, token == self.token else { return }
+      countTask = nil
+      if let count, totalCount != count {
+        totalCount = count
+      }
+    }
   }
 
   private func load(sourceAt index: Int, debounce: Duration) {
@@ -248,8 +298,7 @@ public final class InChatSearchViewModel {
     let cursor = state.cursor
     let kind = state.kind
     let source = source
-    // The first page is small so results show fast; later pages are larger to finish the count.
-    let limit = cursor == nil ? pageLimit : countPageLimit
+    let limit = pageLimit
 
     sources[index].task = Task { [weak self] in
       if debounce > .zero {
@@ -307,8 +356,6 @@ public final class InChatSearchViewModel {
       userNavigated = true
     }
     resolvePendingStep()
-    // Keep paging until the source runs out so the total is exact.
-    load(sourceAt: index, debounce: .zero)
   }
 
   private func rebuildMatches(keepingStaleIfEmpty: Bool = false) {
@@ -386,6 +433,8 @@ public final class InChatSearchViewModel {
   }
 
   private func cancelTasks() {
+    countTask?.cancel()
+    countTask = nil
     for index in sources.indices {
       sources[index].task?.cancel()
       sources[index].task = nil

@@ -54,6 +54,11 @@ export const encodeUser = ({
         ? undefined
         : user.timeZone ?? undefined,
     bot: user.bot === true ? true : undefined,
+    // Who a bot acts for. Public, like the bot itself, so everyone sees "Mo's Claude".
+    botInfo:
+      user.bot === true && user.botCreatorId != null
+        ? { owner: { oneofKind: "ownerUserId", ownerUserId: BigInt(user.botCreatorId) } }
+        : undefined,
     profilePhoto: cdnUrl
       ? {
           cdnUrl: cdnUrl,

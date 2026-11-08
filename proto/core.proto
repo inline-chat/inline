@@ -227,6 +227,21 @@ message User {
   optional BotAvatar bot_avatar = 14;
 
   optional string bio = 15;
+
+  // Set only for bots: who the bot acts for.
+  optional BotInfo bot_info = 16;
+}
+
+// A bot acts for its owner. Inline evaluates what a bot does as the bot plus
+// its owner, limited to what an owner can delegate (using and steering the
+// owner's or others' bots, never approving or configuring).
+message BotInfo {
+  oneof owner {
+    // The person the bot acts for. Today, the bot's creator.
+    int64 owner_user_id = 1;
+  }
+  // Reserved for bots owned by a space.
+  reserved 2;
 }
 
 message UserProfilePhoto {
@@ -273,6 +288,13 @@ message Dialog {
   optional int64 folder_id = 18;
   // Personal translation preference, shared by all sessions of this account.
   optional bool translation_enabled = 19;
+  // Unseen messages addressed to the viewer: mentions of them (directly or
+  // through a group) and replies to their messages. Absent when the server did
+  // not compute it; clients keep their previous value.
+  optional int32 unread_mentions_count = 20;
+  // The viewer's messages with reactions they haven't seen. Absent when the
+  // server did not compute it; clients keep their previous value.
+  optional int32 unread_reactions_count = 21;
 }
 
 message DialogFolder {
@@ -583,6 +605,8 @@ message Block {
     BlockCallout callout = 16;
     BlockMeter meter = 17;
     BlockForm form = 18;
+    // Bot only. Sandboxed HTML; at most one per message.
+    BlockWidget widget = 19;
   }
 }
 
@@ -900,6 +924,37 @@ message MessageFormSelection {
   optional string other_text = 2;
 }
 
+// A bot's HTML widget, rendered in a sandbox with no network access. The title
+// range is the fallback older clients, notifications and search use. Clients
+// that can't render widgets show the flat text.
+message BlockWidget {
+  // Bot-chosen identity, unique among the message's action and form IDs, and
+  // stable across edits: per-viewer widget state is keyed by it. Same
+  // character set as MessageAction.action_id.
+  string widget_id = 1;
+  BlockText title = 2;
+  // An HTML fragment or a full document. UTF-8, at most 256 KiB.
+  string html = 3;
+  // The content height the sender measured, in CSS px at 640 px wide, so the
+  // first frame reserves the right space. Clamped to 80...2000.
+  optional uint32 height = 4;
+  // Images the HTML references by position as "media/0", "media/1", ...
+  // They use the block image pipeline, so they can be pending. No alt text.
+  repeated BlockImage images = 5;
+  // Checked by the server before the bot sees an inline.action() call.
+  AgentGrantRequirement required_grant = 6;
+}
+
+// A widget's inline.action(name, payload) call. Unlike a callback button's
+// data, which the bot wrote, the viewer's client supplies every field: bots
+// must treat both as untrusted input.
+message MessageWidgetCall {
+  // Same character set as MessageAction.action_id, at most 64 characters.
+  string name = 1;
+  // UTF-8 JSON, at most 4 KiB. Empty means no payload.
+  bytes payload = 2;
+}
+
 message Message {
   int64 id = 1;
 
@@ -986,6 +1041,14 @@ message Message {
   // Text quoted from the replied message, shown in the reply header. `message`
   // holds only the caption. Older clients show a plain reply.
   optional string reply_quote = 27;
+
+  // Addressed to the viewer (mention or reply) and not seen yet. Set on
+  // history results only; absent elsewhere.
+  optional bool unread_mention = 28;
+
+  // The viewer's message, with reactions they haven't seen. Set on history
+  // results only; absent elsewhere.
+  optional bool unread_reactions = 29;
 }
 
 // Agent providers that implement Inline's session continuity contract. The
@@ -1393,13 +1456,25 @@ enum AgentGrantOperation {
 message AgentGrant {
   int64 id = 1;
   int64 bot_user_id = 2;
-  // Subject. Space and chat subjects are reserved for later.
+  // The person, for person grants; 0 for space and group grants. Prefer `subject`.
   int64 user_id = 3;
   repeated AgentGrantOperation operations = 4;
   int64 revision = 5;
   optional int64 granted_by = 6;
   // Last change, Unix seconds.
   int64 date = 7;
+  // Who the grant is for. Always set by current servers.
+  optional AccessSubject subject = 8;
+}
+
+// Who an access grant is for. Space and group subjects mean their current
+// members (people only; bots get them through the person they act for).
+message AccessSubject {
+  oneof subject {
+    int64 user_id = 1;
+    int64 space_id = 2;
+    int64 group_id = 3;
+  }
 }
 
 enum AgentParticipationMode {
@@ -1480,6 +1555,9 @@ message GetAgentSessionStatesResult { repeated AgentSession sessions = 1; }
 message ListAgentGrantsInput {
   // Omitted or zero when the calling bot lists its own grants.
   int64 bot_user_id = 1;
+  // Include space and group grants. Older clients leave it unset and see
+  // person grants only.
+  optional bool include_all_subjects = 2;
 }
 
 message ListAgentGrantsResult {
@@ -1493,9 +1571,13 @@ message ListAgentGrantsResult {
 // without APPROVE and CONFIGURE (the bridge's /allowlist).
 message SetAgentGrantInput {
   int64 bot_user_id = 1;
+  // The person; ignored when `subject` is set.
   int64 user_id = 2;
   // Non-empty.
   repeated AgentGrantOperation operations = 3;
+  // A person, a space or a user group. Space and group grants need the owner
+  // to be a member of that space.
+  optional AccessSubject subject = 4;
 }
 
 message SetAgentGrantResult {
@@ -1505,7 +1587,23 @@ message SetAgentGrantResult {
 
 message DeleteAgentGrantInput {
   int64 bot_user_id = 1;
+  // The person; ignored when `subject` is set.
   int64 user_id = 2;
+  optional AccessSubject subject = 3;
+}
+
+// What one person or bot may do with a bot, resolved by the server: their own
+// grants, grants to their spaces and groups, and for a bot what the person it
+// acts for may delegate. Callable by the bot, its owner, or the user asked about.
+message GetAgentAccessInput {
+  // Omitted or zero when the calling bot asks about itself.
+  int64 bot_user_id = 1;
+  int64 user_id = 2;
+}
+
+message GetAgentAccessResult {
+  bool is_owner = 1;
+  repeated AgentGrantOperation operations = 2;
 }
 
 message DeleteAgentGrantResult { int64 revision = 1; }
@@ -2349,6 +2447,10 @@ enum Method {
   MOVE_AGENT_SESSION = 162;
   UNPIN_ALL_MESSAGES = 163;
   GET_AGENT_SETTINGS = 164;
+  GET_CONTACTS = 165;
+  GET_AGENT_ACCESS = 166;
+  GET_UNREAD_ACTIVITY = 167;
+  READ_ACTIVITY = 168;
 }
 
 message RpcCall {
@@ -2518,6 +2620,10 @@ message RpcCall {
     MoveAgentSessionInput moveAgentSession = 163;
     UnpinAllMessagesInput unpinAllMessages = 164;
     GetAgentSettingsInput getAgentSettings = 165;
+    GetContactsInput getContacts = 166;
+    GetAgentAccessInput getAgentAccess = 167;
+    GetUnreadActivityInput getUnreadActivity = 168;
+    ReadActivityInput readActivity = 169;
   }
 }
 
@@ -2689,6 +2795,10 @@ message RpcResult {
     MoveAgentSessionResult moveAgentSession = 163;
     UnpinAllMessagesResult unpinAllMessages = 164;
     GetAgentSettingsResult getAgentSettings = 165;
+    GetContactsResult getContacts = 166;
+    GetAgentAccessResult getAgentAccess = 167;
+    GetUnreadActivityResult getUnreadActivity = 168;
+    ReadActivityResult readActivity = 169;
   }
 }
 
@@ -3194,6 +3304,9 @@ message GetChatResult {
   optional User user = 5;
   // Newest-first ordinary messages, capped by the server at 100.
   repeated Message messages = 6;
+  // Set when you can only read this chat, through a bot you manage that is in
+  // it (or in a chat above it). Show it read-only: no composer, no dialog.
+  optional int64 read_only_via_bot_user_id = 7;
 }
 
 message ShowInChatListInput {
@@ -3310,9 +3423,51 @@ message ReadMessagesInput {
 
   // If unset, server resolves to the latest message id for the peer.
   optional int64 max_id = 2;
+
+  // Explicit "Mark as Read" from a chat list: also reads every unread
+  // mention and reaction in the dialog.
+  optional bool read_activity = 3;
 }
 
 message ReadMessagesResult { repeated Update updates = 1; }
+
+// IDs of unread mentions or of the viewer's messages with unread reactions,
+// oldest first.
+message GetUnreadActivityInput {
+  InputPeer peer_id = 1;
+  // False lists mentions and replies, true lists reactions.
+  bool reactions = 2;
+  // Return messages with an ID greater than this.
+  optional int64 offset_id = 3;
+  // Defaults to and is capped at 500.
+  optional int32 limit = 4;
+}
+
+message GetUnreadActivityResult {
+  repeated int64 message_ids = 1;
+  int32 unread_mentions_count = 2;
+  int32 unread_reactions_count = 3;
+  // True when nothing unread follows the last returned ID.
+  bool final = 4;
+}
+
+// Reads mentions and reactions. A message ID is enough: for one viewer a
+// message is either addressed to them or theirs, never both.
+message ReadActivityInput {
+  InputPeer peer_id = 1;
+  // Messages seen on screen.
+  repeated int64 message_ids = 2;
+  // Read every unread mention and reply, up to max_id when set.
+  bool all_mentions = 3;
+  // Read every unread reaction, up to max_id when set.
+  bool all_reactions = 4;
+  optional int64 max_id = 5;
+}
+
+// Empty on purpose: the change reaches every session, the caller included,
+// through the ordered user stream. Counts delivered here could arrive out of
+// order with that stream and double-count reads still in flight.
+message ReadActivityResult {}
 
 message CreateBotInput {
   // Name of the bot
@@ -4083,17 +4238,32 @@ message SendMessageInput {
   // Text quoted from the replied message; `message` is only the caption.
   // Ignored without reply_to_msg_id.
   optional string reply_quote = 14;
+
+  // Add mentioned users who aren't in this thread yet, when the sender may add
+  // them, before the message is sent, so the message reaches them. Threads
+  // only; mentions in DMs and public threads are never added.
+  optional bool add_mentioned_users = 15;
 }
 
-message SendMessageResult { repeated Update updates = 2; }
+message SendMessageResult {
+  repeated Update updates = 2;
+  // With add_mentioned_users: mentioned users added to the thread.
+  repeated int64 added_user_ids = 3;
+  // With add_mentioned_users: mentioned users not in the thread who could not
+  // be added (not a contact of the sender, or not a member of the space).
+  repeated int64 unadded_user_ids = 4;
+}
 
 message InvokeMessageActionInput {
   InputPeer peer_id = 1;
   int64 message_id = 2;
-  // A callback action's ID, or a form's form_id when submitting it.
+  // A callback action's ID, a form's form_id when submitting it, or a
+  // widget's widget_id for a call from inside it.
   string action_id = 3;
   // Required when action_id names a BlockForm, absent otherwise.
   optional MessageFormSubmission form = 4;
+  // Required when action_id names a BlockWidget, absent otherwise.
+  optional MessageWidgetCall widget_call = 5;
 }
 
 message InvokeMessageActionResult {
@@ -4307,11 +4477,20 @@ message SearchMessagesInput {
 
   // Optional filter for media/doc messages
   optional SearchMessagesFilter filter = 5;
+
+  // Count every matching message instead of returning a page: the result has
+  // total_count set and no messages. Scans the whole chat, so clients send it
+  // alongside the first page request rather than waiting on it. Requires
+  // queries; limit and offset_id are ignored.
+  optional bool count_only = 6;
 }
 
 message SearchMessagesResult {
   repeated Message messages = 1;
   optional int64 seq = 2;
+
+  // Number of matching messages in the chat; set for count_only requests.
+  optional int32 total_count = 3;
 }
 
 enum ExternalResourceProvider {
@@ -4670,6 +4849,7 @@ message Update {
     UpdateAgentRuntime agent_runtime = 56;
     UpdateAgentSessionControl agent_session_control = 57;
     UpdateAgentSettings agent_settings = 58;
+    UpdateUnreadActivity unread_activity = 59;
   }
 }
 
@@ -4827,6 +5007,21 @@ message UpdateReadMaxId {
   int32 unread_count = 4;
 }
 
+// Unread mentions or reactions in a dialog changed. Stored in the user bucket.
+message UpdateUnreadActivity {
+  Peer peer_id = 1;
+  // Counts after this change.
+  int32 unread_mentions_count = 2;
+  int32 unread_reactions_count = 3;
+  // Messages that became unread mentions or replies.
+  repeated int64 unread_mention_ids = 4;
+  // The viewer's messages that got unseen reactions.
+  repeated int64 unread_reaction_ids = 5;
+  // Messages that are no longer unread: read, deleted, or the reaction was
+  // withdrawn. Also echoes reads that changed nothing.
+  repeated int64 cleared_message_ids = 6;
+}
+
 // Update when a dialog is marked as unread
 message UpdateMarkAsUnread {
   // Peer ID of the dialog that was marked as unread
@@ -4898,6 +5093,8 @@ message UpdateMessageActionInvoked {
   // A form submission. Secret values are present only in the live delivery;
   // catch-up copies mark them redacted.
   optional MessageFormSubmission form = 7;
+  // A call from inside a widget; action_id is its widget_id and data is empty.
+  optional MessageWidgetCall widget_call = 8;
 }
 
 // A chat member's view of an agent session's run state changed.
@@ -4916,10 +5113,12 @@ message UpdateAgentParticipation {
 // Sent to a bot's owner, the bot and the grant's subject.
 message UpdateAgentGrant {
   int64 bot_user_id = 1;
+  // The person for person grants; 0 for space and group grants.
   int64 user_id = 2;
   // Absent when the grant was deleted.
   optional AgentGrant grant = 3;
   int64 revision = 4;
+  optional AccessSubject subject = 5;
 }
 
 // Sent to a bot's owner when its runtime status, setup state or settings
@@ -5162,6 +5361,56 @@ message SearchUsersInput {
 }
 
 message SearchUsersResult { repeated User users = 1; }
+
+// People and bots the caller has a relationship with. For a bot, that's its own
+// relationships plus its owner's. A bot can start a conversation only with its
+// contacts. Without a query: recent contacts, bots you manage, and bots you can
+// use. With a query: also members of shared spaces, matched by name or username.
+message GetContactsInput {
+  optional string query = 1;
+  optional ContactKind kind = 2;
+  // Default 20, at most 50.
+  optional int32 limit = 3;
+}
+
+enum ContactKind {
+  CONTACT_KIND_ALL = 0;
+  CONTACT_KIND_PEOPLE = 1;
+  CONTACT_KIND_BOTS = 2;
+}
+
+enum ContactRelation {
+  CONTACT_RELATION_UNSPECIFIED = 0;
+  // A DM or a thread together.
+  CONTACT_RELATION_SHARED_CHAT = 1;
+  CONTACT_RELATION_SHARED_SPACE = 2;
+  // A bot you manage, or (for a bot caller) a bot its owner manages.
+  CONTACT_RELATION_MANAGED = 3;
+  // Bot callers: the person the bot acts for.
+  CONTACT_RELATION_OWNER = 4;
+  // A bot you may use (its access list includes you, or your owner).
+  CONTACT_RELATION_CAN_USE = 5;
+  // Someone who may use a bot you manage.
+  CONTACT_RELATION_USES_YOUR_BOT = 6;
+}
+
+message Contact {
+  int64 user_id = 1;
+  repeated ContactRelation relations = 2;
+  // Bot callers: the tie exists only through the bot's owner.
+  bool via_owner = 3;
+  // Last message between you, Unix seconds, when known.
+  optional int64 last_interaction_date = 4;
+  // Bots: what the caller may do with this bot. Empty for people.
+  repeated AgentGrantOperation bot_operations = 5;
+  // Bots: the caller manages this bot (or acts for its manager).
+  bool manages_bot = 6;
+}
+
+message GetContactsResult {
+  repeated Contact contacts = 1;
+  repeated User users = 2;
+}
 
 // Read-only public profile lookup by stable ID, without creating a DM or dialog.
 // Up to 50 IDs. Missing, deleted, and pending-setup users are omitted.

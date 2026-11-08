@@ -3,6 +3,7 @@ import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { DialogsModel } from "@in/server/db/models/dialogs"
+import { getActivityCounts } from "@in/server/modules/activityItems"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log } from "@in/server/utils/log"
@@ -30,6 +31,8 @@ type Output = {
   anchorMessage?: Message
   user?: User
   messages: Message[]
+  /** Read-only: opened through this bot the viewer manages. */
+  readOnlyViaBotUserId?: number
 }
 
 const log = new Log("functions.getChat")
@@ -181,7 +184,11 @@ async function getChatAndDialogForThread(
     return { chat, dialog: newDialog }
   }
 
-  await AccessGuards.ensureChatAccess(chat, currentUserId)
+  if (!(await AccessGuards.hasChatAccess(chat, currentUserId))) {
+    // Opening through a bot you manage: read-only, and no dialog or sidebar entry.
+    await AccessGuards.ensureChatReadAccess(chat, currentUserId)
+    return { chat, dialog }
+  }
 
   if (dialog) {
     return { chat, dialog }
@@ -248,7 +255,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
     async (tx): Promise<Output> => {
       const [snapshotChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).limit(1)
       if (!snapshotChat) throw RealtimeRpcError.ChatIdInvalid()
-      await AccessGuards.ensureChatAccess(snapshotChat, currentUserId, tx)
+      const readOnlyViaBotUserId = await AccessGuards.ensureChatReadAccess(snapshotChat, currentUserId, tx)
 
       const [snapshotDialog] = await tx
         .select()
@@ -258,6 +265,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
       const unreadCount = snapshotDialog
         ? await DialogsModel.getUnreadCount(snapshotChat.id, currentUserId, tx)
         : 0
+      const unreadActivity = snapshotDialog ? await getActivityCounts(currentUserId, snapshotChat.id, tx) : undefined
       const encodedChat = await Encoders.chatForUser(snapshotChat, {
         encodingForUserId: currentUserId,
         tx,
@@ -336,13 +344,14 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
 
       return {
         chat: encodedChat,
-        dialog: snapshotDialog ? Encoders.dialog(snapshotDialog, { unreadCount }) : undefined,
+        dialog: snapshotDialog ? Encoders.dialog(snapshotDialog, { unreadCount, unreadActivity }) : undefined,
         pinnedMessageIds: pinnedRows.map((row) => BigInt(row.messageId)),
         anchorMessage: encodedAnchorMessage,
         user: peer
           ? Encoders.user({ user: peer.user, photoFile: peer.photoFile, viewerUserId: currentUserId })
           : undefined,
         messages: encodedMessages,
+        readOnlyViaBotUserId,
       }
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },

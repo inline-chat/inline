@@ -1445,6 +1445,23 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("activity items") { db in
+      // Server counts of unseen mentions (replies included) and reactions; nil means unknown.
+      try db.alter(table: "dialog") { table in
+        table.add(column: "unreadMentionsCount", .integer)
+        table.add(column: "unreadReactionsCount", .integer)
+      }
+      // Unread mentions and reactions in each chat. No message foreign key: a row can
+      // point at history that is not loaded locally yet.
+      try db.create(table: "activityItem") { table in
+        table.column("chatId", .integer).notNull()
+        table.column("messageId", .integer).notNull()
+        table.column("kind", .integer).notNull()
+        table.column("pendingRead", .boolean).notNull().defaults(to: false)
+        table.primaryKey(["chatId", "kind", "messageId"])
+      }
+    }
+
     return migrator
   }
 }

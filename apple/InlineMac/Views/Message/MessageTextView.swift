@@ -290,6 +290,9 @@ class MessageTextView: NSTextView {
         onPlainSingleClick?(location, event)
       }
     }
+    if mouseUp != nil, !event.modifierFlags.contains(.control) {
+      MessageSelectionMenu.selectionTrackingEnded(in: self, at: finalWindowPoint)
+    }
   }
 
   override func mouseDragged(with event: NSEvent) {

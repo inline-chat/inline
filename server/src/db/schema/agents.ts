@@ -1,9 +1,12 @@
 import { bytea } from "@in/server/db/schema/common"
 import { chats } from "@in/server/db/schema/chats"
 import { users } from "@in/server/db/schema/users"
+import { spaces } from "@in/server/db/schema/spaces"
+import { userGroups } from "@in/server/db/schema/userGroups"
 import {
   bigint,
   bigserial,
+  check,
   index,
   integer,
   pgSequence,
@@ -68,9 +71,10 @@ export const agentGrants = pgTable(
     botUserId: integer("bot_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    subjectUserId: integer("subject_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+    // Exactly one subject: a person, everyone in a space, or everyone in a user group.
+    subjectUserId: integer("subject_user_id").references(() => users.id, { onDelete: "cascade" }),
+    subjectSpaceId: integer("subject_space_id").references(() => spaces.id, { onDelete: "cascade" }),
+    subjectGroupId: integer("subject_group_id").references(() => userGroups.id, { onDelete: "cascade" }),
     // Bit (1 << AgentGrantOperation) per granted operation; 0 once revoked.
     operations: integer("operations").notNull(),
     revision: bigint("revision", { mode: "bigint" }).notNull(),
@@ -80,8 +84,22 @@ export const agentGrants = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date", precision: 3 }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("agent_grants_bot_subject_unique").on(table.botUserId, table.subjectUserId),
+    uniqueIndex("agent_grants_bot_subject_unique")
+      .on(table.botUserId, table.subjectUserId)
+      .where(sql`${table.subjectUserId} is not null`),
+    uniqueIndex("agent_grants_bot_space_unique")
+      .on(table.botUserId, table.subjectSpaceId)
+      .where(sql`${table.subjectSpaceId} is not null`),
+    uniqueIndex("agent_grants_bot_group_unique")
+      .on(table.botUserId, table.subjectGroupId)
+      .where(sql`${table.subjectGroupId} is not null`),
     index("agent_grants_subject_idx").on(table.subjectUserId),
+    index("agent_grants_subject_space_idx").on(table.subjectSpaceId),
+    index("agent_grants_subject_group_idx").on(table.subjectGroupId),
+    check(
+      "agent_grants_one_subject",
+      sql`num_nonnulls(${table.subjectUserId}, ${table.subjectSpaceId}, ${table.subjectGroupId}) = 1`,
+    ),
   ],
 )
 

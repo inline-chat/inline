@@ -220,6 +220,8 @@ describe("InlineBotClient", () => {
     await client.unpinMessage({ chat_id: 9, message_id: 7 })
     await client.getChatParticipant({ chat_id: 9, user_id: 6 })
     await client.getChatParticipantCount({ chat_id: 9 })
+    await client.getContacts({ query: "maya", kind: "people", limit: 5 })
+    await client.getContacts()
     await client.addThreadParticipant({ chat_id: 9, user_id: 5 })
     await client.removeThreadParticipant({ chat_id: 9, user_id: 5 })
     await client.setThreadTitle({ chat_id: 9, title: "Triage", emoji: "🚨" })
@@ -234,6 +236,8 @@ describe("InlineBotClient", () => {
       { url: "https://api.inline.chat/bot/unpinMessage", method: "POST" },
       { url: "https://api.inline.chat/bot/getChatParticipant?chat_id=9&user_id=6", method: "GET" },
       { url: "https://api.inline.chat/bot/getChatParticipantCount?chat_id=9", method: "GET" },
+      { url: "https://api.inline.chat/bot/getContacts?query=maya&kind=people&limit=5", method: "GET" },
+      { url: "https://api.inline.chat/bot/getContacts", method: "GET" },
       { url: "https://api.inline.chat/bot/addThreadParticipant", method: "POST" },
       { url: "https://api.inline.chat/bot/removeThreadParticipant", method: "POST" },
       { url: "https://api.inline.chat/bot/setThreadTitle", method: "POST" },

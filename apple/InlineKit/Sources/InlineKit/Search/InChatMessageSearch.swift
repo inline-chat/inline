@@ -63,10 +63,8 @@ public enum InChatSearchError: Error, Sendable {
 /// Fetches in-chat search pages. Local reads the FTS index; remote calls `searchMessages`
 /// for the peer without saving the hits.
 public enum InChatMessageSearch {
-  /// The first page, kept small so results show fast.
-  public static let pageLimit = 50
-  /// Later pages, loaded in the background until the total is exact.
-  public static let countPageLimit = 200
+  /// Results per page, as in Telegram; the next page loads on demand.
+  public static let pageLimit = 100
   static let remoteTimeout: Duration = .seconds(15)
 
   public static func searchLocal(
@@ -108,7 +106,7 @@ public enum InChatMessageSearch {
   ) async throws -> InChatSearchPage {
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return .empty }
-    let limit = max(1, min(limit, countPageLimit))
+    let limit = max(1, min(limit, pageLimit))
 
     // A direct call: hits stay in memory, so an open chat is not reloaded for every page.
     // Jumping to a hit loads its surrounding history through the normal history path.
@@ -154,6 +152,33 @@ public enum InChatMessageSearch {
     return InChatSearchPage(hits: hits, oldestMessageId: oldest, hasMore: messages.count >= limit && oldest != nil)
   }
 
+  /// Every matching message in the chat, counted by the server (which leaves out history the
+  /// viewer cleared). A full scan, so callers send it next to the first page.
+  public static func countRemote(
+    peer: Peer,
+    query: String,
+    expectedAccount: AuthAccountMutationToken?
+  ) async throws -> Int {
+    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return 0 }
+    let result = try await Api.realtime.callRpcDirect(
+      method: .searchMessages,
+      input: .searchMessages(.with {
+        $0.peerID = peer.toInputPeer()
+        $0.queries = [trimmed]
+        $0.countOnly = true
+      }),
+      timeout: countTimeout,
+      accountToken: expectedAccount
+    )
+    guard case let .searchMessages(response) = result, response.hasTotalCount else {
+      throw InChatSearchError.unsupportedResponse
+    }
+    return Int(response.totalCount)
+  }
+
+  static let countTimeout: Duration = .seconds(30)
+
   static func hit(from fullMessage: FullMessage) -> InChatSearchHit {
     let message = fullMessage.message
     return InChatSearchHit(
@@ -178,6 +203,8 @@ public enum InChatMessageSearch {
 public protocol InChatSearchSource: Sendable {
   func local(query: String, beforeMessageId: Int64?, limit: Int) async throws -> InChatSearchPage
   func remote(query: String, beforeMessageId: Int64?, limit: Int) async throws -> InChatSearchPage
+  /// The server's total number of matches.
+  func remoteCount(query: String) async throws -> Int
 }
 
 public struct InChatSearchLiveSource: InChatSearchSource {
@@ -202,5 +229,9 @@ public struct InChatSearchLiveSource: InChatSearchSource {
       db: db, peer: peer, query: query, beforeMessageId: beforeMessageId, limit: limit,
       expectedAccount: account
     )
+  }
+
+  public func remoteCount(query: String) async throws -> Int {
+    try await InChatMessageSearch.countRemote(peer: peer, query: query, expectedAccount: account)
   }
 }

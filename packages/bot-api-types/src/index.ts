@@ -78,6 +78,8 @@ export type BotUser = {
   username?: string
   first_name?: string
   last_name?: string
+  /** Bots only: the person this bot acts for. */
+  owner_id?: number
 }
 
 export type BotChatType = "user" | "thread"
@@ -270,6 +272,26 @@ export type BotRichBlock =
       width?: number
       height?: number
     }
+  | ({ type: "widget" } & BotWidget)
+
+/**
+ * Sandboxed HTML rendered inside the message, with no network access. Bots only;
+ * at most one per message. See the Inline skill's visualize guide.
+ */
+export type BotWidget = {
+  /** Stable across edits; per-viewer state is kept by it. Defaults to "widget". */
+  widget_id?: string
+  /** Header, notification and fallback text. */
+  title: BotRichText
+  /** An HTML fragment or full document, at most 256 KiB. */
+  html: string
+  /** Measured content height in CSS px at 640 px wide; reserves first-frame space. */
+  height?: number
+  /** Referenced from the HTML as "media/0", "media/1", ... in this order. Input reads `file.file_id`. */
+  images?: Array<{ file?: BotFile; width?: number; height?: number }>
+  /** Who may trigger `inline.action()`. Defaults to anyone who can see the message. */
+  required_grant?: BotGrantRequirement
+}
 
 export type BotBlockStatus = "pending" | "running" | "waiting" | "done" | "failed" | "cancelled"
 
@@ -567,6 +589,11 @@ export type BotUpdate = BotUpdateBase &
             )
           /** Present when a form block was submitted; `action.action_id` is its form ID. */
           form?: BotFormSubmission
+          /**
+           * Present for `inline.action(name, payload)` from a widget; `action.action_id` is its
+           * widget ID. The viewer's client supplies both fields: treat them as untrusted input.
+           */
+          widget_call?: { name: string; payload?: unknown }
         }
       }
     | { bot_participation: BotParticipationChange }
@@ -615,11 +642,39 @@ export type GetMessagesResult = { messages: BotMessage[] }
 export type SearchMessagesResult = { messages: BotMessage[] }
 export type CreateThreadResult = { chat: BotChat }
 export type CreateReplyThreadResult = { chat: BotChat }
-export type SendMessageResult = { message: BotMessage }
+export type SendMessageResult = {
+  message: BotMessage
+  /** With `add_mentioned_users`: mentioned users added to the thread. */
+  added_user_ids?: number[]
+  /** With `add_mentioned_users`: mentioned users who can't see the chat and couldn't be added. */
+  unadded_user_ids?: number[]
+}
 export type ForwardMessageResult = { message: BotMessage }
 export type ForwardMessagesResult = { message_ids: number[] }
 export type GetChatParticipantResult = { participant: BotChatParticipant }
 export type GetChatParticipantCountResult = { count: number }
+export type BotContactRelation =
+  | "shared_chat"
+  | "shared_space"
+  | "managed"
+  | "owner"
+  | "can_use"
+  | "uses_your_bot"
+export type BotAgentOperation = "invoke" | "steer" | "approve" | "configure"
+export type BotContact = {
+  user: BotUser
+  /** Why this user is a contact, for the bot or the person it acts for. */
+  relations: BotContactRelation[]
+  /** True when every relation comes through the bot's owner, not the bot itself. */
+  via_owner: boolean
+  /** Unix seconds of the latest shared-chat activity, when known. */
+  last_interaction_date?: number
+  /** Bot contacts: what the calling bot may do with this bot. */
+  bot_operations?: BotAgentOperation[]
+  /** Bot contacts: this bot is managed by the calling bot's owner. */
+  manages_bot?: boolean
+}
+export type GetContactsResult = { contacts: BotContact[] }
 export type GetMyCommandsResult = { commands: BotCommand[] }
 export type GetMySkillsResult = { skills: BotSkill[] }
 export type EditMessageTextResult = { message: BotMessage }
@@ -633,6 +688,11 @@ export type GetWebhookInfoResult = WebhookInfo
 
 export type SendMessageParams = BotTargetInput & {
   text?: string
+  /**
+   * Explicit blocks, in the same shape `rich_message` has on received messages, so a
+   * bot can read, change and write one back. Use instead of `text`.
+   */
+  rich_message?: BotRichMessage
   reply_to_message_id?: BotInputId
   /** Parse Inline's supported Markdown surface. Defaults to true; false preserves literal syntax. */
   parse_markdown?: boolean
@@ -643,6 +703,8 @@ export type SendMessageParams = BotTargetInput & {
   silent?: boolean
   /** Trusted cross-thread provenance for explicit same-bot Agent handoffs. */
   source_chat_id?: BotInputId
+  /** Add mentioned users who can't see this private thread yet, when the bot may add them. */
+  add_mentioned_users?: boolean
   // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
   // Remove after confirming no production use in the previous month.
   parseMarkdown?: boolean
@@ -650,7 +712,10 @@ export type SendMessageParams = BotTargetInput & {
 
 export type EditMessageTextParams = BotTargetInput & {
   message_id: BotInputId
-  text: string
+  /** Required unless `rich_message` is set. */
+  text?: string
+  /** Use instead of `text`; replaces the message's blocks. Keep a widget's `widget_id` to keep viewers' widget state. */
+  rich_message?: BotRichMessage
   /** Parse Inline's supported Markdown surface. Defaults to true; false preserves literal syntax. */
   parse_markdown?: boolean
   actions?: BotMessageAction[][]
@@ -703,6 +768,14 @@ export type GetChatParticipantParams = {
 
 export type GetChatParticipantCountParams = {
   chat_id: BotInputId
+}
+
+export type GetContactsParams = {
+  /** Matches names and usernames; a leading @ is ignored. */
+  query?: string
+  kind?: "all" | "people" | "bots"
+  /** 1 to 50. Defaults to 20. */
+  limit?: number
 }
 
 export type AddThreadParticipantParams = {
@@ -865,6 +938,7 @@ export type BotMethodName =
   | "unpinMessage"
   | "getChatParticipant"
   | "getChatParticipantCount"
+  | "getContacts"
   | "addThreadParticipant"
   | "removeThreadParticipant"
   | "setThreadTitle"
@@ -910,6 +984,7 @@ export type BotMethodParamsByName = {
   unpinMessage: UnpinMessageParams
   getChatParticipant: GetChatParticipantParams
   getChatParticipantCount: GetChatParticipantCountParams
+  getContacts: GetContactsParams
   addThreadParticipant: AddThreadParticipantParams
   removeThreadParticipant: RemoveThreadParticipantParams
   setThreadTitle: SetThreadTitleParams
@@ -956,6 +1031,7 @@ export type BotMethodResultByName = {
   unpinMessage: EmptyResult
   getChatParticipant: GetChatParticipantResult
   getChatParticipantCount: GetChatParticipantCountResult
+  getContacts: GetContactsResult
   addThreadParticipant: EmptyResult
   removeThreadParticipant: EmptyResult
   setThreadTitle: EmptyResult

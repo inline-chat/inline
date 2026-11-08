@@ -122,6 +122,7 @@ impl Thread {
             reply_to: reply_to.map(|(message_id, author_user_id)| ReplyRef {
                 message_id,
                 author_user_id,
+                mentions_author: false,
             }),
             sent_at: message_id,
         }

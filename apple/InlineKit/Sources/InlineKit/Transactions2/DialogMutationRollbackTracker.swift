@@ -20,6 +20,7 @@ enum DialogRollbackField: Hashable, Sendable {
   case chatListHidden
   case unreadMark
   case unreadCount
+  case activityCounts
 
   func isEqual(_ lhs: Dialog, _ rhs: Dialog) -> Bool {
     switch self {
@@ -33,6 +34,8 @@ enum DialogRollbackField: Hashable, Sendable {
     case .chatListHidden: lhs.chatListHidden == rhs.chatListHidden
     case .unreadMark: lhs.unreadMark == rhs.unreadMark
     case .unreadCount: lhs.unreadCount == rhs.unreadCount
+    case .activityCounts:
+      lhs.unreadMentionsCount == rhs.unreadMentionsCount && lhs.unreadReactionsCount == rhs.unreadReactionsCount
     }
   }
 
@@ -48,6 +51,7 @@ enum DialogRollbackField: Hashable, Sendable {
     case .chatListHidden: target.chatListHidden = source.chatListHidden
     case .unreadMark: target.unreadMark = source.unreadMark
     case .unreadCount: target.unreadCount = source.unreadCount
+    case .activityCounts: target.copyActivityCounts(from: source)
     }
   }
 }

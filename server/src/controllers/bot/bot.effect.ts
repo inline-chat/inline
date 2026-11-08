@@ -13,6 +13,7 @@ import type {
   GetChatHistoryParams,
   GetChatParticipantCountParams,
   GetChatParticipantParams,
+  GetContactsParams,
   AddThreadParticipantParams,
   RemoveThreadParticipantParams,
   GetChatParams,
@@ -105,6 +106,7 @@ import {
   BotUpdateAgentSuccess,
   BotGetChatParticipantSuccess,
   BotGetChatParticipantCountSuccess,
+  BotGetContactsSuccess,
   BotGetFileSuccess,
   BotGetUpdatesSuccess,
   BotWebhookInfoSuccess,
@@ -112,6 +114,8 @@ import {
   BotMessageSuccess,
   BotForwardMessagesSuccess,
   BotMessageRuntimeSuccess,
+  BotSendMessageSuccess,
+  BotSendMessageRuntimeSuccess,
   BotMessagesRuntimeSuccess,
   BotMessagesSuccess,
   CreateReplyThreadInput,
@@ -144,6 +148,7 @@ import {
   PinMessageInput,
   GetChatParticipantInput,
   GetChatParticipantCountInput,
+  GetContactsInput,
   ThreadParticipantMutationInput,
   UpdateAgentInput,
   SetThreadTitleInput,
@@ -359,6 +364,7 @@ const BotMethodDocumentation = {
   unpinMessage: { summary: "Unpin a message", description: "Unpins one message in a chat." },
   getChatParticipant: { summary: "Get a chat participant", description: "Returns one participant of an accessible chat, with space membership when applicable." },
   getChatParticipantCount: { summary: "Get chat participant count", description: "Returns the number of participants in an accessible chat." },
+  getContacts: { summary: "Get contacts", description: "Returns the people and bots the authenticated bot works with, plus those of the person it acts for: its owner, bots the owner manages, people in shared chats and spaces, and bots it may use. Each contact says why it is one and, for bots, what the authenticated bot may do with it." },
   addThreadParticipant: { summary: "Add a thread participant", description: "Adds one user to a thread. The authenticated bot must have permission to manage that thread's participants." },
   removeThreadParticipant: { summary: "Remove a thread participant", description: "Removes one user from a thread. The authenticated bot must have permission to manage that thread's participants and cannot remove itself." },
   setThreadTitle: { summary: "Update thread title", description: "Changes a thread's title, emoji, or both. An empty emoji removes it." },
@@ -521,7 +527,7 @@ const HeaderBotEndpoints = {
     BotMethodDocumentation.sendMessage,
     {
       payload: SendMessageInput,
-      success: BotMessageSuccess,
+      success: BotSendMessageSuccess,
     },
   ),
   getChat: headerGet(
@@ -694,6 +700,7 @@ const HeaderBotEndpoints = {
   unpinMessage: headerPost("headerUnpinMessage", "/bot/unpinMessage", BotMethodDocumentation.unpinMessage, { payload: PinMessageInput, success: BotEmptySuccess }),
   getChatParticipant: headerGet("headerGetChatParticipant", "/bot/getChatParticipant", BotMethodDocumentation.getChatParticipant, { query: GetChatParticipantInput.fields, success: BotGetChatParticipantSuccess }),
   getChatParticipantCount: headerGet("headerGetChatParticipantCount", "/bot/getChatParticipantCount", BotMethodDocumentation.getChatParticipantCount, { query: GetChatParticipantCountInput.fields, success: BotGetChatParticipantCountSuccess }),
+  getContacts: headerGet("headerGetContacts", "/bot/getContacts", BotMethodDocumentation.getContacts, { query: GetContactsInput.fields, success: BotGetContactsSuccess }),
   addThreadParticipant: headerPost("headerAddThreadParticipant", "/bot/addThreadParticipant", BotMethodDocumentation.addThreadParticipant, { payload: ThreadParticipantMutationInput, success: BotEmptySuccess }),
   removeThreadParticipant: headerPost("headerRemoveThreadParticipant", "/bot/removeThreadParticipant", BotMethodDocumentation.removeThreadParticipant, { payload: ThreadParticipantMutationInput, success: BotEmptySuccess }),
   setThreadTitle: headerPost("headerSetThreadTitle", "/bot/setThreadTitle", BotMethodDocumentation.setThreadTitle, { payload: SetThreadTitleInput, success: BotEmptySuccess }),
@@ -722,7 +729,7 @@ const PathBotEndpoints = {
     BotMethodDocumentation.sendMessage,
     {
       payload: SendMessageInput,
-      success: BotMessageSuccess,
+      success: BotSendMessageSuccess,
     },
   ),
   getChat: pathGet(
@@ -895,6 +902,7 @@ const PathBotEndpoints = {
   unpinMessage: pathPost("pathUnpinMessage", "/bot:token/unpinMessage", BotMethodDocumentation.unpinMessage, { payload: PinMessageInput, success: BotEmptySuccess }),
   getChatParticipant: pathGet("pathGetChatParticipant", "/bot:token/getChatParticipant", BotMethodDocumentation.getChatParticipant, { query: GetChatParticipantInput.fields, success: BotGetChatParticipantSuccess }),
   getChatParticipantCount: pathGet("pathGetChatParticipantCount", "/bot:token/getChatParticipantCount", BotMethodDocumentation.getChatParticipantCount, { query: GetChatParticipantCountInput.fields, success: BotGetChatParticipantCountSuccess }),
+  getContacts: pathGet("pathGetContacts", "/bot:token/getContacts", BotMethodDocumentation.getContacts, { query: GetContactsInput.fields, success: BotGetContactsSuccess }),
   addThreadParticipant: pathPost("pathAddThreadParticipant", "/bot:token/addThreadParticipant", BotMethodDocumentation.addThreadParticipant, { payload: ThreadParticipantMutationInput, success: BotEmptySuccess }),
   removeThreadParticipant: pathPost("pathRemoveThreadParticipant", "/bot:token/removeThreadParticipant", BotMethodDocumentation.removeThreadParticipant, { payload: ThreadParticipantMutationInput, success: BotEmptySuccess }),
   setThreadTitle: pathPost("pathSetThreadTitle", "/bot:token/setThreadTitle", BotMethodDocumentation.setThreadTitle, { payload: SetThreadTitleInput, success: BotEmptySuccess }),
@@ -1101,6 +1109,7 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     HeaderBotEndpoints.unpinMessage,
     HeaderBotEndpoints.getChatParticipant,
     HeaderBotEndpoints.getChatParticipantCount,
+    HeaderBotEndpoints.getContacts,
     HeaderBotEndpoints.addThreadParticipant,
     HeaderBotEndpoints.removeThreadParticipant,
     HeaderBotEndpoints.setThreadTitle,
@@ -1144,6 +1153,7 @@ export const BotApiGroup = HttpApiGroup.make("bot")
     PathBotEndpoints.unpinMessage,
     PathBotEndpoints.getChatParticipant,
     PathBotEndpoints.getChatParticipantCount,
+    PathBotEndpoints.getContacts,
     PathBotEndpoints.addThreadParticipant,
     PathBotEndpoints.removeThreadParticipant,
     PathBotEndpoints.setThreadTitle,
@@ -1386,7 +1396,8 @@ const normalizeInputForSchema = (
     operation === "getUpdates" ||
     operation === "getAgent" ||
     operation === "getChatParticipant" ||
-    operation === "getChatParticipantCount"
+    operation === "getChatParticipantCount" ||
+    operation === "getContacts"
   const normalized = usesQueryIdCodecs
     ? { ...input }
     : normalizeIntegerFields(input, [
@@ -1409,6 +1420,9 @@ const normalizeInputForSchema = (
     if (parseMarkdown !== undefined) {
       normalized["parse_markdown"] =
         booleanForValidation(parseMarkdown)
+    }
+    if (operation === "sendMessage" && normalized["add_mentioned_users"] !== undefined) {
+      normalized["add_mentioned_users"] = booleanForValidation(normalized["add_mentioned_users"])
     }
   }
   if (
@@ -1558,6 +1572,7 @@ const validateInput = (
       case "unpinMessage": return Schema.decodeUnknownEffect(PinMessageInput)(value)
       case "getChatParticipant": return Schema.decodeUnknownEffect(GetChatParticipantInput)(value)
       case "getChatParticipantCount": return Schema.decodeUnknownEffect(GetChatParticipantCountInput)(value)
+      case "getContacts": return Schema.decodeUnknownEffect(GetContactsInput)(value)
       case "addThreadParticipant":
       case "removeThreadParticipant": return Schema.decodeUnknownEffect(ThreadParticipantMutationInput)(value)
       case "setThreadTitle": return Schema.decodeUnknownEffect(SetThreadTitleInput)(value)
@@ -1703,6 +1718,7 @@ const runOperation = (
       case "unpinMessage": return operations.unpinMessage(input as UnpinMessageParams, context)
       case "getChatParticipant": return operations.getChatParticipant(input as GetChatParticipantParams, context)
       case "getChatParticipantCount": return operations.getChatParticipantCount(input as GetChatParticipantCountParams, context)
+      case "getContacts": return operations.getContacts(input as GetContactsParams, context)
       case "addThreadParticipant": return operations.addThreadParticipant(input as AddThreadParticipantParams, context)
       case "removeThreadParticipant": return operations.removeThreadParticipant(input as RemoveThreadParticipantParams, context)
       case "setThreadTitle": return operations.setThreadTitle(input as SetThreadTitleParams, context)
@@ -1732,6 +1748,7 @@ const validateSuccessEnvelope = (
       case "getSpace":
         return Schema.decodeUnknownEffect(BotGetSpaceSuccess)(envelope)
       case "sendMessage":
+        return Schema.decodeUnknownEffect(BotSendMessageRuntimeSuccess)(envelope)
       case "editMessageText":
       case "editMessageActions":
       case "forwardMessage":
@@ -1768,6 +1785,7 @@ const validateSuccessEnvelope = (
         return Schema.decodeUnknownEffect(BotGetMySkillsSuccess)(envelope)
       case "getChatParticipant": return Schema.decodeUnknownEffect(BotGetChatParticipantSuccess)(envelope)
       case "getChatParticipantCount": return Schema.decodeUnknownEffect(BotGetChatParticipantCountSuccess)(envelope)
+      case "getContacts": return Schema.decodeUnknownEffect(BotGetContactsSuccess)(envelope)
       case "deleteMessage":
       case "deleteMessages":
       case "sendReaction":
@@ -2196,6 +2214,7 @@ export const makeBotRouteGroup = () => {
           .handleRaw("headerUnpinMessage", ({ request }) => execute("unpinMessage", request, undefined))
           .handleRaw("headerGetChatParticipant", ({ request }) => execute("getChatParticipant", request, undefined))
           .handleRaw("headerGetChatParticipantCount", ({ request }) => execute("getChatParticipantCount", request, undefined))
+          .handleRaw("headerGetContacts", ({ request }) => execute("getContacts", request, undefined))
           .handleRaw("headerAddThreadParticipant", ({ request }) => execute("addThreadParticipant", request, undefined))
           .handleRaw("headerRemoveThreadParticipant", ({ request }) => execute("removeThreadParticipant", request, undefined))
           .handleRaw("headerSetThreadTitle", ({ request }) => execute("setThreadTitle", request, undefined))
@@ -2321,6 +2340,7 @@ export const makeBotRouteGroup = () => {
           .handleRaw("pathUnpinMessage", ({ params, request }) => execute("unpinMessage", request, params.token))
           .handleRaw("pathGetChatParticipant", ({ params, request }) => execute("getChatParticipant", request, params.token))
           .handleRaw("pathGetChatParticipantCount", ({ params, request }) => execute("getChatParticipantCount", request, params.token))
+          .handleRaw("pathGetContacts", ({ params, request }) => execute("getContacts", request, params.token))
           .handleRaw("pathAddThreadParticipant", ({ params, request }) => execute("addThreadParticipant", request, params.token))
           .handleRaw("pathRemoveThreadParticipant", ({ params, request }) => execute("removeThreadParticipant", request, params.token))
           .handleRaw("pathSetThreadTitle", ({ params, request }) => execute("setThreadTitle", request, params.token))

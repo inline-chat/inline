@@ -28,6 +28,7 @@ final class MentionedParticipantsAccessManager {
     let groupParticipantIds: Set<Int64>
     let users: [UserInfo]
     let groups: [InlineKit.UserGroup]
+    let canRemoveParticipants: Bool
   }
 
   private enum GroupAction {
@@ -74,6 +75,7 @@ final class MentionedParticipantsAccessManager {
           database: database,
           peer: request.peer,
           chatId: request.chatId,
+          currentUserId: request.currentUserId,
           userIds: request.reservedUserIds,
           groupIds: request.reservedGroupIds
         )
@@ -87,7 +89,8 @@ final class MentionedParticipantsAccessManager {
           currentUserId: request.currentUserId,
           messageCount: snapshot.messageCount,
           participantIds: snapshot.participantIds,
-          pendingUserIds: request.pendingUserIds
+          pendingUserIds: request.pendingUserIds,
+          canRemoveParticipants: snapshot.canRemoveParticipants
         )
 
         let userAction = MentionedParticipantAddPolicy.action(
@@ -138,7 +141,7 @@ final class MentionedParticipantsAccessManager {
         handledUserIds.formUnion(userIds)
       case let .prompt(userIds):
         let items = Self.userItems(for: Self.userInfos(for: userIds, from: snapshot.users))
-        prompt(items, chatId: snapshot.chat.id)
+        prompt(items, chatId: snapshot.chat.id, allowsUndo: snapshot.canRemoveParticipants)
         handledUserIds.formUnion(userIds)
     }
 
@@ -149,7 +152,7 @@ final class MentionedParticipantsAccessManager {
         await autoAdd(items, chatId: snapshot.chat.id)
         handledGroupIds.formUnion(items.compactMap(\.group?.id))
       case let .prompt(items):
-        prompt(items, chatId: snapshot.chat.id)
+        prompt(items, chatId: snapshot.chat.id, allowsUndo: snapshot.canRemoveParticipants)
         handledGroupIds.formUnion(items.compactMap(\.group?.id))
     }
 
@@ -159,7 +162,83 @@ final class MentionedParticipantsAccessManager {
     )
   }
 
-  private func prompt(_ items: [MentionCompletionItem], chatId: Int64) {
+  /// After a send, offers to add recipients who can't open a private thread the
+  /// message links to. Runs off the main thread and never delays the send.
+  func promptForLinkedThreadAccess(text: String?, entities: MessageEntities?, peer: InlineKit.Peer) {
+    let currentUserId = Auth.shared.getCurrentUserId()
+    let database = AppDatabase.shared
+
+    Task.detached(priority: .utility) { [weak self] in
+      let gaps = await LinkedThreadAccess.findGaps(
+        text: text,
+        entities: entities,
+        destination: peer,
+        currentUserId: currentUserId,
+        database: database,
+        refreshRoster: { chatId in
+          _ = try? await Api.realtime.send(.getChatParticipants(chatID: chatId))
+        }
+      )
+      guard let gap = gaps.first else { return }
+      await self?.promptLinkAccess(gap)
+    }
+  }
+
+  private func promptLinkAccess(_ gap: LinkedThreadAccessGap) {
+    guard let composeView, let presenter = composeView.attachmentFlowPresenter(),
+          presenter.presentedViewController == nil
+    else { return }
+
+    let names = gap.users.map { $0.user.firstName ?? $0.user.displayName }
+    let who = names.count == 1 ? names[0] : "\(names.count) people"
+    let alert = UIAlertController(
+      title: "Add \(who) to \(gap.chatTitle)?",
+      message: "\(ListFormatter.localizedString(byJoining: names)) can't open the link you sent.",
+      preferredStyle: .actionSheet
+    )
+    alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self] _ in
+      Task { @MainActor [weak self] in
+        await self?.addLinkRecipients(gap)
+      }
+    })
+    alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
+
+    if let popover = alert.popoverPresentationController {
+      popover.sourceView = composeView.sendButton
+      popover.sourceRect = composeView.sendButton.bounds
+    }
+
+    presenter.present(alert, animated: true)
+  }
+
+  private func addLinkRecipients(_ gap: LinkedThreadAccessGap) async {
+    var added: [UserInfo] = []
+    for user in gap.users {
+      do {
+        try await Api.realtime.send(.addChatParticipant(chatID: gap.chat.id, userID: user.user.id))
+        added.append(user)
+      } catch {
+        log.error("Failed to add linked thread recipient", error: error)
+      }
+    }
+
+    guard !added.isEmpty else {
+      ToastManager.shared.showToast(
+        "Couldn't add them to \(gap.chatTitle)",
+        type: .error,
+        systemImage: "exclamationmark.triangle"
+      )
+      return
+    }
+    let who = added.count == 1 ? (added[0].user.firstName ?? added[0].user.displayName) : "\(added.count) people"
+    ToastManager.shared.showToast(
+      "Added \(who) to \(gap.chatTitle)",
+      type: .success,
+      systemImage: "person.badge.plus"
+    )
+  }
+
+  private func prompt(_ items: [MentionCompletionItem], chatId: Int64, allowsUndo: Bool) {
     guard !items.isEmpty else { return }
     guard let composeView, let presenter = composeView.attachmentFlowPresenter() else {
       release(items: items)
@@ -173,7 +252,7 @@ final class MentionedParticipantsAccessManager {
     )
     alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self] _ in
       Task { @MainActor [weak self] in
-        await self?.autoAdd(items, chatId: chatId)
+        await self?.autoAdd(items, chatId: chatId, allowsUndo: allowsUndo)
         self?.release(items: items)
       }
     })
@@ -189,7 +268,7 @@ final class MentionedParticipantsAccessManager {
     presenter.present(alert, animated: true)
   }
 
-  private func autoAdd(_ items: [MentionCompletionItem], chatId: Int64) async {
+  private func autoAdd(_ items: [MentionCompletionItem], chatId: Int64, allowsUndo: Bool = true) async {
     var addedItems: [MentionCompletionItem] = []
 
     for item in items {
@@ -218,10 +297,10 @@ final class MentionedParticipantsAccessManager {
       Self.addedToastMessage(for: addedItems),
       type: .success,
       systemImage: "person.badge.plus",
-      action: { [weak self] in
+      action: allowsUndo ? { [weak self] in
         self?.remove(addedItems, chatId: chatId)
-      },
-      actionTitle: "Undo"
+      } : nil,
+      actionTitle: allowsUndo ? "Undo" : nil
     )
   }
 
@@ -275,6 +354,7 @@ final class MentionedParticipantsAccessManager {
     database: AppDatabase,
     peer: InlineKit.Peer,
     chatId: Int64?,
+    currentUserId: Int64?,
     userIds: Set<Int64>,
     groupIds: Set<Int64>
   ) async throws -> Snapshot {
@@ -296,6 +376,19 @@ final class MentionedParticipantsAccessManager {
 
       let access = try ChatParticipantsWithMembersViewModel.effectiveParticipantAccess(db, for: chat)
 
+      let membership = try chat.spaceId.flatMap { spaceId -> InlineKit.Member? in
+        guard let currentUserId else { return nil }
+        return try InlineKit.Member
+          .filter(Column("spaceId") == spaceId)
+          .filter(Column("userId") == currentUserId)
+          .fetchOne(db)
+      }
+      let canRemoveParticipants = ChatParticipantPolicy.canRemove(
+        chat: chat,
+        currentUserId: currentUserId,
+        membership: membership
+      )
+
       let users = try User
         .filter(ids: Array(userIds))
         .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
@@ -312,7 +405,8 @@ final class MentionedParticipantsAccessManager {
         participantIds: access.userIds,
         groupParticipantIds: access.groupIds,
         users: users,
-        groups: groups
+        groups: groups,
+        canRemoveParticipants: canRemoveParticipants
       )
     }
   }
@@ -347,7 +441,9 @@ final class MentionedParticipantsAccessManager {
     guard !context.isPublic else { return .none }
     guard context.currentUserId != nil else { return .none }
 
-    if context.isReplyThread || context.messageCount < autoAddMessageLimit {
+    if context.canRemoveParticipants,
+       context.isReplyThread || context.messageCount < autoAddMessageLimit
+    {
       return .autoAdd(items)
     }
 

@@ -16,6 +16,7 @@ import { ChatModel } from "@in/server/db/models/chats"
 import { UsersModel } from "@in/server/db/models/users"
 import { agentSessions, chats, messages, type DbAgentSession, type DbChat } from "@in/server/db/schema"
 import { insertChatUpdate, pushChatUpdate } from "@in/server/modules/agents/chatUpdates"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import type { ServerUpdate } from "@in/server/protocol/server"
 import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
@@ -119,7 +120,26 @@ async function attentionAudience(chat: DbChat, botUserId: number, attention: Age
     return UsersModel.getActiveUserIds(requested.filter((id) => id === chat.minUserId || id === chat.maxUserId))
   }
   const access = await getEffectiveChatAccessUserIds(db, [chat.id], { userIds: requested })
-  return requested.filter((id) => access.get(chat.id)?.has(id))
+  const audience: number[] = []
+  for (const id of requested) {
+    if (access.get(chat.id)?.has(id)) audience.push(id)
+    // The bot's owner may not be in the thread (a friend asked their bot), but
+    // can open it through the bot to answer the approval.
+    else if (await canReadThroughBot(chat, botUserId, id)) audience.push(id)
+  }
+  return audience
+}
+
+async function canReadThroughBot(chat: DbChat, botUserId: number, userId: number): Promise<boolean> {
+  const bot = await UsersModel.getUserById(botUserId)
+  if (bot?.botCreatorId !== userId) return false
+  try {
+    await AccessGuards.ensureChatReadAccess(chat, userId)
+    return true
+  } catch (error) {
+    if (error instanceof RealtimeRpcError) return false
+    throw error
+  }
 }
 
 async function statusMessageId(row: DbAgentSession): Promise<bigint | undefined> {

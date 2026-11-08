@@ -150,11 +150,11 @@ Chat commands take several chats: repeat `-c`/`-u` or comma-separate ids. Batch 
 - `inline bots settings --bot-user-id 42 [--chat-id 7] [--output-mode detailed|friendly|default]`
   - Detailed shows every step; friendly shows short updates and the answer. Without `--output-mode`, print the setting. With `--chat-id`, show or set that thread's override (`default` clears it); otherwise the bot's default. Owner or configure access.
 - `inline bots access list --bot-user-id 42`
-  - List people with access to the bot (no grants means owner only).
-- `inline bots access grant --bot-user-id 42 --user-id 7 [--operations invoke,steer,approve,configure]`
-  - Grant or replace one person's access. Defaults to `invoke,steer`.
-- `inline bots access revoke --bot-user-id 42 --user-id 7`
-  - Revoke one person's access.
+  - List who can use the bot: people, spaces and user groups (no grants means owner only).
+- `inline bots access grant --bot-user-id 42 (--user-id 7 | --space-id 3 | --group-id 9) [--operations invoke,steer,approve,configure]`
+  - Grant or replace access for one person, everyone in a space you're in, or everyone in a user group. Defaults to `invoke,steer`. People's bots get use and steer through them, never approve or configure.
+- `inline bots access revoke --bot-user-id 42 (--user-id 7 | --space-id 3 | --group-id 9)`
+  - Revoke that access.
 
 ### typing
 

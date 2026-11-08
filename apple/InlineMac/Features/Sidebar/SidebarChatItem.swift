@@ -405,8 +405,8 @@ struct SidebarChatItemView: Equatable, View {
           toggleReadUnread()
         } label: {
           Label(
-            item.unread ? "Mark Read" : "Mark Unread",
-            systemImage: item.unread ? "checkmark.message.fill" : "envelope.badge.fill"
+            item.needsAttention ? "Mark Read" : "Mark Unread",
+            systemImage: item.needsAttention ? "checkmark.message.fill" : "envelope.badge.fill"
           )
         }
 
@@ -711,8 +711,8 @@ enum SidebarChatRowActionRunner {
   ) {
     Task(priority: .userInitiated) {
       do {
-        if item.unread {
-          UnreadManager.shared.readAll(item.peerId, chatId: item.chatId)
+        if item.needsAttention {
+          UnreadManager.shared.markChatRead(item.peerId, chatId: item.chatId)
           return
         }
 

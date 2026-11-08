@@ -116,6 +116,8 @@ export const chats = pgTable(
     parentChatIdIndex: index("chats_parent_chat_id_idx").on(table.parentChatId),
     /** Repair discovery and catalog refresh filter every reachable chat by recency. */
     lastUpdateDateIndex: index("chats_last_update_date_idx").on(table.lastUpdateDate),
+    /** DMs by their second user; (min_user_id, max_user_id) covers the first. */
+    maxUserIdIndex: index("chats_max_user_id_idx").on(table.maxUserId),
   }),
 )
 
@@ -134,6 +136,8 @@ export const chatParticipants = pgTable(
   (table) => ({
     /** Ensure unique participant per chat */
     uniqueParticipant: unique("unique_participant").on(table.chatId, table.userId),
+    /** A user's threads: contacts and reach. */
+    userIdIndex: index("chat_participants_user_id_idx").on(table.userId),
   }),
 )
 

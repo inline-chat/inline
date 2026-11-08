@@ -70,7 +70,11 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     read("list_my_threads", ToolTarget::None),
     read("get_reactions", ToolTarget::Accessible),
     read("list_pins", ToolTarget::Accessible),
-    // Send, reply, mention, react, pin.
+    // Where a thread sits: its parent, subthreads and threads linking here.
+    read("get_related_threads", ToolTarget::Accessible),
+    // People and agents the agent (or its owner) knows, to mention and ask.
+    read("find_contacts", ToolTarget::None),
+    // Send, reply, mention (asking a person or agent), react, pin.
     write("send_message", ToolTarget::Accessible, false),
     write("add_reaction", ToolTarget::Accessible, false),
     write("remove_reaction", ToolTarget::Accessible, false),
@@ -81,10 +85,18 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     write("create_chat", ToolTarget::None, true),
     write("start_subthread", ToolTarget::CurrentWork, false),
     write("return_attachment", ToolTarget::CurrentWork, true),
-    // Ask a teammate (a question mention in the current work).
-    write("ask_teammate", ToolTarget::CurrentWork, false),
     // Follow or unfollow a thread, as people do with /follow.
     write("follow_thread", ToolTarget::Accessible, false),
+    // The owner DM's lead session: task subthreads it starts and steers,
+    // after Codex's sub-agent tools (spawn, send, interrupt, list, wait).
+    // The runtime limits these to the DM's work and this agent's own works.
+    read("list_tasks", ToolTarget::None),
+    read("wait_tasks", ToolTarget::None),
+    // Tell the owner in their DM, which the DM's lead also sees.
+    write("notify_owner", ToolTarget::None, false),
+    write("spawn_thread", ToolTarget::None, false),
+    write("send_to_thread", ToolTarget::Accessible, false),
+    write("stop_thread", ToolTarget::Accessible, false),
 ];
 
 pub fn tool(name: &str) -> Option<&'static ToolDescriptor> {
@@ -224,7 +236,7 @@ mod tests {
             "create_chat",
             "start_subthread",
             "return_attachment",
-            "ask_teammate",
+            "find_contacts",
         ] {
             assert!(tool(name).is_some(), "{name}");
         }
@@ -235,6 +247,8 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), TOOL_CATALOG.len());
+        // Asking someone is a message that mentions them.
+        assert!(tool("ask_teammate").is_none());
         assert!(
             TOOL_CATALOG
                 .iter()

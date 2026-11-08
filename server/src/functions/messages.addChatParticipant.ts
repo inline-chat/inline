@@ -1,4 +1,6 @@
+import { UsersModel } from "@in/server/db/models/users"
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
+import { ensureBotCanReach } from "@in/server/modules/contacts/contacts"
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { chatParticipantGroups } from "@in/server/db/schema/userGroups"
@@ -27,7 +29,7 @@ import {
   type PreparedChatPermissionUpdate,
 } from "@in/server/modules/authorization/chatPermissionUpdates"
 import {
-  ensureCanManageChatParticipants,
+  ensureCanAddChatParticipants,
   ensureUserCanParticipateInChat,
 } from "@in/server/modules/authorization/spaceThreadGuards"
 import {
@@ -48,6 +50,12 @@ type AddChatParticipantOutput = {
   groupParticipant?: ChatParticipantGroup
   group?: UserGroup
   users: User[]
+}
+
+/** Bots add only their contacts or their owner's. People aren't limited. */
+async function ensureActorCanReach(actorUserId: number, targetUserId: number, action: string): Promise<void> {
+  const actor = await UsersModel.getUserById(actorUserId)
+  if (actor?.bot === true) await ensureBotCanReach(actor, targetUserId, { action })
 }
 
 export async function addChatParticipant(
@@ -90,8 +98,9 @@ export async function addChatParticipant(
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
       }
 
-      await ensureCanManageChatParticipants(chat, context.currentUserId)
+      await ensureCanAddChatParticipants(chat, context.currentUserId, tx)
       await ensureUserCanParticipateInChat(chat, userId)
+      await ensureActorCanReach(context.currentUserId, userId, "add_participant")
 
       // Check if user exists
       const user = await tx
@@ -271,7 +280,7 @@ async function addChatParticipantGroup(
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
       }
 
-      await ensureCanManageChatParticipants(chat, context.currentUserId)
+      await ensureCanAddChatParticipants(chat, context.currentUserId, tx)
       await ensureGroupCanParticipateInChat(chat, input.groupId)
 
       const [existing] = await tx

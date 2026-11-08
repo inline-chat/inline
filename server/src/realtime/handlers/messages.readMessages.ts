@@ -15,6 +15,7 @@ export const readMessages = async (
     {
       peer: input.peerId,
       maxId: input.maxId !== undefined ? Number(input.maxId) : undefined,
+      readActivity: input.readActivity === true,
     },
     {
       currentSessionId: handlerContext.sessionId,

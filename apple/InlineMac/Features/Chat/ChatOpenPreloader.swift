@@ -10,6 +10,10 @@ struct PreparedChatPayload: Sendable {
   let chatItem: SpaceChatItem?
   let messagesInitialState: MessagesProgressiveViewModel.InitialState
   let pinnedMessage: PreparedPinnedMessage?
+  /// The unread line's boundary when the history around it isn't cached and is being fetched.
+  /// The list holds a loading state over these latest messages until the fetch lands, then
+  /// opens at the line. Nil when nothing is fetched, including offline.
+  let unreadFetchBoundary: Int64?
 }
 
 struct PreparedPinnedMessage: Sendable, Equatable {
@@ -69,10 +73,39 @@ actor ChatOpenPreloader {
       try Task.checkCancellation()
     }
 
+    // The dialog decides the window, and the chat view reads the same snapshot for its
+    // unread line, so both agree on where the chat opens.
+    let chatItem = try await database.reader.read { db in
+      try Self.fetchChatItem(peer: peer, db: db)
+    }
+    let unreadBoundary = targetMessageId == nil
+      ? chatItem.flatMap {
+        ChatUnreadOpening.boundary(unreadCount: $0.dialog.unreadCount, readInboxMaxId: $0.dialog.readInboxMaxId)
+      }
+      : nil
+    let unreadWindow: (messages: [FullMessage], publicationRevision: UInt64)? = if let unreadBoundary {
+      try await localUnreadOpeningWindow(peer: peer, boundary: unreadBoundary, latestLimit: initialLimit, database: database)
+    } else {
+      nil
+    }
+    // Opening never waits on the network. Uncached history is fetched behind a loading state, but
+    // only when a fetch can actually run: offline, the latest cached messages open as they are.
+    let unreadFetchBoundary: Int64?
+    if let unreadBoundary, unreadWindow == nil,
+       await MainActor.run(body: { Api.realtime.stateObject.connectionState != .connecting })
+    {
+      unreadFetchBoundary = unreadBoundary
+    } else {
+      unreadFetchBoundary = nil
+    }
+    try Task.checkCancellation()
+
     // Taken before the read, so updates published while it runs are reconciled by the view model.
-    let publicationRevision = await MainActor.run {
+    // An unread window was read earlier, after its own revision.
+    let currentRevision = await MainActor.run {
       MessagesPublisher.shared.publicationRevision(for: peer)
     }
+    let publicationRevision = unreadWindow?.publicationRevision ?? currentRevision
     let payload = try await database.reader.read { db in
       let readSignpostID = OSSignpostID(log: Self.signpostLog)
       os_signpost(
@@ -90,15 +123,6 @@ actor ChatOpenPreloader {
           name: "ChatPreloaderDatabaseRead",
           signpostID: readSignpostID
         )
-      }
-
-      let chatItem: SpaceChatItem?
-      do {
-        try Task.checkCancellation()
-        let signpostID = OSSignpostID(log: Self.signpostLog)
-        os_signpost(.begin, log: Self.signpostLog, name: "ChatPreloaderFetchChatItem", signpostID: signpostID)
-        defer { os_signpost(.end, log: Self.signpostLog, name: "ChatPreloaderFetchChatItem", signpostID: signpostID) }
-        chatItem = try Self.fetchChatItem(peer: peer, db: db)
       }
 
       let threadAnchor: FullMessage?
@@ -133,7 +157,7 @@ actor ChatOpenPreloader {
             "messages=\(messageCount)"
           )
         }
-        messages = try Self.fetchInitialMessages(
+        messages = try unreadWindow?.messages ?? Self.fetchInitialMessages(
           peer: peer,
           limit: initialLimit,
           targetMessageId: targetMessageId,
@@ -190,7 +214,8 @@ actor ChatOpenPreloader {
         targetMessageId: targetMessageId,
         chatItem: chatItem,
         messagesInitialState: messagesInitialState,
-        pinnedMessage: pinnedMessage
+        pinnedMessage: pinnedMessage,
+        unreadFetchBoundary: unreadFetchBoundary
       )
     }
     try Task.checkCancellation()
@@ -199,6 +224,7 @@ actor ChatOpenPreloader {
     let likelyVisibleMessages = Self.likelyVisibleMessages(
       in: payload.messagesInitialState.messages,
       targetMessageId: targetMessageId,
+      unreadBoundary: unreadWindow == nil ? nil : unreadBoundary,
       limit: InlineTinyThumbnailWarmupPolicy.firstPresentationMessageLimit
     )
     let thumbnailWarmup = await InlineTinyThumbnailPrewarmer.beginWarmup(
@@ -220,9 +246,19 @@ actor ChatOpenPreloader {
   private static func likelyVisibleMessages(
     in messages: [FullMessage],
     targetMessageId: Int64?,
+    unreadBoundary: Int64?,
     limit: Int
   ) -> [FullMessage] {
     guard !messages.isEmpty, limit > 0 else { return [] }
+
+    // The list opens with the unread line at the top, so the rows after it are the visible ones.
+    if targetMessageId == nil, let unreadBoundary,
+       let firstUnread = messages.firstIndex(where: { $0.message.messageId > unreadBoundary })
+    {
+      let end = min(messages.count, firstUnread + limit)
+      let start = max(0, end - limit)
+      return Array(messages[start ..< end])
+    }
 
     guard let targetMessageId,
           let targetIndex = messages.firstIndex(where: { $0.message.messageId == targetMessageId })
@@ -253,6 +289,23 @@ actor ChatOpenPreloader {
     }
 
     return try item.map { try fillMissingChat(in: $0, peer: peer, db: db) }
+  }
+
+  /// The cached window a chat with unread messages opens on, read with the publication revision
+  /// taken before it: the latest page or the window around the boundary. Nil when the cache
+  /// cannot show the line.
+  private func localUnreadOpeningWindow(
+    peer: Peer,
+    boundary: Int64,
+    latestLimit: Int,
+    database: AppDatabase
+  ) async throws -> (messages: [FullMessage], publicationRevision: UInt64)? {
+    let revision = await MainActor.run { MessagesPublisher.shared.publicationRevision(for: peer) }
+    let window = try await database.reader.read { db in
+      let latest = try Self.fetchLatestMessages(peer: peer, limit: latestLimit, db: db)
+      return try ChatUnreadOpening.localOpeningWindow(db, peer: peer, boundary: boundary, latest: latest)
+    }
+    return window.map { ($0, revision) }
   }
 
   private static func fetchInitialMessages(

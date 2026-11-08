@@ -12,7 +12,6 @@ type Input = {
   pushNotificationProvider?: SessionPushNotificationProvider
   pushContentEncryptionKey?: PushContentEncryptionKeyInput
   pushContentVersion?: number
-  supportsFilteredSyncPushes?: boolean
 }
 
 export const updatePushNotificationDetails = async (input: Input, context: FunctionContext): Promise<void> => {
@@ -21,6 +20,5 @@ export const updatePushNotificationDetails = async (input: Input, context: Funct
     pushNotificationProvider: input.pushNotificationProvider,
     pushContentEncryptionKey: input.pushContentEncryptionKey,
     pushContentVersion: input.pushContentVersion,
-    supportsFilteredSyncPushes: input.supportsFilteredSyncPushes,
   })
 }

@@ -798,6 +798,7 @@ struct SidebarView: View {
         : nil,
       descendantUnreadCount: projectedItem.descendantUnreadCount,
       descendantProminentUnreadCount: projectedItem.descendantProminentUnreadCount,
+      descendantActivityBadge: projectedItem.descendantActivityBadge,
       actions: SidebarNativeRowConfiguration.ChatActions(
         open: { openChat(item) },
         close: { closeChat(item) },
@@ -835,10 +836,14 @@ struct SidebarView: View {
   }
 
   /// The hover + on a chat row starts a thread nested under it. On a direct
-  /// chat with an agent, the thread includes the agent.
+  /// chat with an agent, the thread includes the agent. Subthread rows don't
+  /// get one.
   private func newSubthreadAction(for item: SidebarViewModel.Item) -> (() -> Void)? {
     // Experimental and agent-only: plain chats and folders show no hover +.
-    guard agentRowNewThreadEnabled, isArchiveVisible == false, isTemporaryItem(item) == false,
+    guard agentRowNewThreadEnabled,
+          isArchiveVisible == false,
+          item.parentChatId == nil,
+          isTemporaryItem(item) == false,
           let botID = agents.agentBotID(for: item.peerId)
     else { return nil }
     return {
@@ -1798,8 +1803,8 @@ struct SidebarView: View {
   }
 
   private func markAllRead(in nodeID: SidebarCollectionNodeID) {
-    for item in appKitSidebarTree.items(includingDescendantsOf: nodeID) where item.unread {
-      UnreadManager.shared.readAll(item.peerId, chatId: item.chatId)
+    for item in appKitSidebarTree.items(includingDescendantsOf: nodeID) where item.needsAttention {
+      UnreadManager.shared.markChatRead(item.peerId, chatId: item.chatId)
     }
   }
 
@@ -2697,8 +2702,8 @@ struct SidebarView: View {
   }
 
   private func markAllOpenChatsRead() {
-    for item in openSectionItems() where item.unread {
-      UnreadManager.shared.readAll(item.peerId, chatId: item.chatId)
+    for item in openSectionItems() where item.needsAttention {
+      UnreadManager.shared.markChatRead(item.peerId, chatId: item.chatId)
     }
   }
 

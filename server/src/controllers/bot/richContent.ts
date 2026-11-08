@@ -526,6 +526,9 @@ const encodeBlocks = (input: {
           is_rtl: trueOrUndefined(table.isRtl),
         }]
       }
+      case "widget":
+        // The block validator rejects widgets until widget sending lands.
+        return []
       case undefined:
         return []
     }

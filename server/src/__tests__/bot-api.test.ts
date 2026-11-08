@@ -5,7 +5,7 @@ import { users } from "@in/server/db/schema/users"
 import { generateToken, hashToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { MessageModel } from "@in/server/db/models/messages"
-import { setupTestLifecycle } from "./setup"
+import { setupTestLifecycle, testUtils } from "./setup"
 
 async function createBotSession(username: string) {
   const [bot] = await db
@@ -1210,5 +1210,79 @@ describe("Bot HTTP API", () => {
     const duplicateJson = await duplicateRes.json()
     expect(duplicateJson.ok).toBe(false)
     expect(duplicateJson.error_code).toBe(400)
+  })
+
+  it("lists a bot's contacts with its owner and mentions add people to its threads", async () => {
+    const insertUser = async (values: { firstName: string; username: string; bot?: boolean; botCreatorId?: number }) => {
+      const [user] = await db
+        .insert(users)
+        .values({ ...values, emailVerified: false, phoneVerified: false, pendingSetup: false })
+        .returning()
+      return user!
+    }
+    const mo = await insertUser({ firstName: "Mo", username: "contacts_mo" })
+    const dena = await insertUser({ firstName: "Dena", username: "contacts_dena" })
+    const claude = await insertUser({ firstName: "Mo Claude", username: "contacts_claude_bot", bot: true, botCreatorId: mo.id })
+    const codex = await insertUser({ firstName: "Mo Codex", username: "contacts_codex_bot", bot: true, botCreatorId: mo.id })
+    await testUtils.createDMWithDialogAndMessage({ spaceId: null as any, userA: mo, userB: dena })
+
+    const { token } = await generateToken(claude.id)
+    await SessionsModel.create({ userId: claude.id, tokenHash: hashToken(token), personalData: {}, clientType: "api" })
+    const get = (path: string) =>
+      app.handle(new Request(`http://localhost/bot/${path}`, { headers: { Authorization: `Bearer ${token}` } }))
+    const post = (method: string, body: Record<string, unknown>) =>
+      app.handle(new Request(`http://localhost/bot/${method}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }))
+
+    const meRes = await get("getMe")
+    expect(meRes.status).toBe(200)
+    expect((await meRes.json()).result.user).toMatchObject({ id: claude.id, is_bot: true, owner_id: mo.id })
+
+    const contactsRes = await get("getContacts")
+    expect(contactsRes.status).toBe(200)
+    const contacts = (await contactsRes.json()).result.contacts as any[]
+    const byId = new Map(contacts.map((contact) => [contact.user.id, contact]))
+    expect(contacts[0]).toMatchObject({ user: { id: mo.id, is_bot: false }, relations: ["owner"], via_owner: false })
+    expect(contacts[0].user).not.toHaveProperty("owner_id")
+    expect(contacts[0]).not.toHaveProperty("bot_operations")
+    expect(byId.get(codex.id)).toMatchObject({
+      user: { id: codex.id, is_bot: true, username: "contacts_codex_bot", owner_id: mo.id },
+      relations: ["managed"],
+      via_owner: true,
+      bot_operations: ["invoke", "steer"],
+      manages_bot: true,
+    })
+    expect(byId.get(dena.id)).toMatchObject({ relations: ["shared_chat"], via_owner: true })
+
+    const botsRes = await get("getContacts?kind=bots&limit=5")
+    expect(botsRes.status).toBe(200)
+    expect((await botsRes.json()).result.contacts.map((contact: any) => contact.user.id)).toEqual([codex.id])
+
+    const searchRes = await get("getContacts?query=%40dena")
+    expect((await searchRes.json()).result.contacts.map((contact: any) => contact.user.id)).toEqual([dena.id])
+
+    const threadRes = await post("createThread", { title: "Contacts plan", participants: [mo.id] })
+    expect(threadRes.status).toBe(200)
+    const threadChatId = (await threadRes.json()).result.chat.chat_id as number
+
+    const plainRes = await post("sendMessage", { chat_id: threadChatId, text: "no flag" })
+    expect(plainRes.status).toBe(200)
+    expect((await plainRes.json()).result).not.toHaveProperty("added_user_ids")
+
+    const sendRes = await post("sendMessage", {
+      chat_id: threadChatId,
+      text: `[@Dena](inline://user?id=${dena.id}) can you check?`,
+      add_mentioned_users: true,
+    })
+    expect(sendRes.status).toBe(200)
+    const sent = (await sendRes.json()).result
+    expect(sent.added_user_ids).toEqual([dena.id])
+    expect(sent.unadded_user_ids).toEqual([])
+
+    const participantRes = await get(`getChatParticipant?chat_id=${threadChatId}&user_id=${dena.id}`)
+    expect(participantRes.status).toBe(200)
   })
 })

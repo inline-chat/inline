@@ -84,6 +84,7 @@ message ServerUpdate {
     UpdateAgentRuntime user_agent_runtime = 53;
     UpdateAgentSessionControl user_agent_session_control = 54;
     UpdateAgentSettings user_agent_settings = 55;
+    UpdateUnreadActivity user_unread_activity = 56;
   }
 }
 

@@ -166,7 +166,7 @@ struct InChatSearchBar: View {
     .padding(.leading, 12)
     .padding(.trailing, 10)
     .frame(height: Self.fieldHeight)
-    .inChatSearchGlass(in: Capsule())
+    .inChatSearchGlass(in: Capsule(), interactive: true)
   }
 
   /// Return jumps to the highlighted preview, or steps older over the chat.
@@ -205,9 +205,7 @@ struct InChatSearchResultsPanel: View {
   var body: some View {
     content
       .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
-      // Tall regular glass turns thick and frosted, unlike the thin field; clear glass keeps
-      // the chat showing through as the list fills.
-      .inChatSearchGlass(in: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous), clear: true)
+      .inChatSearchGlass(in: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
   }
 
   @ViewBuilder
@@ -245,6 +243,7 @@ struct InChatSearchResultsPanel: View {
                 cornerRadius: Self.rowCornerRadius
               ))
               .id(hit.messageId)
+              .onAppear { model.loadMoreIfNeeded(after: hit) }
             }
             footer
           }
@@ -266,7 +265,7 @@ struct InChatSearchResultsPanel: View {
 
   @ViewBuilder
   private var footer: some View {
-    if model.isCounting {
+    if model.isLoadingMore {
       HStack(spacing: 6) {
         ProgressView().controlSize(.mini)
         Text("Searching older messages…").foregroundStyle(.secondary)
@@ -285,7 +284,7 @@ struct InChatSearchResultsPanel: View {
 
   private var listHeight: CGFloat {
     let rows = CGFloat(min(model.matches.count, Self.maxVisibleRows))
-    let footer = model.isCounting || model.remoteFailed ? Self.footerHeight : 0
+    let footer = model.isLoadingMore || model.remoteFailed ? Self.footerHeight : 0
     return rows * Self.rowHeight + footer + Self.inset * 2
   }
 }
@@ -403,21 +402,34 @@ private struct InChatSearchGlassContainer<Content: View>: View {
 }
 
 private extension View {
-  /// Interactive Liquid Glass on macOS 26, a material with an edge and shadow before it.
-  /// `clear` keeps a large surface see-through. Apple's guidance for clear glass is a dimming
-  /// layer beneath it so content stays legible; the window color is light in light mode and
-  /// dark in dark mode.
-  @ViewBuilder
-  func inChatSearchGlass(in shape: some Shape, clear: Bool = false) -> some View {
+  /// The Cmd+K / menu material: regular Liquid Glass over a light tint on macOS 26, the popover
+  /// material before it. `interactive` adds the press response for controls.
+  func inChatSearchGlass(in shape: some Shape, interactive: Bool = false) -> some View {
+    modifier(InChatSearchGlassMaterial(shape: shape, interactive: interactive))
+  }
+}
+
+private struct InChatSearchGlassMaterial<S: Shape>: ViewModifier {
+  let shape: S
+  let interactive: Bool
+  @Environment(\.colorScheme) private var colorScheme
+
+  /// The same tint Cmd+K uses under its glass.
+  private var tint: Color {
+    colorScheme == .dark ? Color.black.opacity(0.14) : Color.white.opacity(0.16)
+  }
+
+  func body(content: Content) -> some View {
     if #available(macOS 26.0, *) {
-      if clear {
-        glassEffect(.clear.interactive(), in: shape)
-          .background(shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.7)))
-      } else {
-        glassEffect(.regular.interactive(), in: shape)
-      }
+      content
+        .background(shape.fill(tint))
+        .glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
     } else {
-      background(.regularMaterial, in: shape)
+      content
+        .background(VisualEffectView(material: .popover, blendingMode: .withinWindow))
+        .background(shape.fill(tint))
+        .compositingGroup()
+        .clipShape(shape)
         .overlay(shape.stroke(Color.primary.opacity(0.08)))
         .shadow(color: .black.opacity(0.12), radius: 8, y: 2)
     }

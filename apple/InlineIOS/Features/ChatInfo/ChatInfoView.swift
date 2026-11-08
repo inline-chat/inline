@@ -94,8 +94,13 @@ struct ChatInfoView: View {
     currentMemberRole == .owner || currentMemberRole == .admin
   }
 
+  /// Anyone who can see a private thread may add people to it.
+  var canAddParticipants: Bool {
+    ChatParticipantPolicy.canAdd(chat: currentChat)
+  }
+
   /// Mirrors `ensureCanManageChatParticipants` on the server: the chat's creator
-  /// may always add or remove people; in a space, so may its owners and admins.
+  /// may always remove people; in a space, so may its owners and admins.
   var canManageParticipants: Bool {
     guard isPrivate else { return false }
     if let currentUserId = Auth.shared.getCurrentUserId(), currentChat?.createdBy == currentUserId {
@@ -259,6 +264,7 @@ struct ChatInfoView: View {
                     isSearching: $isSearching,
                     isPrivate: isPrivate,
                     isDM: isDM,
+                    canAddParticipants: canAddParticipants,
                     canManageParticipants: canManageParticipants,
                     canChangeVisibility: canChangeChatVisibility,
                     participants: participantsWithMembersViewModel.participants,
@@ -1145,7 +1151,7 @@ struct InfoTabView: View {
       GridItem(.flexible()),
       GridItem(.flexible()),
     ], spacing: 16) {
-      if chatInfoView.canManageParticipants {
+      if chatInfoView.canAddParticipants {
         Button(action: {
           chatInfoView.isSearching = true
         }) {

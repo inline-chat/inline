@@ -30,6 +30,7 @@ struct SidebarProjectedItem: Equatable, Identifiable {
   let childCount: Int
   let descendantUnreadCount: Int
   let descendantProminentUnreadCount: Int
+  var descendantActivityBadge: ChatListActivityBadge? = nil
   let isExpanded: Bool
 
   var id: ChatListItem.Identifier { item.id }
@@ -125,19 +126,23 @@ struct SidebarCollectionTree {
   ) -> [SidebarProjectedNode] {
     // Reduce the full tree once, including descendants hidden by collapse.
     var unreadByID: [NodeID: (count: Int, prominent: Int)] = [:]
-    func aggregate(_ id: NodeID) -> (count: Int, prominent: Int) {
+    var descendantActivityByID: [NodeID: ChatListActivityBadge] = [:]
+    func aggregate(_ id: NodeID) -> (count: Int, prominent: Int, activity: ChatListActivityBadge?) {
       let item = id.chatID.flatMap { itemByID[$0] }
       var total = (
         count: item?.unread == true ? 1 : 0,
         prominent: item?.unread == true && item?.prominentUnreadDot == true ? 1 : 0
       )
+      var descendantActivity: ChatListActivityBadge?
       for childID in snapshot.nodes[id]?.childIDs ?? [] {
         let child = aggregate(childID)
         total.count += child.count
         total.prominent += child.prominent
+        descendantActivity = .strongest(descendantActivity, child.activity)
       }
       unreadByID[id] = total
-      return total
+      descendantActivityByID[id] = descendantActivity
+      return (total.count, total.prominent, .strongest(item?.activityBadge, descendantActivity))
     }
     for section in snapshot.sections {
       for id in section.rootIDs { _ = aggregate(id) }
@@ -159,6 +164,7 @@ struct SidebarCollectionTree {
           descendantUnreadCount: (unreadByID[projected.id]?.count ?? 0) - (item.unread ? 1 : 0),
           descendantProminentUnreadCount: (unreadByID[projected.id]?.prominent ?? 0)
             - (item.unread && item.prominentUnreadDot ? 1 : 0),
+          descendantActivityBadge: descendantActivityByID[projected.id],
           isExpanded: isExpanded
         ))
       case let .folder(id):

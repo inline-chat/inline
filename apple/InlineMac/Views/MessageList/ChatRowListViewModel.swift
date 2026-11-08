@@ -165,6 +165,10 @@ final class ChatRowListViewModel {
     try await progressiveViewModel.loadLatestWindowAsync()
   }
 
+  func loadUnreadOpeningWindow(boundary: Int64) async throws -> Bool {
+    try await progressiveViewModel.loadUnreadOpeningWindowAsync(boundary: boundary)
+  }
+
   func setAtBottom(_ atBottom: Bool) {
     progressiveViewModel.setAtBottom(atBottom)
   }
@@ -476,10 +480,25 @@ final class ChatRowListViewModel {
     reindex()
   }
 
+  /// The message the unread line sits above, fixed for the visit once a window shows it, so
+  /// later windows and new messages never move it.
+  private(set) var unreadLineMessageId: Int64?
+
+  private func resolveUnreadLineMessageId(in messages: [FullMessage]) -> Int64? {
+    if let unreadLineMessageId { return unreadLineMessageId }
+    guard let showUnreadAfter else { return nil }
+    unreadLineMessageId = ChatUnreadOpening.firstUnreadMessageId(
+      in: messages,
+      boundary: showUnreadAfter,
+      of: progressiveViewModel
+    )
+    return unreadLineMessageId
+  }
+
   private func makeRows(for messages: [FullMessage]) -> [Row] {
     Self.makeRows(
       messages: messages,
-      showUnreadAfter: showUnreadAfter,
+      unreadLineMessageId: resolveUnreadLineMessageId(in: messages),
       showsCollapsedHistory: collapsedMaxId != nil,
       parentMessageStableId: threadAnchor?.id
     )
@@ -487,7 +506,7 @@ final class ChatRowListViewModel {
 
   private static func makeRows(
     messages: [FullMessage],
-    showUnreadAfter: Int64?,
+    unreadLineMessageId: Int64?,
     showsCollapsedHistory: Bool,
     parentMessageStableId: Int64?
   ) -> [Row] {
@@ -504,21 +523,18 @@ final class ChatRowListViewModel {
     }
 
     var prevDayStart: Date?
-    var didInsertUnread = false
 
     for msg in messages {
+      // The unread line goes above the date that starts with the first unread message, so
+      // opening with the line at the top still shows that date.
+      if let unreadLineMessageId, msg.message.messageId == unreadLineMessageId {
+        out.append(.unreadSeparator)
+      }
+
       let dayStart = dayStart(for: msg.message.date)
       if prevDayStart == nil || dayStart != prevDayStart {
         out.append(.daySeparator(dayStart: dayStart))
         prevDayStart = dayStart
-      }
-
-      if !didInsertUnread,
-         let showUnreadAfter,
-         msg.message.messageId > showUnreadAfter
-      {
-        out.append(.unreadSeparator)
-        didInsertUnread = true
       }
 
       out.append(.message(id: msg.id))

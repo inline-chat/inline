@@ -2819,6 +2819,7 @@ class GlassComposeAppKit: NSView {
     else if attachmentItemsSnapshot.isEmpty {
       keepCurrentChatInSidebar()
 
+      mentionedParticipants.promptForLinkedThreadAccess(text: text, entities: entities, peer: destinationPeerId)
       mentionedParticipants.handle(entities: entities, peer: destinationPeerId, chat: chat) {
         Task.detached(priority: .userInitiated) { // @MainActor in
           try await Api.realtime.send(
@@ -2853,6 +2854,7 @@ class GlassComposeAppKit: NSView {
     // With image/file/video
     else {
       keepCurrentChatInSidebar()
+      mentionedParticipants.promptForLinkedThreadAccess(text: text, entities: entities, peer: destinationPeerId)
       mentionedParticipants.handle(entities: entities, peer: destinationPeerId, chat: chat) {
         enqueueAttachments(replyToMessageId: replyToMsgId)
       }

@@ -3,6 +3,7 @@ import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getMessageThreadProjectionsMap } from "@in/server/modules/subthreads"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { applyUnreadActivityFlags } from "@in/server/modules/activityItems"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 import { MAX_HISTORY_ID, withHistorySnapshot } from "@in/server/modules/message/historySnapshot"
@@ -41,19 +42,19 @@ export const getMessages = async (input: Input, context: FunctionContext): Promi
 
     const canonicalPeer = Encoders.peerFromChat(chat, { currentUserId: context.currentUserId })
 
-    return {
-      seq: BigInt(chat.updateSeq ?? 0),
-      messages: orderedMessages.map((message) => {
-        const threadProjection = threadProjections.get(message.messageId)
-        return Encoders.fullMessage({
-          message,
-          encodingForUserId: context.currentUserId,
-          encodingForPeer: { inputPeer: canonicalPeer },
-          replies: threadProjection?.replies,
-          subthread: threadProjection?.subthread,
-        })
-      }),
-    }
+    const encodedMessages = orderedMessages.map((message) => {
+      const threadProjection = threadProjections.get(message.messageId)
+      return Encoders.fullMessage({
+        message,
+        encodingForUserId: context.currentUserId,
+        encodingForPeer: { inputPeer: canonicalPeer },
+        replies: threadProjection?.replies,
+        subthread: threadProjection?.subthread,
+      })
+    })
+    await applyUnreadActivityFlags({ userId: context.currentUserId, chatId: chat.id, messages: encodedMessages, tx })
+
+    return { seq: BigInt(chat.updateSeq ?? 0), messages: encodedMessages }
   })
 }
 
