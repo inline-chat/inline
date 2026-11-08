@@ -4988,11 +4988,11 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
           forwardItem.submenu = ForwardMessageMenu.make(messages: [fullMessage], dependencies: dependencies)
         }
         menu.addItem(forwardItem)
-        if ExperimentalFeatureFlags.macMessageSelectionEnabled, message.messageId > 0,
+        if message.messageId > 0,
            message.status == nil || message.status == .sent
         {
           let selectItem = NSMenuItem(
-            title: "Select Messages", action: #selector(selectMessagesForForwarding), keyEquivalent: ""
+            title: "Select", action: #selector(selectMessagesForForwarding), keyEquivalent: ""
           )
           selectItem.target = self
           selectItem.image = NSImage(systemSymbolName: "checkmark.circle", accessibilityDescription: nil)

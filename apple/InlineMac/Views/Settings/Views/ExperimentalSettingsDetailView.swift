@@ -15,8 +15,6 @@ struct ExperimentalSettingsDetailView: View {
 
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
-  @AppStorage(ExperimentalFeatureFlags.macMessageSelectionKey)
-  private var messageSelectionEnabled = false
   @AppStorage(ExperimentalFeatureFlags.quickForwardKey)
   private var quickForwardEnabled = false
   @AppStorage(ExperimentalFeatureFlags.richMessageCopyEditingKey)
@@ -85,13 +83,6 @@ struct ExperimentalSettingsDetailView: View {
         )
       }
       .settingsSearchAnchor(.richCopyMarkdownEditing)
-      Toggle(isOn: $messageSelectionEnabled) {
-        SettingsRowLabel(
-          .selectMultipleMessages,
-          description: "Select messages to forward or delete together. Right-click a message and choose Select Messages."
-        )
-      }
-      .settingsSearchAnchor(.selectMultipleMessages)
       Toggle(isOn: $quickForwardEnabled) {
         SettingsRowLabel(
           .quickForward,

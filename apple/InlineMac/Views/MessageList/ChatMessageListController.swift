@@ -17,6 +17,12 @@ protocol ChatMessageListController: NSViewController {
   func setTopOverlayHeight(_ height: CGFloat)
   func canSelectMessage(atRow row: Int) -> Bool
   func isMessageSelected(atRow row: Int) -> Bool
+  /// The selection identity of a selectable row; nil for dates, service messages and the like.
+  func messageSelectionStableId(atRow row: Int) -> Int64?
+  func messageSelectionRow(forStableId stableId: Int64) -> Int?
+  var selectedMessageStableIds: Set<Int64> { get }
+  /// Replaces the whole selection; unselectable or unloaded ids are dropped.
+  func setSelectedMessageStableIds(_ stableIds: Set<Int64>)
   @discardableResult func beginMessageSelection(atRow row: Int) -> Bool
   @discardableResult func toggleMessageSelection(atRow row: Int) -> Bool
   @discardableResult func extendMessageSelection(toRow row: Int) -> Bool

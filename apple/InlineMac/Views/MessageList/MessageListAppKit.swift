@@ -404,9 +404,25 @@ class MessageListAppKit: NSViewController {
     return messageSelection.isSelected(stableId)
   }
 
+  func messageSelectionStableId(atRow row: Int) -> Int64? {
+    selectableStableId(forRow: row)
+  }
+
+  func messageSelectionRow(forStableId stableId: Int64) -> Int? {
+    chatRows.rowIndex(forMessageStableId: stableId)
+  }
+
+  var selectedMessageStableIds: Set<Int64> {
+    messageSelection.selectedStableIds
+  }
+
+  func setSelectedMessageStableIds(_ stableIds: Set<Int64>) {
+    let changed = messageSelection.replace(with: stableIds, orderedIds: selectableMessageStableIds)
+    emitMessageSelectionChange(changedStableIds: changed)
+  }
+
   @discardableResult
   func beginMessageSelection(atRow row: Int) -> Bool {
-    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     guard let stableId = selectableStableId(forRow: row) else { return false }
     let changed = messageSelection.begin(with: stableId)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -415,7 +431,6 @@ class MessageListAppKit: NSViewController {
 
   @discardableResult
   func toggleMessageSelection(atRow row: Int) -> Bool {
-    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     guard let stableId = selectableStableId(forRow: row) else { return false }
     let changed = messageSelection.toggle(stableId, orderedIds: selectableMessageStableIds)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -424,7 +439,6 @@ class MessageListAppKit: NSViewController {
 
   @discardableResult
   func extendMessageSelection(toRow row: Int) -> Bool {
-    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     guard let stableId = selectableStableId(forRow: row) else { return false }
     let changed = messageSelection.selectRange(to: stableId, orderedIds: selectableMessageStableIds)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -433,7 +447,6 @@ class MessageListAppKit: NSViewController {
 
   @discardableResult
   func selectAllMessages() -> Bool {
-    guard ExperimentalFeatureFlags.macMessageSelectionEnabled else { return false }
     let stableIds = selectableMessageStableIds
     let changed = messageSelection.selectAll(stableIds)
     emitMessageSelectionChange(changedStableIds: changed)
@@ -518,7 +531,7 @@ class MessageListAppKit: NSViewController {
     if visible.location != NSNotFound {
       for row in visible.location ..< min(NSMaxRange(visible), tableView.numberOfRows) {
         if let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell {
-          configureForwardSelection(cell, row: row)
+          configureForwardSelection(cell, row: row, animated: true)
         }
       }
     }
@@ -540,15 +553,23 @@ class MessageListAppKit: NSViewController {
         restoreVisibleMessageAnchor(anchor)
       }
       syncAvatarOverlayAfterTableLayout()
+      // Avatars live in one overlay; they all move with the message column, so slide it as a whole.
+      if usesAvatarOverlay {
+        SelectionMotion.slide(
+          avatarOverlayView.layer,
+          fromX: active ? -MessageTableCell.forwardSelectionInset : MessageTableCell.forwardSelectionInset
+        )
+      }
     }
   }
 
-  private func configureForwardSelection(_ cell: MessageTableCell, row: Int) {
+  private func configureForwardSelection(_ cell: MessageTableCell, row: Int, animated: Bool = false) {
     let stableId = selectableStableId(forRow: row)
     cell.setForwardSelection(
       active: messageSelection.isActive,
       selectable: stableId != nil,
-      selected: stableId.map { messageSelection.isSelected($0) } ?? false
+      selected: stableId.map { messageSelection.isSelected($0) } ?? false,
+      animated: animated
     ) { [weak self] in
       guard let self, let stableId, let currentRow = chatRows.rowIndex(forMessageStableId: stableId) else { return }
       toggleMessageSelection(atRow: currentRow)
