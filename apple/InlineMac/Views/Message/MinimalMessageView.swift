@@ -4894,6 +4894,23 @@ extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
   }
 }
 
+// MARK: - Selection menu
+
+extension MinimalMessageViewAppKit: MessageSelectionMenuProviding {
+  func messageSelectionMenuItems() -> [MessageSelectionMenu.Item] {
+    let regularMessage = message.status != .sending && message.status != .failed
+    guard regularMessage, !isAnchorMessage, let quoted = selectedTextForQuote() else { return [] }
+    return [
+      .init(title: "Quote") { [weak self] in
+        guard let self, !self.isAnchorMessage else { return }
+        ChatsManager
+          .get(for: self.fullMessage.peerId, chatId: self.fullMessage.chatId)
+          .quote(MessageMarkdown.quoteLines(quoted), replyingTo: self.fullMessage.message.messageId)
+      },
+    ]
+  }
+}
+
 // MARK: - NSTextViewDelegate
 
 extension MinimalMessageViewAppKit: NSTextViewDelegate, RichBlockTextMenuProviding {
