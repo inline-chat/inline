@@ -1,6 +1,8 @@
 import { db } from "@in/server/db"
 import { members, userNotDeleted, users, type DbChat, type DbMember } from "@in/server/db/schema"
 import { getSpacePrivacyContext, type SpacePrivacyContext } from "@in/server/modules/privacy/spacePrivacy"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import type { Transaction } from "@in/server/db/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { and, eq, inArray } from "drizzle-orm"
 
@@ -34,6 +36,23 @@ export async function ensureCanManageChatParticipants(chat: DbChat, userId: numb
   }
 
   throw RealtimeRpcError.SpaceAdminRequired()
+}
+
+/**
+ * Anyone who can already read a private thread may bring someone else in, so
+ * sharing work doesn't wait on its creator. Public threads and removals keep
+ * the creator/admin rule in `ensureCanManageChatParticipants`.
+ */
+export async function ensureCanAddChatParticipants(
+  chat: DbChat,
+  userId: number,
+  query?: Pick<Transaction, "select">,
+): Promise<void> {
+  if (!chat.publicThread && (await AccessGuards.hasChatAccess(chat, userId, query))) {
+    return
+  }
+
+  await ensureCanManageChatParticipants(chat, userId)
 }
 
 export async function ensureUserCanParticipateInChat(chat: DbChat, userId: number): Promise<void> {
