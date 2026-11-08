@@ -37,6 +37,7 @@ import { Reaction } from "@inline-chat/protocol/core";
 import { AgentThreadContext } from "@inline-chat/protocol/core";
 import { ChatParticipantGroup } from "@inline-chat/protocol/core";
 import { ChatParticipant } from "@inline-chat/protocol/core";
+import { UpdateUnreadActivity } from "@inline-chat/protocol/core";
 import { UpdateAgentSettings } from "@inline-chat/protocol/core";
 import { UpdateAgentSessionControl } from "@inline-chat/protocol/core";
 import { UpdateAgentRuntime } from "@inline-chat/protocol/core";
@@ -423,6 +424,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: UpdateAgentSettings user_agent_settings = 55;
          */
         userAgentSettings: UpdateAgentSettings;
+    } | {
+        oneofKind: "userUnreadActivity";
+        /**
+         * @generated from protobuf field: UpdateUnreadActivity user_unread_activity = 56;
+         */
+        userUnreadActivity: UpdateUnreadActivity;
     } | {
         oneofKind: undefined;
     };
@@ -1529,7 +1536,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 52, name: "user_agent_grant", kind: "message", oneof: "update", T: () => UpdateAgentGrant },
             { no: 53, name: "user_agent_runtime", kind: "message", oneof: "update", T: () => UpdateAgentRuntime },
             { no: 54, name: "user_agent_session_control", kind: "message", oneof: "update", T: () => UpdateAgentSessionControl },
-            { no: 55, name: "user_agent_settings", kind: "message", oneof: "update", T: () => UpdateAgentSettings }
+            { no: 55, name: "user_agent_settings", kind: "message", oneof: "update", T: () => UpdateAgentSettings },
+            { no: 56, name: "user_unread_activity", kind: "message", oneof: "update", T: () => UpdateUnreadActivity }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -1864,6 +1872,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userAgentSettings: UpdateAgentSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userAgentSettings)
                     };
                     break;
+                case /* UpdateUnreadActivity user_unread_activity */ 56:
+                    message.update = {
+                        oneofKind: "userUnreadActivity",
+                        userUnreadActivity: UpdateUnreadActivity.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userUnreadActivity)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -2038,6 +2052,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* UpdateAgentSettings user_agent_settings = 55; */
         if (message.update.oneofKind === "userAgentSettings")
             UpdateAgentSettings.internalBinaryWrite(message.update.userAgentSettings, writer.tag(55, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateUnreadActivity user_unread_activity = 56; */
+        if (message.update.oneofKind === "userUnreadActivity")
+            UpdateUnreadActivity.internalBinaryWrite(message.update.userUnreadActivity, writer.tag(56, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

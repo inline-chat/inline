@@ -288,6 +288,13 @@ message Dialog {
   optional int64 folder_id = 18;
   // Personal translation preference, shared by all sessions of this account.
   optional bool translation_enabled = 19;
+  // Unseen messages addressed to the viewer: mentions of them (directly or
+  // through a group) and replies to their messages. Absent when the server did
+  // not compute it; clients keep their previous value.
+  optional int32 unread_mentions_count = 20;
+  // The viewer's messages with reactions they haven't seen. Absent when the
+  // server did not compute it; clients keep their previous value.
+  optional int32 unread_reactions_count = 21;
 }
 
 message DialogFolder {
@@ -1034,6 +1041,14 @@ message Message {
   // Text quoted from the replied message, shown in the reply header. `message`
   // holds only the caption. Older clients show a plain reply.
   optional string reply_quote = 27;
+
+  // Addressed to the viewer (mention or reply) and not seen yet. Set on
+  // history results only; absent elsewhere.
+  optional bool unread_mention = 28;
+
+  // The viewer's message, with reactions they haven't seen. Set on history
+  // results only; absent elsewhere.
+  optional bool unread_reactions = 29;
 }
 
 // Agent providers that implement Inline's session continuity contract. The
@@ -2434,6 +2449,8 @@ enum Method {
   GET_AGENT_SETTINGS = 164;
   GET_CONTACTS = 165;
   GET_AGENT_ACCESS = 166;
+  GET_UNREAD_ACTIVITY = 167;
+  READ_ACTIVITY = 168;
 }
 
 message RpcCall {
@@ -2605,6 +2622,8 @@ message RpcCall {
     GetAgentSettingsInput getAgentSettings = 165;
     GetContactsInput getContacts = 166;
     GetAgentAccessInput getAgentAccess = 167;
+    GetUnreadActivityInput getUnreadActivity = 168;
+    ReadActivityInput readActivity = 169;
   }
 }
 
@@ -2778,6 +2797,8 @@ message RpcResult {
     GetAgentSettingsResult getAgentSettings = 165;
     GetContactsResult getContacts = 166;
     GetAgentAccessResult getAgentAccess = 167;
+    GetUnreadActivityResult getUnreadActivity = 168;
+    ReadActivityResult readActivity = 169;
   }
 }
 
@@ -3402,9 +3423,51 @@ message ReadMessagesInput {
 
   // If unset, server resolves to the latest message id for the peer.
   optional int64 max_id = 2;
+
+  // Explicit "Mark as Read" from a chat list: also reads every unread
+  // mention and reaction in the dialog.
+  optional bool read_activity = 3;
 }
 
 message ReadMessagesResult { repeated Update updates = 1; }
+
+// IDs of unread mentions or of the viewer's messages with unread reactions,
+// oldest first.
+message GetUnreadActivityInput {
+  InputPeer peer_id = 1;
+  // False lists mentions and replies, true lists reactions.
+  bool reactions = 2;
+  // Return messages with an ID greater than this.
+  optional int64 offset_id = 3;
+  // Defaults to and is capped at 500.
+  optional int32 limit = 4;
+}
+
+message GetUnreadActivityResult {
+  repeated int64 message_ids = 1;
+  int32 unread_mentions_count = 2;
+  int32 unread_reactions_count = 3;
+  // True when nothing unread follows the last returned ID.
+  bool final = 4;
+}
+
+// Reads mentions and reactions. A message ID is enough: for one viewer a
+// message is either addressed to them or theirs, never both.
+message ReadActivityInput {
+  InputPeer peer_id = 1;
+  // Messages seen on screen.
+  repeated int64 message_ids = 2;
+  // Read every unread mention and reply, up to max_id when set.
+  bool all_mentions = 3;
+  // Read every unread reaction, up to max_id when set.
+  bool all_reactions = 4;
+  optional int64 max_id = 5;
+}
+
+// Empty on purpose: the change reaches every session, the caller included,
+// through the ordered user stream. Counts delivered here could arrive out of
+// order with that stream and double-count reads still in flight.
+message ReadActivityResult {}
 
 message CreateBotInput {
   // Name of the bot
@@ -4777,6 +4840,7 @@ message Update {
     UpdateAgentRuntime agent_runtime = 56;
     UpdateAgentSessionControl agent_session_control = 57;
     UpdateAgentSettings agent_settings = 58;
+    UpdateUnreadActivity unread_activity = 59;
   }
 }
 
@@ -4932,6 +4996,21 @@ message UpdateReadMaxId {
 
   // Still unread count
   int32 unread_count = 4;
+}
+
+// Unread mentions or reactions in a dialog changed. Stored in the user bucket.
+message UpdateUnreadActivity {
+  Peer peer_id = 1;
+  // Counts after this change.
+  int32 unread_mentions_count = 2;
+  int32 unread_reactions_count = 3;
+  // Messages that became unread mentions or replies.
+  repeated int64 unread_mention_ids = 4;
+  // The viewer's messages that got unseen reactions.
+  repeated int64 unread_reaction_ids = 5;
+  // Messages that are no longer unread: read, deleted, or the reaction was
+  // withdrawn. Also echoes reads that changed nothing.
+  repeated int64 cleared_message_ids = 6;
 }
 
 // Update when a dialog is marked as unread

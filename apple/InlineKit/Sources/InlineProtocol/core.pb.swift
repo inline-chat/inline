@@ -1207,6 +1207,8 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getAgentSettings // = 164
   case getContacts // = 165
   case getAgentAccess // = 166
+  case getUnreadActivity // = 167
+  case readActivity // = 168
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -1381,6 +1383,8 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 164: self = .getAgentSettings
     case 165: self = .getContacts
     case 166: self = .getAgentAccess
+    case 167: self = .getUnreadActivity
+    case 168: self = .readActivity
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -1553,6 +1557,8 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getAgentSettings: return 164
     case .getContacts: return 165
     case .getAgentAccess: return 166
+    case .getUnreadActivity: return 167
+    case .readActivity: return 168
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -1725,6 +1731,8 @@ public nonisolated enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getAgentSettings,
     .getContacts,
     .getAgentAccess,
+    .getUnreadActivity,
+    .readActivity,
   ]
 
 }
@@ -3923,6 +3931,29 @@ public nonisolated struct Dialog: @unchecked Sendable {
   public var hasTranslationEnabled: Bool {_storage._translationEnabled != nil}
   /// Clears the value of `translationEnabled`. Subsequent reads from it will return its default value.
   public mutating func clearTranslationEnabled() {_uniqueStorage()._translationEnabled = nil}
+
+  /// Unseen messages addressed to the viewer: mentions of them (directly or
+  /// through a group) and replies to their messages. Absent when the server did
+  /// not compute it; clients keep their previous value.
+  public var unreadMentionsCount: Int32 {
+    get {_storage._unreadMentionsCount ?? 0}
+    set {_uniqueStorage()._unreadMentionsCount = newValue}
+  }
+  /// Returns true if `unreadMentionsCount` has been explicitly set.
+  public var hasUnreadMentionsCount: Bool {_storage._unreadMentionsCount != nil}
+  /// Clears the value of `unreadMentionsCount`. Subsequent reads from it will return its default value.
+  public mutating func clearUnreadMentionsCount() {_uniqueStorage()._unreadMentionsCount = nil}
+
+  /// The viewer's messages with reactions they haven't seen. Absent when the
+  /// server did not compute it; clients keep their previous value.
+  public var unreadReactionsCount: Int32 {
+    get {_storage._unreadReactionsCount ?? 0}
+    set {_uniqueStorage()._unreadReactionsCount = newValue}
+  }
+  /// Returns true if `unreadReactionsCount` has been explicitly set.
+  public var hasUnreadReactionsCount: Bool {_storage._unreadReactionsCount != nil}
+  /// Clears the value of `unreadReactionsCount`. Subsequent reads from it will return its default value.
+  public mutating func clearUnreadReactionsCount() {_uniqueStorage()._unreadReactionsCount = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -6804,6 +6835,28 @@ public nonisolated struct Message: @unchecked Sendable {
   public var hasReplyQuote: Bool {_storage._replyQuote != nil}
   /// Clears the value of `replyQuote`. Subsequent reads from it will return its default value.
   public mutating func clearReplyQuote() {_uniqueStorage()._replyQuote = nil}
+
+  /// Addressed to the viewer (mention or reply) and not seen yet. Set on
+  /// history results only; absent elsewhere.
+  public var unreadMention: Bool {
+    get {_storage._unreadMention ?? false}
+    set {_uniqueStorage()._unreadMention = newValue}
+  }
+  /// Returns true if `unreadMention` has been explicitly set.
+  public var hasUnreadMention: Bool {_storage._unreadMention != nil}
+  /// Clears the value of `unreadMention`. Subsequent reads from it will return its default value.
+  public mutating func clearUnreadMention() {_uniqueStorage()._unreadMention = nil}
+
+  /// The viewer's message, with reactions they haven't seen. Set on history
+  /// results only; absent elsewhere.
+  public var unreadReactions: Bool {
+    get {_storage._unreadReactions ?? false}
+    set {_uniqueStorage()._unreadReactions = newValue}
+  }
+  /// Returns true if `unreadReactions` has been explicitly set.
+  public var hasUnreadReactions: Bool {_storage._unreadReactions != nil}
+  /// Clears the value of `unreadReactions`. Subsequent reads from it will return its default value.
+  public mutating func clearUnreadReactions() {_uniqueStorage()._unreadReactions = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -12023,6 +12076,22 @@ public nonisolated struct RpcCall: Sendable {
     set {input = .getAgentAccess(newValue)}
   }
 
+  public var getUnreadActivity: GetUnreadActivityInput {
+    get {
+      if case .getUnreadActivity(let v)? = input {return v}
+      return GetUnreadActivityInput()
+    }
+    set {input = .getUnreadActivity(newValue)}
+  }
+
+  public var readActivity: ReadActivityInput {
+    get {
+      if case .readActivity(let v)? = input {return v}
+      return ReadActivityInput()
+    }
+    set {input = .readActivity(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Input: Equatable, Sendable {
@@ -12191,6 +12260,8 @@ public nonisolated struct RpcCall: Sendable {
     case getAgentSettings(GetAgentSettingsInput)
     case getContacts(GetContactsInput)
     case getAgentAccess(GetAgentAccessInput)
+    case getUnreadActivity(GetUnreadActivityInput)
+    case readActivity(ReadActivityInput)
 
   }
 
@@ -13532,6 +13603,22 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .getAgentAccess(newValue)}
   }
 
+  public var getUnreadActivity: GetUnreadActivityResult {
+    get {
+      if case .getUnreadActivity(let v)? = _storage._result {return v}
+      return GetUnreadActivityResult()
+    }
+    set {_uniqueStorage()._result = .getUnreadActivity(newValue)}
+  }
+
+  public var readActivity: ReadActivityResult {
+    get {
+      if case .readActivity(let v)? = _storage._result {return v}
+      return ReadActivityResult()
+    }
+    set {_uniqueStorage()._result = .readActivity(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Result: Equatable, Sendable {
@@ -13700,6 +13787,8 @@ public nonisolated struct RpcResult: @unchecked Sendable {
     case getAgentSettings(GetAgentSettingsResult)
     case getContacts(GetContactsResult)
     case getAgentAccess(GetAgentAccessResult)
+    case getUnreadActivity(GetUnreadActivityResult)
+    case readActivity(ReadActivityResult)
 
   }
 
@@ -16042,12 +16131,24 @@ public nonisolated struct ReadMessagesInput: Sendable {
   /// Clears the value of `maxID`. Subsequent reads from it will return its default value.
   public mutating func clearMaxID() {self._maxID = nil}
 
+  /// Explicit "Mark as Read" from a chat list: also reads every unread
+  /// mention and reaction in the dialog.
+  public var readActivity: Bool {
+    get {_readActivity ?? false}
+    set {_readActivity = newValue}
+  }
+  /// Returns true if `readActivity` has been explicitly set.
+  public var hasReadActivity: Bool {self._readActivity != nil}
+  /// Clears the value of `readActivity`. Subsequent reads from it will return its default value.
+  public mutating func clearReadActivity() {self._readActivity = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _peerID: InputPeer? = nil
   fileprivate var _maxID: Int64? = nil
+  fileprivate var _readActivity: Bool? = nil
 }
 
 public nonisolated struct ReadMessagesResult: Sendable {
@@ -16056,6 +16157,128 @@ public nonisolated struct ReadMessagesResult: Sendable {
   // methods supported on all messages.
 
   public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// IDs of unread mentions or of the viewer's messages with unread reactions,
+/// oldest first.
+public nonisolated struct GetUnreadActivityInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {_peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// False lists mentions and replies, true lists reactions.
+  public var reactions: Bool = false
+
+  /// Return messages with an ID greater than this.
+  public var offsetID: Int64 {
+    get {_offsetID ?? 0}
+    set {_offsetID = newValue}
+  }
+  /// Returns true if `offsetID` has been explicitly set.
+  public var hasOffsetID: Bool {self._offsetID != nil}
+  /// Clears the value of `offsetID`. Subsequent reads from it will return its default value.
+  public mutating func clearOffsetID() {self._offsetID = nil}
+
+  /// Defaults to and is capped at 500.
+  public var limit: Int32 {
+    get {_limit ?? 0}
+    set {_limit = newValue}
+  }
+  /// Returns true if `limit` has been explicitly set.
+  public var hasLimit: Bool {self._limit != nil}
+  /// Clears the value of `limit`. Subsequent reads from it will return its default value.
+  public mutating func clearLimit() {self._limit = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _offsetID: Int64? = nil
+  fileprivate var _limit: Int32? = nil
+}
+
+public nonisolated struct GetUnreadActivityResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var messageIds: [Int64] = []
+
+  public var unreadMentionsCount: Int32 = 0
+
+  public var unreadReactionsCount: Int32 = 0
+
+  /// True when nothing unread follows the last returned ID.
+  public var final: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Reads mentions and reactions. A message ID is enough: for one viewer a
+/// message is either addressed to them or theirs, never both.
+public nonisolated struct ReadActivityInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {_peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// Messages seen on screen.
+  public var messageIds: [Int64] = []
+
+  /// Read every unread mention and reply, up to max_id when set.
+  public var allMentions: Bool = false
+
+  /// Read every unread reaction, up to max_id when set.
+  public var allReactions: Bool = false
+
+  public var maxID: Int64 {
+    get {_maxID ?? 0}
+    set {_maxID = newValue}
+  }
+  /// Returns true if `maxID` has been explicitly set.
+  public var hasMaxID: Bool {self._maxID != nil}
+  /// Clears the value of `maxID`. Subsequent reads from it will return its default value.
+  public mutating func clearMaxID() {self._maxID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _maxID: Int64? = nil
+}
+
+/// Empty on purpose: the change reaches every session, the caller included,
+/// through the ordered user stream. Counts delivered here could arrive out of
+/// order with that stream and double-count reads still in flight.
+public nonisolated struct ReadActivityResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -21816,6 +22039,14 @@ public nonisolated struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .agentSettings(newValue)}
   }
 
+  public var unreadActivity: UpdateUnreadActivity {
+    get {
+      if case .unreadActivity(let v)? = _storage._update {return v}
+      return UpdateUnreadActivity()
+    }
+    set {_uniqueStorage()._update = .unreadActivity(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Update: Equatable, Sendable {
@@ -21884,6 +22115,7 @@ public nonisolated struct Update: @unchecked Sendable {
     case agentRuntime(UpdateAgentRuntime)
     case agentSessionControl(UpdateAgentSessionControl)
     case agentSettings(UpdateAgentSettings)
+    case unreadActivity(UpdateUnreadActivity)
 
   }
 
@@ -22437,6 +22669,43 @@ public nonisolated struct UpdateReadMaxId: Sendable {
 
   /// Still unread count
   public var unreadCount: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: Peer? = nil
+}
+
+/// Unread mentions or reactions in a dialog changed. Stored in the user bucket.
+public nonisolated struct UpdateUnreadActivity: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: Peer {
+    get {_peerID ?? Peer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// Counts after this change.
+  public var unreadMentionsCount: Int32 = 0
+
+  public var unreadReactionsCount: Int32 = 0
+
+  /// Messages that became unread mentions or replies.
+  public var unreadMentionIds: [Int64] = []
+
+  /// The viewer's messages that got unseen reactions.
+  public var unreadReactionIds: [Int64] = []
+
+  /// Messages that are no longer unread: read, deleted, or the reaction was
+  /// withdrawn. Also echoes reads that changed nothing.
+  public var clearedMessageIds: [Int64] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -27367,7 +27636,7 @@ nonisolated extension AgentSessionMessageSyncState: SwiftProtobuf._ProtoNameProv
 }
 
 nonisolated extension Method: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0\u{1}CONNECT_AGENT_SESSION\0\u{1}SYNC_AGENT_SESSION_MESSAGES\0\u{1}GET_AGENT_SESSION\0\u{1}UPDATE_BOT_AGENT\0\u{1}DELETE_BOT_AGENT\0\u{1}JOIN_SPACE_BY_INVITE_TOKEN\0\u{1}GET_SPACE_INVITE_LINK\0\u{1}SET_SPACE_INVITE_LINK_ENABLED\0\u{1}GET_FILE_PART\0\u{1}ACKNOWLEDGE_MESSAGES\0\u{1}GET_USERS\0\u{1}GET_BOT_SKILLS\0\u{1}GET_BOT_CONFIGURATION_CATALOG\0\u{1}UPDATE_DIALOG_TRANSLATION\0\u{1}TRANSCRIBE_VOICE_DRAFT\0\u{1}REQUEST_BOT_FILESYSTEM\0\u{1}ANSWER_BOT_FILESYSTEM\0\u{1}SET_SPACE_PHOTO\0\u{1}MOVE_GRID_CALL_HERE\0\u{1}OPEN_GRID_THREAD\0\u{1}SET_GRID_TRANSCRIPTION\0\u{1}LIST_GRID_TRANSCRIPTS\0\u{1}REPORT_AGENT_RUNTIME\0\u{1}GET_AGENT_RUNTIME\0\u{1}UPDATE_AGENT_SESSION_STATE\0\u{1}GET_AGENT_SESSION_STATES\0\u{1}LIST_AGENT_GRANTS\0\u{1}SET_AGENT_GRANT\0\u{1}DELETE_AGENT_GRANT\0\u{1}IMPORT_AGENT_GRANTS\0\u{1}GET_AGENT_PARTICIPATIONS\0\u{1}SET_AGENT_PARTICIPATION\0\u{1}UPDATE_AGENT_SETTINGS\0\u{1}CONTROL_AGENT_SESSION\0\u{1}MOVE_AGENT_SESSION\0\u{1}UNPIN_ALL_MESSAGES\0\u{1}GET_AGENT_SETTINGS\0\u{1}GET_CONTACTS\0\u{1}GET_AGENT_ACCESS\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNSPECIFIED\0\u{1}GET_ME\0\u{1}SEND_MESSAGE\0\u{1}GET_PEER_PHOTO\0\u{1}DELETE_MESSAGES\0\u{1}GET_CHAT_HISTORY\0\u{1}ADD_REACTION\0\u{1}DELETE_REACTION\0\u{1}EDIT_MESSAGE\0\u{1}CREATE_CHAT\0\u{1}GET_SPACE_MEMBERS\0\u{1}DELETE_CHAT\0\u{1}INVITE_TO_SPACE\0\u{1}GET_CHAT_PARTICIPANTS\0\u{1}ADD_CHAT_PARTICIPANT\0\u{1}REMOVE_CHAT_PARTICIPANT\0\u{1}TRANSLATE_MESSAGES\0\u{1}GET_CHATS\0\u{1}UPDATE_USER_SETTINGS\0\u{1}GET_USER_SETTINGS\0\u{1}SEND_COMPOSE_ACTION\0\u{1}CREATE_BOT\0\u{1}DELETE_MEMBER\0\u{1}MARK_AS_UNREAD\0\u{1}GET_UPDATES_STATE\0\u{1}GET_CHAT\0\u{1}GET_UPDATES\0\u{1}UPDATE_MEMBER_ACCESS\0\u{1}SEARCH_MESSAGES\0\u{1}FORWARD_MESSAGES\0\u{1}UPDATE_CHAT_VISIBILITY\0\u{1}PIN_MESSAGE\0\u{1}UPDATE_CHAT_INFO\0\u{1}LIST_BOTS\0\u{1}REVEAL_BOT_TOKEN\0\u{1}MOVE_THREAD\0\u{1}ROTATE_BOT_TOKEN\0\u{1}UPDATE_BOT_PROFILE\0\u{1}GET_MESSAGES\0\u{1}UPDATE_DIALOG_NOTIFICATION_SETTINGS\0\u{1}READ_MESSAGES\0\u{1}REGISTER_DEVICE\0\u{1}CREATE_SUBTHREAD\0\u{1}GET_BOT_COMMANDS\0\u{1}SET_BOT_COMMANDS\0\u{1}GET_PEER_BOT_COMMANDS\0\u{1}SHOW_IN_CHAT_LIST\0\u{1}RESERVE_CHAT_IDS\0\u{1}INVOKE_MESSAGE_ACTION\0\u{1}ANSWER_MESSAGE_ACTION\0\u{1}REVOKE_SESSION\0\u{1}UPDATE_DIALOG_OPEN\0\u{1}UPDATE_DIALOG_ORDER\0\u{1}CLEAR_CHAT_HISTORY\0\u{1}DELETE_BOT\0\u{1}DELETE_MESSAGE_ATTACHMENT\0\u{1}SET_BOT_AVATAR\0\u{1}CLEAR_BOT_AVATAR\0\u{1}GET_BOT_PRESENCE\0\u{1}SET_BOT_PRESENCE_STATE\0\u{1}UPDATE_DIALOG_FOLLOW_MODE\0\u{1}GET_SESSIONS\0\u{1}CHECK_USERNAME\0\u{1}CHANGE_USERNAME\0\u{1}UPDATE_PROFILE\0\u{1}GET_SPACE_URL_PREVIEW_EXCLUSIONS\0\u{1}ADD_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}REMOVE_SPACE_URL_PREVIEW_EXCLUSION\0\u{1}GET_USER_GROUPS\0\u{1}CREATE_USER_GROUP\0\u{1}UPDATE_USER_GROUP\0\u{1}DELETE_USER_GROUP\0\u{1}GET_SPACE_SETTINGS\0\u{1}TOGGLE_SPACE_GRID\0\u{1}GET_THREAD_REFERENCES\0\u{1}GET_THREAD_SUBTHREADS\0\u{1}GET_PEER_BOTS\0\u{1}GET_MY_BOT_CAPABILITIES\0\u{1}SET_MY_BOT_CAPABILITIES\0\u{1}REQUEST_BOT_CHAT_SETTINGS\0\u{1}INVOKE_BOT_CHAT_SETTINGS_ITEM\0\u{1}ANSWER_BOT_CHAT_SETTINGS\0\u{2}\u{2}GET_GRID\0\u{1}CREATE_GRID_ROOM\0\u{1}JOIN_GRID_ROOM\0\u{1}LEAVE_GRID_ROOM\0\u{1}SET_GRID_ROOM_TITLE\0\u{1}SET_GRID_ROOM_LOCKED\0\u{1}DELETE_GRID_ROOM\0\u{1}PREPARE_GRID_CONNECTION\0\u{1}SET_GRID_AVATAR_MICROPHONE_ENABLED\0\u{1}GET_GRID_HOME\0\u{1}CREATE_CLI_SESSION\0\u{1}SET_PROFILE_PHOTO\0\u{1}GET_EXTERNAL_PROFILE_PHOTO\0\u{1}GET_CHAT_TRANSCRIPT\0\u{1}SEARCH_EXTERNAL_RESOURCES\0\u{1}JOIN_PUBLIC_SPACE\0\u{1}COLLAPSE_HISTORY\0\u{1}LIST_CONNECTORS\0\u{1}PREPARE_CONNECTOR_OAUTH\0\u{1}DISCONNECT_CONNECTOR\0\u{1}SEARCH_USERS\0\u{1}INVITE_TO_INLINE\0\u{1}RESOLVE_URL_PREVIEW\0\u{1}CREATE_BOT_AGENT\0\u{1}GET_BOT_AGENT\0\u{1}LIST_BOT_AGENTS\0\u{1}CREATE_SPACE\0\u{1}DELETE_SPACE\0\u{1}LEAVE_SPACE\0\u{1}GET_CONNECTOR_CONFIG\0\u{1}SET_CONNECTOR_CONFIG\0\u{1}CREATE_EXTERNAL_TASK\0\u{1}UNREGISTER_DEVICE\0\u{1}LOG_OUT\0\u{1}CREATE_UPLOAD\0\u{1}SAVE_UPLOAD_PART\0\u{1}GET_UPLOAD_STATE\0\u{1}FINISH_UPLOAD\0\u{1}CANCEL_UPLOAD\0\u{1}UPDATE_SESSION\0\u{1}UPDATE_DIALOG_ARCHIVED\0\u{1}CREATE_DIALOG_FOLDER\0\u{1}UPDATE_DIALOG_FOLDER\0\u{1}DELETE_DIALOG_FOLDER\0\u{1}GET_SPACE\0\u{1}CONNECT_AGENT_SESSION\0\u{1}SYNC_AGENT_SESSION_MESSAGES\0\u{1}GET_AGENT_SESSION\0\u{1}UPDATE_BOT_AGENT\0\u{1}DELETE_BOT_AGENT\0\u{1}JOIN_SPACE_BY_INVITE_TOKEN\0\u{1}GET_SPACE_INVITE_LINK\0\u{1}SET_SPACE_INVITE_LINK_ENABLED\0\u{1}GET_FILE_PART\0\u{1}ACKNOWLEDGE_MESSAGES\0\u{1}GET_USERS\0\u{1}GET_BOT_SKILLS\0\u{1}GET_BOT_CONFIGURATION_CATALOG\0\u{1}UPDATE_DIALOG_TRANSLATION\0\u{1}TRANSCRIBE_VOICE_DRAFT\0\u{1}REQUEST_BOT_FILESYSTEM\0\u{1}ANSWER_BOT_FILESYSTEM\0\u{1}SET_SPACE_PHOTO\0\u{1}MOVE_GRID_CALL_HERE\0\u{1}OPEN_GRID_THREAD\0\u{1}SET_GRID_TRANSCRIPTION\0\u{1}LIST_GRID_TRANSCRIPTS\0\u{1}REPORT_AGENT_RUNTIME\0\u{1}GET_AGENT_RUNTIME\0\u{1}UPDATE_AGENT_SESSION_STATE\0\u{1}GET_AGENT_SESSION_STATES\0\u{1}LIST_AGENT_GRANTS\0\u{1}SET_AGENT_GRANT\0\u{1}DELETE_AGENT_GRANT\0\u{1}IMPORT_AGENT_GRANTS\0\u{1}GET_AGENT_PARTICIPATIONS\0\u{1}SET_AGENT_PARTICIPATION\0\u{1}UPDATE_AGENT_SETTINGS\0\u{1}CONTROL_AGENT_SESSION\0\u{1}MOVE_AGENT_SESSION\0\u{1}UNPIN_ALL_MESSAGES\0\u{1}GET_AGENT_SETTINGS\0\u{1}GET_CONTACTS\0\u{1}GET_AGENT_ACCESS\0\u{1}GET_UNREAD_ACTIVITY\0\u{1}READ_ACTIVITY\0")
 }
 
 nonisolated extension GridTranscriptionState: SwiftProtobuf._ProtoNameProviding {
@@ -29107,7 +29376,7 @@ nonisolated extension UserProfilePhoto: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Dialog"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}peer\0\u{3}space_id\0\u{1}archived\0\u{1}pinned\0\u{3}read_max_id\0\u{3}unread_count\0\u{3}chat_id\0\u{3}unread_mark\0\u{3}notification_settings\0\u{3}sidebar_visible\0\u{1}open\0\u{3}opened_date\0\u{3}chat_list_hidden\0\u{1}order\0\u{3}pinned_order\0\u{3}follow_mode\0\u{3}collapsed_max_id\0\u{3}folder_id\0\u{3}translation_enabled\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}peer\0\u{3}space_id\0\u{1}archived\0\u{1}pinned\0\u{3}read_max_id\0\u{3}unread_count\0\u{3}chat_id\0\u{3}unread_mark\0\u{3}notification_settings\0\u{3}sidebar_visible\0\u{1}open\0\u{3}opened_date\0\u{3}chat_list_hidden\0\u{1}order\0\u{3}pinned_order\0\u{3}follow_mode\0\u{3}collapsed_max_id\0\u{3}folder_id\0\u{3}translation_enabled\0\u{3}unread_mentions_count\0\u{3}unread_reactions_count\0")
 
   fileprivate class _StorageClass {
     var _peer: Peer? = nil
@@ -29129,6 +29398,8 @@ nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     var _collapsedMaxID: Int64? = nil
     var _folderID: Int64? = nil
     var _translationEnabled: Bool? = nil
+    var _unreadMentionsCount: Int32? = nil
+    var _unreadReactionsCount: Int32? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -29158,6 +29429,8 @@ nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       _collapsedMaxID = source._collapsedMaxID
       _folderID = source._folderID
       _translationEnabled = source._translationEnabled
+      _unreadMentionsCount = source._unreadMentionsCount
+      _unreadReactionsCount = source._unreadReactionsCount
     }
   }
 
@@ -29195,6 +29468,8 @@ nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
         case 17: try { try decoder.decodeSingularInt64Field(value: &_storage._collapsedMaxID) }()
         case 18: try { try decoder.decodeSingularInt64Field(value: &_storage._folderID) }()
         case 19: try { try decoder.decodeSingularBoolField(value: &_storage._translationEnabled) }()
+        case 20: try { try decoder.decodeSingularInt32Field(value: &_storage._unreadMentionsCount) }()
+        case 21: try { try decoder.decodeSingularInt32Field(value: &_storage._unreadReactionsCount) }()
         default: break
         }
       }
@@ -29264,6 +29539,12 @@ nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       try { if let v = _storage._translationEnabled {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 19)
       } }()
+      try { if let v = _storage._unreadMentionsCount {
+        try visitor.visitSingularInt32Field(value: v, fieldNumber: 20)
+      } }()
+      try { if let v = _storage._unreadReactionsCount {
+        try visitor.visitSingularInt32Field(value: v, fieldNumber: 21)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -29292,6 +29573,8 @@ nonisolated extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
         if _storage._collapsedMaxID != rhs_storage._collapsedMaxID {return false}
         if _storage._folderID != rhs_storage._folderID {return false}
         if _storage._translationEnabled != rhs_storage._translationEnabled {return false}
+        if _storage._unreadMentionsCount != rhs_storage._unreadMentionsCount {return false}
+        if _storage._unreadReactionsCount != rhs_storage._unreadReactionsCount {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -32542,7 +32825,7 @@ nonisolated extension MessageWidgetCall: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Message"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{3}agent_session\0\u{1}subthread\0\u{3}counts_as_unread\0\u{3}reply_quote\0\u{4}U]\u{1}has_link\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}from_id\0\u{3}peer_id\0\u{3}chat_id\0\u{1}message\0\u{1}out\0\u{1}date\0\u{1}mentioned\0\u{3}reply_to_msg_id\0\u{1}media\0\u{3}edit_date\0\u{3}grouped_id\0\u{1}attachments\0\u{1}reactions\0\u{3}is_sticker\0\u{1}entities\0\u{3}send_mode\0\u{3}fwd_from\0\u{1}replies\0\u{1}actions\0\u{1}rev\0\u{3}service_message\0\u{3}block_content\0\u{3}agent_session\0\u{1}subthread\0\u{3}counts_as_unread\0\u{3}reply_quote\0\u{3}unread_mention\0\u{3}unread_reactions\0\u{4}S]\u{1}has_link\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -32573,6 +32856,8 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     var _subthread: MessageSubthread? = nil
     var _countsAsUnread: Bool? = nil
     var _replyQuote: String? = nil
+    var _unreadMention: Bool? = nil
+    var _unreadReactions: Bool? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -32611,6 +32896,8 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       _subthread = source._subthread
       _countsAsUnread = source._countsAsUnread
       _replyQuote = source._replyQuote
+      _unreadMention = source._unreadMention
+      _unreadReactions = source._unreadReactions
     }
   }
 
@@ -32656,6 +32943,8 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         case 25: try { try decoder.decodeSingularMessageField(value: &_storage._subthread) }()
         case 26: try { try decoder.decodeSingularBoolField(value: &_storage._countsAsUnread) }()
         case 27: try { try decoder.decodeSingularStringField(value: &_storage._replyQuote) }()
+        case 28: try { try decoder.decodeSingularBoolField(value: &_storage._unreadMention) }()
+        case 29: try { try decoder.decodeSingularBoolField(value: &_storage._unreadReactions) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
         }
@@ -32750,6 +33039,12 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       try { if let v = _storage._replyQuote {
         try visitor.visitSingularStringField(value: v, fieldNumber: 27)
       } }()
+      try { if let v = _storage._unreadMention {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 28)
+      } }()
+      try { if let v = _storage._unreadReactions {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 29)
+      } }()
       try { if let v = _storage._hasLink_p {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
       } }()
@@ -32790,6 +33085,8 @@ nonisolated extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
         if _storage._subthread != rhs_storage._subthread {return false}
         if _storage._countsAsUnread != rhs_storage._countsAsUnread {return false}
         if _storage._replyQuote != rhs_storage._replyQuote {return false}
+        if _storage._unreadMention != rhs_storage._unreadMention {return false}
+        if _storage._unreadReactions != rhs_storage._unreadReactions {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -37987,7 +38284,7 @@ nonisolated extension RpcError.Code: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcCall"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}method\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{1}getUnreadActivity\0\u{1}readActivity\0\u{c}S\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -40141,6 +40438,32 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
           self.input = .getAgentAccess(v)
         }
       }()
+      case 168: try {
+        var v: GetUnreadActivityInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getUnreadActivity(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getUnreadActivity(v)
+        }
+      }()
+      case 169: try {
+        var v: ReadActivityInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .readActivity(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .readActivity(v)
+        }
+      }()
       default: break
       }
     }
@@ -40815,6 +41138,14 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       guard case .getAgentAccess(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 167)
     }()
+    case .getUnreadActivity?: try {
+      guard case .getUnreadActivity(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 168)
+    }()
+    case .readActivity?: try {
+      guard case .readActivity(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 169)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -40830,7 +41161,7 @@ nonisolated extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
 nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "RpcResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{c}S\u{1}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}req_msg_id\0\u{1}getMe\0\u{1}getPeerPhoto\0\u{1}deleteMessages\0\u{1}sendMessage\0\u{1}getChatHistory\0\u{1}addReaction\0\u{1}deleteReaction\0\u{1}editMessage\0\u{1}createChat\0\u{1}getSpaceMembers\0\u{1}deleteChat\0\u{1}inviteToSpace\0\u{1}getChatParticipants\0\u{1}addChatParticipant\0\u{1}removeChatParticipant\0\u{1}translateMessages\0\u{1}getChats\0\u{1}updateUserSettings\0\u{1}getUserSettings\0\u{1}sendComposeAction\0\u{1}createBot\0\u{1}deleteMember\0\u{1}markAsUnread\0\u{1}getUpdatesState\0\u{1}getChat\0\u{1}getUpdates\0\u{1}updateMemberAccess\0\u{1}searchMessages\0\u{1}forwardMessages\0\u{1}updateChatVisibility\0\u{1}pinMessage\0\u{1}updateChatInfo\0\u{1}listBots\0\u{1}revealBotToken\0\u{1}moveThread\0\u{1}rotateBotToken\0\u{1}updateBotProfile\0\u{1}getMessages\0\u{1}updateDialogNotificationSettings\0\u{1}readMessages\0\u{1}registerDevice\0\u{1}createSubthread\0\u{1}getBotCommands\0\u{1}setBotCommands\0\u{1}getPeerBotCommands\0\u{1}showInChatList\0\u{1}reserveChatIds\0\u{1}invokeMessageAction\0\u{1}answerMessageAction\0\u{1}revokeSession\0\u{1}updateDialogOpen\0\u{1}updateDialogOrder\0\u{1}clearChatHistory\0\u{1}deleteBot\0\u{1}deleteMessageAttachment\0\u{1}setBotAvatar\0\u{1}clearBotAvatar\0\u{1}getBotPresence\0\u{1}setBotPresenceState\0\u{1}updateDialogFollowMode\0\u{1}getSessions\0\u{1}checkUsername\0\u{1}changeUsername\0\u{1}updateProfile\0\u{1}getSpaceUrlPreviewExclusions\0\u{1}addSpaceUrlPreviewExclusion\0\u{1}removeSpaceUrlPreviewExclusion\0\u{1}getUserGroups\0\u{1}createUserGroup\0\u{1}updateUserGroup\0\u{1}deleteUserGroup\0\u{1}getSpaceSettings\0\u{1}toggleSpaceGrid\0\u{1}getThreadReferences\0\u{1}getThreadSubthreads\0\u{1}getPeerBots\0\u{1}getMyBotCapabilities\0\u{1}setMyBotCapabilities\0\u{1}requestBotChatSettings\0\u{1}invokeBotChatSettingsItem\0\u{1}answerBotChatSettings\0\u{2}\u{2}getGrid\0\u{1}createGridRoom\0\u{1}joinGridRoom\0\u{1}leaveGridRoom\0\u{1}setGridRoomTitle\0\u{1}setGridRoomLocked\0\u{1}deleteGridRoom\0\u{1}prepareGridConnection\0\u{1}setGridAvatarMicrophoneEnabled\0\u{1}getGridHome\0\u{1}createCliSession\0\u{1}setProfilePhoto\0\u{1}getExternalProfilePhoto\0\u{1}getChatTranscript\0\u{1}searchExternalResources\0\u{1}joinPublicSpace\0\u{1}collapseHistory\0\u{1}listConnectors\0\u{1}prepareConnectorOAuth\0\u{1}disconnectConnector\0\u{1}searchUsers\0\u{1}inviteToInline\0\u{1}resolveUrlPreview\0\u{1}createBotAgent\0\u{1}getBotAgent\0\u{1}listBotAgents\0\u{1}createSpace\0\u{1}deleteSpace\0\u{1}leaveSpace\0\u{1}getConnectorConfig\0\u{1}setConnectorConfig\0\u{1}createExternalTask\0\u{1}unregisterDevice\0\u{1}logOut\0\u{1}createUpload\0\u{1}saveUploadPart\0\u{1}getUploadState\0\u{1}finishUpload\0\u{1}cancelUpload\0\u{1}updateSession\0\u{1}updateDialogArchived\0\u{1}createDialogFolder\0\u{1}updateDialogFolder\0\u{1}deleteDialogFolder\0\u{1}getSpace\0\u{1}connectAgentSession\0\u{1}syncAgentSessionMessages\0\u{1}getAgentSession\0\u{1}updateBotAgent\0\u{1}deleteBotAgent\0\u{1}joinSpaceByInviteToken\0\u{1}getSpaceInviteLink\0\u{1}setSpaceInviteLinkEnabled\0\u{1}getFilePart\0\u{1}acknowledgeMessages\0\u{1}getUsers\0\u{1}getBotSkills\0\u{1}getBotConfigurationCatalog\0\u{1}updateDialogTranslation\0\u{1}transcribeVoiceDraft\0\u{1}requestBotFilesystem\0\u{1}answerBotFilesystem\0\u{1}setSpacePhoto\0\u{1}moveGridCallHere\0\u{1}openGridThread\0\u{1}setGridTranscription\0\u{1}listGridTranscripts\0\u{1}reportAgentRuntime\0\u{1}getAgentRuntime\0\u{1}updateAgentSessionState\0\u{1}getAgentSessionStates\0\u{1}listAgentGrants\0\u{1}setAgentGrant\0\u{1}deleteAgentGrant\0\u{1}importAgentGrants\0\u{1}getAgentParticipations\0\u{1}setAgentParticipation\0\u{1}updateAgentSettings\0\u{1}controlAgentSession\0\u{1}moveAgentSession\0\u{1}unpinAllMessages\0\u{1}getAgentSettings\0\u{1}getContacts\0\u{1}getAgentAccess\0\u{1}getUnreadActivity\0\u{1}readActivity\0\u{c}S\u{1}\u{1}")
 
   fileprivate class _StorageClass {
     var _reqMsgID: UInt64 = 0
@@ -43011,6 +43342,32 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
             _storage._result = .getAgentAccess(v)
           }
         }()
+        case 168: try {
+          var v: GetUnreadActivityResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getUnreadActivity(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getUnreadActivity(v)
+          }
+        }()
+        case 169: try {
+          var v: ReadActivityResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .readActivity(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .readActivity(v)
+          }
+        }()
         default: break
         }
       }
@@ -43686,6 +44043,14 @@ nonisolated extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       case .getAgentAccess?: try {
         guard case .getAgentAccess(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 167)
+      }()
+      case .getUnreadActivity?: try {
+        guard case .getUnreadActivity(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 168)
+      }()
+      case .readActivity?: try {
+        guard case .readActivity(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 169)
       }()
       case nil: break
       }
@@ -47434,7 +47799,7 @@ nonisolated extension MarkAsUnreadResult: SwiftProtobuf.Message, SwiftProtobuf._
 
 nonisolated extension ReadMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ReadMessagesInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}max_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}max_id\0\u{3}read_activity\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -47444,6 +47809,7 @@ nonisolated extension ReadMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._M
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self._maxID) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self._readActivity) }()
       default: break
       }
     }
@@ -47460,12 +47826,16 @@ nonisolated extension ReadMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._M
     try { if let v = self._maxID {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._readActivity {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ReadMessagesInput, rhs: ReadMessagesInput) -> Bool {
     if lhs._peerID != rhs._peerID {return false}
     if lhs._maxID != rhs._maxID {return false}
+    if lhs._readActivity != rhs._readActivity {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -47496,6 +47866,173 @@ nonisolated extension ReadMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._
 
   public static func ==(lhs: ReadMessagesResult, rhs: ReadMessagesResult) -> Bool {
     if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetUnreadActivityInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetUnreadActivityInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}reactions\0\u{3}offset_id\0\u{1}limit\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.reactions) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self._offsetID) }()
+      case 4: try { try decoder.decodeSingularInt32Field(value: &self._limit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.reactions != false {
+      try visitor.visitSingularBoolField(value: self.reactions, fieldNumber: 2)
+    }
+    try { if let v = self._offsetID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._limit {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetUnreadActivityInput, rhs: GetUnreadActivityInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.reactions != rhs.reactions {return false}
+    if lhs._offsetID != rhs._offsetID {return false}
+    if lhs._limit != rhs._limit {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GetUnreadActivityResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetUnreadActivityResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_ids\0\u{3}unread_mentions_count\0\u{3}unread_reactions_count\0\u{1}final\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedInt64Field(value: &self.messageIds) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.unreadMentionsCount) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.unreadReactionsCount) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.final) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.messageIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.messageIds, fieldNumber: 1)
+    }
+    if self.unreadMentionsCount != 0 {
+      try visitor.visitSingularInt32Field(value: self.unreadMentionsCount, fieldNumber: 2)
+    }
+    if self.unreadReactionsCount != 0 {
+      try visitor.visitSingularInt32Field(value: self.unreadReactionsCount, fieldNumber: 3)
+    }
+    if self.final != false {
+      try visitor.visitSingularBoolField(value: self.final, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetUnreadActivityResult, rhs: GetUnreadActivityResult) -> Bool {
+    if lhs.messageIds != rhs.messageIds {return false}
+    if lhs.unreadMentionsCount != rhs.unreadMentionsCount {return false}
+    if lhs.unreadReactionsCount != rhs.unreadReactionsCount {return false}
+    if lhs.final != rhs.final {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ReadActivityInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ReadActivityInput"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}message_ids\0\u{3}all_mentions\0\u{3}all_reactions\0\u{3}max_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeRepeatedInt64Field(value: &self.messageIds) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.allMentions) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.allReactions) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self._maxID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.messageIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.messageIds, fieldNumber: 2)
+    }
+    if self.allMentions != false {
+      try visitor.visitSingularBoolField(value: self.allMentions, fieldNumber: 3)
+    }
+    if self.allReactions != false {
+      try visitor.visitSingularBoolField(value: self.allReactions, fieldNumber: 4)
+    }
+    try { if let v = self._maxID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ReadActivityInput, rhs: ReadActivityInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.messageIds != rhs.messageIds {return false}
+    if lhs.allMentions != rhs.allMentions {return false}
+    if lhs.allReactions != rhs.allReactions {return false}
+    if lhs._maxID != rhs._maxID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension ReadActivityResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ReadActivityResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ReadActivityResult, rhs: ReadActivityResult) -> Bool {
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -55084,7 +55621,7 @@ nonisolated extension DeleteUserGroupResult: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Update"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}seq\0\u{1}date\0\u{4}\u{2}new_message\0\u{3}edit_message\0\u{3}update_message_id\0\u{3}delete_messages\0\u{3}update_compose_action\0\u{3}update_user_status\0\u{3}message_attachment\0\u{3}update_reaction\0\u{3}delete_reaction\0\u{3}participant_add\0\u{3}participant_delete\0\u{3}new_chat\0\u{3}delete_chat\0\u{3}space_member_add\0\u{3}space_member_delete\0\u{3}join_space\0\u{3}update_read_max_id\0\u{3}update_user_settings\0\u{3}new_message_notification\0\u{3}mark_as_unread\0\u{3}chat_skip_pts\0\u{3}chat_has_new_updates\0\u{3}space_has_new_updates\0\u{3}space_member_update\0\u{3}chat_visibility\0\u{3}dialog_archived\0\u{3}chat_info\0\u{3}pinned_messages\0\u{3}chat_moved\0\u{3}dialog_notification_settings\0\u{3}chat_open\0\u{3}message_action_invoked\0\u{3}message_action_answered\0\u{3}clear_chat_history\0\u{3}bot_presence\0\u{3}dialog_follow_mode\0\u{3}updated_user\0\u{3}participant_group_add\0\u{3}participant_group_delete\0\u{3}space_settings\0\u{3}chat_permissions\0\u{3}dialog_collapsed_max_id\0\u{3}dialog_folder\0\u{3}user_added_to_chat\0\u{3}user_removed_from_chat\0\u{1}acknowledgement\0\u{3}dialog_translation\0\u{3}space_profile\0\u{3}user_has_new_updates\0\u{3}agent_session_state\0\u{3}agent_participation\0\u{3}agent_grant\0\u{3}agent_runtime\0\u{3}agent_session_control\0\u{3}agent_settings\0\u{c}\u{3}\u{1}")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}seq\0\u{1}date\0\u{4}\u{2}new_message\0\u{3}edit_message\0\u{3}update_message_id\0\u{3}delete_messages\0\u{3}update_compose_action\0\u{3}update_user_status\0\u{3}message_attachment\0\u{3}update_reaction\0\u{3}delete_reaction\0\u{3}participant_add\0\u{3}participant_delete\0\u{3}new_chat\0\u{3}delete_chat\0\u{3}space_member_add\0\u{3}space_member_delete\0\u{3}join_space\0\u{3}update_read_max_id\0\u{3}update_user_settings\0\u{3}new_message_notification\0\u{3}mark_as_unread\0\u{3}chat_skip_pts\0\u{3}chat_has_new_updates\0\u{3}space_has_new_updates\0\u{3}space_member_update\0\u{3}chat_visibility\0\u{3}dialog_archived\0\u{3}chat_info\0\u{3}pinned_messages\0\u{3}chat_moved\0\u{3}dialog_notification_settings\0\u{3}chat_open\0\u{3}message_action_invoked\0\u{3}message_action_answered\0\u{3}clear_chat_history\0\u{3}bot_presence\0\u{3}dialog_follow_mode\0\u{3}updated_user\0\u{3}participant_group_add\0\u{3}participant_group_delete\0\u{3}space_settings\0\u{3}chat_permissions\0\u{3}dialog_collapsed_max_id\0\u{3}dialog_folder\0\u{3}user_added_to_chat\0\u{3}user_removed_from_chat\0\u{1}acknowledgement\0\u{3}dialog_translation\0\u{3}space_profile\0\u{3}user_has_new_updates\0\u{3}agent_session_state\0\u{3}agent_participation\0\u{3}agent_grant\0\u{3}agent_runtime\0\u{3}agent_session_control\0\u{3}agent_settings\0\u{3}unread_activity\0\u{c}\u{3}\u{1}")
 
   fileprivate class _StorageClass {
     var _seq: Int32? = nil
@@ -55838,6 +56375,19 @@ nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
             _storage._update = .agentSettings(v)
           }
         }()
+        case 59: try {
+          var v: UpdateUnreadActivity?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .unreadActivity(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .unreadActivity(v)
+          }
+        }()
         default: break
         }
       }
@@ -56076,6 +56626,10 @@ nonisolated extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       case .agentSettings?: try {
         guard case .agentSettings(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 58)
+      }()
+      case .unreadActivity?: try {
+        guard case .unreadActivity(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 59)
       }()
       case nil: break
       }
@@ -56862,6 +57416,65 @@ nonisolated extension UpdateReadMaxId: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs._peerID != rhs._peerID {return false}
     if lhs.readMaxID != rhs.readMaxID {return false}
     if lhs.unreadCount != rhs.unreadCount {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension UpdateUnreadActivity: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateUnreadActivity"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}unread_mentions_count\0\u{3}unread_reactions_count\0\u{3}unread_mention_ids\0\u{3}unread_reaction_ids\0\u{3}cleared_message_ids\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.unreadMentionsCount) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.unreadReactionsCount) }()
+      case 4: try { try decoder.decodeRepeatedInt64Field(value: &self.unreadMentionIds) }()
+      case 5: try { try decoder.decodeRepeatedInt64Field(value: &self.unreadReactionIds) }()
+      case 6: try { try decoder.decodeRepeatedInt64Field(value: &self.clearedMessageIds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.unreadMentionsCount != 0 {
+      try visitor.visitSingularInt32Field(value: self.unreadMentionsCount, fieldNumber: 2)
+    }
+    if self.unreadReactionsCount != 0 {
+      try visitor.visitSingularInt32Field(value: self.unreadReactionsCount, fieldNumber: 3)
+    }
+    if !self.unreadMentionIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.unreadMentionIds, fieldNumber: 4)
+    }
+    if !self.unreadReactionIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.unreadReactionIds, fieldNumber: 5)
+    }
+    if !self.clearedMessageIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.clearedMessageIds, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateUnreadActivity, rhs: UpdateUnreadActivity) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.unreadMentionsCount != rhs.unreadMentionsCount {return false}
+    if lhs.unreadReactionsCount != rhs.unreadReactionsCount {return false}
+    if lhs.unreadMentionIds != rhs.unreadMentionIds {return false}
+    if lhs.unreadReactionIds != rhs.unreadReactionIds {return false}
+    if lhs.clearedMessageIds != rhs.clearedMessageIds {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
