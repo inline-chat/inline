@@ -13,13 +13,6 @@ public enum ExperimentalFeatureFlags {
   /// Read only to migrate pre-`sidebarMode` installs; never written.
   public static let sidebarAsInboxKey = "experimental.sidebarAsInbox"
   public static let nativeFileDownloadsKey = "experimental.nativeFileDownloads"
-  public static let macMessageSelectionKey = "experimental.macMessageSelection"
-
-  /// macOS-only and off by default, independent of the Quick Forward experiment.
-  public static var macMessageSelectionEnabled: Bool {
-    UserDefaults.standard.bool(forKey: macMessageSelectionKey)
-  }
-
   public static let quickForwardKey = "experimental.quickForward"
   public static let richMessageCopyEditingKey = "experimental.richMessageCopyEditing"
 
