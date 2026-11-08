@@ -5109,6 +5109,37 @@ describe("inline/monitor", () => {
     }
   })
 
+  it("handles /approve while the run it unblocks is still going in the same chat", async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const started: string[] = []
+    const harness = await setupMonitorHarness({
+      events: [
+        { kind: "message.new", chatId: 89n, message: { id: 40n, date: 1_700_000_040n, fromId: 51n, message: "run uname" } },
+        { kind: "message.new", chatId: 89n, message: { id: 41n, date: 1_700_000_041n, fromId: 51n, message: "/approve abc allow-once" } },
+      ],
+      chats: { "89": { kind: "direct", title: "DM", peerUserId: 51n } },
+      dispatchReplyPayload: { text: "ok" },
+      dispatchReplyBlocker: async ({ ctx }: { ctx: any }) => {
+        started.push(String(ctx.Body))
+        if (ctx.Body === "run uname") await gate
+      },
+    } as any)
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(started).toEqual(["run uname", "/approve abc allow-once"]))
+    } finally {
+      release()
+      await handle.stop()
+    }
+  })
+
   it("applies a thread mode changed in chat to the next message without a restart", async () => {
     let release!: () => void
     const gate = new Promise<void>((resolve) => { release = resolve })

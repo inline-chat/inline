@@ -262,6 +262,20 @@ const INLINE_COLD_BOOT_GATED_EVENTS = new Set([
   "reaction.delete",
 ])
 
+const INLINE_OUT_OF_BAND_COMMAND_RE = /^\/(?:approve|stop)(?:@[A-Za-z0-9_]+)?(?:\s|$)/i
+
+export function isInlineOutOfBandCommandText(text: string | undefined | null): boolean {
+  return typeof text === "string" && INLINE_OUT_OF_BAND_COMMAND_RE.test(text.trim())
+}
+
+function decodeInlineCallbackText(data: Uint8Array): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(data)
+  } catch {
+    return ""
+  }
+}
+
 const INLINE_BOT_HAND_BACK_SYSTEM_PROMPT =
   "This message is another bot's reply to you. It needs no answer: your response will not reach that bot. To ask it for more, mention it."
 
@@ -5349,6 +5363,15 @@ export async function monitorInlineProvider(params: {
   }
 
   const scheduleInboundMessage = (entry: InlineDebounceEntry): void => {
+    // /approve and /stop act on the run that is already going in this chat.
+    // Queued behind it, an approval waits for the very run it would unblock.
+    if (isInlineOutOfBandCommandText(entry.msg.message)) {
+      scheduleImmediateInboundMessage(
+        { chatId: entry.chatId, msg: entry.msg },
+        "inline control command dispatch",
+      )
+      return
+    }
     scheduleInboundTask(
       "inbound dispatch",
       async () => {
@@ -5748,7 +5771,8 @@ export async function monitorInlineProvider(params: {
               },
             },
             "inline action dispatch",
-            { serializeWithChat: true },
+            // Approval buttons carry their /approve command as callback data.
+            isInlineOutOfBandCommandText(decodeInlineCallbackText(data)) ? undefined : { serializeWithChat: true },
           )
           return
         }

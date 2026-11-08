@@ -192,12 +192,49 @@ const resolveInlineOriginTarget = createChannelNativeOriginTargetResolverAsync({
   resolveFallbackTarget: resolveInlineFallbackOriginTarget,
 })
 
-const resolveInlineApproverDmTargets = createChannelApproverDmTargetResolverAsync({
+const resolveInlineApproverUserDmTargets = createChannelApproverDmTargetResolverAsync({
   shouldHandleRequest: ({ cfg, accountId, request, sessionDelivery }) =>
     shouldHandleInlineExecApprovalRequest(requestParams({ cfg, accountId, request, sessionDelivery })),
   resolveApprovers: getInlineExecApprovalApprovers,
   mapApprover: (approver) => ({ to: `user:${approver}` }),
 })
+
+type InlineApproverDmTargetsInput = Parameters<typeof resolveInlineApproverUserDmTargets>[0]
+
+async function resolveInlineDmPeerUserId(params: {
+  cfg: OpenClawConfig
+  accountId?: string | null
+  chatId: bigint
+}): Promise<string | null> {
+  const { withInlineFollowClient } = await import("./follow-command.js")
+  return await withInlineFollowClient({
+    cfg: params.cfg,
+    accountId: params.accountId ?? null,
+    fn: async (client) => {
+      const chat = await client.getChat({ chatId: params.chatId })
+      const peer = chat.peer?.type
+      return peer?.oneofKind === "user" ? String(peer.user.userId) : null
+    },
+  })
+}
+
+// An approval asked in the approver's own DM goes back to that DM. Name it by
+// the origin's chat target so the host sees the prompt reached the origin and
+// doesn't also post "I sent the approval request to Inline DMs, not this chat".
+async function resolveInlineApproverDmTargets(input: InlineApproverDmTargetsInput) {
+  const targets = await resolveInlineApproverUserDmTargets(input)
+  const origin = resolveTurnSourceInlineOriginTarget(input.request as ApprovalRequest)
+  const chatId = origin && !origin.threadId ? origin.to.match(/^chat:([0-9]+)$/)?.[1] : undefined
+  if (!chatId || targets.length === 0) return targets
+  const peerUserId = await resolveInlineDmPeerUserId({
+    cfg: input.cfg,
+    accountId: input.accountId ?? null,
+    chatId: BigInt(chatId),
+  }).catch(() => null)
+  if (!peerUserId) return targets
+  return targets.map((target) =>
+    target.to === `user:${peerUserId}` ? { ...target, to: `chat:${chatId}` } : target)
+}
 
 function describeInlineExecApprovalSetup(params: { accountId?: string | null }): string {
   const prefix =

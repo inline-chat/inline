@@ -1,4 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
+
+const getChatPeer = vi.hoisted(() => ({ value: null as { oneofKind: "user"; user: { userId: bigint } } | { oneofKind: "chat"; chat: { chatId: bigint } } | null }))
+vi.mock("./follow-command.js", () => ({
+  withInlineFollowClient: async ({ fn }: { fn: (client: unknown, accountId: string) => Promise<unknown> }) =>
+    await fn({ getChat: async () => ({ peer: getChatPeer.value ? { type: getChatPeer.value } : undefined }) }, "default"),
+}))
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import type { ExecApprovalRequest } from "openclaw/plugin-sdk/approval-runtime"
 import { inlineApprovalNativeRuntime } from "./approval-handler.runtime"
@@ -163,6 +169,24 @@ describe("inline/native approvals", () => {
         request,
       }),
     ).toEqual([{ to: "user:51" }])
+  })
+
+  it("sends an approval asked in the approver's own DM back to that DM chat", async () => {
+    const cfg = {
+      channels: { inline: { token: "token", execApprovals: { approvers: ["51", "52"] } } },
+    } as OpenClawConfig
+    const resolve = (request: ExecApprovalRequest) =>
+      inlineApprovalCapability.nativeAsync!.resolveApproverDmTargets!({
+        cfg, accountId: "default", approvalKind: "exec", request,
+      })
+
+    getChatPeer.value = { oneofKind: "user", user: { userId: 51n } }
+    expect(await resolve(buildExecRequest({ turnSourceTo: "chat:7" })))
+      .toEqual([{ to: "chat:7" }, { to: "user:52" }])
+
+    getChatPeer.value = { oneofKind: "chat", chat: { chatId: 7n } }
+    expect(await resolve(buildExecRequest({ turnSourceTo: "chat:7" })))
+      .toEqual([{ to: "user:51" }, { to: "user:52" }])
   })
 
   it.each([
