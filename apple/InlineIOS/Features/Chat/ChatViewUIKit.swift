@@ -76,8 +76,16 @@ public class ChatContainerView: UIView {
         self?.restoreComposeFocusAfterContextMenu()
       }
       collectionView.onScrollAffordanceChanged = { [weak self] state in
-        self?.scrollButton.setVisible(state.isVisible)
+        self?.setScrollButtonShown(state.isVisible)
         self?.scrollButton.setHasUnread(state.hasUnread)
+      }
+      collectionView.onVisibleMessagesChanged = { [weak self] ids in
+        guard let navigator = self?.activityNavigator else { return }
+        if let ids {
+          navigator.noteVisible(messageIds: ids)
+        } else {
+          navigator.clearVisible()
+        }
       }
     }
     collectionView.translatesAutoresizingMaskIntoConstraints = false
@@ -182,6 +190,21 @@ public class ChatContainerView: UIView {
   }()
 
   let scrollButton = BlurCircleButton()
+  private lazy var mentionButton = BlurCircleButton(
+    symbolName: "at",
+    tint: ThemeManager.shared.selected.accent,
+    accessibilityTitle: "Next Unread Mention"
+  )
+  private lazy var reactionButton = BlurCircleButton(
+    symbolName: "heart.fill",
+    tint: .systemPink,
+    accessibilityTitle: "Next Unread Reaction"
+  )
+  private var activityNavigator: ChatActivityNavigator?
+  private var mentionButtonBottomConstraint: NSLayoutConstraint?
+  private var reactionButtonBottomConstraint: NSLayoutConstraint?
+  private var isScrollButtonShown = false
+  private var activityState = ChatActivityNavigator.State.empty
 
   private var usesIOS27KeyboardWorkaround: Bool {
     if #available(iOS 27.0, *) {
@@ -204,6 +227,7 @@ public class ChatContainerView: UIView {
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
 
   isolated deinit {
+    activityNavigator?.stop()
     sendAnimationCoordinator?.cancelAll()
     NotificationCenter.default.removeObserver(self)
     edgePanGestureRecognizer?.removeTarget(self, action: #selector(handleEdgePan(_:)))
@@ -335,6 +359,24 @@ public class ChatContainerView: UIView {
     scrollButton.onTap = { [weak self] in
       self?.messagesCollectionView.scrollToBottom()
     }
+    addSubview(mentionButton)
+    mentionButton.onTap = { [weak self] in
+      self?.jumpToNextActivity()
+    }
+    mentionButton.setMenu(UIMenu(children: [
+      UIAction(title: "Mark All Mentions as Read", image: UIImage(systemName: "checkmark.message")) { [weak self] _ in
+        self?.activityNavigator?.markAllMentionsRead()
+      },
+    ]))
+    addSubview(reactionButton)
+    reactionButton.onTap = { [weak self] in
+      self?.jumpToNextReaction()
+    }
+    reactionButton.setMenu(UIMenu(children: [
+      UIAction(title: "Mark All Reactions as Seen", image: UIImage(systemName: "checkmark")) { [weak self] _ in
+        self?.activityNavigator?.markAllReactionsRead()
+      },
+    ]))
 
     if usesIOS27KeyboardWorkaround {
       composeView.textView.setKeyboardTrackingAccessoryView(keyboardTrackingAccessoryView)
@@ -392,8 +434,75 @@ public class ChatContainerView: UIView {
         // the existing 10pt visual spacing from the trailing and compose edges.
         scrollButton.trailingAnchor.constraint(equalTo: composeTrailingAnchor, constant: -5),
         scrollButton.bottomAnchor.constraint(equalTo: composeContainerView.topAnchor, constant: -5),
+
+        mentionButton.centerXAnchor.constraint(equalTo: scrollButton.centerXAnchor),
+        reactionButton.centerXAnchor.constraint(equalTo: scrollButton.centerXAnchor),
       ]
     )
+    // Stacked from the bottom: scroll-to-bottom, @, ♥. Hidden buttons take no slot.
+    mentionButtonBottomConstraint = mentionButton.bottomAnchor.constraint(equalTo: scrollButton.bottomAnchor)
+    reactionButtonBottomConstraint = reactionButton.bottomAnchor.constraint(equalTo: scrollButton.bottomAnchor)
+    mentionButtonBottomConstraint?.isActive = true
+    reactionButtonBottomConstraint?.isActive = true
+    startActivityNavigator()
+  }
+
+  private static let floatingButtonStep: CGFloat = 42
+
+  private func layoutFloatingButtons(animated: Bool) {
+    let mentionSlot = isScrollButtonShown ? 1 : 0
+    let reactionSlot = mentionSlot + (activityState.mentionsCount > 0 ? 1 : 0)
+    mentionButtonBottomConstraint?.constant = -CGFloat(mentionSlot) * Self.floatingButtonStep
+    reactionButtonBottomConstraint?.constant = -CGFloat(reactionSlot) * Self.floatingButtonStep
+    guard animated, window != nil else { return }
+    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.22) {
+      self.layoutIfNeeded()
+    }
+  }
+
+  // MARK: - Unread mentions and replies
+
+  private func startActivityNavigator() {
+    guard activityNavigator == nil, !isPreview, let chatId, chatId > 0 else { return }
+    let navigator = ChatActivityNavigator(peerId: peerId, chatId: chatId)
+    navigator.onChange = { [weak self] state in
+      self?.applyActivityState(state)
+    }
+    activityNavigator = navigator
+    navigator.start()
+    applyActivityState(navigator.state)
+  }
+
+  private func applyActivityState(_ state: ChatActivityNavigator.State) {
+    activityState = state
+    mentionButton.setCount(state.mentionsCount)
+    mentionButton.setVisible(state.mentionsCount > 0)
+    reactionButton.setCount(state.reactionsCount)
+    reactionButton.setVisible(state.reactionsCount > 0)
+    layoutFloatingButtons(animated: true)
+  }
+
+  private func setScrollButtonShown(_ shown: Bool) {
+    scrollButton.setVisible(shown)
+    guard isScrollButtonShown != shown else { return }
+    isScrollButtonShown = shown
+    layoutFloatingButtons(animated: true)
+  }
+
+  private func jumpToNextReaction() {
+    guard let navigator = activityNavigator else { return }
+    Task { @MainActor [weak self] in
+      guard let messageId = await navigator.nextReactionMessageId(), let self else { return }
+      self.messagesCollectionView.scrollToMessageWhenAvailable(messageId)
+    }
+  }
+
+  private func jumpToNextActivity() {
+    guard let navigator = activityNavigator else { return }
+    Task { @MainActor [weak self] in
+      guard let messageId = await navigator.nextMessageId(), let self else { return }
+      self.messagesCollectionView.scrollToMessageWhenAvailable(messageId)
+    }
   }
 
   private func setupObservers() {
