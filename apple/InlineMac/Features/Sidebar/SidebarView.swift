@@ -52,6 +52,7 @@ struct SidebarView: View {
   @ObservedObject private var auth = Auth.shared
   private let audioPlayer = AudioPlaybackCenter.shared
   private let agents = SidebarAgents.shared
+  @AppStorage(SidebarAgents.rowNewThreadButtonKey) private var agentRowNewThreadEnabled = false
   private let sidebarInteractionLog = Log.scoped("SidebarInteractions")
   @State private var isHomeHovering = false
   @State private var isLocationHovering = false
@@ -373,7 +374,7 @@ struct SidebarView: View {
         colorScheme: String(describing: colorScheme),
         themeRevision: settings.themeRevision,
         temporaryItemID: visibleTemporaryItem?.id,
-        agentBotsRevision: agents.ownedBotIDs.hashValue
+        agentBotsRevision: agentRowNewThreadEnabled ? agents.ownedBotIDs.hashValue &+ 1 : 0
       )
     )
   }
@@ -734,7 +735,7 @@ struct SidebarView: View {
           close: { removeFolder(folder, disposition: .closeDialogs) },
           ungroup: { removeFolder(folder, disposition: .keepDialogs) },
           markAllRead: { markAllRead(in: folder.nodeID) },
-          newThread: isArchiveVisible ? nil : { createNewThread(inFolder: folder.id) }
+          newThread: nil
         )
       ))
     case .folderEmpty:
@@ -836,8 +837,10 @@ struct SidebarView: View {
   /// The hover + on a chat row starts a thread nested under it. On a direct
   /// chat with an agent, the thread includes the agent.
   private func newSubthreadAction(for item: SidebarViewModel.Item) -> (() -> Void)? {
-    guard isArchiveVisible == false, isTemporaryItem(item) == false else { return nil }
-    let botID = agents.agentBotID(for: item.peerId)
+    // Experimental and agent-only: plain chats and folders show no hover +.
+    guard agentRowNewThreadEnabled, isArchiveVisible == false, isTemporaryItem(item) == false,
+          let botID = agents.agentBotID(for: item.peerId)
+    else { return nil }
     return {
       guard let dependencies else { return }
       // The new thread nests under this row, so make sure it's visible.
@@ -848,7 +851,7 @@ struct SidebarView: View {
         dependencies: dependencies,
         parentChatId: item.chatId,
         agentBotUserId: botID,
-        bindsAgent: botID.map(agents.isOwnedBot) ?? false
+        bindsAgent: agents.isOwnedBot(botID)
       )
     }
   }

@@ -11,6 +11,10 @@ import RealtimeV2
 final class SidebarAgents {
   static let shared = SidebarAgents()
 
+  /// Experimental: a hover + on agent DM rows that starts a nested thread
+  /// with the agent. Off by default; plain chats and folders never show it.
+  static let rowNewThreadButtonKey = "experimental.sidebarAgentRowNewThread"
+
   /// The current account's own bots. Only these can carry an agent preset
   /// (project, model, reasoning) on a new thread.
   private(set) var ownedBotIDs: Set<Int64> = []

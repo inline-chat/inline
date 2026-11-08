@@ -10,6 +10,8 @@ struct ExperimentalSettingsDetailView: View {
   @StateObject private var settings = AppSettings.shared
   @AppStorage(ExperimentalFeatureFlags.newThreadAgentPickerKey)
   private var newThreadAgentPickerEnabled = false
+  @AppStorage(SidebarAgents.rowNewThreadButtonKey)
+  private var agentRowNewThreadEnabled = false
 
   @AppStorage(ExperimentalFeatureFlags.nativeFileDownloadsKey)
   private var nativeFileDownloadsEnabled = false
@@ -41,6 +43,13 @@ struct ExperimentalSettingsDetailView: View {
         }
         .settingsSearchAnchor(.newThreadAgentPicker)
       }
+      Toggle(isOn: $agentRowNewThreadEnabled) {
+        SettingsRowLabel(
+          .sidebarAgentRowNewThread,
+          description: "Show a + on agent chats in the sidebar that starts a new thread with the agent."
+        )
+      }
+      .settingsSearchAnchor(.sidebarAgentRowNewThread)
       Toggle(isOn: $settings.richContentRendererEnabled) {
         SettingsRowLabel(
           .richContentRenderer,
