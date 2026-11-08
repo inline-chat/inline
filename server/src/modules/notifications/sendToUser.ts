@@ -128,6 +128,7 @@ const configureGenericSendMessageNotification = ({
     isReplyThread: payload.isReplyThread ?? false,
     sender: senderPayload,
     messageId: payload.messageId,
+    placeholderReason: "no_device_key" satisfies PushPlaceholderReason,
   }
 
   notification.payload = apsPayload
@@ -182,8 +183,7 @@ type PushContentSession = Pick<
   | "pushContentKeyId"
   | "pushContentVersion"
   | "pushContentKeyAlgorithm"
-> &
-  Partial<Pick<PushSession, "pushFilteredSyncPushes">>
+>
 
 const sessionSupportsEncryptedPushContent = (
   session: PushContentSession,
@@ -197,37 +197,11 @@ const sessionSupportsEncryptedPushContent = (
   return session.pushContentKeyAlgorithm === PUSH_CONTENT_ALGORITHM
 }
 
-const filteredSyncAlertTitle = "Inline"
-const filteredSyncAlertBody = "Conversation updated."
-
 /**
- * Read/delete sync pushes clear delivered notifications. Background pushes are
- * throttled and dropped by iOS, so sessions whose notification service extension
- * can filter (hide) a push get a mutable alert the extension consumes instead.
+ * Why a message push carries only the generic alert, in clear text for the notification
+ * extension's health telemetry. Never content: only which server path produced the placeholder.
  */
-const configureSyncNotification = ({
-  notification,
-  session,
-  expirySeconds,
-  collapseId,
-}: {
-  notification: Notification
-  session: PushContentSession
-  expirySeconds: number
-  collapseId?: string
-}) => {
-  if (session.pushFilteredSyncPushes !== true) {
-    configureBackgroundNotification({ notification, expirySeconds, collapseId })
-    return
-  }
-  configureAlertNotification(notification)
-  notification.mutableContent = true
-  notification.priority = 10
-  notification.expiry = expirySeconds
-  if (collapseId) notification.collapseId = collapseId
-  // Only visible if the extension fails to filter; never carries content.
-  notification.alert = { title: filteredSyncAlertTitle, body: filteredSyncAlertBody }
-}
+export type PushPlaceholderReason = "no_device_key" | "encryption_failed" | "too_large"
 
 export const buildApnNotification = ({
   session,
@@ -272,6 +246,7 @@ export const buildApnNotification = ({
       recipientUserId: String(recipientUserId),
       threadId: payload.threadId,
       messageId: payload.messageId,
+      placeholderReason: "too_large" satisfies PushPlaceholderReason,
     }
     notification.alert = { title: genericEncryptedAlertTitle, body: genericEncryptedAlertBody }
     return Buffer.byteLength(JSON.stringify(notification), "utf8") <= 4_096 ? notification : undefined
@@ -314,7 +289,9 @@ export const buildApnNotification = ({
         kind: "send_message_encrypted",
         threadId: payload.threadId,
         messageId: payload.messageId,
-        ...(encryptedContent ? { encryptedContent } : {}),
+        ...(encryptedContent
+          ? { encryptedContent }
+          : { placeholderReason: "encryption_failed" satisfies PushPlaceholderReason }),
       }
       notification.contentAvailable = true
       notification.mutableContent = true
@@ -369,11 +346,7 @@ export const buildApnNotification = ({
 
   if (payload.kind === "message_deleted") {
     if (!payload.messageIds.length) return undefined
-    configureSyncNotification({
-      notification,
-      session,
-      expirySeconds: nowSeconds + 60 * 60,
-    })
+    configureBackgroundNotification({ notification, expirySeconds: nowSeconds + 60 * 60 })
     notification.payload = {
       kind: "message_deleted",
       threadId: payload.threadId,
@@ -383,9 +356,8 @@ export const buildApnNotification = ({
   }
 
   if (!payload.readUpToMessageId) return undefined
-  configureSyncNotification({
+  configureBackgroundNotification({
     notification,
-    session,
     expirySeconds: nowSeconds + 60 * 10,
     collapseId: `messages_read:${payload.threadId}`,
   })
@@ -404,8 +376,7 @@ export const preparePushNotificationToUser = async (
   { userId, payload }: SendPushToUserInput,
 ): Promise<PreparedPushSubmission | undefined> => {
   try {
-    // Get all sessions for the user
-    const userSessions = await SessionsModel.getValidPushSessionsByUserId(userId)
+    const userSessions = uniquePushSessions(await SessionsModel.getValidPushSessionsByUserId(userId))
 
     if (!userSessions.length) {
       return
@@ -543,6 +514,32 @@ export const preparePushNotificationToUser = async (
 export const sendPushNotificationToUser = async (input: SendPushToUserInput): Promise<void> => {
   const submit = await preparePushNotificationToUser(input)
   await submit?.()
+}
+
+/**
+ * One push per device token. Registration releases a token from superseded sessions, but rows
+ * written before that rule can still share a token; delivering both shows the real message next to
+ * a placeholder from the session whose key the device no longer has. Keep the newest session that
+ * can carry encrypted content.
+ */
+export function uniquePushSessions<T extends Pick<PushSession, "id" | "applePushToken"> & PushContentSession>(
+  sessions: readonly T[],
+): T[] {
+  const byToken = new Map<string, T>()
+  for (const session of sessions) {
+    const current = byToken.get(session.applePushToken)
+    if (!current) {
+      byToken.set(session.applePushToken, session)
+      continue
+    }
+    const rank = (candidate: T) => [sessionSupportsEncryptedPushContent(candidate) ? 1 : 0, candidate.id] as const
+    const [currentKey, currentId] = rank(current)
+    const [candidateKey, candidateId] = rank(session)
+    if (candidateKey > currentKey || (candidateKey === currentKey && candidateId > currentId)) {
+      byToken.set(session.applePushToken, session)
+    }
+  }
+  return [...byToken.values()]
 }
 
 export function shouldClearApplePushTokenForFailures(failures: readonly unknown[]): boolean {

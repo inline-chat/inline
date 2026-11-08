@@ -7,6 +7,7 @@ import {
   buildExpoPushMessage,
   shouldClearApplePushTokenForFailures,
   shouldPlayNotificationSound,
+  uniquePushSessions,
 } from "./sendToUser"
 
 const unencryptedSession = {
@@ -321,6 +322,7 @@ describe("sendToUser APN payloads", () => {
     expect(Buffer.byteLength(JSON.stringify(notification), "utf8")).toBeLessThanOrEqual(4_096)
     expect(notification.payload).toEqual({
       kind: "send_message_encrypted", recipientUserId: "99", threadId: "chat_34", messageId: "90",
+      placeholderReason: "too_large",
     })
     expect(JSON.stringify(notification)).not.toContain("Secret")
     expect(notification.aps.sound).toBe("default")
@@ -395,35 +397,23 @@ describe("sendToUser APN payloads", () => {
     expect(decrypted.photoUrl).toBe(photoUrl)
   })
 
-  it("sends sync pushes as filtered alerts only to sessions that can filter them", () => {
-    const build = (pushFilteredSyncPushes: boolean | null, payload: Parameters<typeof buildApnNotification>[0]["payload"]) =>
+  it("always sends read/delete sync as background pushes", () => {
+    const build = (payload: Parameters<typeof buildApnNotification>[0]["payload"]) =>
       buildApnNotification({
         recipientUserId: 99,
-        session: { ...unencryptedSession, pushFilteredSyncPushes },
+        session: unencryptedSession,
         payload,
         silent: false,
         topic: "chat.inline.Inline",
         nowSeconds: 500,
       })!
-    const readPayload = { kind: "messages_read", threadId: "chat_34", readUpToMessageId: "99" } as const
-    const deletedPayload = { kind: "message_deleted" as const, threadId: "chat_34", messageIds: ["90"] }
 
-    for (const capable of [null, false]) {
-      const read = build(capable, readPayload)
-      expect(read.pushType).toBe("background")
-      expect(read.priority).toBe(5)
-      expect(read.aps["content-available"]).toBe(1)
-      expect(read.aps["mutable-content"]).toBeUndefined()
-      expect(read.aps.alert).toBeUndefined()
-    }
-
-    const read = build(true, readPayload)
-    expect(read.pushType).toBe("alert")
-    expect(read.priority).toBe(10)
-    expect(read.aps["mutable-content"]).toBe(1)
-    expect(read.aps["content-available"]).toBeUndefined()
-    expect(read.aps.sound).toBeUndefined()
-    expect(read.aps.alert).toEqual({ title: "Inline", body: "Conversation updated." })
+    const read = build({ kind: "messages_read", threadId: "chat_34", readUpToMessageId: "99" })
+    expect(read.pushType).toBe("background")
+    expect(read.priority).toBe(5)
+    expect(read.aps["content-available"]).toBe(1)
+    expect(read.aps["mutable-content"]).toBeUndefined()
+    expect(read.aps.alert).toBeUndefined()
     expect(read.expiry).toBe(1_100)
     expect(read.collapseId).toBe("messages_read:chat_34")
     expect(read.payload).toEqual({
@@ -433,11 +423,47 @@ describe("sendToUser APN payloads", () => {
       readUpToMessageId: "99",
     })
 
-    const deleted = build(true, deletedPayload)
-    expect(deleted.pushType).toBe("alert")
-    expect(deleted.aps["mutable-content"]).toBe(1)
+    const deleted = build({ kind: "message_deleted", threadId: "chat_34", messageIds: ["90"] })
+    expect(deleted.pushType).toBe("background")
+    expect(deleted.aps.alert).toBeUndefined()
     expect(deleted.expiry).toBe(4_100)
     expect(deleted.collapseId).toBeUndefined()
+  })
+
+  it("tags generic message alerts with the server path that produced them", () => {
+    const payload = {
+      kind: "send_message" as const, senderUserId: 12, threadId: "chat_3", title: "Ada", body: "Hi",
+      messageId: "77",
+    }
+    const noKey = buildApnNotification({ session: unencryptedSession, payload, recipientUserId: 9,
+      silent: false, topic: "chat.inline.Inline", nowSeconds: 100 })!
+    expect(noKey.payload.placeholderReason).toBe("no_device_key")
+
+    const recipient = generateKeyPairSync("x25519")
+    const publicKey = Buffer.from(recipient.publicKey.export({ format: "der", type: "spki" }).subarray(-32))
+    const session = { pushContentKeyPublic: publicKey, pushContentKeyId: "k", pushContentVersion: PUSH_CONTENT_VERSION,
+      pushContentKeyAlgorithm: PUSH_CONTENT_ALGORITHM }
+    const failed = buildApnNotification({ session, payload, recipientUserId: 9, silent: false,
+      topic: "chat.inline.Inline", nowSeconds: 100, encrypt: () => { throw new Error("boom") } })!
+    expect(failed.payload.placeholderReason).toBe("encryption_failed")
+    expect(failed.payload.encryptedContent).toBeUndefined()
+
+    const encrypted = buildApnNotification({ session, payload, recipientUserId: 9, silent: false,
+      topic: "chat.inline.Inline", nowSeconds: 100 })!
+    expect(encrypted.payload.encryptedContent).toBeDefined()
+    expect(encrypted.payload.placeholderReason).toBeUndefined()
+  })
+
+  it("delivers once per device token, preferring the newest session with a device key", () => {
+    const key = { pushContentKeyPublic: Buffer.alloc(32, 1), pushContentKeyId: "k",
+      pushContentVersion: PUSH_CONTENT_VERSION, pushContentKeyAlgorithm: PUSH_CONTENT_ALGORITHM }
+    const sessions = [
+      { id: 1, applePushToken: "a", ...key },
+      { id: 3, applePushToken: "a", ...unencryptedSession },
+      { id: 2, applePushToken: "a", ...key },
+      { id: 4, applePushToken: "b", ...unencryptedSession },
+    ]
+    expect(uniquePushSessions(sessions).map((session) => session.id)).toEqual([2, 4])
   })
 
   it("does not relabel an oversized invite alert as a chat message", () => {
