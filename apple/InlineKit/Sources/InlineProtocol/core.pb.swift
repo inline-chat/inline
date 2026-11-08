@@ -20050,6 +20050,19 @@ public nonisolated struct SearchMessagesInput: Sendable {
   /// Clears the value of `filter`. Subsequent reads from it will return its default value.
   public mutating func clearFilter() {self._filter = nil}
 
+  /// Count every matching message instead of returning a page: the result has
+  /// total_count set and no messages. Scans the whole chat, so clients send it
+  /// alongside the first page request rather than waiting on it. Requires
+  /// queries; limit and offset_id are ignored.
+  public var countOnly: Bool {
+    get {_countOnly ?? false}
+    set {_countOnly = newValue}
+  }
+  /// Returns true if `countOnly` has been explicitly set.
+  public var hasCountOnly: Bool {self._countOnly != nil}
+  /// Clears the value of `countOnly`. Subsequent reads from it will return its default value.
+  public mutating func clearCountOnly() {self._countOnly = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -20058,6 +20071,7 @@ public nonisolated struct SearchMessagesInput: Sendable {
   fileprivate var _limit: Int32? = nil
   fileprivate var _offsetID: Int64? = nil
   fileprivate var _filter: SearchMessagesFilter? = nil
+  fileprivate var _countOnly: Bool? = nil
 }
 
 public nonisolated struct SearchMessagesResult: Sendable {
@@ -20076,11 +20090,22 @@ public nonisolated struct SearchMessagesResult: Sendable {
   /// Clears the value of `seq`. Subsequent reads from it will return its default value.
   public mutating func clearSeq() {self._seq = nil}
 
+  /// Number of matching messages in the chat; set for count_only requests.
+  public var totalCount: Int32 {
+    get {_totalCount ?? 0}
+    set {_totalCount = newValue}
+  }
+  /// Returns true if `totalCount` has been explicitly set.
+  public var hasTotalCount: Bool {self._totalCount != nil}
+  /// Clears the value of `totalCount`. Subsequent reads from it will return its default value.
+  public mutating func clearTotalCount() {self._totalCount = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _seq: Int64? = nil
+  fileprivate var _totalCount: Int32? = nil
 }
 
 /// Provider-neutral autocomplete result. V1 inserts this as a TEXT_URL entity;
@@ -52916,7 +52941,7 @@ nonisolated extension GetThreadSubthreadsResult: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SearchMessagesInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}queries\0\u{1}limit\0\u{3}offset_id\0\u{1}filter\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{1}queries\0\u{1}limit\0\u{3}offset_id\0\u{1}filter\0\u{3}count_only\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -52929,6 +52954,7 @@ nonisolated extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf.
       case 3: try { try decoder.decodeSingularInt32Field(value: &self._limit) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self._offsetID) }()
       case 5: try { try decoder.decodeSingularEnumField(value: &self._filter) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self._countOnly) }()
       default: break
       }
     }
@@ -52954,6 +52980,9 @@ nonisolated extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf.
     try { if let v = self._filter {
       try visitor.visitSingularEnumField(value: v, fieldNumber: 5)
     } }()
+    try { if let v = self._countOnly {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 6)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -52963,6 +52992,7 @@ nonisolated extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf.
     if lhs._limit != rhs._limit {return false}
     if lhs._offsetID != rhs._offsetID {return false}
     if lhs._filter != rhs._filter {return false}
+    if lhs._countOnly != rhs._countOnly {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -52970,7 +53000,7 @@ nonisolated extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension SearchMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "SearchMessagesResult"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0\u{1}seq\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0\u{1}seq\0\u{3}total_count\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -52980,6 +53010,7 @@ nonisolated extension SearchMessagesResult: SwiftProtobuf.Message, SwiftProtobuf
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self._seq) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self._totalCount) }()
       default: break
       }
     }
@@ -52996,12 +53027,16 @@ nonisolated extension SearchMessagesResult: SwiftProtobuf.Message, SwiftProtobuf
     try { if let v = self._seq {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._totalCount {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: SearchMessagesResult, rhs: SearchMessagesResult) -> Bool {
     if lhs.messages != rhs.messages {return false}
     if lhs._seq != rhs._seq {return false}
+    if lhs._totalCount != rhs._totalCount {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -11585,6 +11585,15 @@ export interface SearchMessagesInput {
      * @generated from protobuf field: optional SearchMessagesFilter filter = 5;
      */
     filter?: SearchMessagesFilter;
+    /**
+     * Count every matching message instead of returning a page: the result has
+     * total_count set and no messages. Scans the whole chat, so clients send it
+     * alongside the first page request rather than waiting on it. Requires
+     * queries; limit and offset_id are ignored.
+     *
+     * @generated from protobuf field: optional bool count_only = 6;
+     */
+    countOnly?: boolean;
 }
 /**
  * @generated from protobuf message SearchMessagesResult
@@ -11598,6 +11607,12 @@ export interface SearchMessagesResult {
      * @generated from protobuf field: optional int64 seq = 2;
      */
     seq?: bigint;
+    /**
+     * Number of matching messages in the chat; set for count_only requests.
+     *
+     * @generated from protobuf field: optional int32 total_count = 3;
+     */
+    totalCount?: number;
 }
 /**
  * Provider-neutral autocomplete result. V1 inserts this as a TEXT_URL entity;
@@ -47263,7 +47278,8 @@ class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
             { no: 2, name: "queries", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 4, name: "offset_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 5, name: "filter", kind: "enum", opt: true, T: () => ["SearchMessagesFilter", SearchMessagesFilter] }
+            { no: 5, name: "filter", kind: "enum", opt: true, T: () => ["SearchMessagesFilter", SearchMessagesFilter] },
+            { no: 6, name: "count_only", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<SearchMessagesInput>): SearchMessagesInput {
@@ -47293,6 +47309,9 @@ class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
                 case /* optional SearchMessagesFilter filter */ 5:
                     message.filter = reader.int32();
                     break;
+                case /* optional bool count_only */ 6:
+                    message.countOnly = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -47320,6 +47339,9 @@ class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
         /* optional SearchMessagesFilter filter = 5; */
         if (message.filter !== undefined)
             writer.tag(5, WireType.Varint).int32(message.filter);
+        /* optional bool count_only = 6; */
+        if (message.countOnly !== undefined)
+            writer.tag(6, WireType.Varint).bool(message.countOnly);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -47335,7 +47357,8 @@ class SearchMessagesResult$Type extends MessageType<SearchMessagesResult> {
     constructor() {
         super("SearchMessagesResult", [
             { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message },
-            { no: 2, name: "seq", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 2, name: "seq", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "total_count", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<SearchMessagesResult>): SearchMessagesResult {
@@ -47356,6 +47379,9 @@ class SearchMessagesResult$Type extends MessageType<SearchMessagesResult> {
                 case /* optional int64 seq */ 2:
                     message.seq = reader.int64().toBigInt();
                     break;
+                case /* optional int32 total_count */ 3:
+                    message.totalCount = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -47374,6 +47400,9 @@ class SearchMessagesResult$Type extends MessageType<SearchMessagesResult> {
         /* optional int64 seq = 2; */
         if (message.seq !== undefined)
             writer.tag(2, WireType.Varint).int64(message.seq);
+        /* optional int32 total_count = 3; */
+        if (message.totalCount !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.totalCount);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
