@@ -693,8 +693,6 @@ export type SendMessageParams = BotTargetInput & {
    * bot can read, change and write one back. Use instead of `text`.
    */
   rich_message?: BotRichMessage
-  /** Added after the text or blocks. The title becomes the text when there is none. */
-  widget?: BotWidget
   reply_to_message_id?: BotInputId
   /** Parse Inline's supported Markdown surface. Defaults to true; false preserves literal syntax. */
   parse_markdown?: boolean
@@ -714,12 +712,10 @@ export type SendMessageParams = BotTargetInput & {
 
 export type EditMessageTextParams = BotTargetInput & {
   message_id: BotInputId
-  /** Required unless `rich_message` or `widget` is set. */
+  /** Required unless `rich_message` is set. */
   text?: string
-  /** Use instead of `text`; replaces the message's blocks. */
+  /** Use instead of `text`; replaces the message's blocks. Keep a widget's `widget_id` to keep viewers' widget state. */
   rich_message?: BotRichMessage
-  /** Replaces the widget. Keep `widget_id` to keep viewers' widget state. */
-  widget?: BotWidget
   /** Parse Inline's supported Markdown surface. Defaults to true; false preserves literal syntax. */
   parse_markdown?: boolean
   actions?: BotMessageAction[][]
