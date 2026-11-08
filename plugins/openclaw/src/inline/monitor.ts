@@ -262,6 +262,47 @@ const INLINE_COLD_BOOT_GATED_EVENTS = new Set([
   "reaction.delete",
 ])
 
+// The Claude Code runtime reaches OpenClaw tools over MCP, so they arrive as
+// `mcp__openclaw__exec`; the host would title that "Mcp Openclaw Exec".
+const INLINE_OPENCLAW_MCP_TOOL_PREFIX = /^mcp__openclaw__/
+
+function normalizeInlineProgressToolInput<T>(input: T): T {
+  const record = input as { event?: unknown; name?: unknown }
+  if (record.event !== "tool" || typeof record.name !== "string") return input
+  const name = record.name.replace(INLINE_OPENCLAW_MCP_TOOL_PREFIX, "")
+  return name === record.name ? input : { ...input, name }
+}
+
+const INLINE_COMMAND_TOOL_NAMES = new Set(["exec", "bash", "shell"])
+
+// Say what the command is, like bridge v2 ("Running `cargo test`"), not "Exec".
+function relabelInlineCommandProgressLine(line: unknown, input: unknown): void {
+  const record = input as {
+    event?: unknown
+    name?: unknown
+    phase?: unknown
+    title?: unknown
+    args?: { command?: unknown }
+  }
+  if (!line || typeof line !== "object" || typeof record.name !== "string") return
+  if (!INLINE_COMMAND_TOOL_NAMES.has(record.name.replace(INLINE_OPENCLAW_MCP_TOOL_PREFIX, ""))) return
+  const shorten = (value: unknown): string => {
+    const command = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
+    return command.length > 80 ? `${command.slice(0, 79)}…` : command
+  }
+  if (record.event === "tool") {
+    const command = shorten(record.args?.command)
+    if (command) Object.assign(line, { text: `Running \`${command}\``, label: "Running a command" })
+    return
+  }
+  if (record.event === "item" && record.phase === "end") {
+    // Host item titles read `command <text>`; anything else is not the command.
+    const title = typeof record.title === "string" ? record.title.match(/^command\s+(.+)$/s)?.[1] : undefined
+    const command = shorten(title)
+    Object.assign(line, { text: command ? `Ran \`${command}\`` : "Ran a command", label: "Ran a command" })
+  }
+}
+
 const INLINE_OUT_OF_BAND_COMMAND_RE = /^\/(?:approve|stop)(?:@[A-Za-z0-9_]+)?(?:\s|$)/i
 
 export function isInlineOutOfBandCommandText(text: string | undefined | null): boolean {
@@ -3717,7 +3758,12 @@ export async function monitorInlineProvider(params: {
       input: Parameters<typeof buildChannelProgressDraftLineForEntry>[1],
       options?: Parameters<typeof buildChannelProgressDraftLineForEntry>[2],
     ): ChannelProgressDraftLine | undefined => {
-      const line = buildChannelProgressDraftLineForEntry(account.config, input, options)
+      const line = buildChannelProgressDraftLineForEntry(
+        account.config,
+        normalizeInlineProgressToolInput(input),
+        options,
+      )
+      relabelInlineCommandProgressLine(line, input)
       // Item titles are host-generated strings such as `command ${command}`,
       // not an agent description. Keep the description from the correlated start.
       const description = input.event === "tool"

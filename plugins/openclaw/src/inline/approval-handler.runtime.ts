@@ -35,7 +35,9 @@ const log = createSubsystemLogger("inline/approvals")
 type InlinePendingDelivery = {
   text: string
   actions?: MessageActions
+  subject?: string
 }
+type InlineFinalPayload = { text: string }
 type InlineApprovalSendTarget = { chatId: bigint } | { userId: bigint }
 type InlinePreparedTarget = {
   sendTarget: InlineApprovalSendTarget
@@ -48,6 +50,8 @@ type InlinePendingApproval = {
   text: string
   parseMarkdown: boolean
   typingChatId?: bigint
+  // What the card asked about, shown again once it is decided or expires.
+  subject?: string
 }
 type InlineParsedApprovalTarget = {
   kind: "chat" | "user"
@@ -213,12 +217,65 @@ function buildPendingPayload(params: {
           nowMs: params.nowMs,
         })
 
-  const text = sanitizeInlineOutgoingText(payload.text ?? "")
   const actions = buildInlineApprovalActions(params.view)
+  // OpenClaw's text spells out every /approve command for channels without
+  // buttons. With buttons, show what is being approved and let them do the rest.
+  const subject = actions ? buildInlineApprovalSubject(params) : null
+  const text = sanitizeInlineOutgoingText(subject ? subject.text : payload.text ?? "")
   return {
     text,
+    ...(subject ? { subject: subject.summary } : {}),
     ...(actions ? { actions } : {}),
   }
+}
+
+function fenced(text: string, language = ""): string {
+  const body = text.length > 2000 ? `${text.slice(0, 2000)}…` : text
+  const fence = body.includes("```") ? "````" : "```"
+  return `${fence}${language}\n${body}\n${fence}`
+}
+
+function buildInlineApprovalSubject(params: {
+  approvalKind: ChannelApprovalKind
+  view: PendingApprovalView
+}): { text: string; summary: string } | null {
+  const view = params.view as PendingApprovalView & Record<string, unknown>
+  const warning = typeof view.warningText === "string" ? view.warningText.trim() : ""
+  if (params.approvalKind === "exec") {
+    const command = typeof view.commandText === "string" ? view.commandText.trim() : ""
+    if (!command) return null
+    const summary = fenced(command, "sh")
+    return {
+      text: [warning, "Command approval required", summary].filter(Boolean).join("\n\n"),
+      summary,
+    }
+  }
+  if (params.approvalKind === "plugin") {
+    const title = typeof view.title === "string" ? view.title.trim() : ""
+    const description = typeof view.description === "string" ? view.description.trim() : ""
+    if (!title && !description) return null
+    const summary = [title ? `**${title}**` : "", description].filter(Boolean).join("\n")
+    return {
+      text: [warning, "Approval required", summary].filter(Boolean).join("\n\n"),
+      summary,
+    }
+  }
+  return null
+}
+
+const INLINE_APPROVAL_DECISION_LABELS: Record<string, string> = {
+  "allow-once": "✅ Allowed once",
+  "allow-always": "✅ Always allowed",
+  deny: "❌ Denied",
+}
+
+function buildInlineApprovalFinalText(params: {
+  entry: InlinePendingApproval
+  heading: string
+}): string {
+  // Cards without a recorded subject (no buttons) keep their own text.
+  if (!params.entry.subject) return params.entry.text
+  return sanitizeInlineOutgoingText(`${params.heading}\n\n${params.entry.subject}`)
 }
 
 // Named through the public factory because the SDK does not export the async adapter type.
@@ -227,7 +284,8 @@ type InlineApprovalNativeRuntimeAdapter = ReturnType<
     InlinePendingDelivery,
     InlinePreparedTarget,
     InlinePendingApproval,
-    never
+    never,
+    InlineFinalPayload
   >
 >
 
@@ -235,7 +293,8 @@ export const inlineApprovalNativeRuntime: InlineApprovalNativeRuntimeAdapter = c
   InlinePendingDelivery,
   InlinePreparedTarget,
   InlinePendingApproval,
-  never
+  never,
+  InlineFinalPayload
 >({
   eventKinds: INLINE_APPROVAL_EVENT_KINDS,
   availability: {
@@ -262,8 +321,19 @@ export const inlineApprovalNativeRuntime: InlineApprovalNativeRuntimeAdapter = c
   presentation: {
     buildPendingPayload: ({ request, approvalKind, nowMs, view }) =>
       buildPendingPayload({ request, approvalKind, nowMs, view }),
-    buildResolvedResult: () => ({ kind: "clear-actions" }),
-    buildExpiredResult: () => ({ kind: "clear-actions" }),
+    buildResolvedResult: ({ resolved, entry }) => ({
+      kind: "update",
+      payload: {
+        text: buildInlineApprovalFinalText({
+          entry,
+          heading: INLINE_APPROVAL_DECISION_LABELS[String(resolved.decision)] ?? "Approval resolved",
+        }),
+      },
+    }),
+    buildExpiredResult: ({ entry }) => ({
+      kind: "update",
+      payload: { text: buildInlineApprovalFinalText({ entry, heading: "⌛ Approval expired" }) },
+    }),
   },
   transport: {
     prepareTarget: ({ cfg, accountId, plannedTarget }) => {
@@ -338,6 +408,7 @@ export const inlineApprovalNativeRuntime: InlineApprovalNativeRuntimeAdapter = c
           text: pendingPayload.text,
           parseMarkdown: resolved.context.parseMarkdown ?? true,
           ...(preparedTarget.typingChatId != null ? { typingChatId: preparedTarget.typingChatId } : {}),
+          ...(pendingPayload.subject ? { subject: pendingPayload.subject } : {}),
         }
       } finally {
         if (preparedTarget.typingChatId != null) {
@@ -352,6 +423,29 @@ export const inlineApprovalNativeRuntime: InlineApprovalNativeRuntimeAdapter = c
             )
           }
         }
+      }
+    },
+    updateEntry: async ({ cfg, accountId, context, entry, payload }) => {
+      const resolved = resolveHandlerContext(handlerContext({ cfg, accountId, context }))
+      if (!resolved) {
+        return
+      }
+      await resolved.context.client.invokeRaw(Method.EDIT_MESSAGE, {
+        oneofKind: "editMessage",
+        editMessage: {
+          messageId: entry.messageId,
+          peerId: entry.peerId,
+          text: payload.text,
+          actions: { rows: [] },
+          parseMarkdown: entry.parseMarkdown,
+        },
+      })
+      if (entry.typingChatId != null) {
+        await sendInlineBotPresenceState(
+          resolved.context.client,
+          entry.typingChatId,
+          BotPresenceState_Kind.IDLE,
+        )
       }
     },
   },

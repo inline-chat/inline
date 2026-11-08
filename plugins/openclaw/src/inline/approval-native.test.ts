@@ -399,7 +399,9 @@ describe("inline/native approvals", () => {
       nowMs: request.createdAtMs,
       view,
     })
-    expect(pendingPayload.text).toContain("Approval required.")
+    // Buttons carry the decisions, so the card shows only what is being approved.
+    expect(pendingPayload.text).toBe("Command approval required\n\n```sh\npwd\n```")
+    expect(pendingPayload.text).not.toContain("/approve")
     expect(pendingPayload.actions?.rows[0]?.actions[0]?.text).toBe("Allow Once")
     expect(
       pendingPayload.actions?.rows[0]?.actions[0]?.action.oneofKind,
@@ -464,12 +466,28 @@ describe("inline/native approvals", () => {
     )
     expect(entry?.messageId).toBe(9001n)
 
-    await inlineApprovalNativeRuntime.interactions?.clearPendingActions?.({
+    const final = await inlineApprovalNativeRuntime.presentation.buildResolvedResult({
       cfg,
       accountId: "default",
       context,
+      request,
+      resolved: { id: request.id, decision: "allow-once", ts: 1 } as any,
+      view: { ...view, phase: "resolved", decision: "allow-once" },
+      entry: entry!,
+    })
+    expect(final).toEqual({
+      kind: "update",
+      payload: { text: "✅ Allowed once\n\n```sh\npwd\n```" },
+    })
+    await inlineApprovalNativeRuntime.transport.updateEntry?.({
+      cfg,
+      accountId: "default",
+      context,
+      request,
+      approvalKind: "exec",
       entry: entry!,
       phase: "resolved",
+      payload: (final as { payload: { text: string } }).payload,
     })
     expect(invokeRaw).toHaveBeenCalledWith(
       expect.any(Number),
@@ -477,11 +495,20 @@ describe("inline/native approvals", () => {
         oneofKind: "editMessage",
         editMessage: expect.objectContaining({
           messageId: 9001n,
+          text: "✅ Allowed once\n\n```sh\npwd\n```",
           actions: { rows: [] },
           parseMarkdown: false,
         }),
       }),
     )
+    expect(await inlineApprovalNativeRuntime.presentation.buildExpiredResult({
+      cfg,
+      accountId: "default",
+      context,
+      request,
+      view: { ...view, phase: "expired" },
+      entry: entry!,
+    })).toEqual({ kind: "update", payload: { text: "⌛ Approval expired\n\n```sh\npwd\n```" } })
     expect(invokeRaw).toHaveBeenCalledWith(
       SET_BOT_PRESENCE_STATE,
       expect.objectContaining({

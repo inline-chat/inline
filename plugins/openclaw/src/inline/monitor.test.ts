@@ -9163,6 +9163,13 @@ describe("inline/monitor", () => {
       const progress = harness.calls.sendMessage.mock.calls[0]?.[0]
       expect(progress?.parseMarkdown).toBe(false)
       expect(progress?.text).not.toContain('activity="agent"')
+      const progressTexts = [
+        ...harness.calls.sendMessage.mock.calls.map(([args]) => args?.text),
+        ...harness.calls.invokeRaw.mock.calls.map(([, args]) => args?.editMessage?.text),
+      ].filter((text): text is string => typeof text === "string")
+      // Commands read as what is running, not as the tool name.
+      expect(progressTexts.some((text) => text.includes("Running `ls`"))).toBe(true)
+      expect(progressTexts.some((text) => /\bExec\b/.test(text))).toBe(false)
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(4, expect.objectContaining({ oneofKind: "deleteMessages" }))
       expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.sendComposeAction?.action === 6)).toBe(true)
       expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 773n, typing: true })
@@ -9228,7 +9235,7 @@ describe("inline/monitor", () => {
           oneofKind: "editMessage",
           editMessage: expect.objectContaining({
             messageId: 1n,
-            text: expect.stringContaining("Exec: done"),
+            text: expect.stringContaining("Ran a command"),
             parseMarkdown: true,
           }),
         }),
