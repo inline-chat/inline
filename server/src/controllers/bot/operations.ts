@@ -23,6 +23,10 @@ import type {
   GetChatHistoryParams,
   GetChatParticipantCountParams,
   GetChatParticipantParams,
+  GetContactsParams,
+  GetContactsResult,
+  BotAgentOperation,
+  BotContactRelation,
   AddThreadParticipantParams,
   RemoveThreadParticipantParams,
   GetChatParams,
@@ -48,7 +52,10 @@ import type {
   UpdateAgentParams,
 } from "@inline-chat/bot-api-types"
 import {
+  AgentGrantOperation,
   AgentGrantRequirement,
+  ContactKind,
+  ContactRelation,
   InputPeer,
   MessageAction_Style,
   MessageAction,
@@ -96,6 +103,8 @@ import { updateChatInfo as updateChatInfoFn } from "@in/server/functions/message
 import { uploadFileOperation, type UploadFileOperationInput } from "@in/server/methods/uploadFileOperation"
 import { handler as getMeHandler } from "@in/server/methods/getMe"
 import { getSpace as getSpaceFn } from "@in/server/functions/space.getSpace"
+import { getContacts as getContactsFn } from "@in/server/modules/contacts/contacts"
+import { InMemoryRateLimiter } from "@in/server/modules/oauth/rateLimiter"
 import {
   createBotAgent,
   deleteBotAgent,
@@ -134,6 +143,18 @@ type BotUserSource = {
   readonly username?: string | null | undefined
   readonly firstName?: string | null | undefined
   readonly lastName?: string | null | undefined
+  /** DB users: the person a bot acts for. */
+  readonly botCreatorId?: number | null | undefined
+  /** Protocol users: the person a bot acts for. */
+  readonly botInfo?: {
+    readonly owner?: { readonly oneofKind?: string | undefined; readonly ownerUserId?: bigint | undefined } | undefined
+  } | null | undefined
+}
+
+const botOwnerId = (user: BotUserSource): number | undefined => {
+  if (user.botCreatorId != null) return user.botCreatorId
+  const owner = user.botInfo?.owner
+  return owner?.oneofKind === "ownerUserId" && owner.ownerUserId !== undefined ? Number(owner.ownerUserId) : undefined
 }
 
 type BotChatSource = {
@@ -170,16 +191,17 @@ type BotMessageReference = Omit<BotMessage, "chat" | "reply_to_message">
 const toBotUser = (
   user: BotUserSource,
   options?: { readonly isBot?: boolean | undefined },
-): BotUser => ({
+): BotUser => {
+  const isBot = typeof user.bot === "boolean" ? user.bot : (options?.isBot ?? false)
+  return {
     id: Number(user.id),
-  is_bot:
-    typeof user.bot === "boolean"
-      ? user.bot
-      : (options?.isBot ?? false),
-  username: user.username ?? undefined,
-  first_name: user.firstName ?? undefined,
-  last_name: user.lastName ?? undefined,
-})
+    is_bot: isBot,
+    username: user.username ?? undefined,
+    first_name: user.firstName ?? undefined,
+    last_name: user.lastName ?? undefined,
+    owner_id: isBot ? botOwnerId(user) : undefined,
+  }
+}
 
 const BOT_COMMAND_RE = /^[a-z0-9_]+$/
 const BOT_COMMAND_LIMIT = 100
@@ -1137,12 +1159,12 @@ const inputRecord = (
   input as Record<string, unknown>
 
 const getMe = async (context: BotOperationContext) => {
-  const result = await getMeHandler(
-    {},
-    { currentUserId: context.currentUserId },
-  )
+  const [result, bot] = await Promise.all([
+    getMeHandler({}, { currentUserId: context.currentUserId }),
+    UsersModel.getUserById(context.currentUserId),
+  ])
   return {
-    user: toBotUser(result.user, { isBot: true }),
+    user: toBotUser({ ...result.user, botCreatorId: bot?.botCreatorId }, { isBot: true }),
   }
 }
 
@@ -1222,8 +1244,9 @@ const sendMessage = async (
   const chatId = Number(chatResult.chat.id)
   const botChat = toBotChat(chatResult.chat)
   const randomId = randomId64()
+  const addMentionedUsers = parseBotBoolean(raw["add_mentioned_users"]) === true
 
-  await sendMessageFn({
+  const sendResult = await sendMessageFn({
     peerId: inputPeer,
     message: typeof raw["text"] === "string" ? raw["text"] : undefined,
     replyToMessageId: replyToMessageId
@@ -1236,14 +1259,19 @@ const sendMessage = async (
     sendMode: input.silent ? MessageSendMode.MODE_SILENT : undefined,
     sourceChatId,
     paceBotSender: { isBot: true },
+    addMentionedUsers: addMentionedUsers || undefined,
   }, { ...context, isBot: true })
 
   const sent = await MessageModel.getMessageByRandomId(
     randomId,
     context.currentUserId,
   )
+  const message = await encodeStoredBotMessage({ messageId: sent.messageId, chatId, peerId: inputPeer, botChat })
+  if (!addMentionedUsers) return { message }
   return {
-    message: await encodeStoredBotMessage({ messageId: sent.messageId, chatId, peerId: inputPeer, botChat }),
+    message,
+    added_user_ids: sendResult.mentionAdds?.addedUserIds ?? [],
+    unadded_user_ids: sendResult.mentionAdds?.unaddedUserIds ?? [],
   }
 }
 
@@ -1768,6 +1796,80 @@ const getChatParticipantCount = async (input: GetChatParticipantCountParams, con
   return { count: participants.users.length }
 }
 
+const BOT_CONTACT_KINDS = {
+  all: ContactKind.ALL,
+  people: ContactKind.PEOPLE,
+  bots: ContactKind.BOTS,
+} as const satisfies Record<NonNullable<GetContactsParams["kind"]>, ContactKind>
+
+const BOT_CONTACT_RELATIONS: Partial<Record<ContactRelation, BotContactRelation>> = {
+  [ContactRelation.SHARED_CHAT]: "shared_chat",
+  [ContactRelation.SHARED_SPACE]: "shared_space",
+  [ContactRelation.MANAGED]: "managed",
+  [ContactRelation.OWNER]: "owner",
+  [ContactRelation.CAN_USE]: "can_use",
+  [ContactRelation.USES_YOUR_BOT]: "uses_your_bot",
+}
+
+const BOT_AGENT_OPERATIONS: Partial<Record<AgentGrantOperation, BotAgentOperation>> = {
+  [AgentGrantOperation.INVOKE]: "invoke",
+  [AgentGrantOperation.STEER]: "steer",
+  [AgentGrantOperation.APPROVE]: "approve",
+  [AgentGrantOperation.CONFIGURE]: "configure",
+}
+
+const BOT_CONTACTS_MAX_LIMIT = 50
+const BOT_CONTACTS_MAX_QUERY = 64
+// Same rule as the realtime GET_CONTACTS RPC, counted separately for HTTP.
+const contactsLimiter = new InMemoryRateLimiter({ capacity: 10_000 })
+
+const getContacts = async (input: GetContactsParams, context: BotOperationContext): Promise<GetContactsResult> => {
+  const raw = input as Record<string, unknown>
+  const query = raw["query"]
+  if (query !== undefined && (typeof query !== "string" || query.length > BOT_CONTACTS_MAX_QUERY)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  const kindInput = raw["kind"]
+  if (kindInput !== undefined && !(typeof kindInput === "string" && Object.hasOwn(BOT_CONTACT_KINDS, kindInput))) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  const kind = kindInput === undefined ? undefined : BOT_CONTACT_KINDS[kindInput as keyof typeof BOT_CONTACT_KINDS]
+  const limit = raw["limit"] === undefined ? undefined : Number(raw["limit"])
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > BOT_CONTACTS_MAX_LIMIT)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  const rate = contactsLimiter.consume({
+    key: `bot-get-contacts:${context.currentUserId}`,
+    nowMs: Date.now(),
+    rule: { max: 60, windowMs: 60_000 },
+  })
+  if (!rate.allowed) throw RealtimeRpcError.RateLimit(rate.retryAfterSeconds)
+
+  const actor = await UsersModel.getUserById(context.currentUserId)
+  if (!actor || UsersModel.isDeleted(actor)) throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+  const result = await getContactsFn({ query, kind, limit }, actor)
+
+  const usersById = new Map(result.users.map((user) => [Number(user.id), user]))
+  return {
+    contacts: result.contacts.flatMap((contact) => {
+      const user = usersById.get(Number(contact.userId))
+      if (!user) return []
+      const botUser = toBotUser(user)
+      return [{
+        user: botUser,
+        relations: contact.relations.flatMap((relation) => BOT_CONTACT_RELATIONS[relation] ?? []),
+        via_owner: contact.viaOwner,
+        last_interaction_date: contact.lastInteractionDate === undefined ? undefined : Number(contact.lastInteractionDate),
+        bot_operations: botUser.is_bot
+          ? contact.botOperations.flatMap((operation) => BOT_AGENT_OPERATIONS[operation] ?? [])
+          : undefined,
+        manages_bot: botUser.is_bot ? contact.managesBot : undefined,
+      }]
+    }),
+  }
+}
+
 const addThreadParticipant = async (
   input: AddThreadParticipantParams,
   context: BotOperationContext,
@@ -2063,6 +2165,7 @@ export const botOperationHandlers: BotOperationHandlers = {
   unpinMessage,
   getChatParticipant,
   getChatParticipantCount,
+  getContacts,
   addThreadParticipant,
   removeThreadParticipant,
   setThreadTitle,

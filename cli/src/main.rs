@@ -1330,6 +1330,7 @@ impl ChatsCreateSubthreadArgs {
                 })
                 .collect(),
             agent_context: None,
+            reserved_chat_id: None,
         })
     }
 }
@@ -1555,8 +1556,8 @@ struct BotsAccessGrantArgs {
     #[arg(long, help = "Bot user id")]
     bot_user_id: i64,
 
-    #[arg(long, help = "User id to grant access to")]
-    user_id: i64,
+    #[command(flatten)]
+    subject: BotsAccessSubjectArgs,
 
     #[arg(
         long,
@@ -1573,8 +1574,22 @@ struct BotsAccessUserArgs {
     #[arg(long, help = "Bot user id")]
     bot_user_id: i64,
 
-    #[arg(long, help = "User id to revoke")]
-    user_id: i64,
+    #[command(flatten)]
+    subject: BotsAccessSubjectArgs,
+}
+
+/// Who an access grant is for: one person, everyone in a space, or everyone in a user group.
+#[derive(Args, Clone, Debug)]
+#[group(required = true, multiple = false)]
+pub(crate) struct BotsAccessSubjectArgs {
+    #[arg(long, help = "A person's user id")]
+    pub(crate) user_id: Option<i64>,
+
+    #[arg(long, help = "Everyone in this space (you must be a member)")]
+    pub(crate) space_id: Option<i64>,
+
+    #[arg(long, help = "Everyone in this user group")]
+    pub(crate) group_id: Option<i64>,
 }
 
 #[derive(Args)]
@@ -5336,7 +5351,10 @@ async fn send_messages_with_attachments(
     }
 
     let _ = (peer_summary, caption);
-    Ok(proto::SendMessageResult { updates })
+    Ok(proto::SendMessageResult {
+        updates,
+        ..Default::default()
+    })
 }
 
 async fn handle_messages_export(
@@ -8396,8 +8414,7 @@ mod cli_parsing_tests {
         );
 
         for (name, expected) in [("remove-photo", 0), ("clear-avatar", 1)] {
-            let cli =
-                Cli::try_parse_from(["inline", "bots", name, "--bot-user-id", "9"]).unwrap();
+            let cli = Cli::try_parse_from(["inline", "bots", name, "--bot-user-id", "9"]).unwrap();
             let matched = match cli.command {
                 Command::Bots {
                     command: BotsCommand::RemovePhoto(_),
@@ -8410,8 +8427,8 @@ mod cli_parsing_tests {
             assert_eq!(matched, expected, "{name}");
         }
 
-        let cli = Cli::try_parse_from(["inline", "bots", "rotate-token", "--bot-user-id", "9"])
-            .unwrap();
+        let cli =
+            Cli::try_parse_from(["inline", "bots", "rotate-token", "--bot-user-id", "9"]).unwrap();
         match cli.command {
             Command::Bots {
                 command: BotsCommand::RotateToken(args),
@@ -8419,8 +8436,8 @@ mod cli_parsing_tests {
             _ => panic!("expected bots rotate-token"),
         }
 
-        let cli = Cli::try_parse_from(["inline", "bots", "settings", "--bot-user-id", "9"])
-            .unwrap();
+        let cli =
+            Cli::try_parse_from(["inline", "bots", "settings", "--bot-user-id", "9"]).unwrap();
         match cli.command {
             Command::Bots {
                 command: BotsCommand::Settings(args),
@@ -8477,8 +8494,8 @@ mod cli_parsing_tests {
             .is_err()
         );
 
-        let cli = Cli::try_parse_from(["inline", "bots", "access", "ls", "--bot-user-id", "9"])
-            .unwrap();
+        let cli =
+            Cli::try_parse_from(["inline", "bots", "access", "ls", "--bot-user-id", "9"]).unwrap();
         assert!(matches!(
             cli.command,
             Command::Bots {
@@ -8506,7 +8523,7 @@ mod cli_parsing_tests {
                         command: BotsAccessCommand::Grant(args),
                     },
             } => {
-                assert_eq!(args.user_id, 7);
+                assert_eq!(args.subject.user_id, Some(7));
                 assert!(args.operations.is_empty());
             }
             _ => panic!("expected bots access grant"),
@@ -8559,7 +8576,7 @@ mod cli_parsing_tests {
                     BotsCommand::Access {
                         command: BotsAccessCommand::Revoke(args),
                     },
-            } => assert_eq!((args.bot_user_id, args.user_id), (9, 7)),
+            } => assert_eq!((args.bot_user_id, args.subject.user_id), (9, Some(7))),
             _ => panic!("expected bots access revoke"),
         }
     }
@@ -9393,8 +9410,8 @@ mod cli_parsing_tests {
 
     #[test]
     fn destructive_yes_short_aliases_parse() {
-        let cli = Cli::try_parse_from(["inline", "bots", "delete", "--bot-user-id", "1", "-y"])
-            .unwrap();
+        let cli =
+            Cli::try_parse_from(["inline", "bots", "delete", "--bot-user-id", "1", "-y"]).unwrap();
         match cli.command {
             Command::Bots {
                 command: BotsCommand::Delete(args),

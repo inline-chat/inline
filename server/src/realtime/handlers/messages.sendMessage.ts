@@ -35,6 +35,7 @@ export const sendMessage = async (
       sendMode: input.sendMode ?? undefined,
       initialAgentContext: input.initialAgentContext,
       sourceChatId: input.sourceChatId === undefined ? undefined : Number(input.sourceChatId),
+      addMentionedUsers: input.addMentionedUsers === true,
       // Legacy sockets know whether they belong to a bot; V3 leaves it to a cached lookup.
       paceBotSender: { isBot: handlerContext.isBot },
     },
@@ -45,5 +46,9 @@ export const sendMessage = async (
     },
   )
 
-  return { updates: result.updates }
+  return {
+    updates: result.updates,
+    addedUserIds: (result.mentionAdds?.addedUserIds ?? []).map(BigInt),
+    unaddedUserIds: (result.mentionAdds?.unaddedUserIds ?? []).map(BigInt),
+  }
 }

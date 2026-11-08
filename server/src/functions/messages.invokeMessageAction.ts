@@ -27,7 +27,9 @@ type Output = {
 
 export const invokeMessageAction = async (input: Input, context: FunctionContext): Promise<Output> => {
   const chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
-  await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+  // Owners who opened the chat through their bot may act only on that bot's messages.
+  const throughManagedBot = !(await AccessGuards.hasChatAccess(chat, context.currentUserId))
+  if (throughManagedBot) await AccessGuards.ensureChatReadAccess(chat, context.currentUserId)
 
   const messageId = Number(input.messageId)
   if (!Number.isSafeInteger(messageId) || messageId <= 0) {
@@ -39,6 +41,9 @@ export const invokeMessageAction = async (input: Input, context: FunctionContext
   const sender = await UsersModel.getUserById(message.fromId)
   if (!sender?.bot) {
     throw RealtimeRpcError.BadRequest()
+  }
+  if (throughManagedBot && sender.botCreatorId !== context.currentUserId) {
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   const actionId = input.actionId.trim()

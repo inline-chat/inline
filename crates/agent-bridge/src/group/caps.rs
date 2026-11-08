@@ -3,8 +3,8 @@
 //!
 //! - A daily speak-gate budget per agent, visible to the owner, with one
 //!   notice when reached and one tap to raise it.
-//! - An agent-only loop cap per conversation: consecutive agent-authored
-//!   messages since the last human message. Reaching it is surfaced to both
+//! - An agent-only loop cap per thread: consecutive agent-authored messages
+//!   since the last human message. Reaching it is surfaced to both
 //!   owners; it is extendable in place and reset by any human message.
 
 use std::collections::BTreeMap;
@@ -15,9 +15,10 @@ use serde::{Deserialize, Serialize};
 /// raise the budget. Large on purpose: a safety cap, not a throttle.
 pub const DEFAULT_DAILY_SPEAK_GATE_BUDGET: u32 = 1_000;
 
-/// Consecutive agent-only messages in one conversation before agent-addressed
-/// input stops starting turns ("in the tens of hops").
-pub const DEFAULT_LOOP_CAP_HOPS: u32 = 30;
+/// Consecutive agent-only messages in one thread before agent-addressed input
+/// stops starting turns. Generous on purpose: hand-backs need no reply and a
+/// new round takes a deliberate mention, so this only stops runaway loops.
+pub const DEFAULT_LOOP_CAP_HOPS: u32 = 50;
 
 /// A calendar day in the owner's local time, as days since the Unix epoch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -196,9 +197,9 @@ impl LoopGuard {
     }
 }
 
-/// Loop guards keyed by conversation scope (the root thread of a subthread
-/// tree, so delegation through subthreads shares one count). Scopes return to
-/// the default on the next human message and are then dropped.
+/// Loop guards keyed by thread (the chat the messages are in; a reply thread
+/// counts on its own). Scopes return to the default on the next human message
+/// and are then dropped.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoopGuards {
     default_limit: u32,

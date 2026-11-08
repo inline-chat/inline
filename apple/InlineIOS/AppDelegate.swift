@@ -1,9 +1,9 @@
 import Auth
 import Combine
-import CryptoKit
 import Foundation
 import InlineConfig
 import InlineKit
+import InlineNotificationFence
 import Logger
 import Security
 import Sentry
@@ -14,6 +14,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   let nav = Navigation()
   let sceneRouterRegistry = IOSSceneRouterRegistry()
   private var protectedDataObserver: NSObjectProtocol?
+  @MainActor private var pushRegistrationNeedsRetry = false
   @MainActor @Published var spaceJoinErrorMessage: String?
   @MainActor private var pendingSpaceJoin: SpaceJoinReference?
   @MainActor private var spaceJoinTask: Task<Void, Never>?
@@ -49,20 +50,22 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       forName: UIApplication.protectedDataDidBecomeAvailableNotification,
       object: nil,
       queue: .main
-    ) { _ in
+    ) { [weak self] _ in
       Task {
         await Auth.shared.refreshFromStorage()
       }
+      MainActor.assumeIsolated { self?.retryPushRegistrationIfNeeded() }
     }
 
     NotificationCenter.default.addObserver(
       forName: UIApplication.didBecomeActiveNotification,
       object: nil,
       queue: .main
-    ) { _ in
+    ) { [weak self] _ in
       Task {
         await Auth.shared.refreshFromStorage()
       }
+      MainActor.assumeIsolated { self?.retryPushRegistrationIfNeeded() }
     }
 
     NotificationCenter.default.addObserver(
@@ -262,19 +265,42 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
     let deviceToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-    let pushContentKey = Self.makePushContentEncryptionKeyMetadata()
-    let pushContentVersion: UInt32? = pushContentKey == nil ? nil : Self.pushContentVersion
-
-    Task.detached {
-      _ = await Api.realtime.sendQueued(
-        .updatePushNotificationDetails(
-          applePushToken: deviceToken,
-          pushContentEncryptionKey: pushContentKey,
-          pushContentVersion: pushContentVersion,
-          supportsFilteredSyncPushes: Self.supportsFilteredSyncPushes
-        )
+    switch PushContentKeyStore().loadOrCreate() {
+    case let .key(privateKey):
+      let pushContentKey = PushContentEncryptionKeyMetadata(
+        publicKey: privateKey.publicKey.rawRepresentation,
+        keyId: PushContentKeyStore.keyID(for: privateKey.publicKey),
+        algorithmRawValue: Self.pushContentAlgorithmRawValue
       )
+      Task.detached {
+        _ = await Api.realtime.sendQueued(
+          .updatePushNotificationDetails(
+            applePushToken: deviceToken,
+            pushContentEncryptionKey: pushContentKey,
+            pushContentVersion: Self.pushContentVersion
+          )
+        )
+      }
+    case let .unavailable(status):
+      // A token-only registration would make the server drop this device's key and send every
+      // message as the generic "Open Inline to read it." alert. Keep the previous registration
+      // and register again once the keychain can be read.
+      Log.shared.error("Deferring push registration: push-content key unavailable (status: \(status))")
+      ExtensionHealth.record(NotificationDeliveryHealth.registrationEvent, ["registration_outcome": "key_unavailable"])
+      registerAgainWhenProtectedDataIsAvailable()
     }
+  }
+
+  private func registerAgainWhenProtectedDataIsAvailable() {
+    DispatchQueue.main.async { self.pushRegistrationNeedsRetry = true }
+  }
+
+  /// Retried from the protected-data and activation observers.
+  @MainActor
+  private func retryPushRegistrationIfNeeded() {
+    guard pushRegistrationNeedsRetry else { return }
+    pushRegistrationNeedsRetry = false
+    getNotificationSettings()
   }
 
   func application(
@@ -461,8 +487,8 @@ extension AppDelegate {
   /// Logout retires the device push key, so an alert still queued for the old session can no
   /// longer be decrypted. The next sign-in registers a fresh key with its own session.
   static func retirePushContentKeyForLogout() {
-    let status = SecItemDelete(basePushContentKeychainQuery() as CFDictionary)
-    if status != errSecSuccess, status != errSecItemNotFound {
+    let status = PushContentKeyStore().delete()
+    if status != errSecSuccess {
       Log.shared.error("Failed to delete push-content private key (status: \(status))")
     }
   }
@@ -470,97 +496,7 @@ extension AppDelegate {
 
 private extension AppDelegate {
   static let pushContentVersion: UInt32 = 1
-  /// Turn on together with `com.apple.developer.usernotifications.filtering` in
-  /// InlineNotificationExtension.entitlements once Apple grants it (request 66FMH87LA5).
-  /// While false the server keeps sending read/delete sync as background pushes.
-  static let supportsFilteredSyncPushes = false
-  static let pushContentKeychainService = "chat.inline.push-content"
-  static let pushContentPrivateKeyAccount = "private-key-v1"
-  static let pushContentKeyId = "ios-x25519-v1"
-  static let pushContentKeychainAccessGroup = "2487AN8AL4.keychainGroup"
   static let pushContentAlgorithmRawValue = 1
-
-  static func makePushContentEncryptionKeyMetadata() -> PushContentEncryptionKeyMetadata? {
-    guard let privateKey = loadOrCreatePushContentPrivateKey() else {
-      return nil
-    }
-
-    return PushContentEncryptionKeyMetadata(
-      publicKey: privateKey.publicKey.rawRepresentation,
-      keyId: pushContentKeyId,
-      algorithmRawValue: pushContentAlgorithmRawValue
-    )
-  }
-
-  static func loadOrCreatePushContentPrivateKey() -> Curve25519.KeyAgreement.PrivateKey? {
-    if let existingData = loadPushContentPrivateKeyData() {
-      do {
-        return try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: existingData)
-      } catch {
-        Log.shared.error("Failed to decode existing push-content private key", error: error)
-      }
-    }
-
-    let privateKey = Curve25519.KeyAgreement.PrivateKey()
-    let didStore = storePushContentPrivateKeyData(privateKey.rawRepresentation)
-    if !didStore {
-      Log.shared.error("Failed to persist push-content private key")
-      return nil
-    }
-    return privateKey
-  }
-
-  static func basePushContentKeychainQuery() -> [String: Any] {
-    [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: pushContentKeychainService,
-      kSecAttrAccount as String: pushContentPrivateKeyAccount,
-      kSecAttrAccessGroup as String: pushContentKeychainAccessGroup,
-    ]
-  }
-
-  static func loadPushContentPrivateKeyData() -> Data? {
-    var query = basePushContentKeychainQuery()
-    query[kSecReturnData as String] = true
-    query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-    var item: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &item)
-    if status == errSecSuccess, let data = item as? Data {
-      return data
-    }
-    if status == errSecItemNotFound {
-      return nil
-    }
-
-    Log.shared.error("Failed to read push-content private key (status: \(status))")
-    return nil
-  }
-
-  static func storePushContentPrivateKeyData(_ keyData: Data) -> Bool {
-    var insertQuery = basePushContentKeychainQuery()
-    insertQuery[kSecValueData as String] = keyData
-    insertQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-
-    let addStatus = SecItemAdd(insertQuery as CFDictionary, nil)
-    if addStatus == errSecSuccess {
-      return true
-    }
-
-    if addStatus == errSecDuplicateItem {
-      let updateQuery = basePushContentKeychainQuery()
-      let updateAttributes: [String: Any] = [kSecValueData as String: keyData]
-      let updateStatus = SecItemUpdate(updateQuery as CFDictionary, updateAttributes as CFDictionary)
-      if updateStatus == errSecSuccess {
-        return true
-      }
-      Log.shared.error("Failed to update push-content private key (status: \(updateStatus))")
-      return false
-    }
-
-    Log.shared.error("Failed to add push-content private key (status: \(addStatus))")
-    return false
-  }
 }
 
 public class NotificationHandler: ObservableObject {

@@ -1,6 +1,6 @@
 // Note:Mostly AI generated
 
-import { and, eq, inArray, isNull } from "drizzle-orm"
+import { and, eq, inArray, isNull, ne, or } from "drizzle-orm"
 import { sessions, type DbSession, type DbNewSession } from "@in/server/db/schema/sessions"
 import { userNotDeleted, users } from "@in/server/db/schema/users"
 import { encrypt, decrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
@@ -56,7 +56,6 @@ export interface UpdatePushNotificationDetailsData {
   deviceId?: string | undefined
   pushContentEncryptionKey?: PushContentEncryptionKeyDetails | undefined
   pushContentVersion?: number | undefined
-  supportsFilteredSyncPushes?: boolean | undefined
 }
 
 export interface UpdateSessionMetadataData {
@@ -103,6 +102,19 @@ export interface PushSession extends SessionWithDecryptedData {
 }
 
 const log = new Log("SessionsModel")
+
+/** Push delivery fields cleared together whenever a session stops owning its push token. */
+export const clearedPushNotificationDetails = {
+  applePushToken: null,
+  applePushTokenEncrypted: null,
+  applePushTokenIv: null,
+  applePushTokenTag: null,
+  pushNotificationProvider: null,
+  pushContentKeyPublic: null,
+  pushContentKeyId: null,
+  pushContentKeyAlgorithm: null,
+  pushContentVersion: null,
+} satisfies Partial<DbNewSession>
 
 export class SessionsModel {
   // Create a new session
@@ -267,8 +279,6 @@ export class SessionsModel {
       pushContentKeyId: null,
       pushContentKeyAlgorithm: null,
       pushContentVersion: null,
-      // Every registration reports this capability; older builds never do.
-      pushFilteredSyncPushes: data.supportsFilteredSyncPushes ?? false,
       ...(data.deviceId ? { deviceId: data.deviceId } : {}),
     }
 
@@ -282,10 +292,70 @@ export class SessionsModel {
       updateData.pushContentVersion = data.pushContentVersion
     }
 
-    await db
-      .update(sessions)
-      .set(updateData)
-      .where(and(eq(sessions.id, id), isNull(sessions.revoked)))
+    const applePushToken = data.applePushToken
+    await db.transaction(async (tx) => {
+      const [owner] = await tx
+        .update(sessions)
+        .set(updateData)
+        .where(and(eq(sessions.id, id), isNull(sessions.revoked)))
+        .returning({ userId: sessions.userId, deviceId: sessions.deviceId, clientType: sessions.clientType })
+      if (!owner) return
+      await this.releasePushTokenFromOtherSessions(tx, { sessionId: id, applePushToken, ...owner })
+    })
+  }
+
+  /**
+   * A push token addresses one app install, and that install has one signed-in account. Any other
+   * live session still holding this token (an earlier login of the same account, or an account that
+   * left this device without reaching the server) would push with a key or account the device no
+   * longer has, which the notification extension can only show as a generic placeholder.
+   *
+   * Tokens are stored encrypted with random IVs, so matches are found among the owner's sessions
+   * and sessions sharing the owner's device ID, not by a token lookup.
+   */
+  private static async releasePushTokenFromOtherSessions(
+    tx: Transaction,
+    owner: {
+      sessionId: number
+      applePushToken: string
+      userId: number
+      deviceId: string | null
+      clientType: DbSession["clientType"]
+    },
+  ): Promise<void> {
+    const sameDevice =
+      owner.deviceId && owner.clientType
+        ? and(eq(sessions.deviceId, owner.deviceId), eq(sessions.clientType, owner.clientType))
+        : undefined
+    const candidates = await tx
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          isNull(sessions.revoked),
+          ne(sessions.id, owner.sessionId),
+          sameDevice ? or(eq(sessions.userId, owner.userId), sameDevice) : eq(sessions.userId, owner.userId),
+        ),
+      )
+
+    // No row locks: a lost race only leaves a stale token until the next registration, while
+    // locking a user's sessions from concurrent device registrations could deadlock.
+    const stale = candidates
+      .filter((candidate) => {
+        const token = this.decryptApplePushToken(candidate)
+        if (!token) return false
+        if (token === owner.applePushToken) return true
+        // Same install on the same device: its previous token is already dead.
+        return owner.deviceId !== null && candidate.deviceId === owner.deviceId && candidate.clientType === owner.clientType
+      })
+      .map((candidate) => candidate.id)
+    if (stale.length === 0) return
+
+    await tx.update(sessions).set(clearedPushNotificationDetails).where(inArray(sessions.id, stale))
+    log.info("Released push token from superseded sessions", {
+      ownerSessionId: owner.sessionId,
+      releasedSessionIds: stale,
+    })
   }
 
   static async clearApplePushToken(id: number): Promise<void> {
@@ -295,18 +365,7 @@ export class SessionsModel {
 
     await db
       .update(sessions)
-      .set({
-        applePushToken: null,
-        applePushTokenEncrypted: null,
-        applePushTokenIv: null,
-        applePushTokenTag: null,
-        pushNotificationProvider: null,
-        pushContentKeyPublic: null,
-        pushContentKeyId: null,
-        pushContentKeyAlgorithm: null,
-        pushContentVersion: null,
-        pushFilteredSyncPushes: null,
-      })
+      .set(clearedPushNotificationDetails)
       .where(eq(sessions.id, id))
   }
 

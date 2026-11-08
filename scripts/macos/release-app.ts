@@ -456,6 +456,13 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/** The DMG step loads appdmg from the global npm create-dmg package. */
+function createDmgPackageLoads(): boolean {
+  const script = `const dir = process.env.CREATE_DMG_DIR || require("path").join(require("child_process").execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim(), "create-dmg"); require("module").createRequire(require("path").join(dir, "package.json"))("appdmg");`;
+  const res = spawnSync({ cmd: ["node", "-e", script], stdout: "ignore", stderr: "ignore" });
+  return res.exitCode === 0;
+}
+
 function commandExists(cmd: string): boolean {
   const res = spawnSync({ cmd: ["bash", "-lc", `command -v ${cmd} >/dev/null 2>&1`] });
   return res.exitCode === 0;
@@ -1468,6 +1475,11 @@ async function main() {
     } else if (buildWillRun(opts)) {
       for (const c of ["xcodebuild", "xcrun", "codesign", "security", "create-dmg", "rsync", "unzip", "perl", "lipo"]) {
         if (!commandExists(c)) missing.push(c);
+      }
+      if (commandExists("create-dmg") && !createDmgPackageLoads()) {
+        // A Homebrew `create-dmg` shell script also satisfies `command -v`, but
+        // DMG packaging needs the npm package's appdmg after a full Xcode build.
+        missing.push("create-dmg (npm: npm install -g --allow-scripts=fs-xattr,macos-alias create-dmg@8.1.0)");
       }
     }
     if (!ctx.rollback && !ctx.dropBuild && taskEnabled(opts, "upload-sentry-dsyms")) {

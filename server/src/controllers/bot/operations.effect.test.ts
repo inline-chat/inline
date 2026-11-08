@@ -54,6 +54,7 @@ const handlers = (
   unpinMessage: unused,
   getChatParticipant: unused,
   getChatParticipantCount: unused,
+  getContacts: unused,
   addThreadParticipant: unused,
   removeThreadParticipant: unused,
   setThreadTitle: unused,

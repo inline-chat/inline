@@ -31,6 +31,8 @@ import {
   TPinMessageInput,
   TGetChatParticipantInput,
   TGetChatParticipantCountInput,
+  TGetContactsInput,
+  TBotContact,
   TThreadParticipantMutationInput,
   TSetThreadTitleInput,
   TBotUploadFileInput,
@@ -76,12 +78,14 @@ type BotMessageReference = Omit<BotMessage, "chat" | "reply_to_message">
 
 const toBotUser = (user: any, options?: { isBot?: boolean }): BotUser => {
   const isBot = typeof user.bot === "boolean" ? user.bot : (options?.isBot ?? false)
+  const protoOwner = user.botInfo?.owner?.oneofKind === "ownerUserId" ? Number(user.botInfo.owner.ownerUserId) : undefined
   return {
     id: user.id,
     is_bot: isBot,
     username: user.username ?? undefined,
     first_name: user.firstName ?? undefined,
     last_name: user.lastName ?? undefined,
+    owner_id: isBot ? (user.botCreatorId ?? protoOwner ?? undefined) : undefined,
   }
 }
 
@@ -588,8 +592,11 @@ const botMethods = (authPlugin: any): any => {
   app.get(
     "/getMe",
     async ({ store }: any) => {
-      const result = await getMeHandler({}, { currentUserId: store.currentUserId })
-      return { ok: true, result: { user: toBotUser(result.user, { isBot: true }) } }
+      const [result, bot] = await Promise.all([
+        getMeHandler({}, { currentUserId: store.currentUserId }),
+        UsersModel.getUserById(store.currentUserId),
+      ])
+      return { ok: true, result: { user: toBotUser({ ...result.user, botCreatorId: bot?.botCreatorId }, { isBot: true }) } }
     },
     {
       response: TApiEnvelope(t.Object({ user: TBotUser })),
@@ -691,7 +698,11 @@ const botMethods = (authPlugin: any): any => {
     },
     {
       detail: jsonBodyDoc(TSendMessageInput),
-      response: TApiEnvelope(t.Object({ message: TBotMessage })),
+      response: TApiEnvelope(t.Object({
+        message: TBotMessage,
+        added_user_ids: t.Optional(t.Array(t.Number())),
+        unadded_user_ids: t.Optional(t.Array(t.Number())),
+      })),
     },
   )
 
@@ -1130,6 +1141,11 @@ const botMethods = (authPlugin: any): any => {
     ok: true,
     result: await botOperationHandlers.getChatParticipantCount(query as any, ctxFromStore(store)),
   }), { query: TGetChatParticipantCountInput, response: TApiEnvelope(t.Object({ count: t.Number() })) })
+
+  app.get("/getContacts", async ({ query, store }: any) => ({
+    ok: true,
+    result: await botOperationHandlers.getContacts(query as any, ctxFromStore(store)),
+  }), { query: TGetContactsInput, response: TApiEnvelope(t.Object({ contacts: t.Array(TBotContact) })) })
 
   app.post("/addThreadParticipant", async ({ body, query, store }: any) => ({
     ok: true,

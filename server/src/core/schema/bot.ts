@@ -32,6 +32,9 @@ export const BotUser = Schema.Struct({
   last_name: Schema.optionalKey(Schema.String).annotateKey({
     description: "User's last name, when available.",
   }),
+  owner_id: Schema.optionalKey(UserId).annotateKey({
+    description: "Bots only: the person this bot acts for.",
+  }),
 }).annotate({
   identifier: "BotUser",
   description: "Basic information about an Inline user or bot.",

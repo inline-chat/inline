@@ -5,7 +5,12 @@ import UniformTypeIdentifiers
 /// Optional photo artwork for the system's expanded notification, never a message-view loader.
 public enum InlineNotificationPhoto {
   public static let maximumBytes = 5 * 1_024 * 1_024
-  public static let maximumPixelSize = 1_280
+  /// A 1024 px RGBA preview decodes to 4 MB. Together with the downloaded bytes that keeps one
+  /// photo well inside the extension's ~24 MB budget; exceeding it gets the process killed, and
+  /// the system then shows the server's generic placeholder instead of the decrypted text.
+  public static let maximumPixelSize = 1_024
+  /// Requests for several messages can run concurrently in one extension process.
+  private static let gate = PhotoGate()
 
   /// Decode optional artwork independently: a wrong JSON type must never reject valid message text.
   public static func url(inDecryptedContent data: Data) -> URL? {
@@ -21,6 +26,11 @@ public enum InlineNotificationPhoto {
   /// attachment (the system takes ownership) or removes it if delivery already ended.
   @concurrent
   public static func file(from url: URL) async -> URL? {
+    guard !Task.isCancelled else { return nil }
+    // One download and decode at a time per process, so a burst of photo messages can't add up
+    // to a jetsam kill.
+    await gate.acquire()
+    defer { Task { await gate.release() } }
     guard !Task.isCancelled else { return nil }
     let session = makeSession()
     defer { session.invalidateAndCancel() }
@@ -116,5 +126,27 @@ private final class PhotoRedirectPolicy: NSObject, URLSessionTaskDelegate {
   ) {
     // Signed media endpoints return the file directly; never forward a capability through a redirect.
     completionHandler(nil)
+  }
+}
+
+private actor PhotoGate {
+  private var isBusy = false
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+
+  func acquire() async {
+    guard isBusy else {
+      isBusy = true
+      return
+    }
+    await withCheckedContinuation { waiters.append($0) }
+  }
+
+  func release() {
+    guard !waiters.isEmpty else {
+      isBusy = false
+      return
+    }
+    // Ownership passes straight to the next waiter.
+    waiters.removeFirst().resume()
   }
 }

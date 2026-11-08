@@ -1,4 +1,6 @@
+import { UsersModel } from "@in/server/db/models/users"
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
+import { ensureBotCanReach } from "@in/server/modules/contacts/contacts"
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { chatParticipantGroups } from "@in/server/db/schema/userGroups"
@@ -50,6 +52,12 @@ type AddChatParticipantOutput = {
   users: User[]
 }
 
+/** Bots add only their contacts or their owner's. People aren't limited. */
+async function ensureActorCanReach(actorUserId: number, targetUserId: number, action: string): Promise<void> {
+  const actor = await UsersModel.getUserById(actorUserId)
+  if (actor?.bot === true) await ensureBotCanReach(actor, targetUserId, { action })
+}
+
 export async function addChatParticipant(
   input: {
     chatId: number
@@ -92,6 +100,7 @@ export async function addChatParticipant(
 
       await ensureCanManageChatParticipants(chat, context.currentUserId)
       await ensureUserCanParticipateInChat(chat, userId)
+      await ensureActorCanReach(context.currentUserId, userId, "add_participant")
 
       // Check if user exists
       const user = await tx

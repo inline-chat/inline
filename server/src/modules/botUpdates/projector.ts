@@ -13,7 +13,7 @@ import type {
   BotReaction,
   BotUser,
 } from "@inline-chat/bot-api-types"
-import { MessageAction_Style, type MessageAction, type MessageActions, type MessageEntities, type MessageFormSubmission } from "@inline-chat/protocol/core"
+import { AgentGrantRequirement, MessageAction_Style, type MessageAction, type MessageActions, type MessageEntities, type MessageFormSubmission } from "@inline-chat/protocol/core"
 import { BotUpdatesModel } from "@in/server/db/models/botUpdates"
 import { BotAgentsModel } from "@in/server/db/models/botAgents"
 import { chatAgentContext } from "@in/server/modules/agentConfiguration"
@@ -26,11 +26,16 @@ import type { UpdateGroup } from "@in/server/modules/updates"
 import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
 import { Log } from "@in/server/utils/log"
 import { isSubthreadParentMessage } from "@in/server/modules/subthreads"
+import { resolveAgentAccess, satisfiesGrantRequirement } from "@in/server/modules/agents/grants"
+import { botChainExhausted } from "@in/server/modules/agents/botChain"
 
 const log = new Log("botUpdates.projector")
 
 const unixSeconds = (value: Date | number) =>
   value instanceof Date ? Math.floor(value.getTime() / 1_000) : Number(value)
+
+const botOwnerId = (user: DbUser): number | undefined =>
+  user.bot === true && user.botCreatorId != null ? user.botCreatorId : undefined
 
 const toUser = (user: DbUser | BotUserJson): BotUser => ({
   id: user.id,
@@ -38,6 +43,7 @@ const toUser = (user: DbUser | BotUserJson): BotUser => ({
   username: user.username ?? undefined,
   first_name: "firstName" in user ? user.firstName ?? undefined : user.first_name,
   last_name: "lastName" in user ? user.lastName ?? undefined : user.last_name,
+  owner_id: "botCreatorId" in user ? botOwnerId(user) : user.owner_id,
 })
 
 const toEventChat = (chat: DbChat): BotEventChat => ({
@@ -243,6 +249,7 @@ async function loadUsers(ids: number[]): Promise<Map<number, BotUserJson>> {
     username: user.username ?? undefined,
     first_name: user.firstName ?? undefined,
     last_name: user.lastName ?? undefined,
+    owner_id: botOwnerId(user),
   }]))
 }
 
@@ -363,21 +370,31 @@ export const activationReason = (input: {
 }
 
 /**
- * A bot owned by someone else may address your bot only where you, the owner,
- * can see the conversation. Otherwise anyone could create a private thread
- * with their own bot and yours and drive your bot without your knowledge.
+ * A bot owned by someone else may address your bot where you, the owner, can
+ * see the conversation, or where your bot's access list lets it (or the person
+ * it acts for) use your bot. Otherwise anyone could create a private thread
+ * with their own bot and yours and drive your bot without your permission.
  */
 export const foreignBotActivationAllowed = (input: {
   senderBotOwnerId: number | null
   targetBotOwnerId: number | null
   recipientUserIds: readonly number[]
+  /** The sender may invoke the target through its own or its owner's grant. */
+  senderCanInvoke?: boolean
 }): boolean =>
   (input.senderBotOwnerId !== null && input.senderBotOwnerId === input.targetBotOwnerId) ||
-  (input.targetBotOwnerId !== null && input.recipientUserIds.includes(input.targetBotOwnerId))
+  (input.targetBotOwnerId !== null && input.recipientUserIds.includes(input.targetBotOwnerId)) ||
+  input.senderCanInvoke === true
 
-async function botOwners(ids: number[]): Promise<Map<number, number | null>> {
+async function botUsers(ids: number[]): Promise<Map<number, DbUser>> {
   const rows = await UsersModel.getUsersWithPhotos(Array.from(new Set(ids)))
-  return new Map(rows.map(({ user }) => [user.id, user.botCreatorId ?? null]))
+  return new Map(rows.map(({ user }) => [user.id, user]))
+}
+
+async function senderCanInvoke(target: DbUser | undefined, sender: DbUser | undefined): Promise<boolean> {
+  if (!target || !sender) return false
+  const access = await resolveAgentAccess(target, sender.id, sender)
+  return satisfiesGrantRequirement(access, AgentGrantRequirement.INVOKE)
 }
 
 async function messageCreated(input: {
@@ -401,9 +418,11 @@ async function messageCreated(input: {
     message.entities,
     streams.map((stream) => stream.botUserId),
   )
-  const owners = message.from.bot
-    ? await botOwners([message.fromId, ...streams.map((stream) => stream.botUserId)])
+  const bots = message.from.bot
+    ? await botUsers([message.fromId, ...streams.map((stream) => stream.botUserId)])
     : undefined
+  // Bots stop waking each other after a long run with no person writing.
+  const chainExhausted = message.from.bot ? await botChainExhausted(input.chat.id) : false
   for (const stream of streams) {
     const reason = activationReason({
       stream,
@@ -413,11 +432,18 @@ async function messageCreated(input: {
       sourceChatId: input.sourceChatId,
     })
     if (!reason) continue
-    if (owners && message.fromId !== stream.botUserId && !foreignBotActivationAllowed({
-      senderBotOwnerId: owners.get(message.fromId) ?? null,
-      targetBotOwnerId: owners.get(stream.botUserId) ?? null,
+    if (bots && message.fromId !== stream.botUserId && chainExhausted) {
+      log.info("Bot chain limit reached; not waking bots until a person writes", {
+        botUserId: stream.botUserId,
+        chatId: input.chat.id,
+      })
+      continue
+    }
+    if (bots && message.fromId !== stream.botUserId && !foreignBotActivationAllowed({
+      senderBotOwnerId: bots.get(message.fromId)?.botCreatorId ?? null,
+      targetBotOwnerId: bots.get(stream.botUserId)?.botCreatorId ?? null,
       recipientUserIds: input.updateGroup.userIds,
-    })) {
+    }) && !(await senderCanInvoke(bots.get(stream.botUserId), bots.get(message.fromId)))) {
       log.warn("Dropping foreign Bot activation outside the target owner's chats", {
         botUserId: stream.botUserId,
         senderBotUserId: message.fromId,

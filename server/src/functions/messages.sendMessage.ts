@@ -8,6 +8,7 @@ import {
   type AgentThreadContext,
   type BlockContent,
 } from "@inline-chat/protocol/core"
+import { ensureBotCanReachDmPeer } from "@in/server/modules/contacts/contacts"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument, DbFullPlainFile, DbFullVoice } from "@in/server/db/models/files"
@@ -16,6 +17,7 @@ import { UsersModel } from "@in/server/db/models/users"
 import { db } from "@in/server/db"
 import { chats, messageAttachments, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
+import { addChatParticipant } from "@in/server/functions/messages.addChatParticipant"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { encryptMessage, encryptMessageEntities } from "@in/server/modules/encryption/encryptMessage"
 import { prependReplyQuote } from "@in/server/modules/message/replyQuote"
@@ -152,11 +154,18 @@ type Input = {
 
   /** Trusted Bot API provenance for an explicit same-bot cross-Chat handoff. */
   sourceChatId?: number
+
+  /** Add mentioned users who can't see this thread yet, when the sender may add them. */
+  addMentionedUsers?: boolean
 }
 
 type Output = {
   updates: Update[]
+  /** With addMentionedUsers: who was added, and who can't see the thread and couldn't be. */
+  mentionAdds?: MentionAdds
 }
+
+type MentionAdds = { addedUserIds: number[]; unaddedUserIds: number[] }
 
 const log = new Log("functions.sendMessage")
 const URGENT_NUDGE_TEXT = "🚨"
@@ -211,6 +220,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   let chat = await ChatModel.getChatFromInputPeerUnchecked(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, currentUserId)
   await ensurePrivatePeerCanReceiveMessages(chat, currentUserId)
+  if (chat.type === "private" && (await senderIsBot())) await ensureBotCanReachDmPeer(chat, currentUserId)
   const inputPeer = Encoders.peerFromChat(chat, { currentUserId })
   const chatId = chat.id
   if (input.paceBotSender) {
@@ -475,6 +485,12 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     fwdFromMessageId = Number(input.forwardHeader.fromMessageId)
     fwdFromSenderId = Number(input.forwardHeader.fromId)
   }
+
+  // Mentioning someone brings them in, so the message reaches them. After every
+  // check, so a send that fails validation adds nobody.
+  const mentionAdds = input.addMentionedUsers
+    ? await addMentionedParticipants(chat, getMentionedUserIds(entities), context)
+    : undefined
 
   let newMessage: DbMessage & { blockContent?: BlockContent | null }
   let update: UpdateSeqAndDate
@@ -816,7 +832,36 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   }
 
   // return new updates
-  return { updates: selfUpdates }
+  return { updates: selfUpdates, mentionAdds }
+}
+
+/**
+ * Adds explicitly mentioned users who can't see a private thread yet, with the
+ * same rules as adding them by hand. DMs and public threads never change.
+ */
+async function addMentionedParticipants(
+  chat: DbChat,
+  mentioned: Iterable<number>,
+  context: FunctionContext,
+): Promise<MentionAdds> {
+  const addedUserIds: number[] = []
+  const unaddedUserIds: number[] = []
+  for (const userId of new Set(mentioned)) {
+    if (userId === context.currentUserId) continue
+    if (await AccessGuards.hasChatAccess(chat, userId)) continue
+    if (chat.type !== "thread" || chat.publicThread === true) {
+      unaddedUserIds.push(userId)
+      continue
+    }
+    try {
+      await addChatParticipant({ chatId: chat.id, userId }, context)
+      addedUserIds.push(userId)
+    } catch (error) {
+      if (!(error instanceof RealtimeRpcError)) throw error
+      unaddedUserIds.push(userId)
+    }
+  }
+  return { addedUserIds, unaddedUserIds }
 }
 
 async function ensurePrivatePeerCanReceiveMessages(chat: DbChat, currentUserId: number): Promise<void> {

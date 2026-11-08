@@ -8,8 +8,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use inline_agent_bridge::HostToolResult;
 use inline_agent_bridge::ProviderSessionId;
 use inline_agent_bridge::group::{
     AddresseeKind, ContextAuthorRole, ContextMessage, Conversation,
@@ -30,6 +31,7 @@ use inline_client::{
     InlineClient, InlineId, LosslessEventReceiver, MessageRecord, SqliteStore,
 };
 use inline_protocol::proto;
+use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::bridge::runtime::{BotAgentResolver, mentioned_agent_id};
@@ -37,8 +39,14 @@ use crate::bridge::runtime::{BotAgentResolver, mentioned_agent_id};
 use super::api::{self, Notify, chat_peer};
 use super::doc::DocBuilder;
 use super::folders::{FolderSource, Folders};
-use super::intake::{MessageFacts, grants_by_user, group_message};
-use super::ledger::{Begin, InputState, Ledger, input_id};
+use super::intake::{
+    MessageFacts, asked, grants_by_user, grants_from_operations, group_message, has_scoped_grants,
+};
+use super::lead::{
+    DIRECTED, LeadRequest, MAX_RUNNING_TASKS, SendMode, SpawnTask, TASK_INSTRUCTIONS, TaskReport,
+    card_text, note_text, report_event_id, report_text, status_word,
+};
+use super::ledger::{Begin, ChildRecord, InputState, LeadEventRecord, Ledger, input_id};
 use super::render::{ActionStyle, QUESTION_FORM_ID, Vocabulary};
 use super::settings;
 use super::skills::{self, Skill, SkillPublisher};
@@ -68,12 +76,12 @@ struct Reconnect {
 /// Messages of a group thread an agent sees when it joins.
 const JOIN_CONTEXT_MESSAGES: u32 = 40;
 const JOIN_CONTEXT_BYTES: usize = 24 * 1024;
-/// Parents followed to find a subthread tree's root.
-const LOOP_SCOPE_DEPTH: usize = 8;
 /// Ancestors of the trigger's reply chain read into the join context.
 const JOIN_REPLY_CHAIN: usize = 5;
 /// Settled ledger records are kept this long for replay detection.
 const LEDGER_RETENTION_SECS: i64 = 14 * 24 * 3600;
+/// Parents followed to find a thread tree's root, the loop cap's scope.
+const LOOP_SCOPE_DEPTH: usize = 8;
 
 /// Identity and settings of one v2 agent.
 #[derive(Clone, Debug)]
@@ -110,40 +118,124 @@ impl V2Config {
     }
 }
 
-/// Grants from `listAgentGrants`, cached until a grant update arrives.
+/// Grants from `listAgentGrants`, cached until a grant update arrives. An
+/// agent sender acts for its owner: it also gets what its owner may delegate
+/// here (use and steer), so the owner's other agents and agents of people
+/// with access work without grants of their own.
 struct Access {
     bot: InlineClient,
     owner_user_id: i64,
-    cache: tokio::sync::Mutex<Option<HashMap<i64, Grants>>>,
+    names: Arc<api::Names>,
+    cache: tokio::sync::Mutex<Option<GrantCache>>,
+    /// Server-resolved access per user, used once any grant names a space or a
+    /// group. Expires so membership changes show up without a grant update.
+    resolved: tokio::sync::Mutex<HashMap<i64, (Grants, std::time::Instant)>>,
+    /// Bumped on every grant update, so an answer fetched before a revocation
+    /// isn't cached after it.
+    generation: std::sync::atomic::AtomicU64,
 }
+
+#[derive(Default)]
+struct GrantCache {
+    by_user: HashMap<i64, Grants>,
+    scoped: bool,
+}
+
+const RESOLVED_ACCESS_TTL: std::time::Duration = std::time::Duration::from_secs(300);
 
 impl Access {
     async fn invalidate(&self) {
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         *self.cache.lock().await = None;
+        self.resolved.lock().await.clear();
+    }
+
+    /// Whether any grant names a space or a group (loads the grants if needed).
+    async fn scoped(&self) -> bool {
+        self.own(0).await;
+        self.cache
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|cache| cache.scoped)
+    }
+
+    /// The server's answer for `user_id`, cached for a few minutes.
+    async fn resolved(&self, user_id: i64) -> Option<Grants> {
+        if let Some((grants, at)) = self.resolved.lock().await.get(&user_id).copied()
+            && at.elapsed() < RESOLVED_ACCESS_TTL
+        {
+            return Some(grants);
+        }
+        let generation = self.generation.load(std::sync::atomic::Ordering::SeqCst);
+        match api::get_agent_access(&self.bot, 0, user_id).await {
+            Ok(result) => {
+                let grants = if result.is_owner {
+                    Grants::OWNER
+                } else {
+                    grants_from_operations(&result.operations)
+                };
+                let mut resolved = self.resolved.lock().await;
+                if self.generation.load(std::sync::atomic::Ordering::SeqCst) == generation {
+                    resolved.insert(user_id, (grants, std::time::Instant::now()));
+                }
+                Some(grants)
+            }
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "access for {user_id} unavailable: {error}");
+                None
+            }
+        }
+    }
+
+    /// The user's own grants, without acting-for.
+    async fn own(&self, user_id: i64) -> Grants {
+        if user_id == self.owner_user_id {
+            return Grants::OWNER;
+        }
+        let mut cache = self.cache.lock().await;
+        if cache.is_none() {
+            match api::list_grants(&self.bot).await {
+                Ok(result) => {
+                    *cache = Some(GrantCache {
+                        by_user: grants_by_user(&result),
+                        scoped: has_scoped_grants(&result),
+                    })
+                }
+                Err(error) => {
+                    // Unknown grants admit nobody but the owner.
+                    log::warn!(target: "inline::bridge::v2", "grants unavailable: {error}");
+                    return Grants::NONE;
+                }
+            }
+        }
+        cache
+            .as_ref()
+            .and_then(|cache| cache.by_user.get(&user_id).copied())
+            .unwrap_or_default()
     }
 }
 
 impl AccessSource for Access {
     fn grants(&self, user_id: i64) -> futures_util::future::BoxFuture<'_, Grants> {
         Box::pin(async move {
-            if user_id == self.owner_user_id {
-                return Grants::OWNER;
+            let own = self.own(user_id).await;
+            if own.owner {
+                return own;
             }
-            let mut cache = self.cache.lock().await;
-            if cache.is_none() {
-                match api::list_grants(&self.bot).await {
-                    Ok(result) => *cache = Some(grants_by_user(&result)),
-                    Err(error) => {
-                        // Unknown grants admit nobody but the owner.
-                        log::warn!(target: "inline::bridge::v2", "grants unavailable: {error}");
-                        return Grants::NONE;
-                    }
-                }
+            // Space and group grants need the server to know who's a member.
+            if self.scoped().await
+                && let Some(grants) = self.resolved(user_id).await
+            {
+                return grants;
             }
-            cache
-                .as_ref()
-                .and_then(|grants| grants.get(&user_id).copied())
-                .unwrap_or_default()
+            let owner = match self.names.owner_of(user_id).await {
+                // A bot never inherits from itself.
+                Some(owner) if owner != user_id => Some(self.own(owner).await),
+                _ => None,
+            };
+            Grants::acting_for(own, owner)
         })
     }
 }
@@ -189,6 +281,14 @@ pub(crate) struct Runtime {
     /// reach it. Messages there never do: the parent may start its own work.
     moved: HashMap<i64, i64>,
     moves: Option<mpsc::UnboundedReceiver<(i64, i64)>>,
+    /// The DM lead's tool calls and its tasks' reports.
+    lead: Option<mpsc::UnboundedReceiver<LeadRequest>>,
+    /// `wait_tasks` calls waiting for a task to finish: (tasks, reply);
+    /// no tasks is any.
+    waiters: Vec<(Vec<i64>, oneshot::Sender<HostToolResult>)>,
+    /// (lead, title, brief) → the task started for it and when, so a
+    /// spawn_thread retried after a tool timeout returns the same task.
+    recent_spawns: HashMap<(i64, String, String), (i64, Instant)>,
     /// Chat → whether this agent created it, so it is the agent's own thread.
     own_threads: HashMap<i64, bool>,
     /// This bot's own follow mode per thread (`Some(true)` following,
@@ -218,8 +318,10 @@ pub(crate) struct Runtime {
     published: Option<Vec<BotCapability>>,
     participation: HashMap<i64, Option<proto::AgentParticipation>>,
     default_output_mode: OutputMode,
+    /// Agent-only hops per thread tree: reply threads and subthreads count
+    /// with the chat they hang off, so asking in a new thread doesn't reset it.
     loop_guards: LoopGuards,
-    /// Chat → the root of its subthread tree, the loop cap's scope.
+    /// Chat → the root of its thread tree, the loop cap's scope.
     loop_roots: HashMap<i64, i64>,
     skills: Option<SkillPublisher>,
     /// Skills by thread folder, briefly: Amp takes seconds to list them.
@@ -239,12 +341,19 @@ impl Runtime {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let ledger = Arc::new(Ledger::open(&config.ledger_path)?);
         let (moves_tx, moves) = mpsc::unbounded_channel();
+        let (lead_tx, lead) = mpsc::unbounded_channel();
+        if let Some(tools) = &tools {
+            tools.set_lead(lead_tx.clone(), config.dm_chat_id);
+        }
+        let names = Arc::new(api::Names::new(bot.clone()));
         let access = Arc::new(Access {
             bot: bot.clone(),
             owner_user_id: config.owner_user_id,
+            names: names.clone(),
             cache: tokio::sync::Mutex::new(None),
+            resolved: tokio::sync::Mutex::new(HashMap::new()),
+            generation: std::sync::atomic::AtomicU64::new(0),
         });
-        let names = Arc::new(api::Names::new(bot.clone()));
         // Each thread's settings, as a previous run left them.
         let mut thread_settings = HashMap::new();
         let mut bound_configs = HashMap::new();
@@ -277,6 +386,7 @@ impl Runtime {
             ),
             tools,
             moves: moves_tx,
+            lead: lead_tx,
             names,
             dm_chat_id: config.dm_chat_id,
             gate_budget: std::sync::Mutex::new(DailySpeakGateBudget::default()),
@@ -293,6 +403,9 @@ impl Runtime {
             works: HashMap::new(),
             moved,
             moves: Some(moves),
+            lead: Some(lead),
+            waiters: Vec::new(),
+            recent_spawns: HashMap::new(),
             own_threads: HashMap::new(),
             follows: HashMap::new(),
             thread_settings,
@@ -374,6 +487,7 @@ impl Runtime {
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         tokio::pin!(shutdown);
         let mut moves = self.moves.take().expect("run once");
+        let mut lead = self.lead.take().expect("run once");
         let mut connection = tokio::time::interval(CONNECTION_CHECK);
         connection.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let result = loop {
@@ -382,6 +496,7 @@ impl Runtime {
                 _ = &mut shutdown => break Ok(()),
                 // Before any delivery, so a subthread's first reply finds its work.
                 Some((from, to)) = moves.recv() => self.moved_work(from, to),
+                Some(request) = lead.recv() => self.lead_request(request).await,
                 _ = connection.tick() => {
                     self.keep_connected().await;
                     // A harness that needs setup shows in the apps right away.
@@ -518,6 +633,18 @@ impl Runtime {
             Err(error) => {
                 log::warn!(target: "inline::bridge::v2", "cannot recover pending publication: {error}")
             }
+        }
+        // Task reports no lead input took yet reach their lead again.
+        let leads: HashSet<i64> = self
+            .agent
+            .ledger
+            .lead_events()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|event| event.lead_chat_id)
+            .collect();
+        for lead in leads {
+            self.deliver_lead_events(lead).await;
         }
         let _ = self.agent.ledger.prune(LEDGER_RETENTION_SECS);
     }
@@ -936,11 +1063,13 @@ impl Runtime {
                     .and_then(|chat| chat.agent_context.as_ref())
                     .filter(|context| context.bot_user_id == self.config.bot_user_id)
                     .map(|context| context.configuration.clone().unwrap_or_default());
+                // A subthread of the owner's DM is part of the DM, as v1
+                // treated it, whoever opened it.
                 let own = bound.is_some()
-                    || result
-                        .chat
-                        .as_ref()
-                        .is_some_and(|chat| chat.created_by == Some(self.config.bot_user_id));
+                    || result.chat.as_ref().is_some_and(|chat| {
+                        chat.created_by == Some(self.config.bot_user_id)
+                            || chat.parent_chat_id == Some(self.config.dm_chat_id)
+                    });
                 if let Some(configuration) = bound {
                     self.bound_settings(
                         chat_id,
@@ -960,8 +1089,9 @@ impl Runtime {
         }
     }
 
-    /// The loop cap counts a whole subthread tree, so agents handing work
-    /// to each other through subthreads share one count (spec §5.1 rule 6).
+    /// Agents went back and forth here without a person: this agent stops
+    /// answering other agents and says so, with one tap to allow more.
+    /// The root of `chat_id`'s thread tree, cached.
     async fn loop_scope(&mut self, chat_id: i64) -> i64 {
         if let Some(root) = self.loop_roots.get(&chat_id) {
             return *root;
@@ -985,8 +1115,6 @@ impl Runtime {
         root
     }
 
-    /// Agents went back and forth here without a person: this agent stops
-    /// answering other agents and says so, with one tap to allow more.
     async fn loop_cap_reached(&self, chat_id: i64, limit: u32) {
         let text = format!(
             "{} stopped answering other agents here after {limit} agent messages in a row. A message from a person resets this.",
@@ -2122,13 +2250,22 @@ impl Runtime {
         } else {
             Conversation::Group
         };
-        let reply_author = message.reply_to_message_id.map(|id| {
-            if self.agent.sent.lock().expect("sent").contains(&id.get()) {
-                self.config.bot_user_id
-            } else {
-                0
+        let sender_is_bot = message.metadata.sender_is_bot.unwrap_or(false);
+        // The person an agent sender acts for (`User.bot_info`).
+        let author_owner = if sender_is_bot {
+            self.agent.names.owner_of(message.sender_id.get()).await
+        } else {
+            None
+        };
+        let (reply_author, reply_mentions_author) = match message.reply_to_message_id {
+            Some(id) => {
+                let (author, mentions) = self
+                    .replied_to(chat_id, id.get(), message.sender_id.get())
+                    .await;
+                (Some(author), mentions)
             }
-        });
+            None => (None, false),
+        };
         let group = group_message(
             message,
             MessageFacts {
@@ -2136,6 +2273,8 @@ impl Runtime {
                 bot_username: &self.config.bot_username,
                 conversation,
                 reply_author,
+                reply_mentions_author,
+                author_owner,
                 author_name: self.agent.names.of(message.sender_id.get()).await,
             },
         );
@@ -2285,6 +2424,27 @@ impl Runtime {
         result
     }
 
+    /// Who wrote the replied-to message (0 when unknown), and whether it
+    /// mentioned `sender`: a reply to this agent's message from someone it
+    /// asked is the answer it asked for (a hand-back). Read from Inline, not
+    /// remembered, so it holds across restarts.
+    async fn replied_to(&self, chat_id: i64, reply_id: i64, sender: i64) -> (i64, bool) {
+        let mine = self.agent.sent.lock().expect("sent").contains(&reply_id);
+        let known = if mine { self.config.bot_user_id } else { 0 };
+        match api::get_messages(&self.agent.bot, chat_id, vec![reply_id]).await {
+            Ok(messages) => messages
+                .iter()
+                .find(|replied| replied.id == reply_id)
+                .map_or((known, false), |replied| {
+                    (replied.from_id, asked(replied, sender))
+                }),
+            Err(error) => {
+                log::debug!(target: "inline::bridge::v2", "chat={chat_id} reply lookup failed: {error}");
+                (known, false)
+            }
+        }
+    }
+
     async fn act(
         &mut self,
         message: &MessageRecord,
@@ -2373,6 +2533,13 @@ impl Runtime {
             return Ok(());
         }
         if let Some(control) = control {
+            // /stop in the DM also stops the lead's running tasks.
+            let stopped_tasks =
+                if chat_id == self.config.dm_chat_id && matches!(control, Control::Stop) {
+                    self.stop_tasks(chat_id, group.author.user_id).await
+                } else {
+                    0
+                };
             let toast = if self.works.contains_key(&chat_id) {
                 self.ask(chat_id, |reply| Command::Control {
                     control,
@@ -2382,6 +2549,20 @@ impl Runtime {
                 .await
             } else {
                 Some("Nothing is running in this thread.".to_owned())
+            };
+            let toast = match (stopped_tasks, toast) {
+                (0, toast) => toast,
+                (count, None) => Some(format!(
+                    "Also stopped {count} running task{}.",
+                    plural(count)
+                )),
+                (count, Some(toast)) if toast.starts_with("Nothing is running") => {
+                    Some(format!("Stopped {count} running task{}.", plural(count)))
+                }
+                (count, Some(toast)) => Some(format!(
+                    "{toast} Stopped {count} running task{}.",
+                    plural(count)
+                )),
             };
             if let Some(toast) = toast {
                 self.reply(chat_id, group.message_id, &toast).await;
@@ -2393,7 +2574,15 @@ impl Runtime {
         // untrusted context (spec §5.3).
         let context =
             if group.conversation == Conversation::Group && !self.works.contains_key(&chat_id) {
-                self.join_context(group).await
+                let anchor = self.anchor_context(chat_id).await;
+                with_anchor(self.join_context(group).await, anchor)
+            } else if group.conversation == Conversation::WorkThread
+                && !self.works.contains_key(&chat_id)
+                && !self.session_known(chat_id).await.unwrap_or(true)
+            {
+                // A reply thread someone opened (in the DM, say) starts
+                // from the message it hangs off.
+                with_anchor(None, self.anchor_context(chat_id).await)
             } else {
                 None
             };
@@ -2478,7 +2667,10 @@ impl Runtime {
                 input: Box::new(input),
                 pending,
                 message_id: group.message_id,
-                answer_reply: matches!(group.conversation, Conversation::Group),
+                // An agent's answer to this agent's request is not quoted:
+                // quoting would wake it again.
+                answer_reply: matches!(group.conversation, Conversation::Group)
+                    && !(required == Operation::HandBack && group.author.kind.is_agent()),
                 reply_to: group.reply_to.as_ref().map(|reply| reply.message_id),
             })
             .await
@@ -2681,6 +2873,47 @@ impl Runtime {
         })
     }
 
+    /// Where a reply thread or subthread hangs: its parent thread and the
+    /// message it started from, as untrusted context.
+    async fn anchor_context(&self, chat_id: i64) -> Option<String> {
+        let chat = api::get_chat(&self.agent.bot, chat_id).await.ok()?.chat?;
+        let parent = chat.parent_chat_id?;
+        let title = self
+            .agent
+            .bot
+            .chat_state(InlineId::new(parent))
+            .await
+            .ok()
+            .and_then(|state| state.dialog)
+            .and_then(|dialog| dialog.title);
+        let place = if parent == self.config.dm_chat_id {
+            "your owner's DM".to_owned()
+        } else {
+            match title {
+                Some(title) => format!("\"{title}\""),
+                None => "another thread".to_owned(),
+            }
+        };
+        let mut text =
+            format!("This thread is a subthread of {place} (inline://chat?id={parent}).");
+        if let Some(message_id) = chat.parent_message_id
+            && let Ok(messages) = api::get_messages(&self.agent.bot, parent, vec![message_id]).await
+            && let Some(message) = messages.into_iter().next()
+        {
+            let author = self.agent.names.of(message.from_id).await;
+            let body: String = message
+                .message
+                .unwrap_or_default()
+                .chars()
+                .take(ANCHOR_CHARS)
+                .collect();
+            text.push_str(&format!(
+                " It started from this message there (message {message_id}):\n{author}: {body}"
+            ));
+        }
+        Some(text)
+    }
+
     /// Spawns the work actor for a thread, resuming the session the server
     /// knows. A failed lookup never starts a new session.
     async fn ensure_work(
@@ -2729,6 +2962,8 @@ impl Runtime {
                 agent_session_id: connection.agent_session.map(|session| session.id),
                 native: Some(ProviderSessionId::new(connection.session_ref)?),
                 from_v1: false,
+                fork_from: None,
+                fork_at: None,
             },
             // Inline knows no work here: a thread v1 served goes on in its
             // session and folder.
@@ -2737,6 +2972,8 @@ impl Runtime {
                     agent_session_id: None,
                     native: Some(native),
                     from_v1: true,
+                    fork_from: None,
+                    fork_at: None,
                 },
                 None => Known::default(),
             },
@@ -2751,6 +2988,22 @@ impl Runtime {
             chat_id,
             super::work::spawn(self.agent.clone(), chat_id, known, mode, settings),
         );
+        // A new DM work takes the task reports waiting for its next input.
+        if chat_id == self.config.dm_chat_id {
+            let reports: Vec<LeadEventRecord> = self
+                .agent
+                .ledger
+                .lead_events()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|report| report.lead_chat_id == chat_id)
+                .collect();
+            if !reports.is_empty()
+                && let Some(work) = self.works.get(&chat_id)
+            {
+                let _ = work.tx.send(Command::LeadReports(reports)).await;
+            }
+        }
         Ok(())
     }
 
@@ -2936,6 +3189,862 @@ impl Runtime {
             Err(_) => problem("Listing the files failed."),
         }
     }
+}
+
+// ---------------------------------------------------------------
+// The DM lead and its task subthreads (see `lead.rs`)
+// ---------------------------------------------------------------
+
+impl Runtime {
+    async fn lead_request(&mut self, request: LeadRequest) {
+        // The tool gave up waiting: acting now would surprise the lead, which
+        // was told it may not have happened.
+        let abandoned = match &request {
+            LeadRequest::Spawn { reply, .. }
+            | LeadRequest::Send { reply, .. }
+            | LeadRequest::Stop { reply, .. }
+            | LeadRequest::List { reply, .. }
+            | LeadRequest::Wait { reply, .. }
+            | LeadRequest::NotifyOwner { reply, .. } => reply.is_closed(),
+            LeadRequest::Report(_) => false,
+        };
+        if abandoned {
+            return;
+        }
+        match request {
+            LeadRequest::Spawn {
+                caller,
+                task,
+                reply,
+            } => {
+                let result = match self.spawn_task(caller, task).await {
+                    Ok(result) => result,
+                    Err(error) => HostToolResult::failure(error),
+                };
+                let _ = reply.send(result);
+            }
+            LeadRequest::Wait {
+                caller,
+                targets,
+                reply,
+            } => {
+                if let Err(error) = self.lead_only(caller) {
+                    let _ = reply.send(HostToolResult::failure(error));
+                } else if let Some(result) = self.wait_now(caller, &targets) {
+                    let _ = reply.send(result);
+                } else {
+                    self.waiters.retain(|(_, reply)| !reply.is_closed());
+                    self.waiters.push((targets, reply));
+                }
+            }
+            LeadRequest::Send {
+                caller,
+                target,
+                text,
+                mode,
+                interrupt,
+                call_id,
+                reply,
+            } => {
+                let result = match self
+                    .send_to_task(caller, target, text, mode, interrupt, &call_id)
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(error) => HostToolResult::failure(error),
+                };
+                let _ = reply.send(result);
+            }
+            LeadRequest::Stop {
+                caller,
+                target,
+                reply,
+            } => {
+                let result = match self.stop_task(caller, target).await {
+                    Ok(result) => result,
+                    Err(error) => HostToolResult::failure(error),
+                };
+                let _ = reply.send(result);
+            }
+            LeadRequest::List { caller, reply } => {
+                let result = match self.list_tasks(caller) {
+                    Ok(result) => result,
+                    Err(error) => HostToolResult::failure(error),
+                };
+                let _ = reply.send(result);
+            }
+            LeadRequest::NotifyOwner {
+                caller,
+                text,
+                call_id,
+                reply,
+            } => {
+                let result = match self.notify_owner(caller, text, &call_id).await {
+                    Ok(result) => result,
+                    Err(error) => HostToolResult::failure(error),
+                };
+                let _ = reply.send(result);
+            }
+            LeadRequest::Report(report) => self.task_report(report).await,
+        }
+    }
+
+    /// A task with a turn running or its session still starting.
+    fn task_running(&self, chat: i64) -> bool {
+        self.works.get(&chat).is_some_and(|work| {
+            !work.task.is_finished()
+                && matches!(*work.phase.borrow(), WorkPhase::Running | WorkPhase::None)
+        })
+    }
+
+    /// Stops a task's running turn. Bounded, so one busy work never holds
+    /// up every chat.
+    async fn halt_task(&self, chat: i64, actor: i64) -> Option<String> {
+        let phase = self.works.get(&chat).map(|work| *work.phase.borrow());
+        match phase {
+            Some(WorkPhase::Running) => {}
+            Some(WorkPhase::None) => {
+                return Some(
+                    "It is still starting, so there is nothing to stop yet; its brief will run."
+                        .to_owned(),
+                );
+            }
+            _ => return Some("Nothing is running there.".to_owned()),
+        }
+        tokio::time::timeout(
+            TASK_CONTROL_TIMEOUT,
+            self.ask(chat, |reply| Command::Control {
+                control: Control::Stop,
+                actor,
+                reply,
+            }),
+        )
+        .await
+        .unwrap_or_else(|_| Some("The task did not answer in time.".to_owned()))
+    }
+
+    /// Records a task's status and shows it on the lead's card.
+    async fn set_task_status(&self, child_chat_id: i64, status: &str) {
+        let Ok(Some(child)) = self.agent.ledger.child(child_chat_id) else {
+            return;
+        };
+        let _ = self.agent.ledger.set_child_status(child_chat_id, status);
+        if let Some(card) = child.card_message_id
+            && let Err(error) = api::edit_markdown(
+                &self.agent.bot,
+                child.lead_chat_id,
+                card,
+                &card_text(&self.config.agent_name, &child.title, child_chat_id, status),
+            )
+            .await
+        {
+            log::warn!(target: "inline::bridge::v2", "task card edit failed: {error}");
+        }
+    }
+
+    fn lead_only(&self, caller: i64) -> Result<(), String> {
+        if caller == self.config.dm_chat_id {
+            Ok(())
+        } else {
+            Err("Only the session in your owner's DM runs task subthreads.".to_owned())
+        }
+    }
+
+    /// `spawn_thread`: a task subthread of the DM with a fresh session that
+    /// inherits the lead's settings, the brief as its first visible message,
+    /// and the lead's card in the DM.
+    async fn spawn_task(&mut self, caller: i64, task: SpawnTask) -> Result<HostToolResult, String> {
+        self.lead_only(caller)?;
+        self.recent_spawns
+            .retain(|_, (_, at)| at.elapsed() < SPAWN_RETRY_WINDOW);
+        let key = (caller, task.title.clone(), task.brief.clone());
+        if let Some((child, _)) = self.recent_spawns.get(&key) {
+            return Ok(spawned(*child, &task.title, true));
+        }
+        let (fork_from, fork_at) = if task.fork {
+            let (session, turn) = self
+                .works
+                .get(&caller)
+                .and_then(WorkHandle::fork_point)
+                .ok_or("Your session is not open here, so a task cannot fork it. Start it with a brief.")?;
+            (Some(session), turn)
+        } else {
+            (None, None)
+        };
+        let running = self
+            .agent
+            .ledger
+            .children(caller)
+            .map_err(|error| format!("Could not read your tasks: {error}"))?
+            .into_iter()
+            .filter(|(chat, _)| self.task_running(*chat))
+            .count();
+        if running >= MAX_RUNNING_TASKS {
+            return Err(format!(
+                "{running} tasks are already running. Wait for one to finish, or stop one with stop_thread."
+            ));
+        }
+        // Listing can start a harness process; only a choice needs it.
+        let catalog = if task.model.is_some() || task.reasoning.is_some() || task.project.is_some()
+        {
+            self.catalog().await
+        } else {
+            Catalog::default()
+        };
+        let mut settings = self
+            .thread_settings
+            .get(&caller)
+            .cloned()
+            .unwrap_or_default();
+        settings.folder = None;
+        if let Some(model) = task.model.clone() {
+            if !catalog.models.is_empty()
+                && !catalog.models.iter().any(|option| option.value == model)
+            {
+                let models: Vec<&str> = catalog
+                    .models
+                    .iter()
+                    .map(|option| option.value.as_str())
+                    .collect();
+                return Err(format!(
+                    "Unknown model {model}. Models: {}.",
+                    models.join(", ")
+                ));
+            }
+            settings.model = Some(model);
+        }
+        if let Some(reasoning) = task.reasoning.clone() {
+            let model = settings.model.as_deref();
+            let option = catalog
+                .models
+                .iter()
+                .find(|option| Some(option.value.as_str()) == model)
+                .or_else(|| catalog.models.iter().find(|option| option.is_default));
+            if let Some(option) = option
+                && !option.reasoning.is_empty()
+                && !option
+                    .reasoning
+                    .iter()
+                    .any(|effort| effort.value == reasoning)
+            {
+                let efforts: Vec<&str> = option
+                    .reasoning
+                    .iter()
+                    .map(|effort| effort.value.as_str())
+                    .collect();
+                return Err(format!(
+                    "Unknown reasoning effort {reasoning} for {}. Efforts: {}.",
+                    option.value,
+                    efforts.join(", ")
+                ));
+            }
+            settings.effort = Some(reasoning);
+        }
+        let folders = self.folders(&catalog);
+        if let Some(project) = task.project.as_deref()
+            && project != NO_PROJECT_ID
+            && folders
+                .as_ref()
+                .and_then(|folders| folders.folder(project))
+                .is_none()
+        {
+            let options = folders
+                .map(|folders| {
+                    folders
+                        .options()
+                        .into_iter()
+                        .map(|folder| format!("{} ({})", folder.id, folder.label))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default();
+            return Err(format!("Unknown project {project}. Projects: {options}."));
+        }
+        let created = self
+            .agent
+            .bot
+            .create_reply_thread(CreateReplyThreadRequest {
+                parent_chat_id: InlineId::new(caller),
+                parent_message_id: None,
+                title: Some(task.title.clone()),
+                description: None,
+                emoji: None,
+                participants: Vec::new(),
+                agent_context: None,
+            })
+            .await
+            .map_err(|error| format!("Inline could not create the subthread: {error}"))?;
+        let child = created.chat_id.get();
+        self.own_threads.insert(child, true);
+        self.recent_spawns.insert(key, (child, Instant::now()));
+        // The task works in the project chosen for it, else the lead's; a
+        // lead in No project gives it a No project folder of its own.
+        let folder = match task.project.as_deref() {
+            Some(project) => Some(self.chosen_folder(child, project, folders.as_ref())?),
+            None => match self
+                .thread_settings
+                .get(&caller)
+                .and_then(|settings| settings.folder.clone())
+            {
+                Some(folder) if workspaces::is_managed(&folder) => {
+                    Some(workspaces::allocate(&self.config.agent_name, child)?)
+                }
+                folder => folder,
+            },
+        };
+        settings.folder = folder;
+        self.thread_settings.insert(child, settings.clone());
+        self.save_thread(child);
+        let card = api::send_markdown(
+            &self.agent.bot,
+            caller,
+            None,
+            &card_text(&self.config.agent_name, &task.title, child, "running"),
+            crate::bridge::helpers::interaction_random_id("v2-lead-card", &task.call_id).get(),
+        )
+        .await
+        .map_err(|error| log::warn!(target: "inline::bridge::v2", "task card failed: {error}"))
+        .ok();
+        if let Some(card) = card {
+            self.agent.sent.lock().expect("sent").insert(card);
+        }
+        self.agent
+            .ledger
+            .add_child(
+                child,
+                &ChildRecord {
+                    lead_chat_id: caller,
+                    lead_session_id: self
+                        .works
+                        .get(&caller)
+                        .and_then(WorkHandle::agent_session_id),
+                    title: task.title.clone(),
+                    card_message_id: card,
+                    status: Some(DIRECTED.to_owned()),
+                },
+            )
+            .map_err(|error| format!("Could not record the task: {error}"))?;
+        let mode = self.effective_mode(None);
+        self.works.insert(
+            child,
+            super::work::spawn(
+                self.agent.clone(),
+                child,
+                Known {
+                    fork_from,
+                    fork_at,
+                    ..Known::default()
+                },
+                mode,
+                settings,
+            ),
+        );
+        if let Err(error) = self
+            .direct_task(
+                child,
+                &format!("**Task**\n\n{}", task.brief),
+                task.brief,
+                Some(TASK_INSTRUCTIONS),
+                Delivery::Turn,
+                crate::bridge::helpers::interaction_random_id("v2-lead-task", &task.call_id).get(),
+            )
+            .await
+        {
+            // An empty task holds no slot; its thread stays for a retry by hand.
+            if let Some(work) = self.works.remove(&child) {
+                work.task.abort();
+            }
+            self.recent_spawns.retain(|_, (task, _)| *task != child);
+            self.set_task_status(child, "failed to start").await;
+            return Err(format!(
+                "The task's thread {child} was created but its brief was not delivered: {error}"
+            ));
+        }
+        Ok(spawned(child, &task.title, false))
+    }
+
+    /// Posts the lead's direction in a task's thread and gives it to its
+    /// work as a message typed there would: a turn, or a steer of the
+    /// running one.
+    async fn direct_task(
+        &mut self,
+        chat: i64,
+        visible: &str,
+        text: String,
+        instructions: Option<&str>,
+        delivery: Delivery,
+        // Stable per tool call, so a retry posts the same message.
+        random_id: i64,
+    ) -> Result<(), String> {
+        let message_id = api::send_markdown(&self.agent.bot, chat, None, visible, random_id)
+            .await
+            .map_err(|error| format!("Inline could not post in the thread: {error}"))?;
+        self.agent.sent.lock().expect("sent").insert(message_id);
+        let id = input_id(self.config.bot_user_id, chat, message_id, "lead");
+        let begun = self
+            .agent
+            .ledger
+            .begin(&id, chat, message_id, self.config.owner_user_id)
+            .map_err(|error| format!("Could not record the direction: {error}"))?;
+        // A retried tool call posts the same message; it ran already.
+        if let Begin::Seen(_) = begun {
+            return Ok(());
+        }
+        self.ensure_work(chat, None)
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut content = InputContent::text(text);
+        if let Some(instructions) = instructions {
+            content.context = Some(inline_agent_bridge::TurnContext {
+                instructions: instructions.to_owned(),
+                conversation: String::new(),
+            });
+        }
+        let input = Input {
+            id: InputId::new(id).map_err(|error| error.to_string())?,
+            content,
+            origin: inline_agent_bridge::harness::Origin::Agent {
+                bot: UserId(self.config.bot_user_id),
+                work: inline_agent_bridge::harness::WorkRef {
+                    chat: inline_agent_bridge::harness::ChatId(self.config.dm_chat_id),
+                    session: None,
+                },
+            },
+            delivery,
+        };
+        let pending = PendingInput {
+            id: input.id.clone(),
+            // The lead acts for its owner.
+            sender: UserId(self.config.owner_user_id),
+            required: Operation::StartWork,
+        };
+        let work = self
+            .works
+            .get(&chat)
+            .ok_or("The thread's work did not start.")?;
+        work.tx
+            .send(Command::Input {
+                input: Box::new(input),
+                pending,
+                message_id,
+                answer_reply: false,
+                reply_to: None,
+            })
+            .await
+            .map_err(|_| "The thread's work stopped. Try again.".to_owned())
+    }
+
+    /// The threads a lead may direct: its tasks and this agent's own work
+    /// threads. Anywhere else it posts with send_message.
+    async fn directable(&mut self, caller: i64, target: i64) -> Result<(), String> {
+        self.lead_only(caller)?;
+        if target == caller {
+            return Err("That is this thread.".to_owned());
+        }
+        let task = matches!(self.agent.ledger.child(target), Ok(Some(_)));
+        if task || self.is_own_thread(target).await {
+            Ok(())
+        } else {
+            Err("Only your task subthreads and your own work threads take direction. Use send_message to post elsewhere.".to_owned())
+        }
+    }
+
+    async fn send_to_task(
+        &mut self,
+        caller: i64,
+        target: i64,
+        text: String,
+        mode: SendMode,
+        interrupt: bool,
+        call_id: &str,
+    ) -> Result<HostToolResult, String> {
+        self.directable(caller, target).await?;
+        if mode == SendMode::Note {
+            return self.note_task(target, text, call_id).await;
+        }
+        self.set_task_status(target, DIRECTED).await;
+        // Queue only means something while a turn runs.
+        let running = self
+            .works
+            .get(&target)
+            .is_some_and(|work| *work.phase.borrow() == WorkPhase::Running);
+        let queued = mode == SendMode::Queue && running && !interrupt;
+        let delivery = if queued {
+            Delivery::Queue
+        } else {
+            Delivery::Turn
+        };
+        if interrupt
+            && self
+                .works
+                .get(&target)
+                .is_some_and(|work| *work.phase.borrow() == WorkPhase::Running)
+        {
+            let _ = self.halt_task(target, self.config.owner_user_id).await;
+        }
+        self.direct_task(
+            target,
+            &format!("**From the DM**\n\n{text}"),
+            text,
+            None,
+            delivery,
+            crate::bridge::helpers::interaction_random_id("v2-lead-send", call_id).get(),
+        )
+        .await?;
+        Ok(HostToolResult::success(
+            json!({
+                "chat_id": target,
+                "sent": true,
+                "queued": queued,
+            })
+            .to_string(),
+        ))
+    }
+
+    /// `send_to_thread` mode note: posted there, and context for the task's
+    /// next turn without starting one (Codex's queue-only `send_message`).
+    async fn note_task(
+        &mut self,
+        target: i64,
+        text: String,
+        call_id: &str,
+    ) -> Result<HostToolResult, String> {
+        let message_id = api::send_markdown(
+            &self.agent.bot,
+            target,
+            None,
+            &format!("**Note from the DM**\n\n{text}"),
+            crate::bridge::helpers::interaction_random_id("v2-lead-note", call_id).get(),
+        )
+        .await
+        .map_err(|error| format!("Inline could not post in the thread: {error}"))?;
+        self.agent.sent.lock().expect("sent").insert(message_id);
+        self.ensure_work(target, None)
+            .await
+            .map_err(|error| error.to_string())?;
+        if let Some(work) = self.works.get(&target) {
+            let _ = work
+                .tx
+                .send(Command::Passive {
+                    message: ContextMessage {
+                        message_id,
+                        author_name: format!(
+                            "{} (your lead in your owner's DM)",
+                            self.config.agent_name
+                        ),
+                        role: ContextAuthorRole::Agent,
+                        reply_to: None,
+                        text,
+                    },
+                })
+                .await;
+        }
+        Ok(HostToolResult::success(
+            json!({"chat_id": target, "noted": true}).to_string(),
+        ))
+    }
+
+    /// `wait_tasks` answered at once: a named task already finished, or
+    /// nothing is running to wait for.
+    fn wait_now(&self, lead: i64, targets: &[i64]) -> Option<HostToolResult> {
+        let children = self.agent.ledger.children(lead).unwrap_or_default();
+        let running = |chat: i64| {
+            children
+                .iter()
+                .any(|(child, record)| *child == chat && record.status.as_deref() == Some(DIRECTED))
+        };
+        let finished: Vec<Value> = targets
+            .iter()
+            .filter(|chat| !running(**chat))
+            .filter_map(|chat| {
+                children
+                    .iter()
+                    .find(|(child, _)| child == chat)
+                    .map(|(child, record)| {
+                        json!({
+                            "chat_id": child,
+                            "title": record.title,
+                            "status": record.status,
+                            "note": "Finished earlier; read its thread with get_messages for the answer.",
+                        })
+                    })
+            })
+            .collect();
+        if !finished.is_empty() {
+            return Some(json_result(&json!({"finished": finished})));
+        }
+        let any_running = if targets.is_empty() {
+            children.iter().any(|(chat, _)| running(*chat))
+        } else {
+            targets.iter().any(|chat| running(*chat))
+        };
+        (!any_running).then(|| {
+            json_result(&json!({
+                "finished": [],
+                "note": "None of those tasks is running.",
+            }))
+        })
+    }
+
+    async fn stop_task(&mut self, caller: i64, target: i64) -> Result<HostToolResult, String> {
+        self.directable(caller, target).await?;
+        if !self.works.contains_key(&target) {
+            return Ok(HostToolResult::success("Nothing is running there."));
+        }
+        let toast = self.halt_task(target, self.config.owner_user_id).await;
+        if toast.is_none() {
+            self.set_task_status(target, "stopped").await;
+        }
+        Ok(HostToolResult::success(
+            toast.unwrap_or_else(|| "Stopped.".to_owned()),
+        ))
+    }
+
+    /// `/stop` in the DM: the lead's running tasks stop too.
+    async fn stop_tasks(&mut self, lead: i64, actor: i64) -> usize {
+        let children = self.agent.ledger.children(lead).unwrap_or_default();
+        let mut stopped = 0;
+        for (chat, _) in children {
+            let running = self
+                .works
+                .get(&chat)
+                .is_some_and(|work| *work.phase.borrow() == WorkPhase::Running);
+            if running && self.halt_task(chat, actor).await.is_none() {
+                self.set_task_status(chat, "stopped").await;
+                stopped += 1;
+            }
+        }
+        stopped
+    }
+
+    /// The DM lead's tasks and this agent's other works; any work may read
+    /// it.
+    fn list_tasks(&self, caller: i64) -> Result<HostToolResult, String> {
+        let lead = self.config.dm_chat_id;
+        let phase = |chat: &i64| {
+            self.works
+                .get(chat)
+                .filter(|work| !work.task.is_finished())
+                .map(|work| match *work.phase.borrow() {
+                    WorkPhase::None => "starting",
+                    WorkPhase::Idle => "idle",
+                    WorkPhase::Running => "working",
+                    WorkPhase::Paused => "paused",
+                })
+        };
+        let children = self
+            .agent
+            .ledger
+            .children(lead)
+            .map_err(|error| format!("Could not read your tasks: {error}"))?;
+        let tasks: Vec<Value> = children
+            .iter()
+            .map(|(chat, child)| {
+                json!({
+                    "chat_id": chat,
+                    "title": child.title,
+                    "link": format!("inline://chat?id={chat}"),
+                    "state": phase(chat).unwrap_or("not loaded"),
+                    "last_result": child.status,
+                })
+            })
+            .collect();
+        let others: Vec<Value> = self
+            .works
+            .keys()
+            .filter(|chat| {
+                **chat != lead
+                    && **chat != caller
+                    && !children.iter().any(|(child, _)| child == *chat)
+            })
+            .filter_map(|chat| {
+                phase(chat).map(|state| {
+                    json!({
+                        "chat_id": chat,
+                        "link": format!("inline://chat?id={chat}"),
+                        "state": state,
+                    })
+                })
+            })
+            .collect();
+        Ok(json_result(&json!({
+            "tasks": tasks,
+            "other_works": others,
+            "hint": "Read a thread with get_messages; find others with list_my_threads or search_chats.",
+        })))
+    }
+
+    /// `notify_owner`: a work outside the DM tells the owner there, and the
+    /// lead sees it with its next input.
+    async fn notify_owner(
+        &mut self,
+        caller: i64,
+        text: String,
+        call_id: &str,
+    ) -> Result<HostToolResult, String> {
+        let dm = self.config.dm_chat_id;
+        if caller == dm {
+            return Err("You are in your owner's DM already; answer here.".to_owned());
+        }
+        let title = self
+            .agent
+            .bot
+            .chat_state(InlineId::new(caller))
+            .await
+            .ok()
+            .and_then(|state| state.dialog)
+            .and_then(|dialog| dialog.title)
+            .map(|title| title.replace(['[', ']'], ""))
+            .unwrap_or_else(|| "a thread".to_owned());
+        let message_id = api::send_markdown(
+            &self.agent.bot,
+            dm,
+            None,
+            &format!("From [{title}](inline://chat?id={caller}):\n\n{text}"),
+            crate::bridge::helpers::interaction_random_id("v2-notify-owner", call_id).get(),
+        )
+        .await
+        .map_err(|error| format!("Inline could not post in your owner's DM: {error}"))?;
+        self.agent.sent.lock().expect("sent").insert(message_id);
+        let event = LeadEventRecord {
+            event_id: report_event_id(
+                self.config.bot_user_id,
+                caller,
+                &format!("notify-{message_id}"),
+                "",
+            ),
+            lead_chat_id: dm,
+            child_chat_id: caller,
+            text: format!(
+                "Note your work in inline://chat?id={caller} posted to your owner here (not a message from your owner):\n{text}"
+            ),
+        };
+        if let Err(error) = self.agent.ledger.add_lead_event(&event) {
+            log::warn!(target: "inline::bridge::v2", "cannot keep the owner note: {error}");
+        }
+        self.deliver_lead_events(dm).await;
+        Ok(HostToolResult::success(
+            json!({"chat_id": dm, "message_id": message_id}).to_string(),
+        ))
+    }
+
+    /// A task's turn ended: its card shows it, and its lead hears it.
+    async fn task_report(&mut self, report: TaskReport) {
+        let Ok(Some(child)) = self.agent.ledger.child(report.child_chat_id) else {
+            return;
+        };
+        self.set_task_status(report.child_chat_id, status_word(report.outcome))
+            .await;
+        // A lead waiting on this task takes the result in its running turn.
+        if report.directed {
+            self.waiters.retain(|(_, reply)| !reply.is_closed());
+            if let Some(index) = self.waiters.iter().position(|(targets, _)| {
+                targets.is_empty() || targets.contains(&report.child_chat_id)
+            }) {
+                let (_, reply) = self.waiters.remove(index);
+                let finished = json!({"finished": [{
+                    "chat_id": report.child_chat_id,
+                    "title": child.title,
+                    "status": status_word(report.outcome),
+                    "answer": report.answer,
+                }]});
+                if reply.send(json_result(&finished)).is_ok() {
+                    return;
+                }
+            }
+        }
+        let event = LeadEventRecord {
+            event_id: report_event_id(
+                self.config.bot_user_id,
+                report.child_chat_id,
+                &report.turn,
+                report.answer.as_deref().unwrap_or_default(),
+            ),
+            lead_chat_id: child.lead_chat_id,
+            child_chat_id: report.child_chat_id,
+            text: if report.directed {
+                report_text(&child.title, report.child_chat_id, &report)
+            } else {
+                note_text(&child.title, report.child_chat_id, report.outcome)
+            },
+        };
+        if let Err(error) = self.agent.ledger.add_lead_event(&event) {
+            log::warn!(target: "inline::bridge::v2", "cannot keep task report: {error}");
+        }
+        self.deliver_lead_events(child.lead_chat_id).await;
+    }
+
+    /// The lead's work takes its pending reports; it runs them between its
+    /// own turns.
+    async fn deliver_lead_events(&mut self, lead: i64) {
+        let events: Vec<LeadEventRecord> = self
+            .agent
+            .ledger
+            .lead_events()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|event| event.lead_chat_id == lead)
+            .collect();
+        if events.is_empty() {
+            return;
+        }
+        if let Err(error) = self.ensure_work(lead, None).await {
+            log::warn!(target: "inline::bridge::v2", "lead={lead} cannot take task reports: {error}");
+            return;
+        }
+        if let Some(work) = self.works.get(&lead) {
+            let _ = work.tx.send(Command::LeadReports(events)).await;
+        }
+    }
+}
+
+/// How long the lead's tools wait for a task's work to answer a control.
+const TASK_CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the same spawn_thread call returns the task it already started.
+const SPAWN_RETRY_WINDOW: Duration = Duration::from_secs(120);
+
+/// spawn_thread's answer for a started task.
+fn spawned(child: i64, title: &str, again: bool) -> HostToolResult {
+    let mut result = json!({
+        "chat_id": child,
+        "link": format!("inline://chat?id={child}"),
+        "title": title,
+        "note": "The task runs in its own session. Your owner sees its answer in the subthread and on your card; you receive it with your next message.",
+    });
+    if again {
+        result["already_started"] = json!(true);
+    }
+    HostToolResult::success(result.to_string())
+}
+/// Characters of a reply thread's starting message given as context.
+const ANCHOR_CHARS: usize = 2_000;
+
+/// Join context with the thread's anchor first.
+fn with_anchor(
+    context: Option<inline_agent_bridge::TurnContext>,
+    anchor: Option<String>,
+) -> Option<inline_agent_bridge::TurnContext> {
+    let Some(anchor) = anchor else {
+        return context;
+    };
+    let mut context = context.unwrap_or(inline_agent_bridge::TurnContext {
+        instructions: String::new(),
+        conversation: String::new(),
+    });
+    context.conversation = if context.conversation.is_empty() {
+        anchor
+    } else {
+        format!("{anchor}\n\n{}", context.conversation)
+    };
+    Some(context)
+}
+
+fn plural(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
+fn json_result(value: &Value) -> HostToolResult {
+    HostToolResult::success(value.to_string())
 }
 
 struct FileQuery<'a> {
@@ -3220,6 +4329,23 @@ mod tests {
         );
         assert_eq!(setup.min_version.as_deref(), Some("0.150.0"));
         assert!(setup.text.unwrap().contains("found 0.140.0"));
+    }
+
+    #[test]
+    fn a_threads_anchor_comes_before_its_conversation() {
+        assert_eq!(with_anchor(None, None), None);
+        let only = with_anchor(None, Some("Anchor".to_owned())).unwrap();
+        assert_eq!(only.conversation, "Anchor");
+        let joined = with_anchor(
+            Some(inline_agent_bridge::TurnContext {
+                instructions: "keep".to_owned(),
+                conversation: "Recent".to_owned(),
+            }),
+            Some("Anchor".to_owned()),
+        )
+        .unwrap();
+        assert_eq!(joined.conversation, "Anchor\n\nRecent");
+        assert_eq!(joined.instructions, "keep");
     }
 }
 

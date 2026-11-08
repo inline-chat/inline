@@ -141,10 +141,28 @@ struct MainContentView: View {
 
     closingReplyThreadPeer = oldPeer ?? settledReplyThreadPeer
     settledReplyThreadPeer = nil
+    // The pane's editor is about to leave; typing should land back in the parent chat.
+    if let parentPeer = nav.currentRoute.selectedPeer {
+      Self.focusComposer(for: parentPeer, in: window?.contentView)
+    }
     replyThreadReveal.animate(to: 0, in: window) {
       guard nav.currentReplyThreadPeer == nil else { return }
       closingReplyThreadPeer = nil
     }
+  }
+
+  @discardableResult
+  private static func focusComposer(for peer: Peer, in view: NSView?) -> Bool {
+    guard let view, !view.isHidden else { return false }
+    if let composer = view as? GlassComposeAppKit, composer.isComposer(for: peer) {
+      composer.focusEditor()
+      return true
+    }
+    if let composer = view as? LegacyComposeAppKit, composer.isComposer(for: peer) {
+      composer.focusEditor()
+      return true
+    }
+    return view.subviews.contains { focusComposer(for: peer, in: $0) }
   }
 
   private func replyThreadResizeGesture(

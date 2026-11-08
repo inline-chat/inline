@@ -179,12 +179,26 @@ pub fn classify_addressee(message: &GroupMessage, bot_user_id: i64) -> Addressee
     }
 }
 
+/// Whether `message` hands back an answer this agent asked for: a reply to one
+/// of its messages, from someone that message mentioned. It needs no grant
+/// (the agent invited it) and is derived from the reply chain alone, so it
+/// survives restarts. A command is never a hand-back.
+pub fn is_hand_back(message: &GroupMessage, bot_user_id: i64) -> bool {
+    message.command().is_none()
+        && message.reply_to.is_some_and(|reply| {
+            reply.author_user_id == bot_user_id
+                && reply.mentions_author
+                && message.author.user_id != bot_user_id
+        })
+}
+
 /// Everything intake needs besides the message.
 #[derive(Clone, Copy, Debug)]
 pub struct IntakeFacts<'a> {
     pub message: &'a GroupMessage,
     pub bot_user_id: i64,
-    /// The sender's current grants on this agent. A mention never grants.
+    /// The sender's current grants on this agent, including what an agent
+    /// sender inherits from the person it acts for. A mention never grants.
     pub grants: Grants,
     pub work: WorkPhase,
     /// This agent's participation in the message's thread; `None` when it has
@@ -286,7 +300,13 @@ pub fn decide_intake(facts: IntakeFacts<'_>) -> IntakeDecision {
 
     match classify_addressee(message, facts.bot_user_id) {
         AddresseeKind::Me { reason } => {
-            let required = required_operation(message, facts.work);
+            // The answer to this agent's own request needs no grant; the loop
+            // cap still applies to agents.
+            let required = if is_hand_back(message, facts.bot_user_id) {
+                Operation::HandBack
+            } else {
+                required_operation(message, facts.work)
+            };
             if !facts.grants.permits(required) {
                 return observe_or_skip(ObserveReason::NotGranted, SkipReason::NotGranted);
             }
@@ -374,6 +394,7 @@ mod tests {
         message.reply_to = Some(ReplyRef {
             message_id: 5,
             author_user_id,
+            mentions_author: false,
         });
         message
     }
@@ -782,6 +803,107 @@ mod tests {
         );
     }
 
+    /// A reply to this agent's message that mentioned `author`.
+    fn hand_back(author: Author, text: &str) -> GroupMessage {
+        let mut message = message(author, Conversation::Group, text);
+        message.reply_to = Some(ReplyRef {
+            message_id: 5,
+            author_user_id: ME,
+            mentions_author: true,
+        });
+        message
+    }
+
+    #[test]
+    fn an_answer_to_my_request_is_admitted_without_a_grant() {
+        let answer = hand_back(agent(OTHER_BOT), "The tests pass on main.");
+        assert!(is_hand_back(&answer, ME));
+        let mut answer_facts = facts(&answer);
+        answer_facts.grants = Grants::NONE;
+        answer_facts.work = WorkPhase::Idle;
+        assert_eq!(
+            decide_intake(answer_facts),
+            IntakeDecision::Act {
+                reason: DirectReason::Reply,
+                join: false,
+                required: Operation::HandBack,
+            }
+        );
+        // A person I asked answers the same way.
+        let person = hand_back(human(ALICE), "Yes, ship it.");
+        let mut person_facts = facts(&person);
+        person_facts.grants = Grants::NONE;
+        assert!(matches!(
+            decide_intake(person_facts),
+            IntakeDecision::Act {
+                required: Operation::HandBack,
+                ..
+            }
+        ));
+        // Still under the loop cap.
+        answer_facts.loop_verdict = LoopVerdict::CapReached {
+            hops: 51,
+            limit: 50,
+            notify_owners: false,
+        };
+        assert_eq!(
+            decide_intake(answer_facts),
+            IntakeDecision::Observe {
+                reason: ObserveReason::LoopCapReached,
+                consider: false
+            }
+        );
+    }
+
+    #[test]
+    fn a_reply_i_did_not_ask_for_still_needs_a_grant() {
+        // My message did not mention the agent replying to it.
+        let mut unasked = hand_back(agent(OTHER_BOT), "Me too.");
+        if let Some(reply) = unasked.reply_to.as_mut() {
+            reply.mentions_author = false;
+        }
+        assert!(!is_hand_back(&unasked, ME));
+        let mut unasked_facts = facts(&unasked);
+        unasked_facts.grants = Grants::NONE;
+        assert_eq!(
+            decide_intake(unasked_facts),
+            IntakeDecision::Observe {
+                reason: ObserveReason::NotGranted,
+                consider: false
+            }
+        );
+        // A reply to someone else's message that mentioned the agent.
+        let mut elsewhere = hand_back(agent(OTHER_BOT), "Done.");
+        if let Some(reply) = elsewhere.reply_to.as_mut() {
+            reply.author_user_id = OWNER;
+        }
+        assert!(!is_hand_back(&elsewhere, ME));
+        // A command in a hand-back is checked as a command.
+        let stop = command(hand_back(agent(OTHER_BOT), "/stop"), "stop", None);
+        assert!(!is_hand_back(&stop, ME));
+        let mut stop_facts = facts(&stop);
+        stop_facts.grants = Grants::NONE;
+        assert!(!matches!(
+            decide_intake(stop_facts),
+            IntakeDecision::Act { .. }
+        ));
+        // Leading with someone else's mention addresses them, not me.
+        let forwarded = mention(
+            hand_back(agent(OTHER_BOT), "@alice can you confirm?"),
+            "@alice",
+            ALICE,
+        );
+        let mut forwarded_facts = facts(&forwarded);
+        forwarded_facts.grants = Grants::NONE;
+        assert_eq!(
+            decide_intake(forwarded_facts),
+            IntakeDecision::Observe {
+                reason: ObserveReason::AddressedToOthers,
+                consider: false
+            }
+        );
+    }
+
     #[test]
     fn agent_messages_addressed_to_me_act_within_the_loop_cap() {
         let message = mention(
@@ -796,8 +918,8 @@ mod tests {
             IntakeDecision::Act { .. }
         ));
         agent_facts.loop_verdict = LoopVerdict::CapReached {
-            hops: 31,
-            limit: 30,
+            hops: 51,
+            limit: 50,
             notify_owners: true,
         };
         let capped = decide_intake(agent_facts);

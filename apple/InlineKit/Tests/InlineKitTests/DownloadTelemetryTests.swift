@@ -105,8 +105,11 @@ struct DownloadTelemetryTests {
     for rejection in rejections {
       #expect(PerformanceTrace.isAllowedEnumValue(rejection.rawValue, for: "withheld_reason"))
     }
-    for outcome in ["decrypted", "plaintext", "unsupported_payload", "key_missing", "decrypt_failed", "withheld", "sync"] {
-      #expect(PerformanceTrace.isAllowedEnumValue(outcome, for: "notification_outcome"))
+    for outcome in NotificationDeliveryHealth.Outcome.allCases {
+      #expect(PerformanceTrace.isAllowedEnumValue(outcome.rawValue, for: "notification_outcome"))
+    }
+    for reason in NotificationDeliveryHealth.placeholderReasons.union(["unknown"]) {
+      #expect(PerformanceTrace.isAllowedEnumValue(reason, for: "placeholder_reason"))
     }
     for kind in [
       "video_transcode_export_preset", "share_photo_heic_as_document", "share_photo_mime_as_document",

@@ -36,17 +36,29 @@ public func botChatSettingsControlKind(for control: BotChatSettingsModel.Control
   }
 }
 
+public func botChatSettingsSharedDisabledReason(
+  in document: BotChatSettingsModel.Document
+) -> String? {
+  BotChatSettingsLayout.sharedDisabledReason(in: document.sections.flatMap(\.items))
+}
+
+/// Agent Settings: who the settings are for, this chat's choices, the
+/// provider's settings, then usage.
 public struct BotChatSettingsPopover<ThreadConfiguration: View>: View {
   private let coordinator: BotChatSettingsCoordinator
   private let showsThreadConfiguration: Bool
   private let threadConfiguration: ThreadConfiguration
+  private let hiddenItemIDs: Set<String>
   private let remoteFolderPicker: BotChatSettingsRemoteFolderPicker?
   private let localFolderPicker: BotChatSettingsLocalFolderPicker?
   private let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
 
+  /// - Parameter hiddenItemIDs: provider items the thread configuration
+  ///   already shows, so a choice appears once.
   public init(
     coordinator: BotChatSettingsCoordinator,
     showsThreadConfiguration: Bool,
+    hiddenItemIDs: Set<String> = [],
     @ViewBuilder threadConfiguration: () -> ThreadConfiguration,
     remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil,
     localFolderPicker: BotChatSettingsLocalFolderPicker? = nil,
@@ -54,27 +66,42 @@ public struct BotChatSettingsPopover<ThreadConfiguration: View>: View {
   ) {
     self.coordinator = coordinator
     self.showsThreadConfiguration = showsThreadConfiguration
+    self.hiddenItemIDs = hiddenItemIDs
     self.threadConfiguration = threadConfiguration()
     self.remoteFolderPicker = remoteFolderPicker
     self.localFolderPicker = localFolderPicker
     self.localFolderPickerAvailable = localFolderPickerAvailable
   }
 
+  private var layout: BotChatSettingsLayout? {
+    coordinator.selectedState.document.map { BotChatSettingsLayout(document: $0, hiding: hiddenItemIDs) }
+  }
+
   public var body: some View {
+    let layout = layout
     VStack(spacing: 0) {
-      BotChatSettingsPopoverHeader(coordinator: coordinator)
+      BotChatSettingsHeader(coordinator: coordinator)
       Divider()
-      BotChatSettingsPopoverContent(
-        coordinator: coordinator,
-        botUserID: coordinator.selectedBot?.id,
-        showsThreadConfiguration: showsThreadConfiguration,
-        threadConfiguration: threadConfiguration,
-        remoteFolderPicker: remoteFolderPicker,
-        localFolderPicker: localFolderPicker,
-        localFolderPickerAvailable: localFolderPickerAvailable
-      )
+      ScrollView {
+        VStack(alignment: .leading, spacing: AgentSettingsMetrics.groupSpacing) {
+          if layout != nil, case let .problem(problem)? = coordinator.selectedState.surfaceStatus {
+            BotChatSettingsProblemNotice(problem: problem, onRetry: coordinator.refreshSelected)
+          }
+          if showsThreadConfiguration {
+            AgentSettingsGroup {
+              threadConfiguration
+            }
+          }
+          if coordinator.isToolbarVisible {
+            providerContent(layout)
+          }
+        }
+        .padding(AgentSettingsMetrics.contentPadding)
+      }
+      .scrollBounceBehavior(.basedOnSize)
     }
-    .frame(width: 420, height: 300)
+    .frame(width: AgentSettingsMetrics.width)
+    .frame(maxHeight: AgentSettingsMetrics.maxHeight)
     .task(id: coordinator.selectedBotID) {
       coordinator.refreshSelectedIfStale()
       while !Task.isCancelled {
@@ -83,165 +110,41 @@ public struct BotChatSettingsPopover<ThreadConfiguration: View>: View {
         } catch {
           return
         }
-        // Keep usage fresh without interrupting the provider's project browser.
-        if coordinator.selectedState.document?.sections.contains(where: { $0.id == "account.usage" }) == true {
+        // Keep usage fresh without interrupting the provider's folder browser.
+        if self.layout?.hasUsage == true {
           coordinator.refreshSelectedIfStale()
         }
       }
     }
   }
-}
-
-private struct BotChatSettingsPopoverHeader: View {
-  let coordinator: BotChatSettingsCoordinator
-
-  var body: some View {
-    HStack(spacing: 10) {
-      Text("Agent settings")
-        .font(.headline)
-        .frame(maxWidth: .infinity, alignment: .leading)
-
-      if let selectedBot = coordinator.selectedBot {
-        if coordinator.bots.count > 1 {
-          Menu {
-            ForEach(coordinator.bots) { bot in
-              Button {
-                coordinator.selectBot(bot.id)
-              } label: {
-                if bot.id == selectedBot.id {
-                  Label(bot.displayName, systemImage: "checkmark")
-                } else {
-                  Text(bot.displayName)
-                }
-              }
-            }
-          } label: {
-            BotChatSettingsBotLabel(bot: selectedBot)
-          }
-          .menuStyle(.borderlessButton)
-          .frame(maxWidth: 180)
-          .accessibilityLabel("Choose agent")
-          .accessibilityValue(selectedBot.displayName)
-        } else {
-          BotChatSettingsBotLabel(bot: selectedBot)
-        }
-      }
-    }
-    .padding(.horizontal, 14)
-    .padding(.vertical, 11)
-  }
-}
-
-private struct BotChatSettingsBotLabel: View {
-  let bot: BotChatSettingsBot
-
-  var body: some View {
-    HStack(spacing: 6) {
-      UserAvatar(user: User(from: bot.user), size: 20)
-      Text(bot.displayName)
-        .font(.callout)
-        .lineLimit(1)
-    }
-    .accessibilityElement(children: .combine)
-  }
-}
-
-private struct BotChatSettingsPopoverContent<ThreadConfiguration: View>: View {
-  let coordinator: BotChatSettingsCoordinator
-  let botUserID: Int64?
-  let showsThreadConfiguration: Bool
-  let threadConfiguration: ThreadConfiguration
-  var remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil
-  let localFolderPicker: BotChatSettingsLocalFolderPicker?
-  let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
-
-  var body: some View {
-    if showsThreadConfiguration {
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 0) {
-          threadConfiguration
-          if coordinator.isToolbarVisible {
-            Divider().padding(.horizontal, 12)
-            providerContent
-          }
-        }
-      }
-      .overlay(alignment: .bottom) {
-        if coordinator.isToolbarVisible,
-           coordinator.selectedState.document != nil,
-           let status = coordinator.selectedState.surfaceStatus
-        {
-          BotChatSettingsStatusBanner(status: status, onRetry: coordinator.refreshSelected)
-            .padding(8)
-        }
-      }
-    } else {
-      standaloneProviderContent
-    }
-  }
 
   @ViewBuilder
-  private var standaloneProviderContent: some View {
+  private func providerContent(_ layout: BotChatSettingsLayout?) -> some View {
     let state = coordinator.selectedState
-    if state.phase == .loading, state.document == nil {
-      BotChatSettingsCenteredState {
-        ProgressView()
-        Text("Loading settings…")
-          .foregroundStyle(.secondary)
-      }
-    } else if state.document != nil {
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 0) {
-          providerContent
-        }
-      }
-      .overlay(alignment: .bottom) {
-        if let status = state.surfaceStatus {
-          BotChatSettingsStatusBanner(status: status, onRetry: coordinator.refreshSelected)
-            .padding(8)
-        }
-      }
-    } else {
-      providerContent
-    }
-  }
-
-  @ViewBuilder
-  private var providerContent: some View {
-    let state = coordinator.selectedState
-    if state.phase == .loading, state.document == nil {
-      BotChatSettingsCenteredState {
-        ProgressView()
-        Text("Loading settings…")
-          .foregroundStyle(.secondary)
-      }
-    } else if let document = state.document {
-      BotChatSettingsDocumentView(
-        document: document,
+    if let layout {
+      BotChatSettingsLayoutView(
+        layout: layout,
         pendingItemIDs: state.pendingItemIDs,
-        botUserID: botUserID,
+        botUserID: coordinator.selectedBot?.id,
         remoteFolderPicker: remoteFolderPicker,
         localFolderPicker: localFolderPicker,
         localFolderPickerAvailable: localFolderPickerAvailable,
         onInvoke: coordinator.invoke(itemID:value:)
       )
+    } else if state.phase == .loading || state.phase == .idle {
+      BotChatSettingsPlaceholder(isCompact: showsThreadConfiguration) {
+        ProgressView().controlSize(.small)
+        Text("Loading settings…")
+      }
     } else if let problem = state.problem {
-      BotChatSettingsCenteredState {
-        Image(systemName: "bolt.horizontal.circle")
-          .font(.title2)
-          .foregroundStyle(.secondary)
+      BotChatSettingsPlaceholder(isCompact: showsThreadConfiguration) {
         Text(problem.message)
-          .font(.callout)
         Button("Retry", action: coordinator.refreshSelected)
           .controlSize(.small)
       }
-    } else {
-      BotChatSettingsCenteredState {
-        Image(systemName: "slider.horizontal.3")
-          .font(.title2)
-          .foregroundStyle(.secondary)
+    } else if !showsThreadConfiguration {
+      BotChatSettingsPlaceholder(isCompact: false) {
         Text("No settings for this chat")
-          .font(.callout)
         Button("Refresh", action: coordinator.refreshSelected)
           .controlSize(.small)
       }
@@ -249,381 +152,395 @@ private struct BotChatSettingsPopoverContent<ThreadConfiguration: View>: View {
   }
 }
 
-private struct BotChatSettingsCenteredState<Content: View>: View {
-  @ViewBuilder let content: () -> Content
+// MARK: - Header
 
-  var body: some View {
-    VStack(spacing: 9, content: content)
-      .frame(maxWidth: .infinity, minHeight: 170)
-      .padding(20)
-  }
-}
-
-private struct BotChatSettingsStatusBanner: View {
-  let status: BotChatSettingsSurfaceStatus
-  let onRetry: () -> Void
+/// The agent these settings belong to, with a switcher when the chat has
+/// more than one, and a quiet refresh indicator.
+private struct BotChatSettingsHeader: View {
+  let coordinator: BotChatSettingsCoordinator
 
   var body: some View {
     HStack(spacing: 8) {
-      switch status {
-      case .refreshing:
+      if let selectedBot = coordinator.selectedBot {
+        if coordinator.bots.count > 1 {
+          UserAvatar(user: User(from: selectedBot.user), size: 22)
+            .accessibilityHidden(true)
+          Menu {
+            ForEach(coordinator.bots) { bot in
+              AgentSettingsMenuItem(bot.displayName, isSelected: bot.id == selectedBot.id) {
+                coordinator.selectBot(bot.id)
+              }
+            }
+          } label: {
+            Text(selectedBot.displayName)
+              .font(.headline)
+          }
+          .menuStyle(.borderlessButton)
+          .fixedSize()
+          .accessibilityLabel("Choose agent")
+          .accessibilityValue(selectedBot.displayName)
+        } else {
+          BotChatSettingsBotLabel(bot: selectedBot)
+        }
+      } else {
+        Text("Agent Settings")
+          .font(.headline)
+      }
+
+      Spacer(minLength: 8)
+
+      if coordinator.selectedState.surfaceStatus == .refreshing {
         ProgressView()
           .controlSize(.mini)
-          .accessibilityHidden(true)
-        Text("Refreshing settings…")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .leading)
-      case let .problem(problem):
-        Image(systemName: "exclamationmark.triangle")
-          .foregroundStyle(.orange)
-          .accessibilityHidden(true)
-        Text(problem.message)
-          .font(.caption)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        Button("Retry", action: onRetry)
-          .controlSize(.mini)
+          .help("Refreshing settings…")
+          .accessibilityLabel("Refreshing settings")
       }
+    }
+    .padding(.horizontal, 14)
+    .frame(height: 44)
+  }
+}
+
+private struct BotChatSettingsBotLabel: View {
+  let bot: BotChatSettingsBot
+
+  var body: some View {
+    HStack(spacing: 7) {
+      UserAvatar(user: User(from: bot.user), size: 22)
+      Text(bot.displayName)
+        .font(.headline)
+        .lineLimit(1)
+    }
+    .accessibilityElement(children: .combine)
+  }
+}
+
+private struct BotChatSettingsProblemNotice: View {
+  let problem: BotChatSettingsProblem
+  let onRetry: () -> Void
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Image(systemName: "exclamationmark.triangle.fill")
+        .foregroundStyle(.orange)
+        .accessibilityHidden(true)
+      Text(problem.message)
+        .font(.callout)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      Button("Retry", action: onRetry)
+        .controlSize(.small)
     }
     .padding(.horizontal, 10)
     .padding(.vertical, 7)
-    .background(.background, in: RoundedRectangle(cornerRadius: 8))
-    .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
+    .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
   }
 }
 
-private struct BotChatSettingsDocumentView: View {
-  let document: BotChatSettingsModel.Document
-  let pendingItemIDs: Set<String>
-  let botUserID: Int64?
-  var remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil
-  let localFolderPicker: BotChatSettingsLocalFolderPicker?
-  let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
-  let onInvoke: (String, BotChatSettingsMutationValue?) -> Void
-
-  private var sharedDisabledReason: String? {
-    botChatSettingsSharedDisabledReason(in: document)
-  }
+private struct BotChatSettingsPlaceholder<Content: View>: View {
+  let isCompact: Bool
+  @ViewBuilder let content: () -> Content
 
   var body: some View {
-    VStack(spacing: 0) {
-      ForEach(document.sections) { section in
-        if section.id != document.sections.first?.id { Divider().padding(.horizontal, 12) }
-        BotChatSettingsSectionView(
-          section: section,
-          pendingItemIDs: pendingItemIDs,
-          sharedDisabledReason: sharedDisabledReason,
-          botUserID: botUserID,
-          remoteFolderPicker: remoteFolderPicker,
-        localFolderPicker: localFolderPicker,
-          localFolderPickerAvailable: localFolderPickerAvailable,
-          onInvoke: onInvoke
-        )
-      }
-      if let sharedDisabledReason {
-        Divider().padding(.horizontal, 12)
-        BotChatSettingsAccessNote(reason: sharedDisabledReason)
-      }
-    }
+    VStack(spacing: 8, content: content)
+      .font(.callout)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, minHeight: isCompact ? 56 : 140)
   }
 }
 
-public func botChatSettingsSharedDisabledReason(
-  in document: BotChatSettingsModel.Document
-) -> String? {
-  let reasons = document.sections
-    .flatMap(\.items)
-    .filter(\.isDisabled)
-    .compactMap(\.disabledReason)
-  guard let first = reasons.first, reasons.allSatisfy({ $0 == first }) else { return nil }
-  return first
-}
+// MARK: - Provider settings
 
-private struct BotChatSettingsAccessNote: View {
-  let reason: String
-
-  var body: some View {
-    Label {
-      Text(reason)
-        .fixedSize(horizontal: false, vertical: true)
-    } icon: {
-      Image(systemName: "lock")
-    }
-    .font(.caption)
-    .foregroundStyle(.tertiary)
-    .padding(.horizontal, 12)
-    .padding(.vertical, 9)
-    .frame(maxWidth: .infinity, alignment: .leading)
-  }
-}
-
-private struct BotChatSettingsSectionView: View {
-  let section: BotChatSettingsModel.Section
+private struct BotChatSettingsLayoutView: View {
+  let layout: BotChatSettingsLayout
   let pendingItemIDs: Set<String>
-  let sharedDisabledReason: String?
   let botUserID: Int64?
-  var remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil
+  let remoteFolderPicker: BotChatSettingsRemoteFolderPicker?
   let localFolderPicker: BotChatSettingsLocalFolderPicker?
   let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
   let onInvoke: (String, BotChatSettingsMutationValue?) -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      if section.title != nil || section.description != nil {
-        VStack(alignment: .leading, spacing: 2) {
-          if let title = section.title {
-            Text(title)
-              .font(.caption.weight(.semibold))
-              .foregroundStyle(.secondary)
-          }
-          if let description = section.description {
-            Text(description)
-              .font(.caption2)
-              .foregroundStyle(.tertiary)
-              .fixedSize(horizontal: false, vertical: true)
-          }
+    ForEach(layout.sections) { section in
+      AgentSettingsGroup(section.title) {
+        ForEach(section.items) { item in
+          BotChatSettingsItemRow(
+            item: item,
+            isPending: pendingItemIDs.contains(item.id),
+            showsDisabledReason: item.disabledReason != layout.accessNote,
+            botUserID: botUserID,
+            remoteFolderPicker: remoteFolderPicker,
+            localFolderPicker: localFolderPicker,
+            localFolderPickerAvailable: localFolderPickerAvailable,
+            onInvoke: onInvoke
+          )
+        }
+        if let description = section.description {
+          AgentSettingsNote(description)
+            .padding(.vertical, 6)
         }
       }
+    }
 
-      ForEach(section.items) { item in
-        BotChatSettingsItemView(
-          item: item,
-          isPending: pendingItemIDs.contains(item.id),
-          showsDisabledReason: item.disabledReason != sharedDisabledReason,
-          botUserID: botUserID,
-          remoteFolderPicker: remoteFolderPicker,
-        localFolderPicker: localFolderPicker,
-          localFolderPickerAvailable: localFolderPickerAvailable,
-          onInvoke: onInvoke
-        )
+    if layout.hasUsage {
+      AgentSettingsGroup(String(localized: "Usage")) {
+        ForEach(layout.meters) { meter in
+          AgentSettingsMeterRow(
+            meter.title,
+            value: meter.value,
+            detail: meter.detail,
+            fraction: meter.fraction
+          ) {
+            if meter.id.hasPrefix(ComposeAgentSettingsItem.context), let action = layout.contextAction {
+              BotChatSettingsContextAction(
+                item: action,
+                isPending: pendingItemIDs.contains(action.id),
+                onInvoke: onInvoke
+              )
+            }
+          }
+        }
+        if let summary = layout.usageSummary, case let .info(text, tone) = summary.control {
+          BotChatSettingsUsageSummaryRow(summary: text, details: summary.description, tone: tone)
+        }
       }
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 10)
-    .frame(maxWidth: .infinity, alignment: .leading)
+
+    if let accessNote = layout.accessNote {
+      AgentSettingsNote(accessNote, systemImage: "lock")
+        .padding(.horizontal, 2)
+    }
   }
 }
 
-private struct BotChatSettingsItemView: View {
+/// Compact, beside the context it frees.
+private struct BotChatSettingsContextAction: View {
+  let item: BotChatSettingsModel.Item
+  let isPending: Bool
+  let onInvoke: (String, BotChatSettingsMutationValue?) -> Void
+
+  var body: some View {
+    if isPending {
+      ProgressView()
+        .controlSize(.mini)
+        .accessibilityLabel("Compacting context")
+    } else {
+      Button("Compact") { onInvoke(item.id, nil) }
+        .buttonStyle(.link)
+        .font(.callout)
+        .disabled(item.isDisabled)
+        .help(item.disabledReason ?? item.description ?? "")
+    }
+  }
+}
+
+private struct BotChatSettingsItemRow: View {
   let item: BotChatSettingsModel.Item
   let isPending: Bool
   let showsDisabledReason: Bool
   let botUserID: Int64?
-  var remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil
+  let remoteFolderPicker: BotChatSettingsRemoteFolderPicker?
   let localFolderPicker: BotChatSettingsLocalFolderPicker?
   let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
   let onInvoke: (String, BotChatSettingsMutationValue?) -> Void
 
-  private var isDisabled: Bool { item.isDisabled }
   private var label: String { item.label ?? "" }
-  private var usesAlignedDescription: Bool {
-    switch item.control {
-    case .toggle, .select: true
-    default: false
-    }
-  }
-  private var showsDescriptionBelowControl: Bool {
-    if case .info = item.control, item.id == "account.usage" { return false }
-    if case .button = item.control { return false }
-    return !usesAlignedDescription
+
+  /// A locked control's own reason, unless the shared access note says it.
+  private var lockReason: String? {
+    guard item.isDisabled, showsDisabledReason else { return nil }
+    return item.disabledReason
   }
 
-  var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      control
-      if showsDescriptionBelowControl, let description = item.description {
-        Text(description)
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      if item.isDisabled, showsDisabledReason, let disabledReason = item.disabledReason {
-        Text(disabledReason)
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-  }
-
-  @ViewBuilder
-  private var control: some View {
-    switch item.control {
-    case let .toggle(value):
-      alignedRow(description: item.description, controlMaxWidth: nil) {
-        if item.isDisabled {
-          Text(value ? "On" : "Off")
-            .foregroundStyle(.secondary)
-        } else {
-          Toggle("", isOn: Binding(
-            get: { value },
-            set: { onInvoke(item.id, .bool($0)) }
-          ))
-          .labelsHidden()
-          .toggleStyle(.switch)
-          .controlSize(.small)
-          .disabled(isDisabled)
-          .accessibilityLabel(label)
-          .accessibilityHint(accessibilityHint)
-        }
-      }
-    case let .select(value, options):
-      VStack(alignment: .leading, spacing: 3) {
-        alignedRow(description: item.description, controlMaxWidth: 250) {
-          if item.isDisabled {
-            Text(options.first(where: { $0.value == value })?.label ?? value)
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-          } else {
-            Picker("", selection: Binding(
-              get: { value },
-              set: { onInvoke(item.id, .string($0)) }
-            )) {
-              ForEach(options) { option in
-                Text(option.label)
-                  .tag(option.value)
-                  .disabled(option.isDisabled)
-              }
-            }
-            .labelsHidden()
-            .disabled(isDisabled)
-            .accessibilityLabel(label)
-            .accessibilityHint(accessibilityHint)
-          }
-        }
-        if let optionDescription = options.first(where: { $0.value == value })?.description {
-          Text(optionDescription)
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-      }
-    case let .info(text, tone):
-      if item.id == "account.usage" {
-        BotChatSettingsUsageRow(summary: text, details: item.description, tone: tone)
-      } else {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
-          Image(systemName: infoSymbol(for: tone))
-            .foregroundStyle(infoColor(for: tone))
-          VStack(alignment: .leading, spacing: 2) {
-            if let itemLabel = item.label {
-              Text(itemLabel).font(.caption.weight(.semibold))
-            }
-            Text(text)
-              .font(.caption)
-              .foregroundStyle(.tertiary)
-              .fixedSize(horizontal: false, vertical: true)
-              .textSelection(.enabled)
-          }
-        }
-        .accessibilityElement(children: .combine)
-      }
-    case .button:
-      HStack(spacing: 7) {
-        if let description = item.description {
-          Text(description)
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        pendingIndicator
-        Button(label) { onInvoke(item.id, nil) }
-          .controlSize(.small)
-          .disabled(isDisabled || isPending)
-          .accessibilityHint(accessibilityHint)
-      }
-      .frame(maxWidth: .infinity, alignment: .trailing)
-    case .folder:
-      if let folder = item.control.folderPresentation {
-      HStack(spacing: 7) {
-        pendingIndicator
-        BotChatSettingsFolderControl(
-          label: label,
-          presentation: folder,
-          isDisabled: isDisabled,
-          disabledReason: item.disabledReason,
-          botUserID: botUserID,
-          remoteFolderPicker: remoteFolderPicker,
-        localFolderPicker: localFolderPicker,
-          localFolderPickerAvailable: localFolderPickerAvailable,
-          onSelect: { onInvoke(item.id, .string($0)) },
-          onPickedFolder: { onInvoke(item.id, .string($0)) }
-        )
-      }
-      }
-    }
-  }
-
-  private func alignedRow<Control: View>(
-    description: String?,
-    controlMaxWidth: CGFloat?,
-    @ViewBuilder control: () -> Control
-  ) -> some View {
-    HStack(spacing: 10) {
-      VStack(alignment: .leading, spacing: 1) {
-        Text(label)
-          .font(.callout)
-        if let description {
-          Text(description)
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-      }
-        .frame(maxWidth: .infinity, alignment: .leading)
-      pendingIndicator
-      control()
-        .frame(maxWidth: controlMaxWidth, alignment: .trailing)
-    }
-    .frame(minHeight: 24)
-  }
-
-  private var accessibilityHint: String {
-    if item.isDisabled, let disabledReason = item.disabledReason { return disabledReason }
+  private var help: String {
+    if item.isDisabled, let reason = item.disabledReason { return reason }
     return item.description ?? ""
   }
 
-  @ViewBuilder
-  private var pendingIndicator: some View {
-    ProgressView()
-      .controlSize(.mini)
-      .opacity(isPending ? 1 : 0)
-      .frame(width: 12, height: 12)
-      .accessibilityLabel("Updating \(label)")
-      .accessibilityHidden(!isPending)
-  }
-
-  private func infoColor(for tone: BotChatSettingsModel.InfoTone) -> Color {
-    switch tone {
-    case .neutral: .secondary
-    case .success: .green
-    case .warning: .orange
-    case .error: .red
-    }
-  }
-
-  private func infoSymbol(for tone: BotChatSettingsModel.InfoTone) -> String {
-    switch tone {
-    case .neutral: "info.circle"
-    case .success: "checkmark.circle"
-    case .warning: "exclamationmark.triangle"
-    case .error: "xmark.octagon"
+  var body: some View {
+    switch item.control {
+    case let .toggle(value):
+      AgentSettingsRow(label, isPending: isPending) {
+        Toggle(label, isOn: Binding(
+          get: { value },
+          set: { onInvoke(item.id, .bool($0)) }
+        ))
+        .labelsHidden()
+        .toggleStyle(.switch)
+        .controlSize(.mini)
+        .disabled(item.isDisabled)
+      }
+      .help(help)
+    case let .select(value, options):
+      let selected = options.first(where: { $0.value == value })
+      AgentSettingsRow(label, isPending: isPending) {
+        AgentSettingsMenu(
+          selected?.label ?? value,
+          accessibilityLabel: label,
+          isEditable: !item.isDisabled,
+          lockReason: lockReason
+        ) {
+          ForEach(options) { option in
+            AgentSettingsMenuItem(
+              option.label,
+              description: option.description,
+              isSelected: option.value == value,
+              isDisabled: option.isDisabled
+            ) {
+              guard option.value != value else { return }
+              onInvoke(item.id, .string(option.value))
+            }
+          }
+        }
+      }
+      .help(item.isDisabled ? help : selected?.description ?? item.description ?? "")
+    case let .info(text, tone):
+      BotChatSettingsInfoRow(label: item.label, text: text, description: item.description, tone: tone)
+    case .button:
+      HStack(spacing: 6) {
+          Button(label) { onInvoke(item.id, nil) }
+            .buttonStyle(.link)
+            .disabled(item.isDisabled || isPending)
+            .accessibilityHint(help)
+          if isPending {
+            ProgressView().controlSize(.mini)
+          }
+      }
+      .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+      .help(help)
+    case .folder:
+      if let folder = item.control.folderPresentation {
+        BotChatSettingsFolderRow(
+          label: label,
+          presentation: folder,
+          lockReason: lockReason,
+          isPending: isPending,
+          isDisabled: item.isDisabled,
+          disabledReason: item.disabledReason,
+          botUserID: botUserID,
+          remoteFolderPicker: remoteFolderPicker,
+          localFolderPicker: localFolderPicker,
+          localFolderPickerAvailable: localFolderPickerAvailable,
+          onSelect: { onInvoke(item.id, .string($0)) }
+        )
+      }
     }
   }
 }
 
-private struct BotChatSettingsFolderControl: View {
+/// A read-only fact. Short ones sit on one line like any other row; a
+/// longer message, like a setup guide, wraps under its title.
+private struct BotChatSettingsInfoRow: View {
+  let label: String?
+  let text: String
+  let description: String?
+  let tone: BotChatSettingsModel.InfoTone
+
+  private var isShort: Bool { label != nil && text.count <= 28 }
+
+  var body: some View {
+    Group {
+      if isShort, let label {
+        AgentSettingsRow(label) {
+          HStack(spacing: 4) {
+            toneIcon
+            Text(text)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .textSelection(.enabled)
+          }
+        }
+      } else {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+          toneIcon
+          VStack(alignment: .leading, spacing: 2) {
+            if let label { Text(label) }
+            Text(text)
+              .font(label == nil ? .body : .callout)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+              .textSelection(.enabled)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+      }
+    }
+    .help(description ?? "")
+    .accessibilityElement(children: .combine)
+  }
+
+  @ViewBuilder
+  private var toneIcon: some View {
+    switch tone {
+    case .neutral: EmptyView()
+    case .success: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+    case .warning: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+    case .error: Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+    }
+  }
+}
+
+/// A v1 bridge's usage: its summary, with the limits and reset times one
+/// click away. Expanding never invokes a provider command.
+struct BotChatSettingsUsageSummaryRow: View {
+  let summary: String
+  let details: String?
+  let tone: BotChatSettingsModel.InfoTone
+
+  @State private var isExpanded = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      Button {
+        isExpanded.toggle()
+      } label: {
+        HStack(spacing: 6) {
+          Text("Account")
+            .frame(maxWidth: .infinity, alignment: .leading)
+          Text(summary)
+            .monospacedDigit()
+            .foregroundStyle(tone == .warning ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+          if details != nil {
+            Image(systemName: "chevron.right")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(.tertiary)
+              .rotationEffect(.degrees(isExpanded ? 90 : 0))
+          }
+        }
+        .frame(minHeight: 28)
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .disabled(details == nil)
+      .accessibilityLabel("Account usage")
+      .accessibilityValue(summary)
+      .accessibilityHint(isExpanded ? "Hide usage limits and reset times" : "Show usage limits and reset times")
+
+      if isExpanded, let details {
+        AgentSettingsNote(details)
+          .textSelection(.enabled)
+          .padding(.bottom, 6)
+      }
+    }
+  }
+}
+
+// MARK: - Folder
+
+/// The folder as one menu: recent folders on the agent's machine, then
+/// picking a new one when this Mac or the agent's machine can.
+private struct BotChatSettingsFolderRow: View {
   let label: String
   let presentation: BotChatSettingsModel.FolderPresentation
+  let lockReason: String?
+  let isPending: Bool
   let isDisabled: Bool
   let disabledReason: String?
   let botUserID: Int64?
-  var remoteFolderPicker: BotChatSettingsRemoteFolderPicker? = nil
+  let remoteFolderPicker: BotChatSettingsRemoteFolderPicker?
   let localFolderPicker: BotChatSettingsLocalFolderPicker?
   let localFolderPickerAvailable: BotChatSettingsLocalPickerAvailability
   let onSelect: (String) -> Void
-  let onPickedFolder: (String) -> Void
 
   @State private var isPickingFolder = false
   @State private var pickerError: String?
@@ -648,72 +565,40 @@ private struct BotChatSettingsFolderControl: View {
       pickerProbe.isReachable
   }
 
-  private var pickerUnavailableReason: String {
-    presentation.remotePickerMessage
-  }
+  private var canPick: Bool { canPickLocally || canBrowseRemotely }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      HStack(spacing: 10) {
-        Text(label)
-          .font(.callout)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        Menu {
+    AgentSettingsRow(label, note: pickerError, isPending: isPending || isPickingFolder) {
+      AgentSettingsMenu(
+        presentation.selectedFolder.label,
+        accessibilityLabel: label,
+        isEditable: !isDisabled,
+        lockReason: lockReason
+      ) {
+        Section("On \(presentation.hostLabel)") {
           ForEach(presentation.recentFolders) { folder in
-            Button {
+            AgentSettingsMenuItem(
+              folder.label,
+              description: folder.parentHint,
+              isSelected: folder.value == presentation.selectedFolder.value,
+              isDisabled: folder.isDisabled
+            ) {
               onSelect(folder.value)
-            } label: {
-              if folder.value == presentation.selectedFolder.value {
-                Label(folderMenuLabel(folder), systemImage: "checkmark")
-              } else {
-                Text(folderMenuLabel(folder))
-              }
             }
-            .disabled(folder.isDisabled)
           }
-          Divider()
-          Button(presentation.pickerTitle, action: pickFolder)
-            .disabled((!canPickLocally && !canBrowseRemotely) || isPickingFolder)
-        } label: {
-          Text(presentation.selectedFolder.label)
-            .lineLimit(1)
-            .frame(minWidth: 120, alignment: .trailing)
         }
-        .disabled(isDisabled)
-        .accessibilityLabel(label)
-        .accessibilityValue(folderMenuLabel(presentation.selectedFolder))
-        .accessibilityHint(accessibilityHint)
-      }
-      if let parentHint = presentation.selectedFolder.parentHint {
-        Text(parentHint)
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-          .frame(maxWidth: .infinity, alignment: .trailing)
-      }
-      Text("On \(presentation.hostLabel)")
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
-        .frame(maxWidth: .infinity, alignment: .trailing)
-      if !canPickLocally && !canBrowseRemotely {
-        Text(pickerUnavailableReason)
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-          .fixedSize(horizontal: false, vertical: true)
-        Text(presentation.commandFallback)
-          .font(.caption2.monospaced())
-          .foregroundStyle(.tertiary)
-          .textSelection(.enabled)
-      } else if isPickingFolder {
-        Label("Choosing a folder…", systemImage: "folder.badge.plus")
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-      } else if let pickerError {
-        Text(pickerError)
-          .font(.caption2)
-          .foregroundStyle(.red)
+        Divider()
+        Button(presentation.pickerTitle, action: pickFolder)
+          .disabled(!canPick || isPickingFolder)
+        if !canPick {
+          Section {
+            Text(presentation.remotePickerMessage)
+            Text(presentation.commandFallback)
+          }
+        }
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .help(accessibilityHint)
     .task(id: pickerProbeID) {
       let probeID = pickerProbeID
       pickerProbe.begin(probeID)
@@ -740,7 +625,7 @@ private struct BotChatSettingsFolderControl: View {
         do {
           let workspaceID = try await remoteFolderPicker(presentation.hostInstallationID, botUserID, presentation.hostLabel)
           guard !Task.isCancelled else { return }
-          onPickedFolder(workspaceID)
+          onSelect(workspaceID)
         } catch is CancellationError {
         } catch {
           pickerError = "Couldn’t choose that folder. Try again."
@@ -760,7 +645,7 @@ private struct BotChatSettingsFolderControl: View {
           endpoint.port,
           endpoint.capability
         )
-        onPickedFolder(workspaceID)
+        onSelect(workspaceID)
       } catch is CancellationError {
       } catch {
         pickerError = "Couldn’t add that folder. Try again."
@@ -771,14 +656,9 @@ private struct BotChatSettingsFolderControl: View {
 
   private var accessibilityHint: String {
     if let disabledReason { return disabledReason }
-    if canBrowseRemotely { return "Browse files and choose a folder on the agent’s machine." }
+    if canBrowseRemotely { return "Browse files and choose a folder on \(presentation.hostLabel)." }
     if canPickLocally { return "Choose a recent folder or pick one on this Mac." }
-    return "\(pickerUnavailableReason) Use \(presentation.commandFallback)."
-  }
-
-  private func folderMenuLabel(_ folder: BotChatSettingsModel.FolderOption) -> String {
-    guard let parentHint = folder.parentHint else { return folder.label }
-    return "\(folder.label) — \(parentHint)"
+    return "On \(presentation.hostLabel). \(presentation.remotePickerMessage)"
   }
 
   private var pickerProbeID: String {
@@ -804,52 +684,5 @@ struct BotChatSettingsLocalPickerProbeState: Equatable {
   mutating func complete(_ id: String, isReachable: Bool) {
     guard activeID == id else { return }
     self.isReachable = isReachable
-  }
-}
-
-/// A read-only account meter; expanding it never invokes a provider command.
-struct BotChatSettingsUsageRow: View {
-  let summary: String
-  let details: String?
-  let tone: BotChatSettingsModel.InfoTone
-
-  @State private var isExpanded = false
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Button {
-        isExpanded.toggle()
-      } label: {
-        HStack(spacing: 7) {
-          Image(systemName: "gauge.with.dots.needle.33percent")
-          Text("Usage")
-          Spacer()
-          Text(summary)
-            .monospacedDigit()
-            .foregroundStyle(tone == .warning ? Color.orange : Color.secondary)
-          Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-        }
-        .font(.callout)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
-        .contentShape(Rectangle())
-      }
-      .buttonStyle(.plain)
-      .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
-      .accessibilityLabel("Account usage")
-      .accessibilityValue("\(summary), \(isExpanded ? "expanded" : "collapsed")")
-      .accessibilityHint(isExpanded ? "Hide usage limits and reset times" : "Show usage limits and reset times")
-
-      if isExpanded, let details {
-        Text(details)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-          .textSelection(.enabled)
-          .padding(.horizontal, 9)
-      }
-    }
   }
 }

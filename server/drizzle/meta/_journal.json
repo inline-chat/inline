@@ -1149,6 +1149,27 @@
       "when": 1794047630442,
       "tag": "0163_agent-settings",
       "breakpoints": true
+    },
+    {
+      "idx": 164,
+      "version": "7",
+      "when": 1794084603628,
+      "tag": "0164_agent-settings-legacy-writes",
+      "breakpoints": true
+    },
+    {
+      "idx": 165,
+      "version": "7",
+      "when": 1794138556752,
+      "tag": "0165_agent-grant-subjects",
+      "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 1794141708057,
+      "tag": "0166_contact-indexes",
+      "breakpoints": true
     }
   ]
 }

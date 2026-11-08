@@ -619,6 +619,48 @@ and currently active turn, then invokes the same catalog and authorization core
 used by Codex. Capabilities expire with the provider epoch, calls outside an
 active turn fail closed, and the unstable MCP-over-ACP extension is not used.
 
+### Task subthreads from the bot DM (bridge v2)
+
+The session in the owner's bot DM is the lead. Its `spawn_thread` tool starts a
+task in a new subthread of the DM, with its own native session, connected to
+the lead's Inline session as a delegation. The brief is the task's first
+visible message. A task starts fresh from it, or, with `context: "fork"`, from
+a native fork of the lead's conversation up to its last finished turn (a
+harness that cannot fork starts fresh). It inherits the lead's model, reasoning, permissions and project unless
+the lead picks another model, reasoning effort or project. The lead keeps a
+status card per task in the DM. At most five tasks run or start at once.
+
+The owner can talk to a task directly in its subthread. The lead's tools follow
+Codex's sub-agent tools and OpenClaw's session tools. `send_to_thread` posts the
+lead's direction in the task's thread; by default it is delivered like a
+message typed there (a new turn, or a steer of the running one), `mode:
+"queue"` waits for the running turn to end, `mode: "note"` adds context for the
+task's next turn without starting one, and `interrupt` stops the running turn
+first. `stop_thread` stops a task's running turn. `list_tasks` shows the tasks
+and the agent's other works. `wait_tasks` waits up to 15 seconds for a task to
+finish and returns its status and answer in the lead's running turn; the lead
+uses it only when that turn needs the result.
+
+When a task's turn ends, its answer is in the subthread and its status on the
+lead's card. Like a Codex sub-agent's result, it reaches the lead without
+starting a turn: it travels with the lead's next input (the owner's next
+message, or a steer of its running turn), and pending reports survive a bridge
+restart. A turn the lead directed carries its answer; a turn the owner had with
+the task directly leaves only a one-line note (the latest per task). Stopped
+turns are not reported. `/stop` in the DM also stops running tasks. Any
+subthread of the DM is the agent's own thread, so it needs no mention.
+
+### Context and tools in other threads (bridge v2)
+
+When the agent first joins a group thread, or first works in a reply thread
+or subthread, it hears where the thread hangs: its parent thread and the
+message it started from, alongside the recent conversation. Every work also
+has `get_related_threads` (a thread's parent, subthreads and threads linking to
+it), `search_messages` with `all_threads` (the agent's 15 most recently active
+threads), `list_tasks`, and `get_current_context`, which names the owner's
+DM. `notify_owner` lets a work outside the DM tell the owner there, for a
+question only they can answer; the DM's lead sees the note with its next input.
+
 ## Project folders
 
 Agent Settings shows up to eight quick choices and keeps **Pick a Folder…**

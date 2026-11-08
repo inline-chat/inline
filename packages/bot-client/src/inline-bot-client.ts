@@ -21,6 +21,7 @@ import type {
   GetChatParams,
   GetChatParticipantParams,
   GetChatParticipantCountParams,
+  GetContactsParams,
   GetAgentParams,
   AddThreadParticipantParams,
   RemoveThreadParticipantParams,
@@ -82,6 +83,7 @@ const botMethodTransports = {
   unpinMessage: "json",
   getChatParticipant: "get",
   getChatParticipantCount: "get",
+  getContacts: "get",
   addThreadParticipant: "json",
   removeThreadParticipant: "json",
   setThreadTitle: "json",
@@ -383,6 +385,10 @@ export class InlineBotClient implements BotClientMethodSurface {
 
   getChatParticipantCount(params: GetChatParticipantCountParams, options?: InlineBotClientMethodOptions) {
     return this.method("getChatParticipantCount", params, options)
+  }
+
+  getContacts(params: GetContactsParams = {}, options?: InlineBotClientMethodOptions) {
+    return this.method("getContacts", params, options)
   }
 
   addThreadParticipant(params: AddThreadParticipantParams, options?: InlineBotClientMethodOptions) {

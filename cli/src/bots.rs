@@ -132,7 +132,9 @@ async fn read_agent_settings(
                 .runtime;
             Ok(Some(proto::AgentSettings {
                 bot_user_id,
-                default_output_mode: runtime.map(|runtime| runtime.default_output_mode).unwrap_or_default(),
+                default_output_mode: runtime
+                    .map(|runtime| runtime.default_output_mode)
+                    .unwrap_or_default(),
                 ..Default::default()
             }))
         }
@@ -151,7 +153,9 @@ struct ThreadOutputModeOutput {
 
 fn chat_peer(chat_id: i64) -> proto::InputPeer {
     proto::InputPeer {
-        r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat { chat_id })),
+        r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
+            chat_id,
+        })),
     }
 }
 
@@ -223,11 +227,40 @@ fn print_grants(grants: &[proto::AgentGrant]) {
     println!("Access:");
     for grant in grants {
         println!(
-            "  user {}: {}",
-            grant.user_id,
+            "  {}: {}",
+            subject_label(grant.subject.as_ref(), grant.user_id),
             operations_label(&grant.operations)
         );
     }
+}
+
+fn subject_label(subject: Option<&proto::AccessSubject>, user_id: i64) -> String {
+    use proto::access_subject::Subject;
+    match subject.and_then(|subject| subject.subject.clone()) {
+        Some(Subject::SpaceId(id)) => format!("space {id}"),
+        Some(Subject::GroupId(id)) => format!("group {id}"),
+        Some(Subject::UserId(id)) => format!("user {id}"),
+        None => format!("user {user_id}"),
+    }
+}
+
+/// The grant's subject from `--user-id`, `--space-id` or `--group-id` (exactly one).
+fn access_subject(args: &crate::BotsAccessSubjectArgs) -> CliResult<proto::AccessSubject> {
+    use proto::access_subject::Subject;
+    let subject = match (args.user_id, args.space_id, args.group_id) {
+        (Some(id), None, None) => Subject::UserId(validate_positive_id_arg("--user-id", id)?),
+        (None, Some(id), None) => Subject::SpaceId(validate_positive_id_arg("--space-id", id)?),
+        (None, None, Some(id)) => Subject::GroupId(validate_positive_id_arg("--group-id", id)?),
+        _ => {
+            return Err(CliError::invalid_args(
+                "Pass exactly one of --user-id, --space-id or --group-id.",
+            )
+            .into());
+        }
+    };
+    Ok(proto::AccessSubject {
+        subject: Some(subject),
+    })
 }
 
 /// Handles every bots subcommand except list, create, and reveal-token.
@@ -248,7 +281,10 @@ pub(crate) async fn handle_bot_management(
             let bot = find_owned_bot(&mut realtime, bot_user_id).await?;
             let settings = read_agent_settings(&mut realtime, bot_user_id).await?;
             let grants = realtime
-                .call(proto::ListAgentGrantsInput { bot_user_id })
+                .call(proto::ListAgentGrantsInput {
+                    bot_user_id,
+                    include_all_subjects: Some(true),
+                })
                 .await?
                 .grants;
             if json {
@@ -435,7 +471,8 @@ pub(crate) async fn handle_bot_management(
                         })
                         .await?;
                 }
-                let thread_mode = read_thread_output_mode(&mut realtime, bot_user_id, chat_id).await?;
+                let thread_mode =
+                    read_thread_output_mode(&mut realtime, bot_user_id, chat_id).await?;
                 let default_mode = read_agent_settings(&mut realtime, bot_user_id)
                     .await?
                     .map(|settings| settings.default_output_mode)
@@ -452,7 +489,9 @@ pub(crate) async fn handle_bot_management(
                     )?;
                 } else {
                     match thread_mode {
-                        Some(mode) => println!("Output mode in chat {chat_id}: {}", output_mode_label(mode)),
+                        Some(mode) => {
+                            println!("Output mode in chat {chat_id}: {}", output_mode_label(mode))
+                        }
                         None => println!(
                             "Output mode in chat {chat_id}: bot default ({})",
                             output_mode_label(default_mode)
@@ -521,7 +560,10 @@ pub(crate) async fn handle_bot_management(
                 let bot_user_id = validate_positive_id_arg("--bot-user-id", args.bot_user_id)?;
                 let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
                 let payload = realtime
-                    .call(proto::ListAgentGrantsInput { bot_user_id })
+                    .call(proto::ListAgentGrantsInput {
+                        bot_user_id,
+                        include_all_subjects: Some(true),
+                    })
                     .await?;
                 if json {
                     output::print_json(&payload, json_format)?;
@@ -531,14 +573,16 @@ pub(crate) async fn handle_bot_management(
             }
             BotsAccessCommand::Grant(args) => {
                 let bot_user_id = validate_positive_id_arg("--bot-user-id", args.bot_user_id)?;
-                let user_id = validate_positive_id_arg("--user-id", args.user_id)?;
+                let subject = access_subject(&args.subject)?;
+                let label = subject_label(Some(&subject), 0);
                 let operations = grant_operations(&args.operations);
                 let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
                 let payload = realtime
                     .call(proto::SetAgentGrantInput {
                         bot_user_id,
-                        user_id,
+                        user_id: args.subject.user_id.unwrap_or_default(),
                         operations,
+                        subject: Some(subject),
                     })
                     .await?;
                 if json {
@@ -549,23 +593,25 @@ pub(crate) async fn handle_bot_management(
                         .as_ref()
                         .map(|grant| operations_label(&grant.operations))
                         .unwrap_or_else(|| "-".to_string());
-                    println!("Granted user {user_id} access to bot {bot_user_id}: {operations}.");
+                    println!("Granted {label} access to bot {bot_user_id}: {operations}.");
                 }
             }
             BotsAccessCommand::Revoke(args) => {
                 let bot_user_id = validate_positive_id_arg("--bot-user-id", args.bot_user_id)?;
-                let user_id = validate_positive_id_arg("--user-id", args.user_id)?;
+                let subject = access_subject(&args.subject)?;
+                let label = subject_label(Some(&subject), 0);
                 let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
                 let payload = realtime
                     .call(proto::DeleteAgentGrantInput {
                         bot_user_id,
-                        user_id,
+                        user_id: args.subject.user_id.unwrap_or_default(),
+                        subject: Some(subject),
                     })
                     .await?;
                 if json {
                     output::print_json(&payload, json_format)?;
                 } else {
-                    println!("Revoked user {user_id}'s access to bot {bot_user_id}.");
+                    println!("Revoked {label}'s access to bot {bot_user_id}.");
                 }
             }
         },

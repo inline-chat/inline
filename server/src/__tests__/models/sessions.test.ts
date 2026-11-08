@@ -135,36 +135,36 @@ describe("SessionsModel push sessions", () => {
     await expect(SessionsModel.setActiveIfPresent(2_000_000_000, false)).resolves.toBe(false)
   })
 
-  test("each push registration reports filtered sync push support", async () => {
-    const user = await testUtils.createUser("filtered-sync-push@test.com")
-    const session = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
-    const read = async () => {
-      const [row] = await db
-        .select({ pushFilteredSyncPushes: schema.sessions.pushFilteredSyncPushes })
-        .from(schema.sessions)
-        .where(eq(schema.sessions.id, session.session.id))
-        .limit(1)
-      return row?.pushFilteredSyncPushes
-    }
+  test("a push token belongs to one live session", async () => {
+    const user = await testUtils.createUser("push-token-owner@test.com")
+    const other = await testUtils.createUser("push-token-other@test.com")
+    const bystander = await testUtils.createUser("push-token-bystander@test.com")
+    const macUser = await testUtils.createUser("push-token-mac@test.com")
+    const earlier = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
+    const reinstall = await testUtils.createSessionForUser(user.id, { clientType: "ios", deviceId: "device-a" })
+    const otherAccount = await testUtils.createSessionForUser(other.id, { clientType: "ios", deviceId: "device-a" })
+    const otherMac = await testUtils.createSessionForUser(macUser.id, { clientType: "macos", deviceId: "device-a" })
+    const unrelated = await testUtils.createSessionForUser(bystander.id, { clientType: "ios" })
 
-    await SessionsModel.updatePushNotificationDetails(session.session.id, {
-      applePushToken: "ios-token",
-      supportsFilteredSyncPushes: true,
+    // Same token on an earlier login, and an old token under the same device ID for another account.
+    await SessionsModel.updatePushNotificationDetails(earlier.session.id, { applePushToken: "token-a" })
+    await SessionsModel.updatePushNotificationDetails(otherAccount.session.id, { applePushToken: "token-old" })
+    await SessionsModel.updatePushNotificationDetails(otherMac.session.id, {
+      applePushToken: "mac-token",
+      pushNotificationProvider: "apns",
     })
-    expect(await read()).toBe(true)
-    const [pushSession] = await SessionsModel.getValidIOSPushSessionsByUserId(user.id)
-    expect(pushSession?.pushFilteredSyncPushes).toBe(true)
+    await SessionsModel.updatePushNotificationDetails(unrelated.session.id, { applePushToken: "token-a" })
 
-    // A build without the capability (older or downgraded) must not inherit it.
-    await SessionsModel.updatePushNotificationDetails(session.session.id, { applePushToken: "ios-token" })
-    expect(await read()).toBe(false)
+    await SessionsModel.updatePushNotificationDetails(reinstall.session.id, { applePushToken: "token-a" })
 
-    await SessionsModel.updatePushNotificationDetails(session.session.id, {
-      applePushToken: "ios-token",
-      supportsFilteredSyncPushes: true,
-    })
-    await SessionsModel.clearApplePushToken(session.session.id)
-    expect(await read()).toBeNull()
+    const tokens = async (userId: number) =>
+      (await SessionsModel.getValidPushSessionsByUserId(userId)).map((session) => [session.id, session.applePushToken])
+    expect(await tokens(user.id)).toEqual([[reinstall.session.id, "token-a"]])
+    // Another client type on the same device keeps its own token.
+    expect(await tokens(other.id)).toEqual([])
+    expect(await tokens(macUser.id)).toEqual([[otherMac.session.id, "mac-token"]])
+    // Tokens are matched only among the owner's sessions and its device, never globally.
+    expect(await tokens(bystander.id)).toEqual([[unrelated.session.id, "token-a"]])
   })
 
   test("revoke clears push notification details", async () => {
@@ -180,7 +180,6 @@ describe("SessionsModel push sessions", () => {
         algorithm: "X25519_HKDF_SHA256_AES256_GCM",
       },
       pushContentVersion: 1,
-      supportsFilteredSyncPushes: true,
     })
     await SessionsModel.setActive(session.session.id, true)
 
@@ -199,7 +198,6 @@ describe("SessionsModel push sessions", () => {
         pushContentKeyId: schema.sessions.pushContentKeyId,
         pushContentKeyAlgorithm: schema.sessions.pushContentKeyAlgorithm,
         pushContentVersion: schema.sessions.pushContentVersion,
-        pushFilteredSyncPushes: schema.sessions.pushFilteredSyncPushes,
       })
       .from(schema.sessions)
       .where(eq(schema.sessions.id, session.session.id))
@@ -216,7 +214,6 @@ describe("SessionsModel push sessions", () => {
     expect(row?.pushContentKeyId).toBeNull()
     expect(row?.pushContentKeyAlgorithm).toBeNull()
     expect(row?.pushContentVersion).toBeNull()
-    expect(row?.pushFilteredSyncPushes).toBeNull()
 
     await expect(SessionsModel.getValidIOSPushSessionsByUserId(user.id)).resolves.toEqual([])
   })

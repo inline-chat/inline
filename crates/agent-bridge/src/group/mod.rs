@@ -50,7 +50,7 @@ pub use hold::{
 pub use input::{direct_input, passive_input};
 pub use intake::{
     AddresseeKind, DirectReason, IntakeDecision, IntakeFacts, ObserveReason, SkipReason, WorkPhase,
-    classify_addressee, decide_intake, leading_mentions, required_operation,
+    classify_addressee, decide_intake, is_hand_back, leading_mentions, required_operation,
 };
 pub use participation::{
     Participation, ParticipationChange, ParticipationError, ParticipationMode,

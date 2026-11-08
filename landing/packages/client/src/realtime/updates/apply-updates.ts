@@ -754,6 +754,7 @@ const applyUpdate = (
     case "agentParticipation":
     case "agentGrant":
     case "agentRuntime":
+    case "agentSettings":
     case "agentSessionControl":
       deferUpdate(db, update)
       return "deferred"

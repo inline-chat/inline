@@ -3661,6 +3661,12 @@ class MinimalMessageViewAppKit: NSView {
   ) {
     guard !isAnchorMessage else { return }
     let action = message.isSubthreadPlacement ? ReplyThreadOpenAction.current : action
+    if source == .threadSummary, action == .sidePane,
+       let existingPeer = message.replyThreadPeer,
+       dependencies?.closeReplyThreadPaneIfShowing(existingPeer) == true
+    {
+      return
+    }
     if action.usesCurrentWindowPresentation {
       focusWindowIfNeeded()
     }
@@ -3687,6 +3693,15 @@ class MinimalMessageViewAppKit: NSView {
 
       if let existingPeer = message.replyThreadPeer {
         openReplyThread(peer: existingPeer, dependencies: dependencies, action: action)
+        return
+      }
+
+      // Open on a reserved id right away; history and sends wait for the server.
+      if let reservedChatId = await dependencies.realtimeV2.createReplyThreadLocally(
+        parentChatId: message.chatId,
+        parentMessageId: message.messageId
+      ) {
+        openReplyThread(peer: .thread(id: reservedChatId), dependencies: dependencies, action: action)
         return
       }
 

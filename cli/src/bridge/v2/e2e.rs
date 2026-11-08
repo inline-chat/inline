@@ -1706,6 +1706,7 @@ async fn codex_round_trip_through_inline() {
                     proto::AgentGrantOperation::Invoke as i32,
                     proto::AgentGrantOperation::Steer as i32,
                 ],
+                subject: None,
             }),
         )
         .await
@@ -2389,7 +2390,14 @@ async fn claude_round_trip_through_inline() {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    send(&owner, chat_id, "E2E_CLAUDE_STEER also this").await;
+    // Claude may coalesce this steer with the original user's text. Give
+    // the fake model a new directive so the earlier @text cannot win.
+    send(
+        &owner,
+        chat_id,
+        "E2E_CLAUDE_STEER also this\n@sleep 0\n@text E2E_CLAUDE_AFTER_STEER",
+    )
+    .await;
     wait_for(
         &api,
         &owner,
@@ -2400,7 +2408,7 @@ async fn claude_round_trip_through_inline() {
             // No tool runs, so the steer cuts the slow reply off.
             texts
                 .iter()
-                .any(|(_, text)| text.contains("FAKE-OK") && text.contains("E2E_CLAUDE_STEER"))
+                .any(|(_, text)| text.contains("E2E_CLAUDE_AFTER_STEER"))
         },
     )
     .await;
@@ -2794,6 +2802,7 @@ async fn claude_round_trip_through_inline() {
                     proto::AgentGrantOperation::Invoke as i32,
                     proto::AgentGrantOperation::Steer as i32,
                 ],
+                subject: None,
             }),
         )
         .await

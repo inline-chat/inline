@@ -297,6 +297,8 @@ fn spawn_work(runtime: &Runtime, cleanup: &mut Cleanup) -> crate::bridge::v2::wo
             agent_session_id: Some(1),
             native: Some(ProviderSessionId::new("fault-session").unwrap()),
             from_v1: false,
+            fork_from: None,
+            fork_at: None,
         },
         OutputMode::Detailed,
         SettingsChange::default(),
@@ -513,7 +515,6 @@ async fn service_messages_are_skipped_but_identical_human_text_still_runs() {
     message.metadata.is_service = false;
     message.metadata.sender_is_bot = Some(false);
     runtime.agent.names.remember(1, "Owner".into()).await;
-    runtime.loop_roots.insert(10, 10);
     runtime.on_message(&message).await.unwrap();
     cleanup.tasks.push(runtime.works.remove(&10).unwrap().task);
     until(|| harness.session.sends.load(Ordering::SeqCst) == 1).await;
@@ -1522,4 +1523,391 @@ async fn a_v1_session_that_does_not_reopen_gives_way_to_a_fresh_one() {
     assert_eq!(harness.session.sends.load(Ordering::SeqCst), 1);
     until(|| runtime.works[&9].agent_session_id() == Some(1)).await;
     cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+}
+
+fn task_report(event: &str, child: i64, text: &str) -> crate::bridge::v2::ledger::LeadEventRecord {
+    crate::bridge::v2::ledger::LeadEventRecord {
+        event_id: event.to_owned(),
+        lead_chat_id: 9,
+        child_chat_id: child,
+        text: text.to_owned(),
+    }
+}
+
+fn completed(turn: &str, consumed: &[&str]) -> Event {
+    Event::Turn {
+        turn: TurnId::new(turn).unwrap(),
+        phase: inline_agent_bridge::harness::TurnPhase::Completed {
+            outcome: inline_agent_bridge::TurnOutcome::Completed,
+            inputs_consumed: consumed
+                .iter()
+                .map(|id| InputId::new(*id).unwrap())
+                .collect(),
+            error: None,
+            duration_ms: None,
+        },
+    }
+}
+
+fn context_of(input: &Input) -> String {
+    input
+        .content
+        .context
+        .as_ref()
+        .map(|context| context.conversation.clone())
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn task_reports_never_start_a_turn_and_ride_with_the_next_input() {
+    let (runtime, harness, mut cleanup) = fixture(false);
+    let tx = spawn_work(&runtime, &mut cleanup);
+    let reports = vec![
+        task_report("e1", 10, "Task: one"),
+        task_report("e2", 11, "Task: two"),
+    ];
+    for report in &reports {
+        runtime.agent.ledger.add_lead_event(report).unwrap();
+    }
+    tx.send(Command::LeadReports(reports.clone()))
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        harness.session.sends.load(Ordering::SeqCst),
+        0,
+        "a task report does not wake the lead"
+    );
+    // The owner's next message carries them, as context.
+    let (_, command) = input(&runtime, 120);
+    tx.send(command).await.unwrap();
+    until(|| harness.session.sends.load(Ordering::SeqCst) == 1).await;
+    let received = harness.session.received.lock().unwrap()[0].clone();
+    assert_eq!(received.content.text, "a task");
+    let context = context_of(&received);
+    assert!(context.starts_with("2 task updates since your last turn"));
+    assert!(context.contains("Task: one") && context.contains("Task: two"));
+    until(|| runtime.agent.ledger.lead_events().unwrap().is_empty()).await;
+    // A delivery read before they were taken adds nothing to the next one.
+    tx.send(Command::LeadReports(reports)).await.unwrap();
+    harness
+        .session
+        .hub
+        .emit(completed("turn-0", &[received.id.as_str()]));
+    let (_, command) = input(&runtime, 121);
+    tx.send(command).await.unwrap();
+    until(|| harness.session.sends.load(Ordering::SeqCst) == 2).await;
+    let next = harness.session.received.lock().unwrap()[1].clone();
+    assert!(!context_of(&next).contains("Task: one"));
+}
+
+#[tokio::test]
+async fn directed_turns_report_owner_turns_leave_notes_and_stops_stay_quiet() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    let mut lead = runtime.lead.take().unwrap();
+    runtime
+        .agent
+        .ledger
+        .add_child(
+            10,
+            &crate::bridge::v2::ledger::ChildRecord {
+                lead_chat_id: 9,
+                lead_session_id: Some(1),
+                title: "Fix CI".to_owned(),
+                card_message_id: None,
+                status: Some(crate::bridge::v2::lead::DIRECTED.to_owned()),
+            },
+        )
+        .unwrap();
+    let handle = work::spawn(
+        runtime.agent.clone(),
+        10,
+        Known {
+            agent_session_id: Some(1),
+            native: Some(ProviderSessionId::new("fault-session").unwrap()),
+            from_v1: false,
+            fork_from: None,
+            fork_at: None,
+        },
+        OutputMode::Detailed,
+        SettingsChange::default(),
+    );
+    let tx = handle.tx.clone();
+    cleanup.tasks.push(handle.task);
+    let id = input_id(2, 10, 5, "lead");
+    runtime.agent.ledger.begin(&id, 10, 5, 1).unwrap();
+    let input = InputId::new(id.clone()).unwrap();
+    tx.send(Command::Input {
+        input: Box::new(Input {
+            id: input.clone(),
+            content: InputContent::text("fix it"),
+            origin: Origin::Agent {
+                bot: UserId(2),
+                work: inline_agent_bridge::harness::WorkRef {
+                    chat: inline_agent_bridge::harness::ChatId(9),
+                    session: None,
+                },
+            },
+            delivery: Delivery::Turn,
+        }),
+        pending: PendingInput {
+            id: input,
+            sender: UserId(1),
+            required: Operation::StartWork,
+        },
+        message_id: 5,
+        answer_reply: false,
+        reply_to: None,
+    })
+    .await
+    .unwrap();
+    until(|| harness.session.sends.load(Ordering::SeqCst) == 1).await;
+    harness.session.hub.emit(completed("turn-0", &[&id]));
+    let report = tokio::time::timeout(Duration::from_secs(3), lead.recv())
+        .await
+        .expect("the lead hears")
+        .unwrap();
+    let crate::bridge::v2::lead::LeadRequest::Report(report) = report else {
+        panic!("a report");
+    };
+    assert_eq!(report.child_chat_id, 10);
+    assert_eq!(report.turn, "turn-0");
+    assert_eq!(report.outcome, inline_agent_bridge::TurnOutcome::Completed);
+    // A fresh actor (a restart) still knows a consumed input was the lead's.
+    let restarted = work::spawn(
+        runtime.agent.clone(),
+        10,
+        Known {
+            agent_session_id: Some(1),
+            native: Some(ProviderSessionId::new("fault-session").unwrap()),
+            from_v1: false,
+            fork_from: None,
+            fork_at: None,
+        },
+        OutputMode::Detailed,
+        SettingsChange::default(),
+    );
+    cleanup.tasks.push(restarted.task);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    harness
+        .session
+        .hub
+        .emit(completed("turn-after-restart", &[&id]));
+    let mut seen = Vec::new();
+    while let Ok(Some(crate::bridge::v2::lead::LeadRequest::Report(report))) =
+        tokio::time::timeout(Duration::from_millis(500), lead.recv()).await
+    {
+        assert!(report.directed);
+        seen.push(report.turn);
+    }
+    assert!(seen.iter().all(|turn| turn == "turn-after-restart") && !seen.is_empty());
+    // The owner talking to the task in its subthread leaves the lead only a
+    // note, without the answer.
+    harness.session.hub.emit(completed("turn-1", &[]));
+    let mut notes = Vec::new();
+    while let Ok(Some(crate::bridge::v2::lead::LeadRequest::Report(report))) =
+        tokio::time::timeout(Duration::from_millis(300), lead.recv()).await
+    {
+        notes.push(report);
+    }
+    assert!(!notes.is_empty());
+    assert!(
+        notes
+            .iter()
+            .all(|note| !note.directed && note.answer.is_none() && note.turn == "turn-1")
+    );
+    // A directed turn that was stopped is not reported either.
+    let stopped = input_id(2, 10, 6, "lead");
+    runtime.agent.ledger.begin(&stopped, 10, 6, 1).unwrap();
+    let stopped_input = InputId::new(stopped.clone()).unwrap();
+    tx.send(Command::Input {
+        input: Box::new(Input {
+            id: stopped_input.clone(),
+            content: InputContent::text("and this"),
+            origin: Origin::Agent {
+                bot: UserId(2),
+                work: inline_agent_bridge::harness::WorkRef {
+                    chat: inline_agent_bridge::harness::ChatId(9),
+                    session: None,
+                },
+            },
+            delivery: Delivery::Turn,
+        }),
+        pending: PendingInput {
+            id: stopped_input,
+            sender: UserId(1),
+            required: Operation::StartWork,
+        },
+        message_id: 6,
+        answer_reply: false,
+        reply_to: None,
+    })
+    .await
+    .unwrap();
+    until(|| harness.session.sends.load(Ordering::SeqCst) == 2).await;
+    harness.session.hub.emit(Event::Turn {
+        turn: TurnId::new("turn-1").unwrap(),
+        phase: inline_agent_bridge::harness::TurnPhase::Completed {
+            outcome: inline_agent_bridge::TurnOutcome::Interrupted,
+            inputs_consumed: vec![InputId::new(stopped).unwrap()],
+            error: None,
+            duration_ms: None,
+        },
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), lead.recv())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn task_reports_reach_the_lead_after_a_restart() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    runtime
+        .agent
+        .ledger
+        .add_lead_event(&task_report("e9", 10, "Task: survived"))
+        .unwrap();
+    runtime.recover().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(harness.session.sends.load(Ordering::SeqCst), 0);
+    let (_, command) = input(&runtime, 122);
+    runtime.works[&9].tx.send(command).await.unwrap();
+    until(|| harness.session.sends.load(Ordering::SeqCst) == 1).await;
+    let received = harness.session.received.lock().unwrap()[0].clone();
+    assert_eq!(context_of(&received), "Task: survived");
+    until(|| runtime.agent.ledger.lead_events().unwrap().is_empty()).await;
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+}
+
+#[tokio::test]
+async fn task_reports_only_reach_the_dm_and_a_new_dm_work_takes_them() {
+    let (mut runtime, harness, mut cleanup) = fixture(false);
+    runtime
+        .agent
+        .ledger
+        .add_lead_event(&task_report("e7", 10, "Task: waiting"))
+        .unwrap();
+    // A work in another thread never carries the DM's reports.
+    let other = work::spawn(
+        runtime.agent.clone(),
+        12,
+        Known {
+            agent_session_id: Some(1),
+            native: Some(ProviderSessionId::new("fault-session").unwrap()),
+            from_v1: false,
+            fork_from: None,
+            fork_at: None,
+        },
+        OutputMode::Detailed,
+        SettingsChange::default(),
+    );
+    other
+        .tx
+        .send(Command::LeadReports(vec![task_report(
+            "e7",
+            10,
+            "Task: waiting",
+        )]))
+        .await
+        .unwrap();
+    let (_, command) = input(&runtime, 130);
+    other.tx.send(command).await.unwrap();
+    until(|| harness.session.sends.load(Ordering::SeqCst) == 1).await;
+    let received = harness.session.received.lock().unwrap()[0].clone();
+    assert!(!context_of(&received).contains("Task: waiting"));
+    assert_eq!(runtime.agent.ledger.lead_events().unwrap().len(), 1);
+    cleanup.tasks.push(other.task);
+    // The DM's work, started by an ordinary message, takes them.
+    runtime.ensure_work(9, None).await.unwrap();
+    let (_, command) = input(&runtime, 131);
+    runtime.works[&9].tx.send(command).await.unwrap();
+    until(|| harness.session.sends.load(Ordering::SeqCst) == 2).await;
+    let received = harness.session.received.lock().unwrap()[1].clone();
+    assert_eq!(context_of(&received), "Task: waiting");
+    cleanup.tasks.push(runtime.works.remove(&9).unwrap().task);
+}
+
+fn waited(result: &HostToolResult) -> Value {
+    serde_json::from_str(&result.content).unwrap()
+}
+
+#[tokio::test]
+async fn a_waiting_lead_takes_a_finished_task_in_its_turn() {
+    use crate::bridge::v2::lead::{LeadRequest, TaskReport};
+    use crate::bridge::v2::ledger::ChildRecord;
+    let (mut runtime, _harness, _cleanup) = fixture(false);
+    let child = |status: &str| ChildRecord {
+        lead_chat_id: 9,
+        lead_session_id: Some(1),
+        title: "Fix CI".to_owned(),
+        card_message_id: None,
+        status: Some(status.to_owned()),
+    };
+    runtime
+        .agent
+        .ledger
+        .add_child(10, &child(crate::bridge::v2::lead::DIRECTED))
+        .unwrap();
+    // Nothing else is running: a wait on another chat answers at once.
+    let (reply, answer) = tokio::sync::oneshot::channel();
+    runtime
+        .lead_request(LeadRequest::Wait {
+            caller: 9,
+            targets: vec![11],
+            reply,
+        })
+        .await;
+    assert_eq!(waited(&answer.await.unwrap())["finished"], json!([]));
+    // A task still running: the wait holds until its report.
+    let (reply, mut answer) = tokio::sync::oneshot::channel();
+    runtime
+        .lead_request(LeadRequest::Wait {
+            caller: 9,
+            targets: vec![],
+            reply,
+        })
+        .await;
+    assert!(answer.try_recv().is_err());
+    runtime
+        .lead_request(LeadRequest::Report(TaskReport {
+            child_chat_id: 10,
+            turn: "t1".to_owned(),
+            outcome: inline_agent_bridge::TurnOutcome::Completed,
+            answer: Some("All green.".to_owned()),
+            directed: true,
+        }))
+        .await;
+    let finished = waited(&answer.await.unwrap());
+    assert_eq!(finished["finished"][0]["chat_id"], 10);
+    assert_eq!(finished["finished"][0]["answer"], "All green.");
+    // Taken in the turn: not queued for the lead's next input too.
+    assert!(runtime.agent.ledger.lead_events().unwrap().is_empty());
+    // Finished already: a wait on it answers at once.
+    let (reply, answer) = tokio::sync::oneshot::channel();
+    runtime
+        .lead_request(LeadRequest::Wait {
+            caller: 9,
+            targets: vec![10],
+            reply,
+        })
+        .await;
+    assert_eq!(
+        waited(&answer.await.unwrap())["finished"][0]["status"],
+        "completed"
+    );
+    // Only the DM's lead waits.
+    let (reply, answer) = tokio::sync::oneshot::channel();
+    runtime
+        .lead_request(LeadRequest::Wait {
+            caller: 12,
+            targets: vec![],
+            reply,
+        })
+        .await;
+    assert!(!answer.await.unwrap().success);
+    if let Some(work) = runtime.works.remove(&9) {
+        work.task.abort();
+    }
 }
