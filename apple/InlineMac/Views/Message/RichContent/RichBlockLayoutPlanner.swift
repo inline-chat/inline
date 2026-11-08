@@ -631,6 +631,9 @@ final class RichBlockLayoutPlanner {
         return appendDiff(diff, path: path, x: x, width: width)
       case let .form(form):
         return appendForm(form, path: path, x: x, width: width, inheritedDirection: inheritedDirection)
+      case .widget:
+        // Not rendered yet; the message falls back to its flat text, like an unknown kind.
+        return false
       }
     }
 
