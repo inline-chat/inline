@@ -4,7 +4,6 @@ import ImageIO
 import InlineIntents
 import InlineNotificationFence
 import OSLog
-import Security
 import UIKit
 import UserNotifications
 
@@ -13,8 +12,13 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
   private let deliveryLock = NSLock()
   private var currentDelivery: InlineNotificationDelivery?
   private let accountFence: any NotificationAccountFenceStorage = KeychainNotificationAccountFenceStorage()
-  private static let healthEvent = "notifications.delivery"
+  private let pushContentKeys = PushContentKeyStore()
+  private static let healthEvent = NotificationDeliveryHealth.event
 
+  // Inline has no notification filtering entitlement: every request this extension receives is
+  // displayed, whatever it publishes. Read/delete sync therefore travels as background pushes
+  // handled by the app, and this extension's only job is to make the shown alert as good as it
+  // can be, as early as it can be.
   override func didReceive(
     _ request: UNNotificationRequest,
     withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
@@ -26,89 +30,63 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
       userInfo: request.content.userInfo,
       fence: accountFence.read()
     )
-    // Read/delete sync pushes carry nothing to show. With the filtering entitlement, empty
-    // content hides them on every path, including rejection and expiry.
-    let isSyncPush = NotificationSyncOps.isSyncPush(request.content.userInfo)
-    let redacted = isSyncPush ? UNNotificationContent() : NotificationAccountRedaction.content(from: request.content)
-    // Recheck on every publication path, including expiry: logout can land mid-processing.
-    let publish: (UNNotificationContent) -> Void = { content in
-      contentHandler(admission.isCurrent(accountFence.read()) ? content : redacted)
+    let redacted = NotificationAccountRedaction.content(from: request.content)
+    guard admission.isAdmitted,
+          let content = request.content.mutableCopy() as? UNMutableNotificationContent
+    else {
+      if case let .rejected(reason) = admission {
+        logger.info("notification content withheld: \(reason.rawValue, privacy: .public)")
+        ExtensionHealthOutbox.shared.record(Self.healthEvent, [
+          "notification_outcome": NotificationDeliveryHealth.Outcome.withheld.rawValue,
+          "withheld_reason": reason.rawValue,
+        ])
+      }
+      contentHandler(redacted)
+      return
     }
 
-    // Install a fallback synchronously: system expiry cannot depend on the main queue.
-    let delivery = InlineNotificationDelivery(
-      content: admission.isAdmitted && !isSyncPush ? request.content : redacted,
-      handler: publish
-    )
+    // Decrypt before installing the fallback. It is CPU-only and fast, and it means every later
+    // exit (expiry, a newer request reusing this instance, a deadline) shows the real text. The
+    // request's own alert is only the server's generic placeholder.
+    let hydration = hydrateFromEncryptedContentIfNeeded(content: content)
+    ExtensionHealthOutbox.shared.record(Self.healthEvent, hydration.healthFields)
+
+    // Recheck on every publication path, including expiry: logout can land mid-processing.
+    let publish: (UNNotificationContent) -> Void = { published in
+      contentHandler(admission.isCurrent(accountFence.read()) ? published : redacted)
+    }
+    let delivery = InlineNotificationDelivery(content: content, handler: publish)
     let previous = deliveryLock.withLock {
       let previous = currentDelivery
       currentDelivery = delivery
       return previous
     }
     previous?.finish()
-    guard admission.isAdmitted else {
-      if case let .rejected(reason) = admission {
-        logger.info("notification content withheld: \(reason.rawValue, privacy: .public)")
-        ExtensionHealthOutbox.shared.record(Self.healthEvent, [
-          "notification_outcome": "withheld", "withheld_reason": reason.rawValue,
-        ])
-      }
-      delivery.finish()
-      return
-    }
+
     let work = Task { @MainActor in
-      if isSyncPush {
-        ExtensionHealthOutbox.shared.record(Self.healthEvent, ["notification_outcome": "sync"])
-        await processSyncPush(request, delivery: delivery)
-        return
-      }
-      await process(request, delivery: delivery) {
+      await enrich(content, hydration: hydration, delivery: delivery) {
         admission.isCurrent(accountFence.read())
       }
     }
     delivery.cancelOnFinish { work.cancel() }
   }
 
-  /// Removes the notifications a read/delete sync push covers, then publishes empty content.
+  /// Optional work on top of already-published text: avatar and communication intent, photo
+  /// artwork, and clearing notifications other devices already read. None of it gates delivery.
   @MainActor
-  private func processSyncPush(_ request: UNNotificationRequest, delivery: InlineNotificationDelivery) async {
-    guard let recipientUserID = NotificationAccountAdmission.recipientUserID(in: request.content.userInfo),
-          let ops = NotificationSyncOps(syncPushUserInfo: request.content.userInfo)
-    else {
-      delivery.finish()
-      return
-    }
-    let removed = await ops.removeCovered(recipientUserID: recipientUserID)
-    if removed > 0 {
-      // Like Telegram, give the removal a moment to land before the extension is torn down.
-      try? await Task.sleep(for: .seconds(1))
-    }
-    delivery.finish()
-  }
-
-  @MainActor
-  private func process(
-    _ request: UNNotificationRequest,
+  private func enrich(
+    _ content: UNMutableNotificationContent,
+    hydration: Hydration,
     delivery: InlineNotificationDelivery,
     isAccountCurrent: @escaping @Sendable () -> Bool
   ) async {
-    guard delivery.isPending else { return }
-    // Finishing routes the fallback through the publication recheck, which redacts it.
-    guard isAccountCurrent(),
-          let content = request.content.mutableCopy() as? UNMutableNotificationContent
-    else {
+    guard delivery.isPending, isAccountCurrent() else {
       delivery.finish()
       return
     }
-    let (photoURL, syncOps, hydration) = hydrateFromEncryptedContentIfNeeded(content: content)
-    ExtensionHealthOutbox.shared.record(Self.healthEvent, ["notification_outcome": hydration])
     let recipientUserID = NotificationAccountAdmission.recipientUserID(in: content.userInfo)
     var bestContent: UNNotificationContent = content
-    // Commit the decrypted text before the first suspension. A newer push or expiry can finish
-    // this delivery at any await, and the request's own alert is only the server's placeholder.
-    guard delivery.updateFallback(bestContent) else { return }
 
-    // Artwork, intent donation and sync cleanup share a total deadline; none gates text delivery.
     let deadline = Task.detached {
       do { try await Task.sleep(for: .seconds(2)) } catch { return }
       delivery.finish()
@@ -142,7 +120,9 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
 
     @MainActor func enrichPhoto() async {
       guard !Task.isCancelled, delivery.isPending, isAccountCurrent() else { return }
-      guard let photoURL, let fileURL = await InlineNotificationPhoto.file(from: photoURL) else { return }
+      guard let photoURL = hydration.photoURL,
+            let fileURL = await InlineNotificationPhoto.file(from: photoURL)
+      else { return }
       guard !Task.isCancelled, delivery.isPending,
             let updated = bestContent.mutableCopy() as? UNMutableNotificationContent
       else {
@@ -164,7 +144,8 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
 
     @MainActor func applySyncOps() async {
       // Read/delete state from the user's other devices clears notifications already handled there.
-      guard let syncOps, let recipientUserID, !Task.isCancelled, delivery.isPending, isAccountCurrent()
+      guard let syncOps = hydration.syncOps, let recipientUserID, !Task.isCancelled, delivery.isPending,
+            isAccountCurrent()
       else { return }
       await syncOps.removeCovered(recipientUserID: recipientUserID)
     }
@@ -202,9 +183,19 @@ private extension NotificationService {
   }
 
   static let pushContentHkdfInfo = Data("inline.push-content.v1".utf8)
-  static let pushContentKeychainService = "chat.inline.push-content"
-  static let pushContentPrivateKeyAccount = "private-key-v1"
-  static let pushContentKeychainAccessGroup = "2487AN8AL4.keychainGroup"
+
+  struct Hydration {
+    var outcome: NotificationDeliveryHealth.Outcome
+    var placeholderReason: String?
+    var photoURL: URL?
+    var syncOps: NotificationSyncOps?
+
+    var healthFields: [String: String] {
+      var fields = ["notification_outcome": outcome.rawValue]
+      if let placeholderReason { fields["placeholder_reason"] = placeholderReason }
+      return fields
+    }
+  }
 
   struct EncryptedPayloadEnvelope {
     let version: Int
@@ -263,30 +254,47 @@ private extension NotificationService {
 
   /// Photo capabilities and sync ops are accepted only from authenticated encrypted content,
   /// never userInfo.
-  func hydrateFromEncryptedContentIfNeeded(
-    content: UNMutableNotificationContent
-  ) -> (photoURL: URL?, syncOps: NotificationSyncOps?, outcome: String) {
+  func hydrateFromEncryptedContentIfNeeded(content: UNMutableNotificationContent) -> Hydration {
     guard let envelope = EncryptedPayloadEnvelope(userInfo: content.userInfo) else {
-      return (nil, nil, "plaintext")
+      // The server had nothing it could encrypt to this device and sent its generic alert.
+      return Hydration(
+        outcome: .placeholder,
+        placeholderReason: NotificationDeliveryHealth.placeholderReason(in: content.userInfo)
+      )
     }
 
     guard envelope.version == 1, envelope.algorithm == "X25519_HKDF_SHA256_AES256_GCM" else {
       logger.error("unsupported encrypted payload metadata")
-      return (nil, nil, "unsupported_payload")
+      return Hydration(outcome: .unsupportedPayload)
     }
 
-    guard let privateKeyData = loadPushContentPrivateKeyData() else {
+    let privateKey: Curve25519.KeyAgreement.PrivateKey
+    switch pushContentKeys.read() {
+    case let .present(key):
+      privateKey = key
+    case .missing, .corrupt:
       logger.error("push-content private key missing")
-      return (nil, nil, "key_missing")
+      return Hydration(outcome: .keyMissing)
+    case let .unavailable(status):
+      logger.error("push-content private key unavailable: \(status, privacy: .public)")
+      return Hydration(outcome: .keyUnavailable)
+    }
+
+    // Key IDs derived from the public key tell an outdated server registration (another session
+    // still holding this device's token) apart from a corrupt payload.
+    if let keyID = envelope.keyId, keyID.hasPrefix(PushContentKeyStore.keyIDPrefix),
+       keyID != PushContentKeyStore.keyID(for: privateKey.publicKey)
+    {
+      logger.error("encrypted notification targets a different device key")
+      return Hydration(outcome: .staleKey)
     }
 
     do {
-      let privateKey = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: privateKeyData)
       let payloadData = try decryptEnvelope(envelope, privateKey: privateKey)
       let payload = try JSONDecoder().decode(DecryptedSendMessagePayload.self, from: payloadData)
       guard payload.kind == "send_message" else {
         logger.error("unsupported decrypted payload kind")
-        return (nil, nil, "unsupported_payload")
+        return Hydration(outcome: .unsupportedPayload)
       }
 
       content.title = payload.title
@@ -318,14 +326,14 @@ private extension NotificationService {
 
       logger.info("decrypted encrypted notification content")
       let object = try? JSONSerialization.jsonObject(with: payloadData) as? [String: Any]
-      return (
-        InlineNotificationPhoto.url(inDecryptedContent: payloadData),
-        NotificationSyncOps(jsonObject: object?["sync"]),
-        "decrypted"
+      return Hydration(
+        outcome: .decrypted,
+        photoURL: InlineNotificationPhoto.url(inDecryptedContent: payloadData),
+        syncOps: NotificationSyncOps(jsonObject: object?["sync"])
       )
     } catch {
       logger.error("failed to decrypt encrypted notification content")
-      return (nil, nil, "decrypt_failed")
+      return Hydration(outcome: .decryptFailed)
     }
   }
 
@@ -364,27 +372,6 @@ private extension NotificationService {
       throw NSError(domain: "NotificationService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid base64url"])
     }
     return data
-  }
-
-  func loadPushContentPrivateKeyData() -> Data? {
-    let query: [String: Any] = [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: Self.pushContentKeychainService,
-      kSecAttrAccount as String: Self.pushContentPrivateKeyAccount,
-      kSecAttrAccessGroup as String: Self.pushContentKeychainAccessGroup,
-      kSecReturnData as String: true,
-      kSecMatchLimit as String: kSecMatchLimitOne,
-    ]
-
-    var item: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &item)
-    if status == errSecSuccess {
-      return item as? Data
-    }
-    if status != errSecItemNotFound {
-      logger.error("failed to read push-content keychain item: \(status, privacy: .public)")
-    }
-    return nil
   }
 
   struct SenderPayload: Sendable {
