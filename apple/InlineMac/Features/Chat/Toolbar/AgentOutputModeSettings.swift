@@ -1,140 +1,64 @@
 import Auth
 import InlineKit
+import InlineMacUI
 import InlineProtocol
 import SwiftUI
 
-/// Output mode in Agent Settings (spec §6, Oct 26): the agent's default and
-/// this thread's override. Never in Compose. Values come from the server and
-/// render from the local cache first.
-struct AgentOutputModeSettingsSection: View {
+/// Output in Agent Settings (spec §6, Oct 26): one row for this thread, its
+/// menu holding the agent's default as a submenu. Never in Compose. Values
+/// come from the server and render from the local cache first.
+struct AgentOutputModeSettingsRow: View {
   let peer: InlineKit.Peer
   let botUserID: Int64
   @ObservedObject private var store = AgentWorkStateStore.shared
   @ObservedObject private var grants = AgentGrantStore.shared
   @State private var isUpdating = false
 
-  private var access: AgentGrantAccess? { grants.access(botUserID: botUserID) }
-
   /// Unknown grants render editable; the server rejects what it must.
-  private var canConfigure: Bool { access?.satisfies(.configure) ?? true }
-
-  private var botName: String {
-    ObjectCache.shared.getCachedUser(id: botUserID)?.user.firstName ?? String(localized: "this agent")
+  static func canConfigure(botUserID: Int64) -> Bool {
+    AgentGrantStore.shared.access(botUserID: botUserID)?.satisfies(.configure) ?? true
   }
 
   var body: some View {
     let defaultMode = store.defaultOutputMode(botUserID: botUserID)
     let threadMode = store.outputModeOverride(peer: peer, botUserID: botUserID)
-    VStack(alignment: .leading, spacing: 8) {
-      HStack {
-        Text("Output")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.secondary)
-        Spacer()
-        if isUpdating {
-          ProgressView().controlSize(.mini)
-        }
-      }
-
-      row(
-        title: "This thread",
-        selection: threadMode.map(\.title) ?? String(localized: "Agent default — \(defaultMode.title)"),
-        description: (threadMode ?? defaultMode).summary
+    let defaultTitle = String(localized: "Default (\(defaultMode.title))")
+    AgentSettingsRow("Output", isPending: isUpdating) {
+      AgentSettingsMenu(
+        threadMode?.title ?? defaultTitle,
+        accessibilityLabel: "Output",
+        isEditable: Self.canConfigure(botUserID: botUserID)
       ) {
-        Button {
+        AgentSettingsMenuItem(defaultTitle, isSelected: threadMode == nil) {
           setThreadMode(nil)
-        } label: {
-          optionLabel(String(localized: "Agent default — \(defaultMode.title)"), isSelected: threadMode == nil)
         }
         Divider()
         ForEach(AgentThreadOutputMode.allCases, id: \.self) { mode in
-          Button {
+          AgentSettingsMenuItem(mode.title, description: mode.summary, isSelected: threadMode == mode) {
             setThreadMode(mode)
-          } label: {
-            optionLabel(mode.title, description: mode.summary, isSelected: threadMode == mode)
+          }
+        }
+        Divider()
+        Menu("Agent Default") {
+          ForEach(AgentThreadOutputMode.allCases, id: \.self) { mode in
+            AgentSettingsMenuItem(mode.title, description: mode.summary, isSelected: defaultMode == mode) {
+              setDefaultMode(mode)
+            }
           }
         }
       }
-
-      row(title: "Agent default", selection: defaultMode.title, description: nil) {
-        ForEach(AgentThreadOutputMode.allCases, id: \.self) { mode in
-          Button {
-            setDefaultMode(mode)
-          } label: {
-            optionLabel(mode.title, description: mode.summary, isSelected: defaultMode == mode)
-          }
-        }
-      }
-
-      if !canConfigure {
-        Label("Only \(ownerName) can change how \(botName) replies.", systemImage: "lock")
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-      }
+      .disabled(isUpdating)
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 10)
-    .frame(maxWidth: .infinity, alignment: .leading)
-  }
-
-  private var ownerName: String {
-    access.flatMap { ObjectCache.shared.getCachedUser(id: $0.ownerUserID)?.user.firstName }
-      ?? String(localized: "the owner")
-  }
-
-  private func row<Options: View>(
-    title: LocalizedStringResource,
-    selection: String,
-    description: String?,
-    @ViewBuilder options: () -> Options
-  ) -> some View {
-    VStack(alignment: .leading, spacing: 3) {
-      HStack(spacing: 10) {
-        Text(title)
-          .font(.callout)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        if canConfigure {
-          Menu {
-            options()
-          } label: {
-            Text(selection).lineLimit(1)
-          }
-          .menuStyle(.borderlessButton)
-          .fixedSize()
-          .disabled(isUpdating)
-        } else {
-          Text(selection).foregroundStyle(.secondary)
-        }
-      }
-      if let description {
-        Text(description)
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-          .frame(maxWidth: .infinity, alignment: .trailing)
-      }
-    }
-  }
-
-  @ViewBuilder
-  private func optionLabel(_ title: String, description: String? = nil, isSelected: Bool) -> some View {
-    let content = VStack(alignment: .leading, spacing: 1) {
-      Text(title)
-      if let description {
-        Text(description).font(.caption).foregroundStyle(.secondary)
-      }
-    }
-    if isSelected {
-      Label { content } icon: { Image(systemName: "checkmark") }
-    } else {
-      content
-    }
+    .help((threadMode ?? defaultMode).summary)
   }
 
   private func setThreadMode(_ mode: AgentThreadOutputMode?) {
+    guard mode != store.outputModeOverride(peer: peer, botUserID: botUserID) else { return }
     perform { try await store.updateOutputModeOverride(mode, peer: peer, botUserID: botUserID) }
   }
 
   private func setDefaultMode(_ mode: AgentThreadOutputMode) {
+    guard mode != store.defaultOutputMode(botUserID: botUserID) else { return }
     perform { try await store.updateDefaultOutputMode(mode, botUserID: botUserID) }
   }
 

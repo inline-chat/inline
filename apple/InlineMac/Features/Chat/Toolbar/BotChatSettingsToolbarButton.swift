@@ -9,6 +9,7 @@ struct BotChatSettingsToolbarButton: View {
   let toolbarState: ChatToolbarState
   let updateAgentContext: (InlineProtocol.AgentThreadContext) async throws -> Void
   @ObservedObject private var agentWorkStore = AgentWorkStateStore.shared
+  @ObservedObject private var grants = AgentGrantStore.shared
 
   private var anchor: ChatToolbarState.Anchor { .button(.botSettings) }
 
@@ -21,6 +22,19 @@ struct BotChatSettingsToolbarButton: View {
   /// Output mode applies to bridge v2 agents, which report a runtime.
   private var showsOutputMode: Bool {
     settingsBotUserID.map { agentWorkStore.runtimeBotUserIDs.contains($0) } ?? false
+  }
+
+  /// One note when this chat's rows are read-only, instead of one per group.
+  private var lockNote: String? {
+    let outputLocked = showsOutputMode && settingsBotUserID.map {
+      !AgentOutputModeSettingsRow.canConfigure(botUserID: $0)
+    } == true
+    guard AgentThreadSettingsRows.isLocked(agentThreadModel) || outputLocked else { return nil }
+    let owner = settingsBotUserID
+      .flatMap { grants.access(botUserID: $0)?.ownerUserID }
+      .flatMap { ObjectCache.shared.getCachedUser(id: $0)?.user.firstName }
+    return owner.map { String(localized: "Only \($0) can change these settings.") }
+      ?? String(localized: "Only the agent’s owner can change these settings.")
   }
 
   var body: some View {
@@ -47,16 +61,15 @@ struct BotChatSettingsToolbarButton: View {
       BotChatSettingsPopover(
         coordinator: coordinator,
         showsThreadConfiguration: agentThreadModel.context != nil || showsOutputMode,
+        hiddenItemIDs: AgentThreadSettingsRows.hiddenItemIDs(for: agentThreadModel),
         threadConfiguration: {
-          VStack(alignment: .leading, spacing: 0) {
-            AgentThreadSettingsSection(
-              model: agentThreadModel,
-              update: updateAgentContext
-            )
-            if showsOutputMode, let botUserID = settingsBotUserID {
-              if agentThreadModel.context != nil { Divider().padding(.horizontal, 12) }
-              AgentOutputModeSettingsSection(peer: coordinator.peer, botUserID: botUserID)
-            }
+          AgentThreadSettingsRows(model: agentThreadModel, update: updateAgentContext)
+          if showsOutputMode, let botUserID = settingsBotUserID {
+            AgentOutputModeSettingsRow(peer: coordinator.peer, botUserID: botUserID)
+          }
+          if let lockNote {
+            AgentSettingsNote(lockNote, systemImage: "lock")
+              .padding(.vertical, 6)
           }
         },
         remoteFolderPicker: { hostInstallationID, botUserID, hostLabel in

@@ -1,6 +1,7 @@
 import Combine
 import GRDB
 import InlineKit
+import InlineMacUI
 import InlineProtocol
 import InlineUI
 import SwiftUI
@@ -36,135 +37,116 @@ struct AgentThreadToolbarIndicator: View {
   }
 }
 
-struct AgentThreadSettingsSection: View {
+
+/// An agent thread's own folder, model and reasoning, as rows in Agent
+/// Settings. The provider's copies of these stay hidden (`hiddenItemIDs`).
+struct AgentThreadSettingsRows: View {
   @ObservedObject var model: AgentThreadToolbarModel
   let update: (InlineProtocol.AgentThreadContext) async throws -> Void
 
+  /// Provider items these rows already show.
+  static func hiddenItemIDs(for model: AgentThreadToolbarModel) -> Set<String> {
+    guard model.context != nil else { return [] }
+    var ids = Set<String>()
+    if model.projectTitle != nil {
+      ids.formUnion([ComposeAgentSettingsItem.folder, ComposeAgentSettingsItem.project])
+    }
+    if model.modelTitle != nil { ids.insert(ComposeAgentSettingsItem.model) }
+    if model.reasoningTitle != nil { ids.insert(ComposeAgentSettingsItem.reasoning) }
+    return ids
+  }
+
+  /// The thread's rows are read-only for this viewer.
+  static func isLocked(_ model: AgentThreadToolbarModel) -> Bool {
+    model.context != nil && model.editabilityResolved && !model.canEdit &&
+      (model.modelTitle != nil || model.reasoningTitle != nil)
+  }
+
   var body: some View {
     if model.context != nil {
-      VStack(alignment: .leading, spacing: 8) {
-        HStack(spacing: 8) {
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Thread")
-              .font(.caption.weight(.semibold))
-              .foregroundStyle(.secondary)
-            if let presentation = model.presentation {
-              Text(presentation.name)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-            }
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-
-          if model.isUpdating {
-            ProgressView()
-              .controlSize(.mini)
-              .accessibilityLabel("Updating thread settings")
-          }
-        }
-
-        if let projectTitle = model.projectTitle {
-          AgentThreadSettingRow(
-            title: "Folder",
-            selectionTitle: projectTitle,
-            selectionDescription: selectedProjectDescription,
-            options: projectOptions,
-            selectedID: model.effectiveProjectID,
-            automaticTitle: nil,
-            isEditable: model.canEditProject,
-            isUpdating: model.isUpdating,
-            helpText: model.canEditProject
-              ? "Changing the folder starts or resumes this chat’s session in that folder."
-              : "The folder can change only for chats that aren’t linked to an existing session.",
-            select: { id in
-              guard let context = model.contextSelectingProject(id) else { return }
-              model.performUpdate(context, using: update)
-            }
-          )
-        }
-
-        if let modelTitle = model.modelTitle {
-          AgentThreadSettingRow(
-            title: "Model",
-            selectionTitle: modelTitle,
-            selectionDescription: selectedModelDescription,
-            options: modelOptions,
-            selectedID: model.explicitModelID,
-            automaticTitle: model.automaticModelTitle,
-            isEditable: model.canEdit,
-            isUpdating: model.isUpdating,
-            helpText: nil,
-            select: selectModel
-          )
-        }
-
-        if let reasoningTitle = model.reasoningTitle {
-          AgentThreadSettingRow(
-            title: "Reasoning",
-            selectionTitle: reasoningTitle,
-            selectionDescription: selectedReasoningDescription,
-            options: reasoningOptions,
-            selectedID: model.explicitReasoningID,
-            automaticTitle: model.automaticReasoningTitle,
-            isEditable: model.canEdit,
-            isUpdating: model.isUpdating,
-            helpText: nil,
-            select: selectReasoning
-          )
-        }
-
-        if model.editabilityResolved, !model.canEdit, showsModel || showsReasoning {
-          Label("Only the Agent owner can change these settings.", systemImage: "lock")
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+      if let projectTitle = model.projectTitle {
+        row(
+          "Folder",
+          value: projectTitle,
+          options: (model.catalog?.projects ?? []).map(AgentThreadSettingOption.init),
+          selectedID: model.effectiveProjectID,
+          automaticTitle: nil,
+          isEditable: model.canEditProject,
+          help: model.canEditProject
+            ? "Changing the folder starts or resumes this chat’s session in that folder."
+            : "The folder can change only for chats that aren’t linked to an existing session."
+        ) { id in
+          guard let context = model.contextSelectingProject(id) else { return }
+          model.performUpdate(context, using: update)
         }
       }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 10)
-      .frame(maxWidth: .infinity, alignment: .leading)
+
+      if let modelTitle = model.modelTitle {
+        row(
+          "Model",
+          value: modelTitle,
+          options: (model.catalog?.models ?? []).map(AgentThreadSettingOption.init),
+          selectedID: model.explicitModelID,
+          automaticTitle: model.automaticModelTitle,
+          isEditable: model.canEdit,
+          help: nil
+        ) { id in
+          guard let context = model.contextSelectingModel(id) else { return }
+          model.performUpdate(context, using: update)
+        }
+      }
+
+      if let reasoningTitle = model.reasoningTitle {
+        row(
+          "Reasoning",
+          value: reasoningTitle,
+          options: (model.availableReasoningOptions ?? []).map(AgentThreadSettingOption.init),
+          selectedID: model.explicitReasoningID,
+          automaticTitle: model.automaticReasoningTitle,
+          isEditable: model.canEdit,
+          help: nil
+        ) { id in
+          guard let context = model.contextSelectingReasoning(id) else { return }
+          model.performUpdate(context, using: update)
+        }
+      }
     }
   }
 
-  private var showsModel: Bool {
-    model.modelTitle != nil
-  }
-
-  private var showsReasoning: Bool {
-    model.reasoningTitle != nil
-  }
-
-  private var projectOptions: [AgentThreadSettingOption] {
-    (model.catalog?.projects ?? []).map(AgentThreadSettingOption.init)
-  }
-
-  private var modelOptions: [AgentThreadSettingOption] {
-    (model.catalog?.models ?? []).map(AgentThreadSettingOption.init)
-  }
-
-  private var reasoningOptions: [AgentThreadSettingOption] {
-    (model.availableReasoningOptions ?? []).map(AgentThreadSettingOption.init)
-  }
-
-  private var selectedProjectDescription: String? {
-    projectOptions.first(where: { $0.id == model.effectiveProjectID })?.description
-  }
-
-  private var selectedModelDescription: String? {
-    modelOptions.first(where: { $0.id == model.effectiveModelID })?.description
-  }
-
-  private var selectedReasoningDescription: String? {
-    reasoningOptions.first(where: { $0.id == model.effectiveReasoningID })?.description
-  }
-
-  private func selectModel(_ id: String?) {
-    guard let context = model.contextSelectingModel(id) else { return }
-    model.performUpdate(context, using: update)
-  }
-
-  private func selectReasoning(_ id: String?) {
-    guard let context = model.contextSelectingReasoning(id) else { return }
-    model.performUpdate(context, using: update)
+  private func row(
+    _ title: String,
+    value: String,
+    options: [AgentThreadSettingOption],
+    selectedID: String?,
+    automaticTitle: String?,
+    isEditable: Bool,
+    help: String?,
+    select: @escaping (String?) -> Void
+  ) -> some View {
+    let selected = options.first(where: { $0.id == selectedID })
+    return AgentSettingsRow(title) {
+      AgentSettingsMenu(
+        value,
+        accessibilityLabel: title,
+        isEditable: isEditable && (automaticTitle != nil || !options.isEmpty)
+      ) {
+        if let automaticTitle {
+          AgentSettingsMenuItem(automaticTitle, isSelected: selectedID == nil) { select(nil) }
+          if !options.isEmpty { Divider() }
+        }
+        ForEach(options) { option in
+          AgentSettingsMenuItem(
+            option.label,
+            description: option.description,
+            isSelected: option.id == selectedID
+          ) {
+            select(option.id)
+          }
+        }
+      }
+      .disabled(model.isUpdating)
+    }
+    .help(help ?? selected?.description ?? "")
   }
 }
 
@@ -183,119 +165,5 @@ private struct AgentThreadSettingOption: Identifiable, Equatable {
     id = option.id
     label = option.label
     description = option.description
-  }
-}
-
-private struct AgentThreadSettingRow: View {
-  let title: LocalizedStringResource
-  let selectionTitle: String
-  let selectionDescription: String?
-  let options: [AgentThreadSettingOption]
-  let selectedID: String?
-  let automaticTitle: String?
-  let isEditable: Bool
-  let isUpdating: Bool
-  let helpText: LocalizedStringResource?
-  let select: (String?) -> Void
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 3) {
-      HStack(spacing: 10) {
-        Text(title)
-          .font(.callout)
-          .frame(maxWidth: .infinity, alignment: .leading)
-
-        if isEditable, automaticTitle != nil || !options.isEmpty {
-          Menu {
-            if let automaticTitle {
-              selectionButton(label: automaticTitle, id: nil)
-              if !options.isEmpty { Divider() }
-            }
-            ForEach(options) { option in
-              selectionButton(
-                label: option.label,
-                description: option.description,
-                id: option.id
-              )
-            }
-          } label: {
-            selectionValue
-          }
-          .menuStyle(.borderlessButton)
-          .disabled(isUpdating)
-          .accessibilityLabel(Text(title))
-          .accessibilityValue(selectionTitle)
-        } else {
-          selectionValue
-            .accessibilityLabel(Text(title))
-            .accessibilityValue(selectionTitle)
-        }
-      }
-      if let selectionDescription {
-        Text(selectionDescription)
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-          .lineLimit(2)
-          .frame(maxWidth: .infinity, alignment: .trailing)
-      }
-      if let helpText {
-        Text(helpText)
-          .font(.caption2)
-          .foregroundStyle(.tertiary)
-          .frame(maxWidth: .infinity, alignment: .trailing)
-      }
-    }
-  }
-
-  private var selectionValue: some View {
-    Text(selectionTitle)
-      .lineLimit(1)
-      .truncationMode(.tail)
-      .frame(maxWidth: 250, alignment: .trailing)
-  }
-
-  private func selectionButton(
-    label: String,
-    description: String? = nil,
-    id: String?
-  ) -> some View {
-    Button {
-      select(id)
-    } label: {
-      AgentThreadConfigurationOptionLabel(
-        title: label,
-        description: description,
-        isSelected: selectedID == id
-      )
-    }
-  }
-}
-
-private struct AgentThreadConfigurationOptionLabel: View {
-  let title: String
-  let description: String?
-  let isSelected: Bool
-
-  var body: some View {
-    if isSelected {
-      Label {
-        content
-      } icon: {
-        Image(systemName: "checkmark")
-      }
-    } else {
-      content
-    }
-  }
-
-  private var content: some View {
-    VStack(alignment: .leading, spacing: 1) {
-      Text(title)
-      if let description, !description.isEmpty {
-        Text(description)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-    }
   }
 }

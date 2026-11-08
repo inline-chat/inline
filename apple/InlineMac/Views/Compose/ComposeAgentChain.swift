@@ -167,7 +167,7 @@ private struct ComposeAgentUsagePopover: View {
       ForEach(windows) { window in
         track(
           title: window.title,
-          detail: window.resetsAt.flatMap { $0 > .now ? Self.resetText($0) : nil },
+          detail: window.resetsAt.flatMap { $0 > .now ? BotChatSettingsLayout.resetText($0) : nil },
           value: "\(window.usedPercent)%",
           fraction: Double(window.usedPercent) / 100
         )
@@ -221,19 +221,6 @@ private struct ComposeAgentUsagePopover: View {
         .progressViewStyle(.linear)
         .tint(fraction >= 0.9 ? .orange : .accentColor)
     }
-  }
-
-  /// "Resets at 2:30 PM" today, "Resets Tue 9:30 AM" this week, else a date.
-  private static func resetText(_ date: Date) -> String {
-    let calendar = Calendar.current
-    if calendar.isDateInToday(date) {
-      return String(localized: "Resets at \(date.formatted(date: .omitted, time: .shortened))")
-    }
-    if date.timeIntervalSinceNow < 6 * 24 * 3600 {
-      let day = date.formatted(.dateTime.weekday(.abbreviated))
-      return String(localized: "Resets \(day) \(date.formatted(date: .omitted, time: .shortened))")
-    }
-    return String(localized: "Resets \(date.formatted(.dateTime.month(.abbreviated).day()))")
   }
 }
 
