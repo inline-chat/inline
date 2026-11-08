@@ -272,6 +272,26 @@ export type BotRichBlock =
       width?: number
       height?: number
     }
+  | ({ type: "widget" } & BotWidget)
+
+/**
+ * Sandboxed HTML rendered inside the message, with no network access. Bots only;
+ * at most one per message. See the Inline skill's visualize guide.
+ */
+export type BotWidget = {
+  /** Stable across edits; per-viewer state is kept by it. Defaults to "widget". */
+  widget_id?: string
+  /** Header, notification and fallback text. */
+  title: BotRichText
+  /** An HTML fragment or full document, at most 256 KiB. */
+  html: string
+  /** Measured content height in CSS px at 640 px wide; reserves first-frame space. */
+  height?: number
+  /** Referenced from the HTML as "media/0", "media/1", ... in this order. Input reads `file.file_id`. */
+  images?: Array<{ file?: BotFile; width?: number; height?: number }>
+  /** Who may trigger `inline.action()`. Defaults to anyone who can see the message. */
+  required_grant?: BotGrantRequirement
+}
 
 export type BotBlockStatus = "pending" | "running" | "waiting" | "done" | "failed" | "cancelled"
 
@@ -569,6 +589,11 @@ export type BotUpdate = BotUpdateBase &
             )
           /** Present when a form block was submitted; `action.action_id` is its form ID. */
           form?: BotFormSubmission
+          /**
+           * Present for `inline.action(name, payload)` from a widget; `action.action_id` is its
+           * widget ID. The viewer's client supplies both fields: treat them as untrusted input.
+           */
+          widget_call?: { name: string; payload?: unknown }
         }
       }
     | { bot_participation: BotParticipationChange }
@@ -663,6 +688,13 @@ export type GetWebhookInfoResult = WebhookInfo
 
 export type SendMessageParams = BotTargetInput & {
   text?: string
+  /**
+   * Explicit blocks, in the same shape `rich_message` has on received messages, so a
+   * bot can read, change and write one back. Use instead of `text`.
+   */
+  rich_message?: BotRichMessage
+  /** Added after the text or blocks. The title becomes the text when there is none. */
+  widget?: BotWidget
   reply_to_message_id?: BotInputId
   /** Parse Inline's supported Markdown surface. Defaults to true; false preserves literal syntax. */
   parse_markdown?: boolean
@@ -682,7 +714,12 @@ export type SendMessageParams = BotTargetInput & {
 
 export type EditMessageTextParams = BotTargetInput & {
   message_id: BotInputId
-  text: string
+  /** Required unless `rich_message` or `widget` is set. */
+  text?: string
+  /** Use instead of `text`; replaces the message's blocks. */
+  rich_message?: BotRichMessage
+  /** Replaces the widget. Keep `widget_id` to keep viewers' widget state. */
+  widget?: BotWidget
   /** Parse Inline's supported Markdown surface. Defaults to true; false preserves literal syntax. */
   parse_markdown?: boolean
   actions?: BotMessageAction[][]
