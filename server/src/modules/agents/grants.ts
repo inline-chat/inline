@@ -28,6 +28,7 @@ import {
   type DbUser,
 } from "@in/server/db/schema"
 import { getCurrentSpaceMembership } from "@in/server/modules/authorization/spaceMembershipLifecycle"
+import { ensureBotCanReach } from "@in/server/modules/contacts/contacts"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -359,6 +360,10 @@ export async function setAgentGrant(input: SetAgentGrantInput, currentUserId: nu
   const subject = await validSubject(subjectFromInput(input.subject, input.userId), editor)
   const operations = operationsToMask(input.operations)
   if (editor.actor === "bot" && (operations & ~botGrantableMask) !== 0) throw RealtimeRpcError.UserIdInvalid()
+  // A bot opening itself to someone notifies them, so it may only do that for its contacts.
+  if (editor.actor === "bot" && subject.kind === "user") {
+    await ensureBotCanReach(editor.bot, subject.id, { action: "grant" })
+  }
 
   const live: LiveGrantUpdate[] = []
   const row = await db.transaction(async (tx) => {
@@ -453,7 +458,8 @@ export async function importAgentGrants(
         subjectUserId,
         operations: importedMask,
         revision: nextRevision(),
-        grantedBy: editor.ownerUserId,
+        // Sent by the bot, so it isn't the owner's choice of who the bot may reach.
+        grantedBy: editor.bot.id,
       })))
       .onConflictDoNothing()
       .returning()
@@ -490,9 +496,12 @@ async function enqueueGrantUpdates(
     revision: row.revision,
     subject: encodeSubject(subject),
   }
-  // A space or group grant reaches its members through access checks, not updates.
-  const subjectUser = subject.kind === "user" ? [subject.id] : []
-  for (const userId of new Set([editor.ownerUserId, editor.bot.id, ...subjectUser])) {
+  // A space or group grant reaches its members through access checks, not updates,
+  // and only the bot hears about it: current apps would show it as a grant for user 0.
+  const recipients = subject.kind === "user"
+    ? [editor.ownerUserId, editor.bot.id, subject.id]
+    : [editor.bot.id]
+  for (const userId of new Set(recipients)) {
     const durable = await UserBucketUpdates.enqueue(
       { userId, update: { oneofKind: "userAgentGrant", userAgentGrant: payload } },
       { tx },

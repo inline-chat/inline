@@ -4,6 +4,7 @@ import {
   pgTable,
   text,
   uniqueIndex,
+  index,
   varchar,
   boolean,
   timestamp,
@@ -70,6 +71,10 @@ export const users = pgTable(
   },
   (table) => ({
     users_username_unique: uniqueIndex("users_username_unique").on(lower(table.username)),
+    /** A person's bots: contacts, reach and owner read access. */
+    botCreatorIdIndex: index("users_bot_creator_id_idx")
+      .on(table.botCreatorId)
+      .where(sql`${table.botCreatorId} is not null`),
   }),
 )
 

@@ -33,6 +33,8 @@ const DEFAULT_LIMIT = 20
 const MAX_LIMIT = 50
 /** Recent chats per principal scanned for contacts. Bounds the no-query listing. */
 const RECENT_CHATS = 100
+/** Participants read from those chats; large threads don't make the listing unbounded. */
+const MAX_CO_PARTICIPANTS = 2_000
 
 /**
  * The people a request is evaluated for: the caller, plus for a bot the person it
@@ -113,7 +115,10 @@ export async function getContacts(input: GetContactsInput, actor: DbUser): Promi
       userId: BigInt(user.id),
       relations: [...candidate.relations].sort((a, b) => a - b),
       viaOwner: !candidate.direct,
-      lastInteractionDate: candidate.lastInteraction ? encodeDate(candidate.lastInteraction) : undefined,
+      // When a tie is only the owner's, a bot (and whoever drives it) learns who, not when.
+      lastInteractionDate: candidate.lastInteraction && candidate.direct
+        ? encodeDate(candidate.lastInteraction)
+        : undefined,
       botOperations,
       managesBot,
     })
@@ -177,6 +182,8 @@ async function addSharedChats(candidates: Candidates, principals: number[]) {
     .select({ chatId: chatParticipants.chatId, userId: chatParticipants.userId })
     .from(chatParticipants)
     .where(inArray(chatParticipants.chatId, [...principalByChat.keys()]))
+    .orderBy(desc(chatParticipants.id))
+    .limit(MAX_CO_PARTICIPANTS)
   for (const row of others) {
     if (principals.includes(row.userId)) continue
     const source = principalByChat.get(row.chatId)!
@@ -219,6 +226,7 @@ async function addGrants(candidates: Candidates, principals: number[], people: n
       .innerJoin(userGroupMembers, eq(userGroupMembers.groupId, agentGrants.subjectGroupId))
       .innerJoin(userGroups, eq(userGroups.id, userGroupMembers.groupId))
       .innerJoin(members, and(eq(members.spaceId, userGroups.spaceId), eq(members.userId, userGroupMembers.userId)))
+      .innerJoin(spaces, and(eq(spaces.id, userGroups.spaceId), isNull(spaces.deleted)))
       .where(and(inArray(userGroupMembers.userId, people), isNull(agentGrants.revokedAt), gt(agentGrants.operations, 0)))
     for (const row of viaGroup) candidates.add(row.botUserId, ContactRelation.CAN_USE, row.userId)
   }
@@ -228,7 +236,12 @@ async function addGrants(candidates: Candidates, principals: number[], people: n
     .select({ subject: agentGrants.subjectUserId, owner: users.botCreatorId })
     .from(agentGrants)
     .innerJoin(users, eq(users.id, agentGrants.botUserId))
-    .where(and(inArray(users.botCreatorId, principals), isNull(agentGrants.revokedAt), gt(agentGrants.operations, 0)))
+    .where(and(
+      inArray(users.botCreatorId, principals),
+      eq(agentGrants.grantedBy, users.botCreatorId),
+      isNull(agentGrants.revokedAt),
+      gt(agentGrants.operations, 0),
+    ))
   for (const row of usesYours) {
     if (row.owner != null && row.subject !== null) candidates.add(row.subject, ContactRelation.USES_YOUR_BOT, row.owner)
   }
@@ -271,6 +284,8 @@ export async function isContactOf(
   const target = await UsersModel.getUserById(targetUserId)
   if (!target || UsersModel.isDeleted(target)) return false
   if (target.botCreatorId != null && principals.ids.includes(target.botCreatorId)) return true
+  // A bot I (or my owner) may use, including through a space or group grant.
+  if (target.bot === true && (await resolveAgentAccess(target, actor.id, actor)).operations !== 0) return true
 
   const checks: Array<() => Promise<boolean>> = [
     async () => {
@@ -321,9 +336,15 @@ export async function isContactOf(
           isNull(agentGrants.revokedAt),
           gt(agentGrants.operations, 0),
           or(
+            // Someone opened their bot to me or my owner.
             and(eq(agentGrants.botUserId, targetUserId), inArray(agentGrants.subjectUserId, principals.ids)),
-            and(eq(agentGrants.subjectUserId, targetUserId), inArray(users.botCreatorId, principals.ids)),
-            and(eq(agentGrants.subjectUserId, targetUserId), inArray(agentGrants.botUserId, principals.ids)),
+            // My owner opened one of their bots to the target. Grants a bot made
+            // itself don't count, or a bot could make anyone its contact.
+            and(
+              eq(agentGrants.subjectUserId, targetUserId),
+              inArray(users.botCreatorId, principals.ids),
+              eq(agentGrants.grantedBy, users.botCreatorId),
+            ),
           ),
         ))
         .limit(1)
@@ -384,4 +405,22 @@ export async function ensureBotReachesParticipants(actorUserId: number, userIds:
   const actor = await UsersModel.getUserById(actorUserId)
   if (actor?.bot !== true) return
   for (const userId of targets) await ensureBotCanReach(actor, userId, { action })
+}
+
+/**
+ * A bot DMs only its contacts or its owner's, unless the person already wrote
+ * to it here. An empty DM the bot opened itself doesn't count as a tie. No-op
+ * for people.
+ */
+export async function ensureBotCanReachDmPeer(
+  chat: { id: number; minUserId: number | null; maxUserId: number | null },
+  senderUserId: number,
+): Promise<void> {
+  if (chat.minUserId == null || chat.maxUserId == null) return
+  const peerUserId = chat.minUserId === senderUserId ? chat.maxUserId : chat.minUserId
+  if (peerUserId === senderUserId) return
+  const sender = await UsersModel.getUserById(senderUserId)
+  if (sender?.bot !== true) return
+  if (await peerHasWrittenIn(chat.id, peerUserId)) return
+  await ensureBotCanReach(sender, peerUserId, { ignoreDmChatId: chat.id, action: "dm" })
 }

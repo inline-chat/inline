@@ -368,3 +368,71 @@ describe("bot access for a space or a user group", () => {
     await setAgentGrant({ botUserId: BigInt(denaCodex.id), userId: 0n, operations: [AgentGrantOperation.INVOKE], subject }, dena.id)
   })
 })
+
+describe("review fixes", () => {
+  setupTestLifecycle()
+
+  test("a bot can't make a stranger its contact by granting itself to them", async () => {
+    const { setAgentGrant } = await import("@in/server/modules/agents/grants")
+    const mo = await person("Mo")
+    const stranger = await person("Stranger")
+    const moClaude = await bot("Mo Claude", mo)
+
+    // Observe mode: the self-grant goes through, but it isn't a tie.
+    await setAgentGrant({ botUserId: 0n, userId: BigInt(stranger.id), operations: [AgentGrantOperation.INVOKE] }, moClaude.id)
+    expect(await isContactOf(moClaude, stranger.id)).toBe(false)
+
+    // The owner opening the bot to someone is the owner's choice: a tie.
+    await setAgentGrant({ botUserId: BigInt(moClaude.id), userId: BigInt(stranger.id), operations: [AgentGrantOperation.INVOKE] }, mo.id)
+    expect(await isContactOf(moClaude, stranger.id)).toBe(true)
+  })
+
+  test("a bot usable through a space grant is a contact", async () => {
+    const { setAgentGrant } = await import("@in/server/modules/agents/grants")
+    const { space, users } = await testUtils.createSpaceWithMembers("Acme", ["dena@a.com", "mo@a.com"] as const)
+    const [dena, mo] = users
+    const denaCodex = await bot("Dena Codex", dena)
+    const moClaude = await bot("Mo Claude", mo)
+    expect(await isContactOf(moClaude, denaCodex.id)).toBe(false)
+    await setAgentGrant(
+      {
+        botUserId: BigInt(denaCodex.id),
+        userId: 0n,
+        operations: [AgentGrantOperation.INVOKE],
+        subject: { subject: { oneofKind: "spaceId", spaceId: BigInt(space.id) } },
+      },
+      dena.id,
+    )
+    expect(await isContactOf(moClaude, denaCodex.id)).toBe(true)
+  })
+
+  test("ties that are only the owner's don't tell the bot when", async () => {
+    const mo = await person("Mo")
+    const dena = await person("Dena")
+    const moClaude = await bot("Mo Claude", mo)
+    await testUtils.createDMWithDialogAndMessage({ spaceId: null as any, userA: mo, userB: dena })
+    const result = await getContacts({}, moClaude)
+    const row = result.contacts.find((contact) => Number(contact.userId) === dena.id)
+    expect(row?.viaOwner).toBe(true)
+    expect(row?.lastInteractionDate).toBeUndefined()
+  })
+
+  test("a send that fails validation adds nobody", async () => {
+    const mo = await person("Mo")
+    const dena = await person("Dena")
+    const chat = await thread("Plan", mo, [mo])
+    await expect(
+      sendMessage(
+        {
+          peerId: { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } },
+          message: `[@Dena](inline://user?id=${dena.id}) hi`,
+          parseMarkdown: true,
+          addMentionedUsers: true,
+          botBlockContent: { blocks: [] } as any,
+        },
+        context(mo.id),
+      ),
+    ).rejects.toBeInstanceOf(RealtimeRpcError)
+    expect(await AccessGuards.hasChatAccess(chat, dena.id)).toBe(false)
+  })
+})

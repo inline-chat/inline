@@ -8,7 +8,7 @@ import {
   type AgentThreadContext,
   type BlockContent,
 } from "@inline-chat/protocol/core"
-import { ensureBotCanReach, peerHasWrittenIn } from "@in/server/modules/contacts/contacts"
+import { ensureBotCanReachDmPeer } from "@in/server/modules/contacts/contacts"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument, DbFullPlainFile, DbFullVoice } from "@in/server/db/models/files"
@@ -341,10 +341,6 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     throw RealtimeRpcError.BadRequest()
   }
   const mentionedUserIds = new Set<number>([...getMentionedUserIds(entities), ...groupMentions.mentionedUserIds])
-  // Mentioning someone brings them in, so the message reaches them.
-  const mentionAdds = input.addMentionedUsers
-    ? await addMentionedParticipants(chat, getMentionedUserIds(entities), context)
-    : undefined
 
   let preparedBlockContent: PreparedBlockContent | undefined
   let botBlockContent: BlockContent | undefined
@@ -489,6 +485,12 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     fwdFromMessageId = Number(input.forwardHeader.fromMessageId)
     fwdFromSenderId = Number(input.forwardHeader.fromId)
   }
+
+  // Mentioning someone brings them in, so the message reaches them. After every
+  // check, so a send that fails validation adds nobody.
+  const mentionAdds = input.addMentionedUsers
+    ? await addMentionedParticipants(chat, getMentionedUserIds(entities), context)
+    : undefined
 
   let newMessage: DbMessage & { blockContent?: BlockContent | null }
   let update: UpdateSeqAndDate
@@ -860,20 +862,6 @@ async function addMentionedParticipants(
     }
   }
   return { addedUserIds, unaddedUserIds }
-}
-
-/**
- * A bot DMs only its contacts or its owner's, unless the person already wrote
- * to it here. An empty DM the bot opened itself doesn't count as a tie.
- */
-async function ensureBotCanReachDmPeer(chat: DbChat, botUserId: number): Promise<void> {
-  if (chat.minUserId == null || chat.maxUserId == null) return
-  const peerUserId = chat.minUserId === botUserId ? chat.maxUserId : chat.minUserId
-  if (peerUserId === botUserId) return
-  if (await peerHasWrittenIn(chat.id, peerUserId)) return
-  const bot = await UsersModel.getUserById(botUserId)
-  if (!bot) return
-  await ensureBotCanReach(bot, peerUserId, { ignoreDmChatId: chat.id, action: "dm" })
 }
 
 async function ensurePrivatePeerCanReceiveMessages(chat: DbChat, currentUserId: number): Promise<void> {
