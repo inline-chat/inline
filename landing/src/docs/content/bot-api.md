@@ -105,10 +105,13 @@ The client returns API failures as `ok: false` envelopes. Network failures and a
 | Task | Common methods |
 | --- | --- |
 | Identify the bot or read conversations | `getMe`, `getChat`, `getChatHistory`, `getMessages`, `searchMessages` |
+| Find people and bots to work with | `getContacts` |
 | Create threads and manage participants | `createThread`, `createReplyThread`, `addThreadParticipant`, `removeThreadParticipant` |
 | Send or change messages | `sendMessage`, `editMessageText`, `deleteMessage`, `forwardMessage`, `sendReaction` |
 | Upload or retrieve files | `uploadFile`, `getFile` |
 | Configure and receive events | `getUpdates`, `setWebhook`, `deleteWebhook`, `getWebhookInfo` |
+
+A bot user carries `owner_id`, the person the bot acts for, when it has one. `getContacts` returns the bot's contacts plus its owner's: the owner (`owner`), bots the owner manages (`managed`), people in shared chats and spaces (`shared_chat`, `shared_space`), and bots it may use (`can_use`). Filter with `query` (name or username), `kind` (`all`, `people`, or `bots`), and `limit` (1–50, default 20). `via_owner` marks contacts reached only through the owner; bot contacts list `bot_operations` the bot may use, such as `invoke` and `steer`. The method allows 60 calls per minute per bot.
 
 For methods that accept a destination, use exactly one of `chat_id` or `user_id`. `chat_id` identifies a conversation; `user_id` addresses a DM with that person. Legacy `peer_thread_id` and `peer_user_id` are accepted. Look up per-method fields and limits in the [method reference](https://api.inline.chat/bot-api-reference).
 
@@ -143,7 +146,7 @@ Inline adds the authenticated bot to the private thread. Verify that the new thr
 
 Public threads require a space and no explicit participant list. Set `is_public: false` when creating a private thread in a space; supplying `space_id` otherwise defaults to public. A bot that can manage a thread can change its participants, but it cannot remove itself.
 
-`sendMessage` and `editMessageText` parse [Inline Markdown](https://github.com/inline-chat/inline/blob/main/packages/protocol/docs/markdown.md) by default. A resolved `inline://user/{userId}` link produces a structured mention. Set `parse_markdown: false` to preserve the supplied syntax literally. Returned messages contain plain `text` and UTF-16 `entities`; structural content also uses `rich_message.blocks`.
+`sendMessage` and `editMessageText` parse [Inline Markdown](https://github.com/inline-chat/inline/blob/main/packages/protocol/docs/markdown.md) by default. A resolved `inline://user/{userId}` link produces a structured mention. Set `parse_markdown: false` to preserve the supplied syntax literally. Set `add_mentioned_users: true` to add mentioned people who can't see a private thread yet, under the same rules as `addThreadParticipant`; the result then lists `added_user_ids` and `unadded_user_ids`. DMs and public threads never change. Returned messages contain plain `text` and UTF-16 `entities`; structural content also uses `rich_message.blocks`.
 
 ## Updates
 
