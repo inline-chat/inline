@@ -30,6 +30,184 @@ fn structure(dialog: &DialogRecord) -> serde_json::Value {
         .unwrap_or(serde_json::Value::Null)
 }
 
+#[allow(deprecated)]
+#[tokio::test]
+async fn parity_promoted_dialog_visibility_survives_partial_updates_and_restart() {
+    let fixture = FixtureDir::new();
+    let path = fixture.0.join("visibility.sqlite");
+    {
+        let store = crate::SqliteStore::open(&path).unwrap();
+        let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+        let mut hidden = DialogRecord::new(InlineId::new(7));
+        hidden.chat_list_hidden = Some(true);
+        store.record_dialog(hidden).await.unwrap();
+
+        // A chat-only patch must not change account-local visibility.
+        backend
+            .record_chat_update(channel(None), None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .dialog(InlineId::new(7))
+                .await
+                .unwrap()
+                .unwrap()
+                .chat_list_hidden,
+            Some(true)
+        );
+
+        // Current server encodes a promoted dialog with visibility true and
+        // omits chat_list_hidden, rather than sending an explicit false.
+        let visible = proto::Dialog {
+            chat_id: Some(7),
+            sidebar_visible: Some(true),
+            ..Default::default()
+        };
+        backend
+            .apply_updates(
+                vec![proto::Update {
+                    update: Some(proto::update::Update::ChatOpen(proto::UpdateChatOpen {
+                        chat: Some(channel(None)),
+                        dialog: Some(visible),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                }],
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .dialog(InlineId::new(7))
+                .await
+                .unwrap()
+                .unwrap()
+                .chat_list_hidden,
+            Some(false)
+        );
+    }
+    let store = crate::SqliteStore::open(&path).unwrap();
+    assert_eq!(
+        store
+            .dialog(InlineId::new(7))
+            .await
+            .unwrap()
+            .unwrap()
+            .chat_list_hidden,
+        Some(false)
+    );
+}
+
+#[allow(deprecated)]
+#[tokio::test]
+async fn parity_snapshot_visibility_and_stale_repair_user_state() {
+    let store = InMemoryStore::new();
+    let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+    let visible = proto::Dialog {
+        chat_id: Some(7),
+        sidebar_visible: Some(true),
+        ..Default::default()
+    };
+    backend
+        .apply_get_chats_snapshot(proto::GetChatsResult {
+            chats: vec![channel(None)],
+            dialogs: vec![visible.clone()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .dialog(InlineId::new(7))
+            .await
+            .unwrap()
+            .unwrap()
+            .chat_list_hidden,
+        Some(false)
+    );
+
+    let mut hidden = store.dialog(InlineId::new(7)).await.unwrap().unwrap();
+    hidden.chat_list_hidden = Some(true);
+    store.record_dialog(hidden).await.unwrap();
+    backend
+        .apply_get_chats_snapshot(proto::GetChatsResult {
+            chats: vec![channel(None)],
+            dialogs: vec![proto::Dialog {
+                chat_id: Some(7),
+                ..Default::default()
+            }],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .dialog(InlineId::new(7))
+            .await
+            .unwrap()
+            .unwrap()
+            .chat_list_hidden,
+        Some(true)
+    );
+    let mut stale = visible;
+    clear_dialog_user_state(&mut stale);
+    backend
+        .record_chat_update(channel(None), Some(stale), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .dialog(InlineId::new(7))
+            .await
+            .unwrap()
+            .unwrap()
+            .chat_list_hidden,
+        Some(true)
+    );
+}
+
+#[allow(deprecated)]
+#[tokio::test]
+async fn parity_sidecar_visibility_respects_explicit_hidden_and_partial_dialogs() {
+    let store = InMemoryStore::new();
+    let backend = SdkBackend::builder().store(store.clone()).build().unwrap();
+    let mut hidden = DialogRecord::new(InlineId::new(7));
+    hidden.chat_list_hidden = Some(true);
+    store.record_dialog(hidden).await.unwrap();
+    for (visible, explicit_hidden, expected) in [
+        (None, None, Some(true)),
+        (Some(true), None, Some(false)),
+        (Some(false), None, Some(true)),
+        (Some(true), Some(true), Some(true)),
+    ] {
+        backend
+            .apply_sidecars(proto::UpdateSidecars {
+                chats: vec![channel(None)],
+                dialogs: vec![proto::Dialog {
+                    chat_id: Some(7),
+                    sidebar_visible: visible,
+                    chat_list_hidden: explicit_hidden,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .dialog(InlineId::new(7))
+                .await
+                .unwrap()
+                .unwrap()
+                .chat_list_hidden,
+            expected
+        );
+    }
+}
+
 #[hegel::test(test_cases = 1000)]
 fn parity_complete_move_home_clears_space_on_both_stores(tc: TestCase) {
     let space = tc.draw(gs::integers::<i64>().min_value(1));

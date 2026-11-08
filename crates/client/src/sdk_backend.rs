@@ -3462,6 +3462,7 @@ impl SdkBackend {
                 .map_err(store_error_to_backend)?;
             if let Some(existing) = &existing {
                 record.pinned_message_ids = existing.pinned_message_ids.clone();
+                record.chat_list_hidden = record.chat_list_hidden.or(existing.chat_list_hidden);
             }
             apply_chat_structure(
                 record,
@@ -3659,7 +3660,7 @@ impl SdkBackend {
                     .and_then(|dialog| dialog.open)
                     .or_else(|| existing.as_ref().and_then(|dialog| dialog.open)),
                 chat_list_hidden: dialog
-                    .and_then(|dialog| dialog.chat_list_hidden)
+                    .and_then(dialog_chat_list_hidden_from_proto)
                     .or_else(|| existing.as_ref().and_then(|dialog| dialog.chat_list_hidden)),
                 order: dialog
                     .and_then(|dialog| dialog.order.clone())
@@ -3815,7 +3816,7 @@ impl SdkBackend {
                 .or_else(|| existing.as_ref().and_then(|dialog| dialog.open)),
             chat_list_hidden: dialog
                 .as_ref()
-                .and_then(|dialog| dialog.chat_list_hidden)
+                .and_then(dialog_chat_list_hidden_from_proto)
                 .or_else(|| existing.as_ref().and_then(|dialog| dialog.chat_list_hidden)),
             order: dialog
                 .as_ref()
@@ -5069,7 +5070,7 @@ fn dialog_records_from_get_chats(result: &proto::GetChatsResult) -> Vec<DialogRe
                 archived: dialog.and_then(|dialog| dialog.archived),
                 pinned: dialog.and_then(|dialog| dialog.pinned),
                 open: dialog.and_then(|dialog| dialog.open),
-                chat_list_hidden: dialog.and_then(|dialog| dialog.chat_list_hidden),
+                chat_list_hidden: dialog.and_then(dialog_chat_list_hidden_from_proto),
                 order: dialog.and_then(|dialog| dialog.order.clone()),
                 pinned_order: dialog.and_then(|dialog| dialog.pinned_order.clone()),
                 notification_mode: dialog.and_then(dialog_notification_mode_from_proto),
@@ -5114,6 +5115,16 @@ fn read_state_from_proto_dialog(
     })
 }
 
+// The server encodes visibility in the legacy field when the newer hidden
+// field is absent. The newer field takes precedence when both are present.
+#[allow(deprecated)]
+fn dialog_chat_list_hidden_from_proto(dialog: &proto::Dialog) -> Option<bool> {
+    dialog
+        .chat_list_hidden
+        .or_else(|| dialog.sidebar_visible.map(|visible| !visible))
+}
+
+#[allow(deprecated)]
 fn clear_dialog_user_state(dialog: &mut proto::Dialog) {
     dialog.archived = None;
     dialog.pinned = None;
@@ -5122,6 +5133,7 @@ fn clear_dialog_user_state(dialog: &mut proto::Dialog) {
     dialog.unread_mark = None;
     dialog.notification_settings = None;
     dialog.chat_list_hidden = None;
+    dialog.sidebar_visible = None;
     dialog.open = None;
     dialog.opened_date = None;
     dialog.order = None;
