@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "count": 265,
+  "count": 267,
   "methodCounts": {
     "ALL": 3,
-    "GET": 103,
+    "GET": 105,
     "OPTIONS": 18,
     "POST": 140,
     "WS": 1
   },
-  "sha256": "8162c427519ef6cd6f9f218c0f54c70edb7dfdcd731aac9d30816dcfae20b670",
+  "sha256": "fe54fdb09eb6741ab7109524052c9e0566ea862b1c4f3f2df7c760ffc0e0581b",
   "routes": [
     {
       "method": "ALL",
@@ -112,6 +112,10 @@
     },
     {
       "method": "GET",
+      "path": "/bot/getContacts"
+    },
+    {
+      "method": "GET",
       "path": "/bot/getFile"
     },
     {
@@ -157,6 +161,10 @@
     {
       "method": "GET",
       "path": "/bot:token/getChatParticipantCount"
+    },
+    {
+      "method": "GET",
+      "path": "/bot:token/getContacts"
     },
     {
       "method": "GET",

@@ -44,6 +44,8 @@ import type {
   GetChatParticipantResult,
   GetChatParticipantCountParams,
   GetChatParticipantCountResult,
+  GetContactsParams,
+  GetContactsResult,
   AddThreadParticipantParams,
   RemoveThreadParticipantParams,
   PinMessageParams,
@@ -114,6 +116,7 @@ export type BotOperation =
   | "unpinMessage"
   | "getChatParticipant"
   | "getChatParticipantCount"
+  | "getContacts"
   | "addThreadParticipant"
   | "removeThreadParticipant"
   | "setThreadTitle"
@@ -258,6 +261,7 @@ export interface BotOperationsShape {
   readonly unpinMessage: (input: UnpinMessageParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
   readonly getChatParticipant: (input: GetChatParticipantParams, context: BotOperationContext) => Effect.Effect<GetChatParticipantResult, BotOperationError>
   readonly getChatParticipantCount: (input: GetChatParticipantCountParams, context: BotOperationContext) => Effect.Effect<GetChatParticipantCountResult, BotOperationError>
+  readonly getContacts: (input: GetContactsParams, context: BotOperationContext) => Effect.Effect<GetContactsResult, BotOperationError>
   readonly addThreadParticipant: (input: AddThreadParticipantParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
   readonly removeThreadParticipant: (input: RemoveThreadParticipantParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
   readonly setThreadTitle: (input: SetThreadTitleParams, context: BotOperationContext) => Effect.Effect<EmptyResult, BotOperationError>
@@ -378,6 +382,7 @@ export interface BotOperationHandlers {
   readonly unpinMessage: (input: UnpinMessageParams, context: BotOperationContext) => Promise<EmptyResult>
   readonly getChatParticipant: (input: GetChatParticipantParams, context: BotOperationContext) => Promise<GetChatParticipantResult>
   readonly getChatParticipantCount: (input: GetChatParticipantCountParams, context: BotOperationContext) => Promise<GetChatParticipantCountResult>
+  readonly getContacts: (input: GetContactsParams, context: BotOperationContext) => Promise<GetContactsResult>
   readonly addThreadParticipant: (input: AddThreadParticipantParams, context: BotOperationContext) => Promise<EmptyResult>
   readonly removeThreadParticipant: (input: RemoveThreadParticipantParams, context: BotOperationContext) => Promise<EmptyResult>
   readonly setThreadTitle: (input: SetThreadTitleParams, context: BotOperationContext) => Promise<EmptyResult>
@@ -571,6 +576,7 @@ export const makeBotOperations = (
   unpinMessage: (input, context) => adapt("unpinMessage", () => handlers.unpinMessage(input, context)),
   getChatParticipant: (input, context) => adapt("getChatParticipant", () => handlers.getChatParticipant(input, context)),
   getChatParticipantCount: (input, context) => adapt("getChatParticipantCount", () => handlers.getChatParticipantCount(input, context)),
+  getContacts: (input, context) => adapt("getContacts", () => handlers.getContacts(input, context)),
   addThreadParticipant: (input, context) => adapt("addThreadParticipant", () => handlers.addThreadParticipant(input, context)),
   removeThreadParticipant: (input, context) => adapt("removeThreadParticipant", () => handlers.removeThreadParticipant(input, context)),
   setThreadTitle: (input, context) => adapt("setThreadTitle", () => handlers.setThreadTitle(input, context)),

@@ -16,6 +16,7 @@ import type {
   BotMethodName,
   GetChatHistoryParams,
   GetChatParams,
+  GetContactsParams,
   GetUpdatesParams,
   SendMessageParams,
   SendReactionParams,
@@ -142,6 +143,7 @@ const makeOperations = (
   unpinMessage: () => unused("unpinMessage"),
   getChatParticipant: () => unused("getChatParticipant"),
   getChatParticipantCount: () => unused("getChatParticipantCount"),
+  getContacts: () => unused("getContacts"),
   addThreadParticipant: () => unused("addThreadParticipant"),
   removeThreadParticipant: () => unused("removeThreadParticipant"),
   setThreadTitle: () => unused("setThreadTitle"),
@@ -344,6 +346,9 @@ describe("Effect Bot routes", () => {
       unpinMessage: () => invoked("unpinMessage", {}),
       getChatParticipant: () => invoked("getChatParticipant", { participant: { user: botUser } }),
       getChatParticipantCount: () => invoked("getChatParticipantCount", { count: 2 }),
+      getContacts: () => invoked("getContacts", {
+        contacts: [{ user: { ...botUser, owner_id: 7 }, relations: ["managed"], via_owner: true, bot_operations: ["invoke", "steer"], manages_bot: true }],
+      }),
       addThreadParticipant: () => invoked("addThreadParticipant", {}),
       removeThreadParticipant: () => invoked("removeThreadParticipant", {}),
       setThreadTitle: () => invoked("setThreadTitle", {}),
@@ -478,6 +483,7 @@ describe("Effect Bot routes", () => {
       { name: "unpinMessage", method: "POST", input: { chat_id: 99, message_id: 101 } },
       { name: "getChatParticipant", method: "GET", input: { chat_id: "99", user_id: "42" } },
       { name: "getChatParticipantCount", method: "GET", input: { chat_id: "99" } },
+      { name: "getContacts", method: "GET", input: { query: "maya", kind: "bots", limit: "5" } },
       { name: "addThreadParticipant", method: "POST", input: { chat_id: 99, user_id: 42 } },
       { name: "removeThreadParticipant", method: "POST", input: { chat_id: 99, user_id: 42 } },
       { name: "setThreadTitle", method: "POST", input: { chat_id: 99, title: "Renamed" } },
@@ -535,7 +541,7 @@ describe("Effect Bot routes", () => {
         }
       }
 
-      expect(calls).toHaveLength(68)
+      expect(calls).toHaveLength(70)
       for (const method of methods) {
         expect(
           calls.filter((call) => call === method.name),
@@ -1196,7 +1202,7 @@ describe("Effect Bot routes", () => {
     expect(() =>
       assertValidOpenApiDocument(spec),
     ).not.toThrow()
-    expect(Object.keys(spec.paths)).toHaveLength(86)
+    expect(Object.keys(spec.paths)).toHaveLength(88)
 
     const expectedMethods = [
       "getMe",
@@ -1226,6 +1232,7 @@ describe("Effect Bot routes", () => {
       "unpinMessage",
       "getChatParticipant",
       "getChatParticipantCount",
+      "getContacts",
       "addThreadParticipant",
       "removeThreadParticipant",
       "setThreadTitle",
@@ -1705,6 +1712,61 @@ describe("Effect Bot routes", () => {
       "/bot/forwardMessages",
       "/bot/getSpace",
     ])
+  })
+
+  it("decodes getContacts queries and keeps mention adds on sendMessage", async () => {
+    let contactsInput: GetContactsParams | undefined
+    let sendInput: SendMessageParams | undefined
+    const kernel = makeKernel({
+      operations: makeOperations({
+        getContacts: (value) => {
+          contactsInput = value
+          return Effect.succeed({
+            contacts: [{ user: { id: 7, is_bot: false }, relations: ["owner"], via_owner: false }],
+          })
+        },
+        sendMessage: (value) => {
+          sendInput = value
+          return Effect.succeed({ message: botMessage, added_user_ids: [8], unadded_user_ids: [] })
+        },
+      }),
+    })
+
+    try {
+      const headers = { authorization: "Bearer 42:HEADER" }
+      const contacts = await kernel.handler(
+        new Request("http://inline.test/bot/getContacts?query=maya&kind=people&limit=5", { headers }),
+      )
+      expect(contacts.status).toBe(200)
+      expect(await contacts.json()).toEqual({
+        ok: true,
+        result: { contacts: [{ user: { id: 7, is_bot: false }, relations: ["owner"], via_owner: false }] },
+      })
+      expect(contactsInput).toEqual({ query: "maya", kind: "people", limit: 5 })
+
+      for (const search of ["limit=0", "limit=51", "kind=robots"]) {
+        const rejected = await kernel.handler(
+          new Request(`http://inline.test/bot/getContacts?${search}`, { headers }),
+        )
+        expect(rejected.status, search).toBe(400)
+      }
+
+      const sent = await kernel.handler(
+        new Request("http://inline.test/bot/sendMessage", {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ chat_id: 99, text: "hi @maya", add_mentioned_users: "true" }),
+        }),
+      )
+      expect(sent.status).toBe(200)
+      expect(await sent.json()).toMatchObject({
+        ok: true,
+        result: { added_user_ids: [8], unadded_user_ids: [] },
+      })
+      expect(sendInput?.add_mentioned_users).toBe(true)
+    } finally {
+      await kernel.dispose()
+    }
   })
 
   it("passes decoded GET query values to the operation boundary", async () => {

@@ -34,12 +34,16 @@ const log = new Log("botUpdates.projector")
 const unixSeconds = (value: Date | number) =>
   value instanceof Date ? Math.floor(value.getTime() / 1_000) : Number(value)
 
+const botOwnerId = (user: DbUser): number | undefined =>
+  user.bot === true && user.botCreatorId != null ? user.botCreatorId : undefined
+
 const toUser = (user: DbUser | BotUserJson): BotUser => ({
   id: user.id,
   is_bot: "bot" in user ? Boolean(user.bot) : user.is_bot,
   username: user.username ?? undefined,
   first_name: "firstName" in user ? user.firstName ?? undefined : user.first_name,
   last_name: "lastName" in user ? user.lastName ?? undefined : user.last_name,
+  owner_id: "botCreatorId" in user ? botOwnerId(user) : user.owner_id,
 })
 
 const toEventChat = (chat: DbChat): BotEventChat => ({
@@ -245,6 +249,7 @@ async function loadUsers(ids: number[]): Promise<Map<number, BotUserJson>> {
     username: user.username ?? undefined,
     first_name: user.firstName ?? undefined,
     last_name: user.lastName ?? undefined,
+    owner_id: botOwnerId(user),
   }]))
 }
 
