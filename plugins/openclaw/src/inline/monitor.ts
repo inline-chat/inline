@@ -73,6 +73,7 @@ import {
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { shareInlineAccountClient } from "./client-registry.js"
+import { createInlineMessageSender } from "./delivery.js"
 import {
   INLINE_DEFAULT_GROUP_POLICY,
   INLINE_DEFAULT_REQUIRE_MENTION,
@@ -1075,6 +1076,7 @@ export async function monitorInlineProvider(params: {
     token,
     client,
   })
+  const sendMessage = createInlineMessageSender(client, abortSignal)
   const meId = meUser.id
   const botUsername = normalizeInlineUsername(meUser.username)?.toLowerCase()
   void registerBotCapabilitiesWithRetry({
@@ -1978,7 +1980,7 @@ export async function monitorInlineProvider(params: {
             })
             if (created) {
               try {
-                await client.sendMessage({
+                await sendMessage({
                   chatId,
                   text: core.channel.pairing.buildPairingReply({
                     channel: CHANNEL_ID,
@@ -2203,7 +2205,7 @@ export async function monitorInlineProvider(params: {
         }
       }
 
-      const sent = await client.sendMessage({
+      const sent = await sendMessage({
         chatId,
         text: responseText,
         replyToMsgId: msg.id,
@@ -2295,7 +2297,7 @@ export async function monitorInlineProvider(params: {
             }
           }
           if (!delivered) {
-            const sent = await client.sendMessage({
+            const sent = await sendMessage({
               chatId,
               text,
               ...(actions ? { actions } : {}),
@@ -2358,7 +2360,7 @@ export async function monitorInlineProvider(params: {
         }
       } catch (error) {
         runtime.error?.(`inline commands pagination edit failed; falling back to send (${String(error)})`)
-        const sent = await client.sendMessage({
+        const sent = await sendMessage({
           chatId,
           text,
           actions,
@@ -2409,7 +2411,7 @@ export async function monitorInlineProvider(params: {
         }
       }
       if (!deliveredNativeMenu) {
-        const sent = await client.sendMessage({
+        const sent = await sendMessage({
           chatId,
           text: menuText,
           ...(menuActions ? { actions: menuActions } : {}),
@@ -2461,7 +2463,7 @@ export async function monitorInlineProvider(params: {
           }
         } catch (error) {
           runtime.error?.(`inline model picker edit failed; falling back to send (${String(error)})`)
-          const sent = await client.sendMessage({
+          const sent = await sendMessage({
             chatId,
             text: outboundText,
             actions,
@@ -2659,7 +2661,7 @@ export async function monitorInlineProvider(params: {
     if (shouldCreateDeliveryThread && !deliveryReplyThreadContext) {
       await setParentThreadCreationTyping(false)
       runtime.error?.("inline create reply thread failed; answer withheld from parent chat")
-      const sent = await client.sendMessage({
+      const sent = await sendMessage({
         chatId,
         text: "I couldn't confirm the reply thread, so I haven't sent the answer. Please check the thread or try again.",
         replyToMsgId: msg.id,
@@ -3100,7 +3102,7 @@ export async function monitorInlineProvider(params: {
           if (abortSignal.aborted || progressState.closing || text === progressState.text) return
           if (progressState.messageId == null) {
             progressState.startedAt ??= performance.now()
-            const sent = await client.sendMessage({
+            const sent = await sendMessage({
               chatId: deliveryChatId,
               text,
               sendMode: "silent",
@@ -3294,7 +3296,7 @@ export async function monitorInlineProvider(params: {
         if (editStreamState.messageId == null) {
           let sent: Awaited<ReturnType<typeof client.sendMessage>>
           try {
-            sent = await client.sendMessage({
+            sent = await sendMessage({
               chatId: deliveryChatId,
               text: snapshot.text,
               ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
@@ -3445,7 +3447,7 @@ export async function monitorInlineProvider(params: {
       actions: MessageActions | undefined
     }): Promise<InlinePartialMediaDeliveryResult> => {
       try {
-        const sent = await client.sendMessage({
+        const sent = await sendMessage({
           chatId: deliveryChatId,
           text: `Attachment: ${params.mediaUrl}`,
           ...(params.isFirstMediaForAnswer && params.replyToMsgId != null
@@ -3513,7 +3515,7 @@ export async function monitorInlineProvider(params: {
       }
 
       try {
-        const sent = await client.sendMessage({
+        const sent = await sendMessage({
           chatId: deliveryChatId,
           media,
           ...(params.isFirstMediaForAnswer && params.replyToMsgId != null
@@ -4077,12 +4079,14 @@ export async function monitorInlineProvider(params: {
               const payloadRecord = visiblePayload as InlineReplyPayload & {
                 interactive?: unknown
                 presentation?: unknown
+                presentationTextMode?: "fallback"
               }
               const rawText =
                 resolveInlineInteractiveTextFallback({
                   text: visiblePayload.text,
                   interactive: payloadRecord.interactive,
                   presentation: payloadRecord.presentation,
+                  presentationTextMode: payloadRecord.presentationTextMode,
                 }) ??
                 visiblePayload.text ??
                 ""
@@ -4127,7 +4131,7 @@ export async function monitorInlineProvider(params: {
                 const outbound = sanitizeInlineDeliveryText(text)
                 if (!outbound.trim()) return
                 try {
-                  const sent = await client.sendMessage({
+                  const sent = await sendMessage({
                     chatId: deliveryChatId,
                     text: outbound,
                     ...(includeReplyTo && replyToMsgId != null ? { replyToMsgId } : {}),
@@ -4345,7 +4349,7 @@ export async function monitorInlineProvider(params: {
                 }
 
                 try {
-                  const sent = await client.sendMessage({
+                  const sent = await sendMessage({
                     chatId: deliveryChatId,
                     ...(caption ? { text: caption } : {}),
                     media,
@@ -4469,7 +4473,7 @@ export async function monitorInlineProvider(params: {
             : dispatchError != null
             ? INLINE_REQUEST_ERROR_FALLBACK
             : EMPTY_RESPONSE_FALLBACK
-        const sent = await client.sendMessage({
+        const sent = await sendMessage({
           chatId: deliveryChatId,
           text: fallbackText,
           ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
@@ -4579,12 +4583,11 @@ export async function monitorInlineProvider(params: {
       runtime.error?.(`inline debounce flush failed: ${String(err)}`)
       const chatId = items[0]?.chatId
       if (chatId == null) return
-      void client
-        .sendMessage({
-          chatId,
-          text: INLINE_DEBOUNCE_ERROR_FALLBACK,
-          parseMarkdown: account.config.parseMarkdown ?? true,
-        })
+      void sendMessage({
+        chatId,
+        text: INLINE_DEBOUNCE_ERROR_FALLBACK,
+        parseMarkdown: account.config.parseMarkdown ?? true,
+      })
         .then(() => {
           publishStatus({ lastOutboundAt: Date.now() })
         })

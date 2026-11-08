@@ -67,12 +67,14 @@ export async function acquireInlineAccountClient(params: {
   token: string
   signal?: AbortSignal | undefined
 }): Promise<InlineClientLease> {
+  params.signal?.throwIfAborted()
   const shared = getSharedInlineAccountClient(params)
   if (shared) return { client: shared, release: async () => {} }
 
   const client = new InlineSdkClient({ baseUrl: params.baseUrl, token: params.token })
   try {
     await client.connect(params.signal)
+    params.signal?.throwIfAborted()
   } catch (error) {
     await client.close().catch(() => {})
     throw error
@@ -86,6 +88,7 @@ export async function withInlineAccountClient<T>(
 ): Promise<T> {
   const lease = await acquireInlineAccountClient(params)
   try {
+    params.signal?.throwIfAborted()
     return await fn(lease.client)
   } finally {
     await lease.release()

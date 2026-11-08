@@ -5,17 +5,17 @@ import {
 } from "./interactive-fallback"
 
 describe("inline/interactive-fallback", () => {
-  it("keeps authored text over legacy and presentation fallbacks", () => {
+  it("combines authored text with canonical presentation content", () => {
     expect(
       resolveInlineInteractiveTextFallback({
         text: "Pick one",
         interactive: { blocks: [{ type: "text", text: "Legacy" }] },
         presentation: { blocks: [{ type: "text", text: "Presentation" }] },
       }),
-    ).toBe("Pick one")
+    ).toBe("Pick one\n\nPresentation")
   })
 
-  it("uses legacy text blocks before presentation and button labels", () => {
+  it("prefers canonical presentation over legacy interactive content", () => {
     expect(
       resolveInlineInteractiveTextFallback({
         text: " ",
@@ -28,7 +28,7 @@ describe("inline/interactive-fallback", () => {
         },
         presentation: { blocks: [{ type: "text", text: "Presentation" }] },
       }),
-    ).toBe("First\n\nSecond")
+    ).toBe("Presentation")
   })
 
   it("renders presentation fallback text when text is omitted", () => {
@@ -59,6 +59,24 @@ describe("inline/interactive-fallback", () => {
         },
       }),
     ).toBe("- Approve")
+  })
+
+  it("keeps unsupported URL controls visible beside authored text", () => {
+    const text = resolveInlineInteractiveTextFallback({
+      text: "Read the docs",
+      presentation: {
+        blocks: [{ type: "buttons", buttons: [{ label: "Docs", action: { type: "url", url: "https://inline.chat/docs" } }] }],
+      },
+    })
+    expect(text).toBe("Read the docs\n\n- Docs: https://inline.chat/docs")
+  })
+
+  it("honors an explicitly authored presentation fallback", () => {
+    expect(resolveInlineInteractiveTextFallback({
+      text: "Readable fallback",
+      presentationTextMode: "fallback",
+      presentation: { blocks: [{ type: "text", text: "Native content" }] },
+    })).toBe("Readable fallback")
   })
 
   it("returns the original text when there is nothing to render", () => {

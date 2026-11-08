@@ -994,6 +994,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         SET_BOT_PRESENCE_STATE,
         UPDATE_DIALOG_FOLLOW_MODE,
       },
+      UpdateComposeAction_ComposeAction: { WORKING: 6 },
       DialogFollowMode: {
         DIALOG_FOLLOW_MODE_UNSPECIFIED: 0,
         FOLLOWING: 1,
@@ -6936,6 +6937,42 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("routes a rendered typed command button through native command handling", async () => {
+    const { resolveInlineReplyActions } = await import("./monitor-reply-actions")
+    const actions = resolveInlineReplyActions({
+      presentation: { blocks: [{ type: "buttons", buttons: [
+        { label: "Verbose", action: { type: "command", command: "/verbose on" } },
+      ] }] },
+    })
+    const action = actions!.rows[0]!.actions[0]!
+    expect(action.action.oneofKind).toBe("callback")
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "message.action.invoke", chatId: 7n, interactionId: 23n,
+        messageId: 1005n, actorUserId: 42n, actionId: action.actionId,
+        data: action.action.oneofKind === "callback" ? action.action.callback.data : new Uint8Array(),
+      }],
+      chats: { "7": { kind: "direct", title: "Alice" } },
+      historyByChat: { "7": [{ id: 1005n, date: 1_700_000_000n, fromId: 777n, message: "Verbose?" }] },
+      shouldHandleTextCommands: vi.fn(() => true),
+      dispatchReplyPayload: { text: "verbose enabled" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: { commands: { text: false } } as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({ CommandBody: "/verbose on", CommandSource: "native" }),
+      ))
+    } finally {
+      await handle.stop()
+    }
+  })
+
   it("does not interpret agent-owned callback data as a native command", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -7498,6 +7535,35 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("retries a flood-limited final reply with the same send identity", async () => {
+    const flood = new Error("SDK send failed", { cause: Object.assign(new Error("paced"), {
+      code: "rpc-error", rpcCode: 3, retryAfterSeconds: 1,
+    }) })
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 72n, message: {
+        id: 10022n, date: 1_700_000_001n, fromId: 42n, message: "hello",
+      } }],
+      chats: { "72": { kind: "direct", title: "Alice" } },
+      sendMessageErrors: [flood],
+      dispatchReplyPayload: { text: "final answer" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2))
+      const [first, second] = harness.calls.sendMessage.mock.calls.map(([request]) => request)
+      expect(first.text).toBe("final answer")
+      expect(second).toBe(first)
+      expect(first.randomId).not.toBe(0n)
+    } finally {
+      await handle.stop()
+    }
+  })
+
   it("maps presentation-only buttons to inline message actions on text replies", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -7522,7 +7588,8 @@ describe("inline/monitor", () => {
             {
               type: "buttons",
               buttons: [
-                { label: "Approve", action: { type: "callback", value: "approve" } },
+                { label: "Approve", style: "primary", action: { type: "callback", value: "approve" } },
+                { label: "Disabled", disabled: true, action: { type: "command", command: "/stop" } },
                 { label: "Docs", action: { type: "url", url: "https://inline.chat/docs" } },
               ],
             },
@@ -7548,6 +7615,8 @@ describe("inline/monitor", () => {
     const sent = harness.calls.sendMessage.mock.calls[0]?.[0]
     const buttons = sent?.actions?.rows?.flatMap((row: any) => row.actions) ?? []
     expect(buttons.map((button: any) => button.text)).toEqual(["Approve"])
+    expect(buttons[0]?.style).toBe(1)
+    expect(sent?.text).toContain("https://inline.chat/docs")
     expect(new TextDecoder().decode(buttons[0]?.action?.callback?.data)).toBe("approve")
 
     await handle.stop()

@@ -6,13 +6,8 @@ import {
 } from "@inline-chat/realtime-sdk"
 import { buildInlinePresentationButtons, resolveInlineMessageActionsParam } from "./actions.js"
 import { normalizeMessagePresentation } from "openclaw/plugin-sdk/interactive-runtime"
-import { buildInlineMessageActionId, type InlineMessageActionOwner } from "./message-actions.js"
-import {
-  sanitizeInlineActionCallbackData,
-  sanitizeInlineActionCopyText,
-  sanitizeInlineActionLabel,
-  sanitizeInlineVisibleText,
-} from "./outbound-sanitize.js"
+import type { InlineMessageActionOwner } from "./message-actions.js"
+import { sanitizeInlineVisibleText } from "./outbound-sanitize.js"
 import { isRecord } from "./monitor-shared.js"
 import { normalizeInlineCommandBody, parseInlineNativeCommandCallbackData } from "./monitor-addressing.js"
 import {
@@ -33,8 +28,6 @@ export function callbackDataToUtf8(data: Uint8Array): string | undefined {
   }
 }
 
-const INLINE_ACTION_MAX_ROWS = 8
-const INLINE_ACTION_MAX_PER_ROW = 8
 const INLINE_CALLBACK_TOAST_MAX_LENGTH = 256
 
 function normalizeInlineCallbackToastText(raw: unknown): string | undefined {
@@ -96,62 +89,6 @@ function normalizeCompatibleButtonCallbackData(raw: string): string {
   return normalizeInlineActionCallbackData(trimmed)
 }
 
-type InlineParsedReplyActionButton =
-  | {
-      text: string
-      kind: "callback"
-      callbackData: string
-    }
-  | {
-      text: string
-      kind: "copyText"
-      copyText: string
-    }
-
-function normalizeReplyMarkupButtonsWith(
-  raw: unknown,
-  options?: { mapCallbackData?: (value: string) => string },
-): InlineParsedReplyActionButton[][] {
-  if (!Array.isArray(raw)) return []
-
-  const rows: InlineParsedReplyActionButton[][] = []
-  for (const candidateRow of raw) {
-    if (!Array.isArray(candidateRow)) continue
-    const row: InlineParsedReplyActionButton[] = []
-    for (const candidateButton of candidateRow) {
-      if (!isRecord(candidateButton)) continue
-      const text = sanitizeInlineActionLabel(
-        typeof candidateButton.text === "string" ? candidateButton.text : "",
-      )
-      const callbackDataRaw =
-        typeof candidateButton.callback_data === "string" ? candidateButton.callback_data.trim() : ""
-      const mappedCallbackData = options?.mapCallbackData
-        ? options.mapCallbackData(callbackDataRaw)
-        : callbackDataRaw
-      const callbackData = sanitizeInlineActionCallbackData(mappedCallbackData)
-      const copyText = sanitizeInlineActionCopyText(
-        typeof candidateButton.copy_text === "string"
-          ? candidateButton.copy_text
-          : typeof candidateButton.copyText === "string"
-            ? candidateButton.copyText
-            : "",
-      )
-      if (!text) continue
-      if (callbackData) {
-        row.push({ text, kind: "callback", callbackData })
-      } else if (copyText) {
-        row.push({ text, kind: "copyText", copyText })
-      }
-      if (row.length >= INLINE_ACTION_MAX_PER_ROW) break
-    }
-    if (row.length === 0) continue
-    rows.push(row)
-    if (rows.length >= INLINE_ACTION_MAX_ROWS) break
-  }
-
-  return rows
-}
-
 export function resolveInlineReplyActions(
   payload: Record<string, unknown>,
   options?: { owner?: InlineMessageActionOwner },
@@ -188,34 +125,10 @@ export function resolveInlineReplyActions(
     if ((rawButtons as unknown[]).length === 0) return undefined
   }
 
-  const rows = normalizeReplyMarkupButtonsWith(
-    rawButtons,
-    mapCallbackData ? { mapCallbackData } : undefined,
+  return resolveInlineMessageActionsParam(
+    { buttons: rawButtons },
+    { owner, ...(mapCallbackData ? { mapCallbackData } : {}) },
   )
-  return {
-    rows: rows.map((row, rowIndex) => ({
-      actions: row.map((button, buttonIndex) => ({
-        actionId: buildInlineMessageActionId(owner, rowIndex, buttonIndex),
-        text: button.text,
-        style: 0,
-        requiredGrant: 0,
-        action:
-          button.kind === "callback"
-            ? {
-                oneofKind: "callback" as const,
-                callback: {
-                  data: new TextEncoder().encode(button.callbackData),
-                },
-              }
-            : {
-                oneofKind: "copyText" as const,
-                copyText: {
-                  text: button.copyText,
-                },
-              },
-      })),
-    })),
-  }
 }
 
 export async function answerInlineMessageAction(

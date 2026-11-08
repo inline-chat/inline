@@ -84,6 +84,41 @@ describe("inline client registry", () => {
     expect(seen).toBe(newer)
   })
 
+  it("rejects an aborted lease without borrowing or opening a client", async () => {
+    const monitorClient = { close: vi.fn() } as any
+    shareInlineAccountClient({ ...account, client: monitorClient })
+    const controller = new AbortController()
+    controller.abort(new Error("cancelled"))
+    const operation = vi.fn()
+
+    await expect(withInlineAccountClient({ ...account, signal: controller.signal }, operation)).rejects.toThrow("cancelled")
+    expect(operation).not.toHaveBeenCalled()
+    expect(created).toHaveLength(0)
+    expect(monitorClient.close).not.toHaveBeenCalled()
+  })
+
+  it("rechecks cancellation between borrowing a lease and invoking its operation", async () => {
+    const monitorClient = { close: vi.fn() } as any
+    shareInlineAccountClient({ ...account, client: monitorClient })
+    const controller = new AbortController()
+    const operation = vi.fn()
+    const result = withInlineAccountClient({ ...account, signal: controller.signal }, operation)
+    controller.abort(new Error("cancelled after borrowing"))
+
+    await expect(result).rejects.toThrow("cancelled after borrowing")
+    expect(operation).not.toHaveBeenCalled()
+    expect(monitorClient.close).not.toHaveBeenCalled()
+  })
+
+  it("closes a newly connected client if its caller cancels during connect", async () => {
+    const controller = new AbortController()
+    const lease = acquireInlineAccountClient({ ...account, signal: controller.signal })
+    controller.abort(new Error("cancelled during connect"))
+
+    await expect(lease).rejects.toThrow("cancelled during connect")
+    expect(created[0]?.close).toHaveBeenCalledTimes(1)
+  })
+
   it("closes a client whose connect failed", async () => {
     failNextConnect = true
 
