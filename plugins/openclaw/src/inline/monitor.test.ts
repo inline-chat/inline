@@ -234,6 +234,7 @@ type MonitorSetup = {
     out?: boolean
     replyToMsgId?: bigint
     entities?: unknown
+    replies?: { chatId: bigint; replyCount: number; hasUnread: boolean; recentReplierUserIds: bigint[] }
   }>>
   mediaByUrl?: Record<string, { contentType?: string; fileName?: string; buffer?: Uint8Array | Buffer }>
   mediaLoadErrors?: Record<string, Error>
@@ -1379,7 +1380,7 @@ describe("inline/monitor", () => {
     expect(mutationHarness.calls.mutateConfigFile).toHaveBeenCalledWith(expect.objectContaining({
       afterWrite: {
         mode: "none",
-        reason: "Inline reads the refreshed runtime config in-process.",
+        reason: "Inline applies chat settings in-process without restarting the channel.",
       },
     }))
     const response = mutationHarness.calls.answerBotChatSettings.mock.calls[0]?.[0]?.response
@@ -5069,6 +5070,105 @@ describe("inline/monitor", () => {
     expect(harness.calls.sendMessage.mock.calls.filter(([args]) => args.chatId === 89n)).toEqual([])
     expect(harness.calls.invokeRaw.mock.calls.filter(([, args]) => args?.oneofKind === "createSubthread")).toHaveLength(1)
     await handle.stop()
+  })
+
+  it("marks parent history lines the bot already answered in a reply thread", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 88n, message: {
+        id: 30n, date: 1_700_000_030n, fromId: 42n, message: "and Canada?",
+      } }],
+      chats: { "88": { kind: "group", title: "Room" } },
+      historyByChat: {
+        "88": [
+          { id: 28n, date: 1_700_000_028n, fromId: 42n, message: "capital of Japan?",
+            replies: { chatId: 8828n, replyCount: 1, hasUnread: false, recentReplierUserIds: [777n] } },
+          { id: 29n, date: 1_700_000_029n, fromId: 42n, message: "capital of Spain?",
+            replies: { chatId: 8829n, replyCount: 1, hasUnread: false, recentReplierUserIds: [42n] } },
+        ],
+      },
+      dispatchReplyPayload: { text: "Ottawa" },
+    } as any)
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: false, historyLimit: 10 } as any),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          InboundHistory: [
+            expect.objectContaining({ body: "capital of Japan? [you answered this in its reply thread]" }),
+            expect.objectContaining({ body: "capital of Spain?" }),
+          ],
+        }),
+      ))
+    } finally {
+      await handle.stop()
+    }
+  })
+
+  it("applies a thread mode changed in chat to the next message without a restart", async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const message = (id: bigint, text: string) => ({
+      kind: "message.new" as const,
+      chatId: 89n,
+      message: { id, date: 1_700_000_000n + id, fromId: 51n, message: text, out: false },
+      seq: Number(id),
+      date: 1_700_000_000n + id,
+    })
+    const harness = await setupMonitorHarness({
+      eventClient: {
+        async *events() {
+          yield message(20n, "before the switch")
+          await gate
+          yield message(21n, "after the switch")
+        },
+        async consumeEvents(handle: (event: unknown) => Promise<void>) {
+          for await (const event of this.events()) await handle(event)
+        },
+        async close() {},
+      },
+      events: [],
+      chats: { "89": { kind: "direct", title: "DM", peerUserId: 51n } },
+      dispatchReplyPayload: { text: "answer" },
+    } as any)
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+      const createdThreads = () =>
+        harness.calls.invokeRaw.mock.calls.filter(([, args]) => args?.oneofKind === "createSubthread")
+      expect(createdThreads()).toHaveLength(0)
+      // The host keeps serving its old snapshot after an `afterWrite: none` write.
+      const { getInlineRuntime } = await import("../runtime")
+      const hostSnapshot = (getInlineRuntime().config as any).current()
+      const { mutateInlineLiveConfig } = await import("./live-config")
+      await mutateInlineLiveConfig({
+        current: () => hostSnapshot,
+        mutateConfigFile: async ({ mutate }) => {
+          const draft = structuredClone(hostSnapshot)
+          mutate(draft)
+          return { nextConfig: draft }
+        },
+      }, (draft: any) => {
+        draft.channels = { inline: { groups: { "89": { replyThreadMode: "on" } } } }
+      })
+      expect((getInlineRuntime().config as any).current()).toBe(hostSnapshot)
+      release()
+      await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2))
+      expect(createdThreads()).toHaveLength(1)
+    } finally {
+      release()
+      await handle.stop()
+    }
   })
 
   it("honors a DM-specific reply-thread mode override", async () => {
@@ -15559,6 +15659,7 @@ describe("inline/monitor bot addressing rules", () => {
     dialogFollowMode?: number
     account?: Record<string, unknown>
     participants?: Array<{ id: bigint; firstName?: string; bot?: boolean }>
+    dispatchReplyPayload?: Record<string, unknown>
   }) {
     const runtime = { log: vi.fn(), error: vi.fn() }
     const harness = await setupMonitorHarness({
@@ -15577,16 +15678,17 @@ describe("inline/monitor bot addressing rules", () => {
       },
       historyByChat: { [String(ROOM)]: [history.otherPerson, history.bot, history.sender] },
       ...(params.participants ? { participants: { [String(ROOM)]: params.participants } } : {}),
-      dispatchReplyPayload: { text: "bot reply" },
+      dispatchReplyPayload: params.dispatchReplyPayload ?? { text: "bot reply" },
     } as any)
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
       account: buildAccount({ groupPolicy: "open", historyLimit: 10, ...params.account } as any),
       runtime: runtime as any,
       abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      log,
     })
-    return { harness, handle, runtime }
+    return { harness, handle, runtime, log }
   }
 
   async function expectNoTurn(
@@ -15720,6 +15822,24 @@ describe("inline/monitor bot addressing rules", () => {
           GroupSystemPrompt: expect.stringContaining("another bot's reply to you"),
         }),
       )
+    } finally {
+      await run.handle.stop()
+    }
+  })
+
+  it("doesn't post an error reply to another bot's hand-back", async () => {
+    const run = await runInbound({
+      message: { message: "4", replyToMsgId: history.bot.id },
+      account: { requireMention: true },
+      participants: [{ id: SENDER, firstName: "Worker Bot", bot: true }],
+      dispatchReplyPayload: { text: "⚠️ The AI service returned an empty reply. Please try again.", isError: true },
+    })
+    try {
+      await waitFor(() => expect(run.harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(run.log.warn).toHaveBeenCalledWith(
+        expect.stringContaining("dropped error reply to bot hand-back"),
+      ))
+      expect(run.harness.calls.sendMessage).not.toHaveBeenCalled()
     } finally {
       await run.handle.stop()
     }

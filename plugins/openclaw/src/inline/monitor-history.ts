@@ -448,16 +448,21 @@ function buildInlineHistoryEntryPayload(params: {
   })
   const replySuffix = params.message.replyToMsgId != null ? ` ->${String(params.message.replyToMsgId)}` : ""
   const messageId = params.syntheticMessageId ?? String(params.message.id)
+  // A top-level message the bot answered in a reply thread still looks unanswered
+  // in the parent chat's history, so say where its answer went.
+  const threadNote = params.message.replies?.recentReplierUserIds?.some((id) => id === params.meId)
+    ? " [you answered this in its reply thread]"
+    : ""
   const attachmentText = normalizeHistoryText(content.attachmentText)
   const entityText = normalizeHistoryText(content.entityText)
 
   return {
-    line: `#${String(params.message.id)}${replySuffix} ${label}: ${text}`,
+    line: `#${String(params.message.id)}${replySuffix} ${label}: ${text}${threadNote}`,
     attachmentLine: attachmentText ? `#${String(params.message.id)}${replySuffix} ${label}: ${attachmentText}` : null,
     entityLine: entityText ? `#${String(params.message.id)}${replySuffix} ${label}: ${entityText}` : null,
     inboundEntry: {
       sender: label,
-      body: text,
+      body: `${text}${threadNote}`,
       ...(params.message.date != null ? { timestamp: Number(params.message.date) * 1000 } : {}),
       messageId,
     },

@@ -2,11 +2,12 @@ import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { Method, type InlineSdkClient } from "@inline-chat/realtime-sdk"
 import { withInlineFollowClient } from "./follow-command.js"
 import { parseCurrentInlineTarget, type InlinePeerTarget } from "./tool-targets.js"
+import { resolveCurrentMode, setGroupMode } from "./threadreply-command.js"
 import {
   INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE,
-  resolveCurrentMode,
-  setGroupMode,
-} from "./threadreply-command.js"
+  mutateInlineLiveConfig,
+  resolveInlineLiveConfig,
+} from "./live-config.js"
 import { jsonResult } from "../openclaw-compat.js"
 
 type InlineReplyThreadsConfigRuntime = {
@@ -72,7 +73,7 @@ export function createInlineReplyThreadsTool(
       }
       const target = parseCurrentInlineTarget(ctx)
       if (!target) throw new Error("inline_reply_threads: only available inside an Inline chat")
-      const cfg = configRuntime.current() as OpenClawConfig
+      const cfg = resolveInlineLiveConfig(configRuntime.current()) as OpenClawConfig
 
       return await withInlineFollowClient({
         cfg,
@@ -82,16 +83,13 @@ export function createInlineReplyThreadsTool(
           if (action === "status") {
             return jsonResult({ ok: true, chatId: groupId, mode: resolveCurrentMode({ cfg, accountId, groupId }) })
           }
-          const committed = await configRuntime.mutateConfigFile({
-            afterWrite: INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE,
-            mutate: (draft) => {
-              setGroupMode({ draft, accountId, groupId, mode: action === "reset" ? "inherit" : action })
-            },
+          const nextConfig = await mutateInlineLiveConfig(configRuntime as never, (draft) => {
+            setGroupMode({ draft, accountId, groupId, mode: action === "reset" ? "inherit" : action })
           })
           return jsonResult({
             ok: true,
             chatId: groupId,
-            mode: resolveCurrentMode({ cfg: committed.nextConfig as OpenClawConfig, accountId, groupId }),
+            mode: resolveCurrentMode({ cfg: nextConfig, accountId, groupId }),
           })
         },
       })

@@ -134,9 +134,9 @@ import {
   setOpenClawAgentDefaultModel,
   resolveUseAccessGroups,
 } from "../openclaw-compat.js"
+import { mutateInlineLiveConfig, resolveInlineLiveConfig } from "./live-config.js"
 import {
   handleInlineThreadReplyCommandWithConfigRuntime,
-  INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE,
   resolveCurrentMode as resolveInlineThreadReplyMode,
   setGroupMode as setInlineThreadReplyMode,
 } from "./threadreply-command.js"
@@ -952,6 +952,28 @@ export async function monitorInlineProvider(params: {
   const shutdown = new AbortController()
   const abortSignal = AbortSignal.any([params.abortSignal, shutdown.signal])
   const core = getInlineRuntime()
+  // Settings changed in chat (/threads, inline_reply_threads, follow callbacks)
+  // write config without a gateway reload, so pick up the host's live snapshot
+  // whenever it changes rather than keeping the one this monitor started with.
+  const readLiveConfig = (): OpenClawConfig | undefined => {
+    try {
+      return (core.config as { current?: () => unknown } | undefined)?.current?.() as OpenClawConfig | undefined
+    } catch {
+      return undefined
+    }
+  }
+  const readResolvedLiveConfig = () => {
+    const live = readLiveConfig()
+    return live ? resolveInlineLiveConfig(live) as OpenClawConfig : undefined
+  }
+  let lastLiveConfig = readResolvedLiveConfig()
+  const refreshLiveConfig = () => {
+    const live = readResolvedLiveConfig()
+    if (live && live !== lastLiveConfig) {
+      lastLiveConfig = live
+      cfg = live
+    }
+  }
 
   if (!account.configured || !account.baseUrl) {
     throw new Error(`Inline not configured for account "${account.accountId}" (missing baseUrl or token)`)
@@ -1570,6 +1592,7 @@ export async function monitorInlineProvider(params: {
 
   const handleInboundNow = async (input: InlineParsedInboundEvent): Promise<void> => {
     if (abortSignal.aborted) return
+    refreshLiveConfig()
     const chatId = input.chatId
     const msg = input.msg
     const rawBodyOverride = input.rawBodyOverride ?? null
@@ -4074,7 +4097,17 @@ export async function monitorInlineProvider(params: {
               const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
               if (!visiblePayload) return finishPayload()
               await drainActivityOperations()
-              await cleanupInlineProgressPlaceholder(visiblePayload.isError || info?.kind === "error" ? "failure" : "success")
+              const payloadIsError = visiblePayload.isError === true || info?.kind === "error"
+              await cleanupInlineProgressPlaceholder(payloadIsError ? "failure" : "success")
+              // A hand-back needs no answer, so a failed run has nothing to report.
+              // Runtimes that treat a silent reply as an empty response would
+              // otherwise post their error into the shared chat.
+              if (botHandBack && payloadIsError) {
+                log?.warn(
+                  `[${account.accountId}] inline: dropped error reply to bot hand-back chat=${String(deliveryChatId)} msg=${String(msg.id)}`,
+                )
+                return finishPayload()
+              }
 
               const payloadRecord = visiblePayload as InlineReplyPayload & {
                 interactive?: unknown
@@ -4905,7 +4938,7 @@ export async function monitorInlineProvider(params: {
       ...params,
       resolvedContext: ingress,
     })
-    const currentConfig = core.config.current() as OpenClawConfig
+    const currentConfig = resolveInlineLiveConfig(core.config.current()) as OpenClawConfig
     const modelContext = await resolveInlineCommandMenuModelContext({
       cfg: currentConfig,
       agentId: ingress.agentId,
@@ -4981,7 +5014,7 @@ export async function monitorInlineProvider(params: {
     // The reply dispatcher owns OpenClaw's live session snapshot and command-side
     // hooks. A direct session-store patch can update disk without changing the
     // running session, which is the mismatch this path exists to prevent.
-    const currentConfig = core.config.current() as OpenClawConfig
+    const currentConfig = resolveInlineLiveConfig(core.config.current()) as OpenClawConfig
     const isGroup = params.ingress.conversationKind !== "direct"
     const ctx = core.channel.reply.finalizeInboundContext({
       Body: params.command,
@@ -5060,7 +5093,7 @@ export async function monitorInlineProvider(params: {
       command: `/model ${params.selection}`,
     })
 
-    const currentConfig = core.config.current() as OpenClawConfig
+    const currentConfig = resolveInlineLiveConfig(core.config.current()) as OpenClawConfig
     const applied = await resolveInlineCommandMenuModelContext({
       cfg: currentConfig,
       agentId: params.ingress.agentId,
@@ -5084,7 +5117,7 @@ export async function monitorInlineProvider(params: {
     ingress: InlineSystemEventContext,
     reasoningLevel: string,
   ): Promise<void> => {
-    const currentConfig = core.config.current() as OpenClawConfig
+    const currentConfig = resolveInlineLiveConfig(core.config.current()) as OpenClawConfig
     const storePath = resolveStorePath(currentConfig.session?.store, { agentId: ingress.agentId })
     await applySessionEntryPatch({
       agentId: ingress.agentId,
@@ -5100,13 +5133,9 @@ export async function monitorInlineProvider(params: {
     ingress: InlineSystemEventContext,
     selection: string,
   ): Promise<void> => {
-    const committed = await core.config.mutateConfigFile({
-      afterWrite: INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE,
-      mutate: (draft: OpenClawConfig) => {
-        setOpenClawAgentDefaultModel(draft, ingress.agentId, selection)
-      },
+    cfg = await mutateInlineLiveConfig(core.config as never, (draft: OpenClawConfig) => {
+      setOpenClawAgentDefaultModel(draft, ingress.agentId, selection)
     })
-    cfg = committed.nextConfig as OpenClawConfig
   }
 
   const answerOpenClawBotSettingsRequest = async (event: {
@@ -5219,16 +5248,12 @@ export async function monitorInlineProvider(params: {
               }
             },
             setReplyThreads: async (value) => {
-              const committed = await core.config.mutateConfigFile({
-                afterWrite: INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE,
-                mutate: (draft: OpenClawConfig) => setInlineThreadReplyMode({
-                  draft,
-                  accountId: account.accountId,
-                  groupId: String(ingress.effectiveChatId),
-                  mode: value,
-                }),
-              })
-              cfg = committed.nextConfig as OpenClawConfig
+              cfg = await mutateInlineLiveConfig(core.config as never, (draft: OpenClawConfig) => setInlineThreadReplyMode({
+                draft,
+                accountId: account.accountId,
+                groupId: String(ingress.effectiveChatId),
+                mode: value,
+              }))
               appliedReplyThreads = value
             },
             resolveContext: async () => (await resolveOpenClawBotSettings({
