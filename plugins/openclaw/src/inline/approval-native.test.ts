@@ -165,6 +165,101 @@ describe("inline/native approvals", () => {
     ).toEqual([{ to: "user:51" }])
   })
 
+  it.each([
+    {
+      name: "prefixed chat target keeps its thread",
+      overrides: { turnSourceTo: "inline:chat:7", turnSourceThreadId: "8" },
+      expected: { to: "chat:7", threadId: "8" },
+    },
+    {
+      name: "numeric thread id is normalized",
+      overrides: { turnSourceTo: "chat:7", turnSourceThreadId: 9 as unknown as string },
+      expected: { to: "chat:7", threadId: "9" },
+    },
+    {
+      name: "DM origin never carries a thread",
+      overrides: { turnSourceTo: "user:51", turnSourceThreadId: "8" },
+      expected: { to: "user:51" },
+    },
+    {
+      name: "non-numeric target has no Inline origin",
+      overrides: { turnSourceTo: "chat:general", turnSourceThreadId: undefined },
+      expected: null,
+    },
+    {
+      name: "another channel's turn has no Inline origin",
+      overrides: { turnSourceChannel: "telegram", turnSourceTo: "chat:7", sessionKey: undefined },
+      expected: null,
+    },
+  ])("routes the approval card's origin: $name", async ({ overrides, expected }) => {
+    const cfg = {
+      channels: { inline: { token: "token", execApprovals: { approvers: ["51"], target: "both" } } },
+    } as OpenClawConfig
+    const request = buildExecRequest(overrides as Partial<ExecApprovalRequest["request"]>)
+
+    const target = await inlineApprovalCapability.nativeAsync!.resolveOriginTarget!({
+      cfg,
+      accountId: "default",
+      approvalKind: "exec",
+      request,
+    })
+
+    expect(target).toEqual(expected)
+  })
+
+  it("falls back to the Inline session when the request has no turn source", async () => {
+    const cfg = {
+      channels: { inline: { token: "token", execApprovals: { approvers: ["51"], target: "both" } } },
+    } as OpenClawConfig
+    const request = buildExecRequest({
+      turnSourceChannel: undefined,
+      turnSourceAccountId: undefined,
+      turnSourceTo: undefined,
+      sessionKey: "agent:main:inline:group:7",
+    } as Partial<ExecApprovalRequest["request"]>)
+
+    const target = await inlineApprovalCapability.nativeAsync!.resolveOriginTarget!({
+      cfg,
+      accountId: "default",
+      approvalKind: "exec",
+      request,
+    })
+
+    expect(target).toEqual({ to: "chat:7" })
+  })
+
+  it("tells a non-approver that Inline exec approvals are off for this bot", () => {
+    const disabled = { channels: { inline: { token: "token", execApprovals: { enabled: false } } } } as OpenClawConfig
+    const enabled = {
+      channels: { inline: { token: "token", execApprovals: { approvers: ["51"] } } },
+    } as OpenClawConfig
+
+    expect(
+      inlineApprovalCapability.resolveApproveCommandBehavior!({
+        cfg: disabled,
+        accountId: "default",
+        senderId: "user:77",
+        approvalKind: "exec",
+      } as any),
+    ).toMatchObject({ kind: "reply", text: expect.stringContaining("not enabled") })
+    expect(
+      inlineApprovalCapability.resolveApproveCommandBehavior!({
+        cfg: enabled,
+        accountId: "default",
+        senderId: "user:77",
+        approvalKind: "exec",
+      } as any),
+    ).toBeUndefined()
+    expect(
+      inlineApprovalCapability.resolveApproveCommandBehavior!({
+        cfg: disabled,
+        accountId: "default",
+        senderId: "user:77",
+        approvalKind: "plugin",
+      } as any),
+    ).toBeUndefined()
+  })
+
   it("matches approval requests to Inline accounts asynchronously", async () => {
     const accounts = {
       a: { token: "token-a", execApprovals: { approvers: ["51"] } },
