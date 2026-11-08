@@ -1330,6 +1330,7 @@ impl ChatsCreateSubthreadArgs {
                 })
                 .collect(),
             agent_context: None,
+            reserved_chat_id: None,
         })
     }
 }

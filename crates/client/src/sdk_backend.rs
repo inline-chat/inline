@@ -1774,6 +1774,7 @@ impl ClientBackend for SdkBackend {
                         agent_context: requested_agent_context
                             .as_ref()
                             .map(agent_thread_context_to_proto),
+                        reserved_chat_id: None,
                     },
                 )
                 .await?;
