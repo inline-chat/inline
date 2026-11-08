@@ -138,6 +138,7 @@ export const inlineProtocolRpcExecutionLane = (rpc: RpcCall): string | undefined
     case "markAsUnread": return peerLane(rpc.input.markAsUnread.peerId)
     case "acknowledgeMessages": return peerLane(rpc.input.acknowledgeMessages.peerId)
     case "readMessages": return peerLane(rpc.input.readMessages.peerId)
+    case "readActivity": return peerLane(rpc.input.readActivity.peerId)
     case "updateDialogNotificationSettings": {
       return peerLane(rpc.input.updateDialogNotificationSettings.peerId)
     }

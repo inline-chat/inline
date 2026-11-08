@@ -3,6 +3,7 @@ import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"
 import { DialogsModel } from "@in/server/db/models/dialogs"
+import { getActivityCounts } from "@in/server/modules/activityItems"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log } from "@in/server/utils/log"
@@ -264,6 +265,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
       const unreadCount = snapshotDialog
         ? await DialogsModel.getUnreadCount(snapshotChat.id, currentUserId, tx)
         : 0
+      const unreadActivity = snapshotDialog ? await getActivityCounts(currentUserId, snapshotChat.id, tx) : undefined
       const encodedChat = await Encoders.chatForUser(snapshotChat, {
         encodingForUserId: currentUserId,
         tx,
@@ -342,7 +344,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
 
       return {
         chat: encodedChat,
-        dialog: snapshotDialog ? Encoders.dialog(snapshotDialog, { unreadCount }) : undefined,
+        dialog: snapshotDialog ? Encoders.dialog(snapshotDialog, { unreadCount, unreadActivity }) : undefined,
         pinnedMessageIds: pinnedRows.map((row) => BigInt(row.messageId)),
         anchorMessage: encodedAnchorMessage,
         user: peer

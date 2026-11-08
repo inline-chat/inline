@@ -94,7 +94,7 @@ export function liveRequirements(updates: readonly Update[], recipient: number):
       case "updateReadMaxId": case "updateUserSettings": case "markAsUnread": case "dialogArchived":
       case "dialogNotificationSettings": case "dialogFollowMode": case "dialogCollapsedMaxId":
       case "dialogFolder": case "dialogTranslation": case "updatedUser": case "messageActionAnswered":
-      case "agentGrant": case "agentRuntime": case "agentSettings": break
+      case "agentGrant": case "agentRuntime": case "agentSettings": case "unreadActivity": break
       // Like an action invocation, the bot must still have access to the session's chat.
       case "agentSessionControl": chat(u.agentSessionControl.chatId); break
       // Other transports already own these transient events and repair hints.

@@ -62,6 +62,7 @@ import { deleteMemberHandler } from "@in/server/realtime/handlers/space.deleteMe
 import { updateMemberAccessHandler } from "@in/server/realtime/handlers/space.updateMemberAccess"
 import { markAsUnread } from "./messages.markAsUnread"
 import { readMessages } from "./messages.readMessages"
+import { getUnreadActivity, readActivity } from "./messages.unreadActivity"
 import { getUpdatesState } from "@in/server/realtime/handlers/updates.getUpdatesState"
 import { getUpdates } from "@in/server/realtime/handlers/updates.getUpdates"
 import { forwardMessagesHandler } from "@in/server/realtime/handlers/messages.forwardMessages"
@@ -928,6 +929,18 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await readMessages(call.input.readMessages, handlerContext)
       return { oneofKind: "readMessages", readMessages: result }
+    }
+
+    case Method.GET_UNREAD_ACTIVITY: {
+      if (call.input.oneofKind !== "getUnreadActivity") throw RealtimeRpcError.BadRequest()
+      const result = await getUnreadActivity(call.input.getUnreadActivity, handlerContext)
+      return { oneofKind: "getUnreadActivity", getUnreadActivity: result }
+    }
+
+    case Method.READ_ACTIVITY: {
+      if (call.input.oneofKind !== "readActivity") throw RealtimeRpcError.BadRequest()
+      const result = await readActivity(call.input.readActivity, handlerContext)
+      return { oneofKind: "readActivity", readActivity: result }
     }
     
     case Method.GET_UPDATES_STATE: {

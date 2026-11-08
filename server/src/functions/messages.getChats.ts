@@ -27,6 +27,7 @@ import {
   type DbFile,
 } from "@in/server/db/schema"
 import { DialogsModel } from "@in/server/db/models/dialogs"
+import { getActivityCountsForChats } from "@in/server/modules/activityItems"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 import { getDialogFolders } from "@in/server/modules/dialogFolders"
@@ -657,10 +658,16 @@ async function readCatalog(input: Input, context: FunctionContext, work: Catalog
       tx,
     })
 
+    const activityCounts = await getActivityCountsForChats({
+      userId: currentUserId,
+      chatIds: dialogsList.map((d) => d.chatId),
+      tx,
+    })
+
     // // 8. Encode everything to protocol buffer types
     const encodedDialogs = dialogsList.map((dialog) => {
       const unreadCount = unreadCounts.find((uc) => uc.chatId === dialog.chatId)?.unreadCount ?? 0
-      return Encoders.dialog(dialog, { unreadCount })
+      return Encoders.dialog(dialog, { unreadCount, unreadActivity: activityCounts.get(dialog.chatId) })
     })
 
     const usersById = new Map<number, DbUser & { photoFile?: DbFile | null }>()
