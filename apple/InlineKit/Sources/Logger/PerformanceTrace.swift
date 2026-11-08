@@ -195,11 +195,15 @@ public enum PerformanceTrace {
       "video_transcode_export_preset", "share_photo_heic_as_document", "share_photo_mime_as_document",
       "create_thread_direct",
     ],
+    // `plaintext` and `sync` come from extension builds before Apple filtering code was removed.
     "notification_outcome": [
-      "decrypted", "plaintext", "unsupported_payload", "key_missing", "decrypt_failed", "withheld", "sync",
+      "decrypted", "placeholder", "unsupported_payload", "key_missing", "key_unavailable", "stale_key",
+      "decrypt_failed", "withheld", "plaintext", "sync",
     ],
+    "placeholder_reason": ["no_device_key", "encryption_failed", "too_large", "unknown"],
     "withheld_reason": ["missingRecipient", "missingFence", "fenceUnavailable", "signedOut", "otherAccount"],
     "delivery_end": ["expired"],
+    "registration_outcome": ["key_unavailable"],
   ]
   private static let connectionReasonValues: Set<String> = [
     "none", "user_stop", "auth_lost", "auth_failed", "auth_timeout", "transport_error", "transport_disconnected",
@@ -209,6 +213,7 @@ public enum PerformanceTrace {
   private static let healthEventNames: Set<String> = [
     "realtime.connection.opened", "realtime.connection.recovered", "realtime.v3_fallback", "realtime.v3_upgrade",
     "files.download", "messages.send", "sync.catchup", "app.fallback", "notifications.delivery",
+    "notifications.registration",
   ]
   private static let platformName: String = {
     #if os(macOS)
