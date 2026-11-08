@@ -598,6 +598,8 @@ message Block {
     BlockCallout callout = 16;
     BlockMeter meter = 17;
     BlockForm form = 18;
+    // Bot only. Sandboxed HTML; at most one per message.
+    BlockWidget widget = 19;
   }
 }
 
@@ -913,6 +915,37 @@ message MessageFormSelection {
   repeated string option_ids = 1;
   // The "Other" answer, when the select allows one.
   optional string other_text = 2;
+}
+
+// A bot's HTML widget, rendered in a sandbox with no network access. The title
+// range is the fallback older clients, notifications and search use. Clients
+// that can't render widgets show the flat text.
+message BlockWidget {
+  // Bot-chosen identity, unique among the message's action and form IDs, and
+  // stable across edits: per-viewer widget state is keyed by it. Same
+  // character set as MessageAction.action_id.
+  string widget_id = 1;
+  BlockText title = 2;
+  // An HTML fragment or a full document. UTF-8, at most 256 KiB.
+  string html = 3;
+  // The content height the sender measured, in CSS px at 640 px wide, so the
+  // first frame reserves the right space. Clamped to 80...2000.
+  optional uint32 height = 4;
+  // Images the HTML references by position as "media/0", "media/1", ...
+  // They use the block image pipeline, so they can be pending. No alt text.
+  repeated BlockImage images = 5;
+  // Checked by the server before the bot sees an inline.action() call.
+  AgentGrantRequirement required_grant = 6;
+}
+
+// A widget's inline.action(name, payload) call. Unlike a callback button's
+// data, which the bot wrote, the viewer's client supplies every field: bots
+// must treat both as untrusted input.
+message MessageWidgetCall {
+  // Same character set as MessageAction.action_id, at most 64 characters.
+  string name = 1;
+  // UTF-8 JSON, at most 4 KiB. Empty means no payload.
+  bytes payload = 2;
 }
 
 message Message {
@@ -4161,10 +4194,13 @@ message SendMessageResult {
 message InvokeMessageActionInput {
   InputPeer peer_id = 1;
   int64 message_id = 2;
-  // A callback action's ID, or a form's form_id when submitting it.
+  // A callback action's ID, a form's form_id when submitting it, or a
+  // widget's widget_id for a call from inside it.
   string action_id = 3;
   // Required when action_id names a BlockForm, absent otherwise.
   optional MessageFormSubmission form = 4;
+  // Required when action_id names a BlockWidget, absent otherwise.
+  optional MessageWidgetCall widget_call = 5;
 }
 
 message InvokeMessageActionResult {
@@ -4969,6 +5005,8 @@ message UpdateMessageActionInvoked {
   // A form submission. Secret values are present only in the live delivery;
   // catch-up copies mark them redacted.
   optional MessageFormSubmission form = 7;
+  // A call from inside a widget; action_id is its widget_id and data is empty.
+  optional MessageWidgetCall widget_call = 8;
 }
 
 // A chat member's view of an agent session's run state changed.

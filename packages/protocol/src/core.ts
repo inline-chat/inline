@@ -1553,6 +1553,14 @@ export interface Block {
          */
         form: BlockForm;
     } | {
+        oneofKind: "widget";
+        /**
+         * Bot only. Sandboxed HTML; at most one per message.
+         *
+         * @generated from protobuf field: BlockWidget widget = 19;
+         */
+        widget: BlockWidget;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2429,6 +2437,74 @@ export interface MessageFormSelection {
      * @generated from protobuf field: optional string other_text = 2;
      */
     otherText?: string;
+}
+/**
+ * A bot's HTML widget, rendered in a sandbox with no network access. The title
+ * range is the fallback older clients, notifications and search use. Clients
+ * that can't render widgets show the flat text.
+ *
+ * @generated from protobuf message BlockWidget
+ */
+export interface BlockWidget {
+    /**
+     * Bot-chosen identity, unique among the message's action and form IDs, and
+     * stable across edits: per-viewer widget state is keyed by it. Same
+     * character set as MessageAction.action_id.
+     *
+     * @generated from protobuf field: string widget_id = 1;
+     */
+    widgetId: string;
+    /**
+     * @generated from protobuf field: BlockText title = 2;
+     */
+    title?: BlockText;
+    /**
+     * An HTML fragment or a full document. UTF-8, at most 256 KiB.
+     *
+     * @generated from protobuf field: string html = 3;
+     */
+    html: string;
+    /**
+     * The content height the sender measured, in CSS px at 640 px wide, so the
+     * first frame reserves the right space. Clamped to 80...2000.
+     *
+     * @generated from protobuf field: optional uint32 height = 4;
+     */
+    height?: number;
+    /**
+     * Images the HTML references by position as "media/0", "media/1", ...
+     * They use the block image pipeline, so they can be pending. No alt text.
+     *
+     * @generated from protobuf field: repeated BlockImage images = 5;
+     */
+    images: BlockImage[];
+    /**
+     * Checked by the server before the bot sees an inline.action() call.
+     *
+     * @generated from protobuf field: AgentGrantRequirement required_grant = 6;
+     */
+    requiredGrant: AgentGrantRequirement;
+}
+/**
+ * A widget's inline.action(name, payload) call. Unlike a callback button's
+ * data, which the bot wrote, the viewer's client supplies every field: bots
+ * must treat both as untrusted input.
+ *
+ * @generated from protobuf message MessageWidgetCall
+ */
+export interface MessageWidgetCall {
+    /**
+     * Same character set as MessageAction.action_id, at most 64 characters.
+     *
+     * @generated from protobuf field: string name = 1;
+     */
+    name: string;
+    /**
+     * UTF-8 JSON, at most 4 KiB. Empty means no payload.
+     *
+     * @generated from protobuf field: bytes payload = 2;
+     */
+    payload: Uint8Array;
 }
 /**
  * @generated from protobuf message Message
@@ -11118,7 +11194,8 @@ export interface InvokeMessageActionInput {
      */
     messageId: bigint;
     /**
-     * A callback action's ID, or a form's form_id when submitting it.
+     * A callback action's ID, a form's form_id when submitting it, or a
+     * widget's widget_id for a call from inside it.
      *
      * @generated from protobuf field: string action_id = 3;
      */
@@ -11129,6 +11206,12 @@ export interface InvokeMessageActionInput {
      * @generated from protobuf field: optional MessageFormSubmission form = 4;
      */
     form?: MessageFormSubmission;
+    /**
+     * Required when action_id names a BlockWidget, absent otherwise.
+     *
+     * @generated from protobuf field: optional MessageWidgetCall widget_call = 5;
+     */
+    widgetCall?: MessageWidgetCall;
 }
 /**
  * @generated from protobuf message InvokeMessageActionResult
@@ -13222,6 +13305,12 @@ export interface UpdateMessageActionInvoked {
      * @generated from protobuf field: optional MessageFormSubmission form = 7;
      */
     form?: MessageFormSubmission;
+    /**
+     * A call from inside a widget; action_id is its widget_id and data is empty.
+     *
+     * @generated from protobuf field: optional MessageWidgetCall widget_call = 8;
+     */
+    widgetCall?: MessageWidgetCall;
 }
 /**
  * A chat member's view of an agent session's run state changed.
@@ -21573,7 +21662,8 @@ class Block$Type extends MessageType<Block> {
             { no: 15, name: "steps", kind: "message", oneof: "kind", T: () => BlockSteps },
             { no: 16, name: "callout", kind: "message", oneof: "kind", T: () => BlockCallout },
             { no: 17, name: "meter", kind: "message", oneof: "kind", T: () => BlockMeter },
-            { no: 18, name: "form", kind: "message", oneof: "kind", T: () => BlockForm }
+            { no: 18, name: "form", kind: "message", oneof: "kind", T: () => BlockForm },
+            { no: 19, name: "widget", kind: "message", oneof: "kind", T: () => BlockWidget }
         ]);
     }
     create(value?: PartialMessage<Block>): Block {
@@ -21696,6 +21786,12 @@ class Block$Type extends MessageType<Block> {
                         form: BlockForm.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).form)
                     };
                     break;
+                case /* BlockWidget widget */ 19:
+                    message.kind = {
+                        oneofKind: "widget",
+                        widget: BlockWidget.internalBinaryRead(reader, reader.uint32(), options, (message.kind as any).widget)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -21762,6 +21858,9 @@ class Block$Type extends MessageType<Block> {
         /* BlockForm form = 18; */
         if (message.kind.oneofKind === "form")
             BlockForm.internalBinaryWrite(message.kind.form, writer.tag(18, WireType.LengthDelimited).fork(), options).join();
+        /* BlockWidget widget = 19; */
+        if (message.kind.oneofKind === "widget")
+            BlockWidget.internalBinaryWrite(message.kind.widget, writer.tag(19, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -23775,6 +23874,146 @@ class MessageFormSelection$Type extends MessageType<MessageFormSelection> {
  * @generated MessageType for protobuf message MessageFormSelection
  */
 export const MessageFormSelection = new MessageFormSelection$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class BlockWidget$Type extends MessageType<BlockWidget> {
+    constructor() {
+        super("BlockWidget", [
+            { no: 1, name: "widget_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "title", kind: "message", T: () => BlockText },
+            { no: 3, name: "html", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "height", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 5, name: "images", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => BlockImage },
+            { no: 6, name: "required_grant", kind: "enum", T: () => ["AgentGrantRequirement", AgentGrantRequirement, "AGENT_GRANT_REQUIREMENT_"] }
+        ]);
+    }
+    create(value?: PartialMessage<BlockWidget>): BlockWidget {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.widgetId = "";
+        message.html = "";
+        message.images = [];
+        message.requiredGrant = 0;
+        if (value !== undefined)
+            reflectionMergePartial<BlockWidget>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: BlockWidget): BlockWidget {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string widget_id */ 1:
+                    message.widgetId = reader.string();
+                    break;
+                case /* BlockText title */ 2:
+                    message.title = BlockText.internalBinaryRead(reader, reader.uint32(), options, message.title);
+                    break;
+                case /* string html */ 3:
+                    message.html = reader.string();
+                    break;
+                case /* optional uint32 height */ 4:
+                    message.height = reader.uint32();
+                    break;
+                case /* repeated BlockImage images */ 5:
+                    message.images.push(BlockImage.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* AgentGrantRequirement required_grant */ 6:
+                    message.requiredGrant = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: BlockWidget, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string widget_id = 1; */
+        if (message.widgetId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.widgetId);
+        /* BlockText title = 2; */
+        if (message.title)
+            BlockText.internalBinaryWrite(message.title, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* string html = 3; */
+        if (message.html !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.html);
+        /* optional uint32 height = 4; */
+        if (message.height !== undefined)
+            writer.tag(4, WireType.Varint).uint32(message.height);
+        /* repeated BlockImage images = 5; */
+        for (let i = 0; i < message.images.length; i++)
+            BlockImage.internalBinaryWrite(message.images[i], writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* AgentGrantRequirement required_grant = 6; */
+        if (message.requiredGrant !== 0)
+            writer.tag(6, WireType.Varint).int32(message.requiredGrant);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message BlockWidget
+ */
+export const BlockWidget = new BlockWidget$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageWidgetCall$Type extends MessageType<MessageWidgetCall> {
+    constructor() {
+        super("MessageWidgetCall", [
+            { no: 1, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "payload", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageWidgetCall>): MessageWidgetCall {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.name = "";
+        message.payload = new Uint8Array(0);
+        if (value !== undefined)
+            reflectionMergePartial<MessageWidgetCall>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageWidgetCall): MessageWidgetCall {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string name */ 1:
+                    message.name = reader.string();
+                    break;
+                case /* bytes payload */ 2:
+                    message.payload = reader.bytes();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageWidgetCall, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string name = 1; */
+        if (message.name !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.name);
+        /* bytes payload = 2; */
+        if (message.payload.length)
+            writer.tag(2, WireType.LengthDelimited).bytes(message.payload);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageWidgetCall
+ */
+export const MessageWidgetCall = new MessageWidgetCall$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Message$Type extends MessageType<Message> {
     constructor() {
@@ -46167,7 +46406,8 @@ class InvokeMessageActionInput$Type extends MessageType<InvokeMessageActionInput
             { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
             { no: 2, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "action_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 4, name: "form", kind: "message", T: () => MessageFormSubmission }
+            { no: 4, name: "form", kind: "message", T: () => MessageFormSubmission },
+            { no: 5, name: "widget_call", kind: "message", T: () => MessageWidgetCall }
         ]);
     }
     create(value?: PartialMessage<InvokeMessageActionInput>): InvokeMessageActionInput {
@@ -46195,6 +46435,9 @@ class InvokeMessageActionInput$Type extends MessageType<InvokeMessageActionInput
                 case /* optional MessageFormSubmission form */ 4:
                     message.form = MessageFormSubmission.internalBinaryRead(reader, reader.uint32(), options, message.form);
                     break;
+                case /* optional MessageWidgetCall widget_call */ 5:
+                    message.widgetCall = MessageWidgetCall.internalBinaryRead(reader, reader.uint32(), options, message.widgetCall);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -46219,6 +46462,9 @@ class InvokeMessageActionInput$Type extends MessageType<InvokeMessageActionInput
         /* optional MessageFormSubmission form = 4; */
         if (message.form)
             MessageFormSubmission.internalBinaryWrite(message.form, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* optional MessageWidgetCall widget_call = 5; */
+        if (message.widgetCall)
+            MessageWidgetCall.internalBinaryWrite(message.widgetCall, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -52040,7 +52286,8 @@ class UpdateMessageActionInvoked$Type extends MessageType<UpdateMessageActionInv
             { no: 4, name: "actor_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 5, name: "action_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 6, name: "data", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
-            { no: 7, name: "form", kind: "message", T: () => MessageFormSubmission }
+            { no: 7, name: "form", kind: "message", T: () => MessageFormSubmission },
+            { no: 8, name: "widget_call", kind: "message", T: () => MessageWidgetCall }
         ]);
     }
     create(value?: PartialMessage<UpdateMessageActionInvoked>): UpdateMessageActionInvoked {
@@ -52081,6 +52328,9 @@ class UpdateMessageActionInvoked$Type extends MessageType<UpdateMessageActionInv
                 case /* optional MessageFormSubmission form */ 7:
                     message.form = MessageFormSubmission.internalBinaryRead(reader, reader.uint32(), options, message.form);
                     break;
+                case /* optional MessageWidgetCall widget_call */ 8:
+                    message.widgetCall = MessageWidgetCall.internalBinaryRead(reader, reader.uint32(), options, message.widgetCall);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -52114,6 +52364,9 @@ class UpdateMessageActionInvoked$Type extends MessageType<UpdateMessageActionInv
         /* optional MessageFormSubmission form = 7; */
         if (message.form)
             MessageFormSubmission.internalBinaryWrite(message.form, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* optional MessageWidgetCall widget_call = 8; */
+        if (message.widgetCall)
+            MessageWidgetCall.internalBinaryWrite(message.widgetCall, writer.tag(8, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

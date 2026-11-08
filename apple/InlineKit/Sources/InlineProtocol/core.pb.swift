@@ -4993,6 +4993,15 @@ public nonisolated struct Block: Sendable {
     set {kind = .form(newValue)}
   }
 
+  /// Bot only. Sandboxed HTML; at most one per message.
+  public var widget: BlockWidget {
+    get {
+      if case .widget(let v)? = kind {return v}
+      return BlockWidget()
+    }
+    set {kind = .widget(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Kind: Equatable, Sendable {
@@ -5019,6 +5028,8 @@ public nonisolated struct Block: Sendable {
     case callout(BlockCallout)
     case meter(BlockMeter)
     case form(BlockForm)
+    /// Bot only. Sandboxed HTML; at most one per message.
+    case widget(BlockWidget)
 
   }
 
@@ -6454,6 +6465,76 @@ public nonisolated struct MessageFormSelection: Sendable {
   public init() {}
 
   fileprivate var _otherText: String? = nil
+}
+
+/// A bot's HTML widget, rendered in a sandbox with no network access. The title
+/// range is the fallback older clients, notifications and search use. Clients
+/// that can't render widgets show the flat text.
+public nonisolated struct BlockWidget: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Bot-chosen identity, unique among the message's action and form IDs, and
+  /// stable across edits: per-viewer widget state is keyed by it. Same
+  /// character set as MessageAction.action_id.
+  public var widgetID: String = String()
+
+  public var title: BlockText {
+    get {_title ?? BlockText()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  /// An HTML fragment or a full document. UTF-8, at most 256 KiB.
+  public var html: String = String()
+
+  /// The content height the sender measured, in CSS px at 640 px wide, so the
+  /// first frame reserves the right space. Clamped to 80...2000.
+  public var height: UInt32 {
+    get {_height ?? 0}
+    set {_height = newValue}
+  }
+  /// Returns true if `height` has been explicitly set.
+  public var hasHeight: Bool {self._height != nil}
+  /// Clears the value of `height`. Subsequent reads from it will return its default value.
+  public mutating func clearHeight() {self._height = nil}
+
+  /// Images the HTML references by position as "media/0", "media/1", ...
+  /// They use the block image pipeline, so they can be pending. No alt text.
+  public var images: [BlockImage] = []
+
+  /// Checked by the server before the bot sees an inline.action() call.
+  public var requiredGrant: AgentGrantRequirement = .none
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _title: BlockText? = nil
+  fileprivate var _height: UInt32? = nil
+}
+
+/// A widget's inline.action(name, payload) call. Unlike a callback button's
+/// data, which the bot wrote, the viewer's client supplies every field: bots
+/// must treat both as untrusted input.
+public nonisolated struct MessageWidgetCall: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Same character set as MessageAction.action_id, at most 64 characters.
+  public var name: String = String()
+
+  /// UTF-8 JSON, at most 4 KiB. Empty means no payload.
+  public var payload: Data = Data()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public nonisolated struct Message: @unchecked Sendable {
@@ -19258,7 +19339,8 @@ public nonisolated struct InvokeMessageActionInput: Sendable {
 
   public var messageID: Int64 = 0
 
-  /// A callback action's ID, or a form's form_id when submitting it.
+  /// A callback action's ID, a form's form_id when submitting it, or a
+  /// widget's widget_id for a call from inside it.
   public var actionID: String = String()
 
   /// Required when action_id names a BlockForm, absent otherwise.
@@ -19271,12 +19353,23 @@ public nonisolated struct InvokeMessageActionInput: Sendable {
   /// Clears the value of `form`. Subsequent reads from it will return its default value.
   public mutating func clearForm() {self._form = nil}
 
+  /// Required when action_id names a BlockWidget, absent otherwise.
+  public var widgetCall: MessageWidgetCall {
+    get {_widgetCall ?? MessageWidgetCall()}
+    set {_widgetCall = newValue}
+  }
+  /// Returns true if `widgetCall` has been explicitly set.
+  public var hasWidgetCall: Bool {self._widgetCall != nil}
+  /// Clears the value of `widgetCall`. Subsequent reads from it will return its default value.
+  public mutating func clearWidgetCall() {self._widgetCall = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _peerID: InputPeer? = nil
   fileprivate var _form: MessageFormSubmission? = nil
+  fileprivate var _widgetCall: MessageWidgetCall? = nil
 }
 
 public nonisolated struct InvokeMessageActionResult: Sendable {
@@ -22608,11 +22701,22 @@ public nonisolated struct UpdateMessageActionInvoked: Sendable {
   /// Clears the value of `form`. Subsequent reads from it will return its default value.
   public mutating func clearForm() {self._form = nil}
 
+  /// A call from inside a widget; action_id is its widget_id and data is empty.
+  public var widgetCall: MessageWidgetCall {
+    get {_widgetCall ?? MessageWidgetCall()}
+    set {_widgetCall = newValue}
+  }
+  /// Returns true if `widgetCall` has been explicitly set.
+  public var hasWidgetCall: Bool {self._widgetCall != nil}
+  /// Clears the value of `widgetCall`. Subsequent reads from it will return its default value.
+  public mutating func clearWidgetCall() {self._widgetCall = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _form: MessageFormSubmission? = nil
+  fileprivate var _widgetCall: MessageWidgetCall? = nil
 }
 
 /// A chat member's view of an agent session's run state changed.
@@ -30447,7 +30551,7 @@ nonisolated extension BlockText: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
 nonisolated extension Block: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "Block"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}paragraph\0\u{1}heading\0\u{1}code\0\u{1}list\0\u{1}separator\0\u{1}image\0\u{1}album\0\u{1}disclosure\0\u{1}footer\0\u{1}quote\0\u{1}table\0\u{1}math\0\u{1}diff\0\u{1}fields\0\u{1}steps\0\u{1}callout\0\u{1}meter\0\u{1}form\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}paragraph\0\u{1}heading\0\u{1}code\0\u{1}list\0\u{1}separator\0\u{1}image\0\u{1}album\0\u{1}disclosure\0\u{1}footer\0\u{1}quote\0\u{1}table\0\u{1}math\0\u{1}diff\0\u{1}fields\0\u{1}steps\0\u{1}callout\0\u{1}meter\0\u{1}form\0\u{1}widget\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -30689,6 +30793,19 @@ nonisolated extension Block: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
           self.kind = .form(v)
         }
       }()
+      case 19: try {
+        var v: BlockWidget?
+        var hadOneofValue = false
+        if let current = self.kind {
+          hadOneofValue = true
+          if case .widget(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.kind = .widget(v)
+        }
+      }()
       default: break
       }
     }
@@ -30771,6 +30888,10 @@ nonisolated extension Block: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     case .form?: try {
       guard case .form(let v)? = self.kind else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
+    }()
+    case .widget?: try {
+      guard case .widget(let v)? = self.kind else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
     }()
     case nil: break
     }
@@ -32320,6 +32441,100 @@ nonisolated extension MessageFormSelection: SwiftProtobuf.Message, SwiftProtobuf
   public static func ==(lhs: MessageFormSelection, rhs: MessageFormSelection) -> Bool {
     if lhs.optionIds != rhs.optionIds {return false}
     if lhs._otherText != rhs._otherText {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension BlockWidget: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BlockWidget"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}widget_id\0\u{1}title\0\u{1}html\0\u{1}height\0\u{1}images\0\u{3}required_grant\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.widgetID) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._title) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.html) }()
+      case 4: try { try decoder.decodeSingularUInt32Field(value: &self._height) }()
+      case 5: try { try decoder.decodeRepeatedMessageField(value: &self.images) }()
+      case 6: try { try decoder.decodeSingularEnumField(value: &self.requiredGrant) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.widgetID.isEmpty {
+      try visitor.visitSingularStringField(value: self.widgetID, fieldNumber: 1)
+    }
+    try { if let v = self._title {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if !self.html.isEmpty {
+      try visitor.visitSingularStringField(value: self.html, fieldNumber: 3)
+    }
+    try { if let v = self._height {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 4)
+    } }()
+    if !self.images.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.images, fieldNumber: 5)
+    }
+    if self.requiredGrant != .none {
+      try visitor.visitSingularEnumField(value: self.requiredGrant, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BlockWidget, rhs: BlockWidget) -> Bool {
+    if lhs.widgetID != rhs.widgetID {return false}
+    if lhs._title != rhs._title {return false}
+    if lhs.html != rhs.html {return false}
+    if lhs._height != rhs._height {return false}
+    if lhs.images != rhs.images {return false}
+    if lhs.requiredGrant != rhs.requiredGrant {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension MessageWidgetCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageWidgetCall"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}name\0\u{1}payload\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      case 2: try { try decoder.decodeSingularBytesField(value: &self.payload) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.name.isEmpty {
+      try visitor.visitSingularStringField(value: self.name, fieldNumber: 1)
+    }
+    if !self.payload.isEmpty {
+      try visitor.visitSingularBytesField(value: self.payload, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageWidgetCall, rhs: MessageWidgetCall) -> Bool {
+    if lhs.name != rhs.name {return false}
+    if lhs.payload != rhs.payload {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -52158,7 +52373,7 @@ nonisolated extension SendMessageResult: SwiftProtobuf.Message, SwiftProtobuf._M
 
 nonisolated extension InvokeMessageActionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InvokeMessageActionInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}message_id\0\u{3}action_id\0\u{1}form\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}peer_id\0\u{3}message_id\0\u{3}action_id\0\u{1}form\0\u{3}widget_call\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -52170,6 +52385,7 @@ nonisolated extension InvokeMessageActionInput: SwiftProtobuf.Message, SwiftProt
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.actionID) }()
       case 4: try { try decoder.decodeSingularMessageField(value: &self._form) }()
+      case 5: try { try decoder.decodeSingularMessageField(value: &self._widgetCall) }()
       default: break
       }
     }
@@ -52192,6 +52408,9 @@ nonisolated extension InvokeMessageActionInput: SwiftProtobuf.Message, SwiftProt
     try { if let v = self._form {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
     } }()
+    try { if let v = self._widgetCall {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -52200,6 +52419,7 @@ nonisolated extension InvokeMessageActionInput: SwiftProtobuf.Message, SwiftProt
     if lhs.messageID != rhs.messageID {return false}
     if lhs.actionID != rhs.actionID {return false}
     if lhs._form != rhs._form {return false}
+    if lhs._widgetCall != rhs._widgetCall {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -56927,7 +57147,7 @@ nonisolated extension UpdateChatOpen: SwiftProtobuf.Message, SwiftProtobuf._Mess
 
 nonisolated extension UpdateMessageActionInvoked: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "UpdateMessageActionInvoked"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}interaction_id\0\u{3}chat_id\0\u{3}message_id\0\u{3}actor_user_id\0\u{3}action_id\0\u{1}data\0\u{1}form\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}interaction_id\0\u{3}chat_id\0\u{3}message_id\0\u{3}actor_user_id\0\u{3}action_id\0\u{1}data\0\u{1}form\0\u{3}widget_call\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -56942,6 +57162,7 @@ nonisolated extension UpdateMessageActionInvoked: SwiftProtobuf.Message, SwiftPr
       case 5: try { try decoder.decodeSingularStringField(value: &self.actionID) }()
       case 6: try { try decoder.decodeSingularBytesField(value: &self.data) }()
       case 7: try { try decoder.decodeSingularMessageField(value: &self._form) }()
+      case 8: try { try decoder.decodeSingularMessageField(value: &self._widgetCall) }()
       default: break
       }
     }
@@ -56973,6 +57194,9 @@ nonisolated extension UpdateMessageActionInvoked: SwiftProtobuf.Message, SwiftPr
     try { if let v = self._form {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
     } }()
+    try { if let v = self._widgetCall {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -56984,6 +57208,7 @@ nonisolated extension UpdateMessageActionInvoked: SwiftProtobuf.Message, SwiftPr
     if lhs.actionID != rhs.actionID {return false}
     if lhs.data != rhs.data {return false}
     if lhs._form != rhs._form {return false}
+    if lhs._widgetCall != rhs._widgetCall {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
