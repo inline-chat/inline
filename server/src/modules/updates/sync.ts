@@ -2182,6 +2182,7 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
             actionId: payload.userMessageActionInvoked.actionId,
             data: payload.userMessageActionInvoked.data,
             form: payload.userMessageActionInvoked.form,
+            widgetCall: payload.userMessageActionInvoked.widgetCall,
           },
         },
       }

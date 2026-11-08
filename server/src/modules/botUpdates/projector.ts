@@ -565,6 +565,8 @@ async function actionInvoked(input: {
   data: Uint8Array
   /** Stored copy: secret values are already redacted. */
   form?: MessageFormSubmission
+  /** A widget's `inline.action(name, payload)`, with the payload parsed. */
+  widgetCall?: { name: string; payload: unknown }
 }): Promise<void> {
   const actor = (await UsersModel.getUsersWithPhotos([input.actorUserId]))[0]?.user
   if (!actor) return
@@ -578,10 +580,15 @@ async function actionInvoked(input: {
       message_action: {
         interaction_id: Number(input.interactionId), chat: toEventChat(input.chat),
         message_id: input.messageId, actor: toUser(actor), date: Math.floor(Date.now() / 1_000),
-        action: Buffer.from(value, "utf8").equals(bytes)
-          ? { action_id: input.actionId, callback_data: value }
-          : { action_id: input.actionId, callback_data_base64: bytes.toString("base64") },
+        action: input.widgetCall
+          ? { action_id: input.actionId }
+          : Buffer.from(value, "utf8").equals(bytes)
+            ? { action_id: input.actionId, callback_data: value }
+            : { action_id: input.actionId, callback_data_base64: bytes.toString("base64") },
         ...(input.form ? { form: botFormSubmission(input.form) } : {}),
+        ...(input.widgetCall
+          ? { widget_call: { name: input.widgetCall.name, ...(input.widgetCall.payload === undefined ? {} : { payload: input.widgetCall.payload }) } }
+          : {}),
       },
     },
     sourceEventId: `action:${input.botUserId}:${input.interactionId}`,

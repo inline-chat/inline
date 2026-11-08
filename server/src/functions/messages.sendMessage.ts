@@ -291,6 +291,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
         text: inputText,
         entities: replyQuote?.entities ?? input.entities,
         parseMarkdown: input.parseMarkdown,
+        allowWidgets: context.isBot === true,
       })
     : undefined
   let text = outgoingText?.text
