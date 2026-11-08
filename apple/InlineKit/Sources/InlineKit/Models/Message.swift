@@ -706,6 +706,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
             blocks: callout.children,
             materializedPhotoIDs: &materializedPhotoIDs
           )
+        case let .widget(widget):
+          for image in widget.images {
+            try materializeBlockPhoto(db, image: image, materializedPhotoIDs: &materializedPhotoIDs)
+          }
         case .paragraph, .heading, .code, .separator, .footer, .table, .math,
              .diff, .fields, .steps, .meter, .form, nil:
           break
