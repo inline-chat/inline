@@ -156,9 +156,8 @@ fn asked_at(message: &proto::Message, user_id: i64, now: i64) -> bool {
         let Some(end) = offset.checked_add(length).filter(|end| *end <= units.len()) else {
             break;
         };
-        let gap_ok = char::decode_utf16(units[cursor..offset].iter().copied()).all(|unit| {
-            unit.is_ok_and(|c| c.is_whitespace() || [',', ':', ';', '&'].contains(&c))
-        });
+        let gap_ok = char::decode_utf16(units[cursor..offset].iter().copied())
+            .all(|unit| unit.is_ok_and(|c| c.is_whitespace() || [',', ':', ';', '&'].contains(&c)));
         if length == 0 || !gap_ok {
             break;
         }
@@ -390,7 +389,11 @@ mod tests {
     #[test]
     fn only_a_recent_message_that_starts_by_mentioning_them_asked_them() {
         let now = 1_000_000_000;
-        let ask = sent("@Dena, @Sam: is it out?", now - 60, vec![mention_at(0, 5, 41), mention_at(7, 4, 42)]);
+        let ask = sent(
+            "@Dena, @Sam: is it out?",
+            now - 60,
+            vec![mention_at(0, 5, 41), mention_at(7, 4, 42)],
+        );
         assert!(asked_at(&ask, 41, now));
         assert!(asked_at(&ask, 42, now));
         assert!(!asked_at(&ask, 43, now));
@@ -398,7 +401,11 @@ mod tests {
         let reference = sent("as @Dena said, done", now - 60, vec![mention_at(3, 5, 41)]);
         assert!(!asked_at(&reference, 41, now));
         // Old requests don't keep a door open.
-        let old = sent("@Dena ok?", now - HAND_BACK_WINDOW_SECS - 1, vec![mention_at(0, 5, 41)]);
+        let old = sent(
+            "@Dena ok?",
+            now - HAND_BACK_WINDOW_SECS - 1,
+            vec![mention_at(0, 5, 41)],
+        );
         assert!(!asked_at(&old, 41, now));
         assert!(!asked_at(&proto::Message::default(), 41, now));
     }
