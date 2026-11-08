@@ -2,6 +2,8 @@ import InlineKit
 import InlineUI
 import SwiftUI
 
+/// Agent Settings: the agent, this chat's output, the provider's settings,
+/// then usage. Same arrangement as the Mac popover (`BotChatSettingsLayout`).
 struct BotChatSettingsSheet: View {
   let coordinator: BotChatSettingsCoordinator
 
@@ -38,33 +40,41 @@ private struct BotChatSettingsSheetContent: View {
 
   var body: some View {
     let state = coordinator.selectedState
-    if state.phase == .loading, state.document == nil {
-      ContentUnavailableView {
-        Label("Loading Settings", systemImage: "slider.horizontal.3")
-      } description: {
-        ProgressView()
-          .accessibilityLabel("Loading agent settings")
-      }
-    } else if let document = state.document {
+    if let document = state.document {
+      let layout = BotChatSettingsLayout(document: document)
       Form {
-        if coordinator.bots.count > 1 {
-          BotChatSettingsAgentSection(coordinator: coordinator)
-        }
-        ForEach(document.sections) { section in
-          BotChatSettingsIOSSection(
-            section: section,
-            pendingItemIDs: state.pendingItemIDs,
-            onInvoke: coordinator.invoke(itemID:value:)
-          )
+        BotChatSettingsAgentSection(coordinator: coordinator)
+        if case let .problem(problem)? = state.surfaceStatus {
+          BotChatSettingsIOSProblemSection(problem: problem, onRetry: coordinator.refreshSelected)
         }
         if let botUserID = outputModeBotUserID {
           AgentOutputModeSection(peer: coordinator.peer, botUserID: botUserID)
         }
-        if let status = state.surfaceStatus {
-          BotChatSettingsIOSStatusSection(status: status, onRetry: coordinator.refreshSelected)
+        ForEach(layout.sections) { section in
+          BotChatSettingsIOSSection(
+            section: section,
+            pendingItemIDs: state.pendingItemIDs,
+            sharedReason: layout.accessNote,
+            onInvoke: coordinator.invoke(itemID:value:)
+          )
+        }
+        if layout.hasUsage {
+          BotChatSettingsIOSUsageSection(
+            layout: layout,
+            pendingItemIDs: state.pendingItemIDs,
+            onInvoke: coordinator.invoke(itemID:value:)
+          )
+        }
+        if let accessNote = layout.accessNote {
+          Section {} footer: {
+            Label(accessNote, systemImage: "lock")
+          }
         }
       }
       .refreshable { coordinator.refreshSelected() }
+    } else if state.phase == .loading || state.phase == .idle {
+      ProgressView()
+        .accessibilityLabel("Loading agent settings")
     } else if let problem = state.problem {
       ContentUnavailableView {
         Label(problem.message, systemImage: "exclamationmark.triangle")
@@ -81,31 +91,29 @@ private struct BotChatSettingsSheetContent: View {
   }
 }
 
+/// Who these settings are for; a switcher when the chat has several agents.
 private struct BotChatSettingsAgentSection: View {
   let coordinator: BotChatSettingsCoordinator
 
   var body: some View {
-    Section("Agent") {
-      if let selectedBot = coordinator.selectedBot {
-        Menu {
-          ForEach(coordinator.bots) { bot in
-            Button {
-              coordinator.selectBot(bot.id)
-            } label: {
-              if bot.id == selectedBot.id {
-                Label(bot.displayName, systemImage: "checkmark")
-              } else {
-                Text(bot.displayName)
-              }
+    if let selectedBot = coordinator.selectedBot {
+      Section {
+        if coordinator.bots.count > 1 {
+          Picker(selection: Binding(
+            get: { selectedBot.id },
+            set: { coordinator.selectBot($0) }
+          )) {
+            ForEach(coordinator.bots) { bot in
+              Text(bot.displayName).tag(bot.id)
             }
-          }
-        } label: {
-          LabeledContent("Agent") {
+          } label: {
             BotChatSettingsIOSAgentLabel(bot: selectedBot)
           }
+          .pickerStyle(.menu)
+          .accessibilityLabel("Choose agent")
+        } else {
+          BotChatSettingsIOSAgentLabel(bot: selectedBot)
         }
-        .accessibilityLabel("Choose agent")
-        .accessibilityValue(selectedBot.displayName)
       }
     }
   }
@@ -115,37 +123,30 @@ private struct BotChatSettingsIOSAgentLabel: View {
   let bot: BotChatSettingsBot
 
   var body: some View {
-    HStack(spacing: 8) {
-      UserAvatar(user: User(from: bot.user), size: 24)
+    HStack(spacing: 10) {
+      UserAvatar(user: User(from: bot.user), size: 28)
       Text(bot.displayName)
+        .font(.headline)
         .lineLimit(1)
     }
     .accessibilityElement(children: .combine)
   }
 }
 
-private struct BotChatSettingsIOSStatusSection: View {
-  let status: BotChatSettingsSurfaceStatus
+private struct BotChatSettingsIOSProblemSection: View {
+  let problem: BotChatSettingsProblem
   let onRetry: () -> Void
 
   var body: some View {
     Section {
       HStack(spacing: 10) {
-        switch status {
-        case .refreshing:
-          ProgressView()
-            .accessibilityHidden(true)
-          Text("Refreshing settings…")
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        case let .problem(problem):
-          Image(systemName: "exclamationmark.triangle")
-            .foregroundStyle(.orange)
-            .accessibilityHidden(true)
-          Text(problem.message)
-            .frame(maxWidth: .infinity, alignment: .leading)
-          Button("Retry", action: onRetry)
-        }
+        Image(systemName: "exclamationmark.triangle.fill")
+          .foregroundStyle(.orange)
+          .accessibilityHidden(true)
+        Text(problem.message)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        Button("Retry", action: onRetry)
+          .buttonStyle(.borderless)
       }
     }
   }
@@ -154,6 +155,7 @@ private struct BotChatSettingsIOSStatusSection: View {
 private struct BotChatSettingsIOSSection: View {
   let section: BotChatSettingsModel.Section
   let pendingItemIDs: Set<String>
+  let sharedReason: String?
   let onInvoke: (String, BotChatSettingsMutationValue?) -> Void
 
   var body: some View {
@@ -162,6 +164,7 @@ private struct BotChatSettingsIOSSection: View {
         BotChatSettingsIOSItem(
           item: item,
           isPending: pendingItemIDs.contains(item.id),
+          showsDisabledReason: item.disabledReason != sharedReason,
           onInvoke: onInvoke
         )
       }
@@ -173,23 +176,83 @@ private struct BotChatSettingsIOSSection: View {
   }
 }
 
+/// Limits and the context window as bars, with Compact beside the context.
+private struct BotChatSettingsIOSUsageSection: View {
+  let layout: BotChatSettingsLayout
+  let pendingItemIDs: Set<String>
+  let onInvoke: (String, BotChatSettingsMutationValue?) -> Void
+
+  var body: some View {
+    Section("Usage") {
+      ForEach(layout.meters) { meter in
+        VStack(alignment: .leading, spacing: 6) {
+          HStack(spacing: 8) {
+            Text(meter.title)
+              .frame(maxWidth: .infinity, alignment: .leading)
+            Text(meter.value)
+              .monospacedDigit()
+              .foregroundStyle(meter.isHigh ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+          }
+          ProgressView(value: min(1, max(0, meter.fraction)))
+            .tint(meter.isHigh ? .orange : .accentColor)
+            .accessibilityHidden(true)
+          if let detail = meter.detail {
+            Text(detail)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+        .accessibilityElement(children: .combine)
+      }
+      if let summary = layout.usageSummary, case let .info(text, tone) = summary.control {
+        VStack(alignment: .leading, spacing: 4) {
+          LabeledContent("Account") {
+            Text(text)
+              .foregroundStyle(tone == .warning ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+          }
+          if let details = summary.description {
+            Text(details)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+      }
+      if let action = layout.contextAction {
+        HStack {
+          Button(action.label ?? String(localized: "Compact Context")) { onInvoke(action.id, nil) }
+            .disabled(action.isDisabled || pendingItemIDs.contains(action.id))
+          Spacer()
+          if pendingItemIDs.contains(action.id) {
+            ProgressView()
+          }
+        }
+      }
+    }
+  }
+}
+
 private struct BotChatSettingsIOSItem: View {
   let item: BotChatSettingsModel.Item
   let isPending: Bool
+  let showsDisabledReason: Bool
   let onInvoke: (String, BotChatSettingsMutationValue?) -> Void
 
   private var label: String { item.label ?? "" }
 
+  /// Phones can't hover, so a locked control's own reason shows under it.
+  private var note: String? {
+    if item.isDisabled, showsDisabledReason, let reason = item.disabledReason { return reason }
+    switch item.control {
+    case .toggle, .button: return item.description
+    default: return nil
+    }
+  }
+
   var body: some View {
-    VStack(alignment: .leading, spacing: 5) {
+    VStack(alignment: .leading, spacing: 4) {
       control
-      if let description = item.description, !isButton {
-        Text(description)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      if item.isDisabled, let reason = item.disabledReason {
-        Text(reason)
+      if let note {
+        Text(note)
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -208,7 +271,6 @@ private struct BotChatSettingsIOSItem: View {
         pendingIndicator
       }
       .disabled(item.isDisabled)
-      .accessibilityHint(accessibilityHint)
     case let .select(value, options):
       HStack {
         Picker(label, selection: Binding(
@@ -221,135 +283,101 @@ private struct BotChatSettingsIOSItem: View {
               .disabled(option.isDisabled)
           }
         }
+        .pickerStyle(.menu)
         pendingIndicator
       }
       .disabled(item.isDisabled)
-      .accessibilityHint(accessibilityHint)
-      if let selectedDescription = options.first(where: { $0.value == value })?.description {
-        Text(selectedDescription)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
     case let .info(text, tone):
-      Label {
-        VStack(alignment: .leading, spacing: 2) {
-          if let label = item.label { Text(label).font(.subheadline.weight(.semibold)) }
-          Text(text).foregroundStyle(.secondary)
+      if let label = item.label, text.count <= 28 {
+        LabeledContent(label) {
+          HStack(spacing: 4) {
+            toneIcon(tone)
+            Text(text)
+          }
         }
-      } icon: {
-        Image(systemName: infoSymbol(for: tone))
-          .foregroundStyle(infoColor(for: tone))
+      } else {
+        Label {
+          VStack(alignment: .leading, spacing: 2) {
+            if let label = item.label { Text(label) }
+            Text(text).foregroundStyle(.secondary)
+          }
+        } icon: {
+          toneIcon(tone)
+        }
+        .accessibilityElement(children: .combine)
       }
-      .accessibilityElement(children: .combine)
     case .button:
       HStack {
         Button(label) { onInvoke(item.id, nil) }
           .disabled(item.isDisabled || isPending)
+        Spacer()
         pendingIndicator
-      }
-      if let description = item.description {
-        Text(description)
-          .font(.caption)
-          .foregroundStyle(.secondary)
       }
     case .folder:
       if let folder = item.control.folderPresentation {
-        BotChatSettingsIOSFolderControl(
-          label: label,
-          presentation: folder,
-          isDisabled: item.isDisabled,
-          disabledReason: item.disabledReason,
-          onSelect: { onInvoke(item.id, .string($0)) }
-        )
-        pendingIndicator
+        HStack {
+          BotChatSettingsIOSFolderControl(
+            label: label,
+            presentation: folder,
+            isDisabled: item.isDisabled,
+            onSelect: { onInvoke(item.id, .string($0)) }
+          )
+          pendingIndicator
+        }
       }
     }
-  }
-
-  private var isButton: Bool {
-    if case .button = item.control { return true }
-    return false
-  }
-
-  private var accessibilityHint: String {
-    item.disabledReason ?? item.description ?? ""
   }
 
   @ViewBuilder
   private var pendingIndicator: some View {
-    ProgressView()
-      .controlSize(.small)
-      .opacity(isPending ? 1 : 0)
-      .accessibilityLabel("Updating \(label)")
-      .accessibilityHidden(!isPending)
-  }
-
-  private func infoColor(for tone: BotChatSettingsModel.InfoTone) -> Color {
-    switch tone {
-    case .neutral: .secondary
-    case .success: .green
-    case .warning: .orange
-    case .error: .red
+    if isPending {
+      ProgressView()
+        .accessibilityLabel("Updating \(label)")
     }
   }
 
-  private func infoSymbol(for tone: BotChatSettingsModel.InfoTone) -> String {
+  @ViewBuilder
+  private func toneIcon(_ tone: BotChatSettingsModel.InfoTone) -> some View {
     switch tone {
-    case .neutral: "info.circle"
-    case .success: "checkmark.circle"
-    case .warning: "exclamationmark.triangle"
-    case .error: "xmark.octagon"
+    case .neutral: EmptyView()
+    case .success: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+    case .warning: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+    case .error: Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
     }
   }
 }
 
+/// Recent folders on the agent's machine; adding one happens there.
 private struct BotChatSettingsIOSFolderControl: View {
   let label: String
   let presentation: BotChatSettingsModel.FolderPresentation
   let isDisabled: Bool
-  let disabledReason: String?
   let onSelect: (String) -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 5) {
-      Menu {
+    Menu {
+      Section("On \(presentation.hostLabel)") {
         ForEach(presentation.recentFolders) { folder in
           Button {
             onSelect(folder.value)
           } label: {
             if folder.value == presentation.selectedFolder.value {
-              Label(menuLabel(folder), systemImage: "checkmark")
+              Label(folder.label, systemImage: "checkmark")
             } else {
-              Text(menuLabel(folder))
+              Text(folder.label)
             }
+            if let parentHint = folder.parentHint { Text(parentHint) }
           }
           .disabled(folder.isDisabled)
         }
-        Divider()
-        Button(presentation.pickerTitle) {}
-          .disabled(true)
-      } label: {
-        LabeledContent(label, value: menuLabel(presentation.selectedFolder))
       }
-      .disabled(isDisabled)
-      .accessibilityValue(menuLabel(presentation.selectedFolder))
-      .accessibilityHint(disabledReason ?? presentation.remotePickerMessage)
-
-      Text("On \(presentation.hostLabel)")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      Text(presentation.remotePickerMessage)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      Text(presentation.commandFallback)
-        .font(.caption.monospaced())
-        .foregroundStyle(.secondary)
-        .textSelection(.enabled)
+      Section(presentation.remotePickerMessage) {
+        Text(presentation.commandFallback)
+      }
+    } label: {
+      LabeledContent(label, value: presentation.selectedFolder.label)
     }
-  }
-
-  private func menuLabel(_ folder: BotChatSettingsModel.FolderOption) -> String {
-    guard let parentHint = folder.parentHint else { return folder.label }
-    return "\(folder.label) — \(parentHint)"
+    .disabled(isDisabled)
+    .accessibilityValue(presentation.selectedFolder.label)
   }
 }
