@@ -884,6 +884,12 @@ class InlineAdapter(BasePlatformAdapter):
     supports_code_blocks = True
     splits_long_messages = True
 
+    @classmethod
+    def supports_exec_approval_buttons(cls) -> bool:
+        # Hermes sends the button card only when this is true. Inline renders it in
+        # send_exec_approval itself rather than through _send_exec_approval_prompt.
+        return True
+
     def __init__(self, config: PlatformConfig, *, use_ephemeral_sidecar_port: bool = False):
         super().__init__(config, Platform("inline"))
         extra = config.extra or {}
@@ -1091,6 +1097,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._clarify_choices: "OrderedDict[str, List[str]]" = OrderedDict()
         self._clarify_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._approval_sessions: "OrderedDict[str, str]" = OrderedDict()
+        self._approval_request_ids: "OrderedDict[str, str]" = OrderedDict()
         self._slash_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._choice_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._update_prompt_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
@@ -4443,9 +4450,20 @@ class InlineAdapter(BasePlatformAdapter):
             await self._finish_action(event, "Approval expired", "Approval expired; the command was not run.")
             return True
         try:
-            from tools.approval import resolve_gateway_approval
-            count = resolve_gateway_approval(session_key, choice)
+            from tools import approval as approval_mod
+            request_id = self._approval_request_ids.get(approval_id)
+            if request_id:
+                # Resolve only the request this card was sent for. Once it has settled
+                # (timeout, /approve), the tap resolves nothing rather than the next one.
+                resolve_card = getattr(approval_mod, "resolve_gateway_approval_card", None)
+                if resolve_card is not None:
+                    count = resolve_card(session_key, choice, request_id)
+                else:
+                    count = approval_mod.resolve_gateway_approval(session_key, choice, request_id=request_id)
+            else:
+                count = approval_mod.resolve_gateway_approval(session_key, choice)
             self._approval_sessions.pop(approval_id, None)
+            self._approval_request_ids.pop(approval_id, None)
             if not count:
                 await self._finish_action(event, "Approval expired", "Approval expired; the command was not run.")
                 return True
@@ -5317,6 +5335,7 @@ class InlineAdapter(BasePlatformAdapter):
         allow_permanent: bool = True,
         allow_session: bool = True,
         smart_denied: bool = False,
+        request_id: Optional[str] = None,
     ) -> SendResult:
         approval_id = secrets.token_hex(6)
         text = f"Command approval required\n\n```\n{command[:2000]}\n```\n\nReason: {description}"
@@ -5336,6 +5355,8 @@ class InlineAdapter(BasePlatformAdapter):
         })
         if result.success:
             self._remember(self._approval_sessions, approval_id, session_key)
+            if request_id:
+                self._remember(self._approval_request_ids, approval_id, str(request_id))
         return result
 
     async def send_slash_confirm(self, chat_id: str, title: str, message: str, session_key: str, confirm_id: str, metadata: Optional[Dict[str, Any]] = None) -> SendResult:

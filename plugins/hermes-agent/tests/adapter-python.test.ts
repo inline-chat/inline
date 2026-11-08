@@ -1764,8 +1764,8 @@ assert seeded["state_path"] == "/tmp/inline-state.json"
 
 approval_state = {"fail": False, "count": 1, "calls": []}
 
-def resolve_gateway_approval(session_key, choice):
-    approval_state["calls"].append((session_key, choice))
+def resolve_gateway_approval(session_key, choice, request_id=None):
+    approval_state["calls"].append((session_key, choice) if request_id is None else (session_key, choice, request_id))
     if approval_state["fail"]:
         raise RuntimeError("approval resolver failed")
     return approval_state["count"]
@@ -4127,8 +4127,18 @@ async def assert_action_thread_targets():
         ["Allow Once", "Deny"],
     ]
     assert "one operation only" in calls[-1][1]["text"]
+    assert not adapter._approval_request_ids
+
+    # Hermes passes the id of the approval request the card answers; the card keeps it.
+    calls.clear()
+    await adapter.send_exec_approval("chat:10", "echo request", "session-6", request_id="request-6")
+    approval_id = calls[-1][1]["actions"]["rows"][0]["actions"][0]["id"].split(":")[2]
+    assert adapter._approval_sessions[approval_id] == "session-6"
+    assert dict(adapter._approval_request_ids) == {approval_id: "request-6"}
 
 asyncio.run(assert_action_thread_targets())
+# Hermes sends the button card only to adapters that report native approval buttons.
+assert InlineAdapter.supports_exec_approval_buttons() is True
 
 async def assert_upload_size_cap():
     with tempfile.TemporaryDirectory() as tmp:
@@ -5677,6 +5687,26 @@ async def assert_callback_state_lifecycle():
     assert answers[-1] == ("interaction-9", "Approval expired")
     assert edits[-1][1:] == ("Approval expired; the command was not run.", {"rows": []})
     approval_state["count"] = 1
+
+    # A card sent with a request id resolves that request only, never the next one queued.
+    adapter._approval_sessions["approval-req"] = "session-req"
+    adapter._approval_request_ids["approval-req"] = "request-1"
+    assert await adapter._handle_approval_action(action_event("appr:approval-req:once", "interaction-req"))
+    assert approval_state["calls"][-1] == ("session-req", "once", "request-1")
+    assert "approval-req" not in adapter._approval_request_ids
+    assert answers[-1] == ("interaction-req", "Approved once")
+
+    card_calls = []
+    approval.resolve_gateway_approval_card = lambda session_key, choice, request_id: card_calls.append(
+        (session_key, choice, request_id)
+    ) or 0
+    adapter._approval_sessions["approval-card"] = "session-card"
+    adapter._approval_request_ids["approval-card"] = "request-2"
+    assert await adapter._handle_approval_action(action_event("appr:approval-card:deny", "interaction-card"))
+    assert card_calls == [("session-card", "deny", "request-2")]
+    assert answers[-1] == ("interaction-card", "Approval expired")
+    assert "approval-card" not in adapter._approval_request_ids
+    del approval.resolve_gateway_approval_card
 
     adapter._slash_sessions["confirm-2"] = "session-3"
     slash_state["fail"] = True
