@@ -78,6 +78,8 @@ export type BotUser = {
   username?: string
   first_name?: string
   last_name?: string
+  /** Bots only: the person this bot acts for. */
+  owner_id?: number
 }
 
 export type BotChatType = "user" | "thread"
@@ -615,11 +617,39 @@ export type GetMessagesResult = { messages: BotMessage[] }
 export type SearchMessagesResult = { messages: BotMessage[] }
 export type CreateThreadResult = { chat: BotChat }
 export type CreateReplyThreadResult = { chat: BotChat }
-export type SendMessageResult = { message: BotMessage }
+export type SendMessageResult = {
+  message: BotMessage
+  /** With `add_mentioned_users`: mentioned users added to the thread. */
+  added_user_ids?: number[]
+  /** With `add_mentioned_users`: mentioned users who can't see the chat and couldn't be added. */
+  unadded_user_ids?: number[]
+}
 export type ForwardMessageResult = { message: BotMessage }
 export type ForwardMessagesResult = { message_ids: number[] }
 export type GetChatParticipantResult = { participant: BotChatParticipant }
 export type GetChatParticipantCountResult = { count: number }
+export type BotContactRelation =
+  | "shared_chat"
+  | "shared_space"
+  | "managed"
+  | "owner"
+  | "can_use"
+  | "uses_your_bot"
+export type BotAgentOperation = "invoke" | "steer" | "approve" | "configure"
+export type BotContact = {
+  user: BotUser
+  /** Why this user is a contact, for the bot or the person it acts for. */
+  relations: BotContactRelation[]
+  /** True when every relation comes through the bot's owner, not the bot itself. */
+  via_owner: boolean
+  /** Unix seconds of the latest shared-chat activity, when known. */
+  last_interaction_date?: number
+  /** Bot contacts: what the calling bot may do with this bot. */
+  bot_operations?: BotAgentOperation[]
+  /** Bot contacts: this bot is managed by the calling bot's owner. */
+  manages_bot?: boolean
+}
+export type GetContactsResult = { contacts: BotContact[] }
 export type GetMyCommandsResult = { commands: BotCommand[] }
 export type GetMySkillsResult = { skills: BotSkill[] }
 export type EditMessageTextResult = { message: BotMessage }
@@ -643,6 +673,8 @@ export type SendMessageParams = BotTargetInput & {
   silent?: boolean
   /** Trusted cross-thread provenance for explicit same-bot Agent handoffs. */
   source_chat_id?: BotInputId
+  /** Add mentioned users who can't see this private thread yet, when the bot may add them. */
+  add_mentioned_users?: boolean
   // 2026-06-03: Deprecated compatibility for production bot clients; prefer `parse_markdown`.
   // Remove after confirming no production use in the previous month.
   parseMarkdown?: boolean
@@ -703,6 +735,14 @@ export type GetChatParticipantParams = {
 
 export type GetChatParticipantCountParams = {
   chat_id: BotInputId
+}
+
+export type GetContactsParams = {
+  /** Matches names and usernames; a leading @ is ignored. */
+  query?: string
+  kind?: "all" | "people" | "bots"
+  /** 1 to 50. Defaults to 20. */
+  limit?: number
 }
 
 export type AddThreadParticipantParams = {
@@ -865,6 +905,7 @@ export type BotMethodName =
   | "unpinMessage"
   | "getChatParticipant"
   | "getChatParticipantCount"
+  | "getContacts"
   | "addThreadParticipant"
   | "removeThreadParticipant"
   | "setThreadTitle"
@@ -910,6 +951,7 @@ export type BotMethodParamsByName = {
   unpinMessage: UnpinMessageParams
   getChatParticipant: GetChatParticipantParams
   getChatParticipantCount: GetChatParticipantCountParams
+  getContacts: GetContactsParams
   addThreadParticipant: AddThreadParticipantParams
   removeThreadParticipant: RemoveThreadParticipantParams
   setThreadTitle: SetThreadTitleParams
@@ -956,6 +998,7 @@ export type BotMethodResultByName = {
   unpinMessage: EmptyResult
   getChatParticipant: GetChatParticipantResult
   getChatParticipantCount: GetChatParticipantCountResult
+  getContacts: GetContactsResult
   addThreadParticipant: EmptyResult
   removeThreadParticipant: EmptyResult
   setThreadTitle: EmptyResult
