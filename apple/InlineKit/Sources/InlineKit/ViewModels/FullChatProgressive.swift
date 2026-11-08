@@ -525,6 +525,44 @@ public class MessagesProgressiveViewModel {
     atBottom = false
   }
 
+  /// Replaces the window with the one a chat opens on for its unread line
+  /// (`ChatUnreadOpening.localOpeningWindow`), after history around the line was fetched.
+  /// False, leaving the window alone, when the cache still cannot show the line.
+  @discardableResult
+  public func loadUnreadOpeningWindowAsync(boundary: Int64) async throws -> Bool {
+    invalidatePendingReload()
+    let generation = reloadGeneration
+    let revision = publisher.publicationRevision(for: peer)
+    let (peer, chatId, currentUserId, limit) = (peer, chatId, currentUserId, initialLimit)
+    let window = try await db.reader.read { db -> (messages: [FullMessage], metadata: LoadedWindowMetadata)? in
+      let latest = try Self.latestWindowQuery(peer: peer, chatId: chatId, currentUserId: currentUserId)
+        .limit(limit)
+        .fetchAll(db)
+        .reversed()
+      guard let messages = try ChatUnreadOpening.localOpeningWindow(
+        db, peer: peer, chatId: chatId, boundary: boundary, latest: Array(latest)
+      ) else { return nil }
+      return (messages, try Self.loadedWindowMetadata(db, peer: peer, messages: messages))
+    }
+    try Task.checkCancellation()
+    guard generation == reloadGeneration, let window else { return false }
+    loadedWindowMetadataGeneration &+= 1
+    applyInitialState(.init(
+      messages: window.messages,
+      threadAnchor: .resolved(threadAnchor),
+      loadedWindowMetadata: window.metadata
+    ))
+    // A window inside history keeps reloads there, anchored where the list places the line.
+    historyAnchorID = historyCoverage.isAtCertifiedLiveEnd
+      ? nil
+      : ChatUnreadOpening.firstUnreadMessageId(in: messages, boundary: boundary, of: self)
+    // Updates published during the read reached the old window; read again to include them.
+    if revision != publisher.publicationRevision(for: peer) {
+      scheduleReload(animated: false)
+    }
+    return true
+  }
+
   @discardableResult
   public func loadLatestWindowAsync() async throws -> Bool {
     invalidatePendingReload()
