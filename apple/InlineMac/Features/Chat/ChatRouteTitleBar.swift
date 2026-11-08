@@ -470,3 +470,48 @@ private struct ToolbarWindowDoubleClickZoom: ViewModifier {
       .allowsWindowActivationEvents(true)
   }
 }
+
+/// Toolbar title while the chat can't be shown: the same shape as the regular
+/// title, with a lock in place of the chat icon and no actions behind it.
+struct ChatUnavailableTitleBar: View {
+  let peer: InlineKit.Peer
+
+  @Environment(\.macToolbarLayout) private var toolbarLayout
+
+  var body: some View {
+    HStack(spacing: toolbarLayout.titleSpacing) {
+      Circle()
+        .fill(Color.primary.opacity(0.07))
+        .overlay {
+          Image(systemName: peer.isThread ? "lock.fill" : "bubble.left")
+            .font(.system(size: toolbarLayout.subtitleFontSize + 1, weight: .medium))
+            .foregroundStyle(.secondary)
+        }
+        .frame(width: toolbarLayout.chatIconSize, height: toolbarLayout.chatIconSize)
+        .accessibilityHidden(true)
+
+      VStack(alignment: .leading, spacing: 0) {
+        Text(ChatUnavailableCopy.title(for: peer))
+          .font(.system(size: toolbarLayout.titleFontSize, weight: .semibold))
+          .lineLimit(1)
+
+        Text("No access")
+          .font(.system(size: toolbarLayout.subtitleFontSize))
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+
+      Color.clear
+        .frame(minWidth: 0, maxWidth: .infinity)
+        .toolbarWindowDoubleClickZoom()
+    }
+    .frame(minWidth: 0, maxWidth: toolbarLayout.titleMaxWidth, alignment: .leading)
+    .accessibilityElement(children: .combine)
+  }
+}
+
+enum ChatUnavailableCopy {
+  static func title(for peer: InlineKit.Peer) -> String {
+    peer.isThread ? "Private Thread" : "Chat Unavailable"
+  }
+}

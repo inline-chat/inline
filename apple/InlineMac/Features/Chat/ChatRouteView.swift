@@ -28,6 +28,13 @@ struct ChatRouteView: View {
     _agentThreadToolbarModel = StateObject(wrappedValue: AgentThreadToolbarModel(peer: peer))
   }
 
+  private var windowTitle: String {
+    if chatToolbarState.isContentUnavailable {
+      return ChatUnavailableCopy.title(for: peer)
+    }
+    return navigationTitle.isEmpty ? fallbackTitle : navigationTitle
+  }
+
   private var fallbackTitle: String {
     peer.isThread ? "Chat" : "Direct Message"
   }
@@ -93,9 +100,9 @@ struct ChatRouteView: View {
       )
       .frame(minWidth: Theme.chatViewMinWidth, maxWidth: .infinity, maxHeight: .infinity)
       .chatScrollEdgeEffect()
-      .navigationTitle(navigationTitle.isEmpty ? fallbackTitle : navigationTitle)
+      .navigationTitle(windowTitle)
       .commandBar {
-        if peer.isThread || isOwnedBotChat {
+        if peer.isThread || isOwnedBotChat, !chatToolbarState.isContentUnavailable {
           CommandBarAction(
             peer.isThread ? "Rename Thread" : "Rename Bot",
             systemImage: "pencil",
@@ -110,7 +117,7 @@ struct ChatRouteView: View {
           }
         }
 
-        if let followPresentation {
+        if let followPresentation, !chatToolbarState.isContentUnavailable {
           CommandBarAction(
             followPresentation.title,
             systemImage: followPresentation.systemImage,
@@ -192,35 +199,45 @@ struct ChatRouteView: View {
       .toolbar {
         let mainItem =
           MacToolbarItem(placement: .navigation, priority: .high, label: "") {
-            ChatRouteTitleBar(
-              peer: peer,
-              db: db,
-              contextSpaceId: nav.selectedSpaceId,
-              agentThreadToolbarModel: agentThreadToolbarModel,
-              onTitleChange: { title in
-                navigationTitle = title
+            if chatToolbarState.isContentUnavailable {
+              ChatUnavailableTitleBar(peer: peer)
+                .macToolbarLayout(toolbarLayout)
+                .id("unavailable-\(peer.toString())")
+            } else {
+              ChatRouteTitleBar(
+                peer: peer,
+                db: db,
+                contextSpaceId: nav.selectedSpaceId,
+                agentThreadToolbarModel: agentThreadToolbarModel,
+                onTitleChange: { title in
+                  navigationTitle = title
+                }
+              )
+              .macToolbarLayout(toolbarLayout)
+              .id(peer.toString())
+              .modifier(ChatToolbarTranslationPresentations(
+                peer: peer,
+                toolbarState: chatToolbarState,
+                anchor: .title,
+                listensForPrompt: true
+              ))
+              .modifier(ChatToolbarParticipantsTitlePresentations(
+                peer: peer,
+                dependencies: dependencies,
+                toolbarState: chatToolbarState
+              ))
+              .modifier(ChatToolbarNotificationTitlePresentations(
+                peer: peer,
+                db: dependencies.database,
+                toolbarState: chatToolbarState
+              ))
+              .modifier(ChatToolbarLinkAccessPromptPresentation(
+                toolbarState: chatToolbarState,
+                anchor: .title
+              ))
+              .onDisappear {
+                chatToolbarState.handleTitleDisappear()
               }
-            )
-            .macToolbarLayout(toolbarLayout)
-            .id(peer.toString())
-            .modifier(ChatToolbarTranslationPresentations(
-              peer: peer,
-              toolbarState: chatToolbarState,
-              anchor: .title,
-              listensForPrompt: true
-            ))
-            .modifier(ChatToolbarParticipantsTitlePresentations(
-              peer: peer,
-              dependencies: dependencies,
-              toolbarState: chatToolbarState
-            ))
-            .modifier(ChatToolbarNotificationTitlePresentations(
-              peer: peer,
-              db: dependencies.database,
-              toolbarState: chatToolbarState
-            ))
-            .onDisappear {
-              chatToolbarState.handleTitleDisappear()
             }
           }
 
@@ -238,128 +255,132 @@ struct ChatRouteView: View {
           }
         }
 
-        if botPresenceController.toolbarItem(for: peer) != nil {
+        // Actions need a readable chat; a private thread you can't open keeps
+        // only its title.
+        if !chatToolbarState.isContentUnavailable {
+          if botPresenceController.toolbarItem(for: peer) != nil {
+            ToolbarItem {
+              BotPresenceToolbarButton(
+                peer: peer,
+                controller: botPresenceController
+              )
+              .macToolbarLayout(toolbarLayout)
+              .id(peer.toString())
+            }
+
+            if #available(macOS 26.0, *) {
+              ToolbarSpacer(.fixed)
+            }
+          }
+
+          if botChatSettingsCoordinator.isToolbarVisible || agentThreadToolbarModel.context != nil {
+            ToolbarItem {
+              BotChatSettingsToolbarButton(
+                coordinator: botChatSettingsCoordinator,
+                agentThreadModel: agentThreadToolbarModel,
+                toolbarState: chatToolbarState,
+                updateAgentContext: { context in
+                  _ = try await dependencies.realtimeV2.send(.updateChatInfo(
+                    chatID: agentThreadToolbarModel.chatID,
+                    title: nil,
+                    emoji: nil,
+                    agentContext: context
+                  ))
+                }
+              )
+              .macToolbarLayout(toolbarLayout)
+              .id("bot-settings-\(peer.toString())")
+            }
+
+            if #available(macOS 26.0, *) {
+              ToolbarSpacer(.fixed)
+            }
+          }
+
+          if settings.translationUIEnabled, peer.isThread {
+            ToolbarItem {
+              ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
+            }
+
+            if #available(macOS 26.0, *) {
+              ToolbarSpacer(.fixed)
+            }
+          }
+
+          if peer.isThread {
+            ToolbarItem {
+              ChatToolbarParticipantsButton(
+                peer: peer,
+                dependencies: dependencies,
+                toolbarState: chatToolbarState
+              )
+              .macToolbarLayout(toolbarLayout)
+              .id("participants-\(peer.toString())")
+            }
+
+            if #available(macOS 26.0, *) {
+              ToolbarSpacer(.fixed)
+            }
+
+            ToolbarItem {
+              ChatToolbarShareButton(
+                peer: peer,
+                dependencies: dependencies,
+                toolbarState: chatToolbarState
+              )
+              .macToolbarLayout(toolbarLayout)
+              .id("share-\(peer.toString())")
+            }
+
+            if #available(macOS 26.0, *) {
+              ToolbarSpacer(.fixed)
+            }
+          }
+
           ToolbarItem {
-            BotPresenceToolbarButton(
+            ChatToolbarNotificationButton(
               peer: peer,
-              controller: botPresenceController
-            )
-            .macToolbarLayout(toolbarLayout)
-            .id(peer.toString())
-          }
-
-          if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed)
-          }
-        }
-
-        if botChatSettingsCoordinator.isToolbarVisible || agentThreadToolbarModel.context != nil {
-          ToolbarItem {
-            BotChatSettingsToolbarButton(
-              coordinator: botChatSettingsCoordinator,
-              agentThreadModel: agentThreadToolbarModel,
-              toolbarState: chatToolbarState,
-              updateAgentContext: { context in
-                _ = try await dependencies.realtimeV2.send(.updateChatInfo(
-                  chatID: agentThreadToolbarModel.chatID,
-                  title: nil,
-                  emoji: nil,
-                  agentContext: context
-                ))
-              }
-            )
-            .macToolbarLayout(toolbarLayout)
-            .id("bot-settings-\(peer.toString())")
-          }
-
-          if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed)
-          }
-        }
-
-        if settings.translationUIEnabled, peer.isThread {
-          ToolbarItem {
-            ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
-          }
-
-          if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed)
-          }
-        }
-
-        if peer.isThread {
-          ToolbarItem {
-            ChatToolbarParticipantsButton(
-              peer: peer,
-              dependencies: dependencies,
+              db: dependencies.database,
               toolbarState: chatToolbarState
             )
-            .macToolbarLayout(toolbarLayout)
-            .id("participants-\(peer.toString())")
+            .id(peer.id)
+          }
+
+          if let followPresentation {
+            ToolbarItem {
+              ChatToolbarFollowButton(
+                peer: peer,
+                isFollowing: followPresentation.isFollowing
+              )
+              .id("follow-\(peer.toString())")
+            }
           }
 
           if #available(macOS 26.0, *) {
             ToolbarSpacer(.fixed)
           }
 
-          ToolbarItem {
-            ChatToolbarShareButton(
-              peer: peer,
-              dependencies: dependencies,
-              toolbarState: chatToolbarState
-            )
-            .macToolbarLayout(toolbarLayout)
-            .id("share-\(peer.toString())")
+          if case .user = peer {
+            ToolbarItem {
+              NudgeButton(peer: peer)
+                .id(peer.id)
+            }
+
+            if #available(macOS 26.0, *) {
+              ToolbarSpacer(.fixed)
+            }
           }
 
-          if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed)
+          if settings.translationUIEnabled, !peer.isThread {
+            ToolbarItem {
+              ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
+            }
           }
-        }
 
-        ToolbarItem {
-          ChatToolbarNotificationButton(
-            peer: peer,
-            db: dependencies.database,
-            toolbarState: chatToolbarState
-          )
-          .id(peer.id)
-        }
-
-        if let followPresentation {
           ToolbarItem {
-            ChatToolbarFollowButton(
-              peer: peer,
-              isFollowing: followPresentation.isFollowing
-            )
-            .id("follow-\(peer.toString())")
-          }
-        }
-
-        if #available(macOS 26.0, *) {
-          ToolbarSpacer(.fixed)
-        }
-
-        if case .user = peer {
-          ToolbarItem {
-            NudgeButton(peer: peer)
+            ChatToolbarMenuButton(peer: peer, dependencies: dependencies)
               .id(peer.id)
           }
-
-          if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed)
-          }
-        }
-
-        if settings.translationUIEnabled, !peer.isThread {
-          ToolbarItem {
-            ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
-          }
-        }
-
-        ToolbarItem {
-          ChatToolbarMenuButton(peer: peer, dependencies: dependencies)
-            .id(peer.id)
         }
       }
     } else {
