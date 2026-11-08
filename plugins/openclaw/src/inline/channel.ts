@@ -1834,8 +1834,13 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       if (!currentChannelId) {
         return undefined
       }
+      // The host's exact-current read gate for installed plugins compares typed
+      // targets by kind. An untyped current id only accepts `user:`/`dm:` in a
+      // DM, so agents passing the `chat:<id>` form we document get rejected.
+      const currentMessagingTarget = resolveInlineSessionTarget({ id: currentChannelId })
       return {
         currentChannelId,
+        ...(currentMessagingTarget ? { currentMessagingTarget } : {}),
         // To remains the parent chat for DM children as well. From is a user
         // identity in DMs and must never substitute for the parent chat ID.
         currentGraphChannelId: resolveInlineSessionTarget({
@@ -1888,6 +1893,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
             "- Inline reactions: pass `messageId` for `react` when you have it; on inbound turns, the current inbound message id can be used as fallback.",
           ]
         : []),
+      "- Inline history tools: name the chat even when it is the current one; targetless reads are rejected. `read` takes `target: \"chat:<chatId>\"`; `search` takes `chatId: \"<chatId>\"` (not `target` or `to`).",
       "- Inline history tools: `read` and `search` return media-aware message payloads (`media`, `attachments`, `attachmentUrls`) so image-only history remains discoverable. `search` is chat-scoped; run it per chat.",
       "- Inline bot command discovery: use `peer-bot-commands`/`bot-commands` to read commands available in the current or target chat/user/reply thread; use `inline_bot_commands` only to manage this bot's registered command menu.",
       "- Inline special tools: use `inline_members` to find users in a space and reuse returned `user:<id>` DM targets. It can infer `spaceId` inside a current Inline space chat/reply thread; pass `spaceId` explicitly otherwise. Use `inline_parent_context` for more parent-chat history from the current reply thread, with `beforeMessageId`, `afterMessageId`, or `messageId` for older/newer/around windows.",

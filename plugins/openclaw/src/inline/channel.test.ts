@@ -586,6 +586,8 @@ describe("inline/channel", () => {
       NativeChannelId: "8", CurrentMessageId: "456", MessageThreadId: "8",
     } })
     expect(dmChildContext?.currentGraphChannelId).toBe("chat:7")
+    // Typed current target lets the host's exact-current read gate accept `chat:<id>`.
+    expect(dmChildContext?.currentMessagingTarget).toBe("chat:7")
     expect(plugin.threading?.resolveAutoThreadId?.({ cfg: {}, to: "chat:7",
       toolContext: { ...dmChildContext, currentChannelId: "inline:8" },
     })).toBe("8")
