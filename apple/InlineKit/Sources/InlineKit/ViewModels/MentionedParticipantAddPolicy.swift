@@ -14,6 +14,9 @@ public struct MentionedParticipantAddContext: Equatable, Sendable {
   public var messageCount: Int
   public var participantIds: Set<Int64>
   public var pendingUserIds: Set<Int64>
+  /// Whether the sender may also remove participants. Auto-add relies on Undo,
+  /// so senders who can't remove get a prompt instead.
+  public var canRemoveParticipants: Bool
 
   public init(
     chatType: ChatType,
@@ -22,7 +25,8 @@ public struct MentionedParticipantAddContext: Equatable, Sendable {
     currentUserId: Int64?,
     messageCount: Int,
     participantIds: Set<Int64>,
-    pendingUserIds: Set<Int64> = []
+    pendingUserIds: Set<Int64> = [],
+    canRemoveParticipants: Bool = true
   ) {
     self.chatType = chatType
     self.isPublic = isPublic
@@ -31,6 +35,7 @@ public struct MentionedParticipantAddContext: Equatable, Sendable {
     self.messageCount = messageCount
     self.participantIds = participantIds
     self.pendingUserIds = pendingUserIds
+    self.canRemoveParticipants = canRemoveParticipants
   }
 }
 
@@ -55,7 +60,9 @@ public enum MentionedParticipantAddPolicy {
 
     guard !userIds.isEmpty else { return .none }
 
-    if context.isReplyThread || context.messageCount < autoAddMessageLimit {
+    if context.canRemoveParticipants,
+       context.isReplyThread || context.messageCount < autoAddMessageLimit
+    {
       return .autoAdd(userIds)
     }
 

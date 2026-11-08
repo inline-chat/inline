@@ -33,6 +33,18 @@ struct MentionedParticipantAddPolicyTests {
     #expect(action == .autoAdd([2]))
   }
 
+  @Test("prompts senders who couldn't undo an add")
+  func promptsSendersWithoutRemoveRights() {
+    #expect(MentionedParticipantAddPolicy.action(
+      for: [2],
+      context: context(messageCount: 0, canRemoveParticipants: false)
+    ) == .prompt([2]))
+    #expect(MentionedParticipantAddPolicy.action(
+      for: [2],
+      context: context(isReplyThread: true, canRemoveParticipants: false)
+    ) == .prompt([2]))
+  }
+
   @Test("skips public and non-thread chats")
   func skipsUnsupportedChats() {
     #expect(MentionedParticipantAddPolicy.action(
@@ -67,7 +79,8 @@ struct MentionedParticipantAddPolicyTests {
     currentUserId: Int64? = 1,
     participantIds: Set<Int64> = [],
     pendingUserIds: Set<Int64> = [],
-    messageCount: Int = 0
+    messageCount: Int = 0,
+    canRemoveParticipants: Bool = true
   ) -> MentionedParticipantAddContext {
     MentionedParticipantAddContext(
       chatType: chatType,
@@ -76,7 +89,8 @@ struct MentionedParticipantAddPolicyTests {
       currentUserId: currentUserId,
       messageCount: messageCount,
       participantIds: participantIds,
-      pendingUserIds: pendingUserIds
+      pendingUserIds: pendingUserIds,
+      canRemoveParticipants: canRemoveParticipants
     )
   }
 }
