@@ -124,4 +124,21 @@ struct MessageSelectionStateTests {
     #expect(state.orderedSelection(in: [5, 10, 30, 40, 50]) == [30, 40])
   }
 
+  @Test("replace drops unknown ids, keeps a surviving anchor, and ends when empty")
+  func replaceSetsWholeSelection() {
+    var state = MessageSelectionState()
+    let orderedIds: [Int64] = [1, 2, 3, 4]
+    state.begin(with: 2)
+
+    #expect(state.replace(with: [2, 3, 4, 99], orderedIds: orderedIds) == Set([3, 4]))
+    #expect(state.selectedStableIds == Set([2, 3, 4]))
+    #expect(state.anchorStableId == 2)
+
+    #expect(state.replace(with: [4], orderedIds: orderedIds) == Set([2, 3]))
+    #expect(state.anchorStableId == 4)
+
+    #expect(state.replace(with: [], orderedIds: orderedIds) == Set([4]))
+    #expect(!state.isActive)
+    #expect(state.anchorStableId == nil)
+  }
 }

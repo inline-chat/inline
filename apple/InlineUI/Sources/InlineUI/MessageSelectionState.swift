@@ -88,6 +88,15 @@ public struct MessageSelectionState: Equatable, Sendable {
     return old.symmetricDifference(selectedStableIds)
   }
 
+  /// Sets the selection to `stableIds` restricted to `orderedIds`, keeping the anchor when it survives.
+  @discardableResult
+  public mutating func replace(with stableIds: Set<Int64>, orderedIds: [Int64]) -> Set<Int64> {
+    let old = selectedStableIds
+    selectedStableIds = stableIds.intersection(orderedIds)
+    normalize(orderedIds: orderedIds)
+    return old.symmetricDifference(selectedStableIds)
+  }
+
   @discardableResult
   public mutating func selectAll(_ orderedIds: [Int64]) -> Set<Int64> {
     let old = selectedStableIds
