@@ -440,7 +440,7 @@ extension ChatInfoView {
 
   var participantsSection: some View {
     Section("Participants") {
-      if canManageParticipants {
+      if canAddParticipants {
         Button(action: {
           isSearching = true
         }) {

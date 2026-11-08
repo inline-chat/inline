@@ -5,6 +5,7 @@ class ChatInfoViewEnvironment: ObservableObject {
   @Binding var isSearching: Bool
   let isPrivate: Bool
   let isDM: Bool
+  let canAddParticipants: Bool
   let canManageParticipants: Bool
   let canChangeVisibility: Bool
   let participants: [UserInfo]
@@ -25,6 +26,7 @@ class ChatInfoViewEnvironment: ObservableObject {
     isSearching: Binding<Bool>,
     isPrivate: Bool,
     isDM: Bool,
+    canAddParticipants: Bool,
     canManageParticipants: Bool,
     canChangeVisibility: Bool,
     participants: [UserInfo],
@@ -44,6 +46,7 @@ class ChatInfoViewEnvironment: ObservableObject {
     _isSearching = isSearching
     self.isPrivate = isPrivate
     self.isDM = isDM
+    self.canAddParticipants = canAddParticipants
     self.canManageParticipants = canManageParticipants
     self.canChangeVisibility = canChangeVisibility
     self.participants = participants

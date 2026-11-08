@@ -1394,6 +1394,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     } else {
       let replyToMessageId = state.replyingMessageId
       mentionedParticipantsAccess.handle(entities: entities, peer: peerId, chatId: chatId)
+      mentionedParticipantsAccess.promptForLinkedThreadAccess(text: text, entities: entities, peer: peerId)
       if attachmentItemsToSend.isEmpty {
         let transaction = makeTextSendTransaction(replyToMessageId: replyToMessageId)
         shouldCoordinateSendAnimationReset = shouldCoordinateTextSendAnimationReset(
