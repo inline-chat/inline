@@ -1484,7 +1484,7 @@ private struct ChatListRow: View {
     Task(priority: .userInitiated) {
       do {
         if item.unread {
-          UnreadManager.shared.readAll(peerId, chatId: item.chatId)
+          UnreadManager.shared.markChatRead(peerId, chatId: item.chatId)
           return
         }
 

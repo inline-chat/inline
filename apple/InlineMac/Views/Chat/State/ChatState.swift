@@ -15,6 +15,8 @@ enum ScrollToMessageReason: String, Sendable, Codable {
   case media
   case link
   case search
+  /// Jumping to an unseen mention or reply from the @ button.
+  case mention
   case unknown
 }
 

@@ -798,6 +798,7 @@ struct SidebarView: View {
         : nil,
       descendantUnreadCount: projectedItem.descendantUnreadCount,
       descendantProminentUnreadCount: projectedItem.descendantProminentUnreadCount,
+      descendantActivityBadge: projectedItem.descendantActivityBadge,
       actions: SidebarNativeRowConfiguration.ChatActions(
         open: { openChat(item) },
         close: { closeChat(item) },
@@ -1802,8 +1803,8 @@ struct SidebarView: View {
   }
 
   private func markAllRead(in nodeID: SidebarCollectionNodeID) {
-    for item in appKitSidebarTree.items(includingDescendantsOf: nodeID) where item.unread {
-      UnreadManager.shared.readAll(item.peerId, chatId: item.chatId)
+    for item in appKitSidebarTree.items(includingDescendantsOf: nodeID) where item.needsAttention {
+      UnreadManager.shared.markChatRead(item.peerId, chatId: item.chatId)
     }
   }
 
@@ -2701,8 +2702,8 @@ struct SidebarView: View {
   }
 
   private func markAllOpenChatsRead() {
-    for item in openSectionItems() where item.unread {
-      UnreadManager.shared.readAll(item.peerId, chatId: item.chatId)
+    for item in openSectionItems() where item.needsAttention {
+      UnreadManager.shared.markChatRead(item.peerId, chatId: item.chatId)
     }
   }
 

@@ -194,7 +194,10 @@ class MessageListAppKit: NSViewController {
 
     appActivityObserverId = AppActivityMonitor.shared.addObserver { [weak self] state in
       guard let self else { return }
-      guard state == .active else { return }
+      guard state == .active else {
+        activityNavigator?.clearVisible()
+        return
+      }
       lastVisibleReadCandidateID = nil
       updateUnreadIfNeeded()
     }
@@ -873,12 +876,32 @@ class MessageListAppKit: NSViewController {
   private let avatarOverlayGroupCalendar = Calendar.autoupdatingCurrent
 
   private var scrollToBottomBottomConstraint: NSLayoutConstraint!
+  private var activityJumpBottomConstraint: NSLayoutConstraint!
+  private var reactionJumpBottomConstraint: NSLayoutConstraint!
+  private var activityNavigator: ChatActivityNavigator?
+  private var isScrollToBottomButtonShown = false
+  private lazy var activityJumpButton: ActivityJumpButtonHostingView = {
+    let button = ActivityJumpButtonHostingView(kind: .mention)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.onClick = { [weak self] in self?.jumpToNextActivity() }
+    button.onMarkAllRead = { [weak self] in self?.activityNavigator?.markAllMentionsRead() }
+    return button
+  }()
+
+  private lazy var reactionJumpButton: ActivityJumpButtonHostingView = {
+    let button = ActivityJumpButtonHostingView(kind: .reaction)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.onClick = { [weak self] in self?.jumpToNextReaction() }
+    button.onMarkAllRead = { [weak self] in self?.activityNavigator?.markAllReactionsRead() }
+    return button
+  }()
+
   private lazy var scrollToBottomButton: ScrollToBottomButtonHostingView = {
     let scrollToBottomButton = ScrollToBottomButtonHostingView()
     scrollToBottomButton.onClick = { [weak self] in
       guard let weakSelf = self else { return }
       weakSelf.scrollToNewestAvailable(animated: true)
-      weakSelf.scrollToBottomButton.setVisibility(false)
+      weakSelf.setScrollToBottomButtonShown(false)
     }
     scrollToBottomButton.translatesAutoresizingMaskIntoConstraints = false
     scrollToBottomButton.setVisibility(false)
@@ -931,6 +954,7 @@ class MessageListAppKit: NSViewController {
     } else {
       scrollToBottomBottomConstraint.constant = -(Theme.messageListBottomInset + insetForCompose)
     }
+    updateActivityJumpPosition(animate: animate)
 
     if isAtBottom {
       tableView.scrollToBottomWithInset(cancel: false)
@@ -1175,6 +1199,114 @@ class MessageListAppKit: NSViewController {
       scrollToBottomButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
       scrollToBottomButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
     ])
+
+    view.addSubview(activityJumpButton)
+    activityJumpBottomConstraint = activityJumpButton.bottomAnchor.constraint(
+      equalTo: view.bottomAnchor,
+      constant: activityJumpBottomConstant
+    )
+    view.addSubview(reactionJumpButton)
+    reactionJumpBottomConstraint = reactionJumpButton.bottomAnchor.constraint(
+      equalTo: view.bottomAnchor,
+      constant: reactionJumpBottomConstant
+    )
+    NSLayoutConstraint.activate([
+      activityJumpButton.centerXAnchor.constraint(equalTo: scrollToBottomButton.centerXAnchor),
+      activityJumpBottomConstraint,
+      activityJumpButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      activityJumpButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      reactionJumpButton.centerXAnchor.constraint(equalTo: scrollToBottomButton.centerXAnchor),
+      reactionJumpBottomConstraint,
+      reactionJumpButton.widthAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+      reactionJumpButton.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
+    ])
+    startActivityNavigator()
+  }
+
+  // MARK: - Unread mentions and replies
+
+  /// Buttons stack from the bottom: scroll-to-bottom, then @, then ♥. Hidden ones take no slot.
+  private func jumpButtonBottomConstant(slot: Int) -> CGFloat {
+    -(Theme.messageListBottomInset + insetForCompose) - CGFloat(slot) * (Theme.scrollButtonSize + 10)
+  }
+
+  private var activityJumpBottomConstant: CGFloat {
+    jumpButtonBottomConstant(slot: isScrollToBottomButtonShown ? 1 : 0)
+  }
+
+  private var reactionJumpBottomConstant: CGFloat {
+    jumpButtonBottomConstant(slot: (isScrollToBottomButtonShown ? 1 : 0) + (activityJumpButton.count > 0 ? 1 : 0))
+  }
+
+  private func updateActivityJumpPosition(animate: Bool) {
+    guard let activityJumpBottomConstraint, let reactionJumpBottomConstraint else { return }
+    if animate {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.2
+        context.allowsImplicitAnimation = true
+        activityJumpBottomConstraint.animator().constant = activityJumpBottomConstant
+        reactionJumpBottomConstraint.animator().constant = reactionJumpBottomConstant
+      }
+    } else {
+      activityJumpBottomConstraint.constant = activityJumpBottomConstant
+      reactionJumpBottomConstraint.constant = reactionJumpBottomConstant
+    }
+  }
+
+  private func setScrollToBottomButtonShown(_ shown: Bool) {
+    scrollToBottomButton.setVisibility(shown)
+    guard isScrollToBottomButtonShown != shown else { return }
+    isScrollToBottomButtonShown = shown
+    updateActivityJumpPosition(animate: true)
+  }
+
+  private func startActivityNavigator() {
+    guard activityNavigator == nil, chatId > 0 else { return }
+    let navigator = ChatActivityNavigator(peerId: peerId, chatId: chatId)
+    navigator.onChange = { [weak self] state in
+      self?.applyActivityState(state, animate: true)
+    }
+    activityNavigator = navigator
+    navigator.start()
+    applyActivityState(navigator.state, animate: false)
+  }
+
+  private func applyActivityState(_ state: ChatActivityNavigator.State, animate: Bool) {
+    activityJumpButton.setCount(state.mentionsCount)
+    reactionJumpButton.setCount(state.reactionsCount)
+    updateActivityJumpPosition(animate: animate)
+  }
+
+  private func jumpToNextReaction() {
+    guard let navigator = activityNavigator else { return }
+    Task { @MainActor [weak self] in
+      guard let messageId = await navigator.nextReactionMessageId(), let self, !self.isDisposed else { return }
+      self.scrollToMsgAndHighlight(ScrollToMessageRequest(messageId: messageId, reason: .mention))
+    }
+  }
+
+  private func jumpToNextActivity() {
+    guard let navigator = activityNavigator else { return }
+    Task { @MainActor [weak self] in
+      guard let messageId = await navigator.nextMessageId(), let self, !self.isDisposed else { return }
+      self.scrollToMsgAndHighlight(ScrollToMessageRequest(messageId: messageId, reason: .mention))
+    }
+  }
+
+  /// Reports on-screen messages so unseen mentions and replies are marked read after a short dwell.
+  private func reportVisibleActivity() {
+    guard let activityNavigator else { return }
+    guard AppActivityMonitor.shared.isActive,
+          isViewLoaded,
+          let window = view.window,
+          window.isVisible,
+          !view.isHiddenOrHasHiddenAncestor,
+          !needsInitialScroll
+    else {
+      activityNavigator.clearVisible()
+      return
+    }
+    activityNavigator.noteVisible(messageIds: visibleMessageIDs())
   }
 
   private func scheduleAvatarOverlaySync(force: Bool = true, animate: Bool = false) {
@@ -2228,6 +2360,8 @@ class MessageListAppKit: NSViewController {
       return
     }
 
+    reportVisibleActivity()
+
     // Prevent iaAtBottom false negative when elastic scrolling
     let overScrolledToBottom = currentScrollOffset > maxScrollableHeight
     let prevAtBottom = isAtBottom
@@ -2255,7 +2389,7 @@ class MessageListAppKit: NSViewController {
 
     if prevAtBottom != isAtBottom {
       let shouldShow = !isAtBottom // && messages.count > 0
-      scrollToBottomButton.setVisibility(shouldShow)
+      setScrollToBottomButtonShown(shouldShow)
       if isAtBottom {
         updateUnreadIfNeeded()
         if chatRows.historyCoverage.isAtCertifiedLiveEnd {
@@ -2530,6 +2664,7 @@ class MessageListAppKit: NSViewController {
     log.trace("viewDidDisappear() called")
     removeLiveResizeObserver()
     clearHoveredMessage()
+    activityNavigator?.clearVisible()
   }
 
   override func viewWillLayout() {
@@ -3778,6 +3913,24 @@ class MessageListAppKit: NSViewController {
     if isAtBottom {
       markMessagesSeen()
     }
+    reportVisibleActivity()
+  }
+
+  /// All on-screen messages: mentions arrive on others' messages, reactions on yours.
+  private func visibleMessageIDs() -> [Int64] {
+    let visibleRect = tableView.visibleRect
+    let visibleRange = tableView.rows(in: visibleRect)
+    guard visibleRange.location != NSNotFound, visibleRange.length > 0 else { return [] }
+
+    let upperBound = min(NSMaxRange(visibleRange), tableView.numberOfRows)
+    return (visibleRange.location ..< upperBound).compactMap { row -> Int64? in
+      guard case .message? = rowItem(at: row),
+            tableView.rect(ofRow: row).intersects(visibleRect),
+            let message = message(forRow: row),
+            message.message.messageId > 0
+      else { return nil }
+      return message.message.messageId
+    }
   }
 
   private func highestVisibleIncomingMessageID() -> Int64? {
@@ -4713,6 +4866,12 @@ extension MessageListAppKit {
 
     // Clear all callbacks
     scrollToBottomButton.onClick = nil
+    activityJumpButton.onClick = nil
+    activityJumpButton.onMarkAllRead = nil
+    reactionJumpButton.onClick = nil
+    reactionJumpButton.onMarkAllRead = nil
+    activityNavigator?.stop()
+    activityNavigator = nil
     onMessageSelectionChange = nil
 
     // Dispose view model

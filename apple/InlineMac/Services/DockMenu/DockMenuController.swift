@@ -48,7 +48,7 @@ final class DockMenuController {
         hasUnavailableChat = true
         continue
       }
-      UnreadManager.shared.readAll(chat.peer, chatId: chatID)
+      UnreadManager.shared.markChatRead(chat.peer, chatId: chatID)
     }
     if hasUnavailableChat {
       ToastCenter.shared.showError("Some chats are still loading. Open Inline and try again.")

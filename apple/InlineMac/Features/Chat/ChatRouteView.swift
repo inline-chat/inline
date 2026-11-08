@@ -436,12 +436,13 @@ struct ChatRouteView: View {
       Task(priority: .userInitiated) {
         do {
           let isUnread = (dialog?.unreadCount ?? 0) > 0 || dialog?.unreadMark == true
+            || (dialog?.unreadMentionsCount ?? 0) > 0
           if isUnread {
             guard let chatId = dialog?.chatId else {
               await MainActor.run { ToastCenter.shared.showError("Failed to update read status") }
               return
             }
-            UnreadManager.shared.readAll(peer, chatId: chatId)
+            UnreadManager.shared.markChatRead(peer, chatId: chatId)
           } else {
             try await dependencies.realtimeV2.send(.markAsUnread(peerId: peer))
           }

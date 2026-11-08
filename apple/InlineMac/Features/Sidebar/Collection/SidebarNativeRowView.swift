@@ -136,6 +136,7 @@ struct SidebarNativeRowConfiguration {
     let unreadCount: Int
     let unreadMark: Bool
     let prominentUnreadDot: Bool
+    let activityBadge: ChatListActivityBadge?
     let pinned: Bool
     let archived: Bool
     let identity: ChatListIdentityDescriptor?
@@ -150,6 +151,7 @@ struct SidebarNativeRowConfiguration {
       unreadCount = item.unreadCount
       unreadMark = item.unreadMark
       prominentUnreadDot = item.prominentUnreadDot
+      activityBadge = item.activityBadge
       pinned = item.pinned
       archived = item.archived
       identity = item.identity
@@ -165,6 +167,7 @@ struct SidebarNativeRowConfiguration {
       unreadCount: Int = 0,
       unreadMark: Bool = false,
       prominentUnreadDot: Bool = false,
+      activityBadge: ChatListActivityBadge? = nil,
       pinned: Bool = false,
       archived: Bool = false,
       identity: ChatListIdentityDescriptor? = nil
@@ -178,6 +181,7 @@ struct SidebarNativeRowConfiguration {
       self.unreadCount = max(unreadCount, 0)
       self.unreadMark = unreadMark
       self.prominentUnreadDot = prominentUnreadDot
+      self.activityBadge = activityBadge
       self.pinned = pinned
       self.archived = archived
       self.identity = identity
@@ -200,6 +204,7 @@ struct SidebarNativeRowConfiguration {
     let disclosureExpanded: Bool?
     var descendantUnreadCount: Int = 0
     var descendantProminentUnreadCount: Int = 0
+    var descendantActivityBadge: ChatListActivityBadge? = nil
     let actions: ChatActions
   }
 
@@ -2157,6 +2162,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
   private let previewView = SidebarNativeComposeActivityView()
   private let titleActivityView = SidebarNativeComposeActivityView()
   private let trailingUnreadBadge = SidebarNativeUnreadBadgeView()
+  private let activityBadge = SidebarNativeActivityBadgeView()
   private let closeButton = SidebarNativeCloseButton()
   /// In the trailing slot on hover; × sits to its left.
   private let newSubthreadButton = SidebarNativeCloseButton()
@@ -2177,6 +2183,7 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     addSubview(previewView)
     addSubview(titleActivityView)
     addSubview(trailingUnreadBadge)
+    addSubview(activityBadge)
     addSubview(closeButton)
     addSubview(newSubthreadButton)
     addSubview(disclosureView)
@@ -2356,6 +2363,12 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       availableTrailing = newSubthreadButton.frame.minX
         - SidebarNativeChatRowMetrics.closeTextSpacing
     }
+    // The activity badge sits just before the unread count, so counts stay aligned on the edge.
+    let activityTrailing = availableTrailing
+    let activityReserve = activityBadge.isShown
+      ? SidebarNativeActivityBadgeView.size + SidebarNativeActivityBadgeView.spacing
+      : 0
+    availableTrailing -= activityReserve
     let showsPreview = configuration.size != .compact
     let badgeBelongsToPreview = configuration.unreadBadgeStyle == .numbered
       && (displayedUnread.count > 0 || displayedUnread.mark)
@@ -2474,7 +2487,37 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
       previewView.frame = .zero
       previewView.isHidden = true
     }
+    layoutActivityBadge(
+      trailing: activityTrailing,
+      reserve: activityReserve,
+      lineMidY: showsPreview
+        ? previewView.frame.midY
+        : painted.midY,
+      countSharesLine: trailingUnreadBadge.occupiesLayout
+        && !keepsNumberedUnreadNearContent
+        && (!showsPreview || badgeBelongsToPreview)
+    )
     updateTitleTooltip()
+  }
+
+  private func layoutActivityBadge(trailing: CGFloat, reserve: CGFloat, lineMidY: CGFloat, countSharesLine: Bool) {
+    guard activityBadge.isShown else {
+      activityBadge.frame = .zero
+      return
+    }
+    let size = SidebarNativeActivityBadgeView.size
+    if countSharesLine {
+      // Slide the count into the reserved edge slot and put the badge where it was.
+      trailingUnreadBadge.frame.origin.x += reserve
+      activityBadge.frame = CGRect(
+        x: trailingUnreadBadge.frame.minX - SidebarNativeActivityBadgeView.spacing - size,
+        y: lineMidY - size / 2,
+        width: size,
+        height: size
+      )
+    } else {
+      activityBadge.frame = CGRect(x: trailing - size, y: lineMidY - size / 2, width: size, height: size)
+    }
   }
 
   private var hierarchyViews: [NSView] {
@@ -2675,8 +2718,10 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
         ))
       }
       menu.addItem(SidebarNativeMenuItem(
-        title: presentation.unread ? "Mark Read" : "Mark Unread",
-        systemImage: presentation.unread ? "checkmark.message.fill" : "envelope.badge.fill",
+        title: presentation.unread || presentation.activityBadge != nil ? "Mark Read" : "Mark Unread",
+        systemImage: presentation.unread || presentation.activityBadge != nil
+          ? "checkmark.message.fill"
+          : "envelope.badge.fill",
         action: actions.toggleReadUnread
       ))
       if let markAllRead = actions.markAllRead {
@@ -2917,7 +2962,9 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     } else {
       nil
     }
-    setAccessibilityValue(unreadValue)
+    let activityValue = displayedActivityBadge?.accessibilityLabel
+    let accessibilityValue = [activityValue, unreadValue].compactMap(\.self).joined(separator: ", ")
+    setAccessibilityValue(accessibilityValue.isEmpty ? nil : accessibilityValue)
     setAccessibilitySelected(interactionPresentation.selected)
 
     var actions: [NSAccessibilityCustomAction] = []
@@ -2954,7 +3001,9 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
           return true
         })
       }
-      actions.append(NSAccessibilityCustomAction(name: presentation.unread ? "Mark Read" : "Mark Unread") {
+      actions.append(NSAccessibilityCustomAction(
+        name: presentation.unread || presentation.activityBadge != nil ? "Mark Read" : "Mark Unread"
+      ) {
         configuration.actions.toggleReadUnread()
         return true
       })
@@ -2982,8 +3031,17 @@ private final class SidebarNativeChatRowView: SidebarNativeInteractiveContentVie
     )
   }
 
+  /// A collapsed parent also shows the strongest badge among its threads.
+  private var displayedActivityBadge: ChatListActivityBadge? {
+    guard let configuration else { return nil }
+    let own = configuration.presentation.activityBadge
+    guard displayedDisclosureExpanded == false else { return own }
+    return .strongest(own, configuration.descendantActivityBadge)
+  }
+
   private func configureUnreadBadges() {
     guard let configuration else { return }
+    activityBadge.configure(displayedActivityBadge, prominent: configuration.presentation.prominentUnreadDot)
     let unread = displayedUnread
     trailingUnreadBadge.configure(
       unreadCount: unread.count,
@@ -3103,6 +3161,78 @@ private struct SidebarNativeUnreadBadgeRoot: View {
         transaction.disablesAnimations = true
       }
     }
+  }
+}
+
+/// "@", reply or heart capsule shown beside a chat's unread count.
+@MainActor
+private final class SidebarNativeActivityBadgeView: NSView {
+  static let size: CGFloat = 16
+  static let spacing: CGFloat = 4
+
+  private let imageView = NSImageView()
+  private(set) var badge: ChatListActivityBadge?
+  private var prominent = true
+  var isShown: Bool { badge != nil }
+
+  override var isFlipped: Bool { true }
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
+    layer?.cornerRadius = Self.size / 2
+    imageView.imageScaling = .scaleProportionallyDown
+    imageView.contentTintColor = .white
+    addSubview(imageView)
+    setAccessibilityElement(false)
+    isHidden = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  /// Mentions and replies always use the accent color; reactions follow the row's prominence,
+  /// like its unread count.
+  func configure(_ badge: ChatListActivityBadge?, prominent: Bool) {
+    guard badge != self.badge || prominent != self.prominent else { return }
+    self.badge = badge
+    self.prominent = prominent
+    isHidden = badge == nil
+    guard let badge else { return }
+    let symbol = switch badge {
+      case .mention: "at"
+      case .reaction: "heart.fill"
+    }
+    imageView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+      .withSymbolConfiguration(.init(pointSize: badge == .mention ? 9.5 : 8, weight: .bold))
+    needsDisplay = true
+    needsLayout = true
+  }
+
+  override func layout() {
+    super.layout()
+    imageView.frame = bounds.insetBy(dx: 3, dy: 3)
+  }
+
+  override var wantsUpdateLayer: Bool { true }
+
+  override func updateLayer() {
+    // A standard-row heart matches the standard unread count (UnreadCountBadge).
+    let isMutedHeart = badge == .reaction && !prominent
+    let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    layer?.backgroundColor = switch badge {
+      case .reaction where prominent: NSColor.systemPink.cgColor
+      case .reaction: (isDark ? NSColor.white.withAlphaComponent(0.16) : NSColor.black.withAlphaComponent(0.09)).cgColor
+      default: NSColor.controlAccentColor.cgColor
+    }
+    imageView.contentTintColor = isMutedHeart ? NSColor.labelColor.withAlphaComponent(0.76) : .white
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
   }
 }
 
