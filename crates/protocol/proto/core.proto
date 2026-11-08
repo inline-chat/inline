@@ -4477,11 +4477,20 @@ message SearchMessagesInput {
 
   // Optional filter for media/doc messages
   optional SearchMessagesFilter filter = 5;
+
+  // Count every matching message instead of returning a page: the result has
+  // total_count set and no messages. Scans the whole chat, so clients send it
+  // alongside the first page request rather than waiting on it. Requires
+  // queries; limit and offset_id are ignored.
+  optional bool count_only = 6;
 }
 
 message SearchMessagesResult {
   repeated Message messages = 1;
   optional int64 seq = 2;
+
+  // Number of matching messages in the chat; set for count_only requests.
+  optional int32 total_count = 3;
 }
 
 enum ExternalResourceProvider {

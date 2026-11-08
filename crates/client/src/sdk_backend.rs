@@ -2152,6 +2152,7 @@ impl ClientBackend for SdkBackend {
                     proto::ReadMessagesInput {
                         peer_id: Some(input_peer_for_chat(request.chat_id)),
                         max_id: request.max_message_id.map(InlineId::get),
+                        read_activity: None,
                     },
                 )
                 .await?;
@@ -2217,6 +2218,7 @@ impl ClientBackend for SdkBackend {
                         proto::ReadMessagesInput {
                             peer_id: Some(input_peer_for_chat(request.chat_id)),
                             max_id: None,
+                            read_activity: None,
                         },
                     )
                     .await?
@@ -4273,6 +4275,7 @@ pub(crate) fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::AgentRuntime(_) => "agent_runtime",
         Update::AgentSessionControl(_) => "agent_session_control",
         Update::AgentSettings(_) => "agent_settings",
+        Update::UnreadActivity(_) => "unread_activity",
     }
 }
 
@@ -9840,6 +9843,8 @@ mod tests {
                         block_content: None,
                         agent_session: None,
                         subthread: None,
+                        unread_mention: None,
+                        unread_reactions: None,
                         counts_as_unread: None,
                         reply_quote: None,
                     }),

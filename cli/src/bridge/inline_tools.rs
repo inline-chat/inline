@@ -431,6 +431,7 @@ impl InlineToolHost {
                 limit: Some(bounded_limit(arguments, 20, 100) as i32),
                 offset_id: positive_i64(arguments, "offset_id"),
                 filter: None,
+                count_only: None,
             })
             .await;
         match response {
