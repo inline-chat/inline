@@ -942,11 +942,9 @@ function resolveInlineProgressPlaceholderEnabled(config: {
   if (config.streaming === false) return false
   if (isRecord(config.streaming) && isRecord(config.streaming.progress)) return true
 
-  return (
-    config.streaming === undefined &&
-    config.streamMode === undefined &&
-    config.streamViaEditMessage !== true
-  )
+  // Friendly by default (D2): Working status while it runs, no progress card.
+  // `streaming: { mode: "progress" }` opts into the card.
+  return false
 }
 
 function resolveInlineBlockStreamingEnabled(config: {
