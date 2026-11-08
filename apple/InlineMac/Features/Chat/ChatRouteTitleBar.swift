@@ -60,8 +60,8 @@ struct ChatRouteTitleBar: View {
     .toolbarWindowDragClickGate(suppressClick: $suppressClick)
     .animation(.easeInOut(duration: 0.18), value: model.status)
     .contextMenu {
-      if model.canRename {
-        Button("Rename Chat...", systemImage: "pencil") {
+      if model.canRenameTitle {
+        Button(model.isOwnedBotChat ? "Rename Bot..." : "Rename Chat...", systemImage: "pencil") {
           beginEditingTitle()
         }
       }
@@ -137,7 +137,7 @@ struct ChatRouteTitleBar: View {
 
   @ViewBuilder
   private var titleView: some View {
-    if model.canRename {
+    if model.canRenameTitle {
       Button(action: handleTitleClick) {
         titleLabel
       }
@@ -151,11 +151,15 @@ struct ChatRouteTitleBar: View {
       ), arrowEdge: .bottom) {
         renamePopover
       }
-      .help("Rename Chat")
-      .accessibilityHint("Rename Chat")
+      .help(renameHelp)
+      .accessibilityHint(renameHelp)
     } else {
       titleLabel
     }
+  }
+
+  private var renameHelp: String {
+    model.isOwnedBotChat ? "Rename Bot" : "Rename Chat"
   }
 
   private var titleLabel: some View {
@@ -183,14 +187,16 @@ struct ChatRouteTitleBar: View {
 
     return VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 8) {
-        EmojiTextFieldPicker(
-          emoji: $model.emojiDraft,
-          size: 28,
-          placeholderSystemImage: "bubble.middle.bottom.fill",
-          accessibilityLabel: "Chat icon"
-        )
+        if !model.isOwnedBotChat {
+          EmojiTextFieldPicker(
+            emoji: $model.emojiDraft,
+            size: 28,
+            placeholderSystemImage: "bubble.middle.bottom.fill",
+            accessibilityLabel: "Chat icon"
+          )
+        }
 
-        TextField("Chat Title", text: $model.titleDraft)
+        TextField(model.isOwnedBotChat ? "Bot Name" : "Chat Title", text: $model.titleDraft)
           .textFieldStyle(.roundedBorder)
           .focused($isTitleFocused)
           .frame(width: 226)
@@ -344,7 +350,7 @@ struct ChatRouteTitleBar: View {
   }
 
   private func beginEditingTitle() {
-    guard model.canRename else { return }
+    guard model.canRenameTitle else { return }
     guard !model.isEditingTitle else { return }
     model.startEditingTitle()
   }
@@ -352,7 +358,7 @@ struct ChatRouteTitleBar: View {
   private func registerRenameCommand() {
     guard let mainWindowID else { return }
     MainWindowOpenCoordinator.shared.registerRenameThread(id: mainWindowID) {
-      guard model.canRename else { return false }
+      guard model.canRenameTitle else { return false }
       guard !model.isEditingTitle else { return true }
       model.startEditingTitle()
       return true

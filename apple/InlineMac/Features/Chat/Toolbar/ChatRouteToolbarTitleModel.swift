@@ -150,9 +150,21 @@ final class ChatRouteToolbarTitleModel {
     cancellables.removeAll()
   }
 
+  /// Direct chat with a bot the current account owns. Its header title
+  /// renames the bot itself.
+  var isOwnedBotChat: Bool {
+    guard let userId = peer.asUserId() else { return false }
+    return SidebarAgents.shared.isOwnedBot(userId)
+  }
+
+  /// Whether the header title can be clicked to rename: threads the user may
+  /// update, or the user's own bots.
+  var canRenameTitle: Bool {
+    peer.isThread ? canRename : isOwnedBotChat
+  }
+
   func startEditingTitle() {
-    guard canRename else { return }
-    guard peer.isThread else { return }
+    guard canRenameTitle else { return }
     guard !isSavingTitle else { return }
     titleDraft = title
     emojiDraft = resolvedEmoji() ?? ""
@@ -172,6 +184,11 @@ final class ChatRouteToolbarTitleModel {
     let trimmedTitle = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedTitle.isEmpty else {
       cancelEditingTitle()
+      return
+    }
+
+    if let botUserId = peer.asUserId() {
+      commitBotRename(botUserId: botUserId, name: trimmedTitle)
       return
     }
 
@@ -215,6 +232,32 @@ final class ChatRouteToolbarTitleModel {
         ))
       } catch {
         log.error("Failed to update chat info", error: error)
+      }
+    }
+  }
+
+  private func commitBotRename(botUserId: Int64, name: String) {
+    guard isOwnedBotChat, name != title else {
+      cancelEditingTitle()
+      return
+    }
+
+    title = name
+    titleDraft = name
+    refreshWindowTitle()
+    isEditingTitle = false
+    isSavingTitle = true
+
+    Task { [weak self] in
+      guard let self else { return }
+      defer { isSavingTitle = false }
+
+      do {
+        _ = try await Api.realtime.send(.updateBotProfile(botUserId: botUserId, name: name))
+      } catch {
+        log.error("Failed to rename bot", error: error)
+        ToastCenter.shared.showError("Couldn’t rename bot. Please try again.")
+        sync()
       }
     }
   }

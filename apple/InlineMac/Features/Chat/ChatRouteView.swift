@@ -32,6 +32,11 @@ struct ChatRouteView: View {
     peer.isThread ? "Chat" : "Direct Message"
   }
 
+  private var isOwnedBotChat: Bool {
+    guard let userId = peer.asUserId() else { return false }
+    return SidebarAgents.shared.isOwnedBot(userId)
+  }
+
   private var followPresentation: ChatToolbarFollowPresentation? {
     guard peer.isThread else { return nil }
     return ChatToolbarFollowPresentation(isFollowing: toolbarDialog?.isFollowingThread == true)
@@ -90,12 +95,12 @@ struct ChatRouteView: View {
       .chatScrollEdgeEffect()
       .navigationTitle(navigationTitle.isEmpty ? fallbackTitle : navigationTitle)
       .commandBar {
-        if peer.isThread {
+        if peer.isThread || isOwnedBotChat {
           CommandBarAction(
-            "Rename Thread",
+            peer.isThread ? "Rename Thread" : "Rename Bot",
             systemImage: "pencil",
             id: "rename",
-            keywords: ["rename", "renaming", "title", "thread", "chat", "name"],
+            keywords: ["rename", "renaming", "title", "thread", "chat", "name", "bot"],
             typeLabel: "Chat",
             priority: 30
           ) {
@@ -380,7 +385,7 @@ struct ChatRouteView: View {
         isPinned: dialog?.pinned == true,
         canPin: dialog?.pinned == true || dialog?.folderId == nil,
         isArchived: dialog?.archived == true,
-        canRename: peer.isThread,
+        canRename: peer.isThread || isOwnedBotChat,
         perform: { command in
           performChatMenuCommand(command, dialog: dialog, dependencies: dependencies)
         }
