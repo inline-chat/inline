@@ -4618,6 +4618,12 @@ message CreateSubthreadInput {
   // Explicit copied or newly selected Agent preset for this independent child.
   // Parent lineage alone never inherits it.
   optional AgentThreadContext agent_context = 7;
+
+  // Optional previously reserved chat id to claim during creation, so the client
+  // can open the thread before the server responds. When the parent message
+  // already has a reply thread, that thread is returned and the reservation is
+  // left unclaimed.
+  optional int64 reserved_chat_id = 8;
 }
 
 message CreateSubthreadResult {
