@@ -16,6 +16,31 @@ public enum ChatListLayoutMode: String, CaseIterable, Codable, Hashable, Sendabl
   case large
 }
 
+/// The one extra badge a chat row shows beside its unread count, in priority order.
+public enum ChatListActivityBadge: String, Codable, Hashable, Sendable {
+  /// Someone mentioned you (or a group you're in), or replied to your message.
+  case mention
+  /// Someone reacted to your message.
+  case reaction
+
+  public var accessibilityLabel: String {
+    switch self {
+      case .mention: "Unread mention"
+      case .reaction: "Unread reaction"
+    }
+  }
+
+  /// Being addressed stays prominent in a muted chat; reactions follow the chat's mute.
+  public var staysProminentWhenMuted: Bool {
+    self != .reaction
+  }
+
+  /// The badge to show when two rows roll up into one (a collapsed parent and its threads).
+  public static func strongest(_ lhs: Self?, _ rhs: Self?) -> Self? {
+    lhs == .mention || rhs == .mention ? .mention : (lhs ?? rhs)
+  }
+}
+
 public enum ChatListProminence: String, Codable, Hashable, Sendable {
   case standard
   case prominent
@@ -122,6 +147,8 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
   public let identity: ChatListIdentityDescriptor?
   public let unreadCount: Int
   public let unreadMark: Bool
+  public let unreadMentionsCount: Int
+  public let unreadReactionsCount: Int
   public let prominence: ChatListProminence
   public let isOpen: Bool
   public let isPinned: Bool
@@ -155,6 +182,8 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
     identity: ChatListIdentityDescriptor? = nil,
     unreadCount: Int = 0,
     unreadMark: Bool = false,
+    unreadMentionsCount: Int = 0,
+    unreadReactionsCount: Int = 0,
     prominence: ChatListProminence = .standard,
     isOpen: Bool = false,
     isPinned: Bool = false,
@@ -187,6 +216,8 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
     self.identity = identity
     self.unreadCount = unreadCount
     self.unreadMark = unreadMark
+    self.unreadMentionsCount = unreadMentionsCount
+    self.unreadReactionsCount = unreadReactionsCount
     self.prominence = prominence
     self.isOpen = isOpen
     self.isPinned = isPinned
@@ -206,6 +237,23 @@ public struct ChatListItemSnapshot: Identifiable, Codable, Hashable, Sendable {
 
   public var isUnread: Bool {
     unreadCount > 0 || unreadMark
+  }
+
+  public var activityBadge: ChatListActivityBadge? {
+    if unreadMentionsCount > 0 { return .mention }
+    if unreadReactionsCount > 0 { return .reaction }
+    return nil
+  }
+
+  /// Unread messages, a manual unread mark, or unseen activity addressed to you.
+  public var needsAttention: Bool {
+    isUnread || activityBadge != nil
+  }
+
+  /// What the Unread filter shows: unread chats plus chats with an unseen mention or reply.
+  /// Reactions alone don't qualify, matching Telegram's unread filters.
+  public var matchesUnreadFilter: Bool {
+    isUnread || activityBadge == .mention
   }
 
   public var isProminent: Bool {

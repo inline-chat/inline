@@ -229,6 +229,9 @@ public actor UpdatesEngine: Sendable {
         case let .updateReadMaxID(updateReadMaxID):
           try updateReadMaxID.apply(db)
 
+        case let .unreadActivity(unreadActivity):
+          try unreadActivity.apply(db)
+
         case let .dialogArchived(dialogArchived):
           try dialogArchived.apply(db)
 
@@ -1742,6 +1745,7 @@ enum RealtimeUpdateDiagnostics {
       case .agentRuntime: return "agentRuntime"
       case .agentSessionControl: return "agentSessionControl"
       case .agentSettings: return "agentSettings"
+      case .unreadActivity: return "unreadActivity"
     }
   }
 }

@@ -3218,6 +3218,8 @@ actor Sync {
         .chat(peer: payload.participation.peerID)
       case .agentGrant, .agentRuntime, .agentSessionControl, .agentSettings:
         .user
+      case .unreadActivity:
+        .user
       default:
         nil
     }
@@ -3513,6 +3515,8 @@ actor BucketActor {
         // Thin agent state; catch-up repairs work bars and sidebar badges.
         true
       case .dialogFollowMode, .dialogCollapsedMaxID, .dialogTranslation:
+        true
+      case .unreadActivity:
         true
       case .dialogFolder:
         true

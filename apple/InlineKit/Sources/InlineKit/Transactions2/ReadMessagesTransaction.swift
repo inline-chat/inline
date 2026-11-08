@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import InlineProtocol
 import Logger
 import RealtimeV2
@@ -12,6 +13,8 @@ public struct ReadMessagesTransaction: Transaction2 {
     let peerId: Peer
     let maxId: Int64?
     let intentId: String?
+    /// Explicit "Mark as Read": also reads unread mentions and reactions.
+    let readActivity: Bool?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -20,13 +23,16 @@ public struct ReadMessagesTransaction: Transaction2 {
 
   private var log = Log.scoped("Transactions/ReadMessages")
 
-  public init(peerId: Peer, maxId: Int64?) {
+  public init(peerId: Peer, maxId: Int64?, readActivity: Bool = false) {
     context = Context(
       peerId: peerId,
       maxId: maxId,
-      intentId: maxId == nil ? UUID().uuidString : nil
+      intentId: maxId == nil ? UUID().uuidString : nil,
+      readActivity: readActivity ? true : nil
     )
   }
+
+  private var readsActivity: Bool { context.readActivity == true }
 
   public var executionKey: TransactionExecutionKey? { .readState(context.peerId) }
   public var reconnectReplayPolicy: TransactionReconnectPolicy? {
@@ -38,6 +44,9 @@ public struct ReadMessagesTransaction: Transaction2 {
       $0.peerID = context.peerId.toInputPeer()
       if let maxId = context.maxId {
         $0.maxID = maxId
+      }
+      if context.readActivity == true {
+        $0.readActivity = true
       }
     })
   }
@@ -54,6 +63,14 @@ public struct ReadMessagesTransaction: Transaction2 {
         dialog.unreadCount = 0
         dialog.unreadMark = false
         try dialog.save(db, onConflict: .replace)
+        if readsActivity, let chatId = dialog.chatId {
+          try ChatActivityItem.markAllPendingRead(
+            db,
+            chatId: chatId,
+            kinds: ChatActivityItem.Kind.allCases,
+            maxId: try ChatActivityItem.markAllBound(db, chatId: chatId)
+          )
+        }
         return DialogMutationSnapshot(
           baseline: baseline,
           optimistic: try Dialog.fetchOne(db, id: dialog.id) ?? dialog,
@@ -66,7 +83,7 @@ public struct ReadMessagesTransaction: Transaction2 {
         peer: context.peerId,
         kind: .read,
         snapshot: snapshot,
-        fields: [.unreadCount, .unreadMark]
+        fields: readsActivity ? [.unreadCount, .unreadMark, .activityCounts] : [.unreadCount, .unreadMark]
       )
     } catch {
       log.error("Failed to optimistically mark dialog as read", error: error)
@@ -107,6 +124,13 @@ public struct ReadMessagesTransaction: Transaction2 {
     do {
       try await AppDatabase.shared.dbWriter.write { db in
         try rollback.apply(db)
+        // The restored counts include these items again.
+        let dialogChatId: Int64? = try Dialog.get(peerId: context.peerId).fetchOne(db)?.chatId
+        if readsActivity, let dialogChatId {
+          try ChatActivityItem
+            .filter(ChatActivityItem.Columns.chatId == dialogChatId)
+            .updateAll(db, [ChatActivityItem.Columns.pendingRead.set(to: false)])
+        }
       }
     } catch {
       log.error("Failed to roll back read state", error: error)
@@ -115,7 +139,7 @@ public struct ReadMessagesTransaction: Transaction2 {
 }
 
 public extension Transaction2 where Self == ReadMessagesTransaction {
-  static func readMessages(peerId: Peer, maxId: Int64? = nil) -> ReadMessagesTransaction {
-    ReadMessagesTransaction(peerId: peerId, maxId: maxId)
+  static func readMessages(peerId: Peer, maxId: Int64? = nil, readActivity: Bool = false) -> ReadMessagesTransaction {
+    ReadMessagesTransaction(peerId: peerId, maxId: maxId, readActivity: readActivity)
   }
 }
