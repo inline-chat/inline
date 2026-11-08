@@ -43,6 +43,7 @@ public enum BlockContentNodeKind: Hashable, Sendable {
   case callout
   case meter
   case form
+  case widget
 }
 
 public struct BlockContentReconciliation: Equatable, Sendable {
@@ -228,6 +229,8 @@ public enum BlockContentReconciler {
         return [Node(path: path, kind: .meter)]
       case .form:
         return [Node(path: path, kind: .form)]
+      case .widget:
+        return [Node(path: path, kind: .widget)]
       }
     }
   }
