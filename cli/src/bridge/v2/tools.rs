@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 use super::api;
+use super::lead::{LeadRequest, SendMode, SpawnTask};
 use super::work::Command;
 use crate::bridge::helpers::interaction_random_id;
 use crate::bridge::inline_tools::{
@@ -41,6 +42,13 @@ use crate::bridge::inline_tools::{
 /// the work to answer.
 const WORK_ANSWER_TIMEOUT: Duration = Duration::from_secs(12);
 const MAX_TEXT_CHARS: usize = 8_000;
+/// Threads `search_messages` with `all_threads` searches.
+const SEARCH_THREADS: usize = 15;
+/// Starting a task creates its subthread, posts and opens its work. Under
+/// the shortest harness limit on a host tool call (ACP's 20 seconds).
+const LEAD_ANSWER_TIMEOUT: Duration = Duration::from_secs(17);
+/// The longest one `wait_tasks` call waits; the lead calls again to wait on.
+const MAX_WAIT_SECONDS: u64 = 15;
 
 /// A tool that acts through the work itself, answered by its actor.
 #[derive(Debug)]
@@ -76,6 +84,8 @@ pub(crate) struct Tools {
     /// Follow choices made here or by /follow, newest wins, so intake sees
     /// them on the next message.
     follows: Mutex<HashMap<i64, bool>>,
+    /// The runtime, which answers the DM lead's tools, and the owner's DM.
+    lead: std::sync::OnceLock<(tokio::sync::mpsc::UnboundedSender<LeadRequest>, i64)>,
     /// Session → the message (chat, message) that started its latest turn,
     /// for `reply_thread: "current"`.
     requests: Mutex<HashMap<String, (i64, i64)>>,
@@ -90,8 +100,18 @@ impl Tools {
             folders: Mutex::new(HashMap::new()),
             sent: Arc::new(Mutex::new(HashSet::new())),
             follows: Mutex::new(HashMap::new()),
+            lead: std::sync::OnceLock::new(),
             requests: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Set once by the runtime that owns this agent's works.
+    pub(crate) fn set_lead(
+        &self,
+        lead: tokio::sync::mpsc::UnboundedSender<LeadRequest>,
+        dm_chat_id: i64,
+    ) {
+        let _ = self.lead.set((lead, dm_chat_id));
     }
 
     pub(crate) fn sent(&self) -> Arc<Mutex<HashSet<i64>>> {
@@ -246,10 +266,12 @@ impl Tools {
                 return HostToolResult::failure(rejection_text(&rejection));
             }
         };
-        let timeout = if call.tool_name == "return_attachment" {
-            RETURN_ATTACHMENT_TIMEOUT
-        } else {
-            HOST_TOOL_EXECUTION_TIMEOUT
+        let timeout = match call.tool_name.as_str() {
+            "return_attachment" => RETURN_ATTACHMENT_TIMEOUT,
+            // Answered by the runtime, which bounds its own wait.
+            "spawn_thread" | "send_to_thread" | "stop_thread" | "list_tasks" | "wait_tasks"
+            | "notify_owner" => LEAD_ANSWER_TIMEOUT + Duration::from_secs(1),
+            _ => HOST_TOOL_EXECUTION_TIMEOUT,
         };
         let work = Work {
             chat: binding.work.chat.0,
@@ -296,6 +318,13 @@ impl Tools {
                 }
             }
             "read_link" => self.read_link(arguments, chat).await,
+            "search_messages" if bool_arg(arguments, "all_threads") => {
+                let Some(query) = string_arg(arguments, "query", 500) else {
+                    return HostToolResult::failure("query is required.");
+                };
+                self.search_everywhere(query, bounded_limit(arguments, 20, 100))
+                    .await
+            }
             "search_messages" => {
                 let Some(query) = string_arg(arguments, "query", 500) else {
                     return HostToolResult::failure("query is required.");
@@ -469,6 +498,97 @@ impl Tools {
                 )
                 .await
             }
+            "get_related_threads" => self.related_threads(chat).await,
+            "notify_owner" => {
+                let Some(text) = string_arg(arguments, "text", MAX_TEXT_CHARS) else {
+                    return HostToolResult::failure("text is required.");
+                };
+                self.through_lead(|reply| LeadRequest::NotifyOwner {
+                    caller: work.chat,
+                    text,
+                    call_id: call.call_id.clone(),
+                    reply,
+                })
+                .await
+            }
+            "list_tasks" => {
+                self.through_lead(|reply| LeadRequest::List {
+                    caller: work.chat,
+                    reply,
+                })
+                .await
+            }
+            "wait_tasks" => {
+                let targets: Vec<i64> = arguments
+                    .get("chat_ids")
+                    .and_then(Value::as_array)
+                    .map(|ids| ids.iter().filter_map(Value::as_i64).collect())
+                    .unwrap_or_default();
+                let seconds = arguments
+                    .get("timeout_seconds")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(MAX_WAIT_SECONDS)
+                    .clamp(1, MAX_WAIT_SECONDS);
+                self.wait_tasks(work.chat, targets, Duration::from_secs(seconds))
+                    .await
+            }
+            "spawn_thread" => {
+                let (Some(title), Some(brief)) = (
+                    string_arg(arguments, "title", 200),
+                    string_arg(arguments, "task", MAX_TEXT_CHARS),
+                ) else {
+                    return HostToolResult::failure("title and task are required.");
+                };
+                let task = SpawnTask {
+                    title,
+                    brief,
+                    model: string_arg(arguments, "model", 200),
+                    reasoning: string_arg(arguments, "reasoning_effort", 100),
+                    project: string_arg(arguments, "project", 4_096),
+                    fork: arguments.get("context").and_then(Value::as_str) == Some("fork"),
+                    call_id: call.call_id.clone(),
+                };
+                self.through_lead(|reply| LeadRequest::Spawn {
+                    caller: work.chat,
+                    task,
+                    reply,
+                })
+                .await
+            }
+            "send_to_thread" => {
+                let (Some(target), Some(text)) = (
+                    positive_i64(arguments, "chat_id"),
+                    string_arg(arguments, "text", MAX_TEXT_CHARS),
+                ) else {
+                    return HostToolResult::failure("chat_id and text are required.");
+                };
+                let mode = match arguments.get("mode").and_then(Value::as_str) {
+                    Some("queue") => SendMode::Queue,
+                    Some("note") => SendMode::Note,
+                    _ => SendMode::Steer,
+                };
+                self.through_lead(|reply| LeadRequest::Send {
+                    caller: work.chat,
+                    target,
+                    text,
+                    mode,
+                    interrupt: bool_arg(arguments, "interrupt"),
+                    call_id: call.call_id.clone(),
+                    reply,
+                })
+                .await
+            }
+            "stop_thread" => {
+                let Some(target) = positive_i64(arguments, "chat_id") else {
+                    return HostToolResult::failure("chat_id is required.");
+                };
+                self.through_lead(|reply| LeadRequest::Stop {
+                    caller: work.chat,
+                    target,
+                    reply,
+                })
+                .await
+            }
             _ => HostToolResult::failure("Unknown Inline tool."),
         }
     }
@@ -548,6 +668,8 @@ impl Tools {
             "agent_user_id": self.config.bot_user_id,
             "agent_name": self.config.agent_name,
             "owner_user_id": self.config.owner_user_id,
+            "owner_dm_chat_id": self.lead.get().map(|(_, dm)| *dm),
+            "in_owner_dm": self.lead.get().is_some_and(|(_, dm)| *dm == chat),
             "provider": self.config.provider.as_str(),
             "mention_syntax": "[@Name](inline://user?id=USER_ID)",
             "thread_link_syntax": "[Title](inline://chat?id=CHAT_ID)",
@@ -833,6 +955,150 @@ impl Tools {
         {
             Ok(result) => json_value_result(&project_contacts(&result)),
             Err(_) => HostToolResult::failure("Inline contacts are unavailable."),
+        }
+    }
+
+    /// Searches the threads this agent was most recently active in, a few at
+    /// a time; Inline searches one thread per request.
+    async fn search_everywhere(&self, query: String, limit: u32) -> HostToolResult {
+        let Ok(page) = self
+            .config
+            .bot
+            .cached_dialogs(DialogsRequest {
+                limit: Some(SEARCH_THREADS as u32),
+                cursor: None,
+                order: DialogsOrder::RecentActivity,
+            })
+            .await
+        else {
+            return HostToolResult::failure("Inline chats are unavailable.");
+        };
+        let searches = page.dialogs.iter().take(SEARCH_THREADS).map(|dialog| {
+            let chat = dialog.chat_id.get();
+            let title = dialog.title.clone();
+            let query = query.clone();
+            async move {
+                let found = api::search_messages(&self.config.bot, chat, query, limit as i32, None)
+                    .await
+                    .unwrap_or_default();
+                (chat, title, found)
+            }
+        });
+        let mut results = Vec::new();
+        for (chat, title, found) in futures_util::future::join_all(searches).await {
+            for message in found {
+                results.push(json!({
+                    "chat_id": chat,
+                    "thread_title": title,
+                    "message_id": message.id,
+                    "from_user_id": message.from_id,
+                    "date": message.date,
+                    "text": message.message.unwrap_or_default().chars().take(500).collect::<String>(),
+                }));
+            }
+        }
+        results
+            .sort_by_key(|result| std::cmp::Reverse(result["date"].as_i64().unwrap_or_default()));
+        results.truncate(limit as usize);
+        json_value_result(&json!({
+            "results": results,
+            "searched_threads": page.dialogs.len().min(SEARCH_THREADS),
+            "note": "Searches your most recently active threads; pass chat_id to search one thread.",
+        }))
+    }
+
+    /// Where a thread sits: its parent, its subthreads and reply threads,
+    /// and threads that link to it.
+    async fn related_threads(&self, chat: i64) -> HostToolResult {
+        let Ok(thread) = api::get_chat(&self.config.bot, chat).await else {
+            return HostToolResult::failure("Inline chat is unavailable to this agent.");
+        };
+        let title_of = |chats: &[proto::Chat], id: i64| {
+            chats
+                .iter()
+                .find(|candidate| candidate.id == id)
+                .map(|candidate| candidate.title.clone())
+        };
+        let children: Vec<Value> = match api::thread_subthreads(&self.config.bot, chat, 50).await {
+            Ok(result) => result
+                .items
+                .iter()
+                .map(|item| {
+                    json!({
+                        "chat_id": item.to_chat_id,
+                        "title": title_of(&result.chats, item.to_chat_id),
+                        "from_message_id": item.from_message_id,
+                    })
+                })
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        let linked_from: Vec<Value> = match api::thread_references(&self.config.bot, chat, 50).await
+        {
+            Ok(result) => result
+                .items
+                .iter()
+                .filter(|item| item.kind == proto::ThreadReferenceKind::ThreadLink as i32)
+                .map(|item| {
+                    json!({
+                        "chat_id": item.from_chat_id,
+                        "title": title_of(&result.chats, item.from_chat_id),
+                        "message_id": item.from_message_id,
+                    })
+                })
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        json_value_result(&json!({
+            "thread": project_chat(&thread),
+            "subthreads": children,
+            "linked_from": linked_from,
+        }))
+    }
+
+    /// The DM lead's tools are answered by the runtime, which owns every work.
+    async fn through_lead(
+        &self,
+        request: impl FnOnce(oneshot::Sender<HostToolResult>) -> LeadRequest,
+    ) -> HostToolResult {
+        let Some((lead, _)) = self.lead.get() else {
+            return HostToolResult::failure("Task subthreads are not available in this bridge.");
+        };
+        let (reply, answer) = oneshot::channel();
+        if lead.send(request(reply)).is_err() {
+            return HostToolResult::failure("This agent is shutting down.");
+        }
+        match tokio::time::timeout(LEAD_ANSWER_TIMEOUT, answer).await {
+            Ok(Ok(result)) => result,
+            _ => HostToolResult::failure(
+                "The bridge did not answer in time. Check list_tasks before trying again.",
+            ),
+        }
+    }
+
+    /// Codex's `wait_agent`: returns when a task the lead directed finishes,
+    /// or when `wait` runs out (not a failure: call again to keep waiting).
+    async fn wait_tasks(&self, caller: i64, targets: Vec<i64>, wait: Duration) -> HostToolResult {
+        let Some((lead, _)) = self.lead.get() else {
+            return HostToolResult::failure("Task subthreads are not available in this bridge.");
+        };
+        let (reply, answer) = oneshot::channel();
+        if lead
+            .send(LeadRequest::Wait {
+                caller,
+                targets,
+                reply,
+            })
+            .is_err()
+        {
+            return HostToolResult::failure("This agent is shutting down.");
+        }
+        match tokio::time::timeout(wait, answer).await {
+            Ok(Ok(result)) => result,
+            _ => json_value_result(&json!({
+                "timed_out": true,
+                "note": "No task finished yet. Wait again only if this turn needs the result; otherwise end your turn and its result will reach you later.",
+            })),
         }
     }
 
@@ -1156,7 +1422,7 @@ pub(crate) fn specs() -> Vec<HostToolSpec> {
         ),
         (
             "search_messages",
-            "Search messages in a chat you can access (default: this work's thread).",
+            "Search messages in a chat you can access (default: this work's thread), or with all_threads in your most recently active threads.",
         ),
         ("search_chats", "Search your threads by title."),
         (
@@ -1165,6 +1431,18 @@ pub(crate) fn specs() -> Vec<HostToolSpec> {
         ),
         ("get_reactions", "Get the reactions on one message."),
         ("list_pins", "List pinned message IDs in a chat."),
+        (
+            "get_related_threads",
+            "See where a thread sits (default: this work's thread): its parent, its subthreads and reply threads, and threads that link to it.",
+        ),
+        (
+            "list_tasks",
+            "List your owner's DM task subthreads with their state and last result, and your other works running here.",
+        ),
+        (
+            "wait_tasks",
+            "Owner's DM only: wait up to timeout_seconds (at most 15) for a task to finish: the given chat_ids, or any running task. Returns the finished task's status and answer, or timed_out. Use only when this turn needs the result.",
+        ),
         (
             "find_contacts",
             "Find people and agents you or your owner know, to mention and ask. Each row has the mention to use; for agents, can_use says whether you may ask them and owner says whose they are.",
@@ -1201,6 +1479,22 @@ pub(crate) fn specs() -> Vec<HostToolSpec> {
         (
             "follow_thread",
             "Check, start or stop following a thread (default: this work's thread), only when a person asked. Following: you answer every message there from people with access. Unfollowed: only mentions and replies to you.",
+        ),
+        (
+            "spawn_thread",
+            "Owner's DM only: start a task in a new subthread of the DM, with its own session. It starts fresh with your brief as its first message (context \"fork\" starts it from a copy of this conversation instead), inheriting your model, reasoning and project unless you set them. Returns at once. Your owner sees its answer in the subthread; you receive its status and answer with your next message, without being woken.",
+        ),
+        (
+            "send_to_thread",
+            "Owner's DM only: give direction to one of your task subthreads or work threads; it is posted there. mode \"steer\" (default) acts like a message typed there: a new turn, or a steer of the running one. \"queue\" waits for the running turn to end. \"note\" adds context for its next turn without starting one. interrupt stops the running turn first.",
+        ),
+        (
+            "notify_owner",
+            "Outside your owner's DM: tell your owner something in their DM with you, such as a question only they can answer or a result they asked for elsewhere. Your DM session also sees it. Use sparingly.",
+        ),
+        (
+            "stop_thread",
+            "Owner's DM only: stop the running turn in one of your task subthreads or work threads.",
         ),
     ];
     read.into_iter()
@@ -1250,6 +1544,7 @@ fn input_schema(name: &str) -> Value {
                 "query": {"type": "string", "minLength": 1, "maxLength": 500},
                 "offset_id": message_id,
                 "limit": limit,
+                "all_threads": {"type": "boolean"},
             }),
             &["query"],
         ),
@@ -1341,6 +1636,37 @@ fn input_schema(name: &str) -> Value {
             }),
             &["action"],
         ),
+        "list_tasks" => (json!({}), &[]),
+        "wait_tasks" => (
+            json!({
+                "chat_ids": {"type": "array", "items": {"type": "integer", "minimum": 1}, "maxItems": 10},
+                "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": MAX_WAIT_SECONDS},
+            }),
+            &[],
+        ),
+        "get_related_threads" => (json!({"chat_id": chat_id}), &[]),
+        "notify_owner" => (json!({"text": text}), &["text"]),
+        "spawn_thread" => (
+            json!({
+                "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "task": text,
+                "model": {"type": "string", "minLength": 1, "maxLength": 200},
+                "reasoning_effort": {"type": "string", "minLength": 1, "maxLength": 100},
+                "project": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "context": {"type": "string", "enum": ["brief", "fork"]},
+            }),
+            &["title", "task"],
+        ),
+        "send_to_thread" => (
+            json!({
+                "chat_id": chat_id,
+                "text": text,
+                "mode": {"type": "string", "enum": ["steer", "queue", "note"]},
+                "interrupt": {"type": "boolean"},
+            }),
+            &["chat_id", "text"],
+        ),
+        "stop_thread" => (json!({"chat_id": chat_id}), &["chat_id"]),
         _ => (json!({}), &[]),
     };
     json!({

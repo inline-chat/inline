@@ -347,6 +347,40 @@ pub(crate) async fn search_messages(
     .messages)
 }
 
+/// A thread's subthreads and reply threads.
+pub(crate) async fn thread_subthreads(
+    bot: &InlineClient,
+    chat_id: i64,
+    limit: i32,
+) -> ApiResult<proto::GetThreadSubthreadsResult> {
+    call!(
+        bot,
+        GetThreadSubthreads,
+        proto::GetThreadSubthreadsInput {
+            chat_id,
+            offset_id: None,
+            limit: Some(limit),
+        }
+    )
+}
+
+/// Threads that link to this one.
+pub(crate) async fn thread_references(
+    bot: &InlineClient,
+    chat_id: i64,
+    limit: i32,
+) -> ApiResult<proto::GetThreadReferencesResult> {
+    call!(
+        bot,
+        GetThreadReferences,
+        proto::GetThreadReferencesInput {
+            chat_id,
+            offset_id: None,
+            limit: Some(limit),
+        }
+    )
+}
+
 pub(crate) async fn get_users(
     bot: &InlineClient,
     user_ids: Vec<i64>,

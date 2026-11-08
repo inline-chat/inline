@@ -25,8 +25,9 @@ use inline_agent_bridge::harness::ChatId;
 use inline_agent_bridge::harness::{
     Acceptance, Delivery, Event, EventStream, FieldAnswer, FieldId, FieldInput, HarnessDriver,
     HeldBy, Input, InputDisposition, InputFact, InputId, InteractionId, InteractionResponse, Op,
-    OpError, OpKind, OpenError, OpenMode, OpenSpec, OutputMode, QuestionForm, QueueOp, RunState,
-    SendError, Session, SettingsChange, SteerPriority, TurnPhase, UsageUpdate, UserId, WaitingOn,
+    OpError, OpKind, OpenError, OpenMode, OpenSpec, Origin, OutputMode, QuestionForm, QueueOp,
+    RunState, SendError, Session, SettingsChange, SteerPriority, TurnPhase, UsageUpdate, UserId,
+    WaitingOn,
 };
 use inline_agent_bridge::{HostToolResult, MAX_SESSION_TITLE_CHARS, ProviderSessionId, TurnId};
 use inline_client::{CreateReplyThreadRequest, FormFieldValue, FormValue, InlineClient, InlineId};
@@ -108,6 +109,8 @@ pub(crate) struct Agent {
     pub tools: Option<Arc<Tools>>,
     /// A work that moved into a subthread tells the main loop (from, to).
     pub moves: mpsc::UnboundedSender<(i64, i64)>,
+    /// The DM lead's tools and its tasks' reports, answered by the main loop.
+    pub lead: mpsc::UnboundedSender<super::lead::LeadRequest>,
     pub names: Arc<api::Names>,
     /// The owner's DM with the agent, for notices meant for the owner.
     pub dm_chat_id: i64,
@@ -288,6 +291,9 @@ pub(crate) enum Command {
         tool: WorkTool,
         reply: oneshot::Sender<HostToolResult>,
     },
+    /// The DM lead's tasks reported; they run as one turn between the
+    /// lead's own turns.
+    LeadReports(Vec<super::ledger::LeadEventRecord>),
 }
 
 /// Operations on the work's native session from Agent Settings, the
@@ -350,6 +356,8 @@ pub(crate) struct WorkHandle {
     pub agent_session_id: Arc<AtomicI64>,
     /// The open native session whose command catalog belongs to this chat.
     catalog_session: Arc<std::sync::Mutex<Option<ProviderSessionId>>>,
+    /// The session's last completed turn, where a task forks it.
+    last_turn: Arc<std::sync::Mutex<Option<TurnId>>>,
     pub task: tokio::task::JoinHandle<()>,
 }
 
@@ -359,6 +367,13 @@ impl WorkHandle {
             return None;
         }
         self.catalog_session.lock().ok()?.clone()
+    }
+
+    /// The open session and its last completed turn, for a task's fork.
+    pub(crate) fn fork_point(&self) -> Option<(ProviderSessionId, Option<TurnId>)> {
+        let session = self.catalog_session()?;
+        let turn = self.last_turn.lock().ok()?.clone();
+        Some((session, turn))
     }
 
     pub(crate) fn agent_session_id(&self) -> Option<i64> {
@@ -373,6 +388,12 @@ pub(crate) struct Known {
     pub native: Option<ProviderSessionId>,
     /// The session is v1's for this thread, not yet recorded in Inline.
     pub from_v1: bool,
+    /// A new work's first session forks this one (the DM lead's), so a task
+    /// starts with the lead's conversation.
+    pub fork_from: Option<ProviderSessionId>,
+    /// The forked session's last completed turn: the fork stops there, before
+    /// the lead's running turn.
+    pub fork_at: Option<TurnId>,
 }
 
 /// Starts the actor for one work.
@@ -393,6 +414,7 @@ pub(crate) fn spawn(
     });
     let agent_session_id = Arc::new(AtomicI64::new(known.agent_session_id.unwrap_or(0)));
     let catalog_session = Arc::new(std::sync::Mutex::new(None));
+    let last_turn = Arc::new(std::sync::Mutex::new(None));
     let outbox = agent
         .ledger
         .outputs(chat_id)
@@ -421,7 +443,10 @@ pub(crate) fn spawn(
         agent_session_id: agent_session_id.clone(),
         native: known.native,
         catalog_session: catalog_session.clone(),
+        last_turn: last_turn.clone(),
         native_from_v1: known.from_v1,
+        fork_from: known.fork_from.clone(),
+        fork_at: known.fork_at.clone(),
         session: None,
         events: None,
         probe: None,
@@ -459,6 +484,12 @@ pub(crate) fn spawn(
         outbox,
         rendering_turn: None,
         last_turn_input: None,
+        lead_reports: Vec::new(),
+        turn_ended: None,
+        final_text: None,
+        taken_reports: HashSet::new(),
+        lead_inputs: HashSet::new(),
+        directed_turns: HashSet::new(),
     };
     let task = tokio::spawn(actor.run(rx));
     WorkHandle {
@@ -466,6 +497,7 @@ pub(crate) fn spawn(
         phase,
         agent_session_id,
         catalog_session,
+        last_turn,
         task,
     }
 }
@@ -539,8 +571,12 @@ struct Actor {
     agent_session_id: Arc<AtomicI64>,
     native: Option<ProviderSessionId>,
     catalog_session: Arc<std::sync::Mutex<Option<ProviderSessionId>>>,
+    last_turn: Arc<std::sync::Mutex<Option<TurnId>>>,
     /// `native` came from v1 and Inline does not know it yet.
     native_from_v1: bool,
+    /// The session the first open forks, for a task forked from its lead.
+    fork_from: Option<ProviderSessionId>,
+    fork_at: Option<TurnId>,
     hold: HoldMachine,
     session: Option<Arc<dyn Session>>,
     /// Behind a mutex only so the actor is `Sync`; polled through `get_mut`.
@@ -604,6 +640,20 @@ struct Actor {
     /// The message the next final answer replies to: the latest group input
     /// the harness took.
     answer_to: Option<i64>,
+    /// The lead's task reports waiting for its next input, like Codex's
+    /// sub-agent notifications: they never start a turn on their own.
+    lead_reports: Vec<super::ledger::LeadEventRecord>,
+    /// A turn just ended, for a task's report to its lead: whether the lead
+    /// directed it.
+    turn_ended: Option<(TurnId, inline_agent_bridge::TurnOutcome, bool)>,
+    /// The answer the ended turn published.
+    final_text: Option<String>,
+    /// Report IDs this lead already gave the harness.
+    taken_reports: HashSet<String>,
+    /// Inputs the DM's lead gave this task, and the turns they started or
+    /// steered: only those turns report back.
+    lead_inputs: HashSet<InputId>,
+    directed_turns: HashSet<TurnId>,
 }
 
 impl Actor {
@@ -698,6 +748,10 @@ impl Actor {
                 // Direct input restarts paused work (spec §4.5) and answers
                 // anything the speak gate was weighing.
                 self.paused = false;
+                if matches!(&input.origin, Origin::Agent { bot, .. } if bot.0 == self.agent.bot_user_id)
+                {
+                    self.lead_inputs.insert(input.id.clone());
+                }
                 self.consider.supersede();
                 self.consider_lines.clear();
                 if answer_reply {
@@ -779,7 +833,93 @@ impl Actor {
                 let result = self.work_tool(tool).await;
                 let _ = reply.send(result);
             }
+            Command::LeadReports(reports) => {
+                for report in reports {
+                    // Only the latest note per task waits.
+                    if report.text.starts_with(super::lead::OWNER_NOTE_PREFIX) {
+                        let stale: Vec<String> = self
+                            .lead_reports
+                            .iter()
+                            .filter(|held| {
+                                held.child_chat_id == report.child_chat_id
+                                    && held.event_id != report.event_id
+                                    && held.text.starts_with(super::lead::OWNER_NOTE_PREFIX)
+                            })
+                            .map(|held| held.event_id.clone())
+                            .collect();
+                        for event_id in stale {
+                            let _ = self.agent.ledger.remove_lead_event(&event_id);
+                            self.lead_reports.retain(|held| held.event_id != event_id);
+                        }
+                    }
+                    // One already on its way to the harness may still arrive
+                    // from a delivery read before it was taken.
+                    if !self.taken_reports.contains(&report.event_id)
+                        && !self
+                            .lead_reports
+                            .iter()
+                            .any(|held| held.event_id == report.event_id)
+                    {
+                        self.lead_reports.push(report);
+                    }
+                }
+            }
         }
+    }
+
+    /// An input the DM's lead gave this task. Its ID derives from the
+    /// message the lead posted, so the ledger answers after a restart too.
+    fn is_lead_input(&self, input: &InputId) -> bool {
+        self.lead_inputs.contains(input)
+            || self
+                .agent
+                .ledger
+                .get(input.as_str())
+                .ok()
+                .flatten()
+                .is_some_and(|record| {
+                    super::ledger::input_id(
+                        self.agent.bot_user_id,
+                        record.chat_id,
+                        record.message_id,
+                        "lead",
+                    ) == input.as_str()
+                })
+    }
+
+    /// Reports an input did not carry after all wait for the next one.
+    fn return_reports(&mut self, reports: Vec<super::ledger::LeadEventRecord>) {
+        for report in reports.into_iter().rev() {
+            self.taken_reports.remove(&report.event_id);
+            self.lead_reports.insert(0, report);
+        }
+    }
+
+    /// A task subthread's turn ended: its lead hears how, with the answer.
+    fn report_to_lead(&mut self) {
+        let Some((turn, outcome, directed)) = self.turn_ended.take() else {
+            return;
+        };
+        let answer = self.final_text.take();
+        // A turn the lead directed reports its answer; one the owner had with
+        // the task directly leaves the lead a note. A stop is not reported:
+        // whoever stopped it knows.
+        if outcome == inline_agent_bridge::TurnOutcome::Interrupted
+            || self.chat_id == self.agent.dm_chat_id
+            || !matches!(self.agent.ledger.child(self.chat_id), Ok(Some(_)))
+        {
+            return;
+        }
+        let _ = self
+            .agent
+            .lead
+            .send(super::lead::LeadRequest::Report(super::lead::TaskReport {
+                child_chat_id: self.chat_id,
+                turn: turn.to_string(),
+                outcome,
+                answer: directed.then_some(answer).flatten(),
+                directed,
+            }));
     }
 
     /// Runs the speak gate on a ready batch: the harness's own side call
@@ -1460,6 +1600,9 @@ impl Actor {
             .copy_thread(from, destination)
             .map_err(|error| format!("Could not retain thread settings: {error}"))?;
         self.chat_id = destination;
+        // The DM's reports stay in the ledger for its next work.
+        self.lead_reports.clear();
+        self.taken_reports.clear();
         self.publication = Publication::new(ChatId(destination));
         self.edits.clear();
         self.slots.clear();
@@ -1504,11 +1647,25 @@ impl Actor {
                 }
             };
         }
-        let mode = match self.native.clone() {
-            Some(session) => OpenMode::Resume { session },
-            None => OpenMode::Start,
+        let mode = match (self.native.clone(), self.fork_from.take()) {
+            (Some(session), _) => OpenMode::Resume { session },
+            (None, Some(session)) => OpenMode::Fork {
+                session,
+                at: self
+                    .fork_at
+                    .take()
+                    .map(|turn| inline_agent_bridge::harness::ForkPoint::Turn { turn }),
+            },
+            (None, None) => OpenMode::Start,
         };
-        match self.open(mode).await {
+        let forking = matches!(mode, OpenMode::Fork { .. });
+        let mut opened = self.open(mode).await;
+        // A harness that cannot fork starts the task fresh from its brief.
+        if forking && matches!(opened, Err(OpenFailure::Other(_))) {
+            log::warn!(target: "inline::bridge::v2", "chat={} fork failed; starting fresh", self.chat_id);
+            opened = self.open(OpenMode::Start).await;
+        }
+        match opened {
             Ok(()) => Some(HoldEvent::Acquired),
             Err(OpenFailure::HeldElsewhere(by)) => Some(HoldEvent::AcquireConflict { by }),
             Err(OpenFailure::Other(message)) => {
@@ -1730,6 +1887,7 @@ impl Actor {
                     owner_user_id: self.agent.owner_user_id,
                     inline_tools: self.agent.tools.is_some(),
                     no_project,
+                    lead: self.chat_id == self.agent.dm_chat_id,
                 })),
                 title: None,
                 after: None,
@@ -1745,6 +1903,13 @@ impl Actor {
 
     /// Records the native session as this thread's work (owner-authenticated).
     async fn connect(&self, native: &ProviderSessionId) -> Result<(), String> {
+        let parent = self
+            .agent
+            .ledger
+            .child(self.chat_id)
+            .ok()
+            .flatten()
+            .and_then(|child| child.lead_session_id);
         let result = self
             .agent
             .owner
@@ -1761,6 +1926,13 @@ impl Actor {
                     .lock()
                     .ok()
                     .and_then(|projects| projects.get(&self.chat_id).cloned()),
+                // A task subthread's session was started by the DM's lead.
+                parent_agent_session_id: parent,
+                relation: if parent.is_some() {
+                    proto::AgentSessionRelation::Delegation as i32
+                } else {
+                    proto::AgentSessionRelation::Unspecified as i32
+                },
                 ..Default::default()
             })
             .await?;
@@ -1830,6 +2002,32 @@ impl Actor {
             }
             context.conversation.push_str(&passive.text);
         }
+        // The lead's task reports travel with its next input, as Codex adds a
+        // sub-agent's result to its parent without starting a turn.
+        let reports = if self.chat_id == self.agent.dm_chat_id {
+            std::mem::take(&mut self.lead_reports)
+        } else {
+            Vec::new()
+        };
+        if !reports.is_empty() {
+            let texts: Vec<&str> = reports.iter().map(|report| report.text.as_str()).collect();
+            let context =
+                input
+                    .content
+                    .context
+                    .get_or_insert_with(|| inline_agent_bridge::TurnContext {
+                        instructions: String::new(),
+                        conversation: String::new(),
+                    });
+            if !context.conversation.is_empty() {
+                context.conversation.push_str("\n\n");
+            }
+            context
+                .conversation
+                .push_str(&super::lead::batch_text(&texts));
+            self.taken_reports
+                .extend(reports.iter().map(|report| report.event_id.clone()));
+        }
         if !matches!(input.delivery, Delivery::Queue | Delivery::Passive) {
             input.delivery = match live_turn(&session) {
                 Some(turn) => Delivery::Steer {
@@ -1842,6 +2040,7 @@ impl Actor {
         // Recorded as written before it is: an input the ledger cannot track
         // is never sent.
         if !self.mark(&pending.id, InputState::Sent) {
+            self.return_reports(reports);
             self.inputs.remove(&pending.id);
             self.reply(
                 message_id,
@@ -1871,6 +2070,21 @@ impl Actor {
             input.delivery = Delivery::Turn;
             result = session.send(input.clone()).await;
         }
+        // Reports the harness took (or may have: never resent) are done;
+        // the rest wait for the next input.
+        let taken = match &result {
+            // Queued input can still be taken back out; the reports wait.
+            Ok(receipt) => !matches!(receipt.disposition, InputDisposition::Queued { .. }),
+            Err(SendError::Unknown(_)) => true,
+            Err(_) => false,
+        };
+        if taken {
+            for report in &reports {
+                let _ = self.agent.ledger.remove_lead_event(&report.event_id);
+            }
+        } else {
+            self.return_reports(reports);
+        }
         match result {
             Ok(receipt) => {
                 // A bare write stays Sent until the harness shows taking it.
@@ -1889,6 +2103,9 @@ impl Actor {
                 if let InputDisposition::Started { turn } | InputDisposition::Steered { turn } =
                     receipt.disposition
                 {
+                    if self.lead_inputs.contains(&pending.id) {
+                        self.directed_turns.insert(turn.clone());
+                    }
                     self.turn = Some(turn.clone());
                     live.turn.get_or_insert(turn);
                 }
@@ -2332,6 +2549,9 @@ impl Actor {
         }
         let from = self.chat_id;
         self.chat_id = destination;
+        // The DM's reports stay in the ledger for its next work.
+        self.lead_reports.clear();
+        self.taken_reports.clear();
         // The subthread is the work's own: its answer stands on its own.
         self.answer_to = None;
         self.answer_replies.clear();
@@ -2500,6 +2720,9 @@ impl Actor {
         match &envelope.event {
             Event::Turn { turn, phase } => match phase {
                 TurnPhase::Started { inputs } => {
+                    if inputs.iter().any(|input| self.lead_inputs.contains(input)) {
+                        self.directed_turns.insert(turn.clone());
+                    }
                     self.turn = Some(turn.clone());
                     if let Some(first) = inputs.first() {
                         self.last_turn_input = Some(first.clone());
@@ -2514,9 +2737,23 @@ impl Actor {
                     }
                 }
                 TurnPhase::Completed {
-                    inputs_consumed, ..
+                    inputs_consumed,
+                    outcome,
+                    ..
                 } => {
                     self.rendering_turn = Some(turn.clone());
+                    let directed = self.directed_turns.remove(turn)
+                        | inputs_consumed
+                            .iter()
+                            .any(|input| self.is_lead_input(input));
+                    for input in inputs_consumed {
+                        self.lead_inputs.remove(input);
+                    }
+                    self.turn_ended = Some((turn.clone(), *outcome, directed));
+                    if let Ok(mut last) = self.last_turn.lock() {
+                        *last = Some(turn.clone());
+                    }
+                    self.final_text = None;
                     for input in inputs_consumed {
                         self.mark(input, InputState::Consumed);
                         self.inputs.remove(input);
@@ -2586,6 +2823,9 @@ impl Actor {
         self.renderer.set_folder(self.folder());
         let ops = self.renderer.apply(&envelope);
         self.render(ops).await;
+        if self.turn_ended.is_some() {
+            self.report_to_lead();
+        }
         if (envelope.event.is_control() || matches!(envelope.event, Event::Child { .. }))
             && let Some(session) = self.session.clone()
         {
@@ -2893,6 +3133,7 @@ impl Actor {
                     self.send(&doc, None, Notify::Silent).await;
                 }
                 RenderOp::Final { doc } => {
+                    self.final_text = Some(doc.text.clone());
                     // Edits still pending land before the answer.
                     self.flush_edits(true).await;
                     let reply_to = self.answer_to.take();
@@ -3963,6 +4204,8 @@ pub(crate) mod recovery_tests {
             agent_session_id: Some(1),
             native: Some(ProviderSessionId::new("fault-session").unwrap()),
             from_v1: false,
+            fork_from: None,
+            fork_at: None,
         };
         let output_mode = OutputMode::Detailed;
         let thread_settings = SettingsChange::default();
@@ -3998,7 +4241,10 @@ pub(crate) mod recovery_tests {
             agent_session_id: agent_session_id.clone(),
             native: known.native,
             catalog_session: Arc::new(std::sync::Mutex::new(None)),
+            last_turn: Arc::new(std::sync::Mutex::new(None)),
             native_from_v1: known.from_v1,
+            fork_from: known.fork_from.clone(),
+            fork_at: known.fork_at.clone(),
             session: None,
             events: None,
             probe: None,
@@ -4036,6 +4282,12 @@ pub(crate) mod recovery_tests {
             outbox,
             rendering_turn: None,
             last_turn_input: None,
+            lead_reports: Vec::new(),
+            turn_ended: None,
+            final_text: None,
+            taken_reports: HashSet::new(),
+            lead_inputs: HashSet::new(),
+            directed_turns: HashSet::new(),
         }
     }
 

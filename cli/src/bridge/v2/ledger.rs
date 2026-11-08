@@ -152,6 +152,23 @@ impl Ledger {
                  chat_id INTEGER NOT NULL,
                  payload TEXT NOT NULL,
                  created_at INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS v2_children (
+                 child_chat_id INTEGER PRIMARY KEY,
+                 lead_chat_id INTEGER NOT NULL,
+                 lead_session_id INTEGER,
+                 title TEXT NOT NULL,
+                 card_message_id INTEGER,
+                 status TEXT,
+                 created_at INTEGER NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS v2_children_lead ON v2_children (lead_chat_id);
+             CREATE TABLE IF NOT EXISTS v2_lead_events (
+                 event_id TEXT PRIMARY KEY,
+                 lead_chat_id INTEGER NOT NULL,
+                 child_chat_id INTEGER NOT NULL,
+                 text TEXT NOT NULL,
+                 created_at INTEGER NOT NULL
              );",
         )?;
         Ok(Self {
@@ -345,6 +362,110 @@ impl Ledger {
         Ok(())
     }
 
+    /// A task subthread the DM's lead started.
+    pub(crate) fn add_child(
+        &self,
+        child_chat_id: i64,
+        child: &ChildRecord,
+    ) -> rusqlite::Result<()> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection.execute(
+            "INSERT INTO v2_children (child_chat_id, lead_chat_id, lead_session_id, title, card_message_id, status, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT (child_chat_id) DO UPDATE SET lead_chat_id = ?2, lead_session_id = ?3, title = ?4, card_message_id = ?5, status = ?6",
+            params![
+                child_chat_id,
+                child.lead_chat_id,
+                child.lead_session_id,
+                child.title,
+                child.card_message_id,
+                child.status,
+                now_seconds()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// The lead a task subthread reports to, if it is one.
+    pub(crate) fn child(&self, child_chat_id: i64) -> rusqlite::Result<Option<ChildRecord>> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection
+            .query_row(
+                "SELECT lead_chat_id, lead_session_id, title, card_message_id, status FROM v2_children WHERE child_chat_id = ?1",
+                [child_chat_id],
+                row_child,
+            )
+            .optional()
+    }
+
+    /// A lead's task subthreads, newest first.
+    pub(crate) fn children(&self, lead_chat_id: i64) -> rusqlite::Result<Vec<(i64, ChildRecord)>> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        let mut statement = connection.prepare(
+            "SELECT lead_chat_id, lead_session_id, title, card_message_id, status, child_chat_id
+             FROM v2_children WHERE lead_chat_id = ?1 ORDER BY created_at DESC, child_chat_id DESC",
+        )?;
+        statement
+            .query_map([lead_chat_id], |row| Ok((row.get(5)?, row_child(row)?)))?
+            .collect()
+    }
+
+    pub(crate) fn set_child_status(
+        &self,
+        child_chat_id: i64,
+        status: &str,
+    ) -> rusqlite::Result<()> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection.execute(
+            "UPDATE v2_children SET status = ?2 WHERE child_chat_id = ?1",
+            params![child_chat_id, status],
+        )?;
+        Ok(())
+    }
+
+    /// A task's report for its lead, kept until the lead's input records it.
+    pub(crate) fn add_lead_event(&self, event: &LeadEventRecord) -> rusqlite::Result<()> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection.execute(
+            "INSERT INTO v2_lead_events (event_id, lead_chat_id, child_chat_id, text, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (event_id) DO NOTHING",
+            params![
+                event.event_id,
+                event.lead_chat_id,
+                event.child_chat_id,
+                event.text,
+                now_seconds()
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Reports no lead input took yet, oldest first.
+    pub(crate) fn lead_events(&self) -> rusqlite::Result<Vec<LeadEventRecord>> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        let mut statement = connection.prepare(
+            "SELECT event_id, lead_chat_id, child_chat_id, text FROM v2_lead_events
+             ORDER BY created_at, rowid",
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok(LeadEventRecord {
+                    event_id: row.get(0)?,
+                    lead_chat_id: row.get(1)?,
+                    child_chat_id: row.get(2)?,
+                    text: row.get(3)?,
+                })
+            })?
+            .collect()
+    }
+
+    /// The lead's harness took the report.
+    pub(crate) fn remove_lead_event(&self, event_id: &str) -> rusqlite::Result<()> {
+        let connection = self.connection.lock().expect("ledger poisoned");
+        connection.execute("DELETE FROM v2_lead_events WHERE event_id = ?1", [event_id])?;
+        Ok(())
+    }
+
     /// Drops settled records older than `max_age_secs`.
     pub(crate) fn prune(&self, max_age_secs: i64) -> rusqlite::Result<usize> {
         let connection = self.connection.lock().expect("ledger poisoned");
@@ -354,6 +475,38 @@ impl Ledger {
             params![now_seconds() - max_age_secs],
         )
     }
+}
+
+/// A task subthread and the lead it reports to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ChildRecord {
+    pub lead_chat_id: i64,
+    /// The lead's work in Inline, the child's parent session.
+    pub lead_session_id: Option<i64>,
+    pub title: String,
+    /// The lead's status card for this task.
+    pub card_message_id: Option<i64>,
+    /// The task's last reported status.
+    pub status: Option<String>,
+}
+
+fn row_child(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChildRecord> {
+    Ok(ChildRecord {
+        lead_chat_id: row.get(0)?,
+        lead_session_id: row.get(1)?,
+        title: row.get(2)?,
+        card_message_id: row.get(3)?,
+        status: row.get(4)?,
+    })
+}
+
+/// A task's report waiting for its lead.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LeadEventRecord {
+    pub event_id: String,
+    pub lead_chat_id: i64,
+    pub child_chat_id: i64,
+    pub text: String,
 }
 
 fn record(connection: &Connection, input_id: &str) -> rusqlite::Result<Option<InputRecord>> {
@@ -474,5 +627,57 @@ mod tests {
             ledger.outputs(11).unwrap(),
             vec!["closed card with the same ID"]
         );
+    }
+
+    #[test]
+    fn task_links_and_lead_reports_survive_reopening() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ledger.sqlite");
+        let child = ChildRecord {
+            lead_chat_id: 1,
+            lead_session_id: Some(40),
+            title: "Fix the build".to_owned(),
+            card_message_id: Some(9),
+            status: None,
+        };
+        let event = LeadEventRecord {
+            event_id: "e1".to_owned(),
+            lead_chat_id: 1,
+            child_chat_id: 5,
+            text: "done".to_owned(),
+        };
+        {
+            let ledger = Ledger::open(&path).unwrap();
+            ledger.add_child(5, &child).unwrap();
+            ledger
+                .add_child(
+                    6,
+                    &ChildRecord {
+                        title: "Other".to_owned(),
+                        ..child.clone()
+                    },
+                )
+                .unwrap();
+            ledger.set_child_status(5, "completed").unwrap();
+            ledger.add_lead_event(&event).unwrap();
+            // A replayed report is kept once.
+            ledger.add_lead_event(&event).unwrap();
+        }
+        let ledger = Ledger::open(&path).unwrap();
+        let stored = ledger.child(5).unwrap().unwrap();
+        assert_eq!(stored.status.as_deref(), Some("completed"));
+        assert_eq!(stored.lead_session_id, Some(40));
+        assert_eq!(ledger.child(7).unwrap(), None);
+        let chats: Vec<i64> = ledger
+            .children(1)
+            .unwrap()
+            .into_iter()
+            .map(|(chat, _)| chat)
+            .collect();
+        assert_eq!(chats.len(), 2);
+        assert!(chats.contains(&5) && chats.contains(&6));
+        assert_eq!(ledger.lead_events().unwrap(), vec![event]);
+        ledger.remove_lead_event("e1").unwrap();
+        assert!(ledger.lead_events().unwrap().is_empty());
     }
 }
