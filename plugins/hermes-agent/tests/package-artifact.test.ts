@@ -149,23 +149,23 @@ describe("packed artifact", () => {
       expect(pack.version).toBe(sourceVersion)
       const tarball = path.join(packDir, pack.filename)
 
-      // Source CI has unreleased workspace dependencies. Install local packed
-      // prerequisites so this still exercises a clean npm tree. The isolated
-      // release stage has no sibling packages and resolves published versions.
+      // Repack the exact installed dependencies, from workspace source or the
+      // isolated candidate graph, into this clean global consumer. Keep the
+      // adapter's declared registry specs unchanged in both cases.
       const localPrerequisites: string[] = []
-      if (existsSync(path.join(repoRoot, "packages", "protocol", "package.json"))) {
-        for (const directory of ["protocol", "sdk"]) {
-          const prerequisiteDir = path.join(repoRoot, "packages", directory)
-          const prerequisitePack = parsePackOutput(execFileSync("npm", [
-            "pack", "--pack-destination", packDir, "--json", "--silent", prerequisiteDir,
-          ], {
-            cwd: packageRoot,
-            encoding: "utf8",
-            env: realNpmEnv,
-            stdio: ["ignore", "pipe", "pipe"],
-          }))
-          localPrerequisites.push(path.join(packDir, prerequisitePack.filename))
-        }
+      const from = path.join(packageRoot, "package.json")
+      const installedSdk = await readInstalledManifest("@inline-chat/realtime-sdk", from)
+      const installedProtocol = await readInstalledManifest("@inline-chat/protocol", installedSdk.path)
+      for (const prerequisite of [installedProtocol, installedSdk]) {
+        const prerequisitePack = parsePackOutput(execFileSync("npm", [
+          "pack", "--ignore-scripts", "--pack-destination", packDir, "--json", "--silent", path.dirname(prerequisite.path),
+        ], {
+          cwd: packageRoot,
+          encoding: "utf8",
+          env: realNpmEnv,
+          stdio: ["ignore", "pipe", "pipe"],
+        }))
+        localPrerequisites.push(path.join(packDir, prerequisitePack.filename))
       }
 
       execFileSync("npm", ["install", "--global", "--prefix", prefix, "--ignore-scripts", "--no-audit", "--no-fund", ...localPrerequisites, tarball], {

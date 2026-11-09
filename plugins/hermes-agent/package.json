@@ -66,7 +66,7 @@
     "check": "bun run typecheck && bun run lint && bun run test"
   },
   "dependencies": {
-    "@inline-chat/realtime-sdk": "0.0.20",
+    "@inline-chat/realtime-sdk": "0.0.22",
     "yaml": "2.9.0"
   },
   "devDependencies": {
