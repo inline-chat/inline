@@ -4253,6 +4253,39 @@ async def assert_quiet_sidecars_leave_the_executor_free():
 
 asyncio.run(assert_quiet_sidecars_leave_the_executor_free())
 
+async def assert_failed_continuation_is_partial_not_resent():
+    # A later chunk (often a widget the server rejected) failing after earlier chunks landed must
+    # not make Hermes resend the whole reply as plain text: the delivered head would post twice.
+    adapter = InlineAdapter(PlatformConfig(extra=trusted_extra))
+    adapter._get_chat_info = root_chat_info
+    sends = []
+
+    async def fake_send_sidecar(path, body):
+        sends.append(body["text"])
+        if len(sends) == 2:
+            return SendResult(success=False, error="widget rejected", retryable=False)
+        return SendResult(success=True, message_id=str(len(sends)), raw_response={})
+
+    adapter._send_sidecar = fake_send_sidecar
+    content = "a" * 3900 + "\n\n" + "b" * 3900 + "\n\n" + "c" * 100
+    result = await adapter.send("chat:10", content)
+    assert len(sends) == 2 and not result.success, (len(sends), result.__dict__)
+    assert result.message_id == "1", result.__dict__
+    assert result.raw_response["partial_overflow"] is True
+    assert result.raw_response["delivered_chunks"] == 1 and result.raw_response["total_chunks"] >= 2, result.raw_response
+    # Hosts before Hermes' own partial-delivery check fall back to plain text: refuse that resend.
+    fallback = await adapter._send_plain_fallback("chat:10", content, reply_to=None, metadata=None)
+    assert not fallback.success and len(sends) == 2
+
+    # A first chunk that fails delivered nothing: the plain failure (and fallback) stay as before.
+    sends.clear()
+    sends.append("pre")  # the next send is the second call, which fails
+    result = await adapter.send("chat:10", "short reply")
+    assert not result.success and not (getattr(result, "raw_response", None) or {}).get("partial_overflow")
+    assert not adapter._partial_sends
+
+asyncio.run(assert_failed_continuation_is_partial_not_resent())
+
 async def assert_model_picker_flow():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
     calls = []

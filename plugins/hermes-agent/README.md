@@ -60,7 +60,10 @@ tap answers only the request its card was sent for, and on Hermes versions with
 writes the card, so a long command arrives in full before its buttons. Gateways
 with many Inline bots no longer hang during startup or keep the old process alive
 on restart. Scheduled posts can mention their recipient with `cron_mention_prefix`
-(see Scheduled mentions below). Tested on Hermes `0.23.0`.
+(see Scheduled mentions below). The agent settings show how full the session's
+context window is, which Inline's composer draws as its context circle. When a
+later part of a long reply is refused, the parts already sent are no longer posted
+again as a plain-text copy. Tested on Hermes `0.23.0`.
 
 ```sh
 npm install -g @inline-chat/hermes-agent-adapter@1.1.0

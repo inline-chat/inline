@@ -1151,6 +1151,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._clarify_choices: "OrderedDict[str, List[str]]" = OrderedDict()
         self._clarify_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._approval_sessions: "OrderedDict[str, str]" = OrderedDict()
+        self._partial_sends: "OrderedDict[tuple, bool]" = OrderedDict()
         self._approval_request_ids: "OrderedDict[str, str]" = OrderedDict()
         self._approval_commands: "OrderedDict[str, str]" = OrderedDict()
         self._slash_sessions: "OrderedDict[str, str]" = OrderedDict()
@@ -5065,6 +5066,7 @@ class InlineAdapter(BasePlatformAdapter):
         metadata: Optional[Dict[str, Any]] = None,
         actions: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
+        requested = content
         content = self._with_cron_mention(content, metadata)
         metadata = self._with_turn_thread(chat_id, reply_to, metadata)
         target = self._target_for(chat_id, metadata)
@@ -5097,7 +5099,9 @@ class InlineAdapter(BasePlatformAdapter):
                     })
                     raw_responses.append(continuation.raw_response)
                     if not continuation.success:
-                        return continuation
+                        return self._partial_send_failure(
+                            chat_id, requested, continuation, previous_id, continuation_ids, len(chunks), raw_responses,
+                        )
                     if continuation.message_id:
                         previous_id = str(continuation.message_id)
                         continuation_ids.append(previous_id)
@@ -5131,7 +5135,12 @@ class InlineAdapter(BasePlatformAdapter):
                 body["actions"] = actions
             last_result = await self._send_sidecar("/send", body)
             if not last_result.success:
-                return last_result
+                if not message_ids:
+                    return last_result
+                return self._partial_send_failure(
+                    chat_id, requested, last_result, message_ids[-1], message_ids[:-1], len(chunks),
+                    [*raw_responses, getattr(last_result, "raw_response", None)],
+                )
             if not marked_visible:
                 self._mark_reply_thread_visible(target)
                 marked_visible = True
@@ -5859,7 +5868,37 @@ class InlineAdapter(BasePlatformAdapter):
             return list(base(content, max_length, len_fn=len_fn))
         return list(base(content, max_length))
 
+    def _partial_send_failure(
+        self, chat_id: str, requested: str, failed: SendResult, last_delivered_id: str,
+        delivered_continuations: List[str], total_chunks: int, raw_responses: List[Any],
+    ) -> SendResult:
+        """A later chunk failed after earlier ones were delivered. ``partial_overflow`` tells Hermes
+        (0.22.7+) not to resend the visible head as plain text; older hosts are stopped in
+        ``_send_plain_fallback``. Either way the reply is not posted twice."""
+        if getattr(BasePlatformAdapter, "_is_partial_delivery", None) is None:
+            self._remember(self._partial_sends, (self._chat_key(chat_id), requested), True, limit=64)
+        return _send_result(
+            success=False,
+            message_id=last_delivered_id,
+            error=failed.error or "continuation failed",
+            error_kind=getattr(failed, "error_kind", None),
+            retryable=bool(getattr(failed, "retryable", False)),
+            raw_response={
+                "partial_overflow": True,
+                "delivered_chunks": 1 + len(delivered_continuations),
+                "total_chunks": total_chunks,
+                "last_message_id": last_delivered_id,
+                "continuation_message_ids": tuple(delivered_continuations),
+                "responses": raw_responses,
+            },
+            continuation_message_ids=tuple(delivered_continuations),
+        )
+
     async def _send_plain_fallback(self, chat_id: str, content: str, *, reply_to: Optional[str], metadata: Any) -> SendResult:
+        if self._partial_sends.pop((self._chat_key(chat_id), content), None):
+            # Part of this reply is already in the chat: resending it would post that part twice.
+            logger.warning("[inline] send failed after partial delivery; not resending it as plain text")
+            return _send_result(success=False, error="send failed after partial delivery", error_kind="bad_format")
         # A widget the server rejected would fail the fallback too; keep the prose and say so.
         if getattr(self, "_parse_markdown", True) and has_widget_markup(content):
             content = without_widgets(content)
