@@ -171,7 +171,13 @@ public struct GetChatTransaction: Transaction2 {
     if let existing = try User.fetchOne(db, id: user.id) {
       // Message imports may create a nameless peer before its full profile arrives.
       let fillsDisplayName = existing.needsDisplayNameFetch && !User(from: user).needsDisplayNameFetch
-      guard fillsDisplayName || profilePhotoNeedsRepair(existing: existing, incoming: user) else { return false }
+      // A full profile omits the time zone when the viewer no longer has access.
+      // Minimal projections omit fields for other reasons, so they cannot clear it.
+      let changesTimeZone = !(user.hasMin && user.min)
+        && existing.timeZone != (user.hasTimeZone ? user.timeZone : nil)
+      guard fillsDisplayName || changesTimeZone || profilePhotoNeedsRepair(existing: existing, incoming: user) else {
+        return false
+      }
     }
 
     _ = try User.save(db, user: user)

@@ -19,20 +19,29 @@ public final class PrivacyPeoplePickerModel: ObservableObject {
   @Published public private(set) var unresolvedIDs: [Int64] = []
 
   private let database: AppDatabase
+  private var selectionIDs: [Int64]
+  private var knownUsers: [Int64: UserInfo] = [:]
   private var recentPeers: [UserInfo] = []
   private var searchTask: Task<Void, Never>?
+  private var loadGeneration = 0
 
-  public init(database: AppDatabase = .shared) {
+  public init(selectedIDs: [Int64] = [], database: AppDatabase = .shared) {
     self.database = database
+    var seen = Set<Int64>()
+    selectionIDs = selectedIDs.filter { seen.insert($0).inserted }
+    unresolvedIDs = selectionIDs
   }
 
   /// The list to save, in display order.
   public var selectedIDs: [Int64] {
-    selectedUsers.map(\.id) + unresolvedIDs
+    selectionIDs
   }
 
-  /// Resolves stored IDs to people, keeping the list order.
-  public func load(selectedIDs: [Int64]) async {
+  /// Resolves names without replacing the selection, which is safe to save before this read finishes.
+  public func load() async {
+    loadGeneration += 1
+    let generation = loadGeneration
+    let selectedIDs = selectionIDs
     let currentUserID = Auth.shared.getCurrentUserId()
     do {
       let (selected, recent) = try await database.dbWriter.read { db in
@@ -49,9 +58,9 @@ public final class PrivacyPeoplePickerModel: ObservableObject {
           .fetchAll(db)
         return (selected, recent)
       }
-      let byID = Dictionary(uniqueKeysWithValues: selected.map { ($0.id, $0) })
-      selectedUsers = selectedIDs.compactMap { byID[$0] }
-      unresolvedIDs = selectedIDs.filter { byID[$0] == nil }
+      guard !Task.isCancelled, generation == loadGeneration else { return }
+      for user in selected { knownUsers[user.id] = user }
+      updateSelectionPresentation()
       recentPeers = recent.sorted { $0.user.displayName.localizedCompare($1.user.displayName) == .orderedAscending }
       refreshCandidates(local: recentPeers, remote: [])
     } catch {
@@ -60,15 +69,23 @@ public final class PrivacyPeoplePickerModel: ObservableObject {
   }
 
   public func add(_ userInfo: UserInfo) {
-    guard !selectedUsers.contains(where: { $0.id == userInfo.id }) else { return }
-    selectedUsers.append(userInfo)
+    guard !selectionIDs.contains(userInfo.id) else { return }
+    selectionIDs.append(userInfo.id)
+    knownUsers[userInfo.id] = userInfo
+    updateSelectionPresentation()
     refreshCandidates(local: candidates, remote: [])
   }
 
   public func remove(id: Int64) {
-    selectedUsers.removeAll { $0.id == id }
+    selectionIDs.removeAll { $0 == id }
+    updateSelectionPresentation()
     let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     if query.isEmpty { refreshCandidates(local: recentPeers, remote: []) }
+  }
+
+  private func updateSelectionPresentation() {
+    selectedUsers = selectionIDs.compactMap { knownUsers[$0] }
+    unresolvedIDs = selectionIDs.filter { knownUsers[$0] == nil }
   }
 
   private func scheduleSearch() {
@@ -99,7 +116,7 @@ public final class PrivacyPeoplePickerModel: ObservableObject {
   }
 
   private func refreshCandidates(local: [UserInfo], remote: [UserInfo]) {
-    var excluded = Set(selectedUsers.map(\.id))
+    var excluded = Set(selectionIDs)
     if let currentUserID = Auth.shared.getCurrentUserId() { excluded.insert(currentUserID) }
     candidates = InviteDirectory.mergedUsers(local: local, remote: remote, excluding: excluded)
   }
