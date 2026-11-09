@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -64,6 +65,7 @@ _DEFAULT_SIDECAR_PORT = 8794
 _ACTION_EDIT_RETRY_DELAY_SECONDS = 0.5
 _DEFAULT_SIDECAR_BIND = "127.0.0.1"
 _MAX_MESSAGE_LENGTH = 4000
+_APPROVAL_CHOICES = frozenset({"once", "session", "always", "deny"})
 _MODEL_PAGE_SIZE = 8
 _CHOICE_PICKER_MAX_CHOICES = 16
 _CHOICE_PICKER_TTL_SECONDS = 2 * 60
@@ -879,16 +881,21 @@ def _apply_yaml_config(yaml_cfg: dict, platform_cfg: dict) -> Optional[dict]:
     return extra
 
 
+def _accepts_keyword(fn: Callable[..., Any], name: str) -> bool:
+    """Whether a host callable takes keyword ``name`` (host APIs grow optional keywords)."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 class InlineAdapter(BasePlatformAdapter):
     MAX_MESSAGE_LENGTH = _MAX_MESSAGE_LENGTH
     supports_code_blocks = True
     splits_long_messages = True
-
-    @classmethod
-    def supports_exec_approval_buttons(cls) -> bool:
-        # Hermes sends the button card only when this is true. Inline renders it in
-        # send_exec_approval itself rather than through _send_exec_approval_prompt.
-        return True
+    # Command preview on an approval card; Hermes sends a longer command whole before the card.
+    _EA_CMD_BUDGET = 2000
 
     def __init__(self, config: PlatformConfig, *, use_ephemeral_sidecar_port: bool = False):
         super().__init__(config, Platform("inline"))
@@ -4444,24 +4451,20 @@ class InlineAdapter(BasePlatformAdapter):
         _, approval_id, choice = parts
         choice = "once" if choice == "approve" else choice
         session_key = self._approval_sessions.get(approval_id)
-        if choice not in {"once", "session", "always", "deny"}:
+        if choice not in _APPROVAL_CHOICES:
             return False
         if not session_key:
             await self._finish_action(event, "Approval expired", "Approval expired; the command was not run.")
             return True
         try:
-            from tools import approval as approval_mod
             request_id = self._approval_request_ids.get(approval_id)
-            if request_id:
-                # Resolve only the request this card was sent for. Once it has settled
-                # (timeout, /approve), the tap resolves nothing rather than the next one.
-                resolve_card = getattr(approval_mod, "resolve_gateway_approval_card", None)
-                if resolve_card is not None:
-                    count = resolve_card(session_key, choice, request_id)
-                else:
-                    count = approval_mod.resolve_gateway_approval(session_key, choice, request_id=request_id)
-            else:
-                count = approval_mod.resolve_gateway_approval(session_key, choice)
+            actor_id = str(event.get("actorUserId") or "").strip()
+            refusal = self._approval_refusal(session_key, actor_id, request_id)
+            if refusal:
+                # Another member's approval: leave the card live for the requester.
+                await self._answer_action(str(event.get("interactionId") or ""), refusal)
+                return True
+            count = self._resolve_approval(session_key, choice, request_id, actor_id)
             self._approval_sessions.pop(approval_id, None)
             self._approval_request_ids.pop(approval_id, None)
             if not count:
@@ -4480,6 +4483,36 @@ class InlineAdapter(BasePlatformAdapter):
             self._report_error("action.approval", exc)
             logger.exception("[inline] approval action failed")
             return True
+
+    def _approval_refusal(self, session_key: str, actor_id: str, request_id: Optional[str]) -> Optional[str]:
+        """Hermes' approver rule (``approvals.approvers``) for a tap, or None when it may answer.
+        Hosts without the rule leave it to the chat access check every action already passed."""
+        try:
+            from gateway.approval_actor import approval_refusal
+        except ImportError:
+            return None
+        requester = approval_refusal(session_key, actor_id, extra=self.config.extra, request_id=request_id)
+        if not requester:
+            return None
+        try:
+            from gateway.approval_actor import refusal_text
+            return str(refusal_text(requester))
+        except ImportError:
+            return f"Only {requester} can answer this approval."
+
+    def _resolve_approval(self, session_key: str, choice: str, request_id: Optional[str], actor_id: str) -> int:
+        """Resolve only the request the card was sent for; once it settled (timeout, /approve)
+        the tap resolves nothing rather than the next one queued. A card without a request id
+        (hosts before 0.22.7) keeps the oldest-pending behaviour."""
+        from tools import approval as approval_mod
+        resolve_card = getattr(approval_mod, "resolve_gateway_approval_card", None)
+        if resolve_card is not None:
+            if _accepts_keyword(resolve_card, "actor_id"):
+                return resolve_card(session_key, choice, request_id, actor_id=actor_id or None, extra=self.config.extra)
+            return resolve_card(session_key, choice, request_id)
+        if request_id:
+            return approval_mod.resolve_gateway_approval(session_key, choice, request_id=request_id)
+        return approval_mod.resolve_gateway_approval(session_key, choice)
 
     async def _handle_slash_action(self, event: Dict[str, Any]) -> bool:
         action_id = str(event.get("actionId") or "")
@@ -5325,36 +5358,28 @@ class InlineAdapter(BasePlatformAdapter):
             "actions": {"rows": self._action_rows(actions)},
         })
 
-    async def send_exec_approval(
-        self,
-        chat_id: str,
-        command: str,
-        session_key: str,
-        description: str = "dangerous command",
-        metadata: Optional[Dict[str, Any]] = None,
-        allow_permanent: bool = True,
-        allow_session: bool = True,
-        smart_denied: bool = False,
-        request_id: Optional[str] = None,
-    ) -> SendResult:
+    async def _send_exec_approval_prompt(self, prompt: Any) -> SendResult:
+        """Draw Hermes' exec-approval prompt as an Inline button card.
+
+        Hermes' ``send_exec_approval`` owns the wording, a truncated command's full send and
+        the Deny-only gate of newer hosts; overriding this hook is also how Hermes knows the
+        adapter has native buttons. Inline only draws the offered choices and remembers which
+        request the card answers, so a tap never resolves a different one."""
         approval_id = secrets.token_hex(6)
-        text = f"Command approval required\n\n```\n{command[:2000]}\n```\n\nReason: {description}"
-        if smart_denied:
-            text += "\n\nSmart DENY: owner override applies to this one operation only."
-        actions = [self._action(f"appr:{approval_id}:once", "Allow Once")]
-        if not smart_denied and allow_session:
-            actions.append(self._action(f"appr:{approval_id}:session", "Allow for Session"))
-            if allow_permanent:
-                actions.append(self._action(f"appr:{approval_id}:always", "Always Allow"))
-        actions.append(self._action(f"appr:{approval_id}:deny", "Deny"))
+        actions = [
+            self._action(f"appr:{approval_id}:{choice}", str(label))
+            for label, choice, _style in prompt.actions
+            if choice in _APPROVAL_CHOICES
+        ]
         result = await self._send_sidecar("/send", {
-            "target": self._target_for(chat_id, metadata),
-            "text": text,
+            "target": self._target_for(prompt.chat_id, prompt.metadata),
+            "text": prompt.text,
             "parseMarkdown": self._parse_markdown,
             "actions": {"rows": self._action_rows(actions)},
         })
         if result.success:
-            self._remember(self._approval_sessions, approval_id, session_key)
+            self._remember(self._approval_sessions, approval_id, prompt.session_key)
+            request_id = getattr(prompt, "request_id", None)
             if request_id:
                 self._remember(self._approval_request_ids, approval_id, str(request_id))
         return result

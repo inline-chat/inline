@@ -4053,6 +4053,19 @@ async def assert_chat_info_cache_invalidation():
 
 asyncio.run(assert_chat_info_cache_invalidation())
 
+FULL_APPROVAL_ACTIONS = [
+    ("Allow Once", "once", "primary"),
+    ("Allow for Session", "session", ""),
+    ("Always Allow", "always", ""),
+    ("Deny", "deny", "danger"),
+]
+
+def approval_prompt(chat_id, session_key, actions, *, text="Command approval required", metadata=None, request_id=None):
+    return types.SimpleNamespace(
+        chat_id=chat_id, session_key=session_key, text=text, actions=list(actions), command="echo ok",
+        description="flagged", smart_denied=False, metadata=metadata, request_id=request_id,
+    )
+
 async def assert_action_thread_targets():
     adapter = InlineAdapter(PlatformConfig(extra=trusted_extra))
     adapter._get_chat_info = root_chat_info
@@ -4065,7 +4078,7 @@ async def assert_action_thread_targets():
     adapter._send_sidecar = fake_send_sidecar
     metadata = {"thread_id": "chat:99"}
     await adapter.send_clarify("chat:10", "Choose", ["A", "B"], "clarify-1", "session-1", metadata=metadata)
-    await adapter.send_exec_approval("chat:10", "echo ok", "session-2", metadata=metadata)
+    await adapter._send_exec_approval_prompt(approval_prompt("chat:10", "session-2", FULL_APPROVAL_ACTIONS, metadata=metadata))
     await adapter.send_slash_confirm("chat:10", "Title", "Message", "session-3", "confirm-1", metadata=metadata)
 
     assert len(calls) == 3
@@ -4100,45 +4113,41 @@ async def assert_action_thread_targets():
         assert body["text"] == "\n".join(["Clarify: Choose", "", *[f"{index + 1}. {label}" for index, label in enumerate(choices[:10])]])
 
     calls.clear()
-    await adapter.send_exec_approval(
-        "chat:10",
-        "echo session",
-        "session-4",
-        allow_permanent=False,
-        allow_session=True,
-    )
+    await adapter._send_exec_approval_prompt(approval_prompt(
+        "chat:10", "session-4", [action for action in FULL_APPROVAL_ACTIONS if action[1] != "always"],
+    ))
     session_rows = calls[-1][1]["actions"]["rows"]
     assert [[action["text"] for action in row["actions"]] for row in session_rows] == [
         ["Allow Once", "Allow for Session"],
         ["Deny"],
     ]
 
+    # Hermes owns the card text and the choice set (Deny-only when it could not show the whole
+    # command); Inline draws exactly what it offers and drops a choice it cannot resolve.
     calls.clear()
-    await adapter.send_exec_approval(
-        "chat:10",
-        "echo smart-denied",
-        "session-5",
-        allow_permanent=False,
-        allow_session=False,
-        smart_denied=True,
-    )
-    smart_rows = calls[-1][1]["actions"]["rows"]
-    assert [[action["text"] for action in row["actions"]] for row in smart_rows] == [
-        ["Allow Once", "Deny"],
-    ]
-    assert "one operation only" in calls[-1][1]["text"]
+    await adapter._send_exec_approval_prompt(approval_prompt(
+        "chat:10", "session-5", [("Deny", "deny", "danger"), ("Later", "later", "")], text="host text",
+    ))
+    deny_only = calls[-1][1]
+    assert [[action["text"] for action in row["actions"]] for row in deny_only["actions"]["rows"]] == [["Deny"]]
+    assert deny_only["text"] == "host text"
     assert not adapter._approval_request_ids
 
     # Hermes passes the id of the approval request the card answers; the card keeps it.
     calls.clear()
-    await adapter.send_exec_approval("chat:10", "echo request", "session-6", request_id="request-6")
+    await adapter._send_exec_approval_prompt(approval_prompt(
+        "chat:10", "session-6", FULL_APPROVAL_ACTIONS, request_id="request-6",
+    ))
     approval_id = calls[-1][1]["actions"]["rows"][0]["actions"][0]["id"].split(":")[2]
     assert adapter._approval_sessions[approval_id] == "session-6"
     assert dict(adapter._approval_request_ids) == {approval_id: "request-6"}
 
 asyncio.run(assert_action_thread_targets())
-# Hermes sends the button card only to adapters that report native approval buttons.
-assert InlineAdapter.supports_exec_approval_buttons() is True
+# Hermes reports native approval buttons for adapters that override its prompt hook, and its
+# own send_exec_approval (wording, full-command send, Deny-only gate) must stay in charge.
+assert "_send_exec_approval_prompt" in vars(InlineAdapter)
+assert "send_exec_approval" not in vars(InlineAdapter)
+assert "supports_exec_approval_buttons" not in vars(InlineAdapter)
 
 async def assert_upload_size_cap():
     with tempfile.TemporaryDirectory() as tmp:
@@ -5706,6 +5715,47 @@ async def assert_callback_state_lifecycle():
     assert card_calls == [("session-card", "deny", "request-2")]
     assert answers[-1] == ("interaction-card", "Approval expired")
     assert "approval-card" not in adapter._approval_request_ids
+
+    # Newer hosts check the clicker against the request in the same step that settles it.
+    def resolve_card_with_actor(session_key, choice, request_id, *, actor_id=None, admin_ids=(), extra=None):
+        card_calls.append((session_key, choice, request_id, actor_id, extra))
+        return 1
+    approval.resolve_gateway_approval_card = resolve_card_with_actor
+    card_calls.clear()
+    adapter._approval_sessions["approval-actor"] = "session-actor"
+    adapter._approval_request_ids["approval-actor"] = "request-3"
+    event = {**action_event("appr:approval-actor:once", "interaction-actor"), "actorUserId": "42"}
+    assert await adapter._handle_approval_action(event)
+    assert card_calls == [("session-actor", "once", "request-3", "42", adapter.config.extra)]
+    assert answers[-1] == ("interaction-actor", "Approved once")
+
+    # Another member's tap is refused privately and the card stays live for the requester.
+    approval_actor = types.ModuleType("gateway.approval_actor")
+    refusals = []
+    def approval_refusal(session_key, actor_id, *, admin_ids=(), request_id=None, extra=None):
+        refusals.append((session_key, actor_id, request_id))
+        return "Ada" if actor_id == "7" else None
+    approval_actor.approval_refusal = approval_refusal
+    approval_actor.refusal_text = lambda requester: f"Only {requester} can answer this"
+    sys.modules["gateway.approval_actor"] = approval_actor
+    try:
+        card_calls.clear()
+        edits_before = len(edits)
+        adapter._approval_sessions["approval-other"] = "session-other"
+        adapter._approval_request_ids["approval-other"] = "request-4"
+        event = {**action_event("appr:approval-other:once", "interaction-other"), "actorUserId": "7"}
+        assert await adapter._handle_approval_action(event)
+        assert refusals[-1] == ("session-other", "7", "request-4")
+        assert answers[-1] == ("interaction-other", "Only Ada can answer this")
+        assert card_calls == [] and len(edits) == edits_before
+        assert adapter._approval_request_ids["approval-other"] == "request-4"
+
+        event = {**action_event("appr:approval-other:deny", "interaction-owner"), "actorUserId": "42"}
+        assert await adapter._handle_approval_action(event)
+        assert card_calls == [("session-other", "deny", "request-4", "42", adapter.config.extra)]
+        assert answers[-1] == ("interaction-owner", "Denied")
+    finally:
+        del sys.modules["gateway.approval_actor"]
     del approval.resolve_gateway_approval_card
 
     adapter._slash_sessions["confirm-2"] = "session-3"
