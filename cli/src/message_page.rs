@@ -42,7 +42,6 @@ mod tests {
         let mut payload = proto::SearchMessagesResult {
             total_count: None,
             seq: Some(41),
-            total_count: None,
             messages: vec![
                 proto::Message {
                     id: 20,

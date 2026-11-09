@@ -7846,7 +7846,6 @@ mod cli_parsing_tests {
             payload: proto::SearchMessagesResult {
                 total_count: None,
                 seq: Some(43),
-                total_count: None,
                 messages: vec![proto::Message {
                     id: 8,
                     message: Some("hola".to_string()),

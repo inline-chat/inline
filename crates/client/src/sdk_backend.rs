@@ -9846,8 +9846,6 @@ mod tests {
                         block_content: None,
                         agent_session: None,
                         subthread: None,
-                        unread_mention: None,
-                        unread_reactions: None,
                         counts_as_unread: None,
                         reply_quote: None,
                         unread_mention: None,
