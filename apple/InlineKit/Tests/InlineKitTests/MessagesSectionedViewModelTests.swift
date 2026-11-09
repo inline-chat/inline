@@ -5,6 +5,52 @@ import Testing
 
 @Suite("MessagesSectionedViewModel Ordering Tests")
 struct MessagesSectionedViewModelOrderingTests {
+  @Test("a reversed unread opening keeps the frozen line and partial-window coverage")
+  @MainActor
+  func unreadOpeningPreservesItsBoundary() {
+    let peer = Peer.user(id: 9_010)
+    let date = Date(timeIntervalSince1970: 1_700_000_000)
+    let rows = (Int64(1) ... 5).map { id in
+      makeSectionTestFullMessage(messageId: id, globalId: id, date: date, peerUserId: peer.id)
+    }
+    let state = MessagesProgressiveViewModel.InitialState(
+      messages: rows,
+      threadAnchor: .resolved(nil),
+      loadedWindowMetadata: .init(messages: rows, holes: [], newerCandidateMessageID: 6),
+      unreadBoundary: 2
+    )
+    let model = MessagesSectionedViewModel(peer: peer, reversed: true, initialState: state)
+    defer { model.dispose() }
+
+    #expect(model.openingUnreadBoundary == 2)
+    #expect(model.firstUnreadMessageId == 3)
+    #expect(model.messages.map(\.message.messageId) == [5, 4, 3, 2, 1])
+    // The visual bottom of this window is not the live end; it cannot authorize readAll.
+    #expect(!model.historyCoverage.isAtCertifiedLiveEnd)
+
+    model.setHistoryAnchor(4)
+    model.setAtBottom(true)
+    #expect(model.openingUnreadBoundary == 2)
+    #expect(model.firstUnreadMessageId == 3)
+    #expect(!model.historyCoverage.isAtCertifiedLiveEnd)
+  }
+
+  @Test("a latest opening without unread messages has no separator target")
+  @MainActor
+  func latestOpeningHasNoUnreadTarget() {
+    let peer = Peer.user(id: 9_011)
+    let row = makeSectionTestFullMessage(messageId: 5, globalId: 5, date: Date(), peerUserId: peer.id)
+    let model = MessagesSectionedViewModel(
+      peer: peer,
+      reversed: true,
+      initialState: .init(messages: [row], threadAnchor: .resolved(nil), loadedWindowMetadata: .init(messages: [row], holes: []))
+    )
+    defer { model.dispose() }
+    #expect(model.openingUnreadBoundary == nil)
+    #expect(model.firstUnreadMessageId == nil)
+    #expect(model.historyCoverage.isAtCertifiedLiveEnd)
+  }
+
   @Test("sectioned projection exposes the contiguous window and its immutable coverage")
   @MainActor
   func projectsHistoryCoverage() {

@@ -237,6 +237,8 @@ public class MessagesProgressiveViewModel {
     /// `MessagesPublisher.publicationRevision(for:)` taken before the read. Updates published
     /// after it reached no view model, so one built from this state reads the chat again.
     public let publicationRevision: UInt64?
+    /// Last read ID frozen with the first window, so the unread line stays fixed for this visit.
+    public let unreadBoundary: Int64?
 
     public var threadAnchor: FullMessage? {
       if case let .resolved(anchor) = threadAnchorState { anchor } else { nil }
@@ -266,12 +268,14 @@ public class MessagesProgressiveViewModel {
       messages: [FullMessage],
       threadAnchor: ThreadAnchor = .unresolved,
       loadedWindowMetadata: LoadedWindowMetadata,
-      publicationRevision: UInt64? = nil
+      publicationRevision: UInt64? = nil,
+      unreadBoundary: Int64? = nil
     ) {
       self.messages = messages
       threadAnchorState = threadAnchor
       self.loadedWindowMetadata = loadedWindowMetadata
       self.publicationRevision = publicationRevision
+      self.unreadBoundary = unreadBoundary
     }
   }
 
@@ -300,7 +304,28 @@ public class MessagesProgressiveViewModel {
   private var loadedWindowMetadataGeneration: UInt64 = 0
   private var reloadGeneration: UInt64 = 0
   private var reloadTask: Task<Void, Never>?
+  /// Replacing the whole window invalidates pages; ordinary row publications do not.
+  private var windowEpoch: UInt64 = 0
   private var pinChangesDuringReload: [MessagesPublisher.PinnedMessagesChange] = []
+  /// Incremental publications may reach the visible window before a page's older database
+  /// snapshot returns. Retain them until that page has been reconciled, including off-window rows.
+  private var pageReadChanges: [UUID: PageReadChanges] = [:]
+
+  private struct PageReadChanges {
+    var updates: [Int64: FullMessage] = [:]
+    var deletedMessageIDs: Set<Int64> = []
+    var pins: [MessagesPublisher.PinnedMessagesChange] = []
+
+    func applying(to messages: [FullMessage]) -> [FullMessage] {
+      messages.compactMap { snapshot in
+        guard !deletedMessageIDs.contains(snapshot.message.messageId) else { return nil }
+        var message = updates[snapshot.id] ?? snapshot
+        for change in pins { change.apply(to: &message) }
+        return message
+      }
+    }
+  }
+
 
   deinit {
     threadAnchorFetchTask?.cancel()
@@ -377,6 +402,7 @@ public class MessagesProgressiveViewModel {
   var hasPendingReload: Bool { reloadTask != nil }
 
   private func applyInitialState(_ state: InitialState, around anchorID: Int64? = nil) {
+    windowEpoch &+= 1
     let projected = state.loadedWindowMetadata.projecting(state.messages, around: anchorID)
     messages = reapplyingPendingAcknowledgements(to: Self.stableSortedMessages(projected.messages, reversed: reversed))
     threadAnchor = state.threadAnchor?.withoutAcknowledgements
@@ -445,11 +471,22 @@ public class MessagesProgressiveViewModel {
         db, peer: peer, chatId: chatId, currentUserId: currentUserId, reversed: false,
         existingMessages: [], mode: .replaceLatest(limit: limit)
       )
+      let dialog = try Dialog.get(peerId: peer).fetchOne(db)
+      let boundary = ChatUnreadOpening.boundary(
+        unreadCount: dialog?.unreadCount, readInboxMaxId: dialog?.readInboxMaxId
+      )
+      let openingMessages = try boundary.flatMap {
+        try ChatUnreadOpening.localOpeningWindow(db, peer: peer, chatId: chatId, boundary: $0, latest: snapshot.messages)
+      } ?? snapshot.messages
+      let usesLatestWindow = openingMessages.map(\.id) == snapshot.messages.map(\.id)
       return try InitialState(
-        messages: snapshot.messages,
+        messages: openingMessages,
         threadAnchor: .resolved(localThreadAnchor(db, peer: peer)),
-        loadedWindowMetadata: snapshot.metadata,
-        publicationRevision: publicationRevision
+        loadedWindowMetadata: usesLatestWindow
+          ? snapshot.metadata
+          : loadedWindowMetadata(db, peer: peer, messages: openingMessages),
+        publicationRevision: publicationRevision,
+        unreadBoundary: boundary
       )
     }
   }
@@ -703,6 +740,7 @@ public class MessagesProgressiveViewModel {
   }
 
   private func applyChanges(update: MessagesPublisher.UpdateType) -> MessagesChangeSet? {
+    retainChangesForInFlightPages(update)
     let updateLabel = update.traceLabel
     let beforeCount = messages.count
     let startedAt = Date()
@@ -899,6 +937,24 @@ public class MessagesProgressiveViewModel {
     }
 
     return nil
+  }
+
+  private func retainChangesForInFlightPages(_ update: MessagesPublisher.UpdateType) {
+    guard !pageReadChanges.isEmpty else { return }
+    for id in Array(pageReadChanges.keys) {
+      switch update {
+        case let .update(change) where change.peer == peer:
+          pageReadChanges[id]?.updates[change.message.id] = change.message
+        case let .add(change) where change.peer == peer:
+          for message in change.messages { pageReadChanges[id]?.updates[message.id] = message }
+        case let .delete(change) where change.peer == peer:
+          pageReadChanges[id]?.deletedMessageIDs.formUnion(change.messageIds)
+        case let .pinnedMessages(change):
+          pageReadChanges[id]?.pins.append(change)
+        default:
+          break
+      }
+    }
   }
 
   private enum PublisherReloadMode: Sendable {
@@ -1568,6 +1624,7 @@ public class MessagesProgressiveViewModel {
       // A reload queued before this jump (often by saving the target's history)
       // read the old window; finishing later, it would replace this one.
       invalidatePendingReload()
+      windowEpoch &+= 1
       // A deferred history reload must preserve this window until scrolling
       // establishes that the user has returned to the live end of the chat.
       atBottom = false
@@ -1908,8 +1965,12 @@ public class MessagesProgressiveViewModel {
 
   private func loadAdditionalMessagesAsync(request: AdditionalLoadRequest, publish: Bool) async -> Bool {
     let peer = peer
-    let generation = reloadGeneration
+    let epoch = windowEpoch
     let previousIDs = messages.map(\.id)
+    let publicationRevision = publisher.publicationRevision(for: peer)
+    let readID = UUID()
+    pageReadChanges[readID] = PageReadChanges()
+    defer { pageReadChanges[readID] = nil }
 
     log
       .debug(
@@ -1921,7 +1982,8 @@ public class MessagesProgressiveViewModel {
         db: db, peer: peer, chatId: chatId, request: request, currentUserId: currentUserId
       )
       let rawCount = messagesBatch.count
-      guard !Task.isCancelled, generation == reloadGeneration else { return false }
+      guard !Task.isCancelled, epoch == windowEpoch, pageStillAdjoins(request) else { return false }
+      messagesBatch = pageReadChanges[readID]?.applying(to: messagesBatch) ?? messagesBatch
 
       log.trace("loaded additional messages async: \(rawCount)")
 
@@ -1944,12 +2006,26 @@ public class MessagesProgressiveViewModel {
       )
 
       updateRange()
+      // A reload still reading was sized for the rows before this page.
+      if reloadTask != nil || publicationRevision != publisher.publicationRevision(for: peer) {
+        scheduleReload(animated: false)
+      }
       await updateLoadedWindowMetadataAsync(retainingMessageIDs: Set(previousIDs))
       guard !Task.isCancelled else { return false }
       return previousIDs != messages.map(\.id)
     } catch {
       Log.shared.error("Failed to get messages \(error)")
       return false
+    }
+  }
+
+  /// A reload that landed while a page was being read can move the edge the page was read
+  /// from. The page still fits when the rows reach its cursor; past it, rows would be missing
+  /// between the two.
+  private func pageStillAdjoins(_ request: AdditionalLoadRequest) -> Bool {
+    switch request.direction {
+      case .older: (oldestLoadedMessageId ?? request.cursorMessageId) <= request.cursorMessageId
+      case .newer: (newestLoadedMessageId ?? request.cursorMessageId) >= request.cursorMessageId
     }
   }
 
