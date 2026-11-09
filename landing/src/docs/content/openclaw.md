@@ -16,30 +16,22 @@ command; no failed or partial run is reported as ready.
 
 ## Install
 
-Install the compatible plugin for the current OpenClaw line:
+Install the plugin that matches your OpenClaw version:
 
-```bash
-openclaw plugins install @inline-openclaw/inline --force --accept-capabilities
-```
+| OpenClaw                                          | Inline plugin | Install                                                                                     |
+| ------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------- |
+| `2026.11.1` and newer                             | `1.0.0`       | `openclaw plugins install npm:@inline-openclaw/inline@1.0.0 --force --accept-capabilities`  |
+| `2026.8.2` through `2026.10.x`                    | `0.0.72`      | `openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities` |
+| `2026.7.x` (`>=2026.7.1`)                         | `0.0.63`      | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`                           |
+| `2026.6.x` (`>=2026.6.11`, including `2026.6.34`) | `0.0.63`      | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`                           |
 
-### Version Match
+Plugin 1.0 needs OpenClaw `2026.11.1` or newer, and OpenClaw refuses to install
+it on an older host. Use the pinned command for your version; `inline agents
+setup` picks it for you. Check your version with `openclaw --version`.
 
-| OpenClaw                                          | Inline plugin |
-| ------------------------------------------------- | ------------- |
-| `2026.8.x` (`>=2026.8.2`)                         | `0.0.65`      |
-| `2026.7.x` (`>=2026.7.1`)                         | `0.0.63`      |
-| `2026.6.x` (`>=2026.6.11`, including `2026.6.34`) | `0.0.63`      |
-
-Install a matched version with:
-
-```bash
-openclaw plugins install @inline-openclaw/inline --force --accept-capabilities
-```
-
-On OpenClaw 2026.8, `--accept-capabilities` approves the capabilities declared
-by Inline's trusted first-party package so the noninteractive install cannot
-stall on a prompt. Older supported hosts do not recognize that flag; install
-their matched `0.0.63` package with `--force` only.
+`--accept-capabilities` approves the capabilities declared by Inline's trusted
+first-party package so the install can't stall on a prompt. OpenClaw 2026.7 and
+older don't recognize that flag.
 
 ## Configure
 
