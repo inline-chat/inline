@@ -1177,6 +1177,13 @@
       "when": 1794151138461,
       "tag": "0167_activity-items",
       "breakpoints": true
+    },
+    {
+      "idx": 168,
+      "version": "7",
+      "when": 1794235846393,
+      "tag": "0168_legacy-agent-grant-upserts",
+      "breakpoints": true
     }
   ]
 }
