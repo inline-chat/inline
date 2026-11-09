@@ -39,7 +39,8 @@ test("a complete explicit-chat history page saves the redundant lookup", async (
   const operation = await prepareScenario(selectScenarios(["history.50"])[0]!)
   const sample = await measureOperation(db.$client.options, operation.run, async () => {})
   await operation.verify()
-  expect(sample.sql.commands).toBe(10)
+  // Includes one indexed lookup for the page's unread activity flags.
+  expect(sample.sql.commands).toBe(11)
 })
 
 test("a missing explicit chat preserves CHAT_ID_INVALID and never enters the response reader", async () => {

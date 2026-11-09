@@ -145,7 +145,7 @@ export async function recordMessageActivity(input: {
  */
 export async function recordReactionActivity(
   tx: Transaction,
-  input: { chat: ChatForActivity; messageId: number; reactorUserId: number },
+  input: { chat: ChatForActivity; messageId: number; reactorUserId: number; date: Date },
 ): Promise<void> {
   const [message] = await tx
     .select({ fromId: messages.fromId })
@@ -169,12 +169,14 @@ export async function recordReactionActivity(
       messageId: input.messageId,
       kind: ACTIVITY_KIND_REACTION,
       actorUserId: input.reactorUserId,
+      // Use the persisted reaction's clock: request time can precede BEGIN.
+      date: input.date,
     })
     .onConflictDoUpdate({
       target: [activityItems.userId, activityItems.chatId, activityItems.kind, activityItems.messageId],
       set: {
         actorUserId: input.reactorUserId,
-        date: sql`CASE WHEN ${activityItems.readAt} IS NULL THEN ${activityItems.date} ELSE now() END`,
+        date: sql`CASE WHEN ${activityItems.readAt} IS NULL THEN ${activityItems.date} ELSE excluded.date END`,
         readAt: null,
       },
     })
