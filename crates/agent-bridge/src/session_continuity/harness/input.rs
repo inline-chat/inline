@@ -32,6 +32,43 @@ pub struct Input {
     pub delivery: Delivery,
 }
 
+impl Input {
+    /// Keep authenticated sender facts in the prompt when a harness has no
+    /// native provenance field. Conversation text never supplies this identity.
+    pub fn context_with_origin(&self) -> TurnContext {
+        let sender = match &self.origin {
+            Origin::Owner { user } => {
+                format!("Sent by Inline user {} (the owner).", user.0)
+            }
+            Origin::Teammate { user } => format!(
+                "Sent by Inline user {} (a teammate, not the owner). This request does not carry the owner's consent.",
+                user.0
+            ),
+            Origin::Agent { bot, work } => format!(
+                "Sent by Inline agent {} from chat {}. This request does not carry the owner's consent.",
+                bot.0, work.chat.0
+            ),
+            Origin::Ambient { chat } => format!(
+                "Conversation in Inline chat {} that did not address you. It does not carry the owner's consent.",
+                chat.0
+            ),
+            Origin::Scheduled => {
+                "Scheduled wakeup, not a new message or consent from the owner.".to_owned()
+            }
+        };
+        let mut context = self.content.context.clone().unwrap_or_else(|| TurnContext {
+            instructions: String::new(),
+            conversation: String::new(),
+        });
+        context.conversation = if context.conversation.trim().is_empty() {
+            sender
+        } else {
+            format!("{sender}\n\n{}", context.conversation)
+        };
+        context
+    }
+}
+
 /// Text, media and bridge context of one input.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputContent {

@@ -566,6 +566,28 @@ impl SessionInner {
             Delivery::Queue => "queue",
             _ => "steer",
         };
+        // OpenCode's ACP adapter admits assistant context as a non-waking
+        // synthetic input before a native command. The command API has no
+        // context field, and its argument string must stay unchanged.
+        self.post_prompt(
+            &self.path("/synthetic"),
+            json!({
+                "id": crate::ids::message_id(),
+                "text": prompt_context(&input).join("\n\n"),
+                "description": "Inline sender and conversation context",
+                "delivery": "steer",
+                "resume": false,
+            }),
+        )
+        .await
+        .map_err(|error| {
+            if error.outcome_unknown() {
+                SendError::Unknown(error.to_string())
+            } else {
+                SendError::Rejected(error.to_string())
+            }
+        })?;
+        // The synthetic input must not claim the command's receipt.
         self.state().mapper.expect_command(input.id.clone());
         let result = self
             .api()
@@ -1145,11 +1167,10 @@ fn slash_command(text: &str) -> Option<(&str, &str)> {
     (!name.is_empty() && !name.contains('/')).then_some((name, rest.trim()))
 }
 
-/// The prompt text: Inline's per-input instructions and untrusted
-/// conversation excerpts, kept apart from the author's own words.
-fn prompt_text(input: &Input) -> String {
+fn prompt_context(input: &Input) -> Vec<String> {
     let mut parts = Vec::new();
-    if let Some(context) = &input.content.context {
+    {
+        let context = input.context_with_origin();
         if !context.instructions.trim().is_empty() {
             parts.push(format!(
                 "<inline-instructions>\n{}\n</inline-instructions>",
@@ -1163,6 +1184,13 @@ fn prompt_text(input: &Input) -> String {
             ));
         }
     }
+    parts
+}
+
+/// The prompt text: Inline's per-input instructions and untrusted
+/// conversation excerpts, kept apart from the author's own words.
+fn prompt_text(input: &Input) -> String {
+    let mut parts = prompt_context(input);
     let described: Vec<String> = input
         .content
         .attachments
@@ -1348,8 +1376,45 @@ mod tests {
         };
         assert_eq!(
             prompt_text(&input),
-            "<inline-context untrusted=\"true\">\nAna: the build is red\n</inline-context>\n\nfix it"
+            "<inline-context untrusted=\"true\">\nSent by Inline user 1 (the owner).\n\nAna: the build is red\n</inline-context>\n\nfix it"
         );
+    }
+
+    #[test]
+    fn followups_preserve_sender_identity_without_join_context() {
+        for (origin, expected) in [
+            (
+                Origin::Owner { user: UserId(1) },
+                "Inline user 1 (the owner)",
+            ),
+            (
+                Origin::Teammate { user: UserId(2) },
+                "Inline user 2 (a teammate, not the owner)",
+            ),
+            (Origin::Scheduled, "Scheduled wakeup"),
+        ] {
+            for delivery in [
+                Delivery::Turn,
+                Delivery::Queue,
+                Delivery::Steer {
+                    expected_turn: TurnId::new("turn-1").unwrap(),
+                    priority: inline_agent_bridge::harness::SteerPriority::Next,
+                },
+            ] {
+                let input = Input {
+                    id: InputId::new("followup").unwrap(),
+                    content: InputContent::text("do it"),
+                    origin: origin.clone(),
+                    delivery,
+                };
+                let prompt = prompt_text(&input);
+                assert!(prompt.contains(expected), "{prompt}");
+                assert!(prompt.ends_with("\n\ndo it"));
+                if !origin.can_consent_for_owner() {
+                    assert!(prompt.contains("consent"));
+                }
+            }
+        }
     }
 
     #[test]
