@@ -264,21 +264,100 @@ struct PrivacySettingsView: View {
       }
 
       Section {
-        SettingsItem(
-          icon: "clock.fill",
-          iconColor: .orange,
-          title: "Share Time Zone"
-        ) {
-          Toggle("Share Time Zone", isOn: $privacy.shareTimeZone)
-            .labelsHidden()
+        NavigationLink {
+          TimeZonePrivacySettingsView()
+        } label: {
+          SettingsItem(
+            icon: "clock.fill",
+            iconColor: .orange,
+            title: "Time Zone"
+          ) {
+            Text(privacy.effectiveTimeZoneRule.summary)
+              .foregroundStyle(.secondary)
+          }
         }
       } footer: {
-        Text("Allow people you chat with to see your local time.")
+        Text("Choose who can see your local time.")
       }
     }
     .listStyle(.insetGrouped)
     .navigationTitle("Privacy")
     .navigationBarTitleDisplayMode(.inline)
+  }
+}
+
+struct TimeZonePrivacySettingsView: View {
+  @ObservedObject private var privacy = INUserSettings.current.privacy
+  @State private var isEditingExceptions = false
+
+  var body: some View {
+    let rule = privacy.effectiveTimeZoneRule
+    List {
+      Section {
+        Picker("Who Can See My Local Time", selection: audience) {
+          Text("Everyone").tag(PrivacyRuleValue.Audience.everyone)
+          Text("Nobody").tag(PrivacyRuleValue.Audience.nobody)
+        }
+        .pickerStyle(.inline)
+      } header: {
+        Text("Who Can See My Local Time")
+      }
+
+      Section {
+        Button {
+          isEditingExceptions = true
+        } label: {
+          HStack {
+            Text(rule.exceptionsTitle)
+              .foregroundStyle(.primary)
+            Spacer()
+            Text(exceptionsCount(rule))
+              .foregroundStyle(.secondary)
+            Image(systemName: "chevron.right")
+              .font(.footnote.weight(.semibold))
+              .foregroundStyle(.tertiary)
+          }
+        }
+      } header: {
+        Text("Exceptions")
+      } footer: {
+        Text(rule.audience == .everyone
+          ? "Add people who shouldn’t see your local time."
+          : "Add people who can see your local time.")
+      }
+    }
+    .listStyle(.insetGrouped)
+    .navigationTitle("Time Zone")
+    .navigationBarTitleDisplayMode(.inline)
+    .sheet(isPresented: $isEditingExceptions) {
+      PrivacyPeopleEditor(
+        title: rule.exceptionsTitle,
+        footer: rule.audience == .everyone
+          ? "These people won’t see your local time."
+          : "Only these people will see your local time.",
+        selectedIDs: rule.exceptions
+      ) { ids in
+        var updated = privacy.effectiveTimeZoneRule
+        updated.exceptions = ids
+        privacy.setTimeZoneRule(updated)
+      }
+    }
+  }
+
+  private var audience: Binding<PrivacyRuleValue.Audience> {
+    Binding(
+      get: { privacy.effectiveTimeZoneRule.audience },
+      set: { audience in
+        var rule = privacy.effectiveTimeZoneRule
+        rule.audience = audience
+        privacy.setTimeZoneRule(rule)
+      }
+    )
+  }
+
+  private func exceptionsCount(_ rule: PrivacyRuleValue) -> String {
+    let count = rule.exceptions.count
+    return count == 0 ? "Add" : (count == 1 ? "1 person" : "\(count) people")
   }
 }
 
