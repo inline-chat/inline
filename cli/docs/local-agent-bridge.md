@@ -407,7 +407,16 @@ one and each part holds at most one (an answer with two goes out as two
 messages); a v1 answer cut at its 16 KiB bound drops an unfinished widget;
 progress shows a streaming widget only as `[Widget: Title]`; and the plain-text
 fallback for an answer Inline refused shows each widget's title, never its
-HTML. A widget's `inline.action` calls are not delivered to local agents yet.
+HTML.
+
+In bridge v2, a widget's `inline.action(name, payload)` call reaches the agent
+as input from the viewer who clicked, as if they had replied to the widget's
+message with `[Widget call] name payload (from the widget "id" on message
+N)`. It goes through the same addressing, access and loop rules as a typed
+message, so only someone allowed to ask the agent starts a turn; anyone else
+gets a toast saying why. The payload is the viewer's own JSON (up to 4 KiB)
+and is treated as untrusted input. Bridge v1 does not deliver widget calls and
+answers them with a toast naming the v2 bridge.
 
 Owner-authorized Agent Settings are available per DM or thread and share the
 same underlying state as slash commands for project, model, reasoning,
@@ -607,8 +616,10 @@ line. In bridge v2, text Inline posts as a message (`send_message`,
 `edit_own_message`, `create_chat`'s first message, `notify_owner`) takes up to
 Inline's limit of 100,000 UTF-16 units, so it can carry a widget; task briefs
 and directions to a task take 8,000 characters. A longer text fails with an
-error naming its size, never a silent cut, and Inline's refusal of a message
-with a widget returns the widget rules.
+error naming its size, never a silent cut. When Inline refuses a sent or
+edited message, the tool error carries the server's reason (for a widget, the
+rule it broke); for a generic refusal of a message with a widget, it lists the
+widget rules.
 
 Compatible Codex app-server versions receive these as native `inline.*` dynamic
 tools. OpenCode, Claude, and Amp receive the same catalog through stable ACP

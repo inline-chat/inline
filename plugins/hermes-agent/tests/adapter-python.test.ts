@@ -6745,6 +6745,39 @@ async def assert_bot_settings_document_and_mutation():
 
 asyncio.run(assert_bot_settings_document_and_mutation())
 
+def assert_bot_settings_context_window():
+    # Inline's composer draws a context circle from session.context:<used>:<window>, as Hermes'
+    # /usage reports it for the chat's resident agent; nothing shows before a first turn.
+    class Compressor:
+        last_prompt_tokens = 183_400
+        context_length = 200_000
+
+    class Runner:
+        agents = {"session-ctx": types.SimpleNamespace(context_compressor=Compressor())}
+        def _session_key_for_source(self, source):
+            return source
+        def _resident_agent_for(self, session_key):
+            return self.agents.get(session_key)
+
+    runner = Runner()
+    assert InlineAdapter._session_context_usage(runner, "session-ctx") == [183_400, 200_000]
+    assert InlineAdapter._session_context_usage(runner, "session-new") is None
+    assert InlineAdapter._session_context_usage(object(), "session-ctx") is None
+
+    adapter = InlineAdapter(PlatformConfig(extra=base_extra))
+    context = {"access": "readOnly", "chat_type": "dm", "following": None, "can_set_reply_threads": True,
+               "context_usage": [183_400, 200_000]}
+    runtime = adapter._bot_settings_document(context)["sections"][0]["items"]
+    assert [item["id"] for item in runtime] == ["session.context:183400:200000"]
+    assert runtime[0]["description"] == "183k of 200k tokens used"
+    assert runtime[0]["control"]["info"] == {"text": "91% full", "tone": inline_adapter_module._INLINE_BOT_SETTINGS_TONE_WARNING}
+    quieter = adapter._bot_settings_document({**context, "context_usage": [1_250_000, 2_000_000]})
+    assert quieter["sections"][0]["items"][0]["description"] == "1.2M of 2M tokens used"
+    assert quieter["sections"][0]["items"][0]["control"]["info"]["tone"] == inline_adapter_module._INLINE_BOT_SETTINGS_TONE_NEUTRAL
+    assert adapter._bot_settings_revision(context) != adapter._bot_settings_revision({**context, "context_usage": [1, 200_000]})
+
+assert_bot_settings_context_window()
+
 async def assert_bot_settings_fail_closed_and_serialized():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
 

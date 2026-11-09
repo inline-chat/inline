@@ -467,7 +467,7 @@ impl Tools {
                     .await
                 {
                     Ok(()) => HostToolResult::success("Message edited."),
-                    Err(error) => HostToolResult::failure(match widget_refusal(
+                    Err(error) => HostToolResult::failure(match refusal(
                         &text,
                         &api::ApiError::from(error),
                     ) {
@@ -776,7 +776,7 @@ impl Tools {
                 )
             }
             Err(error) => HostToolResult::failure(
-                widget_refusal(text, &error)
+                refusal(text, &error)
                     .unwrap_or_else(|| "Inline could not send the message.".to_owned()),
             ),
         }
@@ -906,7 +906,7 @@ impl Tools {
             Ok(sent) => sent,
             Err(error) => {
                 return HostToolResult::failure(
-                    widget_refusal(&text, &error)
+                    refusal(&text, &error)
                         .unwrap_or_else(|| "Inline could not send the message.".to_owned()),
                 );
             }
@@ -1455,11 +1455,18 @@ fn text_over_limit(tool: &str, arguments: &Value) -> Option<String> {
     })
 }
 
-/// Inline's refusal of a message with a widget names the widget rules, since
-/// the error itself does not say which one it broke.
-fn widget_refusal(text: &str, error: &api::ApiError) -> Option<String> {
+/// Why Inline refused a message: the server's own reason when it gave one
+/// (which widget rule, say), else the widget rules for a message with a
+/// widget. `None` for any other failure.
+fn refusal(text: &str, error: &api::ApiError) -> Option<String> {
+    if error.failure() != api::Failure::Refused {
+        return None;
+    }
+    if let Some(reason) = error.server_reason() {
+        return Some(format!("Inline refused the message: {reason}"));
+    }
     let widgets = inline_agent_bridge::widget::spans(text);
-    if widgets.is_empty() || error.failure() != api::Failure::Refused {
+    if widgets.is_empty() {
         return None;
     }
     Some(format!(
@@ -1820,25 +1827,41 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_widget_message_hears_the_widget_rules() {
+    fn a_refused_message_hears_the_servers_reason_or_the_widget_rules() {
         use inline_client::{BackendError, ClientErrorCategory, ClientRequestError};
-        let error = |category| {
-            api::ApiError::Request(ClientRequestError::Backend(BackendError::new(
-                category, "test",
-            )))
+        let error = |category, reason: &str| {
+            api::ApiError::Request(ClientRequestError::Backend(
+                BackendError::new(category, "Inline RPC error BAD_REQUEST (status 400)")
+                    .with_server_message(reason),
+            ))
         };
-        let refused = error(ClientErrorCategory::InvalidInput);
         let widget = "<iframe title=\"A\">\nx\n</iframe>";
-        let hint = widget_refusal(widget, &refused).expect("hint");
+        let reason =
+            "Widget HTML has `vh` units; use px or let the content set the height (line 2)";
+        assert_eq!(
+            refusal(widget, &error(ClientErrorCategory::InvalidInput, reason)).as_deref(),
+            Some(format!("Inline refused the message: {reason}").as_str())
+        );
+        // A generic refusal falls back to the rules, for widgets only.
+        let generic = error(ClientErrorCategory::InvalidInput, "Bad request");
+        let hint = refusal(widget, &generic).expect("hint");
         assert!(hint.contains("one per message") && !hint.contains("more than one"));
         let two = format!("{widget}\n\n{widget}");
         assert!(
-            widget_refusal(&two, &refused)
+            refusal(&two, &generic)
                 .expect("hint")
                 .contains("more than one widget")
         );
-        assert!(widget_refusal("no widget", &refused).is_none());
-        assert!(widget_refusal(widget, &error(ClientErrorCategory::Network)).is_none());
+        assert!(refusal("no widget", &generic).is_none());
+        assert_eq!(
+            refusal(
+                "no widget",
+                &error(ClientErrorCategory::InvalidInput, "Text is too long")
+            )
+            .as_deref(),
+            Some("Inline refused the message: Text is too long")
+        );
+        assert!(refusal(widget, &error(ClientErrorCategory::Network, reason)).is_none());
     }
 
     #[test]

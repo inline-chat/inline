@@ -55,6 +55,10 @@ pub struct BackendError {
     /// A bare HTTP 401/403 is not proof: the server also uses them to deny a
     /// single action.
     pub session_invalidated: bool,
+    /// The server's own description of an RPC error, when it sent one: for a
+    /// refused request, often the rule it broke (which widget rule, say).
+    /// `message` keeps its stable, classified wording.
+    pub server_message: Option<String>,
 }
 
 impl BackendError {
@@ -65,7 +69,15 @@ impl BackendError {
             message: message.into(),
             retry_after_seconds: None,
             session_invalidated: false,
+            server_message: None,
         }
+    }
+
+    /// Attaches the server's description of the error; blank ones are dropped.
+    pub fn with_server_message(mut self, message: impl Into<String>) -> Self {
+        let message = message.into();
+        self.server_message = (!message.trim().is_empty()).then_some(message);
+        self
     }
 
     /// Marks an authentication failure as an explicit server invalidation.

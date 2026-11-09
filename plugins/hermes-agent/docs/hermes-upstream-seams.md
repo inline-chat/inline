@@ -79,11 +79,13 @@ Each draft is ready to file on NousResearch/hermes-agent.
 ### 4. Session model and reasoning settings
 
 - Uses: `GatewayRunner._session_key_for_source`, `_session_model_overrides`,
-  `_resolve_session_reasoning_config`, `_handle_model_command`, `_apply_reasoning_selection`;
+  `_resolve_session_reasoning_config`, `_handle_model_command`, `_apply_reasoning_selection`,
+  `_resident_agent_for` (its `context_compressor` token counts, as `/usage` reads them);
   `hermes_cli.model_switch_providers.list_picker_providers`.
 - Why: Inline's agent settings sheet shows and changes the session/default model and
   reasoning effort, like `/model` and `/reasoning`.
-- Without it: the sheet hides the model and reasoning rows; switching reports unavailable.
+- Without it: the sheet hides the model and reasoning rows and the context window;
+  switching reports unavailable.
 
 > **Session settings API for platform adapters.** Native settings UIs need to read and set
 > the current model and reasoning effort for a `SessionSource`: e.g.

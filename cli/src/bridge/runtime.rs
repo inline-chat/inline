@@ -409,6 +409,23 @@ pub(in crate::bridge) enum PendingVoiceRegistration {
     AtCapacity,
 }
 
+/// Bridge v1 does not deliver widget calls to its agent. The viewer hears
+/// why, rather than that a button is no longer active.
+pub(super) fn widget_call_answer(
+    event: &ClientEvent,
+) -> Option<inline_client::AnswerMessageActionRequest> {
+    let ClientEvent::MessageWidgetCalled { interaction_id, .. } = event else {
+        return None;
+    };
+    Some(inline_client::AnswerMessageActionRequest {
+        interaction_id: *interaction_id,
+        toast: Some(
+            "This agent can't receive widget actions: its owner needs to switch it to the v2 bridge."
+                .to_owned(),
+        ),
+    })
+}
+
 pub(super) fn actionable_event_chat_id(event: &ClientEvent) -> Option<i64> {
     match event {
         ClientEvent::MessageStored { message } => Some(message.chat_id.get()),

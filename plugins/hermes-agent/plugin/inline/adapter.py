@@ -918,6 +918,16 @@ async def _wait_for_exit(proc: subprocess.Popen, timeout: float) -> bool:
     return True
 
 
+def _token_count(tokens: int) -> str:
+    """"850", "439k", "1.2M": the bridge's wording for context sizes."""
+    if tokens < 1_000:
+        return str(tokens)
+    if tokens < 1_000_000:
+        return f"{tokens // 1_000}k"
+    tenths = tokens // 100_000
+    return f"{tenths // 10}M" if tenths % 10 == 0 else f"{tenths // 10}.{tenths % 10}M"
+
+
 def _accepts_keyword(fn: Callable[..., Any], name: str) -> bool:
     """Whether a host callable takes keyword ``name`` (host APIs grow optional keywords)."""
     try:
@@ -1426,6 +1436,7 @@ class InlineAdapter(BasePlatformAdapter):
         }
         if runner is None:
             return context
+        context["context_usage"] = self._session_context_usage(runner, source)
 
         try:
             from hermes_cli.config import load_config_readonly
@@ -1547,6 +1558,22 @@ class InlineAdapter(BasePlatformAdapter):
         return context
 
     @staticmethod
+    def _session_context_usage(runner: Any, source: Any) -> Optional[List[int]]:
+        """``[used, window]`` prompt tokens of the chat's resident Hermes agent, read like Hermes'
+        own ``/usage``; None before its first turn or once the agent was evicted."""
+        try:
+            agent = runner._resident_agent_for(runner._session_key_for_source(source))
+            compressor = getattr(agent, "context_compressor", None) if agent is not None else None
+            used = int(getattr(compressor, "last_prompt_tokens", 0) or 0)
+            window = int(getattr(compressor, "context_length", 0) or 0)
+        except Exception as exc:
+            _hermes_seam_unavailable(
+                "GatewayRunner._resident_agent_for", "Inline agent settings omit the context window", exc,
+            )
+            return None
+        return [used, window] if used > 0 and window > 0 else None
+
+    @staticmethod
     def _bot_settings_revision(context: Dict[str, Any]) -> str:
         visible = {
             key: value for key, value in context.items()
@@ -1605,6 +1632,21 @@ class InlineAdapter(BasePlatformAdapter):
                 "control": {"oneofKind": "select", "select": {
                     "value": context["reasoning"],
                     "options": [{**option, "disabled": False} for option in reasoning_options],
+                }},
+            })
+        usage = context.get("context_usage")
+        if usage:
+            used, window = min(usage[0], usage[1]), usage[1]
+            percent = used * 100 // window
+            # The id carries the numbers: Inline's composer draws its context circle from
+            # ``session.context:<used>:<window>``, as it does for coding-agent bridges.
+            runtime_items.append({
+                "id": f"session.context:{usage[0]}:{window}", "label": "Context window",
+                "description": f"{_token_count(usage[0])} of {_token_count(window)} tokens used",
+                "disabled": True,
+                "control": {"oneofKind": "info", "info": {
+                    "text": f"{percent}% full",
+                    "tone": _INLINE_BOT_SETTINGS_TONE_WARNING if percent >= 90 else _INLINE_BOT_SETTINGS_TONE_NEUTRAL,
                 }},
             })
         if not runtime_items:

@@ -255,6 +255,26 @@ fn projected_agent_session_history_is_rejected_before_idle_or_active_handling() 
 }
 
 #[test]
+fn v1_answers_a_widget_call_by_naming_the_v2_bridge() {
+    let call = ClientEvent::MessageWidgetCalled {
+        interaction_id: InlineId::new(5),
+        chat_id: InlineId::new(42),
+        message_id: InlineId::new(9),
+        actor_user_id: InlineId::new(3),
+        widget_id: "picker".to_owned(),
+        name: "choose".to_owned(),
+        payload: Vec::new(),
+    };
+    // Not routed to a chat or a turn, so it is answered and acknowledged.
+    assert_eq!(actionable_event_chat_id(&call), None);
+    let answer = widget_call_answer(&call).expect("answer");
+    assert_eq!(answer.interaction_id, InlineId::new(5));
+    assert!(answer.toast.expect("toast").contains("v2 bridge"));
+    let user = voice_message(Some("continue"), None);
+    assert!(widget_call_answer(&ClientEvent::MessageStored { message: user }).is_none());
+}
+
+#[test]
 fn bot_progress_updates_do_not_feed_the_active_turn_control_queue() {
     let mut own = voice_message(Some("Working"), None);
     own.sender_id = InlineId::new(17);
