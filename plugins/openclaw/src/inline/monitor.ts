@@ -79,7 +79,7 @@ import {
   INLINE_DEFAULT_REQUIRE_MENTION,
 } from "./config-schema.js"
 import { isInlineExecApprovalHandlerConfigured } from "./exec-approvals.js"
-import { buildInlineSystemPrompt, sanitizeInlineOutgoingText } from "./message-formatting.js"
+import { buildInlineSystemPrompt, isInlineHostNoReplyFallback, sanitizeInlineOutgoingText } from "./message-formatting.js"
 import {
   resolveInlineGroupAllowFrom,
   resolveInlineGroupAccessPolicy,
@@ -4164,7 +4164,9 @@ export async function monitorInlineProvider(params: {
               // A hand-back needs no answer, so a failed run has nothing to report.
               // Runtimes that treat a silent reply as an empty response would
               // otherwise post their error into the shared chat.
-              if (botHandBack && payloadIsError) {
+              // Silence is a correct answer to a hand-back, but OpenClaw requires a
+              // group reply and posts its "couldn't produce a reply" notice instead.
+              if (botHandBack && (payloadIsError || isInlineHostNoReplyFallback(visiblePayload.text))) {
                 log?.warn(
                   `[${account.accountId}] inline: dropped error reply to bot hand-back chat=${String(deliveryChatId)} msg=${String(msg.id)}`,
                 )

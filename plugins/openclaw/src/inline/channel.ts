@@ -1880,12 +1880,14 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       supportsInlineMessageButtonsForConfig(cfg, accountId ?? null) ? ["inlineButtons"] : [],
     messageToolHints: ({ cfg, accountId }) => [
       "- Inline targeting: omit `target` to reply in the current chat.",
+      "- Inline messages you send yourself: once a message, card or buttons are sent with the message tool, don't describe or repeat them in your reply.",
       "- Inline explicit targets: `chat:<chatId>` for chats and `user:<userId>` for direct users. Prefer `user:` for DM user targets.",
       "- Inline discovery: use `channel-list` to discover available chats and users. Use `scope: groups|peers|all` when helpful, and reuse returned `target` values.",
       "- Inline markdown links: in visible replies, link returned users as `[@name](inline://user?id=<userId>)` and returned chats/threads as `[title](inline://chat?id=<chatId>)` or `[title](inline://thread?id=<chatId>)`. Use `target` values only for tool calls.",
       ...(supportsInlineMessageButtonsForConfig(cfg, accountId ?? null)
         ? [
             "- Prefer Inline buttons/selects for 2-5 discrete choices or parameter picks instead of asking the user to type one. Use `presentation` blocks for shared buttons/selects, or `buttons` rows with `callback_data` for callbacks and `copy_text`/`copyText` for copy buttons. For quick button feedback, JSON `callback_data` can include `callbackToast`/`toast`. A callback turn identifies the source message; your normal response replaces that message, omitting buttons clears them, and returning buttons replaces them.",
+            "- Inline buttons: the buttons are the choices. Ask in one short line and don't also list the options in the text.",
           ]
         : []),
       ...(supportsInlineReactionsForConfig(cfg, accountId ?? null)

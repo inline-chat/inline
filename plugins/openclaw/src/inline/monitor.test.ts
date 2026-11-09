@@ -6982,7 +6982,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chatId: 7005n,
-          text: expect.stringContaining("Current thinking level: high."),
+          text: "Thinking: high",
           actions: expect.any(Object),
         }),
       )

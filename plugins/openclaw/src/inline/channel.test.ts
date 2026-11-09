@@ -133,6 +133,9 @@ describe("inline/channel", () => {
         } as OpenClawConfig,
       }) ?? []).join("\n"),
     ).toContain("Prefer Inline buttons/selects")
+    expect(
+      inlineChannelPlugin.agentPrompt?.messageToolHints?.({ cfg: { channels: { inline: { token: "token" } } } as any, accountId: null })?.join("\n"),
+    ).toContain("don't also list the options in the text")
     const messageToolHints = (inlineChannelPlugin.agentPrompt?.messageToolHints?.({
       cfg: {
         channels: {
