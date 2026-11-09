@@ -79,8 +79,8 @@ describe("packed artifact", () => {
       install: { npmSpec: "@inline-chat/hermes-agent-adapter" },
       machineSetupProtocol: 1,
       minHermesVersion: "0.21.3",
-      testedHermesVersion: "0.22.7",
-      testedHermesCommit: "b200f5bc60e31588ba2cb60e288029c4a54ba5fa",
+      testedHermesVersion: "0.23.0",
+      testedHermesCommit: "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
     })
 
     const installJs = await readFile(path.join(packageRoot, "dist/install.js"), "utf8")
