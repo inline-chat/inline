@@ -397,6 +397,18 @@ Outside the owner's top-level bot DM, changed files remain relative-path-only:
 the bridge never publishes an absolute host path or `file://` target to a
 thread.
 
+Arbitrary HTML is unsupported, except one message widget per message: an
+`<iframe title="…" id="…" height="…">` line, an HTML fragment, and a
+`</iframe>` line, outside code fences. Inline renders it as sandboxed HTML (no
+network; inline scripts or scripts from a few CDNs; app theme variables) and
+keeps only its title in the message text. Both bridges teach agents this
+format. The bridge keeps widgets intact: a long v2 answer is never split inside
+one and each part holds at most one (an answer with two goes out as two
+messages); a v1 answer cut at its 16 KiB bound drops an unfinished widget;
+progress shows a streaming widget only as `[Widget: Title]`; and the plain-text
+fallback for an answer Inline refused shows each widget's title, never its
+HTML. A widget's `inline.action` calls are not delivered to local agents yet.
+
 Owner-authorized Agent Settings are available per DM or thread and share the
 same underlying state as slash commands for project, model, reasoning,
 permissions, verbosity, new session, clear, compact, queue, and stop behavior.
@@ -581,9 +593,22 @@ message and chat search, reactions, pins, top-level chat creation, returning an
 explicitly requested local artifact as an Inline file, editing this bot's own
 messages, updating this bot's name, and bot presence. Mutations with meaningful
 side effects require explicit user intent; creating a public chat requires a
-second explicit public-chat intent. There is no reply-thread creation tool,
-arbitrary HTTP, raw RPC, CLI, general filesystem access, owner-token, or general
-send-message capability.
+second explicit public-chat intent. In bridge v1 there is no reply-thread
+creation tool, arbitrary HTTP, raw RPC, CLI, general filesystem access,
+owner-token, or general send-message capability. Bridge v2 adds
+`send_message` (in the work's thread, another accessible chat, or a reply
+thread it creates or reuses, adding mentioned users when the bot may) and
+`notify_owner`; it still has no arbitrary HTTP, raw RPC, CLI, general
+filesystem access or owner token.
+
+Message text arguments (`text`, `initial_message`, task briefs, captions,
+descriptions, summaries) may span lines; other string arguments stay on one
+line. In bridge v2, text Inline posts as a message (`send_message`,
+`edit_own_message`, `create_chat`'s first message, `notify_owner`) takes up to
+Inline's limit of 100,000 UTF-16 units, so it can carry a widget; task briefs
+and directions to a task take 8,000 characters. A longer text fails with an
+error naming its size, never a silent cut, and Inline's refusal of a message
+with a widget returns the widget rules.
 
 Compatible Codex app-server versions receive these as native `inline.*` dynamic
 tools. OpenCode, Claude, and Amp receive the same catalog through stable ACP

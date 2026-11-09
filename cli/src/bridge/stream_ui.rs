@@ -1812,10 +1812,14 @@ fn render_progress_entry(
     terminal: bool,
 ) -> Vec<String> {
     match entry {
-        ProgressEntry::Message { text, .. } => split_segments(text, MAX_PROGRESS_BLOCK_BYTES)
-            .into_iter()
-            .map(|segment| progress_commentary(&segment))
-            .collect(),
+        // A widget shows as its title; its HTML belongs to the final answer.
+        ProgressEntry::Message { text, .. } => split_segments(
+            &inline_agent_bridge::widget::preview(text),
+            MAX_PROGRESS_BLOCK_BYTES,
+        )
+        .into_iter()
+        .map(|segment| progress_commentary(&segment))
+        .collect(),
         ProgressEntry::Activity { activity } => render_activity_blocks(ActivityRenderInput {
             semantic_kind: activity.semantic_kind,
             status: activity.status,

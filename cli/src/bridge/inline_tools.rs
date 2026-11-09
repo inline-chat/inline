@@ -1521,8 +1521,16 @@ pub(in crate::bridge) fn string_arg(
     maximum: usize,
 ) -> Option<String> {
     let value = arguments.get(key)?.as_str()?.trim();
-    (!value.is_empty() && !value.chars().any(char::is_control))
+    (!value.is_empty() && !has_disallowed_control(value, multiline_field(key)))
         .then(|| value.chars().take(maximum).collect())
+}
+
+/// A control character the field may not hold: line breaks and tabs are
+/// allowed only in prose fields.
+fn has_disallowed_control(value: &str, multiline: bool) -> bool {
+    value.chars().any(|character| {
+        character.is_control() && !(multiline && matches!(character, '\n' | '\r' | '\t'))
+    })
 }
 
 pub(in crate::bridge) fn bool_arg(arguments: &serde_json::Value, key: &str) -> bool {
@@ -1801,10 +1809,13 @@ pub(in crate::bridge) fn validate_tool_arguments(
     Ok(())
 }
 
-/// Prose fields: a message, caption or summary may span lines. Every other
-/// string (ids, names, emoji, paths, queries) stays on one line.
+/// Prose fields: a message, caption, summary or task brief may span lines.
+/// Every other string (ids, names, emoji, paths, queries) stays on one line.
 fn multiline_field(key: &str) -> bool {
-    matches!(key, "text" | "caption" | "description" | "summary")
+    matches!(
+        key,
+        "text" | "initial_message" | "task" | "caption" | "description" | "summary"
+    )
 }
 
 fn validate_schema_value(
@@ -1839,12 +1850,11 @@ fn validate_schema_value(
         Some("string") => {
             let value = value.as_str().ok_or(())?;
             let length = value.chars().count();
-            if value.chars().any(|character| {
-                character.is_control() && !(multiline && matches!(character, '\n' | '\r' | '\t'))
-            }) || schema
-                .get("minLength")
-                .and_then(serde_json::Value::as_u64)
-                .is_some_and(|minimum| length < minimum as usize)
+            if has_disallowed_control(value, multiline)
+                || schema
+                    .get("minLength")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some_and(|minimum| length < minimum as usize)
                 || schema
                     .get("maxLength")
                     .and_then(serde_json::Value::as_u64)
@@ -2176,6 +2186,34 @@ mod tests {
             validate_tool_arguments(&serde_json::json!({"text": "ok", "emoji": "a\nb"}), &schema)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn multi_line_message_text_survives_argument_reading() {
+        let arguments = serde_json::json!({
+            "text": "Intro\r\n\n<iframe title=\"Chart\">\n\t<div></div>\n</iframe>",
+            "initial_message": "a\nb",
+            "task": "step 1\nstep 2",
+            "emoji": "a\nb",
+            "title": "Line\tbreak",
+        });
+        assert_eq!(
+            string_arg(&arguments, "text", 8_000).as_deref(),
+            Some("Intro\r\n\n<iframe title=\"Chart\">\n\t<div></div>\n</iframe>")
+        );
+        assert_eq!(
+            string_arg(&arguments, "initial_message", 8_000).as_deref(),
+            Some("a\nb")
+        );
+        assert_eq!(
+            string_arg(&arguments, "task", 8_000).as_deref(),
+            Some("step 1\nstep 2")
+        );
+        assert_eq!(string_arg(&arguments, "emoji", 32), None);
+        assert_eq!(string_arg(&arguments, "title", 200), None);
+        assert_eq!(string_arg(&arguments, "text", 5).as_deref(), Some("Intro"));
+        let bell = serde_json::json!({"text": "a\u{7}b"});
+        assert_eq!(string_arg(&bell, "text", 8_000), None);
     }
 
     #[test]

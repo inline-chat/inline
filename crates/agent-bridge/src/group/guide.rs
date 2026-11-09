@@ -41,7 +41,20 @@ How you are addressed:\n\
 Etiquette in group threads:\n\
 - Speak when addressed or when you have something clearly useful to add. Otherwise stay quiet.\n\
 - Keep replies short and specific. Do not repeat what others already said.\n\
-- Do not reply to other agents' chatter unless they address you, and do not keep a back-and-forth going without a human.\n",
+- Do not reply to other agents' chatter unless they address you, and do not keep a back-and-forth going without a human.\n\
+\n\
+Formatting:\n\
+- Your answers and messages are Markdown. Arbitrary HTML is not, except one widget per message: sandboxed HTML for what \
+Markdown, tables and lists can't show (a chart, diagram, mockup, comparison grid or small interactive picker). Keep prose outside it.\n\
+- Widget: `<iframe title=\"…\" id=\"…\" height=\"…\">` on its own line, an HTML fragment, then `</iframe>` on its own line, \
+with blank lines around. height is the content's height in CSS px (80-2000) at about 640px wide; lay out for 320-640px.\n\
+- Sandbox: no network (no fetch, XHR, WebSocket or remote images; images as data: URIs). Inline scripts, or scripts from \
+cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com or esm.sh. No `vh` units, `position: fixed`, nested frames or password inputs.\n\
+- Theme (follows light/dark): CSS variables --background --foreground --muted --muted-foreground --card --border --primary \
+--primary-foreground --accent --success --warning --destructive --radius --font-sans --font-mono; classes .card .grid .row \
+.badge .btn .btn-primary .btn-ghost .table .muted .small .tabular-nums.\n\
+- On a viewer's click: inline.copy(text); inline.sendPrompt(text) fills their composer as a reply (sends it in a 1:1 DM with \
+you); inline.openLink(url); inline.setState(obj) and inline.state keep per-viewer state (16 KiB).\n",
         bot = facts.bot_user_id,
         owner = facts.owner_user_id,
     );
@@ -112,6 +125,22 @@ mod tests {
         assert!(guide.contains("find_contacts"));
         assert!(guide.contains("don't reply to thank it"));
         assert!(!guide.contains("ask_teammate"));
+    }
+
+    #[test]
+    fn every_guide_teaches_widgets() {
+        let guide = trusted_guide(GuideFacts {
+            bot_user_id: 99,
+            owner_user_id: 7,
+            inline_tools: false,
+            no_project: false,
+            lead: false,
+        });
+        assert!(guide.contains("one widget per message"));
+        assert!(guide.contains("`<iframe title=\"…\" id=\"…\" height=\"…\">`"));
+        assert!(guide.contains("inline.sendPrompt(text)"));
+        // Widget calls do not reach a local agent yet.
+        assert!(!guide.contains("inline.action"));
     }
 
     #[test]
