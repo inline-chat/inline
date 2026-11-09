@@ -17910,12 +17910,109 @@ public nonisolated struct PrivacySettings: Sendable {
   /// Clears the value of `appearInGlobalSearch`. Subsequent reads from it will return its default value.
   public mutating func clearAppearInGlobalSearch() {self._appearInGlobalSearch = nil}
 
+  /// Who can see the user's time zone. When present, it is authoritative and
+  /// share_time_zone mirrors it (true only for AUDIENCE_EVERYONE). Absent means
+  /// the client should derive it from share_time_zone and send no rule back.
+  public var timeZone: PrivacyRule {
+    get {_timeZone ?? PrivacyRule()}
+    set {_timeZone = newValue}
+  }
+  /// Returns true if `timeZone` has been explicitly set.
+  public var hasTimeZone: Bool {self._timeZone != nil}
+  /// Clears the value of `timeZone`. Subsequent reads from it will return its default value.
+  public mutating func clearTimeZone() {self._timeZone = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _shareTimeZone: Bool? = nil
   fileprivate var _appearInGlobalSearch: Bool? = nil
+  fileprivate var _timeZone: PrivacyRule? = nil
+}
+
+/// Who can see one piece of the user's information. The user always sees their own.
+public nonisolated struct PrivacyRule: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var audience: PrivacyRule.Audience = .unspecified
+
+  /// Exceptions that can see it when audience is NOBODY.
+  public var alwaysShare: [PrivacyTarget] = []
+
+  /// Exceptions that cannot see it when audience is EVERYONE.
+  public var neverShare: [PrivacyTarget] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum Audience: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case everyone // = 1
+    case nobody // = 2
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .everyone
+      case 2: self = .nobody
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .everyone: return 1
+      case .nobody: return 2
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [PrivacyRule.Audience] = [
+      .unspecified,
+      .everyone,
+      .nobody,
+    ]
+
+  }
+
+  public init() {}
+}
+
+/// One entry in a privacy exception list. New kinds (spaces, groups) are added
+/// as new oneof cases; servers drop kinds they do not understand.
+public nonisolated struct PrivacyTarget: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var target: PrivacyTarget.OneOf_Target? = nil
+
+  public var userID: Int64 {
+    get {
+      if case .userID(let v)? = target {return v}
+      return 0
+    }
+    set {target = .userID(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Target: Equatable, Sendable {
+    case userID(Int64)
+
+  }
+
+  public init() {}
 }
 
 public nonisolated struct NotificationSettings: Sendable {
@@ -50602,7 +50699,7 @@ nonisolated extension ComposeSettings: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "PrivacySettings"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}share_time_zone\0\u{3}appear_in_global_search\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}share_time_zone\0\u{3}appear_in_global_search\0\u{3}time_zone\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -50612,6 +50709,7 @@ nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._Mes
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self._shareTimeZone) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self._appearInGlobalSearch) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._timeZone) }()
       default: break
       }
     }
@@ -50628,12 +50726,101 @@ nonisolated extension PrivacySettings: SwiftProtobuf.Message, SwiftProtobuf._Mes
     try { if let v = self._appearInGlobalSearch {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._timeZone {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: PrivacySettings, rhs: PrivacySettings) -> Bool {
     if lhs._shareTimeZone != rhs._shareTimeZone {return false}
     if lhs._appearInGlobalSearch != rhs._appearInGlobalSearch {return false}
+    if lhs._timeZone != rhs._timeZone {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension PrivacyRule: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "PrivacyRule"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}audience\0\u{3}always_share\0\u{3}never_share\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.audience) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.alwaysShare) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.neverShare) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.audience != .unspecified {
+      try visitor.visitSingularEnumField(value: self.audience, fieldNumber: 1)
+    }
+    if !self.alwaysShare.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.alwaysShare, fieldNumber: 2)
+    }
+    if !self.neverShare.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.neverShare, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: PrivacyRule, rhs: PrivacyRule) -> Bool {
+    if lhs.audience != rhs.audience {return false}
+    if lhs.alwaysShare != rhs.alwaysShare {return false}
+    if lhs.neverShare != rhs.neverShare {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension PrivacyRule.Audience: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AUDIENCE_UNSPECIFIED\0\u{1}AUDIENCE_EVERYONE\0\u{1}AUDIENCE_NOBODY\0")
+}
+
+nonisolated extension PrivacyTarget: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "PrivacyTarget"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}user_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: Int64?
+        try decoder.decodeSingularInt64Field(value: &v)
+        if let v = v {
+          if self.target != nil {try decoder.handleConflictingOneOf()}
+          self.target = .userID(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if case .userID(let v)? = self.target {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: PrivacyTarget, rhs: PrivacyTarget) -> Bool {
+    if lhs.target != rhs.target {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
