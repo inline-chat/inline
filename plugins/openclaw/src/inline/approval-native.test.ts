@@ -501,6 +501,15 @@ describe("inline/native approvals", () => {
         }),
       }),
     )
+    expect(await inlineApprovalNativeRuntime.presentation.buildResolvedResult({
+      cfg,
+      accountId: "default",
+      context,
+      request,
+      resolved: { id: request.id, decision: "deny", resolvedBy: "Mo", ts: 1 } as any,
+      view: { ...view, phase: "resolved", decision: "deny", resolvedBy: "Mo" },
+      entry: entry!,
+    })).toEqual({ kind: "update", payload: { text: "❌ Denied by Mo\n\n```sh\npwd\n```" } })
     expect(await inlineApprovalNativeRuntime.presentation.buildExpiredResult({
       cfg,
       accountId: "default",

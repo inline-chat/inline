@@ -9167,14 +9167,45 @@ describe("inline/monitor", () => {
         ...harness.calls.sendMessage.mock.calls.map(([args]) => args?.text),
         ...harness.calls.invokeRaw.mock.calls.map(([, args]) => args?.editMessage?.text),
       ].filter((text): text is string => typeof text === "string")
-      // Commands read as what is running, not as the tool name.
-      expect(progressTexts.some((text) => text.includes("Running `ls`"))).toBe(true)
+      // Commands read as what is running, not as the tool name; command text stays
+      // hidden under the host's default commandText "status".
+      expect(progressTexts.some((text) => text.includes("Running a command"))).toBe(true)
+      expect(progressTexts.some((text) => text.includes("ls"))).toBe(false)
       expect(progressTexts.some((text) => /\bExec\b/.test(text))).toBe(false)
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(4, expect.objectContaining({ oneofKind: "deleteMessages" }))
       expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.sendComposeAction?.action === 6)).toBe(true)
       expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 773n, typing: true })
       expect(harness.agentEventListenerCount()).toBe(0)
       expect(harness.calls.dispatchReply.mock.calls[0]?.[0]?.replyOptions?.onAgentRunStart).toBeUndefined()
+    } finally { await handle.stop() }
+  })
+
+  it("shows the command in progress only when commandText is raw", async () => {
+    const harness = await setupMonitorHarness({
+      dispatchTypingLifecycle: true,
+      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
+      chats: { "773": { kind: "direct", title: "Alice" } },
+      toolStartBeforePayloadIndexes: [0],
+      dispatchReplyPayload: { text: "visible after tool" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        dmPolicy: "open", parseMarkdown: false,
+        streaming: { mode: "progress", progress: { commandText: "raw" } },
+      } as any),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "visible after tool" })))
+      const progressTexts = [
+        ...harness.calls.sendMessage.mock.calls.map(([args]) => args?.text),
+        ...harness.calls.invokeRaw.mock.calls.map(([, args]) => args?.editMessage?.text),
+      ].filter((text): text is string => typeof text === "string")
+      // With raw command text the host's own command detail shows through.
+      expect(progressTexts.some((text) => text.includes("list files"))).toBe(true)
+      expect(progressTexts.some((text) => text.includes("Running a command"))).toBe(false)
     } finally { await handle.stop() }
   })
 

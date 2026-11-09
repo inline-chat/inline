@@ -290,15 +290,19 @@ function relabelInlineCommandProgressLine(line: unknown, input: unknown): void {
     const command = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
     return command.length > 80 ? `${command.slice(0, 79)}…` : command
   }
+  // The host decides whether command text is shown (`commandText`, "status" by
+  // default on every channel): it is in the host's line only when allowed.
+  const hostText = typeof (line as { text?: unknown }).text === "string" ? (line as { text: string }).text : ""
   if (record.event === "tool") {
-    const command = shorten(record.args?.command)
-    if (command) Object.assign(line, { text: `Running \`${command}\``, label: "Running a command" })
+    const raw = typeof record.args?.command === "string" ? record.args.command.trim() : ""
+    const command = raw && hostText.includes(raw) ? shorten(raw) : ""
+    Object.assign(line, { text: command ? `Running \`${command}\`` : "Running a command", label: "Running a command" })
     return
   }
   if (record.event === "item" && record.phase === "end") {
     // Host item titles read `command <text>`; anything else is not the command.
     const title = typeof record.title === "string" ? record.title.match(/^command\s+(.+)$/s)?.[1] : undefined
-    const command = shorten(title)
+    const command = title && hostText.includes(title.trim()) ? shorten(title) : ""
     Object.assign(line, { text: command ? `Ran \`${command}\`` : "Ran a command", label: "Ran a command" })
   }
 }

@@ -269,6 +269,14 @@ const INLINE_APPROVAL_DECISION_LABELS: Record<string, string> = {
   deny: "❌ Denied",
 }
 
+// Slack, Discord and Telegram all say who answered. A bare id would read as
+// noise, so only a name is shown.
+function formatInlineApprovalResolver(resolvedBy: unknown): string {
+  const value = typeof resolvedBy === "string" ? resolvedBy.trim() : ""
+  if (!value || /^(?:inline:)?(?:user:)?\d+$/i.test(value)) return ""
+  return `by ${value}`
+}
+
 function buildInlineApprovalFinalText(params: {
   entry: InlinePendingApproval
   heading: string
@@ -321,12 +329,15 @@ export const inlineApprovalNativeRuntime: InlineApprovalNativeRuntimeAdapter = c
   presentation: {
     buildPendingPayload: ({ request, approvalKind, nowMs, view }) =>
       buildPendingPayload({ request, approvalKind, nowMs, view }),
-    buildResolvedResult: ({ resolved, entry }) => ({
+    buildResolvedResult: ({ resolved, view, entry }) => ({
       kind: "update",
       payload: {
         text: buildInlineApprovalFinalText({
           entry,
-          heading: INLINE_APPROVAL_DECISION_LABELS[String(resolved.decision)] ?? "Approval resolved",
+          heading: [
+            INLINE_APPROVAL_DECISION_LABELS[String(resolved.decision)] ?? "Approval resolved",
+            formatInlineApprovalResolver(view.resolvedBy ?? resolved.resolvedBy),
+          ].filter(Boolean).join(" "),
         }),
       },
     }),
