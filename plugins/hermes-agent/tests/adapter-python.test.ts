@@ -4184,6 +4184,73 @@ async def assert_upload_size_cap():
 
 asyncio.run(assert_upload_size_cap())
 
+async def assert_quiet_sidecars_leave_the_executor_free():
+    # Issue 155: a gateway with more Inline bots than default-executor workers must still run
+    # to_thread jobs. Each sidecar's stdout read used to pin a worker for the sidecar's life.
+    import concurrent.futures
+    import subprocess as sp
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(concurrent.futures.ThreadPoolExecutor(max_workers=2))
+    adapter = InlineAdapter(PlatformConfig(extra=trusted_extra))
+    adapter._token = "inline-secret"
+    adapter._sidecar_token = "sidecar-secret"
+    # Silent until stdin closes, then a short drain, like a sidecar finishing its shutdown.
+    quiet = "import sys, time; print('ready inline-secret', flush=True); sys.stdin.read(); time.sleep(0.5)"
+    procs = [
+        sp.Popen([sys.executable, "-c", quiet], stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.STDOUT, start_new_session=True)
+        for _ in range(6)
+    ]
+    logged = []
+    import logging
+    class Capture(logging.Handler):
+        def emit(self, record):
+            logged.append(record.getMessage())
+    capture = Capture()
+    adapter_logger = logging.getLogger(InlineAdapter.__module__)
+    adapter_logger.addHandler(capture)
+    previous_level = adapter_logger.level
+    adapter_logger.setLevel(logging.INFO)
+    tasks = [asyncio.create_task(adapter._supervise_sidecar(proc)) for proc in procs]
+    try:
+        deadline = time.monotonic() + 5
+        while sum("[inline-sidecar] ready" in line for line in logged) < len(procs) and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        sidecar_lines = [line for line in logged if "[inline-sidecar]" in line]
+        assert len(sidecar_lines) == len(procs), sidecar_lines
+        assert all("inline-secret" not in line and "[INLINE_TOKEN]" in line for line in sidecar_lines)
+        # Every sidecar is now quiet, its next read blocked: short jobs must still get a worker.
+        await asyncio.sleep(0.2)
+        assert await asyncio.wait_for(asyncio.to_thread(lambda: "ok"), timeout=3) == "ok"
+
+        # Stopping waits off the loop: the loop keeps ticking while a sidecar ignores shutdown.
+        adapter._sidecar_proc = procs[0]
+        ticks = 0
+        async def tick():
+            nonlocal ticks
+            while True:
+                ticks += 1
+                await asyncio.sleep(0.05)
+        ticker = asyncio.create_task(tick())
+        started = time.monotonic()
+        await adapter._stop_sidecar()
+        ticker.cancel()
+        elapsed = time.monotonic() - started
+        assert procs[0].poll() is not None
+        assert 0.4 <= elapsed < 2.5, elapsed
+        assert ticks >= 4, ticks
+        # The supervisor ends once its sidecar's output closes.
+        await asyncio.wait_for(tasks[0], timeout=3)
+    finally:
+        adapter_logger.removeHandler(capture)
+        adapter_logger.setLevel(previous_level)
+        for proc in procs:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
+        await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=3)
+
+asyncio.run(assert_quiet_sidecars_leave_the_executor_free())
+
 async def assert_model_picker_flow():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
     calls = []

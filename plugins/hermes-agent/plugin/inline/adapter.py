@@ -23,6 +23,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -879,6 +880,16 @@ def _apply_yaml_config(yaml_cfg: dict, platform_cfg: dict) -> Optional[dict]:
     if "home_channel" in platform_cfg:
         extra["home_channel"] = platform_cfg["home_channel"]
     return extra
+
+
+async def _wait_for_exit(proc: subprocess.Popen, timeout: float) -> bool:
+    """Wait for ``proc`` without blocking the loop or taking an executor worker; False on timeout."""
+    deadline = time.monotonic() + timeout
+    while proc.poll() is None:
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.05)
+    return True
 
 
 def _accepts_keyword(fn: Callable[..., Any], name: str) -> bool:
@@ -2189,14 +2200,34 @@ class InlineAdapter(BasePlatformAdapter):
         raise RuntimeError(f"Inline sidecar did not become ready within {timeout}: {last_error}")
 
     async def _supervise_sidecar(self, proc: subprocess.Popen) -> None:
-        if proc.stdout is None:
+        """Log sidecar output. A quiet sidecar can go hours without a line, so its blocking
+        read runs on a thread of its own: on the loop's shared executor every sidecar would pin
+        a worker, and a gateway with more Inline bots than workers stalls every other
+        ``to_thread`` job (startup included)."""
+        stdout = proc.stdout
+        if stdout is None:
             return
-        loop = asyncio.get_event_loop()
-        while True:
+        loop = asyncio.get_running_loop()
+        lines: "asyncio.Queue[bytes]" = asyncio.Queue()
+
+        def hand_off(raw: bytes) -> None:
             try:
-                line = await loop.run_in_executor(None, proc.stdout.readline)
+                loop.call_soon_threadsafe(lines.put_nowait, raw)
+            except RuntimeError:
+                pass  # the loop closed first
+
+        def read() -> None:
+            try:
+                for raw in iter(stdout.readline, b""):
+                    hand_off(raw)
             except Exception:
-                return
+                pass
+            finally:
+                hand_off(b"")
+
+        threading.Thread(target=read, name="inline-sidecar-stdout", daemon=True).start()
+        while True:
+            line = await lines.get()
             if not line:
                 return
             text = line.decode("utf-8", "replace").rstrip()
@@ -2225,9 +2256,7 @@ class InlineAdapter(BasePlatformAdapter):
                     )
                 except Exception:
                     pass
-            try:
-                proc.wait(timeout=3.0)
-            except subprocess.TimeoutExpired:
+            if not await _wait_for_exit(proc, 3.0):
                 if sys.platform != "win32":
                     try:
                         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -2235,9 +2264,7 @@ class InlineAdapter(BasePlatformAdapter):
                         proc.terminate()
                 else:
                     proc.terminate()
-                try:
-                    proc.wait(timeout=2.0)
-                except subprocess.TimeoutExpired:
+                if not await _wait_for_exit(proc, 2.0):
                     proc.kill()
         finally:
             self._sidecar_proc = None
