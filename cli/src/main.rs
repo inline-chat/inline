@@ -7844,6 +7844,7 @@ mod cli_parsing_tests {
         let output = TranslatedSearchMessagesOutput {
             page: MessagePage::new(&[], false),
             payload: proto::SearchMessagesResult {
+                total_count: None,
                 seq: Some(43),
                 total_count: None,
                 messages: vec![proto::Message {

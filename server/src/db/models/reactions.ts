@@ -39,7 +39,7 @@ async function insertReaction(reaction: DbNewReaction) {
     const [inserted] = await tx.insert(reactions).values({ ...reaction, emojiHash }).onConflictDoNothing().returning()
     if (inserted) {
       await appendReactionEvent(tx, inserted, true)
-      await recordReactionActivity(tx, { chat, messageId: inserted.messageId, reactorUserId: inserted.userId })
+      await recordReactionActivity(tx, { chat, messageId: inserted.messageId, reactorUserId: inserted.userId, date: inserted.date })
     }
     return inserted
   })

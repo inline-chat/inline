@@ -63,6 +63,7 @@ enum RichBlockRenderKind: String, Codable, Hashable {
   case meter
   case diff
   case form
+  case widget
 }
 
 struct RichBlockLayoutPlan: Codable, Hashable {
@@ -150,6 +151,7 @@ struct RichBlockLayoutPlan: Codable, Hashable {
     case meter(RichBlockMeterNode)
     case diff(RichBlockDiffNode)
     case form(RichBlockFormNode)
+    case widget(RichBlockWidgetNode)
   }
 
   struct Node: Codable, Hashable {
@@ -188,6 +190,8 @@ struct RichBlockLayoutPlan: Codable, Hashable {
         return .diff
       case .form:
         return .form
+      case .widget:
+        return .widget
       }
     }
   }

@@ -4112,6 +4112,9 @@ impl SdkBackend {
                 // the lossless cursor instead of permanently disconnecting a
                 // forward-compatible client runtime.
                 Some(proto::update::Update::ChatPermissions(_)) => {}
+                // Activity badges are not projected yet; consume their user
+                // sequence so other updates can continue catching up.
+                Some(proto::update::Update::UnreadActivity(_)) => {}
                 Some(proto::update::Update::UpdateUserStatus(update)) => {
                     let status = update.status.as_ref();
                     let is_online = status.and_then(|status| {
@@ -9847,6 +9850,8 @@ mod tests {
                         unread_reactions: None,
                         counts_as_unread: None,
                         reply_quote: None,
+                        unread_mention: None,
+                        unread_reactions: None,
                     }),
                 })),
             }],

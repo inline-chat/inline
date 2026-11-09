@@ -33,4 +33,31 @@ describe("forwarded structural content", () => {
       ? source.blocks[0].kind.image.state.oneofKind
       : undefined).toBe("pending")
   })
+
+  test("a copy without a bot sender keeps a widget's title, not its HTML", () => {
+    const title = { offset: 0n, length: 5n }
+    const source: BlockContent = {
+      blocks: [{
+        kind: {
+          oneofKind: "callout",
+          callout: {
+            kind: 0,
+            children: [{
+              kind: { oneofKind: "widget", widget: { widgetId: "w", title, html: "<b>x</b>", images: [], requiredGrant: 0 } },
+            }],
+          },
+        },
+      }],
+    }
+
+    const attributed = snapshotForwardedBlockContent(source)
+    const copied = snapshotForwardedBlockContent(source, { keepWidgets: false })
+
+    const child = (content: BlockContent) => content.blocks[0]?.kind.oneofKind === "callout"
+      ? content.blocks[0].kind.callout.children[0]?.kind
+      : undefined
+    expect(child(attributed)?.oneofKind).toBe("widget")
+    expect(child(copied)).toEqual({ oneofKind: "paragraph", paragraph: title })
+    expect(child(source)?.oneofKind).toBe("widget")
+  })
 })

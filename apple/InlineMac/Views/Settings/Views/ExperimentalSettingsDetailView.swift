@@ -62,6 +62,13 @@ struct ExperimentalSettingsDetailView: View {
         )
       }
       .settingsSearchAnchor(.inlineMathAttachments)
+      Toggle(isOn: $settings.messageWidgetsEnabled) {
+        SettingsRowLabel(
+          .messageWidgets,
+          description: "Show charts, mockups and other HTML that agents send as live widgets in messages, sandboxed with no network access."
+        )
+      }
+      .settingsSearchAnchor(.messageWidgets)
       Toggle(isOn: $settings.richTextMultiSurfaceSelectionEnabled) {
         SettingsRowLabel(
           .richMessageMultiBlockSelection,

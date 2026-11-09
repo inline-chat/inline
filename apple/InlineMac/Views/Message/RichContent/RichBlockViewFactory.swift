@@ -36,6 +36,8 @@ enum RichBlockViewFactory {
       RichBlockDiffNodeView()
     case .form:
       RichBlockFormNodeView()
+    case .widget:
+      RichBlockWidgetNodeView()
     }
   }
 }

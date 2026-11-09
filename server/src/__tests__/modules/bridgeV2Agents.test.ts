@@ -322,6 +322,21 @@ describe("bridge v2 agent server", () => {
     await rejects(getAgentSettings({ botUserId: 0n }, ownerId), RpcError_Code.USER_ID_INVALID)
   })
 
+  test("legacy user grant upserts keep working after subject expansion", async () => {
+    // The deployed predecessor supplies no partial-index predicate.
+    const legacyGrant = (operations: number) => db.insert(agentGrants).values({
+      botUserId: botId, subjectUserId: teammateId, operations, grantedBy: ownerId, revision: 1n,
+    }).onConflictDoUpdate({
+      target: [agentGrants.botUserId, agentGrants.subjectUserId],
+      set: { operations },
+    }).returning()
+    const [first] = await legacyGrant(1)
+    const [updated] = await legacyGrant(3)
+    expect(updated?.id).toBe(first?.id)
+    expect(updated?.operations).toBe(3)
+    expect((await listAgentGrants({ botUserId: BigInt(botId) }, ownerId)).grants).toHaveLength(1)
+  })
+
   test("legacy server writes preserve settings during rollout and rollback", async () => {
     await reportAgentRuntime({ provider: AgentSessionProvider.CODEX, status: 1 }, botId)
     await updateAgentSettings({ botUserId: BigInt(botId), defaultOutputMode: AgentOutputMode.FRIENDLY }, ownerId)

@@ -1003,7 +1003,8 @@ class MessageSizeCalculator {
         primaryColor: primaryColor(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle),
         secondaryColor: secondaryColor(for: .bubble, usesOutgoingBubbleStyle: usesOutgoingBubbleStyle),
         inlineMathAttachmentsEnabled: AppSettings.shared.richTextInlineMathEnabled,
-        disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message)
+        disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message),
+        widgetLayout: MessageWidgetHeights.shared.layout(for: message.message)
       )
       if let richBlockPlan {
         textSize = richBlockPlan.size
@@ -1822,7 +1823,8 @@ class MessageSizeCalculator {
         primaryColor: primaryColor(for: .minimal, usesOutgoingBubbleStyle: false),
         secondaryColor: secondaryColor(for: .minimal, usesOutgoingBubbleStyle: false),
         inlineMathAttachmentsEnabled: AppSettings.shared.richTextInlineMathEnabled,
-        disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message)
+        disclosureOverrides: RichBlockLocalStateStore.shared.disclosureOverrides(for: message.message),
+        widgetLayout: MessageWidgetHeights.shared.layout(for: message.message)
       )
       if let richBlockPlan {
         textSize = richBlockPlan.size

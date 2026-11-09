@@ -442,6 +442,8 @@ message ServerUserUpdateMessageActionInvoked {
   bytes data = 5;
   // Form submission with every secret value removed and marked redacted.
   optional MessageFormSubmission form = 6;
+  // A call from inside a widget; action_id is its widget_id.
+  optional MessageWidgetCall widget_call = 7;
 }
 
 // Update for a user when bot answers a previously invoked action.

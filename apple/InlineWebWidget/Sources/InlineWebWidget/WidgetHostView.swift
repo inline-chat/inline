@@ -28,6 +28,11 @@ public final class WidgetHostView: NSView {
     didSet { fadeView.isHidden = !isClipped }
   }
 
+  /// Off until expansion exists; the inline cap's fade still shows clipped content.
+  public var showsOpenButton = true {
+    didSet { openButton.isHidden = !showsOpenButton }
+  }
+
   public var contentWidth: CGFloat { max(bounds.width, 320) }
   /// The row's visible content area; snapshots are cropped to it.
   public var visibleContentHeight: CGFloat { max(0, bounds.height - Self.headerHeight) }
@@ -86,7 +91,7 @@ public final class WidgetHostView: NSView {
   public override func layout() {
     super.layout()
     let width = bounds.width
-    titleLabel.frame = NSRect(x: 2, y: 4, width: width - 64, height: 16)
+    titleLabel.frame = NSRect(x: 2, y: 4, width: width - (showsOpenButton ? 64 : 4), height: 16)
     openButton.frame = NSRect(x: width - 56, y: 1, width: 56, height: 20)
     let content = NSRect(x: 0, y: Self.headerHeight, width: width, height: max(0, bounds.height - Self.headerHeight))
     container.frame = content

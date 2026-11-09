@@ -3,7 +3,9 @@ import { db } from "@in/server/db"
 import { botAgents, lower, userNotDeleted, users } from "@in/server/db/schema"
 import { processMessageText } from "@in/server/modules/message/processText"
 import { and, inArray } from "drizzle-orm"
-import { parseBlockContentResult, projectLiteralBlockContent, type BlockContentFallbackReason, type BlockContentWarning, type BlockImageSource } from "@in/server/modules/message/blockContent"
+import { parseBlockContentResult, projectLiteralBlockContent, validateBlockContent, type BlockContentFallbackReason, type BlockContentWarning, type BlockImageSource } from "@in/server/modules/message/blockContent"
+import { attachMarkdownWidget, extractMarkdownWidget, MessageWidgetError } from "@in/server/modules/message/messageWidgets"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 import {
   normalizeMarkdownInput,
   mathOutputRanges,
@@ -18,6 +20,8 @@ type ProcessOutgoingTextInput = {
   text: string
   entities: MessageEntities | undefined
   parseMarkdown?: boolean
+  /** Bot senders only: turn an AFM `<iframe>` preview in the Markdown into a widget block. */
+  allowWidgets?: boolean
 }
 
 type ProcessOutgoingTextOutput = {
@@ -787,12 +791,37 @@ export const processOutgoingText = async (
   validateOutgoingMessageText(input.text)
   let text = input.text
   let entities = input.entities
-  const markdown = input.parseMarkdown ? normalizeMarkdownInput(input.text) : input.text
+  const sourceMarkdown = input.parseMarkdown ? normalizeMarkdownInput(input.text) : input.text
+  let widget: ReturnType<typeof extractMarkdownWidget>
+  try {
+    widget = input.parseMarkdown && input.allowWidgets ? extractMarkdownWidget(sourceMarkdown) : undefined
+  } catch (error) {
+    if (!(error instanceof MessageWidgetError)) throw error
+    log.warn("rejected a malformed widget", { reason: error.message })
+    throw RealtimeRpcError.BadRequest()
+  }
+  // The widget's HTML lives in its block; the text keeps only its title.
+  const markdown = widget?.markdown ?? sourceMarkdown
   const parsedMarkdown = input.parseMarkdown ? parseMarkdownWithSourceMap(markdown) : undefined
   const blockResult = parsedMarkdown ? parseBlockContentResult(markdown, parsedMarkdown) : undefined
   const parsedBlocks = blockResult?.kind === "parsed"
     ? blockResult.value
     : !parsedMarkdown ? projectLiteralBlockContent(input.text, input.entities) : undefined
+  if (widget && parsedMarkdown) {
+    const start = parsedMarkdown.sourceToOutput[widget.titleStart]
+    const end = parsedMarkdown.sourceToOutput[widget.titleEnd]
+    const content = parsedBlocks?.blockContent
+    if (start === undefined || end === undefined || !content || !attachMarkdownWidget(content, start, end, widget.widget)) {
+      log.warn("could not place a widget in the parsed message", { fallback: blockResult?.kind === "fallback" ? blockResult.reason : undefined })
+      throw RealtimeRpcError.BadRequest()
+    }
+    try {
+      validateBlockContent(parsedMarkdown.text, content)
+    } catch (error) {
+      log.warn("rejected an invalid widget", { reason: error instanceof Error ? error.message : "unknown" })
+      throw RealtimeRpcError.BadRequest()
+    }
+  }
   if (blockResult?.kind === "fallback" && blockResult.reason !== "empty") {
     log.warn("rich content projection fell back to flat text", { reason: blockResult.reason })
   } else if (parsedBlocks?.warnings?.length) {

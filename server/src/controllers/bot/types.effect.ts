@@ -415,6 +415,19 @@ export const BotRichBlock: Schema.Codec<NeutralBotRichBlock> = Schema.suspend(
       width: Schema.optionalKey(WireNonNegativeInteger),
       height: Schema.optionalKey(WireNonNegativeInteger),
     }),
+    Schema.Struct({
+      type: Schema.Literal("widget"),
+      widget_id: Schema.optionalKey(Schema.String),
+      title: BotRichText,
+      html: Schema.String,
+      height: Schema.optionalKey(WireNonNegativeInteger),
+      images: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.Struct({
+        file: Schema.optionalKey(Schema.suspend(() => BotFile)),
+        width: Schema.optionalKey(WireNonNegativeInteger),
+        height: Schema.optionalKey(WireNonNegativeInteger),
+      })))),
+      required_grant: Schema.optionalKey(Schema.Literals(["access", "invoke", "steer", "approve", "configure", "owner"])),
+    }).annotate({ description: "Sandboxed HTML a bot shows inside the message, with no network access." }),
   ], { mode: "oneOf" }),
 ).annotate({
   identifier: "BotRichBlock",
@@ -840,6 +853,12 @@ export const BotUpdate = Schema.Union([
       actor: BotUser,
       date: WireNonNegativeInteger,
       action: BotActionInvocation,
+      widget_call: Schema.optionalKey(Schema.Struct({
+        name: Schema.String,
+        payload: Schema.optionalKey(Schema.Unknown),
+      }).annotate({
+        description: "A widget's inline.action(name, payload); action.action_id is its widget ID. The viewer's client supplies both fields.",
+      })),
     }),
   }),
   Schema.Struct({

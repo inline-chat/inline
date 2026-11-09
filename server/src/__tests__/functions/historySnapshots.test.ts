@@ -61,11 +61,11 @@ for (const readKind of ["history", "resources", "lookup", "text", "chat"] as con
     await db.insert(messageAttachments).values({ messageId: message.globalId, urlPreviewId: BigInt(preview.id) })
     await db.update(chats).set({ updateSeq: 7, lastMsgId: 1, messageIdCounter: 1 }).where(eq(chats.id, chat.id))
 
-    const ensureAccess = AccessGuards.ensureChatAccess
+    const ensureAccess = AccessGuards.ensureChatReadAccess
     let edited = false
-    const guard = spyOn(AccessGuards, "ensureChatAccess").mockImplementation(async (accessChat, userId, tx) => {
-      await ensureAccess(accessChat, userId, tx)
-      if (!tx || accessChat.id !== chat.id || edited) return
+    const guard = spyOn(AccessGuards, "ensureChatReadAccess").mockImplementation(async (accessChat, userId, tx) => {
+      const access = await ensureAccess(accessChat, userId, tx)
+      if (!tx || accessChat.id !== chat.id || edited) return access
       edited = true
       const newTitle = encryptMessage("new preview")
       await db.transaction(async (writer) => {
@@ -86,6 +86,7 @@ for (const readKind of ["history", "resources", "lookup", "text", "chat"] as con
           .where(eq(messages.globalId, message.globalId))
         await writer.update(chats).set({ updateSeq: 8 }).where(eq(chats.id, chat.id))
       })
+      return access
     })
     try {
       const result =
@@ -117,14 +118,15 @@ test("an explicit-chat history snapshot survives a concurrent chat deletion and 
   const { user, chat, peerId, context } = await fixture()
   await testUtils.createTestMessage({ chatId: chat.id, fromId: user.id, messageId: 1, text: "snapshot before deletion" })
   await db.update(chats).set({ updateSeq: 7, lastMsgId: 1, messageIdCounter: 1 }).where(eq(chats.id, chat.id))
-  const ensureAccess = AccessGuards.ensureChatAccess
+  const ensureAccess = AccessGuards.ensureChatReadAccess
   let deleted = false
-  const guard = spyOn(AccessGuards, "ensureChatAccess").mockImplementation(async (row, userId, tx) => {
-    await ensureAccess(row, userId, tx)
+  const guard = spyOn(AccessGuards, "ensureChatReadAccess").mockImplementation(async (row, userId, tx) => {
+    const access = await ensureAccess(row, userId, tx)
     if (tx && row.id === chat.id && !deleted) {
       deleted = true
       await db.delete(chats).where(eq(chats.id, chat.id))
     }
+    return access
   })
   try {
     const result = await getChatHistory({ peerId }, context)
