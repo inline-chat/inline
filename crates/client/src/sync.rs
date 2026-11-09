@@ -1136,6 +1136,7 @@ fn bucket_key_for_update(update: &proto::Update) -> Option<SyncBucketKey> {
         | Update::DialogFollowMode(_)
         | Update::DialogCollapsedMaxId(_)
         | Update::UpdateReadMaxId(_)
+        | Update::UnreadActivity(_)
         | Update::ChatOpen(_)
         // Each control is one command. Applied outside the bucket, the cursor
         // stays behind it and the next catch-up runs it a second time.
@@ -2276,6 +2277,38 @@ mod tests {
         let applied = host.applied.lock().await;
         assert_eq!(applied.len(), 1);
         assert_eq!(applied[0], vec![agent_control_update(6, 20)]);
+        assert_eq!(
+            store.sync_bucket_state(SyncBucketKey::User).await.unwrap(),
+            SyncBucketState { seq: 6, date: 20 }
+        );
+    }
+
+    #[tokio::test]
+    async fn live_unread_activity_advances_the_user_bucket_and_never_replays() {
+        let store = Arc::new(InMemoryStore::new());
+        store
+            .save_sync_bucket_state(SyncBucketKey::User, SyncBucketState { seq: 5, date: 10 })
+            .await
+            .unwrap();
+        let host = FakeHost::new(Vec::new());
+        let sync = SyncManager::new(store.clone(), SyncConfig::default());
+        let update = proto::Update {
+            seq: Some(6),
+            date: Some(20),
+            update: Some(proto::update::Update::UnreadActivity(
+                proto::UpdateUnreadActivity::default(),
+            )),
+        };
+
+        sync.process_realtime(&host, vec![update.clone()])
+            .await
+            .unwrap();
+        sync.process_realtime(&host, vec![user_hint(6)])
+            .await
+            .unwrap();
+
+        assert!(host.requests.lock().await.is_empty());
+        assert_eq!(*host.applied.lock().await, vec![vec![update]]);
         assert_eq!(
             store.sync_bucket_state(SyncBucketKey::User).await.unwrap(),
             SyncBucketState { seq: 6, date: 20 }

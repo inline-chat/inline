@@ -2152,6 +2152,7 @@ impl ClientBackend for SdkBackend {
                     proto::ReadMessagesInput {
                         peer_id: Some(input_peer_for_chat(request.chat_id)),
                         max_id: request.max_message_id.map(InlineId::get),
+                        read_activity: None,
                     },
                 )
                 .await?;
@@ -2217,6 +2218,7 @@ impl ClientBackend for SdkBackend {
                         proto::ReadMessagesInput {
                             peer_id: Some(input_peer_for_chat(request.chat_id)),
                             max_id: None,
+                            read_activity: None,
                         },
                     )
                     .await?
@@ -4110,6 +4112,9 @@ impl SdkBackend {
                 // the lossless cursor instead of permanently disconnecting a
                 // forward-compatible client runtime.
                 Some(proto::update::Update::ChatPermissions(_)) => {}
+                // Activity badges are not projected yet; consume their user
+                // sequence so other updates can continue catching up.
+                Some(proto::update::Update::UnreadActivity(_)) => {}
                 Some(proto::update::Update::UpdateUserStatus(update)) => {
                     let status = update.status.as_ref();
                     let is_online = status.and_then(|status| {
@@ -4273,6 +4278,7 @@ pub(crate) fn update_kind(update: &proto::update::Update) -> &'static str {
         Update::AgentRuntime(_) => "agent_runtime",
         Update::AgentSessionControl(_) => "agent_session_control",
         Update::AgentSettings(_) => "agent_settings",
+        Update::UnreadActivity(_) => "unread_activity",
     }
 }
 
@@ -9842,6 +9848,8 @@ mod tests {
                         subthread: None,
                         counts_as_unread: None,
                         reply_quote: None,
+                        unread_mention: None,
+                        unread_reactions: None,
                     }),
                 })),
             }],
