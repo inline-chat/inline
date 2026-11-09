@@ -749,6 +749,8 @@ const applyUpdate = (
     case "participantGroupDelete":
     case "spaceSettings":
     case "spaceProfile":
+    // Retain unread activity until the browser supports activity badges.
+    case "unreadActivity":
     // Bridge v2 agent state: the web client does not render it yet.
     case "agentSessionState":
     case "agentParticipation":

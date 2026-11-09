@@ -459,7 +459,7 @@ describe("durable transaction outbox", () => {
             reqMsgId: request.id,
             result: {
               oneofKind: "sendMessage",
-              sendMessage: { updates: [update] },
+              sendMessage: { updates: [update], addedUserIds: [], unaddedUserIds: [] },
             },
           },
         },
@@ -634,6 +634,8 @@ describe("durable transaction outbox", () => {
             result: {
               oneofKind: "sendMessage",
               sendMessage: {
+                addedUserIds: [],
+                unaddedUserIds: [],
                 updates: [
                   Update.create({
                     update: {
@@ -859,6 +861,8 @@ describe("durable transaction outbox", () => {
             result: {
               oneofKind: "sendMessage",
               sendMessage: {
+                addedUserIds: [],
+                unaddedUserIds: [],
                 updates: [
                   Update.create({
                     update: {
