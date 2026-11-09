@@ -10280,6 +10280,74 @@ export interface PrivacySettings {
      * @generated from protobuf field: optional bool appear_in_global_search = 2;
      */
     appearInGlobalSearch?: boolean;
+    /**
+     * Who can see the user's time zone. When present, it is authoritative and
+     * share_time_zone mirrors it (true only for AUDIENCE_EVERYONE). Absent means
+     * the client should derive it from share_time_zone and send no rule back.
+     *
+     * @generated from protobuf field: optional PrivacyRule time_zone = 3;
+     */
+    timeZone?: PrivacyRule;
+}
+/**
+ * Who can see one piece of the user's information. The user always sees their own.
+ *
+ * @generated from protobuf message PrivacyRule
+ */
+export interface PrivacyRule {
+    /**
+     * @generated from protobuf field: PrivacyRule.Audience audience = 1;
+     */
+    audience: PrivacyRule_Audience;
+    /**
+     * Exceptions that can see it when audience is NOBODY.
+     *
+     * @generated from protobuf field: repeated PrivacyTarget always_share = 2;
+     */
+    alwaysShare: PrivacyTarget[];
+    /**
+     * Exceptions that cannot see it when audience is EVERYONE.
+     *
+     * @generated from protobuf field: repeated PrivacyTarget never_share = 3;
+     */
+    neverShare: PrivacyTarget[];
+}
+/**
+ * @generated from protobuf enum PrivacyRule.Audience
+ */
+export enum PrivacyRule_Audience {
+    /**
+     * @generated from protobuf enum value: AUDIENCE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: AUDIENCE_EVERYONE = 1;
+     */
+    EVERYONE = 1,
+    /**
+     * @generated from protobuf enum value: AUDIENCE_NOBODY = 2;
+     */
+    NOBODY = 2
+}
+/**
+ * One entry in a privacy exception list. New kinds (spaces, groups) are added
+ * as new oneof cases; servers drop kinds they do not understand.
+ *
+ * @generated from protobuf message PrivacyTarget
+ */
+export interface PrivacyTarget {
+    /**
+     * @generated from protobuf oneof: target
+     */
+    target: {
+        oneofKind: "userId";
+        /**
+         * @generated from protobuf field: int64 user_id = 1;
+         */
+        userId: bigint;
+    } | {
+        oneofKind: undefined;
+    };
 }
 /**
  * @generated from protobuf message NotificationSettings
@@ -43908,7 +43976,8 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
     constructor() {
         super("PrivacySettings", [
             { no: 1, name: "share_time_zone", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 2, name: "appear_in_global_search", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 2, name: "appear_in_global_search", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "time_zone", kind: "message", T: () => PrivacyRule }
         ]);
     }
     create(value?: PartialMessage<PrivacySettings>): PrivacySettings {
@@ -43928,6 +43997,9 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
                 case /* optional bool appear_in_global_search */ 2:
                     message.appearInGlobalSearch = reader.bool();
                     break;
+                case /* optional PrivacyRule time_zone */ 3:
+                    message.timeZone = PrivacyRule.internalBinaryRead(reader, reader.uint32(), options, message.timeZone);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -43946,6 +44018,9 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
         /* optional bool appear_in_global_search = 2; */
         if (message.appearInGlobalSearch !== undefined)
             writer.tag(2, WireType.Varint).bool(message.appearInGlobalSearch);
+        /* optional PrivacyRule time_zone = 3; */
+        if (message.timeZone)
+            PrivacyRule.internalBinaryWrite(message.timeZone, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -43956,6 +44031,119 @@ class PrivacySettings$Type extends MessageType<PrivacySettings> {
  * @generated MessageType for protobuf message PrivacySettings
  */
 export const PrivacySettings = new PrivacySettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PrivacyRule$Type extends MessageType<PrivacyRule> {
+    constructor() {
+        super("PrivacyRule", [
+            { no: 1, name: "audience", kind: "enum", T: () => ["PrivacyRule.Audience", PrivacyRule_Audience, "AUDIENCE_"] },
+            { no: 2, name: "always_share", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => PrivacyTarget },
+            { no: 3, name: "never_share", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => PrivacyTarget }
+        ]);
+    }
+    create(value?: PartialMessage<PrivacyRule>): PrivacyRule {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.audience = 0;
+        message.alwaysShare = [];
+        message.neverShare = [];
+        if (value !== undefined)
+            reflectionMergePartial<PrivacyRule>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PrivacyRule): PrivacyRule {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* PrivacyRule.Audience audience */ 1:
+                    message.audience = reader.int32();
+                    break;
+                case /* repeated PrivacyTarget always_share */ 2:
+                    message.alwaysShare.push(PrivacyTarget.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated PrivacyTarget never_share */ 3:
+                    message.neverShare.push(PrivacyTarget.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PrivacyRule, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* PrivacyRule.Audience audience = 1; */
+        if (message.audience !== 0)
+            writer.tag(1, WireType.Varint).int32(message.audience);
+        /* repeated PrivacyTarget always_share = 2; */
+        for (let i = 0; i < message.alwaysShare.length; i++)
+            PrivacyTarget.internalBinaryWrite(message.alwaysShare[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated PrivacyTarget never_share = 3; */
+        for (let i = 0; i < message.neverShare.length; i++)
+            PrivacyTarget.internalBinaryWrite(message.neverShare[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message PrivacyRule
+ */
+export const PrivacyRule = new PrivacyRule$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PrivacyTarget$Type extends MessageType<PrivacyTarget> {
+    constructor() {
+        super("PrivacyTarget", [
+            { no: 1, name: "user_id", kind: "scalar", oneof: "target", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PrivacyTarget>): PrivacyTarget {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.target = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<PrivacyTarget>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PrivacyTarget): PrivacyTarget {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 user_id */ 1:
+                    message.target = {
+                        oneofKind: "userId",
+                        userId: reader.int64().toBigInt()
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PrivacyTarget, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 user_id = 1; */
+        if (message.target.oneofKind === "userId")
+            writer.tag(1, WireType.Varint).int64(message.target.userId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message PrivacyTarget
+ */
+export const PrivacyTarget = new PrivacyTarget$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class NotificationSettings$Type extends MessageType<NotificationSettings> {
     constructor() {
