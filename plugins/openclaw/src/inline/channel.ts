@@ -59,8 +59,10 @@ import { getInlineActiveThreadRoute } from "./active-thread-route.js"
 import { lookupInlineReplyThreadRouteByThreadId } from "./thread-routes.js"
 import {
   buildInlineInboundFormattingHints,
+  isInlineHostNoReplyFallback,
   sanitizeInlineOutgoingText,
 } from "./message-formatting.js"
+import { isInlineQuietHandBack } from "./quiet-hand-backs.js"
 import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
 import {
   inlineBotWideReplyThreadOnKeys,
@@ -978,7 +980,11 @@ async function sendMessageInline(params: {
       context: "sendText",
     })
     const visibleText = sanitizeInlineVisibleText(params.text)
-    if (visibleText.shouldSkip) {
+    const quietHandBack =
+      target.kind !== "user" &&
+      isInlineHostNoReplyFallback(params.text) &&
+      isInlineQuietHandBack(account.accountId, target.normalizedNumeric)
+    if (visibleText.shouldSkip || quietHandBack) {
       return {
         outcome: "not_sent",
         messageId: "",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   adaptInlineVisibleCopy,
+  isInlineHostNoReplyFallback,
   buildInlineInboundFormattingHints,
   buildInlineChatMarkdownLink,
   buildInlineSystemPrompt,
@@ -114,6 +115,9 @@ describe("inline/message-formatting", () => {
       "/model <provider/model> --runtime <runtime> -s to switch harnesses",
       "/model status for details",
     ].join("\n"))).toBe("Model: anthropic/claude-sonnet-5-5\nThinking: high")
+    expect(isInlineHostNoReplyFallback("⚠️ Couldn't answer that. Try again.")).toBe(true)
+    expect(isInlineHostNoReplyFallback("⚠️ OpenClaw couldn't produce or deliver a reply. Please try again.")).toBe(true)
+    expect(isInlineHostNoReplyFallback("Couldn't answer that, sorry")).toBe(false)
     // Agent text that only mentions these words is left alone.
     expect(adaptInlineVisibleCopy("The approval required. I sent it.")).toBe("The approval required. I sent it.")
   })

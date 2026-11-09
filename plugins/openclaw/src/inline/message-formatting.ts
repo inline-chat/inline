@@ -47,7 +47,8 @@ const INLINE_HOST_NOTICE_REPLACEMENTS: InlineCopyReplacement[] = [
   ],
 ]
 
-const INLINE_HOST_NO_REPLY_FALLBACK = /^⚠️ OpenClaw couldn't produce or deliver a reply\./
+// Before and after the Inline copy rewrite below; transformReplyPayload runs first.
+const INLINE_HOST_NO_REPLY_FALLBACK = /^⚠️ (?:OpenClaw couldn't produce or deliver a reply\.|Couldn't answer that\. Try again\.$)/
 
 /** OpenClaw's notice for a turn that ended without a visible reply. */
 export function isInlineHostNoReplyFallback(text: string | undefined | null): boolean {

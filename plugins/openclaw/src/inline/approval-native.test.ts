@@ -342,6 +342,28 @@ describe("inline/native approvals", () => {
     ).resolves.toBe(true)
   })
 
+  it("names who answered from OpenClaw's chat approval id", async () => {
+    const cfg = { channels: { inline: { token: "token", execApprovals: { approvers: ["51"] } } } } as OpenClawConfig
+    const request = buildExecRequest()
+    const invokeRaw = vi.fn(async () => ({ oneofKind: "getUsers", getUsers: { users: [{ id: 1600n, firstName: "Mo" }] } }))
+    const view = { approvalId: request.id, approvalKind: "exec", phase: "resolved", title: "", metadata: [], commandText: "whoami", decision: "allow-once", resolvedBy: "Chat approval (inline:1600)" } as any
+    const entry = { messageId: 1n, peerId: {}, text: "x", parseMarkdown: true, subject: "```sh\nwhoami\n```" } as any
+    const result = await inlineApprovalNativeRuntime.presentation.buildResolvedResult({
+      cfg, accountId: "default", context: { client: { invokeRaw } }, request,
+      resolved: { id: request.id, decision: "allow-once", resolvedBy: "Chat approval (inline:1600)", ts: 1 } as any,
+      view, entry,
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(expect.any(Number), { oneofKind: "getUsers", getUsers: { userIds: [1600n] } })
+    expect(result).toEqual({ kind: "update", payload: { text: "✅ Allowed once by Mo\n\n```sh\nwhoami\n```" } })
+
+    invokeRaw.mockRejectedValueOnce(new Error("no access"))
+    expect(await inlineApprovalNativeRuntime.presentation.buildResolvedResult({
+      cfg, accountId: "default", context: { client: { invokeRaw } }, request,
+      resolved: { id: request.id, decision: "deny", resolvedBy: "Chat approval (inline:1600)", ts: 1 } as any,
+      view: { ...view, decision: "deny" }, entry,
+    })).toEqual({ kind: "update", payload: { text: "❌ Denied\n\n```sh\nwhoami\n```" } })
+  })
+
   it("renders, delivers, and clears Inline approval buttons", async () => {
     const sendTyping = vi.fn(async () => {})
     const sendMessage = vi.fn(async () => ({ messageId: 9001n }))

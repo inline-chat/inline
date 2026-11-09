@@ -15908,6 +15908,8 @@ describe("inline/monitor bot addressing rules", () => {
       await waitFor(() => expect(run.log.warn).toHaveBeenCalledWith(
         expect.stringContaining("dropped error reply to bot hand-back"),
       ))
+      // Let the turn finish, so the plugin's own empty-reply fallback would have run.
+      await new Promise((resolve) => setTimeout(resolve, 300))
       expect(run.harness.calls.sendMessage).not.toHaveBeenCalled()
     } finally {
       await run.handle.stop()

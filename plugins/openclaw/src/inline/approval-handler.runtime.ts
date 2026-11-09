@@ -269,12 +269,30 @@ const INLINE_APPROVAL_DECISION_LABELS: Record<string, string> = {
   deny: "❌ Denied",
 }
 
-// Slack, Discord and Telegram all say who answered. A bare id would read as
-// noise, so only a name is shown.
-function formatInlineApprovalResolver(resolvedBy: unknown): string {
-  const value = typeof resolvedBy === "string" ? resolvedBy.trim() : ""
-  if (!value || /^(?:inline:)?(?:user:)?\d+$/i.test(value)) return ""
-  return `by ${value}`
+// Slack, Discord and Telegram all say who answered. OpenClaw records an Inline
+// answer as "Chat approval (inline:<userId>)", so look up the person's name; a
+// bare id or a failed lookup shows no name rather than noise.
+async function resolveInlineApprovalResolverName(
+  resolvedBy: unknown,
+  client: InlineSdkClient | undefined,
+): Promise<string> {
+  const raw = typeof resolvedBy === "string" ? resolvedBy.trim() : ""
+  if (!raw) return ""
+  const inner = raw.match(/^[^()]*\(([^()]+)\)$/)?.[1]?.trim() ?? raw
+  const userId = inner.match(/^(?:inline:)?(?:user:)?(\d+)$/i)?.[1]
+  if (!userId) return inner === raw ? raw : ""
+  if (!client) return ""
+  try {
+    const result = await client.invokeRaw(Method.GET_USERS, {
+      oneofKind: "getUsers",
+      getUsers: { userIds: [BigInt(userId)] },
+    })
+    const user = result.oneofKind === "getUsers" ? result.getUsers.users[0] : undefined
+    const name = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim()
+    return name || (user?.username ? `@${user.username}` : "")
+  } catch {
+    return ""
+  }
 }
 
 function buildInlineApprovalFinalText(params: {
@@ -329,18 +347,25 @@ export const inlineApprovalNativeRuntime: InlineApprovalNativeRuntimeAdapter = c
   presentation: {
     buildPendingPayload: ({ request, approvalKind, nowMs, view }) =>
       buildPendingPayload({ request, approvalKind, nowMs, view }),
-    buildResolvedResult: ({ resolved, view, entry }) => ({
-      kind: "update",
-      payload: {
-        text: buildInlineApprovalFinalText({
-          entry,
-          heading: [
-            INLINE_APPROVAL_DECISION_LABELS[String(resolved.decision)] ?? "Approval resolved",
-            formatInlineApprovalResolver(view.resolvedBy ?? resolved.resolvedBy),
-          ].filter(Boolean).join(" "),
-        }),
-      },
-    }),
+    buildResolvedResult: async ({ cfg, accountId, context, resolved, view, entry }) => {
+      const handler = resolveHandlerContext(handlerContext({ cfg, accountId, context }))
+      const resolver = await resolveInlineApprovalResolverName(
+        view.resolvedBy ?? resolved.resolvedBy,
+        handler?.context.client,
+      )
+      return {
+        kind: "update",
+        payload: {
+          text: buildInlineApprovalFinalText({
+            entry,
+            heading: [
+              INLINE_APPROVAL_DECISION_LABELS[String(resolved.decision)] ?? "Approval resolved",
+              resolver ? `by ${resolver}` : "",
+            ].filter(Boolean).join(" "),
+          }),
+        },
+      }
+    },
     buildExpiredResult: ({ entry }) => ({
       kind: "update",
       payload: { text: buildInlineApprovalFinalText({ entry, heading: "⌛ Approval expired" }) },

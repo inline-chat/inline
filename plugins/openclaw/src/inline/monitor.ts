@@ -80,6 +80,7 @@ import {
 } from "./config-schema.js"
 import { isInlineExecApprovalHandlerConfigured } from "./exec-approvals.js"
 import { buildInlineSystemPrompt, isInlineHostNoReplyFallback, sanitizeInlineOutgoingText } from "./message-formatting.js"
+import { beginInlineQuietHandBack } from "./quiet-hand-backs.js"
 import {
   resolveInlineGroupAllowFrom,
   resolveInlineGroupAccessPolicy,
@@ -4116,6 +4117,9 @@ export async function monitorInlineProvider(params: {
       let streamedFinalEditRejected = false
       let undeliveredFinalText = ""
       let undeliveredFinalActions: MessageActions | undefined
+      const endQuietHandBack = botHandBack
+        ? beginInlineQuietHandBack(account.accountId, deliveryChatId)
+        : null
       try {
         const dispatch = await dispatchInlineReplyWithSessionInitRetry({
           shouldRetry: () => !abortSignal.aborted && !delivered && !skippedNonSilent && !failedNonSilent,
@@ -4508,6 +4512,8 @@ export async function monitorInlineProvider(params: {
         dispatchError = error
         botPresenceLifecycle.fail()
         runtime.error?.(`inline dispatch failed: ${String(error)}`)
+      } finally {
+        endQuietHandBack?.()
       }
 
       if (deferredTypingCleanup) {
@@ -4555,8 +4561,9 @@ export async function monitorInlineProvider(params: {
       const hostRequestedNoVisibleRecovery =
         dispatchResult.noVisibleReplyFallbackEligible === true
       const explicitFailure = dispatchError != null || failedNonSilent
+      // A hand-back needs no answer, so an empty turn there is not a failure to report.
       if (
-        !abortSignal.aborted && dispatchResult.sendPolicyDenied !== true &&
+        !abortSignal.aborted && dispatchResult.sendPolicyDenied !== true && !botHandBack &&
         !delivered && !hostDeliveredReply && !deferredToActiveRun && !adoptingThread &&
         (explicitFailure ||
           (!hostHandledTurn &&
