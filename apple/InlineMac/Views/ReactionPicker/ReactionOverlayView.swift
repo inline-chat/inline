@@ -25,10 +25,17 @@ struct ReactionOverlayView: View {
   @State private var appearOpacity: Double = 0
   @State private var isEmojiPickerPresented = false
   @State private var isSelectingCustomEmoji = false
+  @State private var scrollEdges = ScrollEdges(leading: false, trailing: true)
 
   private let pageWidth: CGFloat = 280 // Width of one page of reactions
   private static let buttonSize: CGFloat = 32
   private static let moreReactionsKey = "__more_reactions"
+  private static let edgeFadeWidth: CGFloat = 20
+
+  private struct ScrollEdges: Equatable {
+    var leading: Bool
+    var trailing: Bool
+  }
 
   private func handleReactionSelected(_ emoji: String) {
     // Message suggestions are already validated and must be sent exactly as displayed.
@@ -114,16 +121,32 @@ struct ReactionOverlayView: View {
   }
 
   var body: some View {
-    ScrollView(.horizontal, showsIndicators: false) {
-      HStack(spacing: 2) {
-        ForEach(suggestedReactions, id: \.self) { emoji in
-          reactionButton(emoji)
+    // The plus stays pinned outside the scroller so it is always visible, like iOS.
+    HStack(spacing: 2) {
+      ScrollView(.horizontal, showsIndicators: false) {
+        HStack(spacing: 2) {
+          ForEach(suggestedReactions, id: \.self) { emoji in
+            reactionButton(emoji)
+          }
         }
-        moreReactionsButton
+        .padding(.leading, 6)
       }
-      .padding(.vertical, 2)
-      .padding(.horizontal, 6)
+      .onScrollGeometryChange(for: ScrollEdges.self) { geometry in
+        let minOffset = -geometry.contentInsets.leading
+        let maxOffset = geometry.contentSize.width + geometry.contentInsets.trailing - geometry.containerSize.width
+        return ScrollEdges(
+          leading: geometry.contentOffset.x > minOffset + 1,
+          trailing: geometry.contentOffset.x < maxOffset - 1
+        )
+      } action: { _, edges in
+        scrollEdges = edges
+      }
+      .mask(edgeFadeMask)
+
+      moreReactionsButton
+        .padding(.trailing, 6)
     }
+    .padding(.vertical, 2)
     .background(
       RoundedRectangle(cornerRadius: 20)
         .fill(.ultraThinMaterial)
@@ -192,11 +215,14 @@ struct ReactionOverlayView: View {
     Button(action: showEmojiPicker) {
       Image(systemName: "plus")
         .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.primary)
+        .frame(width: Self.buttonSize - 4, height: Self.buttonSize - 4)
+        .background(
+          Circle().fill(Color.primary.opacity(isHovered[Self.moreReactionsKey] == true ? 0.14 : 0.08))
+        )
         .frame(width: Self.buttonSize, height: Self.buttonSize)
     }
     .buttonStyle(.plain)
-    .background(buttonBackground(key: Self.moreReactionsKey))
     .contentShape(Circle())
     .scaleEffect(isHovered[Self.moreReactionsKey] == true ? 1.1 : 1.0)
     .animation(.spring(response: 0.2, dampingFraction: 0.6), value: isHovered[Self.moreReactionsKey])
@@ -204,6 +230,7 @@ struct ReactionOverlayView: View {
       isHovered[Self.moreReactionsKey] = hovering
     }
     .help("More reactions")
+    .accessibilityLabel("More reactions")
     .background {
       EmojiPickerPopoverPresenter2(
         isPresented: $isEmojiPickerPresented,
@@ -211,6 +238,26 @@ struct ReactionOverlayView: View {
         onSelect: handleCustomEmojiSelected
       )
       .allowsHitTesting(false)
+    }
+  }
+
+  /// Fades reactions out at an edge with more content past it, so the one next to the plus
+  /// dissolves instead of reading as clipped behind it.
+  private var edgeFadeMask: some View {
+    HStack(spacing: 0) {
+      LinearGradient(
+        colors: [scrollEdges.leading ? .clear : .black, .black],
+        startPoint: .leading,
+        endPoint: .trailing
+      )
+      .frame(width: Self.edgeFadeWidth)
+      Color.black
+      LinearGradient(
+        colors: [.black, scrollEdges.trailing ? .clear : .black],
+        startPoint: .leading,
+        endPoint: .trailing
+      )
+      .frame(width: Self.edgeFadeWidth)
     }
   }
 
