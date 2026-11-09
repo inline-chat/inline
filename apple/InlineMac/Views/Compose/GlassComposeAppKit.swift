@@ -1169,7 +1169,6 @@ class GlassComposeAppKit: NSView {
     state.replyingToMsgIdPublisher
       .sink { [weak self] replyingToMsgId in
         guard let self else { return }
-        removeStaleReplyQuote(replyingTo: replyingToMsgId)
         updateAgentReplyTarget(replyingToMsgId)
         updateMessageView(to: replyingToMsgId, kind: .replying, animate: true)
         updateVoiceAvailability()
@@ -3175,23 +3174,13 @@ class GlassComposeAppKit: NSView {
     }
   }
 
-  /// The quote lines Quote put at the top and the message they quote, so quoting again or
-  /// dropping the reply can take them back out.
-  private var insertedReplyQuote: (markdown: String, messageId: Int64)?
-
-  /// Puts quote lines first, replacing the last quote, through the normal input path, and
-  /// leaves the cursor at the end so the reply is typed below the quote. One quote per reply,
-  /// like Telegram, so the reply shows it in its header.
+  /// Adds quote lines after anything already typed, each quote its own block, through the
+  /// normal input path, and leaves the cursor at the end so the reply is typed below the quote.
   private func insertQuote(_ markdown: String) {
     let textView = textEditor.textView
-    let insertion = MessageMarkdown.replyQuoteInsertion(
-      markdown,
-      into: textView.string,
-      replacing: insertedReplyQuote?.markdown
-    )
+    let insertion = MessageMarkdown.quoteInsertion(markdown, into: textView.string)
     textView.updateTypingAttributesIfNeeded()
     textView.insertText(insertion.text, replacementRange: insertion.range)
-    insertedReplyQuote = state.replyingToMsgId.map { (markdown, $0) }
     textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
     focus()
   }
@@ -3205,18 +3194,6 @@ class GlassComposeAppKit: NSView {
     textView.insertText(separator + text, replacementRange: NSRange(location: current.length, length: 0))
     textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
     focus()
-  }
-
-  /// A reply that moved to another message, or was dropped, takes its inserted quote with it
-  /// while the lines are still untouched at the top.
-  private func removeStaleReplyQuote(replyingTo replyingToMsgId: Int64?) {
-    guard let inserted = insertedReplyQuote, replyingToMsgId != inserted.messageId else { return }
-    insertedReplyQuote = nil
-    let textView = textEditor.textView
-    guard let range = MessageMarkdown.replyQuoteRemoval(inserted.markdown, from: textView.string) else { return }
-    let selection = textView.selectedRange()
-    textView.insertText("", replacementRange: range)
-    textView.setSelectedRange(NSRange(location: max(0, selection.location - range.length), length: 0))
   }
 
   // TODO: Abstract setAttributedString out of this
