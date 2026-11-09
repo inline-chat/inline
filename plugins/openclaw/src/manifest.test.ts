@@ -377,7 +377,8 @@ describe("plugin manifest", () => {
     expect(readme).toContain('`groupPolicy` defaults to `"open"`, and `requireMention` defaults to `true`')
     expect(setup).toContain('Groups use `groupPolicy: "open"` and `requireMention: true` by default')
     expect(compatibilityVersions[0]).toBe(packageJson.version)
-    expect(compatibilityVersions).toHaveLength(6)
+    const unreleasedRows = [...readme.matchAll(/^\| Next \(unreleased\) \|/gm)].length
+    expect(compatibilityVersions.length + unreleasedRows).toBe(6)
     expect(new Set(compatibilityVersions).size).toBe(compatibilityVersions.length)
     expect(packageJson.scripts?.test).toContain("--maxWorkers=2")
   })
