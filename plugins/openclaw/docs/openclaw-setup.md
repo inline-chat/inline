@@ -156,6 +156,10 @@ network deadline, and never changes plugin success or failure behavior.
   - Update plugin to latest (commands above).
 - `doctor --fix` suggests changing the Inline plugin entry
   - Keep the plugin entry id as `inline`, then re-run `openclaw plugins list` and `openclaw channels status`.
+- A restart notice says a request may already have finished
+  - Check the original request and its results before retrying, especially for approvals or tools with side effects. Input saved before host dispatch resumes automatically. A turn or action that may already have entered the host is never automatically repeated.
+  - Some supported hosts keep steers and follow-ups only in memory and cannot confirm their completion per request. The gateway retains those recovery records; a confirmed notice hands recovery to you and clears their saved payloads. Notices link back to the original Inline message.
+  - The private local inbox is scoped to the account, API endpoint and authenticated bot. It is bounded to 1,000 unresolved inputs, 1 MiB per pending input and 8 MiB overall. If uncertain records fill it, the gateway sends a bounded recovery notice before admitting more input; it does not discard pending requests. This is safe recovery with an explicit uncertain outcome, not an exactly-once host execution guarantee.
 
 ## Recommended Hardening (After Basic Setup)
 
