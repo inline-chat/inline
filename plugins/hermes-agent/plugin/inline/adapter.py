@@ -171,6 +171,29 @@ _INLINE_ENTITY_TYPE_NAMES = {
     14: "group_mention",
 }
 
+_APPROVAL_COMMAND_LIMIT = 2000
+_APPROVAL_FENCE_PATTERN = re.compile(r"(`{3,})[^\n]*\n(.*?)\n\1", re.DOTALL)
+# Same headings as OpenClaw's Inline, Slack and Discord approval cards.
+_APPROVAL_DECISION_HEADINGS = {
+    "once": "✅ Allowed once",
+    "session": "✅ Allowed for this session",
+    "always": "✅ Always allowed",
+    "deny": "❌ Denied",
+}
+_APPROVAL_EXPIRED_HEADING = "⌛ Approval expired"
+
+
+def _approval_command_block(command: str) -> str:
+    body = command if len(command) <= _APPROVAL_COMMAND_LIMIT else f"{command[:_APPROVAL_COMMAND_LIMIT]}…"
+    fence = "````" if "```" in body else "```"
+    return f"{fence}sh\n{body}\n{fence}"
+
+
+def _approval_card_text(heading: str, command: str) -> str:
+    """An answered or expired card: the outcome above the command it was for."""
+    return f"{heading}\n\n{_approval_command_block(command)}" if command else heading
+
+
 _ENV_REF_PATTERN = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 _SIDECAR_RETRYABLE_KINDS = {"transient"}
 _INLINE_DISPLAY_DEFAULTS = {
@@ -1116,6 +1139,7 @@ class InlineAdapter(BasePlatformAdapter):
         self._clarify_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._approval_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._approval_request_ids: "OrderedDict[str, str]" = OrderedDict()
+        self._approval_commands: "OrderedDict[str, str]" = OrderedDict()
         self._slash_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._choice_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._update_prompt_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
@@ -4481,7 +4505,8 @@ class InlineAdapter(BasePlatformAdapter):
         if choice not in _APPROVAL_CHOICES:
             return False
         if not session_key:
-            await self._finish_action(event, "Approval expired", "Approval expired; the command was not run.")
+            command = self._approval_commands.pop(approval_id, None) or await self._approval_command_from_message(event)
+            await self._finish_action(event, "Approval expired", _approval_card_text(_APPROVAL_EXPIRED_HEADING, command))
             return True
         try:
             request_id = self._approval_request_ids.get(approval_id)
@@ -4494,22 +4519,45 @@ class InlineAdapter(BasePlatformAdapter):
             count = self._resolve_approval(session_key, choice, request_id, actor_id)
             self._approval_sessions.pop(approval_id, None)
             self._approval_request_ids.pop(approval_id, None)
+            command = self._approval_commands.pop(approval_id, None) or ""
             if not count:
-                await self._finish_action(event, "Approval expired", "Approval expired; the command was not run.")
+                await self._finish_action(event, "Approval expired", _approval_card_text(_APPROVAL_EXPIRED_HEADING, command))
                 return True
-            labels = {
-                "once": ("Approved once", "Approved once."),
-                "session": ("Approved for session", "Approved for this session."),
-                "always": ("Always allowed", "Always allowed."),
-                "deny": ("Denied", "Denied."),
+            toasts = {
+                "once": "Approved once",
+                "session": "Approved for session",
+                "always": "Always allowed",
+                "deny": "Denied",
             }
-            toast, text = labels[choice]
-            await self._finish_action(event, toast, text)
+            # Slack, Discord and OpenClaw's Inline card say who answered; a bare id is noise.
+            answered_by, _, _ = _inline_sender_identity(_inline_sender_profile(event))
+            heading = _APPROVAL_DECISION_HEADINGS[choice] + (f" by {answered_by}" if answered_by else "")
+            await self._finish_action(event, toasts[choice], _approval_card_text(heading, command))
             return True
         except Exception as exc:
             self._report_error("action.approval", exc)
             logger.exception("[inline] approval action failed")
             return True
+
+    async def _approval_command_from_message(self, event: Dict[str, Any]) -> str:
+        """Recover the command from the card itself when this process no longer has it (e.g. after a restart)."""
+        chat_id = str(event.get("chatId") or "")
+        message_id = str(event.get("messageId") or "")
+        msg = await self._fetch_message(chat_id, message_id) if chat_id and message_id else None
+        if not msg:
+            return ""
+        text = str(msg.get("message") or "")
+        units = text.encode("utf-16-le")
+        for entity in self._message_entities(msg):
+            if self._entity_kind(entity) != "pre":
+                continue
+            offset = _to_int(entity.get("offset"))
+            length = _to_int(entity.get("length"))
+            if offset is None or length is None or offset < 0 or length <= 0:
+                continue
+            return units[offset * 2 : (offset + length) * 2].decode("utf-16-le", errors="ignore").strip()
+        match = _APPROVAL_FENCE_PATTERN.search(text)
+        return match.group(2).strip() if match else ""
 
     def _approval_refusal(self, session_key: str, actor_id: str, request_id: Optional[str]) -> Optional[str]:
         """Hermes' approver rule (``approvals.approvers``) for a tap, or None when it may answer.
@@ -5406,6 +5454,7 @@ class InlineAdapter(BasePlatformAdapter):
         })
         if result.success:
             self._remember(self._approval_sessions, approval_id, prompt.session_key)
+            self._remember(self._approval_commands, approval_id, str(getattr(prompt, "command", "") or ""))
             request_id = getattr(prompt, "request_id", None)
             if request_id:
                 self._remember(self._approval_request_ids, approval_id, str(request_id))

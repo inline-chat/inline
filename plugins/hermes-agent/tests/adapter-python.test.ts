@@ -4141,6 +4141,8 @@ async def assert_action_thread_targets():
     approval_id = calls[-1][1]["actions"]["rows"][0]["actions"][0]["id"].split(":")[2]
     assert adapter._approval_sessions[approval_id] == "session-6"
     assert dict(adapter._approval_request_ids) == {approval_id: "request-6"}
+    # The command is kept so the answered card can still show it.
+    assert adapter._approval_commands[approval_id] == "echo ok"
 
 asyncio.run(assert_action_thread_targets())
 # Hermes reports native approval buttons for adapters that override its prompt hook, and its
@@ -5738,10 +5740,21 @@ async def assert_callback_state_lifecycle():
             "interactionId": interaction_id,
         }
 
+    fetched_messages = {}
+
+    async def fake_fetch_message(chat_id, message_id, **kwargs):
+        return fetched_messages.get(message_id)
+
     adapter._answer_action = fake_answer_action
     adapter._edit_action_message = fake_edit_action_message
+    adapter._fetch_message = fake_fetch_message
+    fence = "\x60\x60\x60"
+
+    def card(heading, command):
+        return f"{heading}\n\n{fence}sh\n{command}\n{fence}"
 
     adapter._approval_sessions["approval-2"] = "session-2"
+    adapter._approval_commands["approval-2"] = "make deploy"
     approval_state["fail"] = True
     assert await adapter._handle_approval_action(action_event("appr:approval-2:once", "interaction-7"))
     assert adapter._approval_sessions["approval-2"] == "session-2"
@@ -5753,15 +5766,52 @@ async def assert_callback_state_lifecycle():
     assert await adapter._handle_approval_action(action_event("appr:approval-2:session", "interaction-8"))
     assert "approval-2" not in adapter._approval_sessions
     assert approval_state["calls"][-1] == ("session-2", "session")
+    assert "approval-2" not in adapter._approval_commands
     assert answers[-1] == ("interaction-8", "Approved for session")
-    assert edits[-1][1:] == ("Approved for this session.", {"rows": []})
+    assert edits[-1][1:] == (card("✅ Allowed for this session", "make deploy"), {"rows": []})
+
+    def answered_by(action_id, interaction_id, sender):
+        return {**action_event(action_id, interaction_id), "actorUserId": "42", "sender": sender}
+
+    adapter._approval_sessions["approval-once"] = "session-once"
+    adapter._approval_commands["approval-once"] = "git push"
+    assert await adapter._handle_approval_action(answered_by(
+        "appr:approval-once:approve", "interaction-8a", {"id": "42", "firstName": "Mo", "username": "mo"},
+    ))
+    assert approval_state["calls"][-1] == ("session-once", "once")
+    assert answers[-1] == ("interaction-8a", "Approved once")
+    assert edits[-1][1:] == (card("✅ Allowed once by Mo", "git push"), {"rows": []})
+
+    adapter._approval_sessions["approval-always"] = "session-always"
+    adapter._approval_commands["approval-always"] = "ls"
+    assert await adapter._handle_approval_action(answered_by(
+        "appr:approval-always:always", "interaction-8b", {"id": "42", "username": "mo"},
+    ))
+    assert answers[-1] == ("interaction-8b", "Always allowed")
+    assert edits[-1][1:] == (card("✅ Always allowed by @mo", "ls"), {"rows": []})
+
+    # Only an id is known for the person who tapped, so the card names nobody.
+    adapter._approval_sessions["approval-deny"] = "session-deny"
+    adapter._approval_commands["approval-deny"] = "rm -rf build"
+    assert await adapter._handle_approval_action(answered_by("appr:approval-deny:deny", "interaction-8c", {"id": "42"}))
+    assert approval_state["calls"][-1] == ("session-deny", "deny")
+    assert answers[-1] == ("interaction-8c", "Denied")
+    assert edits[-1][1:] == (card("❌ Denied", "rm -rf build"), {"rows": []})
+
+    # A command holding a fence gets a longer one.
+    adapter._approval_sessions["approval-fenced"] = "session-fenced"
+    adapter._approval_commands["approval-fenced"] = f"cat <<EOF\n{fence}\nEOF"
+    assert await adapter._handle_approval_action(action_event("appr:approval-fenced:once", "interaction-8d"))
+    assert edits[-1][1] == f"✅ Allowed once\n\n{fence}\x60sh\ncat <<EOF\n{fence}\nEOF\n{fence}\x60"
 
     adapter._approval_sessions["approval-expired"] = "session-expired"
+    adapter._approval_commands["approval-expired"] = "make clean"
     approval_state["count"] = 0
     assert await adapter._handle_approval_action(action_event("appr:approval-expired:deny", "interaction-9"))
     assert "approval-expired" not in adapter._approval_sessions
+    assert "approval-expired" not in adapter._approval_commands
     assert answers[-1] == ("interaction-9", "Approval expired")
-    assert edits[-1][1:] == ("Approval expired; the command was not run.", {"rows": []})
+    assert edits[-1][1:] == (card("⌛ Approval expired", "make clean"), {"rows": []})
     approval_state["count"] = 1
 
     # A card sent with a request id resolves that request only, never the next one queued.
@@ -5867,9 +5917,26 @@ async def assert_callback_state_lifecycle():
     assert await adapter._handle_clarify_action(action_event("cl:clarify-4:other", "interaction-15"))
     assert edits[-1][1:] == ("Type your answer:", {"rows": []})
 
+    # Unknown to this process (e.g. after a restart) and the card can't be read: heading only.
+    calls_before = list(approval_state["calls"])
     assert await adapter._handle_approval_action(action_event("appr:already-resolved:once", "interaction-16"))
     assert answers[-1] == ("interaction-16", "Approval expired")
-    assert edits[-1][1:] == ("Approval expired; the command was not run.", {"rows": []})
+    assert edits[-1][1:] == ("⌛ Approval expired", {"rows": []})
+
+    # The command comes back from the card's code block, as a pre entity (UTF-16 offsets) ...
+    fetched_messages["20"] = {
+        "message": "Command approval required\n\necho 👋 hi",
+        "entities": {"entities": [{"type": 9, "offset": 27, "length": 10, "entity": {"oneofKind": "pre", "pre": {"language": "sh"}}}]},
+    }
+    assert await adapter._handle_approval_action(action_event("appr:restarted:once", "interaction-17"))
+    assert edits[-1][1:] == (card("⌛ Approval expired", "echo 👋 hi"), {"rows": []})
+
+    # ... or as a literal fence when the card was sent without markdown parsing.
+    fetched_messages["20"] = {"message": f"⚠️ Command approval required\n\n{fence}\nuptime\n{fence}\nReason: x"}
+    assert await adapter._handle_approval_action(action_event("appr:restarted:deny", "interaction-18"))
+    assert edits[-1][1:] == (card("⌛ Approval expired", "uptime"), {"rows": []})
+    # Unknown approvals never reach Hermes' resolver.
+    assert approval_state["calls"] == calls_before
 
 asyncio.run(assert_callback_state_lifecycle())
 
