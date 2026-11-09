@@ -215,7 +215,7 @@ jobs:
         with:
           bun-version: '1.4.4'
       - name: Check isolated release and verify tracked source sidecar
-        run: node plugins/hermes-agent/scripts/release-stage.mjs --prepare-only --verify-source-bundle
+        run: node scripts/ci/prepare-hermes-candidate.mjs
 
   chat-sdk:
     name: Vercel Chat SDK adapter

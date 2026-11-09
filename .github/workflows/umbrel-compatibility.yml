@@ -6,6 +6,10 @@ on:
       - 'cli/**'
       - 'plugins/hermes-agent/**'
       - 'scripts/ci/check-hermes-*'
+      - 'scripts/ci/prepare-hermes-candidate.mjs'
+      - 'packages/protocol/**'
+      - 'packages/sdk/**'
+      - 'bun.lock'
       - 'scripts/ci/check-umbrel-hermes.sh'
       - '.github/workflows/umbrel-compatibility.yml'
   push:
@@ -14,6 +18,10 @@ on:
       - 'cli/**'
       - 'plugins/hermes-agent/**'
       - 'scripts/ci/check-hermes-*'
+      - 'scripts/ci/prepare-hermes-candidate.mjs'
+      - 'packages/protocol/**'
+      - 'packages/sdk/**'
+      - 'bun.lock'
       - 'scripts/ci/check-umbrel-hermes.sh'
       - '.github/workflows/umbrel-compatibility.yml'
   schedule:
@@ -43,7 +51,7 @@ jobs:
           bun-version: '1.4.4'
       - name: Prepare and test exact candidate adapter
         if: matrix.adapter == 'candidate'
-        run: node plugins/hermes-agent/scripts/release-stage.mjs --prepare-only --verify-source-bundle --output-dir "$RUNNER_TEMP/hermes-artifact"
+        run: node scripts/ci/prepare-hermes-candidate.mjs "$RUNNER_TEMP/hermes-artifact"
       - name: Test candidate or published consumer
         run: |
           if [[ "${{ matrix.adapter }}" == candidate ]]; then
