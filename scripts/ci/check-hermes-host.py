@@ -797,5 +797,35 @@ async def exercise_exec_approval():
 
 
 asyncio.run(exercise_exec_approval())
+
+
+async def exercise_partial_send():
+    # Published adapters before 1.1.0 returned the bare chunk failure.
+    if not hasattr(type(adapter), "_partial_send_failure"):
+        return
+    sent = []
+
+    def transport(request):
+        if request.url.path == "/send":
+            sent.append(json.loads(request.content)["text"])
+            if len(sent) == 2:
+                return httpx.Response(400, json={"ok": False, "error": "widget rejected", "errorKind": "bad_format"})
+        return httpx.Response(200, json={"ok": True, "result": {"messageId": str(len(sent))}})
+
+    sender = platform_registry.create_adapter("inline", PlatformConfig(
+        enabled=True, token="offline-test-token", extra={"sync_commands": False, "context_backfill": "off"},
+    ))
+    sender._http_client = httpx.AsyncClient(transport=httpx.MockTransport(transport))
+    try:
+        # Hermes' own retry and plain-text fallback: a reply whose second message is refused must
+        # not be sent again, or its delivered first message would appear twice.
+        content = "a" * 3900 + "\n\n" + "b" * 3900
+        result = await sender._send_with_retry("99", content)
+        assert not result.success and len(sent) == 2, (result, [len(text) for text in sent])
+    finally:
+        await sender._http_client.aclose()
+
+
+asyncio.run(exercise_partial_send())
 asyncio.run(exercise_cron_mentions())
 print("Real Hermes admission, registration, authorization/pairing, receipt recovery, fatal teardown, local effects, inbound/reply, cron delivery and exec approvals, deduplication and media safety passed (offline transport).")
