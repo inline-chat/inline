@@ -1297,8 +1297,7 @@ class UIMessageView: UIView {
         kind: .replyInMessage,
         outgoing: outgoing,
         isOnlyEmoji: isEmojiOnlyMessage,
-        thumbnailReloadMessage: fullMessage.message,
-        quote: fullMessage.leadingReplyQuote?.text
+        thumbnailReloadMessage: fullMessage.message
       )
     } else {
       embedView.showNotLoaded(kind: .replyInMessage, outgoing: outgoing, isOnlyEmoji: isEmojiOnlyMessage)
@@ -1351,7 +1350,7 @@ class UIMessageView: UIView {
   }
 
   @objc func handleEmbedViewTap() {
-    MessageViewActions.openRepliedMessage(of: fullMessage)
+    MessageViewActions.openRepliedMessage(of: message)
   }
 
   func setupFileViewIfNeeded() {
