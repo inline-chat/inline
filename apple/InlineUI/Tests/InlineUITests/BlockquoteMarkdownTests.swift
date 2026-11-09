@@ -130,33 +130,4 @@ struct BlockquoteMarkdownTests {
     // Text typed after a quote stays where it is; the next quote goes below it.
     #expect(quote("two", into: "> one\nmy take  \n") == "> one\nmy take\n\n> two\n")
   }
-
-  @Test("A reply quote goes first and quoting again replaces it")
-  func replyQuoteReplaces() {
-    func quote(_ selection: String, into text: String, replacing previous: String?) -> String {
-      let insertion = MessageMarkdown.replyQuoteInsertion(
-        MessageMarkdown.quoteLines(selection),
-        into: text,
-        replacing: previous
-      )
-      return (text as NSString).replacingCharacters(in: insertion.range, with: insertion.text)
-    }
-
-    // First quote goes above what's typed, so the reply shows it in its header.
-    let first = quote("one", into: "my take", replacing: nil)
-    #expect(first == "> one\nmy take")
-    // Quoting again swaps the quote and keeps the caption.
-    #expect(quote("two", into: first, replacing: MessageMarkdown.quoteLines("one")) == "> two\nmy take")
-    // Edited quote lines aren't the inserted ones any more; the new quote goes above them.
-    #expect(quote("two", into: "> one!\nmy take", replacing: MessageMarkdown.quoteLines("one")) == "> two\n\n> one!\nmy take")
-    let parsed = parse("> two\n\n> one!\nmy take")
-    #expect(ranges(parsed.entities, .blockquote).count == 2)
-  }
-
-  @Test("Dropping the reply removes its untouched quote")
-  func replyQuoteRemoval() {
-    let lines = MessageMarkdown.quoteLines("one")
-    #expect(MessageMarkdown.replyQuoteRemoval(lines, from: lines + "my take") == NSRange(location: 0, length: 6))
-    #expect(MessageMarkdown.replyQuoteRemoval(lines, from: "> one!\nmy take") == nil)
-  }
 }

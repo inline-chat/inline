@@ -35,6 +35,7 @@ Supported:
 - Native Inline `/` command-menu sync for Hermes slash commands, including `/threads`, `/follow`, `/unfollow`, `/inline_sync`, `/inline_version`, and `/update`; typed slash commands continue to work even if menu sync is disabled or rejected.
 - Inline-native buttons for clarify prompts, command approvals, slash confirmations, and model selection.
 - Agent-created `send_message`/`edit_message` button rows with opaque callback data. A callback is acknowledged after its target and access checks succeed, then enters Hermes as a normal turn naming the source message and exact action fields. The normal response edits that source message and clears omitted buttons; the agent can instead call `edit_message` with replacement buttons and finish with `NO_REPLY` so the explicit edit remains authoritative.
+- Message widgets: sandboxed HTML (charts, diagrams, mockups, small pickers) through the `inline` tool's `send_widget` action, or an `<iframe title="…" id="…" height="…">HTML</iframe>` block in a Markdown reply. Long replies are split around widgets, never inside one, with at most one widget per message; a widget longer than the 4,000-character chunk goes alone, up to Inline's 100,000-character limit. Streaming previews hide a widget until its closing tag arrives. `send_widget` returns Inline's reason when the server rejects a widget. A viewer's `inline.action(name, payload)` call becomes a turn naming the widget ID, call name, and untrusted JSON payload, and the answer replies below the widget instead of replacing it. Call names and payloads need realtime SDK 0.0.22 or later; with an older bundled SDK, the turn names only the widget.
 - Outbound local photo, video, voice, and document uploads with configurable size caps.
 - Inbound photo, video, voice, and document summaries, with URL-backed media cached locally for Hermes when available.
 - Reactions on bot messages, plus opt-in lifecycle/system events as synthetic Hermes messages.
@@ -50,6 +51,21 @@ Unsupported or intentionally limited:
 - Ephemeral in-channel private replies. Private notices are sent as DMs when a user id is available.
 - Live voice sessions or calls. Voice file messages are supported, but realtime audio is not.
 - Media without a usable Inline CDN/local URL. Those messages still produce text summaries, but Hermes may not receive a local file path.
+
+## Release 1.1.0
+
+Command approvals show Allow and Deny buttons again on every supported Hermes. A
+tap answers only the request its card was sent for, and on Hermes versions with
+`approvals.approvers` only the people that setting allows can answer. Hermes now
+writes the card, so a long command arrives in full before its buttons. Gateways
+with many Inline bots no longer hang during startup or keep the old process alive
+on restart. Scheduled posts can mention their recipient with `cron_mention_prefix`
+(see Scheduled mentions below). Tested on Hermes `0.23.0`.
+
+```sh
+npm install -g @inline-chat/hermes-agent-adapter@1.1.0
+inline-hermes install --force
+```
 
 ## Release 1.0.0
 
@@ -197,8 +213,8 @@ mismatch, rerun the same command after rebuilding or upgrading the package.
 
 - Hermes Agent: requires the external user plugin registry and native platform
   plugin loader available in Hermes Agent `>=0.21.3`. This package was validated
-  against Hermes Agent `0.22.7` from source commit `b200f5bc60e31588ba2cb60e288029c4a54ba5fa` (tag
-  `v0.22.7`), and installs on the minimum `0.21.3`. Hermes `0.22.6` and later refuse
+  against Hermes Agent `0.23.0` from source commit `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19` (tag
+  `v0.23.0`), and installs on the minimum `0.21.3`. Hermes `0.22.6` and later refuse
   every message from adapters before `1.0.0`; upgrade as in Release 1.0.0 above.
 - CI checks the minimum supported Hermes release, newest stable source, and upstream
   `main`, including a full inbound turn through Hermes' production gateway. A six-hour scheduled check also tests the published npm `latest` adapter.

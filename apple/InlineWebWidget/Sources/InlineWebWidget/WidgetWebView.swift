@@ -34,6 +34,24 @@ public final class WidgetWebView: WKWebView {
     }
   }
 
+  /// WebKit's menu offers Reload, new windows and downloads, none of which a
+  /// widget can use. Keep text items such as Copy, Look Up and Speech.
+  public override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+    let blocked = ["Reload", "OpenLink", "OpenImage", "OpenFrame", "OpenMedia", "Download", "CopyImage", "CopyLink"]
+    #if DEBUG
+    let kept: Set<String> = ["WKMenuItemIdentifierInspectElement"]
+    #else
+    let kept: Set<String> = []
+    #endif
+    for item in menu.items {
+      guard let identifier = item.identifier?.rawValue, !kept.contains(identifier) else { continue }
+      if blocked.contains(where: identifier.contains) || identifier.contains("InspectElement") { menu.removeItem(item) }
+    }
+    while menu.items.first?.isSeparatorItem == true { menu.removeItem(at: 0) }
+    while menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
+    super.willOpenMenu(menu, with: event)
+  }
+
   func resetInteraction() { lastUserInteraction = nil }
 
   /// WebContent process id, for spike measurements only (private KVC key).

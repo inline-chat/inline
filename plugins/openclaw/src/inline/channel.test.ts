@@ -79,7 +79,7 @@ describe("inline/channel", () => {
       text_markup: "inline_markdown",
       rules: expect.arrayContaining([
         "Use Inline's supported Markdown: emphasis, inline or fenced code, links, headings, lists or checklists, quotes, tables, separators, and HTTP(S) images.",
-        "Do not rely on strikethrough, footnotes, or arbitrary HTML; unrecognized or ambiguous incomplete syntax remains visible text.",
+        "Do not rely on strikethrough, footnotes, or arbitrary HTML (the one exception is a widget block); unrecognized or ambiguous incomplete syntax remains visible text.",
         "Use ordinary Markdown tables for genuinely tabular data; never put a table in a fenced code block.",
         'For collapsible work, use <details open> followed by <summary>Title</summary>, body Markdown, and </details>; add kind="progress" to summary only while work is in progress.',
         "Use <footer>Attribution or brief metadata</footer> for a short message footer.",
@@ -387,6 +387,23 @@ describe("inline/channel", () => {
       minChars: 1500,
       idleMs: 1000,
     })
+  })
+
+  it("chunks outbound Markdown without splitting a widget block", async () => {
+    vi.resetModules()
+    const runtimeMod = await import("../runtime")
+    runtimeMod.setInlineRuntime({
+      version: "test",
+      channel: { text: { chunkMarkdownText: (text: string) => text.split(/\n{2,}/) } },
+    } as unknown as PluginRuntime)
+    const { inlineChannelPlugin } = await import("./channel")
+    const widget = '<iframe title="Q3" id="q3" height="300">\n<div>\n\n<p>a</p>\n\n</div>\n</iframe>'
+    const chunks = inlineChannelPlugin.outbound?.chunker?.(`One.\n\nTwo.\n\n${widget}\n\nThree.`, 4000)
+    expect(chunks).toEqual(["One.", `Two.\n\n${widget}\n\nThree.`])
+    expect(inlineChannelPlugin.outbound?.sanitizeText?.({
+      text: `${widget.replace("<p>a</p>", "<script>x=`https://a.dev`</script>")}`,
+      payload: {},
+    } as never)).toContain("`https://a.dev`")
   })
 
   it("resolves configured default outbound targets", async () => {

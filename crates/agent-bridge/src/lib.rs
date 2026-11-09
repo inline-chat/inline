@@ -18,6 +18,7 @@ mod session;
 mod session_continuity;
 mod store;
 mod turn;
+pub mod widget;
 
 pub use command::{CommandParseError, parse_command};
 pub use driver::{

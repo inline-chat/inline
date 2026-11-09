@@ -10,6 +10,8 @@ export const retryAfterSecondsFromMs = (ms: number): number =>
 
 export class RealtimeRpcError extends Error {
   public readonly codeName: string
+  /** A reason the caller can act on, safe to return as the error description. Never user content. */
+  public publicReason?: string
   /** Telegram FLOOD_WAIT-style hint copied to `RpcError.retry_after_seconds`. */
   public retryAfterSeconds?: number
 
@@ -45,6 +47,17 @@ export class RealtimeRpcError extends Error {
   // Convenience Helpers (fresh instance for correct stack traces)
   public static BadRequest() {
     return RealtimeRpcError.create(RpcError_Code.BAD_REQUEST, "Bad request", 400, RealtimeRpcError.BadRequest)
+  }
+  /** A bad request whose reason is returned to the caller, so a bot can fix and retry. */
+  public static BadRequestWithReason(reason: string): RealtimeRpcError {
+    const error = RealtimeRpcError.create(
+      RpcError_Code.BAD_REQUEST,
+      reason,
+      400,
+      (): RealtimeRpcError => RealtimeRpcError.BadRequestWithReason(reason),
+    )
+    error.publicReason = reason
+    return error
   }
   public static UnsupportedRpcMethod(method: number): RealtimeRpcError {
     return RealtimeRpcError.create(

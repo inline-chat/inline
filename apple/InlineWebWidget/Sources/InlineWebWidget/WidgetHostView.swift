@@ -28,9 +28,17 @@ public final class WidgetHostView: NSView {
     didSet { fadeView.isHidden = !isClipped }
   }
 
-  /// Off until expansion exists; the inline cap's fade still shows clipped content.
+  /// The header's trailing button, such as Show all for content past the inline cap.
   public var showsOpenButton = true {
-    didSet { openButton.isHidden = !showsOpenButton }
+    didSet {
+      openButton.isHidden = !showsOpenButton
+      needsLayout = true
+    }
+  }
+
+  public var openButtonTitle: String {
+    get { openButton.title }
+    set { openButton.title = newValue }
   }
 
   public var contentWidth: CGFloat { max(bounds.width, 320) }
@@ -91,8 +99,9 @@ public final class WidgetHostView: NSView {
   public override func layout() {
     super.layout()
     let width = bounds.width
-    titleLabel.frame = NSRect(x: 2, y: 4, width: width - (showsOpenButton ? 64 : 4), height: 16)
-    openButton.frame = NSRect(x: width - 56, y: 1, width: 56, height: 20)
+    titleLabel.frame = NSRect(x: 2, y: 4, width: max(0, width - (showsOpenButton ? ceil(openButton.intrinsicContentSize.width) + 8 : 4)), height: 16)
+    let buttonWidth = showsOpenButton ? ceil(openButton.intrinsicContentSize.width) : 0
+    openButton.frame = NSRect(x: width - buttonWidth, y: 1, width: buttonWidth, height: 20)
     let content = NSRect(x: 0, y: Self.headerHeight, width: width, height: max(0, bounds.height - Self.headerHeight))
     container.frame = content
     let inner = container.bounds

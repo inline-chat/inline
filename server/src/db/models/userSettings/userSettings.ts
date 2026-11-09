@@ -10,6 +10,7 @@ import { Log } from "@in/server/utils/log"
 import { userSettings, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import type { Transaction } from "@in/server/db/types"
+import { effectiveTimeZoneRule, isPublicRule, mergePrivacyPatch } from "@in/server/modules/privacy/privacyRules"
 
 const log = new Log("UserSettingsModel")
 
@@ -48,7 +49,9 @@ async function getGeneral(userId: number): Promise<UserSettingsGeneral | null> {
 
 async function updateGeneral(userId: number, general: UserSettingsGeneralInput): Promise<UserSettingsGeneral> {
   // Validate the input data
-  const validatedGeneral = normalizeUserSettingsGeneral(UserSettingsGeneralSchema.parse(general))
+  const validatedGeneral = normalizeUserSettingsGeneral(
+    UserSettingsGeneralSchema.parse({ ...general, privacy: mergePrivacyPatch(undefined, general.privacy, userId) }),
+  )
 
   // Encrypt the settings
   const generalJson = JSON.stringify(validatedGeneral)
@@ -104,10 +107,7 @@ async function updateGeneralWithPatchInTransaction(
         ...current?.notifications,
         ...input.notifications,
       },
-      privacy: {
-        ...current?.privacy,
-        ...input.privacy,
-      },
+      privacy: mergePrivacyPatch(current?.privacy, input.privacy, userId),
       compose: {
         ...current?.compose,
         ...input.compose,
@@ -179,7 +179,8 @@ async function writeGeneral(
   await tx
     .update(users)
     .set({
-      shareTimeZone: validatedGeneral.privacy.shareTimeZone,
+      // Viewer-blind paths may show the time zone only when nobody is excluded.
+      shareTimeZone: isPublicRule(effectiveTimeZoneRule(validatedGeneral.privacy)),
       appearInGlobalSearch: validatedGeneral.privacy.appearInGlobalSearch,
     })
     .where(eq(users.id, userId))

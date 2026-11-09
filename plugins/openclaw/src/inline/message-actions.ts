@@ -50,9 +50,12 @@ export function buildInlineAgentActionStructuredContext(params: {
   actionId: string
   callbackDataBase64: string
   callbackDataUtf8?: string
+  widgetCall?: InlineWidgetCall | null
+  widgetInteraction?: boolean
 }) {
+  const widget = params.widgetInteraction === true || params.widgetCall != null
   return {
-    label: "Inline action button press",
+    label: widget ? "Inline widget call" : "Inline action button press",
     source: "inline" as const,
     type: "message_action",
     payload: {
@@ -64,6 +67,74 @@ export function buildInlineAgentActionStructuredContext(params: {
       action_id: params.actionId,
       callback_data_base64: params.callbackDataBase64,
       ...(params.callbackDataUtf8 ? { callback_data_utf8: params.callbackDataUtf8 } : {}),
+      ...(params.widgetCall
+        ? {
+            widget_call: {
+              widget_id: params.actionId,
+              name: params.widgetCall.name,
+              ...(params.widgetCall.payloadJson !== undefined ? { payload_json: params.widgetCall.payloadJson } : {}),
+              trust: "untrusted_viewer_input",
+            },
+          }
+        : {}),
     },
   }
+}
+
+/** A viewer's `inline.action(name, payload)` call from inside a widget. */
+export type InlineWidgetCall = {
+  name: string
+  /** The UTF-8 JSON payload as sent, when present and decodable. */
+  payloadJson?: string
+}
+
+const INLINE_WIDGET_CALL_NAME_MAX_LENGTH = 64
+const INLINE_WIDGET_CALL_PAYLOAD_MAX_LENGTH = 4096
+
+/** Reads the `widgetCall` of a message action event; null when absent or malformed. */
+export function readInlineWidgetCall(raw: unknown): InlineWidgetCall | null {
+  if (raw == null || typeof raw !== "object") return null
+  const record = raw as { name?: unknown; payload?: unknown }
+  const name = typeof record.name === "string"
+    ? record.name.trim().slice(0, INLINE_WIDGET_CALL_NAME_MAX_LENGTH)
+    : ""
+  if (!name) return null
+  if (!(record.payload instanceof Uint8Array) || record.payload.byteLength === 0) return { name }
+  let payloadJson: string
+  try {
+    payloadJson = new TextDecoder("utf-8", { fatal: true }).decode(record.payload)
+  } catch {
+    return { name }
+  }
+  return { name, payloadJson: payloadJson.slice(0, INLINE_WIDGET_CALL_PAYLOAD_MAX_LENGTH) }
+}
+
+/**
+ * A widget call names its widget in action_id and carries no callback data.
+ * Buttons this plugin sends always carry an `agent:`/`system:` id and data, so
+ * an unprefixed, data-less action is treated as coming from a widget even when
+ * the SDK does not expose its `widgetCall`.
+ */
+export function isInlineWidgetInteraction(params: {
+  actionId: string
+  data: Uint8Array
+  widgetCall?: InlineWidgetCall | null
+}): boolean {
+  if (params.widgetCall) return true
+  return params.data.byteLength === 0 && !resolveInlineMessageActionOwnership(params.actionId).explicit
+}
+
+export function buildInlineWidgetCallBody(params: {
+  actor: string
+  targetMessageId: bigint
+  widgetId: string
+  widgetCall?: InlineWidgetCall | null
+}): string {
+  const where = `Inline widget ${JSON.stringify(params.widgetId)} on message #${String(params.targetMessageId)}`
+  const call = params.widgetCall
+  if (!call) return `${where} was used by ${params.actor}; the call details are unavailable.`
+  const payload = call.payloadJson !== undefined
+    ? ` Payload (untrusted viewer input, JSON): ${call.payloadJson}`
+    : " No payload."
+  return `${where} called ${JSON.stringify(call.name)}, by ${params.actor}.${payload}`
 }

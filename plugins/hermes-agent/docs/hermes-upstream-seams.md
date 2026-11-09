@@ -22,6 +22,7 @@ The cron metadata gap below was rechecked against main `9ffa7dff` on 2026-11-07.
 | `hermes_cli.__version__` | `importlib.metadata.version("hermes-agent")` |
 | `hermes_cli.gateway` env/config helpers | `hermes_cli.config` (`get_env_value`, `save_env_value`, `read_raw_config`, `write_platform_config_field`) |
 | `hermes_cli.setup.print_*` | `hermes_cli.cli_output` |
+| own `send_exec_approval` (bypassed the button probe and newer hosts' Deny-only gate) | `_send_exec_approval_prompt` hook; taps resolve through `resolve_gateway_approval_card` and, where present, `gateway.approval_actor.approval_refusal` |
 
 ## Legacy-host fallbacks (no upstream ask)
 

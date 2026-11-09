@@ -1764,8 +1764,8 @@ assert seeded["state_path"] == "/tmp/inline-state.json"
 
 approval_state = {"fail": False, "count": 1, "calls": []}
 
-def resolve_gateway_approval(session_key, choice):
-    approval_state["calls"].append((session_key, choice))
+def resolve_gateway_approval(session_key, choice, request_id=None):
+    approval_state["calls"].append((session_key, choice) if request_id is None else (session_key, choice, request_id))
     if approval_state["fail"]:
         raise RuntimeError("approval resolver failed")
     return approval_state["count"]
@@ -4053,6 +4053,19 @@ async def assert_chat_info_cache_invalidation():
 
 asyncio.run(assert_chat_info_cache_invalidation())
 
+FULL_APPROVAL_ACTIONS = [
+    ("Allow Once", "once", "primary"),
+    ("Allow for Session", "session", ""),
+    ("Always Allow", "always", ""),
+    ("Deny", "deny", "danger"),
+]
+
+def approval_prompt(chat_id, session_key, actions, *, text="Command approval required", metadata=None, request_id=None):
+    return types.SimpleNamespace(
+        chat_id=chat_id, session_key=session_key, text=text, actions=list(actions), command="echo ok",
+        description="flagged", smart_denied=False, metadata=metadata, request_id=request_id,
+    )
+
 async def assert_action_thread_targets():
     adapter = InlineAdapter(PlatformConfig(extra=trusted_extra))
     adapter._get_chat_info = root_chat_info
@@ -4065,7 +4078,7 @@ async def assert_action_thread_targets():
     adapter._send_sidecar = fake_send_sidecar
     metadata = {"thread_id": "chat:99"}
     await adapter.send_clarify("chat:10", "Choose", ["A", "B"], "clarify-1", "session-1", metadata=metadata)
-    await adapter.send_exec_approval("chat:10", "echo ok", "session-2", metadata=metadata)
+    await adapter._send_exec_approval_prompt(approval_prompt("chat:10", "session-2", FULL_APPROVAL_ACTIONS, metadata=metadata))
     await adapter.send_slash_confirm("chat:10", "Title", "Message", "session-3", "confirm-1", metadata=metadata)
 
     assert len(calls) == 3
@@ -4100,35 +4113,43 @@ async def assert_action_thread_targets():
         assert body["text"] == "\n".join(["Clarify: Choose", "", *[f"{index + 1}. {label}" for index, label in enumerate(choices[:10])]])
 
     calls.clear()
-    await adapter.send_exec_approval(
-        "chat:10",
-        "echo session",
-        "session-4",
-        allow_permanent=False,
-        allow_session=True,
-    )
+    await adapter._send_exec_approval_prompt(approval_prompt(
+        "chat:10", "session-4", [action for action in FULL_APPROVAL_ACTIONS if action[1] != "always"],
+    ))
     session_rows = calls[-1][1]["actions"]["rows"]
     assert [[action["text"] for action in row["actions"]] for row in session_rows] == [
         ["Allow Once", "Allow for Session"],
         ["Deny"],
     ]
 
+    # Hermes owns the card text and the choice set (Deny-only when it could not show the whole
+    # command); Inline draws exactly what it offers and drops a choice it cannot resolve.
     calls.clear()
-    await adapter.send_exec_approval(
-        "chat:10",
-        "echo smart-denied",
-        "session-5",
-        allow_permanent=False,
-        allow_session=False,
-        smart_denied=True,
-    )
-    smart_rows = calls[-1][1]["actions"]["rows"]
-    assert [[action["text"] for action in row["actions"]] for row in smart_rows] == [
-        ["Allow Once", "Deny"],
-    ]
-    assert "one operation only" in calls[-1][1]["text"]
+    await adapter._send_exec_approval_prompt(approval_prompt(
+        "chat:10", "session-5", [("Deny", "deny", "danger"), ("Later", "later", "")], text="host text",
+    ))
+    deny_only = calls[-1][1]
+    assert [[action["text"] for action in row["actions"]] for row in deny_only["actions"]["rows"]] == [["Deny"]]
+    assert deny_only["text"] == "host text"
+    assert not adapter._approval_request_ids
+
+    # Hermes passes the id of the approval request the card answers; the card keeps it.
+    calls.clear()
+    await adapter._send_exec_approval_prompt(approval_prompt(
+        "chat:10", "session-6", FULL_APPROVAL_ACTIONS, request_id="request-6",
+    ))
+    approval_id = calls[-1][1]["actions"]["rows"][0]["actions"][0]["id"].split(":")[2]
+    assert adapter._approval_sessions[approval_id] == "session-6"
+    assert dict(adapter._approval_request_ids) == {approval_id: "request-6"}
+    # The command is kept so the answered card can still show it.
+    assert adapter._approval_commands[approval_id] == "echo ok"
 
 asyncio.run(assert_action_thread_targets())
+# Hermes reports native approval buttons for adapters that override its prompt hook, and its
+# own send_exec_approval (wording, full-command send, Deny-only gate) must stay in charge.
+assert "_send_exec_approval_prompt" in vars(InlineAdapter)
+assert "send_exec_approval" not in vars(InlineAdapter)
+assert "supports_exec_approval_buttons" not in vars(InlineAdapter)
 
 async def assert_upload_size_cap():
     with tempfile.TemporaryDirectory() as tmp:
@@ -4164,6 +4185,73 @@ async def assert_upload_size_cap():
         assert calls[-1][1]["parseMarkdown"] is False
 
 asyncio.run(assert_upload_size_cap())
+
+async def assert_quiet_sidecars_leave_the_executor_free():
+    # Issue 155: a gateway with more Inline bots than default-executor workers must still run
+    # to_thread jobs. Each sidecar's stdout read used to pin a worker for the sidecar's life.
+    import concurrent.futures
+    import subprocess as sp
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(concurrent.futures.ThreadPoolExecutor(max_workers=2))
+    adapter = InlineAdapter(PlatformConfig(extra=trusted_extra))
+    adapter._token = "inline-secret"
+    adapter._sidecar_token = "sidecar-secret"
+    # Silent until stdin closes, then a short drain, like a sidecar finishing its shutdown.
+    quiet = "import sys, time; print('ready inline-secret', flush=True); sys.stdin.read(); time.sleep(0.5)"
+    procs = [
+        sp.Popen([sys.executable, "-c", quiet], stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.STDOUT, start_new_session=True)
+        for _ in range(6)
+    ]
+    logged = []
+    import logging
+    class Capture(logging.Handler):
+        def emit(self, record):
+            logged.append(record.getMessage())
+    capture = Capture()
+    adapter_logger = logging.getLogger(InlineAdapter.__module__)
+    adapter_logger.addHandler(capture)
+    previous_level = adapter_logger.level
+    adapter_logger.setLevel(logging.INFO)
+    tasks = [asyncio.create_task(adapter._supervise_sidecar(proc)) for proc in procs]
+    try:
+        deadline = time.monotonic() + 5
+        while sum("[inline-sidecar] ready" in line for line in logged) < len(procs) and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        sidecar_lines = [line for line in logged if "[inline-sidecar]" in line]
+        assert len(sidecar_lines) == len(procs), sidecar_lines
+        assert all("inline-secret" not in line and "[INLINE_TOKEN]" in line for line in sidecar_lines)
+        # Every sidecar is now quiet, its next read blocked: short jobs must still get a worker.
+        await asyncio.sleep(0.2)
+        assert await asyncio.wait_for(asyncio.to_thread(lambda: "ok"), timeout=3) == "ok"
+
+        # Stopping waits off the loop: the loop keeps ticking while a sidecar ignores shutdown.
+        adapter._sidecar_proc = procs[0]
+        ticks = 0
+        async def tick():
+            nonlocal ticks
+            while True:
+                ticks += 1
+                await asyncio.sleep(0.05)
+        ticker = asyncio.create_task(tick())
+        started = time.monotonic()
+        await adapter._stop_sidecar()
+        ticker.cancel()
+        elapsed = time.monotonic() - started
+        assert procs[0].poll() is not None
+        assert 0.4 <= elapsed < 2.5, elapsed
+        assert ticks >= 4, ticks
+        # The supervisor ends once its sidecar's output closes.
+        await asyncio.wait_for(tasks[0], timeout=3)
+    finally:
+        adapter_logger.removeHandler(capture)
+        adapter_logger.setLevel(previous_level)
+        for proc in procs:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
+        await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=3)
+
+asyncio.run(assert_quiet_sidecars_leave_the_executor_free())
 
 async def assert_model_picker_flow():
     adapter = InlineAdapter(PlatformConfig(extra=base_extra))
@@ -5652,10 +5740,21 @@ async def assert_callback_state_lifecycle():
             "interactionId": interaction_id,
         }
 
+    fetched_messages = {}
+
+    async def fake_fetch_message(chat_id, message_id, **kwargs):
+        return fetched_messages.get(message_id)
+
     adapter._answer_action = fake_answer_action
     adapter._edit_action_message = fake_edit_action_message
+    adapter._fetch_message = fake_fetch_message
+    fence = "\x60\x60\x60"
+
+    def card(heading, command):
+        return f"{heading}\n\n{fence}sh\n{command}\n{fence}"
 
     adapter._approval_sessions["approval-2"] = "session-2"
+    adapter._approval_commands["approval-2"] = "make deploy"
     approval_state["fail"] = True
     assert await adapter._handle_approval_action(action_event("appr:approval-2:once", "interaction-7"))
     assert adapter._approval_sessions["approval-2"] == "session-2"
@@ -5667,16 +5766,114 @@ async def assert_callback_state_lifecycle():
     assert await adapter._handle_approval_action(action_event("appr:approval-2:session", "interaction-8"))
     assert "approval-2" not in adapter._approval_sessions
     assert approval_state["calls"][-1] == ("session-2", "session")
+    assert "approval-2" not in adapter._approval_commands
     assert answers[-1] == ("interaction-8", "Approved for session")
-    assert edits[-1][1:] == ("Approved for this session.", {"rows": []})
+    assert edits[-1][1:] == (card("✅ Allowed for this session", "make deploy"), {"rows": []})
+
+    def answered_by(action_id, interaction_id, sender):
+        return {**action_event(action_id, interaction_id), "actorUserId": "42", "sender": sender}
+
+    adapter._approval_sessions["approval-once"] = "session-once"
+    adapter._approval_commands["approval-once"] = "git push"
+    assert await adapter._handle_approval_action(answered_by(
+        "appr:approval-once:approve", "interaction-8a", {"id": "42", "firstName": "Mo", "username": "mo"},
+    ))
+    assert approval_state["calls"][-1] == ("session-once", "once")
+    assert answers[-1] == ("interaction-8a", "Approved once")
+    assert edits[-1][1:] == (card("✅ Allowed once by Mo", "git push"), {"rows": []})
+
+    adapter._approval_sessions["approval-always"] = "session-always"
+    adapter._approval_commands["approval-always"] = "ls"
+    assert await adapter._handle_approval_action(answered_by(
+        "appr:approval-always:always", "interaction-8b", {"id": "42", "username": "mo"},
+    ))
+    assert answers[-1] == ("interaction-8b", "Always allowed")
+    assert edits[-1][1:] == (card("✅ Always allowed by @mo", "ls"), {"rows": []})
+
+    # Only an id is known for the person who tapped, so the card names nobody.
+    adapter._approval_sessions["approval-deny"] = "session-deny"
+    adapter._approval_commands["approval-deny"] = "rm -rf build"
+    assert await adapter._handle_approval_action(answered_by("appr:approval-deny:deny", "interaction-8c", {"id": "42"}))
+    assert approval_state["calls"][-1] == ("session-deny", "deny")
+    assert answers[-1] == ("interaction-8c", "Denied")
+    assert edits[-1][1:] == (card("❌ Denied", "rm -rf build"), {"rows": []})
+
+    # A command holding a fence gets a longer one.
+    adapter._approval_sessions["approval-fenced"] = "session-fenced"
+    adapter._approval_commands["approval-fenced"] = f"cat <<EOF\n{fence}\nEOF"
+    assert await adapter._handle_approval_action(action_event("appr:approval-fenced:once", "interaction-8d"))
+    assert edits[-1][1] == f"✅ Allowed once\n\n{fence}\x60sh\ncat <<EOF\n{fence}\nEOF\n{fence}\x60"
 
     adapter._approval_sessions["approval-expired"] = "session-expired"
+    adapter._approval_commands["approval-expired"] = "make clean"
     approval_state["count"] = 0
     assert await adapter._handle_approval_action(action_event("appr:approval-expired:deny", "interaction-9"))
     assert "approval-expired" not in adapter._approval_sessions
+    assert "approval-expired" not in adapter._approval_commands
     assert answers[-1] == ("interaction-9", "Approval expired")
-    assert edits[-1][1:] == ("Approval expired; the command was not run.", {"rows": []})
+    assert edits[-1][1:] == (card("⌛ Approval expired", "make clean"), {"rows": []})
     approval_state["count"] = 1
+
+    # A card sent with a request id resolves that request only, never the next one queued.
+    adapter._approval_sessions["approval-req"] = "session-req"
+    adapter._approval_request_ids["approval-req"] = "request-1"
+    assert await adapter._handle_approval_action(action_event("appr:approval-req:once", "interaction-req"))
+    assert approval_state["calls"][-1] == ("session-req", "once", "request-1")
+    assert "approval-req" not in adapter._approval_request_ids
+    assert answers[-1] == ("interaction-req", "Approved once")
+
+    card_calls = []
+    approval.resolve_gateway_approval_card = lambda session_key, choice, request_id: card_calls.append(
+        (session_key, choice, request_id)
+    ) or 0
+    adapter._approval_sessions["approval-card"] = "session-card"
+    adapter._approval_request_ids["approval-card"] = "request-2"
+    assert await adapter._handle_approval_action(action_event("appr:approval-card:deny", "interaction-card"))
+    assert card_calls == [("session-card", "deny", "request-2")]
+    assert answers[-1] == ("interaction-card", "Approval expired")
+    assert "approval-card" not in adapter._approval_request_ids
+
+    # Newer hosts check the clicker against the request in the same step that settles it.
+    def resolve_card_with_actor(session_key, choice, request_id, *, actor_id=None, admin_ids=(), extra=None):
+        card_calls.append((session_key, choice, request_id, actor_id, extra))
+        return 1
+    approval.resolve_gateway_approval_card = resolve_card_with_actor
+    card_calls.clear()
+    adapter._approval_sessions["approval-actor"] = "session-actor"
+    adapter._approval_request_ids["approval-actor"] = "request-3"
+    event = {**action_event("appr:approval-actor:once", "interaction-actor"), "actorUserId": "42"}
+    assert await adapter._handle_approval_action(event)
+    assert card_calls == [("session-actor", "once", "request-3", "42", adapter.config.extra)]
+    assert answers[-1] == ("interaction-actor", "Approved once")
+
+    # Another member's tap is refused privately and the card stays live for the requester.
+    approval_actor = types.ModuleType("gateway.approval_actor")
+    refusals = []
+    def approval_refusal(session_key, actor_id, *, admin_ids=(), request_id=None, extra=None):
+        refusals.append((session_key, actor_id, request_id))
+        return "Ada" if actor_id == "7" else None
+    approval_actor.approval_refusal = approval_refusal
+    approval_actor.refusal_text = lambda requester: f"Only {requester} can answer this"
+    sys.modules["gateway.approval_actor"] = approval_actor
+    try:
+        card_calls.clear()
+        edits_before = len(edits)
+        adapter._approval_sessions["approval-other"] = "session-other"
+        adapter._approval_request_ids["approval-other"] = "request-4"
+        event = {**action_event("appr:approval-other:once", "interaction-other"), "actorUserId": "7"}
+        assert await adapter._handle_approval_action(event)
+        assert refusals[-1] == ("session-other", "7", "request-4")
+        assert answers[-1] == ("interaction-other", "Only Ada can answer this")
+        assert card_calls == [] and len(edits) == edits_before
+        assert adapter._approval_request_ids["approval-other"] == "request-4"
+
+        event = {**action_event("appr:approval-other:deny", "interaction-owner"), "actorUserId": "42"}
+        assert await adapter._handle_approval_action(event)
+        assert card_calls == [("session-other", "deny", "request-4", "42", adapter.config.extra)]
+        assert answers[-1] == ("interaction-owner", "Denied")
+    finally:
+        del sys.modules["gateway.approval_actor"]
+    del approval.resolve_gateway_approval_card
 
     adapter._slash_sessions["confirm-2"] = "session-3"
     slash_state["fail"] = True
@@ -5720,9 +5917,26 @@ async def assert_callback_state_lifecycle():
     assert await adapter._handle_clarify_action(action_event("cl:clarify-4:other", "interaction-15"))
     assert edits[-1][1:] == ("Type your answer:", {"rows": []})
 
+    # Unknown to this process (e.g. after a restart) and the card can't be read: heading only.
+    calls_before = list(approval_state["calls"])
     assert await adapter._handle_approval_action(action_event("appr:already-resolved:once", "interaction-16"))
     assert answers[-1] == ("interaction-16", "Approval expired")
-    assert edits[-1][1:] == ("Approval expired; the command was not run.", {"rows": []})
+    assert edits[-1][1:] == ("⌛ Approval expired", {"rows": []})
+
+    # The command comes back from the card's code block, as a pre entity (UTF-16 offsets) ...
+    fetched_messages["20"] = {
+        "message": "Command approval required\n\necho 👋 hi",
+        "entities": {"entities": [{"type": 9, "offset": 27, "length": 10, "entity": {"oneofKind": "pre", "pre": {"language": "sh"}}}]},
+    }
+    assert await adapter._handle_approval_action(action_event("appr:restarted:once", "interaction-17"))
+    assert edits[-1][1:] == (card("⌛ Approval expired", "echo 👋 hi"), {"rows": []})
+
+    # ... or as a literal fence when the card was sent without markdown parsing.
+    fetched_messages["20"] = {"message": f"⚠️ Command approval required\n\n{fence}\nuptime\n{fence}\nReason: x"}
+    assert await adapter._handle_approval_action(action_event("appr:restarted:deny", "interaction-18"))
+    assert edits[-1][1:] == (card("⌛ Approval expired", "uptime"), {"rows": []})
+    # Unknown approvals never reach Hermes' resolver.
+    assert approval_state["calls"] == calls_before
 
 asyncio.run(assert_callback_state_lifecycle())
 
@@ -6592,6 +6806,217 @@ async def assert_bot_settings_fail_closed_and_serialized():
     assert adapter._bot_settings_lock_users == {}
 
 asyncio.run(assert_bot_settings_fail_closed_and_serialized())
+
+
+from inline import widgets as inline_widgets
+FENCE = chr(96) * 3  # backticks would end this template literal
+
+def assert_widget_markdown_and_tool():
+    md = inline_widgets.build_widget_markdown(
+        html='\n<div class="card">A & "B"</div>\n', title='Q3 "rev" <b> & co', widget_id="revenue", height="420px",
+        text="Revenue grew 18%.",
+    )
+    assert md == (
+        'Revenue grew 18%.\n\n'
+        '<iframe title="Q3 &quot;rev&quot; &lt;b&gt; &amp; co" id="revenue" height="420">\n'
+        '<div class="card">A & "B"</div>\n'
+        '</iframe>'
+    ), md
+    scan = inline_widgets.scan_widgets(md)
+    assert len(scan.widgets) == 1 and scan.widgets[0].title == 'Q3 "rev" <b> & co'
+    assert inline_widgets.build_widget_markdown(html="<p>x</p>") == "<iframe>\n<p>x</p>\n</iframe>"
+    for kwargs, needle in [
+        ({"html": "<p>a</p></IFRAME >"}, "</iframe"),
+        ({"html": "  "}, "html is required"),
+        ({"html": "<p>a</p>", "height": 79}, "80 to 2000"),
+        ({"html": "<p>a</p>", "height": "tall"}, "whole number"),
+        ({"html": "<p>a</p>", "widget_id": "no spaces"}, "widget_id"),
+        ({"html": "<p>a</p>", "text": FENCE + "\nunclosed"}, "one widget"),
+        ({"html": "<p>a</p>", "text": "<iframe>\n<p>b</p>\n</iframe>"}, "one widget"),
+        ({"html": "x" * (256 * 1024 + 1)}, "256 KiB"),
+    ]:
+        try:
+            inline_widgets.build_widget_markdown(**kwargs)
+        except inline_widgets.WidgetError as exc:
+            assert needle in str(exc), (needle, str(exc))
+        else:
+            raise AssertionError(f"expected WidgetError for {kwargs}")
+
+    calls = []
+    def widget_sidecar(path, body):
+        calls.append((path, body))
+        if "vh" in body.get("text", ""):
+            raise inline_tools.InlineToolError("Widget HTML has vh units; use px or let the content set the height (line 1)", "bad_format")
+        return {"ok": True, "result": {"messageId": "77"}}
+    saved = inline_tools._sidecar_call
+    inline_tools._sidecar_call = widget_sidecar
+    try:
+        big_html = "<div>" + ("x" * 9000) + "</div>"
+        ok = json.loads(inline_tools._handle_inline_tool({
+            "action": "send_widget", "chat_id": "10", "title": "Big", "html": big_html,
+            "widget_id": "big", "height": 300, "text": "Lead", "reply_to_message_id": "5",
+        }))
+        assert ok == {"success": True, "action": "send_widget", "result": {"messageId": "77"}}, ok
+        path, body = calls[-1]
+        assert path == "/send" and body["parseMarkdown"] is True and body["replyToMsgId"] == "5"
+        assert body["target"] == {"chatId": "10"}
+        assert body["text"].endswith(big_html + "\n</iframe>") and body["text"].startswith('Lead\n\n<iframe title="Big" id="big" height="300">')
+        rejected = json.loads(inline_tools._handle_inline_tool({
+            "action": "send_widget", "chat_id": "10", "title": "T", "html": "<div style='height:50vh'></div>",
+        }))
+        assert rejected["error"].startswith("Inline rejected the widget: Widget HTML has vh units"), rejected
+        assert rejected["error_kind"] == "bad_format"
+        count = len(calls)
+        local = json.loads(inline_tools._handle_inline_tool({"action": "send_widget", "chat_id": "10", "title": "T", "html": "<p></iframe>"}))
+        assert "</iframe" in local["error"] and not local["error"].startswith("Inline rejected") and len(calls) == count
+        untitled = json.loads(inline_tools._handle_inline_tool({"action": "send_widget", "chat_id": "10", "html": "<p>x</p>"}))
+        assert "title is required" in untitled["error"]
+        # send_message keeps its old shortening, except that a widget is sent whole.
+        long_widget = "<iframe title=\"W\">\n" + ("y" * 6000) + "\n</iframe>"
+        json.loads(inline_tools._handle_inline_tool({"action": "send_message", "chat_id": "10", "text": long_widget}))
+        assert calls[-1][1]["text"] == long_widget
+        json.loads(inline_tools._handle_inline_tool({"action": "send_message", "chat_id": "10", "text": "z" * 6000}))
+        assert len(calls[-1][1]["text"]) == 4000 and calls[-1][1]["text"].endswith("...")
+    finally:
+        inline_tools._sidecar_call = saved
+    assert "send_widget" in inline_tools.INLINE_TOOL_SCHEMA["parameters"]["properties"]["action"]["enum"]
+    assert "inline.action(name, payload)" in inline_tools.INLINE_PLATFORM_GUIDANCE
+
+assert_widget_markdown_and_tool()
+
+def widget_block(index, size=10):
+    return f'<iframe title="W{index}" id="w{index}">\n<div>{"x" * size}</div>\n</iframe>'
+
+async def assert_widget_aware_chunking():
+    adapter = InlineAdapter(PlatformConfig(extra=trusted_extra))
+    plain = adapter.truncate_message("a" * 9000, 4000)
+    assert [len(chunk) for chunk in plain] == [4000, 4000, 1000]
+
+    two = f"Intro\n\n{widget_block(1)}\n\nBetween\n\n{widget_block(2)}\n\nOutro"
+    assert adapter.truncate_message(two, 4000) == [
+        f"Intro\n\n{widget_block(1)}\n\nBetween",
+        f"{widget_block(2)}\n\nOutro",
+    ]
+    one = f"Intro\n\n{widget_block(1)}\n\nOutro"
+    assert adapter.truncate_message(one, 4000) == [one]
+    # A fenced example is code, not a widget.
+    fenced = FENCE + "html\n" + widget_block(1) + "\n" + widget_block(2) + "\n" + FENCE
+    assert adapter.truncate_message(fenced, 4000) == [fenced]
+
+    big = widget_block(3, 9000)
+    long_text = ("word " * 1100).strip()
+    chunks = adapter.truncate_message(f"{long_text}\n\n{big}\n\nTail", 4000)
+    assert big in chunks, [chunk[:20] for chunk in chunks]
+    assert all(chunk.count("<iframe") <= 1 for chunk in chunks)
+    for chunk in chunks:
+        if chunk != big:
+            assert len(chunk) <= 4000 and "<iframe" not in chunk
+    assert "".join(chunks).replace(" ", "").replace("\n", "") == f"{long_text}{big}Tail".replace(" ", "").replace("\n", "")
+
+    sends = []
+    async def fake_send_sidecar(path, body):
+        sends.append((path, body))
+        return SendResult(success=True, message_id=f"m{len(sends)}", raw_response={})
+    adapter._send_sidecar = fake_send_sidecar
+    adapter._mark_reply_thread_visible = lambda target: None
+    async def no_reply_target(reply_to, target, **kwargs):
+        return reply_to
+    adapter._reply_to_for_target = no_reply_target
+    result = await adapter.send("10", two)
+    assert result.success
+    assert [body["text"] for _, body in sends] == adapter.truncate_message(two, 4000)
+
+    sends.clear()
+    streaming = await adapter.edit_message("10", "55", "Working on it\n\n<iframe title=\"Chart\">\n<div>par")
+    assert streaming.success and sends == [("/edit", {
+        "target": {"chatId": "10"}, "messageId": "55", "text": "Working on it", "parseMarkdown": True,
+    })]
+    sends.clear()
+    await adapter.edit_message("10", "55", two)
+    assert [path for path, _ in sends] == ["/edit"] and sends[0][1]["text"].count("<iframe") == 1
+    sends.clear()
+    await adapter.edit_message("10", "55", two, finalize=True)
+    assert [path for path, _ in sends] == ["/edit", "/send"]
+    assert [body["text"] for _, body in sends] == adapter.truncate_message(two, 4000)
+    assert sends[1][1]["replyToMsgId"] == "55"
+
+    fallback_texts = []
+    async def capture_send(chat_id, content, reply_to=None, metadata=None, **kwargs):
+        fallback_texts.append(content)
+        return SendResult(success=True, message_id="f1", raw_response={})
+    adapter.send = capture_send
+    await adapter._send_plain_fallback("10", f"Lead\n\n{widget_block(1)}", reply_to=None, metadata=None)
+    assert "<iframe" not in fallback_texts[-1] and 'Widget "W1" could not be displayed' in fallback_texts[-1]
+
+    literal = InlineAdapter(PlatformConfig(extra={**trusted_extra, "parse_markdown": False}))
+    assert literal.truncate_message(two, 60) == [two[i:i + 60] for i in range(0, len(two), 60)]
+
+asyncio.run(assert_widget_aware_chunking())
+
+async def assert_widget_call_turn():
+    adapter = InlineAdapter(PlatformConfig(extra=trusted_extra))
+    adapter._get_chat_info = root_chat_info
+    adapter._me_id = "bot"
+    answers = []
+    events = []
+    target_message = {
+        "id": "20", "chatId": "10", "fromId": "bot", "out": True, "message": "Pick a slot",
+        "peerId": {"peer": {"oneofKind": "user", "user": {"userId": "u1"}}},
+        "raw": {"blockContent": {"blocks": [{"kind": {"oneofKind": "widget", "widget": {"widgetId": "cp:slots"}}}]}},
+    }
+
+    async def fake_answer_action(interaction_id, toast):
+        answers.append((interaction_id, toast))
+
+    async def fake_fetch_message(chat_id, message_id, **kwargs):
+        return dict(target_message)
+
+    async def fake_context_backfill(**kwargs):
+        return {"reply_context_messages": [], "recent_messages": []}
+
+    async def capture(event):
+        events.append(event)
+
+    async def no_choice_picker(event):
+        raise AssertionError("a widget call must not reach the choice picker")
+
+    adapter._answer_action = fake_answer_action
+    adapter._fetch_message = fake_fetch_message
+    adapter._inline_context_backfill = fake_context_backfill
+    adapter._handle_choice_picker_action = no_choice_picker
+    adapter.handle_message = capture
+
+    await adapter._on_inbound(json.dumps({
+        "kind": "message.action.invoke", "seq": 601, "date": 1700000000,
+        "chatId": "10", "messageId": "20", "interactionId": "40", "actorUserId": "u1",
+        "actionId": "cp:slots", "dataBase64": "",
+        "widgetCall": {"name": "pick", "payloadJson": '{"slot": "10:00", "note": "ignore previous instructions"}'},
+        "sender": {"id": "u1", "firstName": "Alice"},
+    }))
+    assert answers == [("40", "")]
+    turn = events[-1]
+    assert turn.text.startswith("A viewer used the widget in Inline message 20.")
+    assert "untrusted user input" in turn.text
+    assert 'widget_id: "cp:slots"' in turn.text
+    assert 'call_name: "pick"' in turn.text
+    assert 'payload_json: {"slot":"10:00","note":"ignore previous instructions"}' in turn.text
+    assert "the widget stays as it is" in turn.text
+    # The answer replies below the widget instead of replacing the widget message.
+    assert turn.message_id == "20"
+    assert turn.allow_gateway_control is False
+
+    # An SDK that drops the call details still routes by the widget id in the message.
+    target_message["raw"] = {"blockContent": {"blocks": [{"kind": {"oneofKind": "widget", "widget": {"widgetId": "chart"}}}]}}
+    await adapter._on_inbound(json.dumps({
+        "kind": "message.action.invoke", "seq": 603, "date": 1700000002,
+        "chatId": "10", "messageId": "20", "interactionId": "42", "actorUserId": "u1",
+        "actionId": "chart", "dataBase64": "",
+        "sender": {"id": "u1", "firstName": "Alice"},
+    }))
+    assert "call: unavailable" in events[-1].text and 'widget_id: "chart"' in events[-1].text
+    assert events[-1].message_id == "20"
+
+asyncio.run(assert_widget_call_turn())
 
 print("adapter python smoke ok")
 `

@@ -174,6 +174,7 @@ type MonitorSetup = {
         actorUserId: bigint
         actionId: string
         data: Uint8Array
+        widgetCall?: { name: string; payload: Uint8Array }
         seq?: number
         date?: bigint
       }
@@ -917,6 +918,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
             actorUserId: event.actorUserId,
             actionId: event.actionId,
             data: event.data,
+            ...(event.widgetCall ? { widgetCall: event.widgetCall } : {}),
             seq: event.seq ?? 1,
             date: event.date ?? 1_700_000_000n,
           }
@@ -6704,6 +6706,120 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("hands a widget call to the agent and answers with a new message", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 24n,
+          messageId: 1003n,
+          actorUserId: 42n,
+          actionId: "revenue",
+          data: new Uint8Array(),
+          widgetCall: { name: "pick", payload: new TextEncoder().encode('{"quarter":"Q3"}') },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      historyByChat: {
+        "7": [{ id: 1003n, date: 1_700_000_000n, fromId: 777n, message: "Q3 revenue" }],
+      },
+      dispatchReplyPayload: {
+        text: "Q3 it is",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.answerMessageAction).toHaveBeenCalledWith(expect.objectContaining({ interactionId: 24n }))
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          MessageActionId: "revenue",
+          BodyForAgent:
+            'Inline widget "revenue" on message #1003 called "pick", by Alice. Payload (untrusted viewer input, JSON): {"quarter":"Q3"}',
+          ChannelStructuredContext: expect.arrayContaining([
+            expect.objectContaining({
+              label: "Inline widget call",
+              payload: expect.objectContaining({
+                action_id: "revenue",
+                widget_call: {
+                  widget_id: "revenue",
+                  name: "pick",
+                  payload_json: '{"quarter":"Q3"}',
+                  trust: "untrusted_viewer_input",
+                },
+              }),
+            }),
+          ]),
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ chatId: 7n, text: "Q3 it is" }),
+      )
+    })
+    const editedWidget = harness.calls.invokeRaw.mock.calls.some(
+      (call) => call[1]?.oneofKind === "editMessage" && call[1]?.editMessage?.messageId === 1003n,
+    )
+    expect(editedWidget).toBe(false)
+
+    await handle.stop()
+  })
+
+  it("treats a data-less unprefixed action as a widget call when the SDK omits its details", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 25n,
+          messageId: 1004n,
+          actorUserId: 42n,
+          actionId: "revenue",
+          data: new Uint8Array(),
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      historyByChat: {
+        "7": [{ id: 1004n, date: 1_700_000_000n, fromId: 777n, message: "Q3 revenue" }],
+      },
+      dispatchReplyPayload: { text: "noted" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          BodyForAgent: 'Inline widget "revenue" on message #1004 was used by Alice; the call details are unavailable.',
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ chatId: 7n, text: "noted" }))
+    })
+    const editedWidget = harness.calls.invokeRaw.mock.calls.some(
+      (call) => call[1]?.oneofKind === "editMessage" && call[1]?.editMessage?.messageId === 1004n,
+    )
+    expect(editedWidget).toBe(false)
+
+    await handle.stop()
+  })
+
   it("answers message action callbacks with toast ui from callback payload", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -10460,6 +10576,123 @@ describe("inline/monitor", () => {
         }),
       )
     })
+
+    await handle.stop()
+  })
+
+  it("holds a block-streamed widget until it closes", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 673n,
+          message: { id: 5704n, date: 1_700_000_012n, fromId: 42n, message: "chart please" },
+        },
+      ],
+      chats: {
+        "673": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayloads: [
+        { text: 'Revenue grew.\n\n<iframe title="Q3" id="q3" height="300">\n<div class="card">' },
+        { text: "<p>Chart</p>" },
+        { text: "</div>\n</iframe>\n\nDone." },
+      ],
+      payloadInfoKinds: ["block", "block", "block"],
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2)
+    })
+    expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ chatId: 673n, text: "Revenue grew." }),
+    )
+    expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        chatId: 673n,
+        text: '<iframe title="Q3" id="q3" height="300">\n<div class="card">\n<p>Chart</p>\n</div>\n</iframe>\n\nDone.',
+      }),
+    )
+
+    await handle.stop()
+  })
+
+  it("flushes a widget that never closes when the reply ends", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 674n,
+          message: { id: 5705n, date: 1_700_000_012n, fromId: 42n, message: "chart please" },
+        },
+      ],
+      chats: {
+        "674": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayloads: [{ text: 'Intro\n\n<iframe title="Q3">\n<p>cut off' }],
+      payloadInfoKinds: ["block"],
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2)
+    })
+    expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(1, expect.objectContaining({ text: "Intro" }))
+    expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ text: '<iframe title="Q3">\n<p>cut off' }),
+    )
+
+    await handle.stop()
+  })
+
+  it("keeps an unfinished widget out of partial previews", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 675n,
+          message: { id: 5706n, date: 1_700_000_012n, fromId: 42n, message: "chart please" },
+        },
+      ],
+      chats: {
+        "675": { kind: "direct", title: "Alice" },
+      },
+      partialReplies: [{ text: 'Intro\n\n<iframe title="Q3">\n<div>' }],
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ chatId: 675n, text: "Intro" }),
+      )
+    })
+    for (const call of harness.calls.sendMessage.mock.calls) {
+      expect(String((call[0] as { text?: string }).text)).not.toContain("<iframe")
+    }
 
     await handle.stop()
   })

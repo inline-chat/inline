@@ -6215,6 +6215,7 @@ describe("InlineSdkClient", () => {
                         actorUserId: 11n,
                         actionId: "pick",
                         data: new Uint8Array([1, 2, 3]),
+                        widgetCall: { name: "choose", payload: new TextEncoder().encode('{"month":8}') },
                       },
                     },
                   }),
@@ -6234,6 +6235,8 @@ describe("InlineSdkClient", () => {
         expect(event.value.interactionId).toBe(99n)
         expect(event.value.actionId).toBe("pick")
         expect(Array.from(event.value.data)).toEqual([1, 2, 3])
+        expect(event.value.widgetCall?.name).toBe("choose")
+        expect(new TextDecoder().decode(event.value.widgetCall?.payload)).toBe('{"month":8}')
       }
     }
 

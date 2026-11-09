@@ -4,6 +4,7 @@ import { db } from "../../db"
 import * as schema from "../../db/schema"
 import { eq, and } from "drizzle-orm"
 import { getChats } from "@in/server/functions/messages.getChats"
+import { UserSettingsModel } from "@in/server/db/models/userSettings/userSettings"
 import { MessageModel } from "@in/server/db/models/messages"
 import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { parseBlockContent } from "@in/server/modules/message/blockContent"
@@ -311,6 +312,38 @@ describe("getChats", () => {
     expect(usersById.get(sharingPeer.id)?.timeZone).toBe("Asia/Tehran")
     expect(usersById.get(hiddenPeer.id)?.timeZone).toBeUndefined()
     expect(usersById.get(threadSender.id)?.timeZone).toBeUndefined()
+  })
+
+  test("applies time zone exception lists per viewer", async () => {
+    const viewer = await testUtils.createUser("get-chats-tz-rule-viewer@example.com")
+    const other = await testUtils.createUser("get-chats-tz-rule-other@example.com")
+    const trusting = await testUtils.createUser("get-chats-tz-rule-trusting@example.com")
+    const excluding = await testUtils.createUser("get-chats-tz-rule-excluding@example.com")
+
+    await UserSettingsModel.updateGeneralWithPatch(trusting.id, {
+      privacy: { timeZone: { audience: "nobody", alwaysShare: [viewer.id] } },
+    })
+    await UserSettingsModel.updateGeneralWithPatch(excluding.id, {
+      privacy: { timeZone: { audience: "everyone", neverShare: [viewer.id] } },
+    })
+    await db.update(schema.users).set({ timeZone: "Asia/Tokyo" }).where(eq(schema.users.id, trusting.id))
+    await db.update(schema.users).set({ timeZone: "Europe/Paris" }).where(eq(schema.users.id, excluding.id))
+
+    for (const reader of [viewer, other]) {
+      for (const peer of [trusting, excluding]) {
+        const chat = await testUtils.createPrivateChat(reader, peer)
+        await db.insert(schema.dialogs).values({ userId: reader.id, chatId: chat!.id, peerUserId: peer.id })
+      }
+    }
+
+    const timeZones = async (readerId: number) => {
+      const result = await getChats({}, makeHandlerContext(readerId))
+      const byId = new Map(result.users.map((user) => [Number(user.id), user.timeZone]))
+      return { trusting: byId.get(trusting.id), excluding: byId.get(excluding.id) }
+    }
+
+    expect(await timeZones(viewer.id)).toEqual({ trusting: "Asia/Tokyo", excluding: undefined })
+    expect(await timeZones(other.id)).toEqual({ trusting: undefined, excluding: "Europe/Paris" })
   })
 
   test("includes each chat's last message in result.messages", async () => {

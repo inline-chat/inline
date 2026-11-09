@@ -32,10 +32,11 @@ Send Markdown as the message text itself. Do not wrap the whole message in a cod
 | Disclosure | `<details>` or `<details open>`, `<summary>Title</summary>`, body Markdown, `</details>` on separate lines |
 | Progress disclosure | `<summary kind="progress">Working</summary>` inside details; use only while work is ongoing |
 | Footer | `<footer>Attribution or brief metadata</footer>` on its own line |
+| Widget (bots only) | `<iframe title="Title" id="id" height="320">HTML</iframe>` on its own lines; see [Message widgets](widgets.md) |
 
 Use blank lines between blocks. Keep tables as Markdown tables, not fenced code. Backslash-escape Markdown punctuation to keep it literal, or use code spans/fences. Code contents are not interpreted as formatting. Math uses dollar delimiters, not `\(...\)` or `\[...\]`.
 
-Rich blocks, new inline styles, and math display depend on the recipient's client/version and enabled renderer. Older clients may show a simpler text or TeX fallback. Math rendering supports a bounded TeX subset, not arbitrary LaTeX packages. Unrecognized or incomplete syntax may remain visible text; arbitrary HTML and footnotes are not supported. Image fetching can fail: prefer uploaded media (`files.upload` with MCP or CLI `--attach`) for local/private files.
+Rich blocks, new inline styles, and math display depend on the recipient's client/version and enabled renderer. Older clients may show a simpler text or TeX fallback. Math rendering supports a bounded TeX subset, not arbitrary LaTeX packages. Unrecognized or incomplete syntax may remain visible text; arbitrary HTML and footnotes are not supported, apart from one bot widget per message. Image fetching can fail: prefer uploaded media (`files.upload` with MCP or CLI `--attach`) for local/private files.
 
 ## Copyable examples
 

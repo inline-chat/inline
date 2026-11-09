@@ -11,11 +11,18 @@ enum RichBlockWidgetMetrics {
   static let minimumContentHeight: CGFloat = 80
   static let maximumContentHeight: CGFloat = 2_000
 
-  /// Measured height, then the sender's hint, then the default; clamped, then capped inline.
-  static func contentHeight(measured: Int?, hint: Int?) -> (height: CGFloat, isClipped: Bool) {
+  /// Measured height, then the sender's hint, then the default; clamped, then capped
+  /// inline unless the viewer expanded it.
+  static func contentHeight(measured: Int?, hint: Int?, expanded: Bool) -> (height: CGFloat, isClipped: Bool) {
     let raw = CGFloat(measured ?? hint ?? Int(defaultContentHeight))
     let clamped = min(maximumContentHeight, max(minimumContentHeight, raw))
-    return (min(clamped, inlineHeightCap), clamped > inlineHeightCap)
+    let cap = expanded ? maximumContentHeight : inlineHeightCap
+    return (min(clamped, cap), clamped > cap)
+  }
+
+  /// Whether content would pass the inline cap, so the row offers Show all.
+  static func exceedsInlineCap(measured: Int?, hint: Int?) -> Bool {
+    contentHeight(measured: measured, hint: hint, expanded: false).isClipped
   }
 }
 
@@ -23,9 +30,12 @@ enum RichBlockWidgetMetrics {
 /// web views, by widget ID, for this message's current revision.
 struct RichBlockWidgetLayout: Hashable {
   var measuredHeights: [String: Int]
+  /// Widgets the viewer expanded past the inline cap, by widget ID.
+  var expandedIDs: Set<String> = []
 
   var cacheKey: String {
-    measuredHeights.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ",")
+    let heights = measuredHeights.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: ",")
+    return heights + "|" + expandedIDs.sorted().joined(separator: ",")
   }
 }
 
@@ -35,6 +45,10 @@ struct RichBlockWidgetNode: Codable, Hashable {
   /// What the row shows: the measured height capped inline. The page itself may be taller.
   var contentHeight: CGFloat
   var isClipped: Bool
+  /// The viewer expanded it; with `isClipped` false, the row offers Show less.
+  var isExpanded: Bool
+  /// The content would pass the inline cap; the row offers Show all or Show less.
+  var canExpand: Bool
 }
 
 extension RichBlockLayoutPlanner.Builder {
@@ -51,15 +65,17 @@ extension RichBlockLayoutPlanner.Builder {
           title.offset >= 0, title.length > 0, title.offset <= attributedText.length,
           title.length <= attributedText.length - title.offset
     else { return false }
-    let content = RichBlockWidgetMetrics.contentHeight(
-      measured: layout.measuredHeights[widgetID],
-      hint: widget.hasHeight ? Int(widget.height) : nil
-    )
+    let measured = layout.measuredHeights[widgetID]
+    let hint = widget.hasHeight ? Int(widget.height) : nil
+    let isExpanded = layout.expandedIDs.contains(widgetID)
+    let content = RichBlockWidgetMetrics.contentHeight(measured: measured, hint: hint, expanded: isExpanded)
     let node = RichBlockWidgetNode(
       widgetID: widgetID,
       title: title,
       contentHeight: content.height,
-      isClipped: content.isClipped
+      isClipped: content.isClipped,
+      isExpanded: isExpanded,
+      canExpand: RichBlockWidgetMetrics.exceedsInlineCap(measured: measured, hint: hint)
     )
     let frame = CGRect(x: x, y: height, width: width, height: RichBlockWidgetMetrics.headerHeight + content.height)
     nodes.append(.init(path: path, frame: frame, kind: .widget(node)))

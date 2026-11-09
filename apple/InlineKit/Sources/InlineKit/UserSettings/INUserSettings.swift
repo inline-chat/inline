@@ -14,6 +14,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
   var appearInGlobalSearch: Bool
   var replacePastedLinksWithTitles: Bool
   var messageGestures: MessageGestureValues? = nil
+  var timeZoneRule: PrivacyRuleValue? = nil
 
   static let defaults = NotificationSettingsValues(
     mode: .all,
@@ -61,6 +62,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
     disableDmNotifications = notification.disableDmNotifications
     shareTimeZone = privacy.shareTimeZone
     appearInGlobalSearch = privacy.appearInGlobalSearch
+    timeZoneRule = privacy.timeZoneRule
     replacePastedLinksWithTitles = compose.replacePastedLinksWithTitles
     messageGestures = gestures?.accountValues
   }
@@ -83,6 +85,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
     self.init(notification)
     shareTimeZone = privacy.shareTimeZone
     appearInGlobalSearch = privacy.appearInGlobalSearch
+    timeZoneRule = privacy.timeZoneRule
     replacePastedLinksWithTitles = compose.replacePastedLinksWithTitles
     messageGestures = settings.hasMessageGestureSettings ? MessageGestureValues(settings.messageGestureSettings) : nil
   }
@@ -106,6 +109,7 @@ struct NotificationSettingsValues: Equatable, Sendable {
     if settings.appearInGlobalSearch != appearInGlobalSearch {
       settings.appearInGlobalSearch = appearInGlobalSearch
     }
+    settings.replaceTimeZoneRule(timeZoneRule)
   }
 
   func apply(to settings: ComposeSettingsManager) {
@@ -840,7 +844,8 @@ private extension NotificationSettingsValues {
   func makePrivacyManager() -> PrivacySettingsManager {
     PrivacySettingsManager(
       shareTimeZone: shareTimeZone,
-      appearInGlobalSearch: appearInGlobalSearch
+      appearInGlobalSearch: appearInGlobalSearch,
+      timeZoneRule: timeZoneRule
     )
   }
 

@@ -24,7 +24,7 @@ describe("inline/message-formatting", () => {
       text_markup: "inline_markdown",
       rules: expect.arrayContaining([
         "Use Inline's supported Markdown: emphasis, inline or fenced code, links, headings, lists or checklists, quotes, tables, separators, and HTTP(S) images.",
-        "Do not rely on strikethrough, footnotes, or arbitrary HTML; unrecognized or ambiguous incomplete syntax remains visible text.",
+        "Do not rely on strikethrough, footnotes, or arbitrary HTML (the one exception is a widget block); unrecognized or ambiguous incomplete syntax remains visible text.",
         "Use ordinary Markdown tables for genuinely tabular data; never put a table in a fenced code block.",
         'For collapsible work, use <details open> followed by <summary>Title</summary>, body Markdown, and </details>; add kind="progress" to summary only while work is in progress.',
         "Use <footer>Attribution or brief metadata</footer> for a short message footer.",
@@ -120,5 +120,12 @@ describe("inline/message-formatting", () => {
     expect(isInlineHostNoReplyFallback("Couldn't answer that, sorry")).toBe(false)
     // Agent text that only mentions these words is left alone.
     expect(adaptInlineVisibleCopy("The approval required. I sent it.")).toBe("The approval required. I sent it.")
+  })
+
+  it("leaves widget HTML untouched when cleaning outgoing text", () => {
+    const widget = '<iframe title="Links" id="links">\n<script>const u = `https://cdn.jsdelivr.net/x.js`</script>\n</iframe>'
+    expect(sanitizeInlineOutgoingText(`See \`https://inline.chat\`\n\n${widget}`)).toBe(
+      `See https://inline.chat\n\n${widget}`,
+    )
   })
 })

@@ -1,3 +1,4 @@
+import { resolveTimeZoneVisibility } from "@in/server/modules/privacy/timeZoneVisibility"
 import type { Chat, Dialog, InputPeer, Message, User } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
@@ -341,6 +342,9 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
       const [peer] = snapshotPeerUserId
         ? await UsersModel.getUsersWithPhotos([snapshotPeerUserId], { tx })
         : []
+      const peerTimeZoneVisible = peer
+        ? (await resolveTimeZoneVisibility(currentUserId, [peer.user])).has(peer.user.id)
+        : false
 
       return {
         chat: encodedChat,
@@ -348,7 +352,12 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
         pinnedMessageIds: pinnedRows.map((row) => BigInt(row.messageId)),
         anchorMessage: encodedAnchorMessage,
         user: peer
-          ? Encoders.user({ user: peer.user, photoFile: peer.photoFile, viewerUserId: currentUserId })
+          ? Encoders.user({
+              user: peer.user,
+              photoFile: peer.photoFile,
+              timeZoneVisible: peerTimeZoneVisible,
+              viewerUserId: currentUserId,
+            })
           : undefined,
         messages: encodedMessages,
         readOnlyViaBotUserId,

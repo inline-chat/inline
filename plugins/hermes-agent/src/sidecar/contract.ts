@@ -85,6 +85,10 @@ export function normalizeError(
   if (errorCode(error) === "commit-outcome-unknown") {
     return { status: 504, errorKind: "unknown", message, outcomeUnknown: true }
   }
+  // A request the server refused as malformed carries its reason, such as a widget rule.
+  if (isBadRequestCode(error)) {
+    return { status: 400, errorKind: "bad_format", message }
+  }
   const lower = message.toLowerCase()
   if (isRateLimitCode(error) || (lower.includes("rate") && lower.includes("limit"))) {
     // Hermes waits the server's FLOOD_WAIT-style hint instead of its own backoff.
@@ -107,6 +111,13 @@ export function normalizeError(
 
 function errorCode(error: unknown): unknown {
   return typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined
+}
+
+// RpcError_Code.BAD_REQUEST (1) or the HTTP-style 400 the server sends alongside it.
+function isBadRequestCode(error: unknown): boolean {
+  if (errorCode(error) !== "rpc-error") return false
+  const rpcCode = (error as { rpcCode?: unknown }).rpcCode
+  return rpcCode === 1 || rpcCode === 400
 }
 
 // Same check as the SDK's own recovery: RpcError_Code.RATE_LIMIT (3) or HTTP-style 429.
@@ -156,11 +167,14 @@ export function normalizeInboundEvent(
   }
 
   if (event.kind === "message.action.invoke") {
+    const { widgetCall, ...rest } = event
+    const call = normalizeWidgetCall(widgetCall)
     return safeJson({
-      ...event,
+      ...rest,
       meId,
       meUsername,
       ...(sender ? { sender } : {}),
+      ...(call ? { widgetCall: call } : {}),
       dataBase64: event.data instanceof Uint8Array
         ? Buffer.from(event.data).toString("base64")
         : typeof event.data === "string"
@@ -170,6 +184,19 @@ export function normalizeInboundEvent(
   }
 
   return safeJson({ ...event, meId, meUsername, ...(sender ? { sender } : {}) })
+}
+
+/** A widget's `inline.action(name, payload)` call: the payload is UTF-8 JSON the server validated. */
+export function normalizeWidgetCall(value: unknown): { name: string; payloadJson: string | null } | null {
+  const call = asOptionalRecord(value)
+  if (!call) return null
+  const payload = call.payload
+  const payloadJson = payload instanceof Uint8Array
+    ? (payload.byteLength > 0 ? Buffer.from(payload).toString("utf8") : null)
+    : typeof payload === "string" && payload.length > 0
+      ? payload
+      : null
+  return { name: typeof call.name === "string" ? call.name : "", payloadJson }
 }
 
 export function normalizeMessage(message: Record<string, unknown>): Record<string, unknown> {

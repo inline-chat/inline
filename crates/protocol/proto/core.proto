@@ -3818,6 +3818,36 @@ message PrivacySettings {
 
   // If true, the user may appear in global user search results.
   optional bool appear_in_global_search = 2;
+
+  // Who can see the user's time zone. When present, it is authoritative and
+  // share_time_zone mirrors it (true only for AUDIENCE_EVERYONE). Absent means
+  // the client should derive it from share_time_zone and send no rule back.
+  optional PrivacyRule time_zone = 3;
+}
+
+// Who can see one piece of the user's information. The user always sees their own.
+message PrivacyRule {
+  enum Audience {
+    AUDIENCE_UNSPECIFIED = 0;
+    AUDIENCE_EVERYONE = 1;
+    AUDIENCE_NOBODY = 2;
+  }
+
+  Audience audience = 1;
+
+  // Exceptions that can see it when audience is NOBODY.
+  repeated PrivacyTarget always_share = 2;
+
+  // Exceptions that cannot see it when audience is EVERYONE.
+  repeated PrivacyTarget never_share = 3;
+}
+
+// One entry in a privacy exception list. New kinds (spaces, groups) are added
+// as new oneof cases; servers drop kinds they do not understand.
+message PrivacyTarget {
+  oneof target {
+    int64 user_id = 1;
+  }
 }
 
 message NotificationSettings {

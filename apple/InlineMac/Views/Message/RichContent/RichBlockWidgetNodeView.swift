@@ -13,7 +13,18 @@ final class RichBlockWidgetNodeView: RichBlockRenderableView {
   init() {
     super.init(reuseKind: .widget)
     host.showsOpenButton = false
+    host.onOpen = { [weak self] _ in self?.toggleExpanded() }
     addSubview(host)
+  }
+
+  private func toggleExpanded() {
+    guard let key, let message else { return }
+    MessageWidgetHost.shared.toggleExpanded(key: key, message: message)
+  }
+
+  private func applyExpansion(_ node: RichBlockWidgetNode) {
+    host.showsOpenButton = node.canExpand
+    host.openButtonTitle = node.isExpanded ? "Show less" : "Show all"
   }
 
   override func apply(node: RichBlockLayoutPlan.Node, context: RichBlockRenderContext) {
@@ -45,12 +56,14 @@ final class RichBlockWidgetNodeView: RichBlockRenderableView {
       contentHeight: max(pageHeight, widgetNode.contentHeight),
       isClipped: widgetNode.isClipped
     )
+    applyExpansion(widgetNode)
     MessageWidgetHost.shared.register(self, key: key, message: message)
   }
 
   override func updateLayout(node: RichBlockLayoutPlan.Node) {
     guard case let .widget(widgetNode) = node.kind else { return }
     host.isClipped = widgetNode.isClipped
+    applyExpansion(widgetNode)
   }
 
   override func layout() {

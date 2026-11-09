@@ -104,8 +104,26 @@ import {
 import {
   buildInlineAgentActionBody,
   buildInlineAgentActionStructuredContext,
+  buildInlineMessageActionId,
+  buildInlineWidgetCallBody,
+  isInlineWidgetInteraction,
+  readInlineWidgetCall,
   resolveInlineMessageActionOwnership,
+  type InlineMessageActionOwner,
+  type InlineWidgetCall,
 } from "./message-actions.js"
+import {
+  splitInlineWidgetMessages,
+  splitInlineWidgetStreamTail,
+  takeInlineWidgetStreamText,
+  type InlineWidgetStreamHoldback,
+} from "./widgets.js"
+import {
+  sanitizeInlineActionCallbackData,
+  sanitizeInlineActionCopyText,
+  sanitizeInlineActionLabel,
+  sanitizeInlineVisibleText,
+} from "./outbound-sanitize.js"
 import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
 import {
   InlineSenderProfileCache,
@@ -532,6 +550,7 @@ type InlineParsedInboundEvent = {
     actionId: string
     targetMessageId: bigint
     data: Uint8Array
+    widgetCall?: InlineWidgetCall | null
   } | null
 }
 
@@ -1808,15 +1827,25 @@ export async function monitorInlineProvider(params: {
     const callbackActionOwnership = callbackActionEvent
       ? resolveInlineMessageActionOwnership(callbackActionEvent.actionId)
       : null
+    // A widget call names its widget in actionId; its reply is a new message,
+    // never an edit that would replace the widget.
+    const callbackWidgetInteraction = callbackActionEvent != null && isInlineWidgetInteraction(callbackActionEvent)
     if (callbackActionEvent) {
       const actor =
         senderUsername != null && senderUsername.length > 0
           ? `@${senderUsername}`
           : senderName ?? "the sender"
-      rawBody = buildInlineAgentActionBody({
-        actor,
-        targetMessageId: callbackActionEvent.targetMessageId,
-      })
+      rawBody = callbackWidgetInteraction
+        ? buildInlineWidgetCallBody({
+            actor,
+            targetMessageId: callbackActionEvent.targetMessageId,
+            widgetId: callbackActionEvent.actionId,
+            widgetCall: callbackActionEvent.widgetCall ?? null,
+          })
+        : buildInlineAgentActionBody({
+            actor,
+            targetMessageId: callbackActionEvent.targetMessageId,
+          })
     }
 
     const dmPolicy = account.config.dmPolicy ?? "pairing"
@@ -1850,6 +1879,7 @@ export async function monitorInlineProvider(params: {
     const effectiveGroupCommandAllowFrom = effectiveGroupAllowFrom
     const shouldRouteCallbackThroughSystemHandlers =
       callbackActionEvent != null &&
+      !callbackWidgetInteraction &&
       (callbackActionOwnership?.owner === "system" || callbackActionOwnership?.explicit === false)
     const callbackCommandBody = callbackActionEvent && shouldRouteCallbackThroughSystemHandlers
       ? resolveCallbackCommandBodyFromActionData({
@@ -1871,7 +1901,7 @@ export async function monitorInlineProvider(params: {
         runtime.error?.(`inline callback answer failed: ${String(error)}`)
       })
     }
-    const shouldEditCallbackTargetInPlace = callbackActionEvent != null
+    const shouldEditCallbackTargetInPlace = callbackActionEvent != null && !callbackWidgetInteraction
     const normalizedCommandBody = callbackCommandBody ?? commandTarget.body
     const mentionedInlineAgentId = currentContent?.entities.find((entity) =>
       entity.type === "mention" && entity.userId === String(meId) && entity.agentId)?.agentId
@@ -2888,6 +2918,8 @@ export async function monitorInlineProvider(params: {
               ...(actionCallbackDataUtf8
                 ? { callbackDataUtf8: actionCallbackDataUtf8 }
                 : {}),
+              widgetCall: callbackActionEvent.widgetCall ?? null,
+              widgetInteraction: callbackWidgetInteraction,
             }),
           }
         : {}),
@@ -3129,6 +3161,28 @@ export async function monitorInlineProvider(params: {
         : typeof inlineBlockStreamingEnabled === "boolean"
         ? !inlineBlockStreamingEnabled
         : undefined
+    // Block streaming can cut a widget block; an unclosed one waits for its closing tag.
+    const widgetStreamHoldback: InlineWidgetStreamHoldback = { held: "" }
+    const sendHeldInlineWidgetText = async (): Promise<boolean> => {
+      const heldText = takeInlineWidgetStreamText(widgetStreamHoldback, "", { flush: true })
+      if (!heldText.trim() || abortSignal.aborted) return false
+      let sentAny = false
+      try {
+        for (const part of splitInlineWidgetMessages(heldText)) {
+          const sent = await client.sendMessage({ chatId: deliveryChatId, text: part, parseMarkdown })
+          sentAny = true
+          rememberSentBotMessage({
+            chatId: deliveryChatId,
+            messageId: sent.messageId,
+            replyThreadContext: deliveryReplyThreadContext,
+          })
+        }
+      } catch (error) {
+        if (isInlineSendOutcomeUnknown(error)) sentAny = true
+        runtime.error?.(`inline held widget delivery failed: ${String(error)}`)
+      }
+      return sentAny
+    }
     const editStreamState: InlineEditStreamState = {
       messageId: shouldEditCallbackTargetInPlace ? callbackActionEvent?.targetMessageId ?? null : null,
       initialSendMayHaveLanded: false,
@@ -3705,12 +3759,13 @@ export async function monitorInlineProvider(params: {
       const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
       if (!visiblePayload) return
       const partialText = typeof visiblePayload.text === "string" ? visiblePayload.text : ""
-      const nextText = sanitizeInlineDeliveryText(
+      // A preview edit with an unclosed widget would be rejected; show the text before it.
+      const nextText = splitInlineWidgetStreamTail(sanitizeInlineDeliveryText(
         rewriteNumericMentionsToUsernames(
           partialText,
           senderProfilesById,
         ),
-      ).trim() || editStreamState.accumulatedText
+      )).ready.trim() || editStreamState.accumulatedText
       const suppliedActions = resolveInlineReplyActions(visiblePayload as Record<string, unknown>)
       if (suppliedActions !== undefined) {
         editStreamState.latestActions = suppliedActions
@@ -4192,9 +4247,17 @@ export async function monitorInlineProvider(params: {
                 visiblePayload.text ??
                 ""
               const mediaList = resolveInlinePayloadMediaUrls(visiblePayload)
-              const outboundText = sanitizeInlineDeliveryText(
+              const sanitizedOutboundText = sanitizeInlineDeliveryText(
                 rewriteNumericMentionsToUsernames(rawText, senderProfilesById),
               )
+              const canHoldWidgetText =
+                mediaList.length === 0 && !streamViaEditMessage && !shouldEditCallbackTargetInPlace
+              let outboundText = sanitizedOutboundText
+              if (canHoldWidgetText && info?.kind === "block") {
+                outboundText = takeInlineWidgetStreamText(widgetStreamHoldback, sanitizedOutboundText, { flush: false })
+              } else if (widgetStreamHoldback.held && await sendHeldInlineWidgetText()) {
+                markPayloadVisible()
+              }
               const suppliedOutboundActions = resolveInlineReplyActions(
                 visiblePayload as Record<string, unknown>,
               )
@@ -4350,7 +4413,11 @@ export async function monitorInlineProvider(params: {
                   markPayloadVisible()
                   return finishPayload()
                 }
-                await sendTextFallback(outboundText, true, true)
+                // Inline takes one widget per message.
+                const outboundParts = splitInlineWidgetMessages(outboundText)
+                for (const [index, part] of outboundParts.entries()) {
+                  await sendTextFallback(part, index === 0, index === outboundParts.length - 1)
+                }
                 publishStatus({ lastOutboundAt: Date.now() })
                 return finishPayload()
               }
@@ -4522,6 +4589,9 @@ export async function monitorInlineProvider(params: {
       }
 
       await settleEditStream(false)
+      if (widgetStreamHoldback.held && await sendHeldInlineWidgetText()) {
+        delivered = true
+      }
       await settlePartialMediaDeliveries()
       if (partialMediaDelivered) {
         delivered = true
@@ -5801,6 +5871,8 @@ export async function monitorInlineProvider(params: {
           const data = rawEvent["data"] as Uint8Array | undefined
           const eventChatId = rawEvent["chatId"] as bigint | undefined
           const eventDate = rawEvent["date"] as bigint | undefined
+          // Present once the SDK forwards MessageActionInvoked.widget_call.
+          const widgetCall = readInlineWidgetCall(rawEvent["widgetCall"])
 
           if (!actorUserId || !interactionId || !actionId || !targetMessageId || !eventChatId || !eventDate || !data) {
             return
@@ -5825,6 +5897,7 @@ export async function monitorInlineProvider(params: {
                 actionId,
                 targetMessageId,
                 data,
+                ...(widgetCall ? { widgetCall } : {}),
               },
             },
             "inline action dispatch",

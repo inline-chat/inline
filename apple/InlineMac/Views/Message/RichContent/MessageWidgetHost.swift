@@ -11,6 +11,7 @@ final class MessageWidgetHeights: @unchecked Sendable {
 
   private let lock = NSLock()
   private var heights: [String: Int] = [:]
+  private var expanded: Set<String> = []
   private var recency: [String] = []
   private let capacity = 512
 
@@ -22,15 +23,25 @@ final class MessageWidgetHeights: @unchecked Sendable {
     let key = MessageWidgetKey.make(message: message, payload: payload)
     lock.lock()
     defer { lock.unlock() }
-    guard let height = heights[key], let widgetID = MessageWidgetKey.firstWidget(in: payload.content.blocks)?.widgetID
-    else { return RichBlockWidgetLayout(measuredHeights: [:]) }
-    return RichBlockWidgetLayout(measuredHeights: [widgetID: height])
+    guard let widgetID = MessageWidgetKey.firstWidget(in: payload.content.blocks)?.widgetID else {
+      return RichBlockWidgetLayout(measuredHeights: [:])
+    }
+    return RichBlockWidgetLayout(
+      measuredHeights: heights[key].map { [widgetID: $0] } ?? [:],
+      expandedIDs: expanded.contains(key) ? [widgetID] : []
+    )
   }
 
   func height(forKey key: String) -> Int? {
     lock.lock()
     defer { lock.unlock() }
     return heights[key]
+  }
+
+  func toggleExpanded(forKey key: String) {
+    lock.lock()
+    defer { lock.unlock() }
+    if expanded.remove(key) == nil { expanded.insert(key) }
   }
 
   /// Returns true when the stored height changed.
@@ -41,7 +52,11 @@ final class MessageWidgetHeights: @unchecked Sendable {
     heights[key] = height
     recency.removeAll { $0 == key }
     recency.append(key)
-    while recency.count > capacity { heights[recency.removeFirst()] = nil }
+    while recency.count > capacity {
+      let evicted = recency.removeFirst()
+      heights[evicted] = nil
+      expanded.remove(evicted)
+    }
     return true
   }
 }
@@ -146,6 +161,16 @@ final class MessageWidgetHost: NSObject, WidgetCoordinatorDelegate {
     if coordinator.isHosting(view.host) { coordinator.unmount(key: key) }
   }
 
+  /// Show all / Show less: relayout the row with the other height cap.
+  func toggleExpanded(key: String, message: InlineKit.Message) {
+    MessageWidgetHeights.shared.toggleExpanded(forKey: key)
+    NotificationCenter.default.post(
+      name: .richBlockLayoutStateDidChange,
+      object: self,
+      userInfo: ["messageStableID": message.stableId]
+    )
+  }
+
   // MARK: Mounting
 
   @objc private func liveScrollStarted() { isLiveScrolling = true }
@@ -227,12 +252,23 @@ final class MessageWidgetHost: NSObject, WidgetCoordinatorDelegate {
     case let .copy(text):
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(text, forType: .string)
+      ToastCenter.shared.showSuccess("Copied")
     case let .openLink(url):
       NSWorkspace.shared.open(url)
     case let .sendPrompt(text):
-      // The composer shows what will be posted under the viewer's name; nothing is sent here.
-      ChatsManager.get(for: message.peerId, chatId: message.chatId)
-        .prefillPrompt(text, replyingTo: message.messageId)
+      if case let .user(id) = message.peerId, id == message.fromId, message.out != true {
+        // A DM with the widget's bot: the prompt goes only to that bot, so send it as a reply.
+        let peer = message.peerId
+        let chatID = message.chatId
+        let replyTo = message.messageId
+        Task {
+          _ = await Api.realtime.sendQueued(.sendMessage(text: text, peerId: peer, chatId: chatID, replyToMsgId: replyTo))
+        }
+      } else {
+        // Others would see it under the viewer's name: put it in the composer to review and send.
+        ChatsManager.get(for: message.peerId, chatId: message.chatId)
+          .prefillPrompt(text, replyingTo: message.messageId)
+      }
     case let .action(name, payloadJSON):
       guard let widget = message.blockContentPayload.flatMap({ MessageWidgetKey.firstWidget(in: $0.content.blocks) }) else {
         return "Widget is gone"

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -22,6 +23,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from collections import OrderedDict
 from datetime import datetime, timezone
@@ -52,11 +54,14 @@ from .message_actions import (
     build_inline_agent_action_input,
     build_inline_agent_action_turn_id,
     build_inline_system_action_id,
+    inline_message_widget_ids,
+    inline_widget_call,
     parse_inline_agent_action_reply_target,
     resolve_inline_message_action_ownership,
 )
 from .profile import bot_state_key, inline_env, legacy_state_dir, may_adopt_legacy_state, state_dir
 from .telemetry import capture_plugin_error
+from .widgets import has_widget_markup, scan_widgets, split_widget_aware, streaming_preview, without_widgets
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +69,7 @@ _DEFAULT_SIDECAR_PORT = 8794
 _ACTION_EDIT_RETRY_DELAY_SECONDS = 0.5
 _DEFAULT_SIDECAR_BIND = "127.0.0.1"
 _MAX_MESSAGE_LENGTH = 4000
+_APPROVAL_CHOICES = frozenset({"once", "session", "always", "deny"})
 _MODEL_PAGE_SIZE = 8
 _CHOICE_PICKER_MAX_CHOICES = 16
 _CHOICE_PICKER_TTL_SECONDS = 2 * 60
@@ -167,6 +173,29 @@ _INLINE_ENTITY_TYPE_NAMES = {
     13: "bot_command",
     14: "group_mention",
 }
+
+_APPROVAL_COMMAND_LIMIT = 2000
+_APPROVAL_FENCE_PATTERN = re.compile(r"(`{3,})[^\n]*\n(.*?)\n\1", re.DOTALL)
+# Same headings as OpenClaw's Inline, Slack and Discord approval cards.
+_APPROVAL_DECISION_HEADINGS = {
+    "once": "✅ Allowed once",
+    "session": "✅ Allowed for this session",
+    "always": "✅ Always allowed",
+    "deny": "❌ Denied",
+}
+_APPROVAL_EXPIRED_HEADING = "⌛ Approval expired"
+
+
+def _approval_command_block(command: str) -> str:
+    body = command if len(command) <= _APPROVAL_COMMAND_LIMIT else f"{command[:_APPROVAL_COMMAND_LIMIT]}…"
+    fence = "````" if "```" in body else "```"
+    return f"{fence}sh\n{body}\n{fence}"
+
+
+def _approval_card_text(heading: str, command: str) -> str:
+    """An answered or expired card: the outcome above the command it was for."""
+    return f"{heading}\n\n{_approval_command_block(command)}" if command else heading
+
 
 _ENV_REF_PATTERN = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 _SIDECAR_RETRYABLE_KINDS = {"transient"}
@@ -879,10 +908,31 @@ def _apply_yaml_config(yaml_cfg: dict, platform_cfg: dict) -> Optional[dict]:
     return extra
 
 
+async def _wait_for_exit(proc: subprocess.Popen, timeout: float) -> bool:
+    """Wait for ``proc`` without blocking the loop or taking an executor worker; False on timeout."""
+    deadline = time.monotonic() + timeout
+    while proc.poll() is None:
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.05)
+    return True
+
+
+def _accepts_keyword(fn: Callable[..., Any], name: str) -> bool:
+    """Whether a host callable takes keyword ``name`` (host APIs grow optional keywords)."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
 class InlineAdapter(BasePlatformAdapter):
     MAX_MESSAGE_LENGTH = _MAX_MESSAGE_LENGTH
     supports_code_blocks = True
     splits_long_messages = True
+    # Command preview on an approval card; Hermes sends a longer command whole before the card.
+    _EA_CMD_BUDGET = 2000
 
     def __init__(self, config: PlatformConfig, *, use_ephemeral_sidecar_port: bool = False):
         super().__init__(config, Platform("inline"))
@@ -1091,6 +1141,8 @@ class InlineAdapter(BasePlatformAdapter):
         self._clarify_choices: "OrderedDict[str, List[str]]" = OrderedDict()
         self._clarify_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._approval_sessions: "OrderedDict[str, str]" = OrderedDict()
+        self._approval_request_ids: "OrderedDict[str, str]" = OrderedDict()
+        self._approval_commands: "OrderedDict[str, str]" = OrderedDict()
         self._slash_sessions: "OrderedDict[str, str]" = OrderedDict()
         self._choice_picker_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
         self._update_prompt_sessions: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
@@ -2175,14 +2227,34 @@ class InlineAdapter(BasePlatformAdapter):
         raise RuntimeError(f"Inline sidecar did not become ready within {timeout}: {last_error}")
 
     async def _supervise_sidecar(self, proc: subprocess.Popen) -> None:
-        if proc.stdout is None:
+        """Log sidecar output. A quiet sidecar can go hours without a line, so its blocking
+        read runs on a thread of its own: on the loop's shared executor every sidecar would pin
+        a worker, and a gateway with more Inline bots than workers stalls every other
+        ``to_thread`` job (startup included)."""
+        stdout = proc.stdout
+        if stdout is None:
             return
-        loop = asyncio.get_event_loop()
-        while True:
+        loop = asyncio.get_running_loop()
+        lines: "asyncio.Queue[bytes]" = asyncio.Queue()
+
+        def hand_off(raw: bytes) -> None:
             try:
-                line = await loop.run_in_executor(None, proc.stdout.readline)
+                loop.call_soon_threadsafe(lines.put_nowait, raw)
+            except RuntimeError:
+                pass  # the loop closed first
+
+        def read() -> None:
+            try:
+                for raw in iter(stdout.readline, b""):
+                    hand_off(raw)
             except Exception:
-                return
+                pass
+            finally:
+                hand_off(b"")
+
+        threading.Thread(target=read, name="inline-sidecar-stdout", daemon=True).start()
+        while True:
+            line = await lines.get()
             if not line:
                 return
             text = line.decode("utf-8", "replace").rstrip()
@@ -2211,9 +2283,7 @@ class InlineAdapter(BasePlatformAdapter):
                     )
                 except Exception:
                     pass
-            try:
-                proc.wait(timeout=3.0)
-            except subprocess.TimeoutExpired:
+            if not await _wait_for_exit(proc, 3.0):
                 if sys.platform != "win32":
                     try:
                         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -2221,9 +2291,7 @@ class InlineAdapter(BasePlatformAdapter):
                         proc.terminate()
                 else:
                     proc.terminate()
-                try:
-                    proc.wait(timeout=2.0)
-                except subprocess.TimeoutExpired:
+                if not await _wait_for_exit(proc, 2.0):
                     proc.kill()
         finally:
             self._sidecar_proc = None
@@ -2524,10 +2592,12 @@ class InlineAdapter(BasePlatformAdapter):
                 self._schedule_bot_settings_task(self._handle_bot_settings_item(event))
             return
         if kind == "message.action.invoke":
-            if await self._handle_action(event):
+            # A widget call names its widget, never a native control, so it skips system handlers.
+            widget_call = inline_widget_call(event) is not None
+            if not widget_call and await self._handle_action(event):
                 return
             ownership = resolve_inline_message_action_ownership(event.get("actionId"))
-            if ownership.owner == "system" and ownership.explicit:
+            if not widget_call and ownership.owner == "system" and ownership.explicit:
                 await self._answer_action(str(event.get("interactionId") or ""), "Action expired")
                 logger.info("[inline] dropped unhandled system action %s", event.get("actionId") or "")
                 return
@@ -2762,9 +2832,7 @@ class InlineAdapter(BasePlatformAdapter):
             await self.handle_message(MessageEvent(
                 text=text or "[Inline message with no text]", message_type=MessageType.TEXT,
                 source=source, raw_message=event,
-                message_id=build_inline_agent_action_turn_id(
-                    agent_action.get("messageId"), agent_action.get("interactionId"),
-                ) if agent_action else msg_id,
+                message_id=_agent_action_turn_message_id(agent_action, msg_id),
                 timestamp=self._timestamp(event.get("date") or msg.get("date")),
                 allow_gateway_control=not bool(agent_action),
             ))
@@ -2946,14 +3014,7 @@ class InlineAdapter(BasePlatformAdapter):
             message_type=message_type,
             source=source,
             raw_message=event,
-            message_id=(
-                build_inline_agent_action_turn_id(
-                    agent_action.get("messageId"),
-                    agent_action.get("interactionId"),
-                )
-                if agent_action
-                else msg_id
-            ),
+            message_id=_agent_action_turn_message_id(agent_action, msg_id),
             platform_update_id=int(event.get("seq") or 0) if str(event.get("seq") or "").isdigit() else None,
             media_urls=media_urls,
             media_types=media_types,
@@ -2987,6 +3048,12 @@ class InlineAdapter(BasePlatformAdapter):
         if not target:
             await self._answer_action(interaction_id, "Action expired or no longer accessible.")
             return
+        widget_call = inline_widget_call(event)
+        if widget_call is None and str(event.get("actionId") or "") in inline_message_widget_ids(target):
+            # Older realtime SDKs drop the call's name and payload but keep the widget ID.
+            widget_call = {}
+        if widget_call is not None:
+            event = {**event, "widgetCall": widget_call}
 
         synthetic_message = dict(target)
         for stale_key in ("actions", "attachments", "entities", "media", "reactions", "replies", "sender"):
@@ -4437,31 +4504,92 @@ class InlineAdapter(BasePlatformAdapter):
         _, approval_id, choice = parts
         choice = "once" if choice == "approve" else choice
         session_key = self._approval_sessions.get(approval_id)
-        if choice not in {"once", "session", "always", "deny"}:
+        if choice not in _APPROVAL_CHOICES:
             return False
         if not session_key:
-            await self._finish_action(event, "Approval expired", "Approval expired; the command was not run.")
+            command = self._approval_commands.pop(approval_id, None) or await self._approval_command_from_message(event)
+            await self._finish_action(event, "Approval expired", _approval_card_text(_APPROVAL_EXPIRED_HEADING, command))
             return True
         try:
-            from tools.approval import resolve_gateway_approval
-            count = resolve_gateway_approval(session_key, choice)
-            self._approval_sessions.pop(approval_id, None)
-            if not count:
-                await self._finish_action(event, "Approval expired", "Approval expired; the command was not run.")
+            request_id = self._approval_request_ids.get(approval_id)
+            actor_id = str(event.get("actorUserId") or "").strip()
+            refusal = self._approval_refusal(session_key, actor_id, request_id)
+            if refusal:
+                # Another member's approval: leave the card live for the requester.
+                await self._answer_action(str(event.get("interactionId") or ""), refusal)
                 return True
-            labels = {
-                "once": ("Approved once", "Approved once."),
-                "session": ("Approved for session", "Approved for this session."),
-                "always": ("Always allowed", "Always allowed."),
-                "deny": ("Denied", "Denied."),
+            count = self._resolve_approval(session_key, choice, request_id, actor_id)
+            self._approval_sessions.pop(approval_id, None)
+            self._approval_request_ids.pop(approval_id, None)
+            command = self._approval_commands.pop(approval_id, None) or ""
+            if not count:
+                await self._finish_action(event, "Approval expired", _approval_card_text(_APPROVAL_EXPIRED_HEADING, command))
+                return True
+            toasts = {
+                "once": "Approved once",
+                "session": "Approved for session",
+                "always": "Always allowed",
+                "deny": "Denied",
             }
-            toast, text = labels[choice]
-            await self._finish_action(event, toast, text)
+            # Slack, Discord and OpenClaw's Inline card say who answered; a bare id is noise.
+            answered_by, _, _ = _inline_sender_identity(_inline_sender_profile(event))
+            heading = _APPROVAL_DECISION_HEADINGS[choice] + (f" by {answered_by}" if answered_by else "")
+            await self._finish_action(event, toasts[choice], _approval_card_text(heading, command))
             return True
         except Exception as exc:
             self._report_error("action.approval", exc)
             logger.exception("[inline] approval action failed")
             return True
+
+    async def _approval_command_from_message(self, event: Dict[str, Any]) -> str:
+        """Recover the command from the card itself when this process no longer has it (e.g. after a restart)."""
+        chat_id = str(event.get("chatId") or "")
+        message_id = str(event.get("messageId") or "")
+        msg = await self._fetch_message(chat_id, message_id) if chat_id and message_id else None
+        if not msg:
+            return ""
+        text = str(msg.get("message") or "")
+        units = text.encode("utf-16-le")
+        for entity in self._message_entities(msg):
+            if self._entity_kind(entity) != "pre":
+                continue
+            offset = _to_int(entity.get("offset"))
+            length = _to_int(entity.get("length"))
+            if offset is None or length is None or offset < 0 or length <= 0:
+                continue
+            return units[offset * 2 : (offset + length) * 2].decode("utf-16-le", errors="ignore").strip()
+        match = _APPROVAL_FENCE_PATTERN.search(text)
+        return match.group(2).strip() if match else ""
+
+    def _approval_refusal(self, session_key: str, actor_id: str, request_id: Optional[str]) -> Optional[str]:
+        """Hermes' approver rule (``approvals.approvers``) for a tap, or None when it may answer.
+        Hosts without the rule leave it to the chat access check every action already passed."""
+        try:
+            from gateway.approval_actor import approval_refusal
+        except ImportError:
+            return None
+        requester = approval_refusal(session_key, actor_id, extra=self.config.extra, request_id=request_id)
+        if not requester:
+            return None
+        try:
+            from gateway.approval_actor import refusal_text
+            return str(refusal_text(requester))
+        except ImportError:
+            return f"Only {requester} can answer this approval."
+
+    def _resolve_approval(self, session_key: str, choice: str, request_id: Optional[str], actor_id: str) -> int:
+        """Resolve only the request the card was sent for; once it settled (timeout, /approve)
+        the tap resolves nothing rather than the next one queued. A card without a request id
+        (hosts before 0.22.7) keeps the oldest-pending behaviour."""
+        from tools import approval as approval_mod
+        resolve_card = getattr(approval_mod, "resolve_gateway_approval_card", None)
+        if resolve_card is not None:
+            if _accepts_keyword(resolve_card, "actor_id"):
+                return resolve_card(session_key, choice, request_id, actor_id=actor_id or None, extra=self.config.extra)
+            return resolve_card(session_key, choice, request_id)
+        if request_id:
+            return approval_mod.resolve_gateway_approval(session_key, choice, request_id=request_id)
+        return approval_mod.resolve_gateway_approval(session_key, choice)
 
     async def _handle_slash_action(self, event: Dict[str, Any]) -> bool:
         action_id = str(event.get("actionId") or "")
@@ -5023,7 +5151,13 @@ class InlineAdapter(BasePlatformAdapter):
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
         text = self.format_message(content)
-        if len(text) > self.MAX_MESSAGE_LENGTH:
+        several_widgets = False
+        if self._parse_markdown and has_widget_markup(text):
+            if not finalize:
+                # A streaming preview must not send a widget whose closing tag hasn't arrived.
+                text = streaming_preview(text)
+            several_widgets = len(scan_widgets(text).widgets) > 1
+        if len(text) > self.MAX_MESSAGE_LENGTH or several_widgets:
             if finalize:
                 return await self._edit_overflow_split(chat_id, message_id, content, metadata=metadata)
             text = self.truncate_message(text, self.MAX_MESSAGE_LENGTH)[0]
@@ -5307,35 +5441,31 @@ class InlineAdapter(BasePlatformAdapter):
             "actions": {"rows": self._action_rows(actions)},
         })
 
-    async def send_exec_approval(
-        self,
-        chat_id: str,
-        command: str,
-        session_key: str,
-        description: str = "dangerous command",
-        metadata: Optional[Dict[str, Any]] = None,
-        allow_permanent: bool = True,
-        allow_session: bool = True,
-        smart_denied: bool = False,
-    ) -> SendResult:
+    async def _send_exec_approval_prompt(self, prompt: Any) -> SendResult:
+        """Draw Hermes' exec-approval prompt as an Inline button card.
+
+        Hermes' ``send_exec_approval`` owns the wording, a truncated command's full send and
+        the Deny-only gate of newer hosts; overriding this hook is also how Hermes knows the
+        adapter has native buttons. Inline only draws the offered choices and remembers which
+        request the card answers, so a tap never resolves a different one."""
         approval_id = secrets.token_hex(6)
-        text = f"Command approval required\n\n```\n{command[:2000]}\n```\n\nReason: {description}"
-        if smart_denied:
-            text += "\n\nSmart DENY: owner override applies to this one operation only."
-        actions = [self._action(f"appr:{approval_id}:once", "Allow Once")]
-        if not smart_denied and allow_session:
-            actions.append(self._action(f"appr:{approval_id}:session", "Allow for Session"))
-            if allow_permanent:
-                actions.append(self._action(f"appr:{approval_id}:always", "Always Allow"))
-        actions.append(self._action(f"appr:{approval_id}:deny", "Deny"))
+        actions = [
+            self._action(f"appr:{approval_id}:{choice}", str(label))
+            for label, choice, _style in prompt.actions
+            if choice in _APPROVAL_CHOICES
+        ]
         result = await self._send_sidecar("/send", {
-            "target": self._target_for(chat_id, metadata),
-            "text": text,
+            "target": self._target_for(prompt.chat_id, prompt.metadata),
+            "text": prompt.text,
             "parseMarkdown": self._parse_markdown,
             "actions": {"rows": self._action_rows(actions)},
         })
         if result.success:
-            self._remember(self._approval_sessions, approval_id, session_key)
+            self._remember(self._approval_sessions, approval_id, prompt.session_key)
+            self._remember(self._approval_commands, approval_id, str(getattr(prompt, "command", "") or ""))
+            request_id = getattr(prompt, "request_id", None)
+            if request_id:
+                self._remember(self._approval_request_ids, approval_id, str(request_id))
         return result
 
     async def send_slash_confirm(self, chat_id: str, title: str, message: str, session_key: str, confirm_id: str, metadata: Optional[Dict[str, Any]] = None) -> SendResult:
@@ -5663,6 +5793,39 @@ class InlineAdapter(BasePlatformAdapter):
             return content
         return f"{prefix}\n\n{content}"
 
+    def truncate_message(
+        self,
+        content: str,
+        max_length: int = _MAX_MESSAGE_LENGTH,
+        len_fn: Optional[Callable[[str], int]] = None,
+    ) -> List[str]:
+        """Hermes splitting, except a widget block is never cut or shares a message with another."""
+        if getattr(self, "_parse_markdown", True):
+            def split_plain(text: str, limit: int) -> List[str]:
+                pieces = self._base_truncate(text, limit, len_fn)
+                # Upstream numbers multi-part output; the parts here are pieces of one reply.
+                return [piece.removesuffix(f" ({i + 1}/{len(pieces)})") for i, piece in enumerate(pieces)]
+
+            chunks = split_widget_aware(content, max_length, split_plain, len_fn or len)
+            if chunks is not None:
+                return chunks
+        return self._base_truncate(content, max_length, len_fn)
+
+    def _base_truncate(self, content: str, max_length: int, len_fn: Optional[Callable[[str], int]]) -> List[str]:
+        base = super().truncate_message
+        if len_fn is not None and _accepts_keyword(base, "len_fn"):
+            return list(base(content, max_length, len_fn=len_fn))
+        return list(base(content, max_length))
+
+    async def _send_plain_fallback(self, chat_id: str, content: str, *, reply_to: Optional[str], metadata: Any) -> SendResult:
+        # A widget the server rejected would fail the fallback too; keep the prose and say so.
+        if getattr(self, "_parse_markdown", True) and has_widget_markup(content):
+            content = without_widgets(content)
+        base = getattr(super(), "_send_plain_fallback", None)
+        if base is None:
+            return await self.send(chat_id, content, reply_to=reply_to, metadata=metadata)
+        return await base(chat_id, content, reply_to=reply_to, metadata=metadata)
+
     def format_message(self, content: str) -> str:
         # parseMarkdown=false means literal input at every Inline API boundary.
         # Preserve that contract instead of silently rewriting the caller's text.
@@ -5750,6 +5913,13 @@ class InlineAdapter(BasePlatformAdapter):
 
     def _sidecar_base_url(self) -> str:
         return _sidecar_base_url(self._sidecar_bind, self._sidecar_port)
+
+
+def _agent_action_turn_message_id(agent_action: Optional[Dict[str, Any]], msg_id: str) -> str:
+    """A button turn's answer replaces its card; a widget call's answer replies below the widget."""
+    if not agent_action or inline_widget_call(agent_action) is not None:
+        return msg_id
+    return build_inline_agent_action_turn_id(agent_action.get("messageId"), agent_action.get("interactionId"))
 
 
 def _send_result(**kwargs: Any) -> SendResult:

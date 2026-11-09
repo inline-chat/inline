@@ -11,6 +11,7 @@ export const encodeUser = ({
   botAvatarFile,
   min = false,
   includeTimeZone = false,
+  timeZoneVisible,
   includeBotStatus = false,
   viewerUserId,
 }: {
@@ -20,6 +21,11 @@ export const encodeUser = ({
   botAvatarFile?: DbFile
   min?: boolean
   includeTimeZone?: boolean
+  /**
+   * The viewer's resolved access to the time zone rule, from
+   * resolveTimeZoneVisibility. Without it only a rule open to everyone shows it.
+   */
+  timeZoneVisible?: boolean
   /** Bot presence in a min projection, for viewers with a DM with the bot or its owner. */
   includeBotStatus?: boolean
   viewerUserId?: number
@@ -50,7 +56,8 @@ export const encodeUser = ({
           lastOnline: { date: user.lastOnline ? encodeDate(user.lastOnline) : undefined },
         },
     timeZone:
-      (min && !includeTimeZone) || (user.shareTimeZone === false && viewerUserId !== user.id)
+      (min && !includeTimeZone) ||
+      (viewerUserId !== user.id && !(timeZoneVisible ?? user.shareTimeZone !== false))
         ? undefined
         : user.timeZone ?? undefined,
     bot: user.bot === true ? true : undefined,

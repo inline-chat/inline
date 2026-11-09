@@ -1,3 +1,4 @@
+import { resolveTimeZoneVisibility } from "@in/server/modules/privacy/timeZoneVisibility"
 import { syncChatAccess } from "@in/server/modules/authorization/chatAccessSync"
 import type { Chat, Dialog, DialogFolder, GetChatsInput, Message, Space, User } from "@inline-chat/protocol/core"
 import { MessageModel } from "@in/server/db/models/messages"
@@ -686,12 +687,17 @@ async function readCatalog(input: Input, context: FunctionContext, work: Catalog
         .filter((dialog) => privateChatIds.has(dialog.chatId))
         .flatMap((dialog) => (dialog.peerUserId === null ? [] : [dialog.peerUserId])),
     )
+    const timeZoneVisible = await resolveTimeZoneVisibility(
+      currentUserId,
+      Array.from(usersById.values()).filter((user) => dmPeerUserIds.has(user.id)),
+    )
     const encodedUsers = Array.from(usersById.values()).map((user) =>
       Encoders.user({
         user,
         photoFile: user.photoFile ?? undefined,
         min: true,
         includeTimeZone: dmPeerUserIds.has(user.id),
+        timeZoneVisible: timeZoneVisible.has(user.id),
         includeBotStatus: dmPeerUserIds.has(user.id),
         viewerUserId: currentUserId,
       }),

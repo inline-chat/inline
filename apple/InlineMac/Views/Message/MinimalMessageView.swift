@@ -740,7 +740,7 @@ class MinimalMessageViewAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     view.setRelatedMessage(fullMessage.message)
     if let embeddedMessage = fullMessage.repliedToMessage {
-      view.update(with: embeddedMessage, kind: .replyInMessage, quote: fullMessage.leadingReplyQuote?.text)
+      view.update(with: embeddedMessage, kind: .replyInMessage)
     }
     return view
   }()
@@ -3079,7 +3079,7 @@ class MinimalMessageViewAppKit: NSView {
     let text = translationText ?? fullMessage.message.text ?? ""
     let entities = translationEntities ?? fullMessage.message.entities
     let richBlockPlan = props.layout.richBlockContent
-    let blockContent = richBlockPlan == nil ? nil : fullMessage.leadingReplyQuote?.body ?? fullMessage.message.blockContent
+    let blockContent = richBlockPlan == nil ? nil : fullMessage.message.blockContent
 
     let renderCacheStyleKey = "\(richTextStyleKey)|links-v1"
     let attributedString: NSAttributedString
@@ -4177,7 +4177,7 @@ class MinimalMessageViewAppKit: NSView {
     if props.layout.hasReply {
       replyView.setRelatedMessage(fullMessage.message)
       if let embeddedMessage = fullMessage.repliedToMessage {
-        replyView.update(with: embeddedMessage, kind: .replyInMessage, quote: fullMessage.leadingReplyQuote?.text)
+        replyView.update(with: embeddedMessage, kind: .replyInMessage)
       }
     }
     updateReplyThreadSummaryView(for: props)
