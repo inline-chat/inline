@@ -190,7 +190,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .dockBadge: "Dock Badge"
     case .notificationSounds: "Notification Sounds"
     case .appearInGlobalSearch: "Appear in Global Search"
-    case .shareTimeZone: "Share Time Zone"
+    case .shareTimeZone: "Who Can See My Local Time"
     case .autoDownloadMedia: "Media"
     case .autoDownloadFiles: "Files"
     case .autoDownloadVoiceMessages: "Voice Messages"
@@ -322,7 +322,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .dockBadge: ["unread", "count", "icon"]
     case .notificationSounds: ["alert", "mute"]
     case .appearInGlobalSearch: ["username", "find", "discoverable", "visibility"]
-    case .shareTimeZone: ["local time", "timezone"]
+    case .shareTimeZone: ["local time", "timezone", "share", "privacy", "exceptions"]
     case .autoDownloadMedia: ["photos", "images", "videos", "download"]
     case .autoDownloadFiles: ["documents", "attachments", "download"]
     case .autoDownloadVoiceMessages: ["audio", "download"]

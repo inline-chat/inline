@@ -1,9 +1,11 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct PrivacySettingsDetailView: View {
   @ObservedObject private var privacy = INUserSettings.current.privacy
   @State private var fileLinkSenders: [LocalFileLinkTrust.Sender] = []
+  @State private var isEditingTimeZoneExceptions = false
 
   var body: some View {
     Form {
@@ -20,13 +22,22 @@ struct PrivacySettingsDetailView: View {
       }
 
       Section {
-        Toggle(isOn: $privacy.shareTimeZone) {
+        Picker(selection: timeZoneAudience) {
+          Text("Everyone").tag(PrivacyRuleValue.Audience.everyone)
+          Text("Nobody").tag(PrivacyRuleValue.Audience.nobody)
+        } label: {
           SettingsRowLabel(
             .shareTimeZone,
-            description: "Allow people you chat with to see your local time."
+            description: "Who can see your local time in chats and on your profile."
           )
         }
         .settingsSearchAnchor(.shareTimeZone)
+
+        LabeledContent(timeZoneRule.exceptionsTitle) {
+          Button(exceptionsButtonTitle) {
+            isEditingTimeZoneExceptions = true
+          }
+        }
       } header: {
         SettingsSectionHeader("Time Zone")
       }
@@ -48,6 +59,39 @@ struct PrivacySettingsDetailView: View {
     }
     .settingsFormStyle()
     .onAppear { fileLinkSenders = LocalFileLinkTrust.senders }
+    .sheet(isPresented: $isEditingTimeZoneExceptions) {
+      PrivacyPeopleEditor(
+        title: timeZoneRule.exceptionsTitle,
+        footer: timeZoneRule.audience == .everyone
+          ? "These people won’t see your local time."
+          : "Only these people will see your local time.",
+        selectedIDs: timeZoneRule.exceptions
+      ) { ids in
+        var rule = privacy.effectiveTimeZoneRule
+        rule.exceptions = ids
+        privacy.setTimeZoneRule(rule)
+      }
+    }
+  }
+
+  private var timeZoneRule: PrivacyRuleValue {
+    privacy.effectiveTimeZoneRule
+  }
+
+  private var timeZoneAudience: Binding<PrivacyRuleValue.Audience> {
+    Binding(
+      get: { privacy.effectiveTimeZoneRule.audience },
+      set: { audience in
+        var rule = privacy.effectiveTimeZoneRule
+        rule.audience = audience
+        privacy.setTimeZoneRule(rule)
+      }
+    )
+  }
+
+  private var exceptionsButtonTitle: String {
+    let count = timeZoneRule.exceptions.count
+    return count == 0 ? "Add People…" : (count == 1 ? "1 Person…" : "\(count) People…")
   }
 }
 
