@@ -54,11 +54,14 @@ from .message_actions import (
     build_inline_agent_action_input,
     build_inline_agent_action_turn_id,
     build_inline_system_action_id,
+    inline_message_widget_ids,
+    inline_widget_call,
     parse_inline_agent_action_reply_target,
     resolve_inline_message_action_ownership,
 )
 from .profile import bot_state_key, inline_env, legacy_state_dir, may_adopt_legacy_state, state_dir
 from .telemetry import capture_plugin_error
+from .widgets import has_widget_markup, scan_widgets, split_widget_aware, streaming_preview, without_widgets
 
 logger = logging.getLogger(__name__)
 
@@ -2589,10 +2592,12 @@ class InlineAdapter(BasePlatformAdapter):
                 self._schedule_bot_settings_task(self._handle_bot_settings_item(event))
             return
         if kind == "message.action.invoke":
-            if await self._handle_action(event):
+            # A widget call names its widget, never a native control, so it skips system handlers.
+            widget_call = inline_widget_call(event) is not None
+            if not widget_call and await self._handle_action(event):
                 return
             ownership = resolve_inline_message_action_ownership(event.get("actionId"))
-            if ownership.owner == "system" and ownership.explicit:
+            if not widget_call and ownership.owner == "system" and ownership.explicit:
                 await self._answer_action(str(event.get("interactionId") or ""), "Action expired")
                 logger.info("[inline] dropped unhandled system action %s", event.get("actionId") or "")
                 return
@@ -2827,9 +2832,7 @@ class InlineAdapter(BasePlatformAdapter):
             await self.handle_message(MessageEvent(
                 text=text or "[Inline message with no text]", message_type=MessageType.TEXT,
                 source=source, raw_message=event,
-                message_id=build_inline_agent_action_turn_id(
-                    agent_action.get("messageId"), agent_action.get("interactionId"),
-                ) if agent_action else msg_id,
+                message_id=_agent_action_turn_message_id(agent_action, msg_id),
                 timestamp=self._timestamp(event.get("date") or msg.get("date")),
                 allow_gateway_control=not bool(agent_action),
             ))
@@ -3011,14 +3014,7 @@ class InlineAdapter(BasePlatformAdapter):
             message_type=message_type,
             source=source,
             raw_message=event,
-            message_id=(
-                build_inline_agent_action_turn_id(
-                    agent_action.get("messageId"),
-                    agent_action.get("interactionId"),
-                )
-                if agent_action
-                else msg_id
-            ),
+            message_id=_agent_action_turn_message_id(agent_action, msg_id),
             platform_update_id=int(event.get("seq") or 0) if str(event.get("seq") or "").isdigit() else None,
             media_urls=media_urls,
             media_types=media_types,
@@ -3052,6 +3048,12 @@ class InlineAdapter(BasePlatformAdapter):
         if not target:
             await self._answer_action(interaction_id, "Action expired or no longer accessible.")
             return
+        widget_call = inline_widget_call(event)
+        if widget_call is None and str(event.get("actionId") or "") in inline_message_widget_ids(target):
+            # Older realtime SDKs drop the call's name and payload but keep the widget ID.
+            widget_call = {}
+        if widget_call is not None:
+            event = {**event, "widgetCall": widget_call}
 
         synthetic_message = dict(target)
         for stale_key in ("actions", "attachments", "entities", "media", "reactions", "replies", "sender"):
@@ -5149,7 +5151,13 @@ class InlineAdapter(BasePlatformAdapter):
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SendResult:
         text = self.format_message(content)
-        if len(text) > self.MAX_MESSAGE_LENGTH:
+        several_widgets = False
+        if self._parse_markdown and has_widget_markup(text):
+            if not finalize:
+                # A streaming preview must not send a widget whose closing tag hasn't arrived.
+                text = streaming_preview(text)
+            several_widgets = len(scan_widgets(text).widgets) > 1
+        if len(text) > self.MAX_MESSAGE_LENGTH or several_widgets:
             if finalize:
                 return await self._edit_overflow_split(chat_id, message_id, content, metadata=metadata)
             text = self.truncate_message(text, self.MAX_MESSAGE_LENGTH)[0]
@@ -5785,6 +5793,39 @@ class InlineAdapter(BasePlatformAdapter):
             return content
         return f"{prefix}\n\n{content}"
 
+    def truncate_message(
+        self,
+        content: str,
+        max_length: int = _MAX_MESSAGE_LENGTH,
+        len_fn: Optional[Callable[[str], int]] = None,
+    ) -> List[str]:
+        """Hermes splitting, except a widget block is never cut or shares a message with another."""
+        if getattr(self, "_parse_markdown", True):
+            def split_plain(text: str, limit: int) -> List[str]:
+                pieces = self._base_truncate(text, limit, len_fn)
+                # Upstream numbers multi-part output; the parts here are pieces of one reply.
+                return [piece.removesuffix(f" ({i + 1}/{len(pieces)})") for i, piece in enumerate(pieces)]
+
+            chunks = split_widget_aware(content, max_length, split_plain, len_fn or len)
+            if chunks is not None:
+                return chunks
+        return self._base_truncate(content, max_length, len_fn)
+
+    def _base_truncate(self, content: str, max_length: int, len_fn: Optional[Callable[[str], int]]) -> List[str]:
+        base = super().truncate_message
+        if len_fn is not None and _accepts_keyword(base, "len_fn"):
+            return list(base(content, max_length, len_fn=len_fn))
+        return list(base(content, max_length))
+
+    async def _send_plain_fallback(self, chat_id: str, content: str, *, reply_to: Optional[str], metadata: Any) -> SendResult:
+        # A widget the server rejected would fail the fallback too; keep the prose and say so.
+        if getattr(self, "_parse_markdown", True) and has_widget_markup(content):
+            content = without_widgets(content)
+        base = getattr(super(), "_send_plain_fallback", None)
+        if base is None:
+            return await self.send(chat_id, content, reply_to=reply_to, metadata=metadata)
+        return await base(chat_id, content, reply_to=reply_to, metadata=metadata)
+
     def format_message(self, content: str) -> str:
         # parseMarkdown=false means literal input at every Inline API boundary.
         # Preserve that contract instead of silently rewriting the caller's text.
@@ -5872,6 +5913,13 @@ class InlineAdapter(BasePlatformAdapter):
 
     def _sidecar_base_url(self) -> str:
         return _sidecar_base_url(self._sidecar_bind, self._sidecar_port)
+
+
+def _agent_action_turn_message_id(agent_action: Optional[Dict[str, Any]], msg_id: str) -> str:
+    """A button turn's answer replaces its card; a widget call's answer replies below the widget."""
+    if not agent_action or inline_widget_call(agent_action) is not None:
+        return msg_id
+    return build_inline_agent_action_turn_id(agent_action.get("messageId"), agent_action.get("interactionId"))
 
 
 def _send_result(**kwargs: Any) -> SendResult:

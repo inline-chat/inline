@@ -12,6 +12,15 @@ from typing import Any, Dict, Iterable, Optional
 
 from .message_actions import build_inline_agent_action_id
 from .profile import hermes_home, inline_env, multiplex_active
+from .widgets import (
+    MAX_MESSAGE_TEXT_UTF16_UNITS,
+    MAX_MESSAGE_TEXT_UTF8_BYTES,
+    WidgetError,
+    build_widget_markdown,
+    has_widget_markup,
+    scan_widgets,
+    utf16_len,
+)
 
 try:
     from tools.registry import tool_error, tool_result
@@ -71,12 +80,25 @@ INLINE_PLATFORM_GUIDANCE = (
     "do not treat thread ids as reply/quote message ids. Supported Markdown is "
     "emphasis, inline or fenced code, links, headings, lists or checklists, "
     "quotes, tables, separators, and HTTP(S) images. Do not rely on "
-    "strikethrough, footnotes, or arbitrary HTML; unsupported or ambiguous "
+    "strikethrough, footnotes, or arbitrary HTML outside widgets; unsupported or ambiguous "
     "incomplete syntax remains visible text. Use ordinary Markdown "
     "tables for tabular data, never fenced-code tables. For collapsible work, "
     "use <details open>, then <summary>Title</summary>, body Markdown, and "
     "</details>; put kind=\"progress\" on summary only while work is in progress. "
-    "Use <footer>Attribution or brief metadata</footer> for a short footer."
+    "Use <footer>Attribution or brief metadata</footer> for a short footer. "
+    "Widgets: one sandboxed HTML block per message, only when Markdown or tables can't show it "
+    "(charts, diagrams, mockups, comparison grids, small pickers); keep prose outside it. Prefer "
+    "the inline tool's send_widget action; in a reply, a block on its own lines works too: "
+    "<iframe title=\"Name\" id=\"name\" height=\"420\">HTML</iframe> (one widget per message; "
+    "height 80-2000 px, about the content height at 640px wide). The sandbox has no network "
+    "(no fetch, XHR, WebSocket or remote images; use data: URIs); scripts may be inline or from "
+    "cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com or esm.sh. Avoid vh units, position: fixed "
+    "and nested frames; fit 320-640px widths. Theme CSS variables: --background --foreground "
+    "--muted --muted-foreground --card --border --primary --primary-foreground --accent --success "
+    "--warning --destructive --radius --font-sans --font-mono; classes .card .grid .row .badge "
+    ".btn .btn-primary .btn-ghost .table .muted .small. After a viewer's click, scripts can call "
+    "inline.copy(text), inline.sendPrompt(text), inline.action(name, payload) (reaches you as a "
+    "widget call turn), inline.openLink(url), and inline.setState(obj) with inline.state."
 )
 
 # Where each turn's triggering message physically lives, and who sent it. Hermes tells tools
@@ -129,7 +151,8 @@ _sidecars: Dict[str, Dict[str, Any]] = {}
 _settings_owners: Dict[str, Any] = {}
 
 _ACTION_MANIFEST = [
-    ("send_message", "(chat_id?|user_id?, text, buttons?)", "Send a message, including optional agent-owned buttons."),
+    ("send_message", "(chat_id?|user_id?, text, buttons?, reply_to_message_id?)", "Send a message, including optional agent-owned buttons."),
+    ("send_widget", "(chat_id?|user_id?, title, html, widget_id?, height?, text?, reply_to_message_id?)", "Send one sandboxed HTML widget, with optional lead text above it."),
     ("get_chat", "(chat_id?)", "Get metadata for a chat or reply thread, including whether you follow it."),
     ("set_follow_mode", "(chat_id?, mode)", "Follow a thread to join its conversation, or unfollow it to answer only mentions and replies. Applies to you only; mode is following or unfollowed."),
     ("get_messages", "(chat_id?, message_ids)", "Fetch specific Inline messages by ID."),
@@ -238,6 +261,7 @@ def tool_context_prompt(
     lines = [
         "- The `inline` tool is available for Inline history, search, exact message lookup, reactions, pins, and explicit thread management.",
         "- Return normal replies as text. Use inline send_message only to create a message with action buttons or to send into a different destination.",
+        "- For a chart, diagram, mockup or picker that Markdown can't show, use inline send_widget (then reply NO_REPLY unless more text is needed). A widget call from a viewer arrives as a turn naming widget_id, call_name and untrusted payload_json.",
         "- An Inline action-button turn names its source message. A normal response replaces that message; omitted buttons clear the old buttons. Use edit_message with buttons to replace them explicitly.",
         "- If edit_message already finalized the source action card during this turn, return NO_REPLY so the automatic final response does not overwrite that edit.",
     ]
@@ -270,6 +294,7 @@ INLINE_TOOL_SCHEMA = {
         + "\n\n"
         "When chat_id is omitted, the tool uses the current Inline reply thread if present, otherwise the current chat. "
         "Return normal assistant replies as text. Use send_message only for a button card or a different destination. "
+        "Use send_widget for one sandboxed HTML widget (see the Inline platform guidance); it is sent whole, and Inline's reason is returned if it rejects the widget. "
         "To hand work to another bot, mention it in your normal reply; its answer comes back to you as a turn that doesn't need a response, and asking it again takes a new mention. "
         "Agent-owned button presses return as ordinary turns, and the normal response replaces the source card while clearing omitted buttons. "
         "Use create_thread on the current triggering message when someone asks to continue in a thread; your answer then goes into it, so don't also post it in the chat, and it starts with a short summary of the conversation so far. "
@@ -300,7 +325,11 @@ INLINE_TOOL_SCHEMA = {
                 "type": "string",
                 "description": "Parent message ID for create_thread. Defaults to the triggering message when available.",
             },
-            "title": {"type": "string", "description": "Thread title. Required for create_chat, optional for create_thread, and the new name for update_chat."},
+            "title": {"type": "string", "description": "Thread title. Required for create_chat, optional for create_thread, and the new name for update_chat. For send_widget, the widget's title."},
+            "html": {"type": "string", "description": "send_widget: the widget's HTML body (no <iframe> wrapper, no </iframe>)."},
+            "widget_id": {"type": "string", "description": "send_widget: widget id, 1-64 of A-Z a-z 0-9 _ . : - (default widget). Widget calls name it."},
+            "height": {"type": "integer", "minimum": 80, "maximum": 2000, "description": "send_widget: frame height in CSS px, about the content height at 640px wide."},
+            "reply_to_message_id": {"type": "string", "description": "send_message/send_widget: message ID to reply to."},
             "name": {"type": "string", "description": "Agent name for create_agent."},
             "agent_id": {"type": "string", "description": "Globally unique Inline Agent ID for get_agent, update_agent, or delete_agent."},
             "handle": {"type": "string", "description": "Optional Agent handle."},
@@ -320,7 +349,7 @@ INLINE_TOOL_SCHEMA = {
                 "description": "Whether create_chat is visible to the parent space. Defaults to false and requires space_id when true.",
             },
             "query": {"type": "string", "description": "Search query for search_messages."},
-            "text": {"type": "string", "description": "Message text for send_message or edit_message."},
+            "text": {"type": "string", "description": "Message text for send_message or edit_message; optional lead text above a send_widget widget."},
             "buttons": {
                 "type": "array",
                 "maxItems": _MAX_ACTION_ROWS,
@@ -387,7 +416,13 @@ def _handle_inline_tool(args: Dict[str, Any], **_: Any) -> str:
         if action == "create_thread":
             return tool_result({"success": True, "action": action, "result": _create_thread(args)})
         path, body = _request_for_action(action, args)
-        response = _sidecar_call(path, body)
+        try:
+            response = _sidecar_call(path, body)
+        except InlineToolError as exc:
+            if action == "send_widget" and exc.error_kind == "bad_format":
+                # The server names the widget rule the message broke; the model can fix and resend.
+                raise InlineToolError(f"Inline rejected the widget: {exc}", exc.error_kind) from exc
+            raise
         result = _compact_result(action, response.get("result") or {})
         return tool_result({"success": True, "action": action, "result": result})
     except InlineToolError as exc:
@@ -396,14 +431,37 @@ def _handle_inline_tool(args: Dict[str, Any], **_: Any) -> str:
 
 def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
     if action == "send_message":
+        parse_markdown = _bool(args.get("parse_markdown"), True)
         body = {
             "target": _target(args),
-            "text": _required_str(args, "text", max_chars=_MAX_TEXT_CHARS),
-            "parseMarkdown": _bool(args.get("parse_markdown"), True),
+            "text": _message_text(args, parse_markdown),
+            "parseMarkdown": parse_markdown,
         }
         actions = _message_actions(args)
         if actions is not None:
             body["actions"] = actions
+        reply_to = _inline_id(args.get("reply_to_message_id"))
+        if reply_to:
+            body["replyToMsgId"] = reply_to
+        return "/send", body
+
+    if action == "send_widget":
+        if not _str(args.get("title")):
+            raise InlineToolError("title is required", "bad_format")
+        try:
+            text = build_widget_markdown(
+                html=str(args.get("html") or ""),
+                title=_str(args.get("title")),
+                widget_id=_str(args.get("widget_id")),
+                height=args.get("height"),
+                text=str(args.get("text") or ""),
+            )
+        except WidgetError as exc:
+            raise InlineToolError(str(exc), "bad_format") from exc
+        body = {"target": _target(args), "text": text, "parseMarkdown": True}
+        reply_to = _inline_id(args.get("reply_to_message_id"))
+        if reply_to:
+            body["replyToMsgId"] = reply_to
         return "/send", body
 
     if action == "get_chat":
@@ -437,11 +495,12 @@ def _request_for_action(action: str, args: Dict[str, Any]) -> tuple[str, Dict[st
         return "/search", body
 
     if action == "edit_message":
+        parse_markdown = _bool(args.get("parse_markdown"), True)
         body = {
             "target": _target(args),
             "messageId": _required_id(args, "message_id"),
-            "text": _required_str(args, "text", max_chars=_MAX_TEXT_CHARS),
-            "parseMarkdown": _bool(args.get("parse_markdown"), True),
+            "text": _message_text(args, parse_markdown),
+            "parseMarkdown": parse_markdown,
         }
         actions = _message_actions(args)
         if actions is not None:
@@ -895,7 +954,7 @@ def _message_actions(args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def _compact_result(action: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    if action in {"send_message", "edit_message"}:
+    if action in {"send_message", "send_widget", "edit_message"}:
         return {"messageId": _str(result.get("messageId"))}
     if action == "get_chat":
         return _compact_chat(result)
@@ -1164,6 +1223,18 @@ def _required_str(args: Dict[str, Any], key: str, *, max_chars: int) -> str:
     if not value:
         raise InlineToolError(f"{key} is required", "bad_format")
     return _truncate(value, max_chars)
+
+
+def _message_text(args: Dict[str, Any], parse_markdown: bool) -> str:
+    """Message text, shortened as before unless it holds a widget, which is sent whole or refused."""
+    value = _str(args.get("text"))
+    if not value:
+        raise InlineToolError("text is required", "bad_format")
+    if not parse_markdown or not has_widget_markup(value) or not scan_widgets(value).widgets:
+        return _truncate(value, _MAX_TEXT_CHARS)
+    if utf16_len(value) > MAX_MESSAGE_TEXT_UTF16_UNITS or len(value.encode("utf-8")) > MAX_MESSAGE_TEXT_UTF8_BYTES:
+        raise InlineToolError("message with a widget exceeds Inline's 100,000 character limit", "bad_format")
+    return value
 
 
 def _required_id(args: Dict[str, Any], key: str) -> str:

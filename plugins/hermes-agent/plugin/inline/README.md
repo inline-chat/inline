@@ -44,6 +44,10 @@ inbound message delivery; confirm that the bot replies.
 - `/inline_sync` republishes Hermes commands and skills to Inline.
 - `/inline_version` reports the loaded plugin version and last catalog sync.
 
+The agent can send sandboxed HTML message widgets (charts, diagrams, small
+pickers) with the `inline` tool's `send_widget` action or an `<iframe>` block
+in its reply; viewer widget calls come back as turns.
+
 Access controls, group mentions, media limits, native message actions, and
 additional setup options are described in the
 [adapter documentation](https://github.com/inline-chat/inline/tree/main/plugins/hermes-agent#readme).

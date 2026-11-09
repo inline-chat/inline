@@ -38,6 +38,7 @@
     "plugin/inline/profile.py",
     "plugin/inline/telemetry.py",
     "plugin/inline/tools.py",
+    "plugin/inline/widgets.py",
     "plugin/inline/sidecar/index.mjs"
   ],
   "bin": {

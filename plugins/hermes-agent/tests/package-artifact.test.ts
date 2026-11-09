@@ -268,6 +268,7 @@ const expectedFiles = [
   "plugin/inline/sidecar/index.mjs",
   "plugin/inline/telemetry.py",
   "plugin/inline/tools.py",
+  "plugin/inline/widgets.py",
 ]
 
 function parsePackOutput(raw: string): PackEntry {
