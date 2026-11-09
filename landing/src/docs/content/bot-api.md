@@ -148,6 +148,25 @@ Public threads require a space and no explicit participant list. Set `is_public:
 
 `sendMessage` and `editMessageText` parse [Inline Markdown](https://github.com/inline-chat/inline/blob/main/packages/protocol/docs/markdown.md) by default. A resolved `inline://user/{userId}` link produces a structured mention. Set `parse_markdown: false` to preserve the supplied syntax literally. Set `add_mentioned_users: true` to add mentioned people who can't see a private thread yet, under the same rules as `addThreadParticipant`; the result then lists `added_user_ids` and `unadded_user_ids`. DMs and public threads never change. Returned messages contain plain `text` and UTF-16 `entities`; structural content also uses `rich_message.blocks`.
 
+## Widgets
+
+A bot can show one sandboxed HTML widget in a message, such as a chart, mockup or small picker. Put an HTML preview on its own lines in Markdown text, with blank lines around it:
+
+```markdown
+Revenue grew 18% this quarter.
+
+<iframe title="Q3 revenue" id="revenue" height="320">
+<div class="card">…</div>
+</iframe>
+```
+
+- `title` heads the widget and is the message's plain-text fallback. `id` keeps viewers' widget state across `editMessageText`. `height` is the content height in CSS pixels (80–2000).
+- Widgets have no network access: put data in the HTML and images in `data:` URIs. Scripts can be inline or come from jsDelivr, cdnjs, unpkg or esm.sh. Viewport units, nested frames and password inputs are rejected, and HTML is limited to 256 KiB.
+- A malformed widget fails the send with a `description` that names the rule to fix.
+- Buttons call `inline.action(name, payload)`. The bot then gets a `message_action` update with `widget_call: {name, payload}`, and `action.action_id` is the widget's `id`. Treat it as user input. `inline.sendPrompt(text)`, `inline.copy(text)` and `inline.openLink(url)` stay in the viewer's app.
+
+Received messages show a widget as a `{type: "widget"}` block in `rich_message.blocks`. People see widgets in the Inline Mac app with Settings › Experimental › Message Widgets on; other clients show the title.
+
 ## Updates
 
 Polling and webhooks consume the same queue. Setting a webhook disables polling. These bounds apply to queued delivery:
