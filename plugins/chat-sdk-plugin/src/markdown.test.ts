@@ -181,3 +181,23 @@ test("cards preserve Markdown text, tables, images and clickable links", () => {
     "HTTP(S)",
   )
 })
+
+test("widgets and agent blocks rebuild as Markdown instead of disappearing", () => {
+  expect(
+    richBlocksToMarkdown([
+      { type: "widget", widget_id: "chart", title: 'Q3 "draft"', html: "<b>x</b>", height: 320 },
+      { type: "fields", fields: [{ label: "Command", value: "ls -la", is_monospace: true }] },
+      { type: "steps", steps: [{ text: "Build", status: "done" }, { text: "Ship" }] },
+      { type: "callout", kind: "warning", title: "Heads up", blocks: [{ type: "paragraph", text: "Body" }] },
+      { type: "meter", label: "Context", value: 40, max: 100 },
+    ]),
+  ).toBe(
+    [
+      '<iframe title="Q3 &quot;draft&quot;" id="chart" height="320">\n<b>x</b>\n</iframe>',
+      "**Command**: `ls -la`",
+      "- [x] Build\n- [ ] Ship",
+      "> **Heads up**\n> \n> Body",
+      "Context: 40/100",
+    ].join("\n\n"),
+  )
+})
