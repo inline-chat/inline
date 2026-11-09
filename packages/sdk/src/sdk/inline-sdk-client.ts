@@ -1483,6 +1483,8 @@ export class InlineSdkClient {
           actorUserId: payload.actorUserId,
           actionId: payload.actionId,
           data: payload.data,
+          ...(payload.form ? { form: payload.form } : {}),
+          ...(payload.widgetCall ? { widgetCall: { name: payload.widgetCall.name, payload: payload.widgetCall.payload } } : {}),
           seq,
           date,
         }, () => this.bumpUserSeq(seq, options?.source))
