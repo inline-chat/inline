@@ -23,6 +23,10 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
     _ request: UNNotificationRequest,
     withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
   ) {
+    // Counted before any work: `received` minus every recorded end (published, redacted, withheld)
+    // is the number of requests whose process died first, which then show the server placeholder.
+    ExtensionHealthOutbox.shared.record(Self.healthEvent, ["delivery_stage": "received"])
+
     // The device key outlives accounts. Before any decryption, fetch or donation, the payload's
     // recipient must be the account the app says is signed in now.
     let accountFence = accountFence
@@ -53,7 +57,9 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
 
     // Recheck on every publication path, including expiry: logout can land mid-processing.
     let publish: (UNNotificationContent) -> Void = { published in
-      contentHandler(admission.isCurrent(accountFence.read()) ? published : redacted)
+      let isCurrent = admission.isCurrent(accountFence.read())
+      ExtensionHealthOutbox.shared.record(Self.healthEvent, ["delivery_end": isCurrent ? "published" : "redacted"])
+      contentHandler(isCurrent ? published : redacted)
     }
     let delivery = InlineNotificationDelivery(content: content, handler: publish)
     let previous = deliveryLock.withLock {
@@ -61,7 +67,10 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
       currentDelivery = delivery
       return previous
     }
-    previous?.finish()
+    if let previous, previous.isPending {
+      ExtensionHealthOutbox.shared.record(Self.healthEvent, ["delivery_end": "superseded"])
+      previous.finish()
+    }
 
     let work = Task { @MainActor in
       await enrich(content, hydration: hydration, delivery: delivery) {
