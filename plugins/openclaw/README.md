@@ -20,6 +20,7 @@ Supports:
 - Inline compose indicators via `typing`, `stop-typing`, upload-state actions, and `recording-voice`.
 - Emoji reactions via message tool actions (`react`, `reactions`).
 - Reaction events on bot-authored messages are surfaced back to the agent as inbound context.
+- Message widgets: sandboxed HTML inside a message, from OpenClaw's `show_widget` or an inline `<iframe>` block. See Message Widgets below.
 
 Reply-thread behavior:
 
@@ -282,6 +283,23 @@ Reply behavior summary:
 - `replyThreadParentHistoryLimit` defaults to `10`, so reply-thread turns include nearby parent-chat context before the anchor. Set it to `0` only when a chat should stay strictly thread-local.
 
 If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.
+
+## Message Widgets
+
+Inline renders bot-sent HTML widgets inside a message. A widget is an `<iframe>` block in the Markdown text, on its own lines with blank lines around it, at most one per message:
+
+```md
+Revenue grew 18% this quarter.
+
+<iframe title="Q3 revenue" id="revenue" height="420">
+<div class="card">…HTML…</div>
+</iframe>
+```
+
+- **`show_widget`.** On OpenClaw hosts with widget presenters, the plugin registers a current-channel presenter, so the core `show_widget` tool is offered in Inline chats and posts its HTML as one widget message in the current chat or reply thread. The title becomes the widget title and id. HTML containing `</iframe` is refused before sending, and Inline's own rejections (such as `vh` units or nested frames) come back to the agent as the tool error. Older hosts skip the presenter.
+- **Inline blocks in replies.** The agent can also write the block directly to keep prose and a widget in one message. Outbound chunking never splits a widget and keeps one widget per message. Block streaming holds an unclosed widget back until its `</iframe>` arrives, and partial previews stop before it.
+- **Widget calls.** A viewer's `inline.action(name, payload)` reaches the agent as an Inline widget call turn with the widget id, call name and JSON payload, labeled as untrusted viewer input. The reply is a new message, so the widget stays. The call name and payload need Inline realtime SDK 0.0.22 or later; with an older SDK the turn still names the widget.
+- The model gets compact widget guidance (when to use one, sandbox limits, theme variables and the `inline.*` bridge) with Inline's formatting hints.
 
 ## Native Exec Approvals
 
