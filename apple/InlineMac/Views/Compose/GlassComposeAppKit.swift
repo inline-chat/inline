@@ -1181,6 +1181,11 @@ class GlassComposeAppKit: NSView {
         self?.insertQuote(markdown)
       }.store(in: &cancellables)
 
+    state.promptPublisher
+      .sink { [weak self] text in
+        self?.insertPrompt(text)
+      }.store(in: &cancellables)
+
     state.editingMsgIdPublisher
       .sink { [weak self] editingMsgId in
         guard let self else { return }
@@ -3187,6 +3192,17 @@ class GlassComposeAppKit: NSView {
     textView.updateTypingAttributesIfNeeded()
     textView.insertText(insertion.text, replacementRange: insertion.range)
     insertedReplyQuote = state.replyingToMsgId.map { (markdown, $0) }
+    textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+    focus()
+  }
+
+  /// Adds a widget's prompt after what is already typed and focuses the composer; the user sends it.
+  private func insertPrompt(_ text: String) {
+    let textView = textEditor.textView
+    let current = textView.string as NSString
+    let separator = current.length == 0 || textView.string.last?.isNewline == true ? "" : "\n"
+    textView.updateTypingAttributesIfNeeded()
+    textView.insertText(separator + text, replacementRange: NSRange(location: current.length, length: 0))
     textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
     focus()
   }

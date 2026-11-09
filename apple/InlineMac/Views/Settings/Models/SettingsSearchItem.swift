@@ -87,6 +87,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
   case sidebarAgentRowNewThread
   case richContentRenderer
   case inlineMathAttachments
+  case messageWidgets
   case richMessageMultiBlockSelection
   case richCopyMarkdownEditing
   case quickForward
@@ -140,7 +141,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
       .updates
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .richMessageMultiBlockSelection, .richCopyMarkdownEditing, .quickForward,
+         .messageWidgets, .richMessageMultiBlockSelection, .richCopyMarkdownEditing, .quickForward,
          .fileBrowser, .nativeFileDownloads:
       .experimental
     case .syncEngine, .appPermissions, .connectionSecurity, .macDevtools, .onboarding, .playground,
@@ -210,6 +211,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .sidebarAgentRowNewThread: "Agent Row New Thread Button"
     case .richContentRenderer: "Rich Content Renderer"
     case .inlineMathAttachments: "Inline Math Attachments"
+    case .messageWidgets: "Message Widgets"
     case .richMessageMultiBlockSelection: "Rich Message Multi-Block Selection"
     case .richCopyMarkdownEditing: "Rich Copy & Markdown Editing"
     case .quickForward: "Quick Forward"
@@ -268,7 +270,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .automaticUpdates, .updateChannel: "Automatic Updates"
 #endif
     case .newThreadAgentPicker, .sidebarAgentRowNewThread, .richContentRenderer, .inlineMathAttachments,
-         .richMessageMultiBlockSelection:
+         .messageWidgets, .richMessageMultiBlockSelection:
       "Agents"
     case .richCopyMarkdownEditing, .quickForward: "Messages"
     case .fileBrowser, .nativeFileDownloads: "Files"
@@ -341,6 +343,7 @@ enum SettingsSearchItem: String, CaseIterable, Identifiable, Hashable, Sendable 
     case .sidebarAgentRowNewThread: ["agent", "thread", "sidebar", "plus"]
     case .richContentRenderer: ["markdown", "agent"]
     case .inlineMathAttachments: ["latex", "formula", "math"]
+    case .messageWidgets: ["html", "widget", "visualization", "chart"]
     case .richMessageMultiBlockSelection: ["select", "copy"]
     case .richCopyMarkdownEditing: ["copy", "paste", "markdown", "formatting"]
     case .quickForward: ["forward"]
