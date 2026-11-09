@@ -146,9 +146,13 @@ describe("SessionsModel push sessions", () => {
     const otherMac = await testUtils.createSessionForUser(macUser.id, { clientType: "macos", deviceId: "device-a" })
     const unrelated = await testUtils.createSessionForUser(bystander.id, { clientType: "ios" })
 
-    // Same token on an earlier login, and an old token under the same device ID for another account.
+    // Same token on an earlier login and on another account that left this device.
     await SessionsModel.updatePushNotificationDetails(earlier.session.id, { applePushToken: "token-a" })
-    await SessionsModel.updatePushNotificationDetails(otherAccount.session.id, { applePushToken: "token-old" })
+    await SessionsModel.updatePushNotificationDetails(otherAccount.session.id, { applePushToken: "token-a" })
+    // A different token under the same device ID can be another Inline bundle (debug, devbuild).
+    const debugUser = await testUtils.createUser("push-token-debug@test.com")
+    const otherBundle = await testUtils.createSessionForUser(debugUser.id, { clientType: "ios", deviceId: "device-a" })
+    await SessionsModel.updatePushNotificationDetails(otherBundle.session.id, { applePushToken: "debug-token" })
     await SessionsModel.updatePushNotificationDetails(otherMac.session.id, {
       applePushToken: "mac-token",
       pushNotificationProvider: "apns",
@@ -163,6 +167,7 @@ describe("SessionsModel push sessions", () => {
     // Another client type on the same device keeps its own token.
     expect(await tokens(other.id)).toEqual([])
     expect(await tokens(macUser.id)).toEqual([[otherMac.session.id, "mac-token"]])
+    expect(await tokens(debugUser.id)).toEqual([[otherBundle.session.id, "debug-token"]])
     // Tokens are matched only among the owner's sessions and its device, never globally.
     expect(await tokens(bystander.id)).toEqual([[unrelated.session.id, "token-a"]])
   })
