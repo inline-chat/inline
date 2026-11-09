@@ -4047,6 +4047,20 @@ impl SdkBackend {
                         values,
                     });
                 }
+                Some(proto::update::Update::MessageActionInvoked(update))
+                    if update.widget_call.is_some() =>
+                {
+                    let call = update.widget_call.unwrap_or_default();
+                    events.push(ClientEvent::MessageWidgetCalled {
+                        interaction_id: InlineId::new(update.interaction_id),
+                        chat_id: InlineId::new(update.chat_id),
+                        message_id: InlineId::new(update.message_id),
+                        actor_user_id: InlineId::new(update.actor_user_id),
+                        widget_id: update.action_id,
+                        name: call.name,
+                        payload: call.payload,
+                    });
+                }
                 Some(proto::update::Update::AgentSessionControl(update)) => {
                     events.push(ClientEvent::AgentSessionControlRequested {
                         interaction_id: InlineId::new(update.interaction_id),
@@ -5059,6 +5073,23 @@ fn temporary_reconnect_can_regenerate(error: &InlineProtocolV3Error) -> bool {
 }
 
 fn inline_protocol_v3_error_to_backend(error: InlineProtocolV3Error) -> BackendError {
+    // The server's description; carrier and local failures use `Unknown`.
+    let server_message = match &error {
+        InlineProtocolV3Error::Rpc {
+            error_code,
+            message,
+            ..
+        } if *error_code != proto::rpc_error::Code::Unknown as i32 => Some(message.clone()),
+        _ => None,
+    };
+    let backend = classify_inline_protocol_v3_error(error);
+    match server_message {
+        Some(message) => backend.with_server_message(message),
+        None => backend,
+    }
+}
+
+fn classify_inline_protocol_v3_error(error: InlineProtocolV3Error) -> BackendError {
     let rendered = error.to_string();
     match error {
         InlineProtocolV3Error::Rpc {
@@ -5099,6 +5130,18 @@ fn inline_protocol_v3_error_to_backend(error: InlineProtocolV3Error) -> BackendE
 }
 
 fn realtime_error_to_backend(error: RealtimeError) -> BackendError {
+    let server_message = match &error {
+        RealtimeError::RpcError { message, .. } => Some(message.clone()),
+        _ => None,
+    };
+    let backend = classify_realtime_error(error);
+    match server_message {
+        Some(message) => backend.with_server_message(message),
+        None => backend,
+    }
+}
+
+fn classify_realtime_error(error: RealtimeError) -> BackendError {
     match error {
         RealtimeError::InvalidUrl { message, .. } => {
             BackendError::new(ClientErrorCategory::InvalidInput, message)
@@ -6817,6 +6860,47 @@ mod tests {
             friendly: "Internal error (HTTP 500)".to_string(),
         });
         assert_eq!(unavailable.category, ClientErrorCategory::Internal);
+    }
+
+    #[test]
+    fn rpc_errors_keep_the_servers_reason_beside_the_classified_message() {
+        let reason =
+            "Widget HTML has `vh` units; use px or let the content set the height (line 3)";
+        let refused = realtime_error_to_backend(RealtimeError::RpcError {
+            code: 400,
+            error_code: proto::rpc_error::Code::BadRequest as i32,
+            error_name: "BAD_REQUEST".to_string(),
+            message: reason.to_string(),
+            friendly: "Inline RPC error BAD_REQUEST (status 400)".to_string(),
+        });
+        assert_eq!(refused.category, ClientErrorCategory::InvalidInput);
+        assert_eq!(refused.message, "Inline RPC error BAD_REQUEST (status 400)");
+        assert_eq!(refused.server_message.as_deref(), Some(reason));
+
+        let v3 = inline_protocol_v3_error_to_backend(InlineProtocolV3Error::Rpc {
+            status: 400,
+            error_code: proto::rpc_error::Code::BadRequest as i32,
+            message: reason.to_string(),
+        });
+        assert_eq!(v3.server_message.as_deref(), Some(reason));
+        let carrier = inline_protocol_v3_error_to_backend(InlineProtocolV3Error::Rpc {
+            status: 503,
+            error_code: proto::rpc_error::Code::Unknown as i32,
+            message: "Inline Protocol carrier error".to_string(),
+        });
+        assert_eq!(carrier.server_message, None);
+        let blank = realtime_error_to_backend(RealtimeError::RpcError {
+            code: 400,
+            error_code: proto::rpc_error::Code::BadRequest as i32,
+            error_name: "BAD_REQUEST".to_string(),
+            message: " ".to_string(),
+            friendly: "Bad request (HTTP 400)".to_string(),
+        });
+        assert_eq!(blank.server_message, None);
+        assert_eq!(
+            realtime_error_to_backend(RealtimeError::ConnectionClosed).server_message,
+            None
+        );
     }
 
     #[test]
@@ -10240,6 +10324,63 @@ mod tests {
         assert!(
             matches!(events.as_slice(), [ClientEvent::UserUpserted { user_id }] if user_id.get() == 42)
         );
+    }
+
+    #[tokio::test]
+    async fn apply_updates_reports_widget_calls_apart_from_button_actions() {
+        let backend = SdkBackend::builder().build().unwrap();
+        let invoked = |widget_call: Option<proto::MessageWidgetCall>| proto::Update {
+            seq: Some(1),
+            date: Some(10),
+            update: Some(proto::update::Update::MessageActionInvoked(
+                proto::UpdateMessageActionInvoked {
+                    interaction_id: 5,
+                    chat_id: 7,
+                    message_id: 9,
+                    actor_user_id: 3,
+                    action_id: "picker".to_owned(),
+                    data: if widget_call.is_some() {
+                        Vec::new()
+                    } else {
+                        b"opaque".to_vec()
+                    },
+                    widget_call,
+                    ..Default::default()
+                },
+            )),
+        };
+        let events = backend
+            .apply_updates(
+                vec![
+                    invoked(Some(proto::MessageWidgetCall {
+                        name: "choose".to_owned(),
+                        payload: br#"{"plan":"pro"}"#.to_vec(),
+                    })),
+                    invoked(None),
+                ],
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            events[0],
+            ClientEvent::MessageWidgetCalled {
+                interaction_id: InlineId::new(5),
+                chat_id: InlineId::new(7),
+                message_id: InlineId::new(9),
+                actor_user_id: InlineId::new(3),
+                widget_id: "picker".to_owned(),
+                name: "choose".to_owned(),
+                payload: br#"{"plan":"pro"}"#.to_vec(),
+            }
+        );
+        assert_eq!(events[0].reliability(), crate::EventReliability::Lossless);
+        assert!(!events[0].is_never_persisted());
+        assert!(matches!(
+            &events[1],
+            ClientEvent::MessageActionInvoked { data, .. } if data == b"opaque"
+        ));
     }
 
     #[tokio::test]
