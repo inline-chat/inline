@@ -798,7 +798,7 @@ export const processOutgoingText = async (
   } catch (error) {
     if (!(error instanceof MessageWidgetError)) throw error
     log.warn("rejected a malformed widget", { reason: error.message })
-    throw RealtimeRpcError.BadRequest()
+    throw RealtimeRpcError.BadRequestWithReason(error.message)
   }
   // The widget's HTML lives in its block; the text keeps only its title.
   const markdown = widget?.markdown ?? sourceMarkdown
@@ -813,13 +813,14 @@ export const processOutgoingText = async (
     const content = parsedBlocks?.blockContent
     if (start === undefined || end === undefined || !content || !attachMarkdownWidget(content, start, end, widget.widget)) {
       log.warn("could not place a widget in the parsed message", { fallback: blockResult?.kind === "fallback" ? blockResult.reason : undefined })
-      throw RealtimeRpcError.BadRequest()
+      throw RealtimeRpcError.BadRequestWithReason("The widget's <iframe> must be its own block: put blank lines around it")
     }
     try {
       validateBlockContent(parsedMarkdown.text, content)
     } catch (error) {
-      log.warn("rejected an invalid widget", { reason: error instanceof Error ? error.message : "unknown" })
-      throw RealtimeRpcError.BadRequest()
+      const reason = error instanceof Error ? error.message : "Invalid widget"
+      log.warn("rejected an invalid widget", { reason })
+      throw RealtimeRpcError.BadRequestWithReason(reason)
     }
   }
   if (blockResult?.kind === "fallback" && blockResult.reason !== "empty") {

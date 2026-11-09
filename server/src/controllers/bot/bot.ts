@@ -567,8 +567,11 @@ const throwInlineFromUnknown = (error: unknown): never => {
         throw new InlineError(InlineError.ApiError.CHAT_ID_INVALID)
       case RealtimeRpcError.Code.USER_ID_INVALID:
         throw new InlineError(InlineError.ApiError.USER_INVALID)
-      case RealtimeRpcError.Code.BAD_REQUEST:
-        throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+      case RealtimeRpcError.Code.BAD_REQUEST: {
+        const badRequest = new InlineError(InlineError.ApiError.BAD_REQUEST)
+        if (error.publicReason) badRequest.description = error.publicReason
+        throw badRequest
+      }
       default:
         throw new InlineError(InlineError.ApiError.INTERNAL)
     }

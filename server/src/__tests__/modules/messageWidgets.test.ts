@@ -81,7 +81,11 @@ describe("message widgets", () => {
     const message = await MessageModel.getMessage(Number(messageId), chatId)
     expect(message.blockContent?.blocks.some((block) => block.kind.oneofKind === "widget") ?? false).toBe(false)
 
-    await rejects(send(botId, "<iframe title=\"Tall\">\n<div style=\"height:100vh\"></div>\n</iframe>", true), RpcError_Code.BAD_REQUEST)
+    const tall = await send(botId, "<iframe title=\"Tall\">\n<div style=\"height:100vh\"></div>\n</iframe>", true)
+      .then(() => undefined, (caught: unknown) => caught)
+    // The bot learns which rule failed, so it can fix the widget and retry.
+    expect(RealtimeRpcError.is(tall, RpcError_Code.BAD_REQUEST)).toBe(true)
+    expect((tall as RealtimeRpcError).publicReason).toContain("`vh` units")
     await rejects(send(botId, "<iframe title=\"Open\">\n<b>never closed</b>", true), RpcError_Code.BAD_REQUEST)
     await rejects(send(botId, "<iframe>a</iframe>\n\n<iframe>b</iframe>", true), RpcError_Code.BAD_REQUEST)
   })

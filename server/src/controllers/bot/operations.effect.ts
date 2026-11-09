@@ -453,7 +453,13 @@ const classifyFailure = (
       case RealtimeRpcError.Code.USER_ID_INVALID:
         return publicError(InlineError.ApiError.USER_INVALID)
       case RealtimeRpcError.Code.BAD_REQUEST:
-        return publicError(InlineError.ApiError.BAD_REQUEST)
+        return cause.publicReason
+          ? new BotPublicError({
+            error: InlineError.ApiError.BAD_REQUEST[0],
+            errorCode: InlineError.ApiError.BAD_REQUEST[1],
+            description: cause.publicReason,
+          })
+          : publicError(InlineError.ApiError.BAD_REQUEST)
       case RealtimeRpcError.Code.RATE_LIMIT:
         // Pacing is an expected reply, not a server fault: answer the way
         // Telegram's Bot API does so existing bot libraries back off.
