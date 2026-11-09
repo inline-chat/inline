@@ -58,6 +58,13 @@ const SKILL_FILES: &[(&str, &str)] = &[
         )),
     ),
     (
+        "references/widgets.md",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../skills/inline/references/widgets.md"
+        )),
+    ),
+    (
         "references/workflows.md",
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
