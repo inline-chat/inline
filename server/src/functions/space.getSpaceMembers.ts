@@ -1,3 +1,4 @@
+import { resolveTimeZoneVisibility } from "@in/server/modules/privacy/timeZoneVisibility"
 import { db } from "@in/server/db"
 import { and, eq } from "drizzle-orm"
 import { members, userNotDeleted, users } from "@in/server/db/schema"
@@ -32,9 +33,21 @@ export const getSpaceMembers = async (
         { tx },
       )
 
+      const timeZoneVisible = min
+        ? new Set<number>()
+        : await resolveTimeZoneVisibility(context.currentUserId, usersWithPhotos.map((u) => u.user))
+
       return {
         members: activeMembers.map((member) => Encoders.member(member)),
-        users: usersWithPhotos.map((u) => Encoders.user({ user: u.user, photoFile: u.photoFile, min, viewerUserId: context.currentUserId })),
+        users: usersWithPhotos.map((u) =>
+          Encoders.user({
+            user: u.user,
+            photoFile: u.photoFile,
+            min,
+            timeZoneVisible: timeZoneVisible.has(u.user.id),
+            viewerUserId: context.currentUserId,
+          }),
+        ),
         seq: privacy.space.updateSeq ?? 0,
       }
     },

@@ -4,7 +4,7 @@ import { getUserSettingsHandler } from "@in/server/realtime/handlers/user.getUse
 import { updateUserSettingsHandler } from "@in/server/realtime/handlers/user.updateUserSettings"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import { UserSettingsModel } from "@in/server/db/models/userSettings/userSettings"
-import { NotificationSettings_Mode } from "@inline-chat/protocol/core"
+import { NotificationSettings_Mode, PrivacyRule_Audience } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema"
 import { UpdateBucket, updates } from "@in/server/db/schema/updates"
@@ -128,6 +128,56 @@ describe("User Settings RPC", () => {
       .where(eq(users.id, userId))
       .limit(1)
     expect(user).toEqual({ shareTimeZone: false, appearInGlobalSearch: false })
+  })
+
+  test("time zone rule round-trips and survives saves from older clients", async () => {
+    const ruleUser = await testUtils.createUser("time-zone-rule@example.com")
+    const context = {
+      userId: ruleUser.id, sessionId: 201, connectionId: "rule", sendRaw: () => {}, sendRpcReply: () => {},
+    }
+    const userTarget = (id: number) => ({ target: { oneofKind: "userId" as const, userId: BigInt(id) } })
+    const readRow = async () =>
+      (await db.select({ shareTimeZone: users.shareTimeZone }).from(users).where(eq(users.id, ruleUser.id)))[0]
+
+    await updateUserSettingsHandler(
+      {
+        userSettings: {
+          privacySettings: {
+            timeZone: { audience: PrivacyRule_Audience.NOBODY, alwaysShare: [userTarget(42)], neverShare: [] },
+          },
+        },
+      },
+      context,
+    )
+    let privacy = (await getUserSettingsHandler({}, context)).userSettings?.privacySettings
+    expect(privacy?.shareTimeZone).toBe(false)
+    expect(privacy?.appearInGlobalSearch).toBe(true)
+    expect(privacy?.timeZone?.alwaysShare).toEqual([userTarget(42)])
+    expect(await readRow()).toEqual({ shareTimeZone: false })
+
+    // An older client resends its unchanged flag while toggling another setting.
+    await updateUserSettingsHandler(
+      { userSettings: { privacySettings: { shareTimeZone: false, appearInGlobalSearch: false } } },
+      context,
+    )
+    privacy = (await getUserSettingsHandler({}, context)).userSettings?.privacySettings
+    expect(privacy?.timeZone?.audience).toBe(PrivacyRule_Audience.NOBODY)
+    expect(privacy?.timeZone?.alwaysShare).toEqual([userTarget(42)])
+
+    // Turning the flag on opens it to everyone; an exclusion keeps the row non-public.
+    await updateUserSettingsHandler(
+      {
+        userSettings: {
+          privacySettings: {
+            timeZone: { audience: PrivacyRule_Audience.EVERYONE, alwaysShare: [], neverShare: [userTarget(7)] },
+          },
+        },
+      },
+      context,
+    )
+    privacy = (await getUserSettingsHandler({}, context)).userSettings?.privacySettings
+    expect(privacy?.shareTimeZone).toBe(true)
+    expect(await readRow()).toEqual({ shareTimeZone: false })
   })
 
   test("merges concurrent partial updates instead of losing a field", async () => {

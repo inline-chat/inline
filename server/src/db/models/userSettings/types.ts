@@ -19,6 +19,21 @@ export const defaultPrivacySettings = {
   appearInGlobalSearch: true,
 } as const
 
+/** Upper bound for each privacy exception list. */
+export const PRIVACY_RULE_MAX_TARGETS = 500
+
+/** Who can see one piece of a user's information. The owner always can. */
+export const PrivacyRuleSchema = z.object({
+  audience: z.enum(["everyone", "nobody"]),
+  /** User IDs that can see it when audience is nobody. */
+  alwaysShare: z.array(z.number().int().positive()).max(PRIVACY_RULE_MAX_TARGETS).optional().default([]),
+  /** User IDs that cannot see it when audience is everyone. */
+  neverShare: z.array(z.number().int().positive()).max(PRIVACY_RULE_MAX_TARGETS).optional().default([]),
+})
+
+export type PrivacyRule = z.output<typeof PrivacyRuleSchema>
+export type PrivacyRuleInput = z.input<typeof PrivacyRuleSchema>
+
 export const defaultComposeSettings = {
   replacePastedLinksWithTitles: false,
 } as const
@@ -53,6 +68,8 @@ export const UserSettingsGeneralSchema = z.object({
     .object({
       shareTimeZone: z.boolean().optional().default(defaultPrivacySettings.shareTimeZone),
       appearInGlobalSearch: z.boolean().optional().default(defaultPrivacySettings.appearInGlobalSearch),
+      /** Authoritative once written; shareTimeZone mirrors it for older clients. */
+      timeZone: PrivacyRuleSchema.optional(),
     })
     .optional()
     .default(defaultPrivacySettings),
