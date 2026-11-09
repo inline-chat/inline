@@ -1,15 +1,21 @@
 import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
+import { execFile, execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
+import { promisify } from "node:util"
+import { assertAdmissionSource, withCandidateRegistry } from "./npm-candidate-registry.mjs"
 
-const [artifactDir, hostVersion] = process.argv.slice(2)
-if (!artifactDir || !hostVersion) throw new Error("usage: check-openclaw-admission.mjs ARTIFACT_DIR HOST_VERSION")
+const args = process.argv.slice(2)
+const [artifactDir, hostVersion, mode] = args
+if (!artifactDir || !hostVersion || args.length > 3 || (mode && mode !== "--candidate")) {
+  throw new Error("usage: check-openclaw-admission.mjs ARTIFACT_DIR HOST_VERSION [--candidate]")
+}
 const manifest = JSON.parse(await readFile(path.join(artifactDir, "manifest.json"), "utf8"))
+assertAdmissionSource(manifest, mode === "--candidate")
 const plugin = manifest.packages.find((entry) => entry.name === "@inline-openclaw/inline")
 assert.ok(plugin)
 const archive = path.join(artifactDir, plugin.file)
@@ -17,6 +23,8 @@ assert.equal(createHash("sha256").update(await readFile(archive)).digest("hex"),
 const scratch = await mkdtemp(path.join(os.tmpdir(), "inline-openclaw-admission-"))
 const hostDir = path.join(scratch, "host")
 const home = path.join(scratch, "home")
+const exec = promisify(execFile)
+try {
 await mkdir(hostDir, { recursive: true })
 await mkdir(home, { recursive: true })
 await writeFile(path.join(hostDir, "package.json"), JSON.stringify({ private: true, dependencies: { openclaw: hostVersion } }))
@@ -29,11 +37,23 @@ const executable = path.join(hostDir, "node_modules/openclaw/openclaw.mjs")
 // The CI matrix may export OPENCLAW_VERSION=latest, but OpenClaw treats it as
 // its compatibility version. Give the real CLI the installed version, not an npm spec.
 const env = { ...process.env, OPENCLAW_VERSION: installedHost.version, HOME: home, OPENCLAW_STATE_DIR: path.join(home, "state") }
-const cli = (args) => execFileSync(process.execPath, [executable, ...args], {
-  env, cwd: hostDir, encoding: "utf8", timeout: 90_000,
-})
+const cli = async (args, registryEnv = {}) => {
+  // Keep the event loop free while npm inside the real CLI fetches candidates.
+  const result = await exec(process.execPath, [executable, ...args], {
+    env: { ...env, ...registryEnv }, cwd: hostDir, encoding: "utf8", timeout: 90_000, maxBuffer: 10 * 1024 * 1024,
+  })
+  if (result.stderr) process.stderr.write(result.stderr)
+  return result.stdout
+}
 console.log(`OpenClaw host ${installedHost.version}; plugin ${plugin.version}; source ${manifest.sourceSha}`)
-console.log(cli(["plugins", "install", `npm-pack:${archive}`, "--force", "--accept-capabilities"]))
+const install = async (registryEnv = {}) => {
+  console.log(await cli(["plugins", "install", `npm-pack:${archive}`, "--force", "--accept-capabilities"], registryEnv))
+}
+if (mode === "--candidate") {
+  await withCandidateRegistry(artifactDir, manifest, ({ env }) => install(env))
+} else {
+  await install()
+}
 const projectsRoot = path.join(home, "state/npm/projects")
 const projects = await readdir(projectsRoot)
 assert.equal(projects.length, 1, "one disposable OpenClaw plugin project")
@@ -41,36 +61,36 @@ const project = path.join(projectsRoot, projects[0])
 const pluginRoot = path.join(project, "node_modules/@inline-openclaw/inline")
 // `plugins list/inspect` only evaluate the light entry; the gateway imports the channel
 // entry lazily, so load it against this host to catch removed plugin-sdk exports. Run it
-// while the host's peer link to openclaw exists; the npm install below prunes it.
+// while the host's peer link to openclaw exists.
 const channelEntry = pathToFileURL(path.join(pluginRoot, "dist/channel-plugin-api.js")).href
 const channel = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e",
   `const { inlineChannelPlugin } = await import(${JSON.stringify(channelEntry)}); console.log(JSON.stringify({ id: inlineChannelPlugin?.id }))`,
 ], { env, cwd: hostDir, encoding: "utf8", timeout: 60_000 }).trim().split("\n").at(-1))
 assert.equal(channel.id, "inline", "Inline channel entry must load against the installed host")
-const candidateDeps = ["@inline-chat/realtime-sdk", "@inline-chat/protocol"].map((name) => {
+const dependencyArtifacts = ["@inline-chat/realtime-sdk", "@inline-chat/protocol"].map((name) => {
   const item = manifest.packages.find((entry) => entry.name === name)
-  assert.ok(item, `missing ${name} candidate`)
+  assert.ok(item, `missing ${name} artifact`)
   return item
-})
-execFileSync("npm", ["install", "--no-save", "--ignore-scripts", "--no-audit", "--no-fund",
-  ...candidateDeps.map((item) => path.join(artifactDir, item.file))], {
-  cwd: project, stdio: "inherit", timeout: 120_000,
 })
 const pluginRequire = createRequire(path.join(pluginRoot, "package.json"))
 const sdkEntry = pluginRequire.resolve("@inline-chat/realtime-sdk")
 const sdkRequire = createRequire(sdkEntry)
 const protocolEntry = sdkRequire.resolve("@inline-chat/protocol")
 for (const [item, installedEntry] of [[plugin, path.join(pluginRoot, "dist/index.js")],
-  [candidateDeps[0], sdkEntry], [candidateDeps[1], protocolEntry]]) {
+  [dependencyArtifacts[0], sdkEntry], [dependencyArtifacts[1], protocolEntry]]) {
+  assert.equal(createHash("sha256").update(await readFile(path.join(artifactDir, item.file))).digest("hex"), item.sha256)
   const candidateEntry = execFileSync("tar", ["-xOzf", path.join(artifactDir, item.file), "package/dist/index.js"])
   assert.deepEqual(await readFile(installedEntry), candidateEntry, `${item.name} runtime bytes differ from this SHA`)
 }
-const list = JSON.parse(cli(["plugins", "list", "--json"]))
+const list = JSON.parse(await cli(["plugins", "list", "--json"]))
 const entry = list.plugins?.find((item) => item.id === "inline")
 assert.ok(entry, "Inline must be discovered by the installed host")
 assert.notEqual(entry.status, "error", "Inline host registry error")
-const inspect = JSON.parse(cli(["plugins", "inspect", "inline", "--json"]))
+const inspect = JSON.parse(await cli(["plugins", "inspect", "inline", "--json"]))
 assert.equal(inspect.plugin?.id, "inline")
 assert.notEqual(inspect.plugin?.status, "error")
 assert.equal(inspect.plugin?.version, plugin.version)
 console.log(`Installed host registered Inline: ${JSON.stringify({ id: entry.id, status: entry.status, version: inspect.plugin.version, channel: channel.id })}`)
+} finally {
+  await rm(scratch, { recursive: true, force: true })
+}
