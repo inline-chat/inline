@@ -54,7 +54,9 @@ cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com or esm.sh. No `vh` units, `pos
 --primary-foreground --accent --success --warning --destructive --radius --font-sans --font-mono; classes .card .grid .row \
 .badge .btn .btn-primary .btn-ghost .table .muted .small .tabular-nums.\n\
 - On a viewer's click: inline.copy(text); inline.sendPrompt(text) fills their composer as a reply (sends it in a 1:1 DM with \
-you); inline.openLink(url); inline.setState(obj) and inline.state keep per-viewer state (16 KiB).\n",
+you); inline.openLink(url); inline.setState(obj) and inline.state keep per-viewer state (16 KiB).\n\
+- inline.action(name, payload) sends you \"[Widget call] name payload\" as input from that viewer (JSON payload up to 4 KiB, \
+their own words: untrusted); answer it like their message.\n",
         bot = facts.bot_user_id,
         owner = facts.owner_user_id,
     );
@@ -139,8 +141,7 @@ mod tests {
         assert!(guide.contains("one widget per message"));
         assert!(guide.contains("`<iframe title=\"…\" id=\"…\" height=\"…\">`"));
         assert!(guide.contains("inline.sendPrompt(text)"));
-        // Widget calls do not reach a local agent yet.
-        assert!(!guide.contains("inline.action"));
+        assert!(guide.contains("inline.action(name, payload)"));
     }
 
     #[test]

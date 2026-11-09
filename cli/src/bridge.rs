@@ -2790,6 +2790,14 @@ async fn run_provider_installation(
                     }
 
                     let Some(chat_id) = chat_id else {
+                        if let Some(answer) = widget_call_answer(delivery.event())
+                            && let Err(error) = bot.answer_message_action(answer).await
+                        {
+                            eprintln!(
+                                "Could not answer a widget call: {}",
+                                safe_diagnostic(&error.to_string())
+                            );
+                        }
                         if let Err(error) = delivery.ack().await {
                             recover_failed_delivery(
                                 &bot,

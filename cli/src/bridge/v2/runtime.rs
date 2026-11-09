@@ -767,6 +767,27 @@ impl Runtime {
                 self.answer(*interaction_id, toast).await;
                 Ok(())
             }
+            ClientEvent::MessageWidgetCalled {
+                interaction_id,
+                chat_id,
+                message_id,
+                actor_user_id,
+                widget_id,
+                name,
+                payload,
+            } => {
+                let toast = self
+                    .on_widget_call(
+                        interaction_id.get(),
+                        chat_id.get(),
+                        message_id.get(),
+                        actor_user_id.get(),
+                        &widget_call_text(widget_id, name, payload, message_id.get()),
+                    )
+                    .await;
+                self.answer(*interaction_id, toast).await;
+                Ok(())
+            }
             ClientEvent::MessageFormSubmitted {
                 interaction_id,
                 chat_id,
@@ -2153,6 +2174,56 @@ impl Runtime {
         &mut self,
         message: &MessageRecord,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        self.intake(message, None).await.map(drop)
+    }
+
+    /// A viewer's `inline.action` call from a widget in this agent's message:
+    /// input from them as if they had replied to that message with
+    /// `text`, under the same access and addressing rules. The toast for
+    /// the viewer: none when it reached the agent.
+    async fn on_widget_call(
+        &mut self,
+        interaction_id: i64,
+        chat_id: i64,
+        message_id: i64,
+        actor: i64,
+        text: &str,
+    ) -> Option<String> {
+        let message = MessageRecord {
+            chat_id: InlineId::new(chat_id),
+            message_id: InlineId::new(message_id),
+            sender_id: InlineId::new(actor),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_secs() as i64)
+                .max(self.config.accept_messages_after),
+            is_outgoing: false,
+            content: inline_client::MessageContent::Text {
+                text: text.to_owned(),
+            },
+            reply_to_message_id: Some(InlineId::new(message_id)),
+            metadata: Default::default(),
+            transaction: None,
+        };
+        match self.intake(&message, Some(interaction_id)).await {
+            Ok(Some(IntakeDecision::Act { .. })) => None,
+            Ok(decision) => Some(widget_call_refusal(decision).to_owned()),
+            Err(error) => {
+                log::warn!(target: "inline::bridge::v2", "chat={chat_id} widget call failed: {error}");
+                Some("The agent couldn't take this. Try again.".to_owned())
+            }
+        }
+    }
+
+    /// One message's intake, and the decision it got (`None` when it was
+    /// never weighed: a replay, the agent's own, a service row). With
+    /// `widget_call` (its interaction ID) the message stands in for a widget
+    /// call: it is acted on or refused, never kept as context.
+    async fn intake(
+        &mut self,
+        message: &MessageRecord,
+        widget_call: Option<i64>,
+    ) -> Result<Option<IntakeDecision>, Box<dyn std::error::Error>> {
         // Message updates and reconnect catch-up can redeliver old input.
         // v2 has its own ledger, but work already accepted by v1 must never
         // run again after enabling v2. Read its receipt without changing it.
@@ -2162,7 +2233,7 @@ impl Runtime {
                 message.chat_id, message.message_id
             ))?
         {
-            return Ok(());
+            return Ok(None);
         }
         if message.is_outgoing
             || message.timestamp < self.config.accept_messages_after
@@ -2171,7 +2242,7 @@ impl Runtime {
             || message.metadata.is_service
             || message.metadata.agent_session.is_some()
         {
-            return Ok(());
+            return Ok(None);
         }
         // A sender the local store has not met yet: ask Inline whether it is
         // an agent, so the loop cap sees agents it never saw before.
@@ -2310,9 +2381,19 @@ impl Runtime {
                 {
                     log::warn!(target: "inline::bridge::v2", "join failed: {error}");
                 }
-                self.act(message, &group, &decision, required, grants, participation)
-                    .await
+                self.act(
+                    message,
+                    &group,
+                    &decision,
+                    required,
+                    grants,
+                    participation,
+                    widget_call,
+                )
+                .await?;
+                Ok(Some(decision))
             }
+            IntakeDecision::Observe { .. } if widget_call.is_some() => Ok(Some(decision)),
             IntakeDecision::Observe { consider, .. } => {
                 if let Some(work) = self.works.get(&chat_id) {
                     // Batched in the work and delivered at its next native
@@ -2346,9 +2427,9 @@ impl Runtime {
                             .await;
                     }
                 }
-                Ok(())
+                Ok(Some(decision))
             }
-            IntakeDecision::Skip { .. } => Ok(()),
+            IntakeDecision::Skip { .. } => Ok(Some(decision)),
         }
     }
 
@@ -2373,6 +2454,7 @@ impl Runtime {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn act(
         &mut self,
         message: &MessageRecord,
@@ -2381,6 +2463,7 @@ impl Runtime {
         required: Operation,
         grants: Grants,
         participation: Option<proto::AgentParticipation>,
+        widget_call: Option<i64>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let chat_id = group.chat_id;
         // Addressing the agent can make it follow (Inline's opener rule), so
@@ -2497,7 +2580,12 @@ impl Runtime {
             }
             return Ok(());
         }
-        let id = input_id(self.config.bot_user_id, chat_id, group.message_id, "direct");
+        // Each widget call is its own input, though calls share their message.
+        let kind = widget_call.map_or_else(
+            || "direct".to_owned(),
+            |interaction| format!("widget-{interaction}"),
+        );
+        let id = input_id(self.config.bot_user_id, chat_id, group.message_id, &kind);
         // Joining a group thread: the recent conversation comes along as
         // untrusted context (spec §5.3).
         let context =
@@ -3965,6 +4053,73 @@ fn with_anchor(
         format!("{anchor}\n\n{}", context.conversation)
     };
     Some(context)
+}
+
+/// The most of a widget call's payload a turn shows: the server's own cap.
+const MAX_WIDGET_PAYLOAD_BYTES: usize = 4 * 1024;
+
+/// A widget call as the turn's text. Every part is the viewer's, so it is
+/// untrusted input like any message they type; the payload is cut to 4 KiB.
+fn widget_call_text(widget_id: &str, name: &str, payload: &[u8], message_id: i64) -> String {
+    let clean = |text: &str| -> String {
+        text.chars()
+            .map(|character| {
+                if character.is_control() {
+                    ' '
+                } else {
+                    character
+                }
+            })
+            .collect()
+    };
+    let full = String::from_utf8_lossy(payload);
+    let mut end = full.len().min(MAX_WIDGET_PAYLOAD_BYTES);
+    while !full.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut payload = clean(full[..end].trim());
+    if end < full.len() {
+        payload.push('…');
+    }
+    let mut text = format!("[Widget call] {}", clean(name));
+    if !payload.is_empty() {
+        text.push(' ');
+        text.push_str(&payload);
+    }
+    text.push_str(&format!(
+        " (from the widget \"{}\" on message {message_id})",
+        clean(widget_id)
+    ));
+    text
+}
+
+/// Why a widget call did not reach the agent, for the viewer's toast.
+fn widget_call_refusal(decision: Option<IntakeDecision>) -> &'static str {
+    use inline_agent_bridge::group::SkipReason;
+    match decision {
+        Some(
+            IntakeDecision::Observe {
+                reason: ObserveReason::NotGranted,
+                ..
+            }
+            | IntakeDecision::Skip {
+                reason: SkipReason::NotGranted,
+            },
+        ) => "You don't have access to ask this agent.",
+        Some(IntakeDecision::Skip {
+            reason: SkipReason::Muted | SkipReason::NotParticipating,
+        }) => "This agent isn't taking requests in this thread.",
+        Some(
+            IntakeDecision::Observe {
+                reason: ObserveReason::LoopCapReached,
+                ..
+            }
+            | IntakeDecision::Skip {
+                reason: SkipReason::LoopCapReached,
+            },
+        ) => "This agent has paused here for now.",
+        _ => "This widget isn't connected to the agent here.",
+    }
 }
 
 fn plural(count: usize) -> &'static str {
