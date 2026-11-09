@@ -118,6 +118,16 @@ describe("packed artifact", () => {
     expect(sidecar).not.toContain("sourceMappingURL")
   }, 60_000)
 
+  it("copies every packaged plugin file into the Umbrel smoke container", () => {
+    // The npm publish gate loads the plugin from this list; a missing module fails its import.
+    const files = (JSON.parse(readFileSync(path.join(packageRoot, "package.json"), "utf8")) as { files: string[] }).files
+      .filter((file) => file.startsWith("plugin/inline/"))
+      .map((file) => file.slice("plugin/inline/".length))
+    const script = readFileSync(path.join(repoRoot, "scripts", "ci", "check-umbrel-hermes.sh"), "utf8")
+    const copied = script.match(/for file in ([^;]+); do\n\s+docker cp "plugins\/hermes-agent\/plugin\/inline/)?.[1].split(/\s+/)
+    expect(copied?.sort()).toEqual(files.sort())
+  })
+
   it("installs the packed tarball and runs the shipped inline-hermes bin", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "inline-hermes-pack-"))
     try {
