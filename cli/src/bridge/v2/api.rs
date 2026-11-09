@@ -342,6 +342,7 @@ pub(crate) async fn search_messages(
             limit: Some(limit),
             offset_id,
             filter: None,
+            count_only: None,
         }
     )?
     .messages)

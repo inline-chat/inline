@@ -40,6 +40,7 @@ mod tests {
     #[test]
     fn filtered_empty_page_retains_the_scanned_cursor_and_existing_fields() {
         let mut payload = proto::SearchMessagesResult {
+            total_count: None,
             seq: Some(41),
             messages: vec![
                 proto::Message {

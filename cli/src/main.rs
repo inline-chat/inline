@@ -1912,6 +1912,7 @@ impl MessagesSearchArgs {
             limit,
             offset_id,
             filter: self.filter.map(MessageSearchFilter::protocol_value),
+            count_only: None,
         })
     }
 }
@@ -3987,6 +3988,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .call(proto::ReadMessagesInput {
                             peer_id: Some(peer),
                             max_id,
+                            read_activity: None,
                         })
                         .await?;
                     if cli.json {
@@ -7842,6 +7844,7 @@ mod cli_parsing_tests {
         let output = TranslatedSearchMessagesOutput {
             page: MessagePage::new(&[], false),
             payload: proto::SearchMessagesResult {
+                total_count: None,
                 seq: Some(43),
                 messages: vec![proto::Message {
                     id: 8,

@@ -1482,6 +1482,7 @@ pub(crate) async fn run(
                     .call(proto::ReadMessagesInput {
                         peer_id: Some(target.peer),
                         max_id: None,
+                        read_activity: None,
                     })
                     .await;
                 batch.record(&target.label, result, |_| {
