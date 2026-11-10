@@ -2349,7 +2349,11 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("debounces rapid inbound text messages into one turn", async () => {
+  it.each([
+    { source: "channel", inbound: { debounceMs: 0, byChannel: { inline: 20 } }, account: {} },
+    { source: "global", inbound: { debounceMs: 20 }, account: {} },
+    { source: "account", inbound: { debounceMs: 0 }, account: { debounceMs: 20 } },
+  ])("batches rapid inbound text using the $source debounce setting", async ({ inbound, account }) => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -2381,161 +2385,43 @@ describe("inline/monitor", () => {
       },
     })
 
-    const handle = await harness.monitorInlineProvider({
-      cfg: {
-        messages: {
-          inbound: {
-            debounceMs: 0,
-            byChannel: {
-              inline: 20,
-            },
-          },
-        },
-      } as any,
-      account: buildAccount({ dmPolicy: "open" }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
-      abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    })
+    // Both real receipt writes must finish before the simulated 20 ms elapse.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    let handle: Awaited<ReturnType<MonitorHarness["monitorInlineProvider"]>> | undefined
+    try {
+      handle = await harness.monitorInlineProvider({
+        cfg: { messages: { inbound } } as any,
+        account: buildAccount({ dmPolicy: "open", ...account }),
+        runtime: { log: vi.fn(), error: vi.fn() } as any,
+        abortSignal: new AbortController().signal,
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      })
+      await handle.done
+      await vi.advanceTimersByTimeAsync(19)
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      vi.useRealTimers()
+      await waitFor(() => {
+        expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+        expect(harness.calls.resolveAgentRoute).toHaveBeenCalledTimes(1)
+        expect(harness.calls.finalizeInboundContext).toHaveBeenCalledTimes(1)
+        expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+          expect.objectContaining({
+            RawBody: "first line\nsecond line",
+            MessageSid: "1002",
+            MessageSids: ["1001", "1002"],
+            MessageSidFirst: "1001",
+            MessageSidLast: "1002",
+            From: "inline:42",
+            To: "inline:7",
+          }),
+        )
+      })
 
-    await waitFor(() => {
-      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.resolveAgentRoute).toHaveBeenCalledTimes(1)
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledTimes(1)
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          RawBody: "first line\nsecond line",
-          MessageSid: "1002",
-          MessageSids: ["1001", "1002"],
-          MessageSidFirst: "1001",
-          MessageSidLast: "1002",
-          From: "inline:42",
-          To: "inline:7",
-        }),
-      )
-    })
-
-    await handle.stop()
-  }, 30_000)
-
-  it("uses global inbound debounceMs when Inline channel override is absent", async () => {
-    const harness = await setupMonitorHarness({
-      events: [
-        {
-          kind: "message.new",
-          chatId: 7n,
-          message: {
-            id: 1001n,
-            date: 1_700_000_000n,
-            fromId: 42n,
-            message: "first global line",
-          },
-        },
-        {
-          kind: "message.new",
-          chatId: 7n,
-          message: {
-            id: 1002n,
-            date: 1_700_000_001n,
-            fromId: 42n,
-            message: "second global line",
-          },
-        },
-      ],
-      chats: {
-        "7": { kind: "direct", title: "Alice" },
-      },
-      dispatchReplyPayload: {
-        text: "batched reply",
-      },
-    })
-
-    const handle = await harness.monitorInlineProvider({
-      cfg: {
-        messages: {
-          inbound: {
-            debounceMs: 20,
-          },
-        },
-      } as any,
-      account: buildAccount({ dmPolicy: "open" }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
-      abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    })
-
-    await waitFor(() => {
-      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          RawBody: "first global line\nsecond global line",
-          MessageSid: "1002",
-          MessageSids: ["1001", "1002"],
-          MessageSidFirst: "1001",
-          MessageSidLast: "1002",
-        }),
-      )
-    })
-
-    await handle.stop()
-  }, 30_000)
-
-  it("uses Inline account debounceMs to batch rapid inbound text messages", async () => {
-    const harness = await setupMonitorHarness({
-      events: [
-        {
-          kind: "message.new",
-          chatId: 7n,
-          message: {
-            id: 1001n,
-            date: 1_700_000_000n,
-            fromId: 42n,
-            message: "first account-level line",
-          },
-        },
-        {
-          kind: "message.new",
-          chatId: 7n,
-          message: {
-            id: 1002n,
-            date: 1_700_000_001n,
-            fromId: 42n,
-            message: "second account-level line",
-          },
-        },
-      ],
-      chats: {
-        "7": { kind: "direct", title: "Alice" },
-      },
-      dispatchReplyPayload: {
-        text: "batched reply",
-      },
-    })
-
-    const handle = await harness.monitorInlineProvider({
-      cfg: {} as any,
-      account: buildAccount({
-        dmPolicy: "open",
-        debounceMs: 20,
-      }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
-      abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    })
-
-    await waitFor(() => {
-      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          RawBody: "first account-level line\nsecond account-level line",
-          MessageSid: "1002",
-          From: "inline:42",
-          To: "inline:7",
-        }),
-      )
-    })
-
-    await handle.stop()
+    } finally {
+      vi.useRealTimers()
+      await handle?.stop()
+    }
   }, 30_000)
 
   it("lets Inline account debounceMs 0 disable global inbound debounce", async () => {
