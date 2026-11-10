@@ -1126,7 +1126,7 @@ enum BotsCommand {
     Delete(BotsConfirmArgs),
     #[command(
         about = "Show or change a bot's agent settings, such as friendly or detailed output",
-        after_help = "Examples:\n  inline bots settings --bot-user-id 42\n  inline bots settings --bot-user-id 42 --output-mode friendly\n  inline bots settings --bot-user-id 42 --chat-id 7 --output-mode detailed\n  inline bots settings --bot-user-id 42 --chat-id 7 --output-mode default\n\nWithout --output-mode, prints the current settings. Detailed shows every step; friendly shows short updates and the answer.\nThe owner and people with configure access can change them."
+        after_help = "Examples:\n  inline bots settings --bot-user-id 42\n  inline bots settings --bot-user-id 42 --output-mode friendly\n  inline bots settings --bot-user-id 42 --output-mode default\n  inline bots settings --bot-user-id 42 --chat-id 7 --output-mode detailed\n  inline bots settings --bot-user-id 42 --chat-id 7 --output-mode default\n\nWithout --output-mode, prints the current settings. Detailed shows every step; friendly shows short updates and the answer.\nThe owner and people with configure access can change them."
     )]
     Settings(BotsSettingsArgs),
     #[command(about = "List, grant, or revoke people's access to a bot")]
@@ -1543,7 +1543,7 @@ struct BotsSettingsArgs {
     #[arg(
         long,
         value_enum,
-        help = "Output mode: the bot's default, or this thread's with --chat-id (`default` clears a thread's override)"
+        help = "Select an output mode for the bot or --chat-id thread. Use default to clear the selection."
     )]
     output_mode: Option<bots::BotOutputMode>,
 
