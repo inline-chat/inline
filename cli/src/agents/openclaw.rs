@@ -505,12 +505,18 @@ fn inspect_plugin(
     if !output.success {
         // The host reports an actual lookup miss as exit 1, even with --json.
         // A broken config, permission error, or crash must not authorize --force.
+        let envelope = serde_json::from_str::<serde_json::Value>(&output.stdout).ok();
+        let message = envelope
+            .as_ref()
+            .filter(|value| value["ok"] == false && value["error"]["type"] == "cli_error")
+            .and_then(|value| value["error"]["message"].as_str());
+        let detail = message.unwrap_or(&output.stderr);
+        let is_lookup_miss = |line: &str| {
+            let line = line.trim();
+            line == "Plugin not found: inline" || line.starts_with("Plugin not found: inline. Run ")
+        };
         if output.exit_code == Some(1)
-            && output.stderr.lines().any(|line| {
-                let line = line.trim();
-                line == "Plugin not found: inline"
-                    || line.starts_with("Plugin not found: inline. Run ")
-            })
+            && message.map_or_else(|| output.stderr.lines().any(is_lookup_miss), is_lookup_miss)
         {
             return Ok(PluginState::Missing);
         }
@@ -518,7 +524,8 @@ fn inspect_plugin(
             "plugin_probe_failed",
             format!(
                 "could not inspect the OpenClaw Inline plugin (exit {:?}): {}",
-                output.exit_code, output.stderr
+                output.exit_code,
+                crate::diagnostics::safe_text(detail)
             ),
         )
         .into());
@@ -1218,6 +1225,20 @@ mod tests {
             inspect_plugin(&output, current_compatibility()).unwrap(),
             PluginState::Missing
         ));
+        let missing = std::mem::take(&mut output.stderr);
+        output.stdout =
+            serde_json::json!({"ok":false,"error":{"type":"cli_error","message":missing}})
+                .to_string();
+        assert!(matches!(
+            inspect_plugin(&output, current_compatibility()).unwrap(),
+            PluginState::Missing
+        ));
+        output.exit_code = Some(2);
+        assert!(inspect_plugin(&output, current_compatibility()).is_err());
+        output.exit_code = Some(1);
+        output.stdout = r#"{"ok":false,"error":{"type":"cli_error","message":"Plugin not found: inline-other"}}"#.into();
+        assert!(inspect_plugin(&output, current_compatibility()).is_err());
+        output.stdout.clear();
         output.stderr = "config load failed: permission denied".into();
         assert!(inspect_plugin(&output, current_compatibility()).is_err());
         output.success = true;

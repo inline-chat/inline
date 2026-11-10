@@ -192,6 +192,20 @@ pub(super) async fn require_success_with_environment(
         run_with_environment(executable, prefix, args, stdin, timeout, environment).await?;
     if !output.success {
         let label = args.first().copied().unwrap_or("command");
+        let diagnostic = if output.stderr.is_empty() && args.contains(&"--json") {
+            serde_json::from_str::<serde_json::Value>(&output.stdout)
+                .ok()
+                .filter(|value| value["ok"] == false)
+                .and_then(|value| {
+                    value["error"]
+                        .as_str()
+                        .or_else(|| value["error"]["message"].as_str())
+                        .map(crate::diagnostics::safe_text)
+                })
+                .unwrap_or_default()
+        } else {
+            output.stderr
+        };
         return Err(io::Error::other(format!(
             "{} {label} command failed ({}): {}",
             program_label(executable),
@@ -199,10 +213,10 @@ pub(super) async fn require_success_with_environment(
                 .exit_code
                 .map(|code| format!("exit {code}"))
                 .unwrap_or_else(|| "terminated by signal".into()),
-            if output.stderr.is_empty() {
-                "no stderr diagnostic was returned"
+            if diagnostic.is_empty() {
+                "no diagnostic was returned"
             } else {
-                &output.stderr
+                &diagnostic
             }
         ))
         .into());
@@ -332,6 +346,23 @@ mod tests {
         assert!(text.contains("exit 23"));
         assert!(text.contains("certificate expired"));
         assert!(!text.contains("fixture-secret"));
+    }
+
+    #[tokio::test]
+    async fn reports_only_the_redacted_error_from_host_json() {
+        let error = require_success(
+            Path::new("/bin/sh"),
+            &[],
+            &["-c", r#"echo '{"ok":false,"action":"private-metadata","error":"Gateway install blocked: TOKEN=fixture-secret"}'; exit 1"#, "--json"],
+            None,
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("Gateway install blocked"));
+        assert!(!error.contains("fixture-secret"));
+        assert!(!error.contains("private-metadata"));
     }
 
     #[tokio::test]
