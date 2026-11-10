@@ -59,6 +59,12 @@ for (const entry of stageEntries) {
   })
 }
 await cp(path.join(repoRoot, ".oxlintignore"), path.join(stageRoot, ".oxlintignore"))
+// The package tests check the Umbrel smoke script against the packaged plugin files.
+await mkdir(path.join(stageRoot, "scripts", "ci"), { recursive: true })
+await cp(
+  path.join(repoRoot, "scripts", "ci", "check-umbrel-hermes.sh"),
+  path.join(stageRoot, "scripts", "ci", "check-umbrel-hermes.sh"),
+)
 
 if (candidateSdkTarball || candidateProtocolTarball) {
   if (!candidateSdkTarball || !candidateProtocolTarball) {
