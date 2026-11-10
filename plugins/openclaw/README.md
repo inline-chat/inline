@@ -50,12 +50,11 @@ Breaking changes in 1.0. The behavior changes match the rules Hermes 1.0 follows
 ## Install
 
 `1.0` supports OpenClaw `2026.11.1` and newer with no upper version cap.
-Install the plugin version for your OpenClaw release line. The current stable
-release is `1.0.0`.
+Install the plugin version for your OpenClaw release line. The stable release is `0.0.72`. To opt into the 1.0 alpha, use the exact install below.
 
 | OpenClaw line | Inline plugin | Exact install |
 | --- | --- | --- |
-| `2026.11.1` and newer | `1.0.0` | `openclaw plugins install npm:@inline-openclaw/inline@1.0.0 --force --accept-capabilities` |
+| `2026.11.1` and newer | `1.0.0-alpha.1` | `openclaw plugins install npm:@inline-openclaw/inline@1.0.0-alpha.1 --force --accept-capabilities` |
 | `2026.8.2` through `2026.10.x` | `0.0.72` | `openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities` |
 | `2026.7.x` (`>=2026.7.1`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 | `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
@@ -68,14 +67,14 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `1.0.0` | `>=2026.11.1` | `0.0.22` | Stable | First major. Async host SDK and `MessagePresentation` only; see Upgrading to 1.0. Carries widget calls and submitted forms, so the protocol `0.0.14` and SDK `0.0.22` releases come first. |
-| `0.0.72` | `>=2026.8.2` | `0.0.19` | Legacy | Last line for OpenClaw `2026.8.2`–`2026.10.x`; 1.0 requires `2026.11.1`. Loads on OpenClaw `2026.10.5` and newer, which removed `readJsonFileWithFallback`; `0.0.71` and older fail to register the channel there. Matches `toolsBySender` on numeric sender ids only. |
+| `1.0.0-alpha.1` | `>=2026.11.1` | `0.0.22` | Prerelease | First major. Async host SDK and `MessagePresentation` only; see Upgrading to 1.0. Carries widget calls and submitted forms, so the protocol `0.0.14` and SDK `0.0.22` releases come first. |
+| `0.0.72` | `>=2026.8.2` | `0.0.19` | Stable | Last line for OpenClaw `2026.8.2`–`2026.10.x`; 1.0 requires `2026.11.1`. Loads on OpenClaw `2026.10.5` and newer, which removed `readJsonFileWithFallback`; `0.0.71` and older fail to register the channel there. Matches `toolsBySender` on numeric sender ids only. |
 | `0.0.71` | `>=2026.8.2` | `0.0.19` | Previous | Adds opt-in quiet agent activity timelines and the expanded chat-history protocol while retaining recovery and install provenance diagnostics. |
 | `0.0.70` | `>=2026.8.2` | `0.0.18` | Previous | Preserves native reply suppression and send-policy decisions, with September approvals and shutdown cancellation. |
 | `0.0.69` | `>=2026.8.2` | `0.0.18` | Previous | Added September system change approvals and shutdown cancellation. |
 | `0.0.68` | `2026.8.2` | `0.0.18` | Previous | Retries stalled sync autonomously and isolates unrelated chat handlers while retaining ordered acknowledgements. |
 
-### Release 1.0.0
+### Release 1.0.0-alpha.1
 
 - Requires OpenClaw `2026.11.1` and uses only its async SDK APIs and `MessagePresentation` buttons, ahead of the January 2027 removals.
 - Quiet by default: Working in the header, then the answer. `streaming.mode: "progress"` keeps a progress card, which names work as "Running a command" and shows command text only when `commandText` is `raw`.
@@ -118,7 +117,7 @@ bun run --cwd plugins/openclaw check:host /path/to/node_modules/openclaw
 To install this release from npm:
 
 ```sh
-openclaw plugins install npm:@inline-openclaw/inline@1.0.0 --force --accept-capabilities
+openclaw plugins install npm:@inline-openclaw/inline@1.0.0-alpha.1 --force --accept-capabilities
 ```
 
 If the plugin is already installed, update in place:
