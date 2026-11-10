@@ -200,7 +200,9 @@ public enum TextLayouter {
     }
 
     let string = attributed.string as NSString
-    let typesetter = CTTypesetterCreateWithAttributedString(attributed as CFAttributedString)
+    let typesetter = CTTypesetterCreateWithAttributedString(
+      withBaseDirections(attributed, string: string, style: style) as CFAttributedString
+    )
     var lines: [TextLayout.Line] = []
     var y: CGFloat = 0
     var widest: CGFloat = 0
@@ -267,13 +269,55 @@ public enum TextLayouter {
   }
 
   private static func direction(of string: NSString, from start: Int, style: TextLayoutStyle) -> TextDirection {
+    TextDirection.dominant(in: string, range: paragraphContent(of: string, from: start), fallback: style.fallbackDirection)
+  }
+
+  /// The paragraph starting at `start`, without its line break.
+  private static func paragraphContent(of string: NSString, from start: Int) -> NSRange {
     let end = string.rangeOfCharacter(from: .newlines, range: NSRange(location: start, length: string.length - start))
     let paragraphEnd = end.location == NSNotFound ? string.length : end.location
-    return TextDirection.firstStrong(
-      in: string,
-      range: NSRange(location: start, length: paragraphEnd - start),
-      fallback: style.fallbackDirection
-    )
+    return NSRange(location: start, length: paragraphEnd - start)
+  }
+
+  /// Core Text picks a paragraph's base direction from its first strong letter. Where the
+  /// dominant direction disagrees, say Persian prose that opens with "Claude Code", the
+  /// paragraph gets an explicit base direction so runs, punctuation and wrapping follow it.
+  private static func withBaseDirections(
+    _ attributed: NSAttributedString,
+    string: NSString,
+    style: TextLayoutStyle
+  ) -> NSAttributedString {
+    var overridden: NSMutableAttributedString?
+    var start = 0
+    while start < string.length {
+      let content = paragraphContent(of: string, from: start)
+      let dominant = TextDirection.dominant(in: string, range: content, fallback: style.fallbackDirection)
+      let firstStrong = TextDirection.firstStrong(in: string, range: content, fallback: style.fallbackDirection)
+      let next = min(string.length, NSMaxRange(content) + 1)
+      if dominant != firstStrong {
+        let copy = overridden ?? NSMutableAttributedString(attributedString: attributed)
+        overridden = copy
+        copy.addAttribute(
+          NSAttributedString.Key(kCTParagraphStyleAttributeName as String),
+          value: baseDirectionStyle(dominant),
+          range: NSRange(location: start, length: next - start)
+        )
+      }
+      start = next
+    }
+    return overridden ?? attributed
+  }
+
+  private static func baseDirectionStyle(_ direction: TextDirection) -> CTParagraphStyle {
+    var writingDirection: CTWritingDirection = direction == .rightToLeft ? .rightToLeft : .leftToRight
+    return withUnsafeBytes(of: &writingDirection) { bytes in
+      var setting = CTParagraphStyleSetting(
+        spec: .baseWritingDirection,
+        valueSize: MemoryLayout<CTWritingDirection>.size,
+        value: bytes.baseAddress!
+      )
+      return CTParagraphStyleCreate(&setting, 1)
+    }
   }
 
   private static func endsWithHardBreak(_ string: NSString, range: NSRange) -> Bool {

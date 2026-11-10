@@ -45,6 +45,42 @@ public enum TextDirection: Hashable, Sendable {
     return fallback
   }
 
+  /// Base direction of prose: the direction with more words, a tie going to the first strong
+  /// letter.
+  ///
+  /// Persian and Hebrew prose routinely opens with Latin product names, identifiers and paths,
+  /// which the first-strong rule alone reads as left to right. A word is a run of letters with
+  /// the marks and joiners Arabic-script words carry inside them; it counts for the direction of
+  /// its first letter. Same contract as InlineKit's `BlockContentDirection` and the server's
+  /// `blockDirection.ts`. Text with no letters uses `fallback`.
+  public static func dominant(in string: NSString, range: NSRange, fallback: TextDirection) -> TextDirection {
+    guard range.length > 0 else { return fallback }
+    var rightToLeftWords = 0
+    var leftToRightWords = 0
+    var firstStrong: TextDirection?
+    var inWord = false
+    for scalar in string.substring(with: range).unicodeScalars {
+      switch scalar.properties.generalCategory {
+      case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter, .letterNumber:
+        guard !inWord else { continue }
+        inWord = true
+        let direction: TextDirection = isRightToLeftLetter(scalar) ? .rightToLeft : .leftToRight
+        if direction == .rightToLeft { rightToLeftWords += 1 } else { leftToRightWords += 1 }
+        if firstStrong == nil { firstStrong = direction }
+      case .nonspacingMark, .spacingMark, .enclosingMark:
+        continue
+      case .format where scalar.value == 0x200C || scalar.value == 0x200D:
+        continue
+      default:
+        inWord = false
+      }
+    }
+    if rightToLeftWords != leftToRightWords {
+      return rightToLeftWords > leftToRightWords ? .rightToLeft : .leftToRight
+    }
+    return firstStrong ?? fallback
+  }
+
   static func isRightToLeftLetter(_ scalar: Unicode.Scalar) -> Bool {
     switch scalar.value {
     case 0x0590 ... 0x08FF, // Hebrew, Arabic, Syriac, Thaana, NKo, Samaritan, Mandaic, Arabic Extended

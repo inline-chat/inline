@@ -186,17 +186,18 @@ private struct Builder {
 
   mutating func layout(list: RichList, path: RichPath, x: CGFloat, width: CGFloat, depth: Int) -> Bool {
     guard depth <= metrics.maximumDepth, !list.items.isEmpty else { return false }
-    let isRightToLeft = list.isRightToLeft
     let markers = list.items.map { unbounded($0.marker) }
     let widestMarker = markers.map(\.size.width).max() ?? 0
     let markerWidth = grid.ceil(max(metrics.unorderedMarkerWidth, widestMarker + metrics.listMarkerGap))
     let isNested = depth > 1
     let inset = metrics.listLeadingInset + (isNested ? metrics.nestedListIndent : 0)
-    let listX = isRightToLeft ? x : x + inset
     let listWidth = max(1, width - inset)
     let childWidth = max(1, listWidth - markerWidth)
     for (index, item) in list.items.enumerated() {
       if index > 0 { y += metrics.listItemSpacing }
+      // Each item reads in its own direction, so its marker sits on its own leading side.
+      let isRightToLeft = item.isRightToLeft ?? list.isRightToLeft
+      let listX = isRightToLeft ? x : x + inset
       let itemPath = path.appending(index)
       let marker = markers[index]
       let markerFrame = CGRect(

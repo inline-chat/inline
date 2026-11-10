@@ -1,3 +1,4 @@
+import CoreText
 import CoreGraphics
 import Foundation
 import Testing
@@ -49,7 +50,7 @@ struct TextLayoutTests {
     #expect(trailing.size.height == plain.size.height)
   }
 
-  @Test("Paragraph direction follows the first strong letter")
+  @Test("Paragraph direction follows the majority of words, ties going to the first strong letter")
   func direction() {
     let persian = TextLayouter.layout(Fixtures.text("سلام دنیا"), maximumWidth: 300, grid: grid)
     #expect(persian.lines.first?.direction == .rightToLeft)
@@ -67,6 +68,21 @@ struct TextLayoutTests {
 
     let mixed = TextLayouter.layout(Fixtures.text("Hello\nسلام"), maximumWidth: 300, grid: grid)
     #expect(mixed.lines.map(\.direction) == [.leftToRight, .rightToLeft])
+
+    let latinFirst = TextLayouter.layout(Fixtures.text("Claude Code حداقل نسخه لازم دارد"), maximumWidth: 300, grid: grid)
+    #expect(latinFirst.lines.first?.direction == .rightToLeft)
+    let persianName = TextLayouter.layout(Fixtures.text("I talked to محمد about it"), maximumWidth: 300, grid: grid)
+    #expect(persianName.lines.first?.direction == .leftToRight)
+  }
+
+  @Test("Core Text lays a dominant right-to-left paragraph out right to left")
+  func dominantBaseDirection() throws {
+    let string = "Claude Code حداقل نسخه لازم دارد."
+    let layout = TextLayouter.layout(Fixtures.text(string), maximumWidth: 1_000, grid: grid)
+    let line = try #require(layout.lines.first)
+    // With a right-to-left base, the opening Latin run sits on the right, after the Persian.
+    let latinX = CTLineGetOffsetForStringIndex(line.ctLine, 0, nil)
+    #expect(latinX > line.frame.width / 2)
   }
 
   @Test("Aligning moves right-to-left lines to the trailing edge")

@@ -26,10 +26,13 @@ public struct RichList: Hashable, Sendable {
     /// "•", "3." or a checkbox, styled like the body text.
     public var marker: MessageText
     public var children: [RichBlock]
+    /// The item's own direction, which places its marker; nil follows the list.
+    public var isRightToLeft: Bool?
 
-    public init(marker: MessageText, children: [RichBlock]) {
+    public init(marker: MessageText, children: [RichBlock], isRightToLeft: Bool? = nil) {
       self.marker = marker
       self.children = children
+      self.isRightToLeft = isRightToLeft
     }
   }
 
