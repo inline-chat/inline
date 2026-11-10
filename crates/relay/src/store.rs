@@ -247,7 +247,9 @@ impl RelayStore {
     pub fn kv_get(&self, key: &str) -> StoreResult<Option<String>> {
         Ok(self
             .lock()
-            .query_row("SELECT value FROM kv WHERE key = ?1", [key], |row| row.get(0))
+            .query_row("SELECT value FROM kv WHERE key = ?1", [key], |row| {
+                row.get(0)
+            })
             .optional()?)
     }
 
@@ -353,7 +355,12 @@ impl RelayStore {
     }
 
     /// Records a failed attempt.
-    pub fn defer_send(&self, request_id: &str, attempts: u32, next_attempt_at: i64) -> StoreResult<()> {
+    pub fn defer_send(
+        &self,
+        request_id: &str,
+        attempts: u32,
+        next_attempt_at: i64,
+    ) -> StoreResult<()> {
         self.lock().execute(
             "UPDATE pending_sends SET attempts = ?2, next_attempt_at = ?3 WHERE request_id = ?1",
             params![request_id, attempts, next_attempt_at],
@@ -397,7 +404,10 @@ impl RelayStore {
                 |row| row.get(0),
             )
             .optional()?;
-        transaction.execute("DELETE FROM pending_sends WHERE request_id = ?1", [request_id])?;
+        transaction.execute(
+            "DELETE FROM pending_sends WHERE request_id = ?1",
+            [request_id],
+        )?;
         if let (Some(inline_id), Some(remote_id)) = (inline_id, remote_id) {
             transaction.execute(
                 "INSERT INTO links (remote_id, part, inline_id, origin, revision, agent_reaction)
@@ -415,7 +425,11 @@ impl RelayStore {
     pub fn inbound_handled(&self, inline_id: i64) -> StoreResult<bool> {
         Ok(self
             .lock()
-            .query_row("SELECT 1 FROM inbound WHERE inline_id = ?1", [inline_id], |_| Ok(()))
+            .query_row(
+                "SELECT 1 FROM inbound WHERE inline_id = ?1",
+                [inline_id],
+                |_| Ok(()),
+            )
             .optional()?
             .is_some())
     }
@@ -558,7 +572,10 @@ mod tests {
             next_attempt_at: 0,
         };
         assert!(store.reserve_send(&pending).unwrap());
-        assert!(!store.reserve_send(&pending).unwrap(), "same inline message twice");
+        assert!(
+            !store.reserve_send(&pending).unwrap(),
+            "same inline message twice"
+        );
         store.settle_send("r1", Some("m1")).unwrap();
         assert!(store.pending_sends().unwrap().is_empty());
         assert_eq!(store.inline_for_remote("m1").unwrap(), Some(10));

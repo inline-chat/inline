@@ -147,7 +147,7 @@ impl Relay {
                         self.config.network_name
                     ),
                 );
-                self.inline_soft(self.inline.edit(card.inline_id, &text, &[]).await);
+                self.inline_soft(self.inline.edit(card.inline_id, &text, Some(&[])).await);
             }
         }
         self.publish_pending_count()?;
@@ -197,7 +197,9 @@ impl Relay {
                 Ok(()) => Duration::from_secs(3),
                 Err(error) => {
                     let health = match error.kind {
-                        FailureKind::NeedsLogin => ConnectorHealth::NeedsLogin(error.message.clone()),
+                        FailureKind::NeedsLogin => {
+                            ConnectorHealth::NeedsLogin(error.message.clone())
+                        }
                         _ => ConnectorHealth::Degraded(error.message.clone()),
                     };
                     log::warn!(target: "inline::bridge::relay", "connector stopped: {}", error.message);
@@ -222,7 +224,8 @@ impl Relay {
     }
 
     fn set_connector_health(&self, health: ConnectorHealth) {
-        self.health.send_modify(|current| current.connector = Some(health));
+        self.health
+            .send_modify(|current| current.connector = Some(health));
     }
 
     fn publish_pending_count(&self) -> RelayResult<()> {
@@ -351,7 +354,8 @@ impl Relay {
                 .insert(task_id.clone(), anchor);
         }
         if let Some(confirmation) = &message.confirmation {
-            self.post_confirmation(message, confirmation, anchor).await?;
+            self.post_confirmation(message, confirmation, anchor)
+                .await?;
         }
         Ok(())
     }
@@ -467,7 +471,8 @@ impl Relay {
         if !revision_changed && !reaction_changed {
             return Ok(());
         }
-        if revision_changed && link.origin == Origin::Remote
+        if revision_changed
+            && link.origin == Origin::Remote
             && let Some(inline_id) = link.inline_id
         {
             let text = if message.deleted {
@@ -477,7 +482,7 @@ impl Relay {
             } else {
                 render::agent_text(&message.text)
             };
-            self.inline_soft(self.inline.edit(inline_id, &text, &[]).await);
+            self.inline_soft(self.inline.edit(inline_id, &text, None).await);
         }
         if reaction_changed {
             let target = match link.inline_id {
@@ -527,7 +532,7 @@ impl Relay {
                     {
                         let text =
                             render::confirmation_closed(&card.body, &render::closed_status(status));
-                        self.inline_soft(self.inline.edit(card.inline_id, &text, &[]).await);
+                        self.inline_soft(self.inline.edit(card.inline_id, &text, Some(&[])).await);
                     }
                 }
                 None => {}
@@ -541,7 +546,7 @@ impl Relay {
         match self.store.task(&task.id)? {
             Some((_, previous)) if previous == rendered => Ok(()),
             Some((inline_id, _)) => {
-                self.inline_soft(self.inline.edit(inline_id, &rendered, &[]).await);
+                self.inline_soft(self.inline.edit(inline_id, &rendered, None).await);
                 Ok(self.store.put_task(&task.id, inline_id, &rendered)?)
             }
             None => {
@@ -586,12 +591,6 @@ impl Relay {
                 }
                 self.owner_message(message_id, text, reply_to, media).await
             }
-            InlineEvent::Edited { sender_id, .. } => {
-                if sender_id == self.config.owner_user_id && !self.connector.capabilities().edits {
-                    log::info!(target: "inline::bridge::relay", "edit not forwarded: unsupported by the network");
-                }
-                Ok(())
-            }
             InlineEvent::Reaction {
                 message_id,
                 user_id,
@@ -608,7 +607,10 @@ impl Relay {
                 message_id,
                 actor_id,
                 data,
-            } => self.action(interaction_id, message_id, actor_id, &data).await,
+            } => {
+                self.action(interaction_id, message_id, actor_id, &data)
+                    .await
+            }
         }
     }
 
@@ -647,7 +649,10 @@ impl Relay {
             self.notice(
                 message_id,
                 format!("rejected:{message_id}"),
-                format!("{} can't receive files from Inline yet.", self.config.agent_name),
+                format!(
+                    "{} can't receive files from Inline yet.",
+                    self.config.agent_name
+                ),
             )
             .await?;
             self.store.mark_inbound(message_id, "rejected", now())?;
@@ -694,7 +699,8 @@ impl Relay {
                 .await
             {
                 Ok(Some(remote_id)) => {
-                    self.store.settle_send(&pending.request_id, Some(&remote_id))?;
+                    self.store
+                        .settle_send(&pending.request_id, Some(&remote_id))?;
                     return self.publish_pending_count();
                 }
                 Ok(None) => {}
@@ -740,7 +746,8 @@ impl Relay {
         };
         match self.connector.send(&outbound).await {
             Ok(remote_id) => {
-                self.store.settle_send(&pending.request_id, Some(&remote_id))?;
+                self.store
+                    .settle_send(&pending.request_id, Some(&remote_id))?;
                 self.publish_pending_count()
             }
             Err(error) if error.kind == FailureKind::Rejected => {
@@ -839,8 +846,7 @@ impl Relay {
         };
         match result {
             Ok(()) => {
-                self.store
-                    .kv_set(&key, if removed { "" } else { emoji })?;
+                self.store.kv_set(&key, if removed { "" } else { emoji })?;
             }
             Err(error) => {
                 log::warn!(target: "inline::bridge::relay", "reaction not forwarded: {}", error.message);
@@ -917,7 +923,7 @@ impl Relay {
             ConfirmationState::Done,
         )?;
         let text = render::confirmation_closed(&card.body, &status);
-        self.inline_soft(self.inline.edit(card.inline_id, &text, &[]).await);
+        self.inline_soft(self.inline.edit(card.inline_id, &text, Some(&[])).await);
         Ok(())
     }
 

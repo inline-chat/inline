@@ -18,7 +18,10 @@ fn clip(text: &str, suffix: &str) -> String {
 
 /// An agent message.
 pub fn agent_text(text: &str) -> String {
-    clip(text, "\n\n_…cut here; the rest is in the original conversation._")
+    clip(
+        text,
+        "\n\n_…cut here; the rest is in the original conversation._",
+    )
 }
 
 /// A message the owner typed in the remote app.

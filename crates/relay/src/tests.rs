@@ -22,7 +22,10 @@ impl FakeInline {
         self.posts.lock().unwrap().clone()
     }
     fn texts(&self) -> Vec<String> {
-        self.posts().into_iter().map(|(_, post)| post.text).collect()
+        self.posts()
+            .into_iter()
+            .map(|(_, post)| post.text)
+            .collect()
     }
 }
 
@@ -40,13 +43,14 @@ impl InlineSide for FakeInline {
         &'a self,
         message_id: i64,
         text: &'a str,
-        buttons: &'a [Vec<Button>],
+        buttons: Option<&'a [Vec<Button>]>,
     ) -> BoxFuture<'a, InlineResult<()>> {
         Box::pin(async move {
-            self.edits
-                .lock()
-                .unwrap()
-                .push((message_id, text.to_owned(), buttons.len()));
+            self.edits.lock().unwrap().push((
+                message_id,
+                text.to_owned(),
+                buttons.map_or(usize::MAX, <[_]>::len),
+            ));
             Ok(())
         })
     }
@@ -295,18 +299,21 @@ async fn deleted_remote_message_is_replaced() {
         .handle_remote(ConnectorEvent::Message(deleted))
         .await
         .unwrap();
-    assert_eq!(
-        h.inline.edits.lock().unwrap()[0].1,
-        "_Deleted in ChatGPT._"
-    );
+    assert_eq!(h.inline.edits.lock().unwrap()[0].1, "_Deleted in ChatGPT._");
 }
 
 #[tokio::test]
 async fn owner_message_is_sent_once_and_echo_is_not_mirrored() {
     let h = harness();
-    h.relay.handle_inline(owner_text(7, "hi Dot")).await.unwrap();
+    h.relay
+        .handle_inline(owner_text(7, "hi Dot"))
+        .await
+        .unwrap();
     // Redelivery of the same Inline event.
-    h.relay.handle_inline(owner_text(7, "hi Dot")).await.unwrap();
+    h.relay
+        .handle_inline(owner_text(7, "hi Dot"))
+        .await
+        .unwrap();
     let sends = h.connector.sends.lock().unwrap().clone();
     assert_eq!(sends.len(), 1);
     assert_eq!(sends[0].text, "hi Dot");
@@ -377,8 +384,14 @@ async fn uncertain_send_is_reconciled_before_resending() {
         .send_results
         .lock()
         .unwrap()
-        .push_back(Err(ConnectorError::new(FailureKind::Uncertain, "timed out")));
-    h.relay.handle_inline(owner_text(9, "important")).await.unwrap();
+        .push_back(Err(ConnectorError::new(
+            FailureKind::Uncertain,
+            "timed out",
+        )));
+    h.relay
+        .handle_inline(owner_text(9, "important"))
+        .await
+        .unwrap();
     assert_eq!(h.store.pending_sends().unwrap().len(), 1);
     assert!(
         h.inline.texts()[0].starts_with("Not delivered yet"),
@@ -462,8 +475,14 @@ async fn owner_typed_in_remote_app_is_mirrored_until_turned_off() {
         .handle_remote(ConnectorEvent::Message(typed))
         .await
         .unwrap();
-    assert_eq!(h.inline.texts(), vec!["_You, in ChatGPT:_\n> from my phone"]);
-    h.relay.handle_inline(owner_text(3, "/mirror off")).await.unwrap();
+    assert_eq!(
+        h.inline.texts(),
+        vec!["_You, in ChatGPT:_\n> from my phone"]
+    );
+    h.relay
+        .handle_inline(owner_text(3, "/mirror off"))
+        .await
+        .unwrap();
     let typed = RemoteMessage {
         speaker: Speaker::Owner,
         ..agent("o2", "quiet", "r1")
@@ -472,8 +491,15 @@ async fn owner_typed_in_remote_app_is_mirrored_until_turned_off() {
         .handle_remote(ConnectorEvent::Message(typed))
         .await
         .unwrap();
-    assert_eq!(h.inline.posts().len(), 2, "mirror post plus the command reply");
-    assert!(h.connector.sends.lock().unwrap().is_empty(), "commands stay local");
+    assert_eq!(
+        h.inline.posts().len(),
+        2,
+        "mirror post plus the command reply"
+    );
+    assert!(
+        h.connector.sends.lock().unwrap().is_empty(),
+        "commands stay local"
+    );
 }
 
 #[tokio::test]
@@ -576,7 +602,11 @@ async fn confirmation_closed_remotely_updates_card() {
         .await
         .unwrap();
     let edits = h.inline.edits.lock().unwrap().clone();
-    assert!(edits.iter().any(|(_, text, buttons)| text.ends_with("_Approved._") && *buttons == 0));
+    assert!(
+        edits
+            .iter()
+            .any(|(_, text, buttons)| text.ends_with("_Approved._") && *buttons == 0)
+    );
 }
 
 #[tokio::test]
@@ -643,7 +673,14 @@ async fn task_card_is_posted_once_and_edited_in_place() {
     assert_eq!(posts[1].1.reply_to, Some(anchor));
     assert_eq!(posts[1].1.text, "🗂 **Book flights**\nWorking…");
     let edits = h.inline.edits.lock().unwrap().clone();
-    assert_eq!(edits, vec![(posts[1].0, "🗂 **Book flights**\nCompleted".to_owned(), 0)]);
+    assert_eq!(
+        edits,
+        vec![(
+            posts[1].0,
+            "🗂 **Book flights**\nCompleted".to_owned(),
+            usize::MAX
+        )]
+    );
 }
 
 #[tokio::test]
@@ -716,11 +753,21 @@ async fn checkpoint_is_persisted() {
 #[tokio::test]
 async fn help_and_status_stay_local() {
     let h = harness();
-    h.relay.handle_inline(owner_text(1, "/status")).await.unwrap();
+    h.relay
+        .handle_inline(owner_text(1, "/status"))
+        .await
+        .unwrap();
     h.relay.handle_inline(owner_text(2, "/help")).await.unwrap();
-    h.relay.handle_inline(owner_text(3, "/unknown thing")).await.unwrap();
+    h.relay
+        .handle_inline(owner_text(3, "/unknown thing"))
+        .await
+        .unwrap();
     let texts = h.inline.texts();
     assert!(texts[0].contains("Dot: Test"));
     assert!(texts[1].contains("/mirror"));
-    assert_eq!(h.connector.sends.lock().unwrap().len(), 1, "unknown slash text goes through");
+    assert_eq!(
+        h.connector.sends.lock().unwrap().len(),
+        1,
+        "unknown slash text goes through"
+    );
 }

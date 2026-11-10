@@ -109,6 +109,8 @@ pub enum ConnectorHealth {
 }
 
 /// Events a connector emits while running.
+// Messages dominate the stream; boxing them would allocate per event for no gain.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConnectorEvent {
     /// New or changed message.
@@ -339,12 +341,13 @@ pub type InlineResult<T> = Result<T, InlineError>;
 pub trait InlineSide: Send + Sync + 'static {
     /// Posts a message; returns its id.
     fn post<'a>(&'a self, post: &'a InlinePost) -> BoxFuture<'a, InlineResult<i64>>;
-    /// Replaces a message's text and buttons (empty rows clear buttons).
+    /// Replaces a message's text. `buttons: None` is a plain text edit;
+    /// `Some(rows)` also replaces the buttons (empty rows clear them).
     fn edit<'a>(
         &'a self,
         message_id: i64,
         text: &'a str,
-        buttons: &'a [Vec<Button>],
+        buttons: Option<&'a [Vec<Button>]>,
     ) -> BoxFuture<'a, InlineResult<()>>;
     /// Adds or removes the bot's reaction.
     fn react<'a>(
@@ -372,7 +375,8 @@ pub trait InlineSide: Send + Sync + 'static {
 /// Something that happened in the owner DM.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InlineEvent {
-    /// A new message (edits are separate).
+    /// A message. The same id may arrive again (redelivery or edit); the
+    /// relay acts on each id once.
     Message {
         /// Inline message id.
         message_id: i64,
@@ -384,13 +388,6 @@ pub enum InlineEvent {
         reply_to: Option<i64>,
         /// Attached media.
         media: Option<InlineMedia>,
-    },
-    /// An edit of an earlier message.
-    Edited {
-        /// Inline message id.
-        message_id: i64,
-        /// Editor.
-        sender_id: i64,
     },
     /// Reaction added or removed.
     Reaction {
