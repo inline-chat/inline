@@ -1511,7 +1511,13 @@ pub(crate) fn plan_usage(response: &Value) -> Vec<DriverUsageWindow> {
         let slug: String = name
             .trim()
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    '_'
+                }
+            })
             .collect();
         if slug.is_empty() {
             continue;
@@ -1826,7 +1832,15 @@ mod tests {
             ]
         }}));
         let labels: Vec<&str> = windows.iter().map(|window| window.label.as_str()).collect();
-        assert_eq!(labels, ["five_hour", "seven_day", "seven_day_opus", "seven_day_fable"]);
+        assert_eq!(
+            labels,
+            [
+                "five_hour",
+                "seven_day",
+                "seven_day_opus",
+                "seven_day_fable"
+            ]
+        );
         assert_eq!(windows[2].used_percent, 40);
         assert_eq!(windows[3].used_percent, 37);
         assert_eq!(windows[3].window_minutes, Some(10_080));
