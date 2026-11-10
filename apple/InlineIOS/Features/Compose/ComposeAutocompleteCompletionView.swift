@@ -72,8 +72,18 @@ final class ComposeAutocompleteCompletionView: UIView {
   static let cornerRadius: CGFloat = 20
   static let contentInset: CGFloat = 4
   static let rowCornerRadius = cornerRadius - contentInset
+  static let emojiCellSize: CGFloat = 44
+  static let emojiStripInset: CGFloat = 6
 
   weak var delegate: ComposeAutocompleteCompletionDelegate?
+
+  /// Emoji-only results read faster as a strip of large glyphs than as labeled rows.
+  private enum Style {
+    case list
+    case emojiStrip
+  }
+
+  private var style: Style = .list
 
   private var items: [ComposeAutocompleteItem] = []
   private var placeholder: ComposeAutocompletePlaceholder?
@@ -107,6 +117,30 @@ final class ComposeAutocompleteCompletionView: UIView {
     stackView.translatesAutoresizingMaskIntoConstraints = false
     return stackView
   }()
+
+  private lazy var emojiScrollView: UIScrollView = {
+    let scrollView = ComposeAutocompleteScrollView()
+    scrollView.translatesAutoresizingMaskIntoConstraints = false
+    scrollView.showsHorizontalScrollIndicator = false
+    scrollView.showsVerticalScrollIndicator = false
+    scrollView.alwaysBounceHorizontal = true
+    scrollView.backgroundColor = .clear
+    scrollView.delaysContentTouches = false
+    scrollView.isHidden = true
+    return scrollView
+  }()
+
+  private lazy var emojiStackView: UIStackView = {
+    let stackView = UIStackView()
+    stackView.axis = .horizontal
+    stackView.spacing = 0
+    stackView.translatesAutoresizingMaskIntoConstraints = false
+    return stackView
+  }()
+
+  private var activeStackView: UIStackView {
+    style == .emojiStrip ? emojiStackView : stackView
+  }
 
   private lazy var backgroundView: UIVisualEffectView = {
     let effect: UIVisualEffect
@@ -154,10 +188,16 @@ final class ComposeAutocompleteCompletionView: UIView {
     selectedIndex: Int,
     placeholder: ComposeAutocompletePlaceholder?
   ) {
-    let shouldRebuild = self.items != items || self.placeholder != placeholder
+    let nextStyle: Style = placeholder == nil && !items.isEmpty && items.allSatisfy { $0.kind == .emoji }
+      ? .emojiStrip
+      : .list
+    let shouldRebuild = self.items != items || self.placeholder != placeholder || style != nextStyle
     self.items = items
     self.placeholder = placeholder
     self.selectedIndex = items.indices.contains(selectedIndex) ? selectedIndex : 0
+    style = nextStyle
+    scrollView.isHidden = style == .emojiStrip
+    emojiScrollView.isHidden = style != .emojiStrip
     scrollView.isScrollEnabled = placeholder == nil
     setContentInteractionEnabled(placeholder == nil)
     if shouldRebuild {
@@ -244,10 +284,11 @@ final class ComposeAutocompleteCompletionView: UIView {
     guard isContentInteractionEnabled != enabled else { return }
     isContentInteractionEnabled = enabled
     scrollView.isUserInteractionEnabled = enabled
+    emojiScrollView.isUserInteractionEnabled = enabled
     if !enabled {
       showsKeyboardSelection = false
     }
-    for case let control as ComposeAutocompleteRowControl in stackView.arrangedSubviews {
+    for case let control as ComposeAutocompleteRowControl in stackView.arrangedSubviews + emojiStackView.arrangedSubviews {
       control.isEnabled = enabled
     }
     updateSelection()
@@ -282,6 +323,8 @@ final class ComposeAutocompleteCompletionView: UIView {
     addSubview(backgroundView)
     backgroundView.contentView.addSubview(scrollView)
     scrollView.addSubview(stackView)
+    backgroundView.contentView.addSubview(emojiScrollView)
+    emojiScrollView.addSubview(emojiStackView)
 
     NSLayoutConstraint.activate([
       backgroundView.topAnchor.constraint(equalTo: topAnchor),
@@ -314,6 +357,32 @@ final class ComposeAutocompleteCompletionView: UIView {
         equalTo: scrollView.frameLayoutGuide.widthAnchor,
         constant: -(Self.contentInset * 2)
       ),
+
+      emojiScrollView.topAnchor.constraint(equalTo: backgroundView.contentView.topAnchor),
+      emojiScrollView.leadingAnchor.constraint(equalTo: backgroundView.contentView.leadingAnchor),
+      emojiScrollView.trailingAnchor.constraint(equalTo: backgroundView.contentView.trailingAnchor),
+      emojiScrollView.bottomAnchor.constraint(equalTo: backgroundView.contentView.bottomAnchor),
+
+      emojiStackView.topAnchor.constraint(
+        equalTo: emojiScrollView.contentLayoutGuide.topAnchor,
+        constant: Self.emojiStripInset
+      ),
+      emojiStackView.leadingAnchor.constraint(
+        equalTo: emojiScrollView.contentLayoutGuide.leadingAnchor,
+        constant: Self.emojiStripInset
+      ),
+      emojiStackView.trailingAnchor.constraint(
+        equalTo: emojiScrollView.contentLayoutGuide.trailingAnchor,
+        constant: -Self.emojiStripInset
+      ),
+      emojiStackView.bottomAnchor.constraint(
+        equalTo: emojiScrollView.contentLayoutGuide.bottomAnchor,
+        constant: -Self.emojiStripInset
+      ),
+      emojiStackView.heightAnchor.constraint(
+        equalTo: emojiScrollView.frameLayoutGuide.heightAnchor,
+        constant: -(Self.emojiStripInset * 2)
+      ),
     ])
 
     let initialHeight = heightAnchor.constraint(equalToConstant: 0)
@@ -323,13 +392,17 @@ final class ComposeAutocompleteCompletionView: UIView {
   }
 
   private func rebuildRows() {
-    stackView.arrangedSubviews.forEach { view in
-      stackView.removeArrangedSubview(view)
+    for view in stackView.arrangedSubviews + emojiStackView.arrangedSubviews {
       view.removeFromSuperview()
     }
 
     if let placeholder {
       stackView.addArrangedSubview(makePlaceholderRow(placeholder))
+    } else if style == .emojiStrip {
+      for (index, item) in items.enumerated() {
+        emojiStackView.addArrangedSubview(makeEmojiCell(for: item, index: index))
+      }
+      emojiScrollView.contentOffset = .zero
     } else {
       for (index, item) in items.enumerated() {
         let row = makeRow(for: item, index: index)
@@ -405,6 +478,40 @@ final class ComposeAutocompleteCompletionView: UIView {
       containerView.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.minimumItemHeight),
     ])
     return containerView
+  }
+
+  private func makeEmojiCell(for item: ComposeAutocompleteItem, index: Int) -> UIView {
+    let cell = ComposeAutocompleteRowControl()
+    cell.layer.cornerRadius = 12
+    cell.translatesAutoresizingMaskIntoConstraints = false
+    cell.tag = index
+    cell.isEnabled = isContentInteractionEnabled
+    cell.isAccessibilityElement = true
+    cell.accessibilityLabel = [item.subtitle, item.title].compactMap { $0 }.joined(separator: ", ")
+    cell.accessibilityTraits = .button
+    cell.largeContentTitle = [item.emoji, item.title].compactMap { $0 }.joined(separator: " ")
+    cell.showsLargeContentViewer = true
+    cell.addAction(UIAction { [weak self, weak cell] _ in
+      guard let self, let cell else { return }
+      self.selectItem(at: cell.tag)
+    }, for: .touchUpInside)
+
+    let label = UILabel()
+    label.text = item.emoji
+    label.font = .systemFont(ofSize: 30)
+    label.textAlignment = .center
+    label.isUserInteractionEnabled = false
+    label.translatesAutoresizingMaskIntoConstraints = false
+    cell.addSubview(label)
+
+    NSLayoutConstraint.activate([
+      cell.widthAnchor.constraint(equalToConstant: Self.emojiCellSize),
+      cell.heightAnchor.constraint(equalToConstant: Self.emojiCellSize),
+      label.centerXAnchor.constraint(equalTo: cell.centerXAnchor),
+      label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+    ])
+    cell.addInteraction(UILargeContentViewerInteraction())
+    return cell
   }
 
   private func makePlaceholderRow(_ placeholder: ComposeAutocompletePlaceholder) -> UIView {
@@ -521,6 +628,7 @@ final class ComposeAutocompleteCompletionView: UIView {
   }
 
   private func updateSelection() {
+    let stackView = activeStackView
     for (index, view) in stackView.arrangedSubviews.enumerated() {
       guard let control = view as? ComposeAutocompleteRowControl else { continue }
       let isSelected = showsKeyboardSelection && index == selectedIndex
@@ -541,11 +649,21 @@ final class ComposeAutocompleteCompletionView: UIView {
       return
     }
     let selectedView = stackView.arrangedSubviews[selectedIndex]
-    let selectedRect = selectedView.convert(selectedView.bounds, to: scrollView).insetBy(dx: 0, dy: -8)
-    scrollView.scrollRectToVisible(selectedRect, animated: false)
+    if style == .emojiStrip {
+      let selectedRect = selectedView.convert(selectedView.bounds, to: emojiScrollView).insetBy(dx: -8, dy: 0)
+      emojiScrollView.scrollRectToVisible(selectedRect, animated: false)
+    } else {
+      let selectedRect = selectedView.convert(selectedView.bounds, to: scrollView).insetBy(dx: 0, dy: -8)
+      scrollView.scrollRectToVisible(selectedRect, animated: false)
+    }
   }
 
   private func updateHeight() {
+    if style == .emojiStrip {
+      setHeight(Self.emojiCellSize + Self.emojiStripInset * 2)
+      return
+    }
+
     let usesExpandedAccessibilityRows = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
     let titleHeight = UIFontMetrics(forTextStyle: .body)
       .scaledFont(for: .systemFont(ofSize: 15, weight: .semibold)).lineHeight
@@ -555,14 +673,16 @@ final class ComposeAutocompleteCompletionView: UIView {
     let itemHeight = max(Self.minimumItemHeight, ceil((titleHeight + subtitleHeight) * lineMultiplier + 18))
     let rowCount: CGFloat = placeholder == nil ? min(CGFloat(items.count), Self.maxVisibleRows) : 1
     let contentHeight = rowCount * itemHeight + Self.contentInset * 2
-    let constrainedHeight = min(contentHeight, Self.maxHeight)
+    setHeight(min(contentHeight, Self.maxHeight))
+  }
 
+  private func setHeight(_ height: CGFloat) {
     if let heightConstraint {
-      heightConstraint.constant = constrainedHeight
+      heightConstraint.constant = height
       return
     }
 
-    let constraint = heightAnchor.constraint(equalToConstant: constrainedHeight)
+    let constraint = heightAnchor.constraint(equalToConstant: height)
     constraint.priority = UILayoutPriority(999)
     constraint.isActive = true
     heightConstraint = constraint
