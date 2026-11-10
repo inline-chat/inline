@@ -15,6 +15,8 @@ struct FakeInline {
     reactions: Mutex<Vec<(i64, String, bool)>>,
     typing: Mutex<Vec<bool>>,
     toasts: Mutex<Vec<String>>,
+    reads: Mutex<Vec<i64>>,
+    profiles: Mutex<Vec<(Option<String>, Option<usize>)>>,
 }
 
 impl FakeInline {
@@ -87,6 +89,25 @@ impl InlineSide for FakeInline {
             Ok(())
         })
     }
+    fn mark_read(&self, message_id: i64) -> BoxFuture<'_, InlineResult<()>> {
+        Box::pin(async move {
+            self.reads.lock().unwrap().push(message_id);
+            Ok(())
+        })
+    }
+    fn update_profile<'a>(
+        &'a self,
+        name: Option<&'a str>,
+        avatar: Option<&'a FileData>,
+    ) -> BoxFuture<'a, InlineResult<()>> {
+        Box::pin(async move {
+            self.profiles
+                .lock()
+                .unwrap()
+                .push((name.map(str::to_owned), avatar.map(|a| a.bytes.len())));
+            Ok(())
+        })
+    }
     fn fetch_media<'a>(
         &'a self,
         media: &'a InlineMedia,
@@ -110,6 +131,9 @@ struct FakeConnector {
     finds: Mutex<usize>,
     reactions: Mutex<Vec<(String, Option<String>)>>,
     answers: Mutex<Vec<(String, String, bool)>>,
+    file_failures: Mutex<u32>,
+    typing: Mutex<u32>,
+    read_marks: Mutex<Vec<String>>,
 }
 
 impl Connector for FakeConnector {
@@ -175,6 +199,13 @@ impl Connector for FakeConnector {
         file: &'a RemoteFile,
     ) -> BoxFuture<'a, ConnectorResult<Option<FileData>>> {
         Box::pin(async move {
+            {
+                let mut failures = self.file_failures.lock().unwrap();
+                if *failures > 0 {
+                    *failures -= 1;
+                    return Err(ConnectorError::new(FailureKind::Transient, "storage 503"));
+                }
+            }
             Ok((file.locator != "gone").then(|| FileData {
                 name: file.name.clone().unwrap_or_default(),
                 mime: "image/png".into(),
@@ -198,6 +229,30 @@ impl Connector for FakeConnector {
     }
     fn describe(&self) -> BoxFuture<'_, String> {
         Box::pin(async { "Dot: Test".to_owned() })
+    }
+    fn owner_typing(&self) -> BoxFuture<'_, ConnectorResult<()>> {
+        Box::pin(async move {
+            *self.typing.lock().unwrap() += 1;
+            Ok(())
+        })
+    }
+    fn mark_read<'a>(&'a self, message_id: &'a str) -> BoxFuture<'a, ConnectorResult<()>> {
+        Box::pin(async move {
+            self.read_marks.lock().unwrap().push(message_id.to_owned());
+            Ok(())
+        })
+    }
+    fn fetch_avatar<'a>(
+        &'a self,
+        _locator: &'a str,
+    ) -> BoxFuture<'a, ConnectorResult<Option<FileData>>> {
+        Box::pin(async {
+            Ok(Some(FileData {
+                name: "avatar.png".into(),
+                mime: "image/png".into(),
+                bytes: vec![0; 4],
+            }))
+        })
     }
 }
 
@@ -255,6 +310,7 @@ fn owner_text(message_id: i64, text: &str) -> InlineEvent {
         text: text.into(),
         reply_to: None,
         media: None,
+        edited: false,
     }
 }
 
@@ -361,6 +417,7 @@ async fn replies_map_both_ways() {
             text: "answer".into(),
             reply_to: Some(inline_id),
             media: None,
+            edited: false,
         })
         .await
         .unwrap();
@@ -457,6 +514,7 @@ async fn non_owner_input_is_ignored() {
             text: "let me in".into(),
             reply_to: None,
             media: None,
+            edited: false,
         })
         .await
         .unwrap();
@@ -663,6 +721,7 @@ async fn task_card_is_posted_once_and_edited_in_place() {
             title: Some("Book flights".into()),
             label: label.into(),
             terminal: false,
+            entries: Vec::new(),
         })
     };
     h.relay.handle_remote(update("Working…")).await.unwrap();
@@ -730,6 +789,7 @@ async fn owner_media_is_fetched_and_sent() {
                 mime: Some("image/png".into()),
                 size: Some(3),
             }),
+            edited: false,
         })
         .await
         .unwrap();
@@ -770,4 +830,240 @@ async fn help_and_status_stay_local() {
         1,
         "unknown slash text goes through"
     );
+}
+
+#[tokio::test]
+async fn system_messages_show_as_silent_notices() {
+    let h = harness();
+    let notice = RemoteMessage {
+        speaker: Speaker::System,
+        ..agent("s1", "Pip joined the conversation", "r1")
+    };
+    h.relay
+        .handle_remote(ConnectorEvent::Message(notice))
+        .await
+        .unwrap();
+    let posts = h.inline.posts();
+    assert_eq!(posts[0].1.text, "_Pip joined the conversation_");
+    assert!(posts[0].1.silent);
+}
+
+#[tokio::test]
+async fn agent_read_receipts_mark_the_dm_read_forward_only() {
+    let h = harness();
+    h.relay.handle_inline(owner_text(7, "one")).await.unwrap();
+    h.relay.handle_inline(owner_text(8, "two")).await.unwrap();
+    for remote in ["remote-sent-2", "remote-sent-1", "unknown"] {
+        h.relay
+            .handle_remote(ConnectorEvent::ReadUpTo(remote.into()))
+            .await
+            .unwrap();
+    }
+    assert_eq!(h.inline.reads.lock().unwrap().clone(), vec![8]);
+}
+
+#[tokio::test]
+async fn sending_marks_the_remote_read_and_typing_is_throttled() {
+    let h = harness();
+    h.relay.handle_inline(owner_text(7, "hi")).await.unwrap();
+    assert_eq!(
+        h.connector.read_marks.lock().unwrap().clone(),
+        vec!["remote-sent-1"]
+    );
+    for _ in 0..3 {
+        h.relay
+            .handle_inline(InlineEvent::Typing {
+                user_id: OWNER,
+                active: true,
+            })
+            .await
+            .unwrap();
+    }
+    h.relay
+        .handle_inline(InlineEvent::Typing {
+            user_id: 999,
+            active: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(*h.connector.typing.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn profile_changes_update_the_bot_once() {
+    let h = harness();
+    let profile = |name: &str, avatar: &str| {
+        ConnectorEvent::Profile(AgentProfile {
+            name: name.into(),
+            avatar: Some(avatar.into()),
+        })
+    };
+    h.relay.handle_remote(profile("Pip", "a1")).await.unwrap();
+    h.relay.handle_remote(profile("Pip", "a1")).await.unwrap();
+    h.relay.handle_remote(profile("Pippa", "a1")).await.unwrap();
+    h.relay.handle_remote(profile("Pippa", "a2")).await.unwrap();
+    assert_eq!(
+        h.inline.profiles.lock().unwrap().clone(),
+        vec![
+            (Some("Pip".to_owned()), None),
+            (None, Some(4)),
+            (Some("Pippa".to_owned()), None),
+            (None, Some(4)),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn inline_edits_and_deletes_of_sent_messages_are_explained() {
+    let h = harness();
+    h.relay.handle_inline(owner_text(7, "typo")).await.unwrap();
+    let edited = InlineEvent::Message {
+        message_id: 7,
+        sender_id: OWNER,
+        text: "fixed".into(),
+        reply_to: None,
+        media: None,
+        edited: true,
+    };
+    h.relay.handle_inline(edited.clone()).await.unwrap();
+    h.relay.handle_inline(edited).await.unwrap();
+    h.relay
+        .handle_inline(InlineEvent::Deleted { message_id: 7 })
+        .await
+        .unwrap();
+    h.relay
+        .handle_inline(InlineEvent::Deleted { message_id: 7 })
+        .await
+        .unwrap();
+    assert_eq!(
+        h.connector.sends.lock().unwrap().len(),
+        1,
+        "edits are never resent"
+    );
+    let texts = h.inline.texts();
+    assert_eq!(texts.len(), 2);
+    assert!(texts[0].starts_with("Edits stay in Inline"));
+    assert!(texts[1].contains("still in ChatGPT"));
+}
+
+#[tokio::test]
+async fn message_edited_before_delivery_is_sent_with_final_text() {
+    let h = harness();
+    h.relay
+        .handle_inline(InlineEvent::Message {
+            message_id: 9,
+            sender_id: OWNER,
+            text: "final".into(),
+            reply_to: None,
+            media: None,
+            edited: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(h.connector.sends.lock().unwrap()[0].text, "final");
+}
+
+#[tokio::test]
+async fn unsupported_inline_content_is_explained_once() {
+    let h = harness();
+    for _ in 0..2 {
+        h.relay
+            .handle_inline(InlineEvent::Unsupported {
+                message_id: 3,
+                sender_id: OWNER,
+            })
+            .await
+            .unwrap();
+    }
+    assert_eq!(h.inline.posts().len(), 1);
+    assert!(h.inline.texts()[0].contains("can't be sent"));
+}
+
+#[tokio::test]
+async fn deleted_in_remote_app_is_flagged_on_owner_message() {
+    let h = harness();
+    h.relay.handle_inline(owner_text(7, "oops")).await.unwrap();
+    let deleted = RemoteMessage {
+        speaker: Speaker::Owner,
+        deleted: true,
+        client_request_id: Some(correlation_id("bot-1", 7)),
+        ..agent("remote-sent-1", "", "gone")
+    };
+    h.relay
+        .handle_remote(ConnectorEvent::Message(deleted))
+        .await
+        .unwrap();
+    let posts = h.inline.posts();
+    assert_eq!(posts[0].1.reply_to, Some(7));
+    assert_eq!(posts[0].1.text, "_Deleted in ChatGPT._");
+}
+
+#[tokio::test]
+async fn failed_file_downloads_retry_before_a_placeholder() {
+    let h = harness();
+    *h.connector.file_failures.lock().unwrap() = 2;
+    let mut message = agent("m1", "", "r1");
+    message.files = vec![RemoteFile {
+        key: "a".into(),
+        locator: "f1".into(),
+        name: Some("chart.png".into()),
+    }];
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message))
+        .await
+        .unwrap();
+    assert!(
+        h.inline.posts().is_empty(),
+        "no placeholder on a transient failure"
+    );
+    for _ in 0..2 {
+        let (key, raw) = h.store.kv_prefix("file_retry").unwrap().remove(0);
+        let mut value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        value["next_at"] = 0.into();
+        h.store.kv_set(&key, &value.to_string()).unwrap();
+        h.relay.retry_pending().await.unwrap();
+    }
+    let posts = h.inline.posts();
+    assert_eq!(posts.len(), 1);
+    assert!(posts[0].1.file.is_some());
+    assert!(h.store.kv_prefix("file_retry").unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn task_transcript_entries_post_once_under_the_card() {
+    let h = harness();
+    let update = |entries: Vec<TaskEntry>| {
+        ConnectorEvent::Task(TaskUpdate {
+            id: "t1".into(),
+            title: Some("Plan trip".into()),
+            label: "Completed".into(),
+            terminal: true,
+            entries,
+        })
+    };
+    let prompt = TaskEntry {
+        id: "turn-1:prompt".into(),
+        speaker: Speaker::Owner,
+        text: "Find flights".into(),
+    };
+    let answer = TaskEntry {
+        id: "turn-1:answer".into(),
+        speaker: Speaker::Agent,
+        text: "Here are three options.".into(),
+    };
+    h.relay
+        .handle_remote(update(vec![prompt.clone()]))
+        .await
+        .unwrap();
+    h.relay
+        .handle_remote(update(vec![prompt, answer]))
+        .await
+        .unwrap();
+    let posts = h.inline.posts();
+    assert_eq!(posts.len(), 3);
+    let card = posts[0].0;
+    assert_eq!(posts[1].1.reply_to, Some(card));
+    assert_eq!(posts[1].1.text, "_Task prompt:_\nFind flights");
+    assert_eq!(posts[2].1.text, "Here are three options.");
+    assert!(!posts[2].1.silent);
 }

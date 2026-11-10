@@ -34,6 +34,19 @@ pub fn owner_mirror(network: &str, text: &str) -> String {
     format!("_You, in {network}:_\n{quoted}")
 }
 
+/// A notice from the network itself.
+pub fn system_notice(text: &str) -> String {
+    format!("_{}_", clip(text.trim(), "…"))
+}
+
+/// A task transcript entry.
+pub fn task_entry(entry: &crate::model::TaskEntry) -> String {
+    match entry.speaker {
+        crate::model::Speaker::Owner => format!("_Task prompt:_\n{}", clip(&entry.text, "…")),
+        _ => agent_text(&entry.text),
+    }
+}
+
 /// Replacement for a message deleted remotely.
 pub fn deleted(network: &str) -> String {
     format!("_Deleted in {network}._")
@@ -96,7 +109,7 @@ pub fn help(agent: &str, network: &str) -> String {
          `/status` — bridge and {network} connection\n\
          `/mirror on|off` — show messages you type in {network} here\n\
          `/help` — this message\n\n\
-         Edits and deletions made here stay in Inline."
+         {network} has no way to take edits or deletions from Inline, so those stay here; the bridge tells you when it happens."
     )
 }
 

@@ -22,6 +22,12 @@ use crate::store::{
 const CHECKPOINT_KEY: &str = "connector.checkpoint";
 const MIRROR_OWNER_KEY: &str = "settings.mirror_owner";
 const PENDING_RETRY_TICK: Duration = Duration::from_secs(15);
+const READ_MARK_KEY: &str = "sync.agent_read_inline_id";
+const PROFILE_NAME_KEY: &str = "profile.name";
+const PROFILE_AVATAR_KEY: &str = "profile.avatar";
+const FILE_RETRY_PREFIX: &str = "file_retry\u{1f}";
+const MAX_FILE_ATTEMPTS: u32 = 6;
+const OWNER_TYPING_INTERVAL: Duration = Duration::from_secs(4);
 const MAX_SEND_ATTEMPTS: u32 = 8;
 const CONFIRMATION_CALLBACK_VERSION: u32 = 1;
 
@@ -75,6 +81,17 @@ struct ConfirmationCallback {
 }
 
 #[derive(Serialize, Deserialize)]
+struct FileRetry {
+    remote_id: String,
+    key: String,
+    locator: String,
+    name: Option<String>,
+    reply_to: Option<i64>,
+    attempts: u32,
+    next_at: i64,
+}
+
+#[derive(Serialize, Deserialize)]
 struct StoredMedia {
     url: Option<String>,
     name: Option<String>,
@@ -92,6 +109,8 @@ pub struct Relay {
     health: watch::Sender<RelayHealth>,
     /// Inline message id of the text a task was announced with.
     task_anchors: std::sync::Mutex<HashMap<String, i64>>,
+    /// Last owner typing signal forwarded.
+    owner_typing_at: std::sync::Mutex<Option<std::time::Instant>>,
 }
 
 impl std::fmt::Debug for Relay {
@@ -121,6 +140,7 @@ impl Relay {
             apply: Mutex::new(()),
             health,
             task_anchors: Default::default(),
+            owner_typing_at: Default::default(),
         }
     }
 
@@ -271,7 +291,61 @@ impl Relay {
                 self.set_connector_health(health);
                 Ok(())
             }
+            ConnectorEvent::ReadUpTo(remote_id) => self.apply_read(&remote_id).await,
+            ConnectorEvent::Profile(profile) => self.apply_profile(profile).await,
         }
+    }
+
+    async fn apply_read(&self, remote_id: &str) -> RelayResult<()> {
+        let Some(inline_id) = self.store.inline_for_remote(remote_id)? else {
+            return Ok(());
+        };
+        let current = self
+            .store
+            .kv_get(READ_MARK_KEY)?
+            .and_then(|value| value.parse::<i64>().ok());
+        if current.is_some_and(|current| current >= inline_id) {
+            return Ok(());
+        }
+        match self.inline.mark_read(inline_id).await {
+            Ok(()) => self.store.kv_set(READ_MARK_KEY, &inline_id.to_string())?,
+            Err(error) => {
+                log::warn!(target: "inline::bridge::relay", "read state not mirrored: {error}")
+            }
+        }
+        Ok(())
+    }
+
+    async fn apply_profile(&self, profile: AgentProfile) -> RelayResult<()> {
+        let name = profile.name.trim();
+        if !name.is_empty() && self.store.kv_get(PROFILE_NAME_KEY)?.as_deref() != Some(name) {
+            match self.inline.update_profile(Some(name), None).await {
+                Ok(()) => self.store.kv_set(PROFILE_NAME_KEY, name)?,
+                Err(error) => {
+                    log::warn!(target: "inline::bridge::relay", "bot name not updated: {error}")
+                }
+            }
+        }
+        if let Some(locator) = profile.avatar.as_deref()
+            && self.store.kv_get(PROFILE_AVATAR_KEY)?.as_deref() != Some(locator)
+        {
+            match self.connector.fetch_avatar(locator).await {
+                Ok(Some(avatar)) => match self.inline.update_profile(None, Some(&avatar)).await {
+                    Ok(()) => self.store.kv_set(PROFILE_AVATAR_KEY, locator)?,
+                    Err(error) => log::warn!(
+                        target: "inline::bridge::relay",
+                        "bot photo not updated: {error}"
+                    ),
+                },
+                Ok(None) => self.store.kv_set(PROFILE_AVATAR_KEY, locator)?,
+                Err(error) => log::warn!(
+                    target: "inline::bridge::relay",
+                    "avatar download failed: {}",
+                    error.message
+                ),
+            }
+        }
+        Ok(())
     }
 
     async fn apply_message(&self, message: RemoteMessage) -> RelayResult<()> {
@@ -303,6 +377,20 @@ impl Relay {
             agent_reaction: None,
         };
         if message.deleted {
+            return Ok(self.store.put_link(&text_link)?);
+        }
+        if message.speaker == Speaker::System {
+            if !message.text.trim().is_empty() {
+                let post = InlinePost {
+                    text: render::system_notice(&message.text),
+                    reply_to,
+                    key: format!("remote:{}:text", message.id),
+                    file: None,
+                    buttons: Vec::new(),
+                    silent: true,
+                };
+                text_link.inline_id = Some(self.inline.post(&post).await?);
+            }
             return Ok(self.store.put_link(&text_link)?);
         }
         if message.speaker == Speaker::Owner {
@@ -391,14 +479,20 @@ impl Relay {
             },
             Err(error) => {
                 log::warn!(target: "inline::bridge::relay", "file download failed: {}", error.message);
-                InlinePost {
-                    text: render::file_unavailable(&name, &self.config.network_name),
+                let retry = FileRetry {
+                    remote_id: message.id.clone(),
+                    key: file.key.clone(),
+                    locator: file.locator.clone(),
+                    name: file.name.clone(),
                     reply_to,
-                    key,
-                    file: None,
-                    buttons: Vec::new(),
-                    silent: true,
-                }
+                    attempts: 1,
+                    next_at: now() + 30,
+                };
+                self.store.kv_set(
+                    &file_retry_key(&message.id, &file.key),
+                    &serde_json::to_string(&retry).expect("retry serializes"),
+                )?;
+                return Ok(());
             }
         };
         let inline_id = self.inline.post(&post).await?;
@@ -477,12 +571,28 @@ impl Relay {
         {
             let text = if message.deleted {
                 render::deleted(&self.config.network_name)
+            } else if message.speaker == Speaker::System {
+                render::system_notice(&message.text)
             } else if message.speaker == Speaker::Owner {
                 render::owner_mirror(&self.config.network_name, &message.text)
             } else {
                 render::agent_text(&message.text)
             };
             self.inline_soft(self.inline.edit(inline_id, &text, None).await);
+        }
+        // A message the owner sent from Inline was deleted in the remote
+        // app. The bot cannot edit the owner's message, so say it.
+        if revision_changed
+            && message.deleted
+            && link.origin == Origin::Inline
+            && let Some(inline_id) = link.inline_id
+        {
+            self.notice(
+                inline_id,
+                format!("remote-deleted:{}", message.id),
+                render::deleted(&self.config.network_name),
+            )
+            .await?;
         }
         if reaction_changed {
             let target = match link.inline_id {
@@ -542,12 +652,43 @@ impl Relay {
     }
 
     async fn apply_task(&self, task: TaskUpdate) -> RelayResult<()> {
-        let rendered = render::task_card(&task);
+        let card = self.apply_task_card(&task).await?;
+        let remote_id = format!("task:{}", task.id);
+        for entry in &task.entries {
+            if entry.text.trim().is_empty() || self.store.link(&remote_id, &entry.id)?.is_some() {
+                continue;
+            }
+            let inline_id = self
+                .inline
+                .post(&InlinePost {
+                    text: render::task_entry(entry),
+                    reply_to: Some(card),
+                    key: format!("task:{}:{}", task.id, entry.id),
+                    file: None,
+                    buttons: Vec::new(),
+                    silent: entry.speaker != Speaker::Agent,
+                })
+                .await?;
+            self.store.put_link(&Link {
+                remote_id: remote_id.clone(),
+                part: entry.id.clone(),
+                inline_id: Some(inline_id),
+                origin: Origin::Remote,
+                revision: None,
+                agent_reaction: None,
+            })?;
+        }
+        Ok(())
+    }
+
+    async fn apply_task_card(&self, task: &TaskUpdate) -> RelayResult<i64> {
+        let rendered = render::task_card(task);
         match self.store.task(&task.id)? {
-            Some((_, previous)) if previous == rendered => Ok(()),
+            Some((inline_id, previous)) if previous == rendered => Ok(inline_id),
             Some((inline_id, _)) => {
                 self.inline_soft(self.inline.edit(inline_id, &rendered, None).await);
-                Ok(self.store.put_task(&task.id, inline_id, &rendered)?)
+                self.store.put_task(&task.id, inline_id, &rendered)?;
+                Ok(inline_id)
             }
             None => {
                 let anchor = self
@@ -567,7 +708,8 @@ impl Relay {
                         silent: true,
                     })
                     .await?;
-                Ok(self.store.put_task(&task.id, inline_id, &rendered)?)
+                self.store.put_task(&task.id, inline_id, &rendered)?;
+                Ok(inline_id)
             }
         }
     }
@@ -585,11 +727,55 @@ impl Relay {
                 text,
                 reply_to,
                 media,
+                edited,
             } => {
                 if sender_id != self.config.owner_user_id {
                     return Ok(());
                 }
+                if edited && self.store.inbound_handled(message_id)? {
+                    return self.owner_edit(message_id).await;
+                }
                 self.owner_message(message_id, text, reply_to, media).await
+            }
+            InlineEvent::Unsupported {
+                message_id,
+                sender_id,
+            } => {
+                if sender_id != self.config.owner_user_id
+                    || !self.store.mark_inbound(message_id, "unsupported", now())?
+                {
+                    return Ok(());
+                }
+                self.notice(
+                    message_id,
+                    format!("unsupported:{message_id}"),
+                    format!(
+                        "This kind of message can't be sent to your {} yet.",
+                        self.config.agent_name
+                    ),
+                )
+                .await
+            }
+            InlineEvent::Deleted { message_id } => self.owner_delete(message_id).await,
+            InlineEvent::Typing { user_id, active } => {
+                if user_id != self.config.owner_user_id || !active {
+                    return Ok(());
+                }
+                let due = {
+                    let mut last = self
+                        .owner_typing_at
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let due = last.is_none_or(|at| at.elapsed() >= OWNER_TYPING_INTERVAL);
+                    if due {
+                        *last = Some(std::time::Instant::now());
+                    }
+                    due
+                };
+                if due && let Err(error) = self.connector.owner_typing().await {
+                    log::debug!(target: "inline::bridge::relay", "typing not forwarded: {}", error.message);
+                }
+                Ok(())
             }
             InlineEvent::Reaction {
                 message_id,
@@ -612,6 +798,59 @@ impl Relay {
                     .await
             }
         }
+    }
+
+    /// Edits cannot reach the remote; tell the owner once per message.
+    async fn owner_edit(&self, message_id: i64) -> RelayResult<()> {
+        if self.store.remote_for_inline(message_id)?.is_none() {
+            return Ok(());
+        }
+        let key = format!("edit_notice:{message_id}");
+        if self.store.kv_get(&key)?.is_some() {
+            return Ok(());
+        }
+        self.store.kv_set(&key, "1")?;
+        self.notice(
+            message_id,
+            key,
+            format!(
+                "Edits stay in Inline. Your {} still has the original; send a new message to change it.",
+                self.config.agent_name
+            ),
+        )
+        .await
+    }
+
+    /// Deletions cannot reach the remote; say so once for a delivered message.
+    async fn owner_delete(&self, message_id: i64) -> RelayResult<()> {
+        let Some(remote_id) = self.store.remote_for_inline(message_id)? else {
+            return Ok(());
+        };
+        let Some(link) = self.store.link(&remote_id, part::TEXT)? else {
+            return Ok(());
+        };
+        if link.origin != Origin::Inline || link.inline_id != Some(message_id) {
+            return Ok(());
+        }
+        let key = format!("delete_notice:{message_id}");
+        if self.store.kv_get(&key)?.is_some() {
+            return Ok(());
+        }
+        self.store.kv_set(&key, "1")?;
+        self.inline
+            .post(&InlinePost {
+                text: format!(
+                    "_You deleted a message here. It is still in {}; it can't be deleted from Inline._",
+                    self.config.network_name
+                ),
+                reply_to: None,
+                key,
+                file: None,
+                buttons: Vec::new(),
+                silent: true,
+            })
+            .await?;
+        Ok(())
     }
 
     async fn notice(&self, reply_to: i64, key: String, text: String) -> RelayResult<()> {
@@ -748,6 +987,10 @@ impl Relay {
             Ok(remote_id) => {
                 self.store
                     .settle_send(&pending.request_id, Some(&remote_id))?;
+                // Writing back means the owner has read everything before it.
+                if let Err(error) = self.connector.mark_read(&remote_id).await {
+                    log::debug!(target: "inline::bridge::relay", "read state not sent: {}", error.message);
+                }
                 self.publish_pending_count()
             }
             Err(error) if error.kind == FailureKind::Rejected => {
@@ -809,6 +1052,7 @@ impl Relay {
     /// Retries due reservations. Runs on a timer inside `run_remote`.
     pub async fn retry_pending(&self) -> RelayResult<()> {
         let _guard = self.apply.lock().await;
+        self.retry_files().await?;
         let now = now();
         for pending in self.store.pending_sends()? {
             if pending.next_attempt_at > now {
@@ -821,6 +1065,71 @@ impl Relay {
                 ..pending
             };
             self.attempt_send(pending).await?;
+        }
+        Ok(())
+    }
+
+    async fn retry_files(&self) -> RelayResult<()> {
+        for (key, raw) in self.store.kv_prefix(FILE_RETRY_PREFIX)? {
+            let Ok(mut retry) = serde_json::from_str::<FileRetry>(&raw) else {
+                self.store.kv_delete(&key)?;
+                continue;
+            };
+            if retry.next_at > now() {
+                continue;
+            }
+            let part = format!("{}{}", part::FILE_PREFIX, retry.key);
+            if self.store.link(&retry.remote_id, &part)?.is_some() {
+                self.store.kv_delete(&key)?;
+                continue;
+            }
+            let file = RemoteFile {
+                key: retry.key.clone(),
+                locator: retry.locator.clone(),
+                name: retry.name.clone(),
+            };
+            let name = retry.name.clone().unwrap_or_else(|| "file".into());
+            let unavailable = render::file_unavailable(&name, &self.config.network_name);
+            let post = match self.connector.fetch_file(&retry.remote_id, &file).await {
+                Ok(Some(data)) => Some((Some(data), String::new(), false)),
+                Ok(None) => Some((None, unavailable, true)),
+                Err(_) if retry.attempts + 1 >= MAX_FILE_ATTEMPTS => {
+                    Some((None, unavailable, true))
+                }
+                Err(_) => None,
+            };
+            match post {
+                Some((file, text, silent)) => {
+                    let inline_id = self
+                        .inline
+                        .post(&InlinePost {
+                            text,
+                            reply_to: retry.reply_to,
+                            key: format!("remote:{}:{part}", retry.remote_id),
+                            file,
+                            buttons: Vec::new(),
+                            silent,
+                        })
+                        .await?;
+                    self.store.put_link(&Link {
+                        remote_id: retry.remote_id.clone(),
+                        part,
+                        inline_id: Some(inline_id),
+                        origin: Origin::Remote,
+                        revision: None,
+                        agent_reaction: None,
+                    })?;
+                    self.store.kv_delete(&key)?;
+                }
+                None => {
+                    retry.attempts += 1;
+                    retry.next_at = now() + (30i64 << retry.attempts.min(5)).min(900);
+                    self.store.kv_set(
+                        &key,
+                        &serde_json::to_string(&retry).expect("retry serializes"),
+                    )?;
+                }
+            }
         }
         Ok(())
     }
@@ -1014,6 +1323,10 @@ pub fn correlation_id(salt: &str, inline_message_id: i64) -> String {
         &hex[16..20],
         &hex[20..32]
     )
+}
+
+fn file_retry_key(remote_id: &str, key: &str) -> String {
+    format!("{FILE_RETRY_PREFIX}{remote_id}\u{1f}{key}")
 }
 
 fn now() -> i64 {

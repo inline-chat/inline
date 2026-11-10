@@ -263,6 +263,23 @@ impl RelayStore {
         Ok(())
     }
 
+    /// Deletes a key.
+    pub fn kv_delete(&self, key: &str) -> StoreResult<()> {
+        self.lock()
+            .execute("DELETE FROM kv WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
+    /// All keys with a prefix, sorted.
+    pub fn kv_prefix(&self, prefix: &str) -> StoreResult<Vec<(String, String)>> {
+        let connection = self.lock();
+        let mut statement = connection.prepare(
+            "SELECT key, value FROM kv WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key",
+        )?;
+        let rows = statement.query_map([prefix], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Reads one link.
     pub fn link(&self, remote_id: &str, part: &str) -> StoreResult<Option<Link>> {
         Ok(self

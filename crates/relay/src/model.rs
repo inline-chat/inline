@@ -15,6 +15,8 @@ pub enum Speaker {
     Agent,
     /// The owner, writing in the remote app itself or through this relay.
     Owner,
+    /// The network itself (joins, setting changes, notices).
+    System,
 }
 
 /// A file attached to a remote message.
@@ -95,6 +97,29 @@ pub struct TaskUpdate {
     pub label: String,
     /// No further updates expected.
     pub terminal: bool,
+    /// Transcript entries known so far, oldest first. The relay posts each
+    /// new entry once as a reply under the task card.
+    pub entries: Vec<TaskEntry>,
+}
+
+/// One prompt or answer inside a task.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskEntry {
+    /// Stable id within the task.
+    pub id: String,
+    /// `Owner` for prompts, `Agent` for answers.
+    pub speaker: Speaker,
+    /// Text (Markdown).
+    pub text: String,
+}
+
+/// The agent's public profile, mirrored onto the bot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AgentProfile {
+    /// Display name.
+    pub name: String,
+    /// Connector-specific avatar locator; changes when the avatar changes.
+    pub avatar: Option<String>,
 }
 
 /// Connector health as seen by the relay.
@@ -119,6 +144,10 @@ pub enum ConnectorEvent {
     Task(TaskUpdate),
     /// The agent is (or stopped) typing.
     Typing(bool),
+    /// The agent has read everything up to and including this remote message.
+    ReadUpTo(String),
+    /// The agent's name or avatar (may be unchanged; the relay compares).
+    Profile(AgentProfile),
     /// Opaque connector state. The relay persists it only after every event
     /// sent before it was applied, and passes it back on restart.
     Checkpoint(String),
@@ -277,6 +306,24 @@ pub trait Connector: Send + Sync + 'static {
 
     /// A short status line for `/status`.
     fn describe(&self) -> BoxFuture<'_, String>;
+
+    /// Tells the remote the owner is typing. Default: unsupported, no-op.
+    fn owner_typing(&self) -> BoxFuture<'_, ConnectorResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Marks the remote conversation read up to a message. Default: no-op.
+    fn mark_read<'a>(&'a self, _message_id: &'a str) -> BoxFuture<'a, ConnectorResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Downloads the avatar named by [`AgentProfile::avatar`]. Default: none.
+    fn fetch_avatar<'a>(
+        &'a self,
+        _locator: &'a str,
+    ) -> BoxFuture<'a, ConnectorResult<Option<FileData>>> {
+        Box::pin(async { Ok(None) })
+    }
 }
 
 /// A button on an Inline message.
@@ -364,6 +411,15 @@ pub trait InlineSide: Send + Sync + 'static {
         interaction_id: i64,
         toast: Option<&'a str>,
     ) -> BoxFuture<'a, InlineResult<()>>;
+    /// Marks the DM read (by the bot) up to a message, so the owner sees the
+    /// agent has read it.
+    fn mark_read(&self, message_id: i64) -> BoxFuture<'_, InlineResult<()>>;
+    /// Updates the bot's name and/or photo.
+    fn update_profile<'a>(
+        &'a self,
+        name: Option<&'a str>,
+        avatar: Option<&'a FileData>,
+    ) -> BoxFuture<'a, InlineResult<()>>;
     /// Downloads inbound media, refusing anything over `limit` bytes.
     fn fetch_media<'a>(
         &'a self,
@@ -388,6 +444,28 @@ pub enum InlineEvent {
         reply_to: Option<i64>,
         /// Attached media.
         media: Option<InlineMedia>,
+        /// The message carries an edit.
+        edited: bool,
+    },
+    /// The owner sent something the relay cannot represent (a poll, a
+    /// sticker, a new kind of content).
+    Unsupported {
+        /// Inline message id.
+        message_id: i64,
+        /// Sender.
+        sender_id: i64,
+    },
+    /// A message was deleted.
+    Deleted {
+        /// Inline message id.
+        message_id: i64,
+    },
+    /// Someone in the DM started or stopped typing.
+    Typing {
+        /// Typist.
+        user_id: i64,
+        /// Typing state.
+        active: bool,
     },
     /// Reaction added or removed.
     Reaction {
