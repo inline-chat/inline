@@ -7,7 +7,9 @@ members = [
   "crates/agent-driver-codex",
   "crates/agent-driver-opencode",
   "crates/client",
+  "crates/dots",
   "crates/protocol",
+  "crates/relay",
   "crates/sdk",
 ]
 exclude = ["vendor/agent-client-protocol"]

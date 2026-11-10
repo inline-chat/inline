@@ -1,0 +1,15 @@
+{
+  "request_id": "elicit-1",
+  "thread_id": "task-thread-1",
+  "turn_id": "turn-1",
+  "status": "pending",
+  "params": {
+    "threadId": "task-thread-1",
+    "turnId": "turn-1",
+    "serverName": "gmail",
+    "mode": "form",
+    "message": "Send the draft to Sam?",
+    "requestedSchema": {"type": "object", "properties": {"confirmed": {"type": "boolean", "title": "Send"}}, "required": ["confirmed"]},
+    "_meta": {"reason": "sending email", "openai/confirmation": {"version": 1, "field": "confirmed", "presentation": {"title": "Send email", "fields": [{"label": "To", "value": "sam@example.com"}]}}}
+  }
+}

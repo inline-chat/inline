@@ -1,0 +1,38 @@
+{
+  "selection": {
+    "thread_id": "thread-root-1",
+    "generation": "gen-1",
+    "selected_at": "2026-11-01T09:00:00.000000Z",
+    "aeon_id": "aeon-1",
+    "available": true,
+    "messaging_room_id": "room-1"
+  },
+  "profile": {
+    "id": "aeon-1",
+    "display_name": "Pip",
+    "avatar_url": "https://files.oaiusercontent.com/avatar.png",
+    "avatar": null,
+    "avatar_id": null,
+    "avatar_type": "generated",
+    "avatar_manifest": {"schema_version": 1, "resource_bundle_id": "b", "appearance": {"schemaVersion": 1, "shape": "round", "color": "blue", "eyes": "dot", "eyewear": "none", "accessories": ["hat"], "accessoryColors": {}, "depth": 0.5, "hereCharacter": {"id": "c", "name": "n"}}, "snapshot": {"schema_version": 1, "asset_pointer": "p", "source_manifest_sha256": "s", "content_sha256": "c", "manifest_sha256": "m", "width": 512, "height": 512}},
+    "color": "blue",
+    "messaging_room_id": "room-1",
+    "description": null,
+    "status": "active",
+    "isSafetyFlagged": false,
+    "safety_flag": null,
+    "safety_thread_id": null,
+    "safety_turn_id": null,
+    "aeon_kind": "dot",
+    "last_check_in_at": "2026-11-10T08:00:00Z",
+    "created_at": "2026-11-01T09:00:00Z",
+    "updated_at": "2026-11-10T08:00:00Z",
+    "active_root_thread_id": "thread-root-1",
+    "model_picker_enabled": false,
+    "model_options": [],
+    "model_preference": null,
+    "is_admin_paused": false,
+    "is_paused": false,
+    "messaging_room_member_id": null
+  }
+}
