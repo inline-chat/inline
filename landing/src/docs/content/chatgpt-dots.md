@@ -70,13 +70,13 @@ Everything that can sync goes both ways by default.
 | --- | --- | --- |
 | Text and replies | Yes | Yes |
 | Files and photos (up to 20 MiB) | Yes, one per message | Yes, retried if storage is slow |
-| Reactions | Yes | Yes |
+| Reactions | Yes | Yes; yours made in ChatGPT show as your own, one per message as in ChatGPT |
 | Typing | Yes | Yes |
 | Read state | Sending marks the Dot's room read | Read marks on your messages |
 | Task progress | — | One card, updated in place, with each prompt and final answer under it |
 | Confirmations | Approve or Decline buttons | Yes |
 | Edits and deletions | Not possible in ChatGPT; the bot tells you | Shown as edits |
-| Messages and files you send in ChatGPT | — | Mirrored with your attribution (`/mirror off` to stop) |
+| Messages and files you send in ChatGPT | — | Appear as sent by you, never sent back (`/mirror off` to stop) |
 | Dot name and avatar | — | The bot follows them, unless you renamed it or set its photo yourself |
 
 - Messages from before setup are not imported.
@@ -94,7 +94,7 @@ Everything that can sync goes both ways by default.
 | Command | What it does |
 | --- | --- |
 | `/status` | Connection, your Dot's name, and any messages waiting to deliver |
-| `/mirror on` or `/mirror off` | Show messages you type in ChatGPT |
+| `/mirror on` or `/mirror off` | Show messages you type in ChatGPT as yours |
 | `/help` | What the bridge does |
 
 Any other text, including other `/` commands, goes to your Dot as typed.
