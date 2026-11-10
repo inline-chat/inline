@@ -236,6 +236,9 @@ public final class AgentWorkStateStore: ObservableObject {
   @Published public private(set) var runtimeBotUserIDs: Set<Int64> = []
   /// Bots whose runtime the server reports offline (lapsed heartbeats).
   @Published public private(set) var offlineBotUserIDs: Set<Int64> = []
+  /// Bots without a runtime that declare the Output setting (`OUTPUT_MODE`),
+  /// such as the OpenClaw and Hermes plugins.
+  @Published public private(set) var outputModeBotUserIDs: Set<Int64> = []
 
   private let auth: AuthHandle
   private let outputModeRealtime: @Sendable () -> any InlineRPCRealtime
@@ -350,6 +353,17 @@ public final class AgentWorkStateStore: ObservableObject {
   public func defaultOutputMode(botUserID: Int64) -> AgentThreadOutputMode {
     hydrateIfNeeded()
     return defaultOutputModes[botUserID] ?? .detailed
+  }
+
+  /// Whether the bot applies its Output setting: it reports a runtime or declares `OUTPUT_MODE`.
+  public func offersOutputMode(botUserID: Int64) -> Bool {
+    hydrateIfNeeded()
+    return runtimeBotUserIDs.contains(botUserID) || outputModeBotUserIDs.contains(botUserID)
+  }
+
+  func setDeclaresOutputMode(_ declares: Bool, botUserID: Int64) {
+    guard outputModeBotUserIDs.contains(botUserID) != declares else { return }
+    if declares { outputModeBotUserIDs.insert(botUserID) } else { outputModeBotUserIDs.remove(botUserID) }
   }
 
   // MARK: Server input
@@ -496,6 +510,7 @@ public final class AgentWorkStateStore: ObservableObject {
     defaultOutputModes.removeAll()
     runtimeBotUserIDs.removeAll()
     offlineBotUserIDs.removeAll()
+    outputModeBotUserIDs.removeAll()
     overrideRevisions.removeAll()
     guard let database, let account = try? auth.beginAccountMutation() else { return }
     let auth = auth

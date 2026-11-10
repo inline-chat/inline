@@ -122,6 +122,20 @@ struct AgentComposeTargetTests {
     #expect(store.outputMode(peer: peer, botUserID: Self.bot) == .detailed)
   }
 
+  @Test("Output is offered to bots that report a runtime or declare the setting, until reset")
+  @MainActor
+  func outputModeOffer() {
+    let store = AgentWorkStateStore()
+    #expect(!store.offersOutputMode(botUserID: Self.bot))
+    store.setDeclaresOutputMode(true, botUserID: Self.bot)
+    #expect(store.offersOutputMode(botUserID: Self.bot))
+    store.setDeclaresOutputMode(false, botUserID: Self.bot)
+    #expect(!store.offersOutputMode(botUserID: Self.bot))
+    store.setDeclaresOutputMode(true, botUserID: Self.bot)
+    store.removeAll()
+    #expect(!store.offersOutputMode(botUserID: Self.bot))
+  }
+
   @Test("a moved work never moves back on a late update from the chat it left")
   @MainActor
   func movedWorkStaysMoved() {

@@ -30,6 +30,25 @@ public extension AgentWorkStateStore {
     }
   }
 
+  /// The bot's settings, plus whether a bot without a runtime declares the
+  /// Output setting, for its profile in Settings. Bots declare capabilities
+  /// per chat, so this reads them in the owner's chat with the bot.
+  func loadBotSettings(botUserID: Int64) async {
+    guard botUserID > 0, let owner = try? beginOutputModeRequest() else { return }
+    await loadAgentSettings(botUserID: botUserID, owner: owner)
+    guard !runtimeBotUserIDs.contains(botUserID),
+          case let .getPeerBots(result)? = try? await callOutputModeRPC(
+            method: .getPeerBots,
+            input: .getPeerBots(.with { $0.peerID = Peer.user(id: botUserID).toInputPeer() }),
+            owner: owner
+          )
+    else { return }
+    let declares = result.bots.contains { peerBot in
+      peerBot.hasBot && peerBot.bot.id == botUserID && peerBot.capabilities.contains { $0.kind == .outputMode }
+    }
+    setDeclaresOutputMode(declares, botUserID: botUserID)
+  }
+
   /// The bot's default and this chat's override, for a chat's Agent Settings.
   func loadOutputModes(peer: Peer, botUserID: Int64) async {
     guard botUserID > 0, let owner = try? beginOutputModeRequest() else { return }
