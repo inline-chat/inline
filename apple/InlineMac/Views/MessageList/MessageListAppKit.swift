@@ -577,6 +577,8 @@ class MessageListAppKit: NSViewController {
   private var replyThreadSourceMessageId: Int64?
   /// Holds the source message's viewport offset while the pane slides in or out.
   private var replyThreadSourceAnchor: VisibleMessageAnchor?
+  /// A reader resting at latest when the pane moves keeps following it while the source still fits.
+  private var replyThreadSourceKeepsBottom = false
   private var replyThreadSourceAnchorWidth: CGFloat?
   private var replyThreadSourceAnchorExpiry: DispatchWorkItem?
   private var isObservingReplyThreadPane = false
@@ -680,6 +682,7 @@ class MessageListAppKit: NSViewController {
         id: .message(id: stableId), oldIndex: row,
         offset: tableView.rect(ofRow: row).minY - visibleRect.minY
       )
+      replyThreadSourceKeepsBottom = viewport.distanceFromBottom <= Self.exactBottomTolerance
       replyThreadSourceAnchorWidth = measurementWidth()
 
       let expiry = DispatchWorkItem { [weak self] in
@@ -695,6 +698,7 @@ class MessageListAppKit: NSViewController {
     replyThreadSourceAnchorExpiry?.cancel()
     replyThreadSourceAnchorExpiry = nil
     replyThreadSourceAnchor = nil
+    replyThreadSourceKeepsBottom = false
     replyThreadSourceAnchorWidth = nil
   }
 
@@ -706,7 +710,8 @@ class MessageListAppKit: NSViewController {
     fullWidthAsyncCalc()
   }
 
-  /// Runs last in `viewDidLayout`, after width remeasurement and bottom pinning.
+  /// Runs last in `viewDidLayout`, after width remeasurement. A reader who was resting at latest
+  /// is kept there by the remeasurement while `replyThreadSourceKeepsBottom` holds.
   private func maintainReplyThreadSourceAnchorIfNeeded() {
     guard let anchor = replyThreadSourceAnchor,
           !isUserScrolling,
@@ -725,6 +730,8 @@ class MessageListAppKit: NSViewController {
     if viewport.distanceFromBottom <= Self.exactBottomTolerance, rowRect.minY >= visibleTop, rowRect.maxY <= visibleBottom {
       return
     }
+    // Keeping the source in view now means leaving latest; later passes must not pull it back down.
+    replyThreadSourceKeepsBottom = false
 
     var target = rowRect.minY - anchor.offset
     // Rewrapping can grow the row; keep all of it inside the unobscured viewport.
@@ -2277,15 +2284,16 @@ class MessageListAppKit: NSViewController {
     // the viewport, even if a publication arrives before the next wheel tick.
     let unbracketed = !isUserScrolling
     if unbracketed { scrollWheelBegan() }
-    let distance = viewport.distanceFromBottom
-    if distance <= Self.exactBottomTolerance {
+    let originY = scrollView.contentView.bounds.minY
+    if viewport.distanceFromBottom <= Self.exactBottomTolerance {
       scrolledAwayFromBottom = false
-    } else if unbracketed, let before = scrollView.originBeforeWheelEvent, before != scrollView.contentView.bounds.minY {
-      scrolledAwayFromBottom = scrollView.contentView.bounds.minY < before
-    } else if unbracketed || distance != lastLiveDistance {
-      scrolledAwayFromBottom = unbracketed || distance > lastLiveDistance
+    } else if originY == clipOriginY, originY != clipOriginBeforeLastMoveY {
+      // AppKit posts this right after its own clip move, so the last move is the user's.
+      // Rows arriving below grow the distance without moving the origin, so they can't detach.
+      scrolledAwayFromBottom = originY < clipOriginBeforeLastMoveY
+    } else if unbracketed {
+      scrolledAwayFromBottom = true
     }
-    lastLiveDistance = distance
     if isAtBottom != isWithinFollowZone {
       handleBoundsChange(afterUserScroll: true)
     }
@@ -2295,7 +2303,6 @@ class MessageListAppKit: NSViewController {
   @objc private func scrollWheelBegan() {
     log.trace("scroll wheel began")
     isUserScrolling = true
-    lastLiveDistance = viewport.distanceFromBottom
     // User input supersedes both an in-flight fetch and an animated jump. Advance the
     // revision first: stopping the animation runs its completion at once, and that checks it.
     targetScrollRevision &+= 1
@@ -2389,8 +2396,18 @@ class MessageListAppKit: NSViewController {
     }
   }
 
-  private var lastLiveDistance: CGFloat = 0
   private var scrolledAwayFromBottom = false
+  /// Clip origin after and before its latest move. Programmatic restores update these too, so a
+  /// live-scroll notification compares only against the user's own movement.
+  private var clipOriginY: CGFloat = 0
+  private var clipOriginBeforeLastMoveY: CGFloat = 0
+
+  private func noteClipOriginChange() {
+    let originY = scrollView.contentView.bounds.minY
+    guard originY != clipOriginY else { return }
+    clipOriginBeforeLastMoveY = clipOriginY
+    clipOriginY = originY
+  }
 
   /// The 44-point follow zone lets a reader returning towards latest reattach. A wheel
   /// tick away from latest detaches immediately, including between discrete mouse ticks.
@@ -2400,7 +2417,8 @@ class MessageListAppKit: NSViewController {
   }
 
   private var canFollowBottom: Bool {
-    !isUserScrolling && !isProgrammaticScroll && readingHold == nil && replyThreadSourceAnchor == nil
+    !isUserScrolling && !isProgrammaticScroll && readingHold == nil &&
+      (replyThreadSourceAnchor == nil || replyThreadSourceKeepsBottom)
   }
 
   private var shouldKeepBottomPinned: Bool {
@@ -2428,6 +2446,7 @@ class MessageListAppKit: NSViewController {
   private let boundsThrottleID = UUID().uuidString
 
   @objc func scrollViewBoundsChanged(notification: Notification) {
+    noteClipOriginChange()
     updateMessageViewColors()
     scheduleAvatarOverlaySync(force: false)
     refreshMessageHoverAfterGeometryChange()

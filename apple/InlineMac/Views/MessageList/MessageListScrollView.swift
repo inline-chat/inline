@@ -62,13 +62,7 @@ class MessageListScrollView: NSScrollView {
     return hit
   }
 
-  /// A discrete wheel may post only didLiveScroll, after it has moved the viewport.
-  private(set) var originBeforeWheelEvent: CGFloat?
-
-  override func scrollWheel(with event: NSEvent) {
-    originBeforeWheelEvent = contentView.bounds.minY
-    super.scrollWheel(with: event)
-  }
+  // Don't override scrollWheel(with:): AppKit then opts this view out of responsive scrolling.
 
   override func flashScrollers() {
     // Do nothing to prevent flashing
