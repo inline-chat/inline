@@ -22,12 +22,12 @@ pub(crate) enum BotOutputMode {
     Detailed,
     /// No progress or tool chatter, and a plain-language answer.
     Friendly,
-    /// With --chat-id: clear the thread's override and use the bot's default.
+    /// Clear the selected preference for this bot or thread.
     Default,
 }
 
 impl BotOutputMode {
-    /// Default maps to unspecified, which clears a thread's override.
+    /// An explicit reset sends UNSPECIFIED. Omitting the flag only reads settings.
     fn protocol_value(self) -> proto::AgentOutputMode {
         match self {
             Self::Detailed => proto::AgentOutputMode::Detailed,
@@ -83,8 +83,9 @@ fn grant_operations(requested: &[BotGrantOperation]) -> Vec<i32> {
 fn output_mode_label(value: i32) -> &'static str {
     match proto::AgentOutputMode::try_from(value) {
         Ok(proto::AgentOutputMode::Friendly) => "friendly",
-        // Unspecified means Detailed.
-        _ => "detailed",
+        Ok(proto::AgentOutputMode::Detailed) => "detailed",
+        Ok(proto::AgentOutputMode::Unspecified) => "unset",
+        Err(_) => "unknown",
     }
 }
 
@@ -453,12 +454,6 @@ pub(crate) async fn handle_bot_management(
                 .chat_id
                 .map(|chat_id| validate_positive_id_arg("--chat-id", chat_id))
                 .transpose()?;
-            if chat_id.is_none() && args.output_mode == Some(BotOutputMode::Default) {
-                return Err(CliError::invalid_args(
-                    "`--output-mode default` clears a thread's override; add --chat-id.",
-                )
-                .into());
-            }
             let mut realtime = connect_authenticated_realtime(config, auth_store).await?;
             if let Some(chat_id) = chat_id {
                 if let Some(mode) = args.output_mode {
@@ -650,8 +645,16 @@ mod tests {
     }
 
     #[test]
-    fn labels_treat_unspecified_output_mode_as_detailed() {
-        assert_eq!(output_mode_label(0), "detailed");
+    fn labels_preserve_an_unset_output_preference() {
+        assert_eq!(output_mode_label(0), "unset");
+        assert_eq!(
+            output_mode_label(BotOutputMode::Detailed.protocol_value() as i32),
+            "detailed"
+        );
+        assert_eq!(
+            BotOutputMode::Default.protocol_value(),
+            proto::AgentOutputMode::Unspecified
+        );
         assert_eq!(
             output_mode_label(proto::AgentOutputMode::Friendly as i32),
             "friendly"

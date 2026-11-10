@@ -1,4 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
+
+const getChatPeer = vi.hoisted(() => ({ value: null as { oneofKind: "user"; user: { userId: bigint } } | { oneofKind: "chat"; chat: { chatId: bigint } } | null }))
+vi.mock("./follow-command.js", () => ({
+  withInlineFollowClient: async ({ fn }: { fn: (client: unknown, accountId: string) => Promise<unknown> }) =>
+    await fn({ getChat: async () => ({ peer: getChatPeer.value ? { type: getChatPeer.value } : undefined }) }, "default"),
+}))
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import type { ExecApprovalRequest } from "openclaw/plugin-sdk/approval-runtime"
 import { inlineApprovalNativeRuntime } from "./approval-handler.runtime"
@@ -6,6 +12,7 @@ import { inlineApprovalCapability } from "./approval-native"
 import {
   getInlineExecApprovalApprovers,
   isInlineExecApprovalClientEnabled,
+  shouldHandleInlineExecApprovalRequest,
 } from "./exec-approvals"
 
 const SET_BOT_PRESENCE_STATE = 59
@@ -108,33 +115,38 @@ describe("inline/native approvals", () => {
     const request = buildExecRequest({ turnSourceThreadId: "8" })
 
     expect(isInlineExecApprovalClientEnabled({ cfg })).toBe(true)
-    expect(
-      inlineApprovalCapability.authorizeActorAction?.({
+    // Only the async (worker-owned) surfaces are registered.
+    for (const legacySurface of ["authorizeActorAction", "native", "nativeRuntime"] as const) {
+      expect(inlineApprovalCapability[legacySurface]).toBeUndefined()
+    }
+    expect(inlineApprovalCapability.nativeRuntimeAsync).toBeDefined()
+    await expect(
+      inlineApprovalCapability.authorizeActorActionAsync!({
         cfg,
         accountId: "default",
         senderId: "user:51",
         action: "approve",
         approvalKind: "exec",
       }),
-    ).toEqual({ authorized: true })
-    expect(
-      inlineApprovalCapability.authorizeActorAction?.({
+    ).resolves.toEqual({ authorized: true })
+    await expect(
+      inlineApprovalCapability.authorizeActorActionAsync!({
         cfg,
         accountId: "default",
         senderId: "chat:51",
         action: "approve",
         approvalKind: "plugin",
       }),
-    ).toMatchObject({ authorized: false })
+    ).resolves.toMatchObject({ authorized: false })
 
-    expect(
-      inlineApprovalCapability.native?.describeDeliveryCapabilities?.({
+    await expect(
+      inlineApprovalCapability.nativeAsync!.describeDeliveryCapabilities({
         cfg,
         accountId: "default",
         approvalKind: "exec",
         request,
       }),
-    ).toMatchObject({
+    ).resolves.toMatchObject({
       enabled: true,
       preferredSurface: "both",
       supportsOriginSurface: true,
@@ -142,7 +154,7 @@ describe("inline/native approvals", () => {
       notifyOriginWhenDmOnly: true,
     })
     expect(
-      await inlineApprovalCapability.native?.resolveOriginTarget?.({
+      await inlineApprovalCapability.nativeAsync!.resolveOriginTarget!({
         cfg,
         accountId: "default",
         approvalKind: "exec",
@@ -150,13 +162,206 @@ describe("inline/native approvals", () => {
       }),
     ).toEqual({ to: "chat:7", threadId: "8" })
     expect(
-      await inlineApprovalCapability.native?.resolveApproverDmTargets?.({
+      await inlineApprovalCapability.nativeAsync!.resolveApproverDmTargets!({
         cfg,
         accountId: "default",
         approvalKind: "exec",
         request,
       }),
     ).toEqual([{ to: "user:51" }])
+  })
+
+  it("sends an approval asked in the approver's own DM back to that DM chat", async () => {
+    const cfg = {
+      channels: { inline: { token: "token", execApprovals: { approvers: ["51", "52"] } } },
+    } as OpenClawConfig
+    const resolve = (request: ExecApprovalRequest) =>
+      inlineApprovalCapability.nativeAsync!.resolveApproverDmTargets!({
+        cfg, accountId: "default", approvalKind: "exec", request,
+      })
+
+    getChatPeer.value = { oneofKind: "user", user: { userId: 51n } }
+    expect(await resolve(buildExecRequest({ turnSourceTo: "chat:7" })))
+      .toEqual([{ to: "chat:7" }, { to: "user:52" }])
+
+    getChatPeer.value = { oneofKind: "chat", chat: { chatId: 7n } }
+    expect(await resolve(buildExecRequest({ turnSourceTo: "chat:7" })))
+      .toEqual([{ to: "user:51" }, { to: "user:52" }])
+  })
+
+  it.each([
+    {
+      name: "prefixed chat target keeps its thread",
+      overrides: { turnSourceTo: "inline:chat:7", turnSourceThreadId: "8" },
+      expected: { to: "chat:7", threadId: "8" },
+    },
+    {
+      name: "numeric thread id is normalized",
+      overrides: { turnSourceTo: "chat:7", turnSourceThreadId: 9 as unknown as string },
+      expected: { to: "chat:7", threadId: "9" },
+    },
+    {
+      name: "DM origin never carries a thread",
+      overrides: { turnSourceTo: "user:51", turnSourceThreadId: "8" },
+      expected: { to: "user:51" },
+    },
+    {
+      name: "non-numeric target has no Inline origin",
+      overrides: { turnSourceTo: "chat:general", turnSourceThreadId: undefined },
+      expected: null,
+    },
+    {
+      name: "another channel's turn has no Inline origin",
+      overrides: { turnSourceChannel: "telegram", turnSourceTo: "chat:7", sessionKey: undefined },
+      expected: null,
+    },
+  ])("routes the approval card's origin: $name", async ({ overrides, expected }) => {
+    const cfg = {
+      channels: { inline: { token: "token", execApprovals: { approvers: ["51"], target: "both" } } },
+    } as OpenClawConfig
+    const request = buildExecRequest(overrides as Partial<ExecApprovalRequest["request"]>)
+
+    const target = await inlineApprovalCapability.nativeAsync!.resolveOriginTarget!({
+      cfg,
+      accountId: "default",
+      approvalKind: "exec",
+      request,
+    })
+
+    expect(target).toEqual(expected)
+  })
+
+  it("falls back to the Inline session when the request has no turn source", async () => {
+    const cfg = {
+      channels: { inline: { token: "token", execApprovals: { approvers: ["51"], target: "both" } } },
+    } as OpenClawConfig
+    const request = buildExecRequest({
+      turnSourceChannel: undefined,
+      turnSourceAccountId: undefined,
+      turnSourceTo: undefined,
+      sessionKey: "agent:main:inline:group:7",
+    } as Partial<ExecApprovalRequest["request"]>)
+
+    const target = await inlineApprovalCapability.nativeAsync!.resolveOriginTarget!({
+      cfg,
+      accountId: "default",
+      approvalKind: "exec",
+      request,
+    })
+
+    expect(target).toEqual({ to: "chat:7" })
+  })
+
+  it("tells a non-approver that Inline exec approvals are off for this bot", () => {
+    const disabled = { channels: { inline: { token: "token", execApprovals: { enabled: false } } } } as OpenClawConfig
+    const enabled = {
+      channels: { inline: { token: "token", execApprovals: { approvers: ["51"] } } },
+    } as OpenClawConfig
+
+    expect(
+      inlineApprovalCapability.resolveApproveCommandBehavior!({
+        cfg: disabled,
+        accountId: "default",
+        senderId: "user:77",
+        approvalKind: "exec",
+      } as any),
+    ).toMatchObject({ kind: "reply", text: expect.stringContaining("not enabled") })
+    expect(
+      inlineApprovalCapability.resolveApproveCommandBehavior!({
+        cfg: enabled,
+        accountId: "default",
+        senderId: "user:77",
+        approvalKind: "exec",
+      } as any),
+    ).toBeUndefined()
+    expect(
+      inlineApprovalCapability.resolveApproveCommandBehavior!({
+        cfg: disabled,
+        accountId: "default",
+        senderId: "user:77",
+        approvalKind: "plugin",
+      } as any),
+    ).toBeUndefined()
+  })
+
+  it("matches approval requests to Inline accounts asynchronously", async () => {
+    const accounts = {
+      a: { token: "token-a", execApprovals: { approvers: ["51"] } },
+      b: { token: "token-b", execApprovals: { approvers: ["52"] } },
+    }
+    const cfg = { channels: { inline: { accounts } } } as unknown as OpenClawConfig
+    const handles = (config: OpenClawConfig, accountId: string, request: ExecApprovalRequest) =>
+      shouldHandleInlineExecApprovalRequest({ cfg: config, accountId, request })
+
+    // Bound turn-source account wins.
+    const bound = buildExecRequest({ turnSourceAccountId: "b" })
+    const boundResult = handles(cfg, "b", bound)
+    expect(boundResult).toBeInstanceOf(Promise)
+    await expect(boundResult).resolves.toBe(true)
+    await expect(handles(cfg, "a", bound)).resolves.toBe(false)
+
+    // Explicit Inline forwarding targets scope delivery to their accounts.
+    const targeted = {
+      ...cfg,
+      approvals: {
+        exec: {
+          enabled: true,
+          mode: "targets",
+          targets: [{ channel: "inline", to: "user:52", accountId: "b" }],
+        },
+      },
+    } as unknown as OpenClawConfig
+    const unbound = buildExecRequest({ turnSourceAccountId: undefined })
+    await expect(handles(targeted, "b", unbound)).resolves.toBe(true)
+    await expect(handles(targeted, "a", unbound)).resolves.toBe(false)
+
+    // Foreign-channel requests without a bound account only route when exactly
+    // one Inline account is eligible.
+    const foreign = buildExecRequest({
+      turnSourceChannel: "slack",
+      turnSourceAccountId: undefined,
+      turnSourceTo: "channel:C1",
+    })
+    await expect(handles(cfg, "a", foreign)).resolves.toBe(false)
+    const single = {
+      channels: { inline: { accounts: { a: accounts.a } } },
+    } as unknown as OpenClawConfig
+    await expect(handles(single, "a", foreign)).resolves.toBe(true)
+
+    // The runtime availability gate awaits the same account matching.
+    const context = { client: {} }
+    await expect(
+      Promise.resolve(inlineApprovalNativeRuntime.availability.shouldHandle({
+        cfg, accountId: "a", context, request: bound, approvalKind: "exec",
+      })),
+    ).resolves.toBe(false)
+    await expect(
+      Promise.resolve(inlineApprovalNativeRuntime.availability.shouldHandle({
+        cfg, accountId: "b", context, request: bound, approvalKind: "exec",
+      })),
+    ).resolves.toBe(true)
+  })
+
+  it("names who answered from OpenClaw's chat approval id", async () => {
+    const cfg = { channels: { inline: { token: "token", execApprovals: { approvers: ["51"] } } } } as OpenClawConfig
+    const request = buildExecRequest()
+    const invokeRaw = vi.fn(async () => ({ oneofKind: "getUsers", getUsers: { users: [{ id: 1600n, firstName: "Mo" }] } }))
+    const view = { approvalId: request.id, approvalKind: "exec", phase: "resolved", title: "", metadata: [], commandText: "whoami", decision: "allow-once", resolvedBy: "Chat approval (inline:1600)" } as any
+    const entry = { messageId: 1n, peerId: {}, text: "x", parseMarkdown: true, subject: "```sh\nwhoami\n```" } as any
+    const result = await inlineApprovalNativeRuntime.presentation.buildResolvedResult({
+      cfg, accountId: "default", context: { client: { invokeRaw } }, request,
+      resolved: { id: request.id, decision: "allow-once", resolvedBy: "Chat approval (inline:1600)", ts: 1 } as any,
+      view, entry,
+    })
+    expect(invokeRaw).toHaveBeenCalledWith(expect.any(Number), { oneofKind: "getUsers", getUsers: { userIds: [1600n] } })
+    expect(result).toEqual({ kind: "update", payload: { text: "✅ Allowed once by Mo\n\n```sh\nwhoami\n```" } })
+
+    invokeRaw.mockRejectedValueOnce(new Error("no access"))
+    expect(await inlineApprovalNativeRuntime.presentation.buildResolvedResult({
+      cfg, accountId: "default", context: { client: { invokeRaw } }, request,
+      resolved: { id: request.id, decision: "deny", resolvedBy: "Chat approval (inline:1600)", ts: 1 } as any,
+      view: { ...view, decision: "deny" }, entry,
+    })).toEqual({ kind: "update", payload: { text: "❌ Denied\n\n```sh\nwhoami\n```" } })
   })
 
   it("renders, delivers, and clears Inline approval buttons", async () => {
@@ -216,7 +421,9 @@ describe("inline/native approvals", () => {
       nowMs: request.createdAtMs,
       view,
     })
-    expect(pendingPayload.text).toContain("Approval required.")
+    // Buttons carry the decisions, so the card shows only what is being approved.
+    expect(pendingPayload.text).toBe("Command approval required\n\n```sh\npwd\n```")
+    expect(pendingPayload.text).not.toContain("/approve")
     expect(pendingPayload.actions?.rows[0]?.actions[0]?.text).toBe("Allow Once")
     expect(
       pendingPayload.actions?.rows[0]?.actions[0]?.action.oneofKind,
@@ -281,12 +488,28 @@ describe("inline/native approvals", () => {
     )
     expect(entry?.messageId).toBe(9001n)
 
-    await inlineApprovalNativeRuntime.interactions?.clearPendingActions?.({
+    const final = await inlineApprovalNativeRuntime.presentation.buildResolvedResult({
       cfg,
       accountId: "default",
       context,
+      request,
+      resolved: { id: request.id, decision: "allow-once", ts: 1 } as any,
+      view: { ...view, phase: "resolved", decision: "allow-once" },
+      entry: entry!,
+    })
+    expect(final).toEqual({
+      kind: "update",
+      payload: { text: "✅ Allowed once\n\n```sh\npwd\n```" },
+    })
+    await inlineApprovalNativeRuntime.transport.updateEntry?.({
+      cfg,
+      accountId: "default",
+      context,
+      request,
+      approvalKind: "exec",
       entry: entry!,
       phase: "resolved",
+      payload: (final as { payload: { text: string } }).payload,
     })
     expect(invokeRaw).toHaveBeenCalledWith(
       expect.any(Number),
@@ -294,11 +517,29 @@ describe("inline/native approvals", () => {
         oneofKind: "editMessage",
         editMessage: expect.objectContaining({
           messageId: 9001n,
+          text: "✅ Allowed once\n\n```sh\npwd\n```",
           actions: { rows: [] },
           parseMarkdown: false,
         }),
       }),
     )
+    expect(await inlineApprovalNativeRuntime.presentation.buildResolvedResult({
+      cfg,
+      accountId: "default",
+      context,
+      request,
+      resolved: { id: request.id, decision: "deny", resolvedBy: "Mo", ts: 1 } as any,
+      view: { ...view, phase: "resolved", decision: "deny", resolvedBy: "Mo" },
+      entry: entry!,
+    })).toEqual({ kind: "update", payload: { text: "❌ Denied by Mo\n\n```sh\npwd\n```" } })
+    expect(await inlineApprovalNativeRuntime.presentation.buildExpiredResult({
+      cfg,
+      accountId: "default",
+      context,
+      request,
+      view: { ...view, phase: "expired" },
+      entry: entry!,
+    })).toEqual({ kind: "update", payload: { text: "⌛ Approval expired\n\n```sh\npwd\n```" } })
     expect(invokeRaw).toHaveBeenCalledWith(
       SET_BOT_PRESENCE_STATE,
       expect.objectContaining({

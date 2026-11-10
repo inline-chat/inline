@@ -1,6 +1,6 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { resolveAgentRoute } from "openclaw/plugin-sdk/routing"
-import { listSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
+import { prepareSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
 import {
   findInlineTokenOwnerAccountId,
   formatDuplicateInlineTokenReason,
@@ -36,16 +36,16 @@ function truncateUtf16(value: string, maxLength: number): string {
     : truncated
 }
 
-export function buildInlinePublishedSkills(params: {
+export async function buildInlinePublishedSkills(params: {
   cfg: OpenClawConfig
   accountId: string
-}): InlinePublishedSkill[] {
+}): Promise<InlinePublishedSkill[]> {
   const route = resolveAgentRoute({
     cfg: params.cfg,
     channel: "inline",
     accountId: params.accountId,
   })
-  const commands = listSkillCommandsForAgents({
+  const commands = await prepareSkillCommandsForAgents({
     cfg: params.cfg,
     agentIds: [route.agentId],
   })
@@ -99,7 +99,7 @@ export async function syncInlineAgentSkills(params: {
 
     try {
       const token = await resolveInlineToken(account)
-      const skills = buildInlinePublishedSkills({ cfg: params.cfg, accountId: account.accountId })
+      const skills = await buildInlinePublishedSkills({ cfg: params.cfg, accountId: account.accountId })
       await callInlineBotApi<Record<string, never>>({
         baseUrl: account.baseUrl,
         token,

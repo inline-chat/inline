@@ -3,7 +3,7 @@ import path from "node:path"
 import { writeFile } from "node:fs/promises"
 import { renameSync, unlinkSync, writeFileSync } from "node:fs"
 import { InlineInboundInbox } from "./inbound-inbox.js"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
   INLINE_ACTION_CALLBACK_DATA_MAX_BYTES,
   INLINE_ACTION_LABEL_MAX_LENGTH,
@@ -12,8 +12,8 @@ import {
 const modelRuntimeMocks = vi.hoisted(() => ({
   buildModelsProviderData: vi.fn(),
   resolveDefaultModelForAgent: vi.fn(),
-  getSessionEntry: vi.fn(),
-  patchSessionEntry: vi.fn(),
+  getSessionEntryAsync: vi.fn(),
+  applySessionEntryPatch: vi.fn(),
   applyModelOverrideToSessionEntry: vi.fn(),
 }))
 
@@ -54,8 +54,8 @@ vi.mock("openclaw/plugin-sdk/session-store-runtime", async () => {
   )
   return {
     ...actual,
-    getSessionEntry: modelRuntimeMocks.getSessionEntry,
-    patchSessionEntry: modelRuntimeMocks.patchSessionEntry,
+    getSessionEntryAsync: modelRuntimeMocks.getSessionEntryAsync,
+    applySessionEntryPatch: modelRuntimeMocks.applySessionEntryPatch,
   }
 })
 
@@ -77,7 +77,7 @@ type MonitorHarness = {
     sendMessage: ReturnType<typeof vi.fn>
     invokeRaw: ReturnType<typeof vi.fn>
     uploadFile: ReturnType<typeof vi.fn>
-    fetchRemoteMedia: ReturnType<typeof vi.fn>
+    readRemoteMediaBuffer: ReturnType<typeof vi.fn>
     saveMediaBuffer: ReturnType<typeof vi.fn>
     resolveAgentRoute: ReturnType<typeof vi.fn>
     recordInboundSession: ReturnType<typeof vi.fn>
@@ -230,6 +230,9 @@ type MonitorSetup = {
     lastName?: string
     bot?: boolean
   }>
+  botOutputMode?: number
+  outputParticipations?: Array<{ botUserId: bigint; outputMode?: number }>
+  outputParticipationsError?: Error
   participantLookupError?: Error
   directoryLookupError?: Error
   historyByChat?: Record<string, Array<{
@@ -240,6 +243,7 @@ type MonitorSetup = {
     out?: boolean
     replyToMsgId?: bigint
     entities?: unknown
+    replies?: { chatId: bigint; replyCount: number; hasUnread: boolean; recentReplierUserIds: bigint[] }
   }>>
   mediaByUrl?: Record<string, { contentType?: string; fileName?: string; buffer?: Uint8Array | Buffer }>
   mediaLoadErrors?: Record<string, Error>
@@ -259,6 +263,7 @@ type MonitorSetup = {
   pluginCommands?: Array<{ name: string; description: string }>
   onDispatchReply?: () => void
   dispatchReplyPayload?: {
+    isError?: boolean
     text?: string
     replyToId?: string
     mediaUrl?: string
@@ -501,11 +506,11 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     }
   })
   modelRuntimeMocks.resolveDefaultModelForAgent.mockReset().mockImplementation(({ cfg }: any) => resolveMockModelRef(cfg))
-  modelRuntimeMocks.getSessionEntry.mockReset().mockReturnValue(undefined)
-  modelRuntimeMocks.patchSessionEntry.mockReset().mockImplementation(async ({ fallbackEntry, update }: any) => {
-    const entry = structuredClone(fallbackEntry ?? { sessionId: "test-session", updatedAt: 1 })
-    return await update(entry, { existingEntry: fallbackEntry ? undefined : entry })
-  })
+  modelRuntimeMocks.getSessionEntryAsync.mockReset().mockReturnValue(undefined)
+  modelRuntimeMocks.applySessionEntryPatch.mockReset().mockImplementation(async ({ fallbackEntry, patch }: any) => ({
+    ...structuredClone(fallbackEntry ?? { sessionId: "test-session", updatedAt: 1 }),
+    ...patch,
+  }))
   modelRuntimeMocks.applyModelOverrideToSessionEntry.mockReset().mockImplementation(({ entry, selection }: any) => {
     entry.provider = selection.provider
     entry.model = selection.model
@@ -543,7 +548,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     error.name = "InlineSdkAuthenticationError"
     onAuthenticationError?.(error)
   })
-  const fetchRemoteMedia = vi.fn(async ({ url }: { url: string }) => {
+  const readRemoteMediaBuffer = vi.fn(async ({ url }: { url: string }) => {
     const media = setup.mediaByUrl?.[url]
     return {
       buffer: Buffer.from(media?.buffer ?? [1, 2, 3]),
@@ -707,6 +712,13 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         oneofKind: "updateDialogFollowMode",
         updateDialogFollowMode: {},
       }
+    }
+    if (method === 158 && input?.oneofKind === "getAgentParticipations") {
+      if (setup.outputParticipationsError) throw setup.outputParticipationsError
+      return { oneofKind: "getAgentParticipations", getAgentParticipations: { participations: setup.outputParticipations ?? [] } }
+    }
+    if (method === 164 && input?.oneofKind === "getAgentSettings") {
+      return { oneofKind: "getAgentSettings", getAgentSettings: { settings: { defaultOutputMode: setup.botOutputMode ?? 0 } } }
     }
     if (method === 1 && input?.oneofKind === "getMe") {
       if (setup.getMeError) {
@@ -972,7 +984,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           return false
         }
       },
-      BotCapability_Kind: { CHAT_SETTINGS: 1 },
+      AgentOutputMode: { UNSPECIFIED: 0, DETAILED: 1, FRIENDLY: 2 },
+      BotCapability_Kind: { CHAT_SETTINGS: 1, OUTPUT_MODE: 3 },
       BotChatSettingsInfo_Tone: { TONE_UNSPECIFIED: 0, NEUTRAL: 1, SUCCESS: 2, WARNING: 3, ERROR: 4 },
       BotChatSettingsProblem_Code: {
         CODE_UNSPECIFIED: 0,
@@ -986,6 +999,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         constructor(_path: string) {}
       },
       Method: {
+        GET_AGENT_PARTICIPATIONS: 158,
+        GET_AGENT_SETTINGS: 164,
         GET_ME: 1,
         SEND_COMPOSE_ACTION: 20,
         DELETE_MESSAGES: 4,
@@ -1001,6 +1016,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         SET_BOT_PRESENCE_STATE,
         UPDATE_DIALOG_FOLLOW_MODE,
       },
+      UpdateComposeAction_ComposeAction: { WORKING: 6 },
       DialogFollowMode: {
         DIALOG_FOLLOW_MODE_UNSPECIFIED: 0,
         FOLLOWING: 1,
@@ -1121,7 +1137,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     )
     return {
       ...actual,
-      listSkillCommandsForAgents: vi.fn(() => setup.skillCommands ?? []),
+      prepareSkillCommandsForAgents: vi.fn(() => setup.skillCommands ?? []),
     }
   })
   vi.doMock("openclaw/plugin-sdk/plugin-runtime", async () => {
@@ -1206,7 +1222,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         shouldHandleTextCommands: setup.shouldHandleTextCommands ?? (() => true),
       },
       media: {
-        fetchRemoteMedia,
+        readRemoteMediaBuffer,
         saveMediaBuffer,
       },
       text: {
@@ -1251,7 +1267,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       sendTyping,
       invokeRaw,
       uploadFile,
-      fetchRemoteMedia,
+      readRemoteMediaBuffer,
       saveMediaBuffer,
       resolveAgentRoute,
       recordInboundSession,
@@ -1300,7 +1316,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.setMyBotCapabilities).toHaveBeenCalledWith({
-        capabilities: [{ kind: 1, version: 1 }],
+        capabilities: [{ kind: 1, version: 1 }, { kind: 3, version: 1 }],
       })
       expect(harness.calls.answerBotChatSettings).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1386,7 +1402,7 @@ describe("inline/monitor", () => {
     expect(mutationHarness.calls.mutateConfigFile).toHaveBeenCalledWith(expect.objectContaining({
       afterWrite: {
         mode: "none",
-        reason: "Inline reads the refreshed runtime config in-process.",
+        reason: "Inline applies chat settings in-process without restarting the channel.",
       },
     }))
     const response = mutationHarness.calls.answerBotChatSettings.mock.calls[0]?.[0]?.response
@@ -1417,7 +1433,7 @@ describe("inline/monitor", () => {
         agents: { defaults: { model: "openai/gpt-5.6-sol" } },
       },
     })
-    modelRuntimeMocks.getSessionEntry.mockReturnValue({
+    modelRuntimeMocks.getSessionEntryAsync.mockReturnValue({
       sessionId: "fallback-session",
       updatedAt: Date.now(),
       providerOverride: "minimax",
@@ -1693,7 +1709,7 @@ describe("inline/monitor", () => {
       },
     })
     configureCatalog()
-    modelRuntimeMocks.getSessionEntry.mockImplementation(() => selectedEntry as any)
+    modelRuntimeMocks.getSessionEntryAsync.mockImplementation(() => selectedEntry as any)
     const mutationHandle = await mutationHarness.monitorInlineProvider({
       cfg: {} as any,
       account: buildAccount({ groupPolicy: "open" }),
@@ -1718,7 +1734,7 @@ describe("inline/monitor", () => {
       oneofKind: "select",
       select: { value: "minimax/MiniMax-M3" },
     })
-    expect(modelRuntimeMocks.patchSessionEntry).not.toHaveBeenCalled()
+    expect(modelRuntimeMocks.applySessionEntryPatch).not.toHaveBeenCalled()
 
     await mutationHandle.stop()
   })
@@ -2334,7 +2350,11 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("debounces rapid inbound text messages into one turn", async () => {
+  it.each([
+    { source: "channel", inbound: { debounceMs: 0, byChannel: { inline: 20 } }, account: {} },
+    { source: "global", inbound: { debounceMs: 20 }, account: {} },
+    { source: "account", inbound: { debounceMs: 0 }, account: { debounceMs: 20 } },
+  ])("batches rapid inbound text using the $source debounce setting", async ({ inbound, account }) => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -2366,161 +2386,43 @@ describe("inline/monitor", () => {
       },
     })
 
-    const handle = await harness.monitorInlineProvider({
-      cfg: {
-        messages: {
-          inbound: {
-            debounceMs: 0,
-            byChannel: {
-              inline: 20,
-            },
-          },
-        },
-      } as any,
-      account: buildAccount({ dmPolicy: "open" }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
-      abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    })
+    // Both real receipt writes must finish before the simulated 20 ms elapse.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    let handle: Awaited<ReturnType<MonitorHarness["monitorInlineProvider"]>> | undefined
+    try {
+      handle = await harness.monitorInlineProvider({
+        cfg: { messages: { inbound } } as any,
+        account: buildAccount({ dmPolicy: "open", ...account }),
+        runtime: { log: vi.fn(), error: vi.fn() } as any,
+        abortSignal: new AbortController().signal,
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      })
+      await handle.done
+      await vi.advanceTimersByTimeAsync(19)
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      vi.useRealTimers()
+      await waitFor(() => {
+        expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+        expect(harness.calls.resolveAgentRoute).toHaveBeenCalledTimes(1)
+        expect(harness.calls.finalizeInboundContext).toHaveBeenCalledTimes(1)
+        expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+          expect.objectContaining({
+            RawBody: "first line\nsecond line",
+            MessageSid: "1002",
+            MessageSids: ["1001", "1002"],
+            MessageSidFirst: "1001",
+            MessageSidLast: "1002",
+            From: "inline:42",
+            To: "inline:7",
+          }),
+        )
+      })
 
-    await waitFor(() => {
-      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.resolveAgentRoute).toHaveBeenCalledTimes(1)
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledTimes(1)
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          RawBody: "first line\nsecond line",
-          MessageSid: "1002",
-          MessageSids: ["1001", "1002"],
-          MessageSidFirst: "1001",
-          MessageSidLast: "1002",
-          From: "inline:42",
-          To: "inline:7",
-        }),
-      )
-    })
-
-    await handle.stop()
-  }, 30_000)
-
-  it("uses global inbound debounceMs when Inline channel override is absent", async () => {
-    const harness = await setupMonitorHarness({
-      events: [
-        {
-          kind: "message.new",
-          chatId: 7n,
-          message: {
-            id: 1001n,
-            date: 1_700_000_000n,
-            fromId: 42n,
-            message: "first global line",
-          },
-        },
-        {
-          kind: "message.new",
-          chatId: 7n,
-          message: {
-            id: 1002n,
-            date: 1_700_000_001n,
-            fromId: 42n,
-            message: "second global line",
-          },
-        },
-      ],
-      chats: {
-        "7": { kind: "direct", title: "Alice" },
-      },
-      dispatchReplyPayload: {
-        text: "batched reply",
-      },
-    })
-
-    const handle = await harness.monitorInlineProvider({
-      cfg: {
-        messages: {
-          inbound: {
-            debounceMs: 20,
-          },
-        },
-      } as any,
-      account: buildAccount({ dmPolicy: "open" }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
-      abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    })
-
-    await waitFor(() => {
-      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          RawBody: "first global line\nsecond global line",
-          MessageSid: "1002",
-          MessageSids: ["1001", "1002"],
-          MessageSidFirst: "1001",
-          MessageSidLast: "1002",
-        }),
-      )
-    })
-
-    await handle.stop()
-  }, 30_000)
-
-  it("uses Inline account debounceMs to batch rapid inbound text messages", async () => {
-    const harness = await setupMonitorHarness({
-      events: [
-        {
-          kind: "message.new",
-          chatId: 7n,
-          message: {
-            id: 1001n,
-            date: 1_700_000_000n,
-            fromId: 42n,
-            message: "first account-level line",
-          },
-        },
-        {
-          kind: "message.new",
-          chatId: 7n,
-          message: {
-            id: 1002n,
-            date: 1_700_000_001n,
-            fromId: 42n,
-            message: "second account-level line",
-          },
-        },
-      ],
-      chats: {
-        "7": { kind: "direct", title: "Alice" },
-      },
-      dispatchReplyPayload: {
-        text: "batched reply",
-      },
-    })
-
-    const handle = await harness.monitorInlineProvider({
-      cfg: {} as any,
-      account: buildAccount({
-        dmPolicy: "open",
-        debounceMs: 20,
-      }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
-      abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    })
-
-    await waitFor(() => {
-      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
-        expect.objectContaining({
-          RawBody: "first account-level line\nsecond account-level line",
-          MessageSid: "1002",
-          From: "inline:42",
-          To: "inline:7",
-        }),
-      )
-    })
-
-    await handle.stop()
+    } finally {
+      vi.useRealTimers()
+      await handle?.stop()
+    }
   }, 30_000)
 
   it("lets Inline account debounceMs 0 disable global inbound debounce", async () => {
@@ -2995,6 +2897,8 @@ describe("inline/monitor", () => {
       },
     })
 
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    onTestFinished(() => { vi.useRealTimers() })
     const handle = await harness.monitorInlineProvider({
       cfg: {
         messages: {
@@ -3011,6 +2915,9 @@ describe("inline/monitor", () => {
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
 
+    await handle.done
+    await vi.advanceTimersByTimeAsync(250)
+    vi.useRealTimers()
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
@@ -3022,7 +2929,6 @@ describe("inline/monitor", () => {
       )
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 80))
     expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
     expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3229,6 +3135,8 @@ describe("inline/monitor", () => {
       },
     })
 
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    onTestFinished(() => { vi.useRealTimers() })
     const handle = await harness.monitorInlineProvider({
       cfg: {
         messages: {
@@ -3248,6 +3156,9 @@ describe("inline/monitor", () => {
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
 
+    await handle.done
+    await vi.advanceTimersByTimeAsync(250)
+    vi.useRealTimers()
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
@@ -3259,7 +3170,6 @@ describe("inline/monitor", () => {
       )
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 80))
     expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
     expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3267,7 +3177,7 @@ describe("inline/monitor", () => {
         MessageSid: "1001",
       }),
     )
-    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+    expect(harness.calls.readRemoteMediaBuffer).not.toHaveBeenCalled()
 
     await handle.stop()
   })
@@ -3360,7 +3270,7 @@ describe("inline/monitor", () => {
         }),
       )
     })
-    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+    expect(harness.calls.readRemoteMediaBuffer).not.toHaveBeenCalled()
     expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
       expect.objectContaining({
         Body: "/stop",
@@ -3432,6 +3342,8 @@ describe("inline/monitor", () => {
       },
     })
 
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    onTestFinished(() => { vi.useRealTimers() })
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
       account: buildAccount({
@@ -3443,6 +3355,9 @@ describe("inline/monitor", () => {
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
 
+    await handle.done
+    await vi.advanceTimersByTimeAsync(250)
+    vi.useRealTimers()
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
@@ -3454,9 +3369,8 @@ describe("inline/monitor", () => {
       )
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 80))
     expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+    expect(harness.calls.readRemoteMediaBuffer).not.toHaveBeenCalled()
     expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
     expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4784,7 +4698,7 @@ describe("inline/monitor", () => {
     })
 
     await waitFor(() => {
-      expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+      expect(harness.calls.readRemoteMediaBuffer).not.toHaveBeenCalled()
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: "what about this image?",
@@ -5076,6 +4990,136 @@ describe("inline/monitor", () => {
     expect(harness.calls.sendMessage.mock.calls.filter(([args]) => args.chatId === 89n)).toEqual([])
     expect(harness.calls.invokeRaw.mock.calls.filter(([, args]) => args?.oneofKind === "createSubthread")).toHaveLength(1)
     await handle.stop()
+  })
+
+  it("marks parent history lines the bot already answered in a reply thread", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 88n, message: {
+        id: 30n, date: 1_700_000_030n, fromId: 42n, message: "and Canada?",
+      } }],
+      chats: { "88": { kind: "group", title: "Room" } },
+      historyByChat: {
+        "88": [
+          { id: 28n, date: 1_700_000_028n, fromId: 42n, message: "capital of Japan?",
+            replies: { chatId: 8828n, replyCount: 1, hasUnread: false, recentReplierUserIds: [777n] } },
+          { id: 29n, date: 1_700_000_029n, fromId: 42n, message: "capital of Spain?",
+            replies: { chatId: 8829n, replyCount: 1, hasUnread: false, recentReplierUserIds: [42n] } },
+        ],
+      },
+      dispatchReplyPayload: { text: "Ottawa" },
+    } as any)
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: false, historyLimit: 10 } as any),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          InboundHistory: [
+            expect.objectContaining({ body: "capital of Japan? [you answered this in its reply thread]" }),
+            expect.objectContaining({ body: "capital of Spain?" }),
+          ],
+        }),
+      ))
+    } finally {
+      await handle.stop()
+    }
+  })
+
+  it("handles /approve while the run it unblocks is still going in the same chat", async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const started: string[] = []
+    const harness = await setupMonitorHarness({
+      events: [
+        { kind: "message.new", chatId: 89n, message: { id: 40n, date: 1_700_000_040n, fromId: 51n, message: "run uname" } },
+        { kind: "message.new", chatId: 89n, message: { id: 41n, date: 1_700_000_041n, fromId: 51n, message: "/approve abc allow-once" } },
+      ],
+      chats: { "89": { kind: "direct", title: "DM", peerUserId: 51n } },
+      dispatchReplyPayload: { text: "ok" },
+      dispatchReplyBlocker: async ({ ctx }: { ctx: any }) => {
+        started.push(String(ctx.Body))
+        if (ctx.Body === "run uname") await gate
+      },
+    } as any)
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(started).toEqual(["run uname", "/approve abc allow-once"]))
+    } finally {
+      release()
+      await handle.stop()
+    }
+  })
+
+  it("applies a thread mode changed in chat to the next message without a restart", async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const message = (id: bigint, text: string) => ({
+      kind: "message.new" as const,
+      chatId: 89n,
+      message: { id, date: 1_700_000_000n + id, fromId: 51n, message: text, out: false },
+      seq: Number(id),
+      date: 1_700_000_000n + id,
+    })
+    const harness = await setupMonitorHarness({
+      eventClient: {
+        async *events() {
+          yield message(20n, "before the switch")
+          await gate
+          yield message(21n, "after the switch")
+        },
+        async consumeEvents(handle: (event: unknown) => Promise<void>) {
+          for await (const event of this.events()) await handle(event)
+        },
+        async close() {},
+      },
+      events: [],
+      chats: { "89": { kind: "direct", title: "DM", peerUserId: 51n } },
+      dispatchReplyPayload: { text: "answer" },
+    } as any)
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+      const createdThreads = () =>
+        harness.calls.invokeRaw.mock.calls.filter(([, args]) => args?.oneofKind === "createSubthread")
+      expect(createdThreads()).toHaveLength(0)
+      // The host keeps serving its old snapshot after an `afterWrite: none` write.
+      const { getInlineRuntime } = await import("../runtime")
+      const hostSnapshot = (getInlineRuntime().config as any).current()
+      const { mutateInlineLiveConfig } = await import("./live-config")
+      await mutateInlineLiveConfig({
+        current: () => hostSnapshot,
+        mutateConfigFile: async ({ mutate }) => {
+          const draft = structuredClone(hostSnapshot)
+          mutate(draft)
+          return { nextConfig: draft }
+        },
+      }, (draft: any) => {
+        draft.channels = { inline: { groups: { "89": { replyThreadMode: "on" } } } }
+      })
+      expect((getInlineRuntime().config as any).current()).toBe(hostSnapshot)
+      release()
+      await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2))
+      expect(createdThreads()).toHaveLength(1)
+    } finally {
+      release()
+      await handle.stop()
+    }
   })
 
   it("honors a DM-specific reply-thread mode override", async () => {
@@ -6979,7 +7023,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chatId: 7005n,
-          text: expect.stringContaining("Current thinking level: high."),
+          text: "Thinking: high",
           actions: expect.any(Object),
         }),
       )
@@ -7063,6 +7107,42 @@ describe("inline/monitor", () => {
     })
 
     await handle.stop()
+  })
+
+  it("routes a rendered typed command button through native command handling", async () => {
+    const { resolveInlineReplyActions } = await import("./monitor-reply-actions")
+    const actions = resolveInlineReplyActions({
+      presentation: { blocks: [{ type: "buttons", buttons: [
+        { label: "Verbose", action: { type: "command", command: "/verbose on" } },
+      ] }] },
+    })
+    const action = actions!.rows[0]!.actions[0]!
+    expect(action.action.oneofKind).toBe("callback")
+    const harness = await setupMonitorHarness({
+      events: [{
+        kind: "message.action.invoke", chatId: 7n, interactionId: 23n,
+        messageId: 1005n, actorUserId: 42n, actionId: action.actionId,
+        data: action.action.oneofKind === "callback" ? action.action.callback.data : new Uint8Array(),
+      }],
+      chats: { "7": { kind: "direct", title: "Alice" } },
+      historyByChat: { "7": [{ id: 1005n, date: 1_700_000_000n, fromId: 777n, message: "Verbose?" }] },
+      shouldHandleTextCommands: vi.fn(() => true),
+      dispatchReplyPayload: { text: "verbose enabled" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: { commands: { text: false } } as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({ CommandBody: "/verbose on", CommandSource: "native" }),
+      ))
+    } finally {
+      await handle.stop()
+    }
   })
 
   it("does not interpret agent-owned callback data as a native command", async () => {
@@ -7303,7 +7383,7 @@ describe("inline/monitor", () => {
     })
 
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
-    expect(modelRuntimeMocks.patchSessionEntry).not.toHaveBeenCalled()
+    expect(modelRuntimeMocks.applySessionEntryPatch).not.toHaveBeenCalled()
 
     await handle.stop()
   })
@@ -7623,6 +7703,93 @@ describe("inline/monitor", () => {
     const button = sent?.actions?.rows?.[0]?.actions?.[0]
     expect(button?.text).toBe("Approve")
     expect(new TextDecoder().decode(button?.action?.callback?.data)).toBe("approve")
+
+    await handle.stop()
+  })
+
+  it("retries a flood-limited final reply with the same send identity", async () => {
+    const flood = new Error("SDK send failed", { cause: Object.assign(new Error("paced"), {
+      code: "rpc-error", rpcCode: 3, retryAfterSeconds: 1,
+    }) })
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 72n, message: {
+        id: 10022n, date: 1_700_000_001n, fromId: 42n, message: "hello",
+      } }],
+      chats: { "72": { kind: "direct", title: "Alice" } },
+      sendMessageErrors: [flood],
+      dispatchReplyPayload: { text: "final answer" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2))
+      const [first, second] = harness.calls.sendMessage.mock.calls.map(([request]) => request)
+      expect(first.text).toBe("final answer")
+      expect(second).toBe(first)
+      expect(first.randomId).not.toBe(0n)
+    } finally {
+      await handle.stop()
+    }
+  })
+
+  it("maps presentation-only buttons to inline message actions on text replies", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 72n,
+          message: {
+            id: 10022n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "show options",
+          },
+        },
+      ],
+      chats: {
+        "72": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "choose one",
+        presentation: {
+          blocks: [
+            {
+              type: "buttons",
+              buttons: [
+                { label: "Approve", style: "primary", action: { type: "callback", value: "approve" } },
+                { label: "Disabled", disabled: true, action: { type: "command", command: "/stop" } },
+                { label: "Docs", action: { type: "url", url: "https://inline.chat/docs" } },
+              ],
+            },
+          ],
+        },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ chatId: 72n, actions: expect.any(Object) }),
+      )
+    })
+
+    const sent = harness.calls.sendMessage.mock.calls[0]?.[0]
+    const buttons = sent?.actions?.rows?.flatMap((row: any) => row.actions) ?? []
+    expect(buttons.map((button: any) => button.text)).toEqual(["Approve"])
+    expect(buttons[0]?.style).toBe(1)
+    expect(sent?.text).toContain("https://inline.chat/docs")
+    expect(new TextDecoder().decode(buttons[0]?.action?.callback?.data)).toBe("approve")
 
     await handle.stop()
   })
@@ -8581,6 +8748,42 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it.each([
+    { label: "unset retains configured progress", bot: 0, own: 0, legacy: true, show: true },
+    { label: "another bot's override leaves the mode unset", bot: 0, own: 0, legacy: false, show: false },
+    { label: "explicit bot Detailed", bot: 1, own: 0, legacy: false, show: true },
+    { label: "explicit bot Friendly", bot: 2, own: 0, legacy: true, show: false },
+    { label: "chat Friendly overrides Detailed", bot: 1, own: 2, legacy: true, show: false },
+    { label: "chat Detailed overrides Friendly", bot: 2, own: 1, legacy: false, show: true },
+    { label: "unavailable chat preference keeps a Detailed turn quiet", bot: 1, own: 0, legacy: true, show: false, unavailable: true },
+  ])("renders one answer when $label", async ({ bot, own, legacy, show, unavailable }) => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 772n, message: { id: 42n, date: 1_700_000_004n, fromId: 3n, message: "check" } }],
+      chats: { "772": { kind: "direct", title: "Alice" } },
+      botOutputMode: bot,
+      outputParticipations: [{ botUserId: 888n, outputMode: 1 }, { botUserId: 777n, outputMode: own }],
+      ...(unavailable ? { outputParticipationsError: new Error("unavailable") } : {}),
+      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
+        await replyOptions.onToolStart({ name: "exec", args: { command: "date" } })
+        await dispatcherOptions.deliver({ text: "finished" }, { kind: "final" })
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ dmPolicy: "open", streaming: { mode: legacy ? "progress" : "off" } }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: new AbortController().signal,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "finished" })))
+      const sends = harness.calls.sendMessage.mock.calls.map(([payload]) => payload)
+      expect(sends.filter((payload) => payload.text === "finished")).toHaveLength(1)
+      expect(sends.some((payload) => payload.sendMode === "silent")).toBe(show)
+      const methods = harness.calls.invokeRaw.mock.calls.map(([, input]) => input.oneofKind)
+      expect(methods).toContain("getAgentSettings")
+      expect(methods).not.toContain("updateAgentSettings")
+      expect(methods).not.toContain("setAgentParticipation")
+    } finally { await handle.stop() }
+  })
+
   it("maps unified streaming.mode=progress to a separate Inline progress placeholder path", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -8670,7 +8873,7 @@ describe("inline/monitor", () => {
       chats: { "773": { kind: "direct", title: "Alice" } },
       dispatchReplyResult: { queuedFinal: false, counts: {} },
       dispatchReplyBlocker: async ({ replyOptions, emitAgentEvent }) => {
-        replyOptions.onAgentRunStart("current-run")
+        replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
         await replyOptions.onToolStart({ name: "read", toolCallId: "read-1", args: { path: "/tmp/book.txt" } })
         await replyOptions.onItemEvent({ itemId: "tool:read-1", toolCallId: "read-1", kind: "tool", name: "read", phase: "end", status: "completed" })
         // The host's /stop returns an empty normal dispatch result. The provider
@@ -8701,7 +8904,7 @@ describe("inline/monitor", () => {
       chats: { "773": { kind: "direct", title: "Alice" } },
       dispatchReplyResult: { queuedFinal: false, counts: {} },
       dispatchReplyBlocker: async ({ replyOptions, emitAgentEvent }) => {
-        replyOptions.onAgentRunStart("current-run")
+        replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
         await replyOptions.onToolStart({ name: "exec", toolCallId: "exec-1", args: { command: "sleep 45", title: "Wait for stop check" } })
         // OpenClaw 2026.9.7 returns its aborted dispatch before the worker's
         // settled lifecycle callback. The provider signal remains active.
@@ -8734,7 +8937,7 @@ describe("inline/monitor", () => {
       dispatchReplyResult: { queuedFinal: false, counts: {} },
       editMessageDelayMs: 150,
       dispatchReplyBlocker: async ({ replyOptions, emitAgentEvent }) => {
-        replyOptions.onAgentRunStart("current-run")
+        replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
         await replyOptions.onToolStart({ name: "exec", toolCallId: "exec-1", args: { command: "sleep 45" } })
         if (late) setTimeout(() => {
           emitAgentEvent({ runId: "current-run", stream: "lifecycle", data: { phase: "error", aborted: true, stopReason: "aborted", executionSettled: true } })
@@ -8759,7 +8962,7 @@ describe("inline/monitor", () => {
       events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
       chats: { "773": { kind: "direct", title: "Alice" } },
       dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
-        replyOptions.onAgentRunStart("current-run")
+        replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
         await dispatcherOptions.deliver({ text: "Ready." })
       },
     })
@@ -9037,11 +9240,49 @@ describe("inline/monitor", () => {
       const progress = harness.calls.sendMessage.mock.calls[0]?.[0]
       expect(progress?.parseMarkdown).toBe(false)
       expect(progress?.text).not.toContain('activity="agent"')
+      const progressTexts = [
+        ...harness.calls.sendMessage.mock.calls.map(([args]) => args?.text),
+        ...harness.calls.invokeRaw.mock.calls.map(([, args]) => args?.editMessage?.text),
+      ].filter((text): text is string => typeof text === "string")
+      // Commands read as what is running, not as the tool name; command text stays
+      // hidden under the host's default commandText "status".
+      expect(progressTexts.some((text) => text.includes("Running a command"))).toBe(true)
+      expect(progressTexts.some((text) => text.includes("ls"))).toBe(false)
+      expect(progressTexts.some((text) => /\bExec\b/.test(text))).toBe(false)
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(4, expect.objectContaining({ oneofKind: "deleteMessages" }))
       expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.sendComposeAction?.action === 6)).toBe(true)
       expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 773n, typing: true })
       expect(harness.agentEventListenerCount()).toBe(0)
-      expect(harness.calls.dispatchReply.mock.calls[0]?.[0]?.replyOptions?.onAgentRunStart).toBeUndefined()
+      expect(harness.calls.dispatchReply.mock.calls[0]?.[0]?.replyOptions?.onPreparedAgentRunStart).toBeUndefined()
+    } finally { await handle.stop() }
+  })
+
+  it("shows the command in progress only when commandText is raw", async () => {
+    const harness = await setupMonitorHarness({
+      dispatchTypingLifecycle: true,
+      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
+      chats: { "773": { kind: "direct", title: "Alice" } },
+      toolStartBeforePayloadIndexes: [0],
+      dispatchReplyPayload: { text: "visible after tool" },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        dmPolicy: "open", parseMarkdown: false,
+        streaming: { mode: "progress", progress: { commandText: "raw" } },
+      } as any),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "visible after tool" })))
+      const progressTexts = [
+        ...harness.calls.sendMessage.mock.calls.map(([args]) => args?.text),
+        ...harness.calls.invokeRaw.mock.calls.map(([, args]) => args?.editMessage?.text),
+      ].filter((text): text is string => typeof text === "string")
+      // With raw command text the host's own command detail shows through.
+      expect(progressTexts.some((text) => text.includes("list files"))).toBe(true)
+      expect(progressTexts.some((text) => text.includes("Running a command"))).toBe(false)
     } finally { await handle.stop() }
   })
 
@@ -9102,7 +9343,7 @@ describe("inline/monitor", () => {
           oneofKind: "editMessage",
           editMessage: expect.objectContaining({
             messageId: 1n,
-            text: expect.stringContaining("Exec: done"),
+            text: expect.stringContaining("Ran a command"),
             parseMarkdown: true,
           }),
         }),
@@ -10580,6 +10821,39 @@ describe("inline/monitor", () => {
   })
 
   it.each([
+    { target: "chat:7", messageId: 901n, fallback: false },
+    { target: "user:42", messageId: 901n, fallback: false },
+    { target: "chat:8", messageId: 901n, fallback: true },
+    { target: "chat:7", messageId: null, fallback: true },
+  ])("uses the widget receipt for the current turn ($target, $messageId)", async ({ target, messageId, fallback }) => {
+    const warning = "⚠️ Couldn't answer that. Try again."
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 7n, message: { id: 18n, date: 1_700_000_000n, fromId: 42n, message: "Show a widget" } }],
+      chats: { "7": { kind: "direct", title: "Alice" } },
+      dispatchReplyBlocker: async ({ ctx }) => {
+        const { createInlineWidgetPresenter } = await import("./widget-presenter.js")
+        const presenter = createInlineWidgetPresenter({
+          readConfig: () => ({ channels: { inline: { token: "test-token" } } }),
+          createClient: () => ({ connect: async () => {}, close: async () => {}, sendMessage: async () => ({ messageId }) }),
+        })
+        await presenter.present({
+          document: { kind: "html", html: "<p>Done</p>" }, title: "Result",
+          context: { messageChannel: "inline", sessionKey: (ctx as { SessionKey: string }).SessionKey, deliveryContext: { channel: "inline", to: target } },
+        })
+      },
+      dispatchReplyPayload: { text: warning, isError: true },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {}, account: buildAccount({ dmPolicy: "open" }), runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+    })
+    try {
+      await handle.done
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(fallback ? 1 : 0)
+    } finally { await handle.stop() }
+  })
+
+  it.each([
     ["deliberate silence", { deliberateSilentTerminalReply: true }],
     ["observed source delivery", { observedReplyDelivery: true }],
     ["a queued final", { queuedFinal: true }],
@@ -11920,6 +12194,66 @@ describe("inline/monitor", () => {
     })
     expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+
+    await handle.stop()
+  })
+
+  it("never wakes the agent on service notices, new or edited", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 71n,
+          message: {
+            id: 60101n,
+            date: 1_700_000_055n,
+            fromId: 42n,
+            message: "Alice linked a thread",
+            serviceMessage: { event: { oneofKind: "threadBacklink", threadBacklink: {} } },
+          },
+        },
+        {
+          kind: "message.edit",
+          chatId: 71n,
+          message: {
+            id: 60101n,
+            date: 1_700_000_056n,
+            fromId: 42n,
+            message: "Alice linked a thread",
+            raw: { serviceMessage: { event: {} } },
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 71n,
+          message: {
+            id: 60102n,
+            date: 1_700_000_057n,
+            fromId: 42n,
+            message: "real question",
+          },
+        },
+      ],
+      chats: {
+        "71": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: { text: "answer" },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+    })
+    const ctx = harness.calls.dispatchReply.mock.calls[0]?.[0]?.ctx
+    expect(ctx?.MessageSid).toBe("60102")
+    expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
 
     await handle.stop()
   })
@@ -13553,7 +13887,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/current-photo.jpg",
         }),
@@ -13753,7 +14087,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/spec.pdf",
           filePathHint: "spec.pdf",
@@ -13848,7 +14182,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/image-document",
           filePathHint: "image-document.png",
@@ -13930,7 +14264,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/flattened-photo.jpg",
           filePathHint: "flattened-photo.jpg",
@@ -14033,7 +14367,7 @@ describe("inline/monitor", () => {
         }),
       )
     })
-    expect(harness.calls.fetchRemoteMedia).not.toHaveBeenCalled()
+    expect(harness.calls.readRemoteMediaBuffer).not.toHaveBeenCalled()
     expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
 
     await handle.stop()
@@ -14094,7 +14428,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/fallback-voice.ogg",
           filePathHint: "fallback-voice.ogg",
@@ -14191,7 +14525,7 @@ describe("inline/monitor", () => {
       },
     })
 
-    harness.calls.fetchRemoteMedia.mockRejectedValueOnce(new Error("network failed"))
+    harness.calls.readRemoteMediaBuffer.mockRejectedValueOnce(new Error("network failed"))
 
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
@@ -14269,7 +14603,7 @@ describe("inline/monitor", () => {
       },
     })
 
-    harness.calls.fetchRemoteMedia.mockRejectedValueOnce(
+    harness.calls.readRemoteMediaBuffer.mockRejectedValueOnce(
       new Error(
         "Failed to fetch media from https://cdn.inline.chat/huge-spec.pdf: content length 500000000 exceeds maxBytes 1048576",
       ),
@@ -14289,7 +14623,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
-      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+      expect(harness.calls.readRemoteMediaBuffer).toHaveBeenCalledWith(
         expect.objectContaining({
           url: "https://cdn.inline.chat/huge-spec.pdf",
           maxBytes: 1 * 1024 * 1024,
@@ -15604,6 +15938,26 @@ describe("inline/monitor durable inbound recovery", () => {
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   })
 
+  it.each([true, false])("applies dropPendingOnColdBoot=%s to replayed widget actions", async (dropPendingOnColdBoot) => {
+    const now = BigInt(Math.floor(Date.now() / 1000))
+    const action = { kind: "message.action.invoke" as const, chatId: 7n, messageId: 991n, actorUserId: 42n,
+      actionId: "chart", data: new Uint8Array(), widgetCall: { name: "select", payload: new Uint8Array() } }
+    const harness = await setupMonitorHarness({
+      events: [{ ...action, interactionId: 21n, date: now - 120n }, { ...action, interactionId: 22n, date: now }],
+      chats: { "7": { kind: "direct", title: "Alice" } },
+      historyByChat: { "7": [{ id: 991n, date: now - 180n, fromId: 777n, message: "Chart" }] },
+      dispatchReplyPayload: { text: "Selected." },
+    })
+    const handle = await start(harness, { dropPendingOnColdBoot })
+    try {
+      await handle.done
+      expect(harness.calls.answerMessageAction.mock.calls.map(([input]) => input.interactionId)).toEqual(
+        dropPendingOnColdBoot ? [22n] : [21n, 22n],
+      )
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(dropPendingOnColdBoot ? 1 : 2)
+    } finally { await handle.stop() }
+  })
+
   it("recovers accepted pending input even when cold boot drops old unaccepted server events", async () => {
     const harness = await setupMonitorHarness({ events: [], chats: { "7": { kind: "direct", title: "Alice", peerUserId: 42n } } })
     const inbox = await InlineInboundInbox.open(harness.stateDir, identity)
@@ -15959,6 +16313,7 @@ describe("inline/monitor bot addressing rules", () => {
     dialogFollowMode?: number
     account?: Record<string, unknown>
     participants?: Array<{ id: bigint; firstName?: string; bot?: boolean }>
+    dispatchReplyPayload?: Record<string, unknown>
   }) {
     const runtime = { log: vi.fn(), error: vi.fn() }
     const harness = await setupMonitorHarness({
@@ -15977,16 +16332,17 @@ describe("inline/monitor bot addressing rules", () => {
       },
       historyByChat: { [String(ROOM)]: [history.otherPerson, history.bot, history.sender] },
       ...(params.participants ? { participants: { [String(ROOM)]: params.participants } } : {}),
-      dispatchReplyPayload: { text: "bot reply" },
+      dispatchReplyPayload: params.dispatchReplyPayload ?? { text: "bot reply" },
     } as any)
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
       account: buildAccount({ groupPolicy: "open", historyLimit: 10, ...params.account } as any),
       runtime: runtime as any,
       abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      log,
     })
-    return { harness, handle, runtime }
+    return { harness, handle, runtime, log }
   }
 
   async function expectNoTurn(
@@ -16120,6 +16476,26 @@ describe("inline/monitor bot addressing rules", () => {
           GroupSystemPrompt: expect.stringContaining("another bot's reply to you"),
         }),
       )
+    } finally {
+      await run.handle.stop()
+    }
+  })
+
+  it("doesn't post an error reply to another bot's hand-back", async () => {
+    const run = await runInbound({
+      message: { message: "4", replyToMsgId: history.bot.id },
+      account: { requireMention: true },
+      participants: [{ id: SENDER, firstName: "Worker Bot", bot: true }],
+      dispatchReplyPayload: { text: "⚠️ The AI service returned an empty reply. Please try again.", isError: true },
+    })
+    try {
+      await waitFor(() => expect(run.harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(run.log.warn).toHaveBeenCalledWith(
+        expect.stringContaining("dropped error reply to bot hand-back"),
+      ))
+      // Let the turn finish, so the plugin's own empty-reply fallback would have run.
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(run.harness.calls.sendMessage).not.toHaveBeenCalled()
     } finally {
       await run.handle.stop()
     }

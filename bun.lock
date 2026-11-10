@@ -265,7 +265,7 @@
     },
     "plugins/openclaw": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.72",
+      "version": "1.0.0-alpha.1",
       "dependencies": {
         "@inline-chat/realtime-sdk": "0.0.22",
         "zod": "4.6.7",

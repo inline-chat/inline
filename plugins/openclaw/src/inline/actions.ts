@@ -6,9 +6,11 @@ import type {
   ChannelMessageToolSchemaContribution,
 } from "openclaw/plugin-sdk/channel-contract"
 import {
-  normalizeInteractiveReply,
-  reduceInteractiveReply,
-  type InteractiveReplyButton,
+  isMessagePresentationInteractiveBlock,
+  resolveMessagePresentationButtonAction,
+  resolveMessagePresentationOptionAction,
+  type MessagePresentation,
+  type MessagePresentationAction,
 } from "openclaw/plugin-sdk/interactive-runtime"
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import {
@@ -21,6 +23,7 @@ import {
   type User,
 } from "@inline-chat/realtime-sdk"
 import { listInlineAccountIds, resolveInlineAccount, resolveInlineToken } from "./accounts.js"
+import { withInlineAccountClient } from "./client-registry.js"
 import { adoptInlineActiveThread, getInlineActiveThreadRoute } from "./active-thread-route.js"
 import { downloadInlineMediaFromUrl, uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
@@ -37,7 +40,10 @@ import {
   sanitizeInlineActionLabel,
   sanitizeInlineVisibleText,
 } from "./outbound-sanitize.js"
-import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
+import {
+  normalizeInlineLegacyInteractivePresentation,
+  resolveInlineInteractiveTextFallback,
+} from "./interactive-fallback.js"
 import { assertInlineReadAllowed, captureInlineReadFence } from "./read-authority.js"
 import { buildInlineUserDisplayName, getSpaceMembersWithUsers } from "./space-members.js"
 import {
@@ -855,6 +861,8 @@ type InlineReplyMarkupButton =
       text: string
       kind: "callback"
       callbackData: string
+      callbackDataKind?: "command"
+      style?: number
     }
   | {
       text: string
@@ -963,7 +971,10 @@ function resolveInlineSpecializationIdFromSessionKey(sessionKey: string | null |
   return sessionKey?.match(/:inline-agent:([^:]+)$/)?.[1]
 }
 
-function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] {
+function normalizeReplyMarkupButtons(
+  raw: unknown,
+  mapCallbackData?: (value: string) => string,
+): InlineReplyMarkupButton[][] {
   if (!Array.isArray(raw)) return []
   const rows: InlineReplyMarkupButton[][] = []
   for (const candidateRow of raw) {
@@ -974,8 +985,9 @@ function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] 
       const text = sanitizeInlineActionLabel(
         typeof candidateButton.text === "string" ? candidateButton.text : "",
       )
+      const rawCallbackData = typeof candidateButton.callback_data === "string" ? candidateButton.callback_data : ""
       const callbackData = sanitizeInlineActionCallbackData(
-        typeof candidateButton.callback_data === "string" ? candidateButton.callback_data : "",
+        mapCallbackData ? mapCallbackData(rawCallbackData) : rawCallbackData,
       )
       const copyText = sanitizeInlineActionCopyText(
         typeof candidateButton.copy_text === "string"
@@ -986,7 +998,13 @@ function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] 
       )
       if (!text) continue
       if (callbackData) {
-        row.push({ text, kind: "callback", callbackData })
+        row.push({
+          text,
+          kind: "callback",
+          callbackData,
+          ...(candidateButton.callback_data_kind === "command" ? { callbackDataKind: "command" as const } : {}),
+          ...(candidateButton.style === 1 || candidateButton.style === 2 ? { style: candidateButton.style } : {}),
+        })
       } else if (copyText) {
         row.push({ text, kind: "copyText", copyText })
       }
@@ -999,23 +1017,91 @@ function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] 
   return rows
 }
 
-function chunkInteractiveButtons(
-  buttons: readonly InteractiveReplyButton[],
+type InlinePresentationControl = {
+  label: string
+  action: MessagePresentationAction | undefined
+  disabled?: boolean | undefined
+  style?: string | undefined
+}
+
+/**
+ * Preserve the action kind independently of callback data. A command is handled
+ * by the host; an opaque callback (even one containing /approve) belongs to the
+ * agent. Unsupported actions stay in the presentation fallback text.
+ */
+function resolveInlinePresentationCallbackData(action: MessagePresentationAction | undefined) {
+  if (action?.type === "callback") return action.value
+  if (action?.type === "command") return action.command
+  return undefined
+}
+
+function chunkPresentationControls(
+  controls: readonly InlinePresentationControl[],
   rows: InlineReplyMarkupButton[][],
 ) {
-  for (let i = 0; i < buttons.length; i += INLINE_ACTION_MAX_PER_ROW) {
+  for (let i = 0; i < controls.length; i += INLINE_ACTION_MAX_PER_ROW) {
     const row: InlineReplyMarkupButton[] = []
-    for (const button of buttons.slice(i, i + INLINE_ACTION_MAX_PER_ROW)) {
-      const text = sanitizeInlineActionLabel(button.label)
-      const callbackData = sanitizeInlineActionCallbackData(button.value)
+    for (const control of controls.slice(i, i + INLINE_ACTION_MAX_PER_ROW)) {
+      if (control.disabled) continue
+      const text = sanitizeInlineActionLabel(control.label)
+      const callbackData = sanitizeInlineActionCallbackData(
+        resolveInlinePresentationCallbackData(control.action),
+      )
       if (!text || !callbackData) continue
-      row.push({ text, kind: "callback", callbackData })
+      row.push({
+        text,
+        kind: "callback",
+        callbackData,
+        ...(control.action?.type === "command" ? { callbackDataKind: "command" as const } : {}),
+        ...(control.style === "primary" ? { style: 1 } : control.style === "danger" ? { style: 2 } : {}),
+      })
     }
 
     if (row.length === 0) continue
     rows.push(row)
     if (rows.length >= INLINE_ACTION_MAX_ROWS) return
   }
+}
+
+function buildInlinePresentationRows(presentation: MessagePresentation): InlineReplyMarkupButton[][] {
+  const rows: InlineReplyMarkupButton[][] = []
+  for (const block of presentation.blocks) {
+    if (rows.length >= INLINE_ACTION_MAX_ROWS) break
+    if (!isMessagePresentationInteractiveBlock(block)) continue
+    const controls: InlinePresentationControl[] =
+      block.type === "buttons"
+        ? block.buttons.map((button) => ({
+            label: button.label,
+            action: resolveMessagePresentationButtonAction(button),
+            disabled: button.disabled,
+            style: button.style,
+          }))
+        : block.options.map((option) => ({
+            label: option.label,
+            action: resolveMessagePresentationOptionAction(option),
+          }))
+    chunkPresentationControls(controls, rows)
+  }
+  return rows
+}
+
+/**
+ * Render presentation buttons/selects as Inline `channelData.inline.buttons`
+ * rows, the same shape agent-authored `buttons` use.
+ */
+export function buildInlinePresentationButtons(
+  presentation: MessagePresentation,
+): Array<Array<{ text: string; callback_data: string; callback_data_kind?: "command"; style?: number }>> {
+  return buildInlinePresentationRows(presentation).map((row) =>
+    row.flatMap((button) =>
+      button.kind === "callback" ? [{
+        text: button.text,
+        callback_data: button.callbackData,
+        ...(button.callbackDataKind ? { callback_data_kind: button.callbackDataKind } : {}),
+        ...(button.style ? { style: button.style } : {}),
+      }] : [],
+    ),
+  )
 }
 
 function resolveInlineInteractiveButtonsParam(
@@ -1038,30 +1124,12 @@ function resolveInlineInteractiveButtonsParam(
     }
   }
 
-  const interactive = normalizeInteractiveReply(rawInteractive)
-  if (!interactive) {
+  const presentation = normalizeInlineLegacyInteractivePresentation(rawInteractive)
+  if (!presentation) {
     return undefined
   }
 
-  const rows = reduceInteractiveReply(interactive, [] as InlineReplyMarkupButton[][], (state, block) => {
-    if (state.length >= INLINE_ACTION_MAX_ROWS) {
-      return state
-    }
-    if (block.type === "buttons") {
-      chunkInteractiveButtons(block.buttons, state)
-      return state
-    }
-    if (block.type === "select") {
-      chunkInteractiveButtons(
-        block.options.map((option) => ({
-          label: option.label,
-          ...(option.value !== undefined ? { value: option.value } : {}),
-        })),
-        state,
-      )
-    }
-    return state
-  })
+  const rows = buildInlinePresentationRows(presentation)
   return rows.length > 0 ? rows : undefined
 }
 
@@ -1072,9 +1140,13 @@ function toInlineMessageActions(
   return {
     rows: rows.map((row, rowIndex) => ({
       actions: row.map((button, buttonIndex) => ({
-        actionId: buildInlineMessageActionId(owner, rowIndex, buttonIndex),
+        actionId: buildInlineMessageActionId(
+          button.kind === "callback" && button.callbackDataKind === "command" ? "system" : owner,
+          rowIndex,
+          buttonIndex,
+        ),
         text: button.text,
-        style: 0,
+        style: button.kind === "callback" ? button.style ?? 0 : 0,
         requiredGrant: 0,
         action:
           button.kind === "callback"
@@ -1097,7 +1169,7 @@ function toInlineMessageActions(
 
 export function resolveInlineMessageActionsParam(
   params: Record<string, unknown>,
-  options?: { owner?: InlineMessageActionOwner },
+  options?: { owner?: InlineMessageActionOwner; mapCallbackData?: (value: string) => string },
 ): MessageActions | undefined {
   const owner = options?.owner ?? "agent"
   if (!Object.prototype.hasOwnProperty.call(params, "buttons")) {
@@ -1125,7 +1197,7 @@ export function resolveInlineMessageActionsParam(
     throw new Error("inline action: buttons must be an array of button rows")
   }
 
-  const rows = normalizeReplyMarkupButtons(rawButtons)
+  const rows = normalizeReplyMarkupButtons(rawButtons, options?.mapCallbackData)
   return toInlineMessageActions(rows, owner)
 }
 
@@ -2441,7 +2513,7 @@ async function findMessageById(params: {
 async function withInlineClient<T>(params: {
   cfg: OpenClawConfig
   accountId: string | null | undefined
-  /** Host authority fence; runs after token resolution, right before connecting. */
+  /** Host authority fence; runs after token resolution, before any Inline request (shared or fresh client). */
   beforeConnect?: (() => void) | undefined
   fn: (client: InlineSdkClient, account: ReturnType<typeof resolveInlineAccount>) => Promise<T>
 }): Promise<T> {
@@ -2450,17 +2522,11 @@ async function withInlineClient<T>(params: {
     throw new Error(`Inline not configured for account "${account.accountId}" (missing token or baseUrl)`)
   }
   const token = await resolveInlineToken(account)
-  const client = new InlineSdkClient({
-    baseUrl: account.baseUrl,
-    token,
-  })
   params.beforeConnect?.()
-  await client.connect()
-  try {
-    return await params.fn(client, account)
-  } finally {
-    await client.close().catch(() => {})
-  }
+  return await withInlineAccountClient(
+    { accountId: account.accountId, baseUrl: account.baseUrl, token },
+    (client) => params.fn(client, account),
+  )
 }
 
 function toJsonSafe(value: unknown): unknown {

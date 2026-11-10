@@ -2,6 +2,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/channel-entry-contract"
 import { InlineSdkClient } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
+import { getInlineActiveThreadRoute } from "./active-thread-route.js"
 import { parseCurrentInlineSession, parseInlineTarget } from "./tool-targets.js"
 import {
   buildInlineWidgetHtmlFromOpenClaw,
@@ -143,6 +144,10 @@ export function createInlineWidgetPresenter(deps: InlineWidgetPresenterDeps): In
         throw error
       }
 
+      const route = getInlineActiveThreadRoute({ accountId: account.accountId, sessionKey: context.sessionKey })
+      const widgetChatId = "chatId" in destination.send ? destination.send.chatId
+        : route?.parentPeer.kind === "direct" && route.threadId == null && route.parentPeer.id === String(destination.send.userId)
+          ? route.sourceChatId : undefined
       let client: InlineWidgetSendClient | null = null
       try {
         const token = await resolveInlineToken(account)
@@ -151,6 +156,9 @@ export function createInlineWidgetPresenter(deps: InlineWidgetPresenterDeps): In
         // One message: the server turns the block into a widget and keeps its title as text.
         const sent = await client.sendMessage({ ...destination.send, text, parseMarkdown: true })
         const messageId = sent.messageId != null ? String(sent.messageId) : undefined
+        if (messageId && route && widgetChatId === (route.threadId ?? route.sourceChatId)) {
+          route.deliveredWidgetChatId = widgetChatId
+        }
         const receipt: WidgetMessageReceipt = {
           ...(messageId ? { primaryPlatformMessageId: messageId } : {}),
           platformMessageIds: messageId ? [messageId] : [],

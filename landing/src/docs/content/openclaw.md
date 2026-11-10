@@ -12,34 +12,26 @@ inline agents setup --target openclaw
 The command checks the installed OpenClaw version before creating a bot, installs
 the matching trusted plugin, restarts the gateway, and only reports ready after a
 live Inline probe. If it stops, the error includes the failed phase and retry
-command; no failed or partial run is reported as ready.
+command. If Inline is already installed, start the gateway for that profile
+before retrying setup. The live probe identifies the existing bot.
 
 ## Install
 
-Install the compatible plugin for the current OpenClaw line:
+Install the plugin that matches your OpenClaw version:
 
-```bash
-openclaw plugins install @inline-openclaw/inline --force --accept-capabilities
-```
+| OpenClaw                                          | Inline plugin | Install                                                                                     |
+| ------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------- |
+| `2026.11.1` and newer                             | `1.0.0-alpha.1`       | `openclaw plugins install npm:@inline-openclaw/inline@1.0.0-alpha.1 --force --accept-capabilities`  |
+| `2026.8.2` through `2026.10.x`                    | `0.0.72`      | `openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities` |
+| `2026.7.x` (`>=2026.7.1`)                         | `0.0.63`      | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`                           |
+| `2026.6.x` (`>=2026.6.11`, including `2026.6.34`) | `0.0.63`      | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`                           |
 
-### Version Match
+Plugin 1.0 needs OpenClaw `2026.11.1` or newer, and OpenClaw refuses to install
+it on an older host. Use the pinned command above to opt into the alpha. The stable npm release is `0.0.72`. Check your version with `openclaw --version`.
 
-| OpenClaw                                          | Inline plugin |
-| ------------------------------------------------- | ------------- |
-| `2026.8.x` (`>=2026.8.2`)                         | `0.0.65`      |
-| `2026.7.x` (`>=2026.7.1`)                         | `0.0.63`      |
-| `2026.6.x` (`>=2026.6.11`, including `2026.6.34`) | `0.0.63`      |
-
-Install a matched version with:
-
-```bash
-openclaw plugins install @inline-openclaw/inline --force --accept-capabilities
-```
-
-On OpenClaw 2026.8, `--accept-capabilities` approves the capabilities declared
-by Inline's trusted first-party package so the noninteractive install cannot
-stall on a prompt. Older supported hosts do not recognize that flag; install
-their matched `0.0.63` package with `--force` only.
+`--accept-capabilities` approves the capabilities declared by Inline's trusted
+first-party package so the install can't stall on a prompt. OpenClaw 2026.7 and
+older don't recognize that flag.
 
 ## Configure
 
@@ -103,17 +95,23 @@ Open a DM with the bot, complete pairing, and verify it works.
 
 ## Update
 
-Ask OpenClaw to update the tracked Inline plugin:
+On OpenClaw `2026.11.1` and newer, check the tracked selection with
+`openclaw plugins update inline --dry-run`. An exact install keeps its version
+pin. To switch that install to the latest stable release, use
+`openclaw plugins update @inline-openclaw/inline@latest --accept-capabilities`
+as the update command below. Keep the compatible pin on older hosts.
+
+After active turns finish, update the same gateway profile from the host:
 
 ```bash
+openclaw gateway stop
 openclaw plugins update inline --accept-capabilities
+openclaw gateway start
+openclaw channels status --channel inline --probe --json
 ```
 
-Restart after active work finishes:
-
-```bash
-openclaw gateway restart
-```
+For a foreground gateway, stop and relaunch the foreground process. For a named
+profile, pass `--profile <name>` before each subcommand.
 
 ## Checks
 

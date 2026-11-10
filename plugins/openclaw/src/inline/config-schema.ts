@@ -124,8 +124,8 @@ const InlineStreamingSchema = z.union([
     })
     .strict(),
 ])
-const InlineRuntimeStreamingChunkSchema = InlineStreamingChunkSchema.passthrough()
-const InlineRuntimeBlockStreamingCoalesceSchema = BlockStreamingCoalesceSchema.passthrough()
+const InlineRuntimeStreamingChunkSchema = InlineStreamingChunkSchema.loose()
+const InlineRuntimeBlockStreamingCoalesceSchema = BlockStreamingCoalesceSchema.loose()
 const InlineRuntimeStreamingSchema = z.union([
   z.boolean(),
   InlineStreamingModeSchema,
@@ -139,7 +139,7 @@ const InlineRuntimeStreamingSchema = z.union([
           toolProgress: z.boolean().optional(),
           commandText: InlineStreamingCommandTextSchema.optional(),
         })
-        .passthrough()
+        .loose()
         .optional(),
       progress: z
         .object({
@@ -151,17 +151,17 @@ const InlineRuntimeStreamingSchema = z.union([
           toolProgress: z.boolean().optional(),
           commandText: InlineStreamingCommandTextSchema.optional(),
         })
-        .passthrough()
+        .loose()
         .optional(),
       block: z
         .object({
           enabled: z.boolean().optional(),
           coalesce: InlineRuntimeBlockStreamingCoalesceSchema.optional(),
         })
-        .passthrough()
+        .loose()
         .optional(),
     })
-    .passthrough(),
+    .loose(),
 ])
 
 export const InlineAccountSchemaBase = z
@@ -223,7 +223,7 @@ export const InlineAccountSchema = InlineAccountSchemaBase.superRefine((value, c
 const InlineConfigAccountSchema = InlineAccountSchemaBase.extend({
   streaming: InlineRuntimeStreamingSchema.optional(),
 })
-  .passthrough()
+  .loose()
   .superRefine((value, ctx) => {
     requireOpenAllowFrom({
       policy: value.dmPolicy,
@@ -237,17 +237,17 @@ const InlineConfigAccountSchema = InlineAccountSchemaBase.extend({
 
 export const InlineRuntimeAccountSchema = InlineAccountSchemaBase.extend({
   streaming: InlineRuntimeStreamingSchema.optional(),
-}).passthrough()
+}).loose()
 
 export const InlineRuntimeConfigSchema = InlineRuntimeAccountSchema.extend({
   accounts: z.record(z.string(), InlineRuntimeAccountSchema.optional()).optional(),
-}).passthrough()
+}).loose()
 
 export const InlineConfigSchema = InlineAccountSchemaBase.extend({
   streaming: InlineRuntimeStreamingSchema.optional(),
   accounts: z.record(z.string(), InlineConfigAccountSchema.optional()).optional(),
 })
-  .passthrough()
+  .loose()
   .superRefine((value, ctx) => {
     requireOpenAllowFrom({
       policy: value.dmPolicy,

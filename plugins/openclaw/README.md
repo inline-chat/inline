@@ -31,10 +31,11 @@ Reply-thread behavior:
 - Threads the bot follows continue without a mention. A thread's first message decides who follows; a bot mentioned later answers once without following.
 - Authorized users can run `/follow` in a group or reply thread to keep eligible unmentioned activity relevant, and `/unfollow` to explicitly opt out.
 
-## Upgrading from 0.0.72
+## Upgrading to 1.0
 
-Breaking changes in the next release. They match the rules Hermes 1.0 follows; see [How bots behave](https://inline.chat/docs/openclaw).
+Breaking changes in 1.0. The behavior changes match the rules Hermes 1.0 follows; see [How bots behave](https://inline.chat/docs/openclaw).
 
+- **OpenClaw `2026.11.1` or newer is required.** 1.0 uses the host's async SDK APIs, which older hosts don't have, and drops the synchronous ones that OpenClaw removes in January 2027. Stay on `0.0.72` for older hosts.
 - **`/threadreply` is now `/threads`**, with `auto`, `on`, `reset`, and `status`, and it works in DMs.
 - **`replyThreadMode` is Auto or On, per chat.** On a chat, `thread` reads as `on` and `main` as `auto`. A bot-wide or `groups."*"` On is ignored with a startup warning; run `/threads on` in each chat that should use threads.
 - **Words no longer open a thread.** The agent understands the request and opens one.
@@ -43,22 +44,22 @@ Breaking changes in the next release. They match the rules Hermes 1.0 follows; s
 - **Answers quote only a bot that asked** by mention or addressed command, so the answer reaches it. People get plain answers. Another bot's reply to this bot wakes it, needs no answer, and isn't quoted; another round takes a new mention.
 - **A command no bot claimed is ignored.** Several bots offering `/status` with nothing naming one means none of them runs it.
 - **Someone added to a thread under the bot's DM keeps group rules** and their own session, so the DM's context never reaches them.
-- **Messages sent while the gateway was down aren't answered.** Updates recorded more than 60 seconds before the gateway started don't wake the agent. Set `dropPendingOnColdBoot: false` to answer them.
+- **Messages sent while the gateway was down aren't answered.** Messages and button, form, or widget actions recorded more than 60 seconds before the gateway started don't wake the agent on replay. Locally accepted requests still recover after a restart. Set `dropPendingOnColdBoot: false` to answer them.
+- **Output mode starts unset.** Setup and upgrades preserve your choice. An explicit thread choice overrides the bot choice. Detailed shows a progress timeline and a separate answer. Friendly skips the tool timeline. With both choices unset, OpenClaw follows the configured streaming behavior (quiet by default). For example, `inline bots settings --bot-user-id 42 --output-mode friendly` selects Friendly for bot 42. Pass `default` to clear the selection, or add `--chat-id <id>` to change it for one chat.
 
 ## Install
 
-The Inline plugin supports OpenClaw `2026.8.2` and newer, including
-`2026.9.x`, with no upper version cap. It is built against `2026.11.1`. Install
-the plugin version for your OpenClaw release line. The current stable release
-is `0.0.72`.
+`1.0` supports OpenClaw `2026.11.1` and newer with no upper version cap.
+Install the plugin version for your OpenClaw release line. The stable release is `0.0.72`. To opt into the 1.0 alpha, use the exact install below.
 
 | OpenClaw line | Inline plugin | Exact install |
 | --- | --- | --- |
-| `2026.8.2` and newer, including `2026.10.5` | `0.0.72` | `openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities` |
+| `2026.11.1` and newer | `1.0.0-alpha.1` | `openclaw plugins install npm:@inline-openclaw/inline@1.0.0-alpha.1 --force --accept-capabilities` |
+| `2026.8.2` through `2026.10.x` | `0.0.72` | `openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities` |
 | `2026.7.x` (`>=2026.7.1`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 | `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`) | `0.0.63` | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force` |
 
-The minimum supported host remains `2026.8.2`. Newer host versions are not
+The minimum supported host for 1.0 is `2026.11.1`. Newer host versions are not
 blocked by package metadata. OpenClaw 2026.9.3 and newer require Node 24.16+
 on the 24.x line or Node 26.1+; Node 26 is recommended.
 
@@ -66,12 +67,26 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| Next (unreleased) | `>=2026.8.2` | `0.0.22` | Source candidate | Carries widget calls and submitted forms. Requires the protocol `0.0.14` and SDK `0.0.22` releases before publication. |
-| `0.0.72` | `>=2026.8.2` | `0.0.19` | Stable | Loads on OpenClaw `2026.10.5` and newer, which removed `readJsonFileWithFallback`; `0.0.71` and older fail to register the channel there. Matches `toolsBySender` on numeric sender ids only. |
+| `1.0.0-alpha.1` | `>=2026.11.1` | `0.0.22` | Prerelease | First major. Async host SDK and `MessagePresentation` only; see Upgrading to 1.0. Carries widget calls and submitted forms, so the protocol `0.0.14` and SDK `0.0.22` releases come first. |
+| `0.0.72` | `>=2026.8.2` | `0.0.19` | Stable | Last line for OpenClaw `2026.8.2`–`2026.10.x`; 1.0 requires `2026.11.1`. Loads on OpenClaw `2026.10.5` and newer, which removed `readJsonFileWithFallback`; `0.0.71` and older fail to register the channel there. Matches `toolsBySender` on numeric sender ids only. |
 | `0.0.71` | `>=2026.8.2` | `0.0.19` | Previous | Adds opt-in quiet agent activity timelines and the expanded chat-history protocol while retaining recovery and install provenance diagnostics. |
 | `0.0.70` | `>=2026.8.2` | `0.0.18` | Previous | Preserves native reply suppression and send-policy decisions, with September approvals and shutdown cancellation. |
 | `0.0.69` | `>=2026.8.2` | `0.0.18` | Previous | Added September system change approvals and shutdown cancellation. |
 | `0.0.68` | `2026.8.2` | `0.0.18` | Previous | Retries stalled sync autonomously and isolates unrelated chat handlers while retaining ordered acknowledgements. |
+
+### Release 1.0.0-alpha.1
+
+- Requires OpenClaw `2026.11.1` and uses only its async SDK APIs and `MessagePresentation` buttons, ahead of the January 2027 removals.
+- Quiet by default: Working in the header, then the answer. `streaming.mode: "progress"` keeps a progress card, which names work as "Running a command" and shows command text only when `commandText` is `raw`.
+- Approval cards show what is being approved and the buttons. Once answered they read "✅ Allowed once by Mo", "❌ Denied" or "⌛ Approval expired" above the command.
+- `/approve` and `/stop` work while the run they act on is still going. An approval asked in the approver's own DM stays in that DM without a "sent to your DM" notice.
+- Shorter notices: "Allowed once.", "Waiting for approval in your DM.", "⚠️ Couldn't answer that. Try again.", and `/model` and `/think` show the current value above their buttons.
+- Chat settings changed with `/threads`, `inline_reply_threads` or the settings sheet apply to the next message without a restart.
+- A bot's hand-back gets no error or "couldn't reply" notice when the agent stays silent. Parent-chat history marks messages the bot already answered in a reply thread.
+- Tools share the monitor's connection instead of opening their own. Sends retry rate limits once the server says when.
+- Service messages, such as a linked thread, no longer wake the bot. Each reply thread keeps one session.
+- Agent `read` and `search` work from runtimes that call OpenClaw tools over MCP, such as Claude Code.
+- Agents can show `show_widget` message widgets; widget calls and submitted forms come back as agent turns. Needs protocol `0.0.14` and realtime SDK `0.0.22`.
 
 ### Release 0.0.72
 
@@ -92,7 +107,7 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 - Carries forward native reply suppression, September approvals, cancellation-safe shutdown, and realtime SDK `0.0.19` recovery behavior.
 - Tests the extracted package against released hosts and checks that the bundled SDK matches the validated build.
 
-The CI host matrix runs on `2026.8.2`, `2026.9.1`, and npm `latest`.
+The CI host matrix runs on `2026.11.1` and npm `latest`.
 To check an installed host locally after building the SDK:
 
 ```sh
@@ -102,25 +117,30 @@ bun run --cwd plugins/openclaw check:host /path/to/node_modules/openclaw
 To install this release from npm:
 
 ```sh
-openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities
+openclaw plugins install npm:@inline-openclaw/inline@1.0.0-alpha.1 --force --accept-capabilities
 ```
 
 If the plugin is already installed, update in place:
 
 ```sh
+openclaw gateway stop
 openclaw plugins update inline --accept-capabilities
-openclaw gateway restart
+openclaw gateway start
 openclaw plugins list
 openclaw plugins inspect inline --json
 openclaw channels status --channel inline --probe --json
 openclaw message send --channel inline --target chat:123 --message "Inline smoke test" --dry-run
 ```
 
-After initial installation, an OpenClaw owner can run `/inline_update` from
-Inline. The command delegates to OpenClaw's tracked-plugin updater with explicit
-capability consent, strips credential variables from the updater process, and
-asks for `/restart` after OpenClaw reports a successful update. Other authorized
-chat members cannot update host plugins.
+On OpenClaw 2026.11.1 and newer, an exact install keeps its version pin.
+Use `openclaw plugins update inline --dry-run` to inspect the selection. To
+switch to stable updates, use `openclaw plugins update @inline-openclaw/inline@latest --accept-capabilities`
+for the update step. Keep older hosts on their compatible pin. Run each command
+with the same `--profile <name>` if using a named profile. For a foreground
+gateway, stop and relaunch that process.
+
+An OpenClaw owner can also try `/inline_update` in Inline. When the host
+requires exclusive access, finish active turns and use the offline steps above.
 
 Installed skills are published to Inline for Skilled Agent selection on gateway
 start and whenever OpenClaw emits `skill_changed`. Any authorized bot user can
@@ -484,11 +504,16 @@ channels:
 While OpenClaw works on a turn, Inline shows **Working** instead of Typing, with or
 without agent activity. Apps that don't support Working yet show Typing.
 
+By default the bot is quiet while it works: Inline shows Working, then the answer
+arrives as one message, with no progress message in the chat. Set
+`channels.inline.streaming: { mode: "progress" }` to post a progress card that
+lists what the agent is doing.
+
 Agent activity is experimental and **off by default**. Set
 `channels.inline.experimentalAgentActivity: true` (or the same field on an
 individual Inline account), then restart the gateway to opt in. Unset it or set
-it to `false` and restart to restore the existing temporary progress placeholder,
-which is deleted when the reply arrives.
+it to `false` and restart to restore the temporary progress placeholder (in
+progress mode), which is deleted when the reply arrives.
 
 In Inline on each device, enable **Settings → Experimental → Agents → Agent
 Activity** and restart the app. Expanded logs also need **Rich Content Renderer**

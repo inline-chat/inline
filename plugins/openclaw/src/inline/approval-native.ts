@@ -1,13 +1,13 @@
 import {
-  createApproverRestrictedNativeApprovalCapability,
+  createApproverRestrictedNativeApprovalCapabilityAsync,
   splitChannelApprovalCapability,
 } from "openclaw/plugin-sdk/approval-delivery-runtime"
-import { createLazyChannelApprovalNativeRuntimeAdapter } from "openclaw/plugin-sdk/approval-handler-adapter-runtime"
-import type { ChannelApprovalNativeRuntimeAdapter } from "openclaw/plugin-sdk/approval-handler-runtime"
+import { createLazyChannelApprovalNativeRuntimeAdapterAsync } from "openclaw/plugin-sdk/approval-handler-adapter-runtime"
 import {
-  createChannelApproverDmTargetResolver,
-  createChannelNativeOriginTargetResolver,
+  createChannelApproverDmTargetResolverAsync,
+  createChannelNativeOriginTargetResolverAsync,
   resolveApprovalRequestSessionConversation,
+  type ApprovalRequestSessionDelivery,
 } from "openclaw/plugin-sdk/approval-native-runtime"
 import {
   buildExecApprovalPendingReplyPayload,
@@ -38,6 +38,7 @@ import {
 } from "./exec-approvals.js"
 
 type InlineOriginTarget = { to: string; threadId?: string }
+type InlineApprovalNativeRuntimeAdapter = NonNullable<ChannelApprovalCapability["nativeRuntimeAsync"]>
 
 function accountParams(params: {
   cfg: OpenClawConfig
@@ -64,10 +65,17 @@ function requestParams(params: {
   cfg: OpenClawConfig
   accountId?: string | null | undefined
   request: ApprovalRequest
-}): { cfg: OpenClawConfig; accountId?: string | null; request: ApprovalRequest } {
+  sessionDelivery?: ApprovalRequestSessionDelivery | null | undefined
+}): {
+  cfg: OpenClawConfig
+  accountId?: string | null
+  request: ApprovalRequest
+  sessionDelivery?: ApprovalRequestSessionDelivery | null
+} {
   return {
     ...accountParams(params),
     request: params.request,
+    ...(params.sessionDelivery !== undefined ? { sessionDelivery: params.sessionDelivery } : {}),
   }
 }
 
@@ -173,10 +181,10 @@ function resolveInlineFallbackOriginTarget(request: ApprovalRequest): InlineOrig
   }
 }
 
-const resolveInlineOriginTarget = createChannelNativeOriginTargetResolver({
+const resolveInlineOriginTarget = createChannelNativeOriginTargetResolverAsync({
   channel: "inline",
-  shouldHandleRequest: ({ cfg, accountId, request }) =>
-    shouldHandleInlineExecApprovalRequest(requestParams({ cfg, accountId, request })),
+  shouldHandleRequest: ({ cfg, accountId, request, sessionDelivery }) =>
+    shouldHandleInlineExecApprovalRequest(requestParams({ cfg, accountId, request, sessionDelivery })),
   resolveTurnSourceTarget: resolveTurnSourceInlineOriginTarget,
   resolveSessionTarget: resolveSessionInlineOriginTarget,
   normalizeTargetForMatch: normalizeInlineOriginTarget,
@@ -184,12 +192,49 @@ const resolveInlineOriginTarget = createChannelNativeOriginTargetResolver({
   resolveFallbackTarget: resolveInlineFallbackOriginTarget,
 })
 
-const resolveInlineApproverDmTargets = createChannelApproverDmTargetResolver({
-  shouldHandleRequest: ({ cfg, accountId, request }) =>
-    shouldHandleInlineExecApprovalRequest(requestParams({ cfg, accountId, request })),
+const resolveInlineApproverUserDmTargets = createChannelApproverDmTargetResolverAsync({
+  shouldHandleRequest: ({ cfg, accountId, request, sessionDelivery }) =>
+    shouldHandleInlineExecApprovalRequest(requestParams({ cfg, accountId, request, sessionDelivery })),
   resolveApprovers: getInlineExecApprovalApprovers,
   mapApprover: (approver) => ({ to: `user:${approver}` }),
 })
+
+type InlineApproverDmTargetsInput = Parameters<typeof resolveInlineApproverUserDmTargets>[0]
+
+async function resolveInlineDmPeerUserId(params: {
+  cfg: OpenClawConfig
+  accountId?: string | null
+  chatId: bigint
+}): Promise<string | null> {
+  const { withInlineFollowClient } = await import("./follow-command.js")
+  return await withInlineFollowClient({
+    cfg: params.cfg,
+    accountId: params.accountId ?? null,
+    fn: async (client) => {
+      const chat = await client.getChat({ chatId: params.chatId })
+      const peer = chat.peer?.type
+      return peer?.oneofKind === "user" ? String(peer.user.userId) : null
+    },
+  })
+}
+
+// An approval asked in the approver's own DM goes back to that DM. Name it by
+// the origin's chat target so the host sees the prompt reached the origin and
+// doesn't also post "I sent the approval request to Inline DMs, not this chat".
+async function resolveInlineApproverDmTargets(input: InlineApproverDmTargetsInput) {
+  const targets = await resolveInlineApproverUserDmTargets(input)
+  const origin = resolveTurnSourceInlineOriginTarget(input.request as ApprovalRequest)
+  const chatId = origin && !origin.threadId ? origin.to.match(/^chat:([0-9]+)$/)?.[1] : undefined
+  if (!chatId || targets.length === 0) return targets
+  const peerUserId = await resolveInlineDmPeerUserId({
+    cfg: input.cfg,
+    accountId: input.accountId ?? null,
+    chatId: BigInt(chatId),
+  }).catch(() => null)
+  if (!peerUserId) return targets
+  return targets.map((target) =>
+    target.to === `user:${peerUserId}` ? { ...target, to: `chat:${chatId}` } : target)
+}
 
 function describeInlineExecApprovalSetup(params: { accountId?: string | null }): string {
   const prefix =
@@ -199,7 +244,7 @@ function describeInlineExecApprovalSetup(params: { accountId?: string | null }):
   return `Approve it from the Web UI or terminal UI for now. Inline supports native exec approvals for this account. Configure \`${prefix}.execApprovals.approvers\` or \`commands.ownerAllowFrom\`; leave \`${prefix}.execApprovals.enabled\` unset/\`auto\` or set it to \`true\`.`
 }
 
-const inlineNativeApprovalCapability = createApproverRestrictedNativeApprovalCapability({
+const inlineNativeApprovalCapability = createApproverRestrictedNativeApprovalCapabilityAsync({
   channel: "inline",
   channelLabel: "Inline",
   describeExecApprovalSetup: describeInlineExecApprovalSetup,
@@ -210,7 +255,7 @@ const inlineNativeApprovalCapability = createApproverRestrictedNativeApprovalCap
     isInlineExecApprovalAuthorizedSender(senderParams({ cfg, accountId, senderId })),
   isPluginAuthorizedSender: ({ cfg, accountId, senderId }) =>
     isInlineExecApprovalApprover(senderParams({ cfg, accountId, senderId })),
-  isNativeDeliveryEnabled: ({ cfg, accountId }) =>
+  isNativeDeliveryEnabled: async ({ cfg, accountId }) =>
     isInlineExecApprovalClientEnabled(accountParams({ cfg, accountId })),
   resolveNativeDeliveryMode: ({ cfg, accountId }) =>
     resolveInlineExecApprovalTarget(accountParams({ cfg, accountId })),
@@ -221,14 +266,14 @@ const inlineNativeApprovalCapability = createApproverRestrictedNativeApprovalCap
   resolveOriginTarget: resolveInlineOriginTarget,
   resolveApproverDmTargets: resolveInlineApproverDmTargets,
   notifyOriginWhenDmOnly: true,
-  nativeRuntime: createLazyChannelApprovalNativeRuntimeAdapter({
+  nativeRuntimeAsync: createLazyChannelApprovalNativeRuntimeAdapterAsync({
     eventKinds: INLINE_APPROVAL_EVENT_KINDS,
     isConfigured: ({ cfg, accountId }) =>
       isInlineExecApprovalClientEnabled(accountParams({ cfg, accountId })),
     shouldHandle: ({ cfg, accountId, request }) =>
       shouldHandleInlineExecApprovalRequest(requestParams({ cfg, accountId, request })),
     load: async () =>
-      loadBundledEntryExportSync<ChannelApprovalNativeRuntimeAdapter>(import.meta.url, {
+      loadBundledEntryExportSync<InlineApprovalNativeRuntimeAdapter>(import.meta.url, {
         specifier: "./approval-handler.runtime.js",
         exportName: "inlineApprovalNativeRuntime",
       }),

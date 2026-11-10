@@ -6,6 +6,7 @@ import type {
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../openclaw-compat.js"
 import { normalizeInlineTarget } from "./normalize.js"
+import { mutateInlineLiveConfig, resolveInlineLiveConfig } from "./live-config.js"
 import {
   resolveInlineGroupReplyThreadMode,
   type InlineReplyThreadMode,
@@ -31,10 +32,7 @@ const MODE_LABELS: Record<InlineReplyThreadMode, string> = {
 }
 const INLINE_THREADREPLY_NATIVE_NAME = "threads"
 
-export const INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE = {
-  mode: "none",
-  reason: "Inline reads the refreshed runtime config in-process.",
-} as const
+export { INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE } from "./live-config.js"
 
 type InlineThreadReplyCommandConfigRuntime = Pick<
   OpenClawPluginApi["runtime"]["config"],
@@ -229,7 +227,7 @@ export async function handleInlineThreadReplyCommandWithConfigRuntime(
     return { text: "/threads is only available in Inline chats." }
   }
 
-  const currentConfig = configRuntime.current() as OpenClawConfig
+  const currentConfig = resolveInlineLiveConfig(configRuntime.current()) as OpenClawConfig
   const args = ctx.args?.trim() ?? ""
   const action = normalizeAction(args)
   if (action === "help") {
@@ -263,18 +261,14 @@ export async function handleInlineThreadReplyCommandWithConfigRuntime(
     }
   }
 
-  const committed = await configRuntime.mutateConfigFile({
-    afterWrite: INLINE_LIVE_CONFIG_WRITE_AFTER_WRITE,
-    mutate: (draft) => {
-      setGroupMode({
-        draft,
-        accountId: ctx.accountId,
-        groupId,
-        mode: action,
-      })
-    },
+  const nextConfig = await mutateInlineLiveConfig(configRuntime as never, (draft) => {
+    setGroupMode({
+      draft,
+      accountId: ctx.accountId,
+      groupId,
+      mode: action,
+    })
   })
-  const nextConfig = committed.nextConfig as OpenClawConfig
   return {
     text: buildStatusText({
       cfg: nextConfig,

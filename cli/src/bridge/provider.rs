@@ -523,8 +523,10 @@ fn newest_claude(
     candidates: Vec<std::path::PathBuf>,
     version: impl Fn(&std::path::Path) -> Option<inline_agent_driver_claude::ClaudeVersion>,
 ) -> Option<std::path::PathBuf> {
-    let mut newest: Option<(Option<inline_agent_driver_claude::ClaudeVersion>, std::path::PathBuf)> =
-        None;
+    let mut newest: Option<(
+        Option<inline_agent_driver_claude::ClaudeVersion>,
+        std::path::PathBuf,
+    )> = None;
     for candidate in candidates {
         let found = version(&candidate);
         if newest.as_ref().is_none_or(|(best, _)| found > *best) {
@@ -1444,7 +1446,10 @@ mod tests {
             _ => None,
         };
         assert_eq!(
-            newest_claude(vec![broken.clone(), homebrew.clone(), native.clone()], version),
+            newest_claude(
+                vec![broken.clone(), homebrew.clone(), native.clone()],
+                version
+            ),
             Some(native.clone())
         );
         // A tie keeps the saved (first) install; unreadable versions fall back to it.

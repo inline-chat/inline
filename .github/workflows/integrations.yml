@@ -141,7 +141,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: ["2026.8.2", "2026.9.1", "latest"]
+        host: ["2026.11.1", "latest"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -374,7 +374,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        host: ['2026.8.2', '2026.9.1', 'latest']
+        host: ['2026.11.1', 'latest']
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4

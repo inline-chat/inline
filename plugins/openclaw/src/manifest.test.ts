@@ -337,10 +337,10 @@ describe("plugin manifest", () => {
 
     expect(json.openclaw?.install?.clawhubSpec).toBe("clawhub:@inline-openclaw/inline")
     expect(json.openclaw?.install?.defaultChoice).toBe("clawhub")
-    expect(json.openclaw?.install?.minHostVersion).toBe(">=2026.8.2")
-    expect(json.peerDependencies?.openclaw).toBe(">=2026.8.2")
+    expect(json.openclaw?.install?.minHostVersion).toBe(">=2026.11.1")
+    expect(json.peerDependencies?.openclaw).toBe(">=2026.11.1")
     expect(json.peerDependenciesMeta?.openclaw?.optional).toBe(true)
-    expect(json.openclaw?.compat?.pluginApi).toBe(">=2026.8.2")
+    expect(json.openclaw?.compat?.pluginApi).toBe(">=2026.11.1")
     expect(json.devDependencies?.openclaw).toBe("2026.11.1")
     expect(json.openclaw?.build?.openclawVersion).toBe(json.devDependencies?.openclaw)
     expect(json.openclaw?.release?.publishToClawHub).toBe(true)

@@ -8,7 +8,8 @@ Need a bot token first? See `docs/create-inline-bot.md`.
 
 Choose the Inline plugin version that matches the installed OpenClaw line:
 
-- OpenClaw `2026.8.2` and newer, including `2026.9.x`: Inline plugin `0.0.70` — `openclaw plugins install npm:@inline-openclaw/inline@0.0.70 --force --accept-capabilities`
+- OpenClaw `2026.11.1` and newer: Inline plugin `1.0.0-alpha.1` — `openclaw plugins install npm:@inline-openclaw/inline@1.0.0-alpha.1 --force --accept-capabilities`
+- OpenClaw `2026.8.2` through `2026.10.x`: Inline plugin `0.0.72` — `openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities`
 - OpenClaw `2026.7.x` (`>=2026.7.1`): Inline plugin `0.0.63` — `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`
 - OpenClaw `2026.6.x` (`>=2026.6.11`, including extended-stable `2026.6.34`): Inline plugin `0.0.63` — `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`
 
@@ -19,24 +20,32 @@ recognize that flag.
 The current plugin has no upper host version cap. For OpenClaw 2026.9.3 and
 newer, use Node 24.16+ on 24.x or Node 26.1+ (Node 26 recommended).
 
-Install the current version:
+To opt into the 1.0 alpha:
 
 ```sh
-openclaw plugins install npm:@inline-openclaw/inline@0.0.70 --force --accept-capabilities
+openclaw plugins install npm:@inline-openclaw/inline@1.0.0-alpha.1 --force --accept-capabilities
 ```
 
 If already installed on a supported host, update in place:
 
 ```sh
+openclaw gateway stop
 openclaw plugins update inline --accept-capabilities
-openclaw gateway restart
+openclaw gateway start
 openclaw plugins list
 openclaw plugins inspect inline --json
 openclaw channels status --channel inline --probe --json
 ```
 
-After the first install, an OpenClaw owner can run `/inline_update` in Inline
-and then `/restart`; routine plugin updates do not require host shell access.
+On OpenClaw 2026.11.1 and newer, an exact install keeps its version pin.
+Use `openclaw plugins update inline --dry-run` to inspect the selection. To
+switch to stable updates, use `openclaw plugins update @inline-openclaw/inline@latest --accept-capabilities`
+for the update step. Keep older hosts on their compatible pin. Run each command
+with the same `--profile <name>` if using a named profile. For a foreground
+gateway, stop and relaunch that process.
+
+An OpenClaw owner can also try `/inline_update` in Inline. When the host
+requires exclusive access, finish active turns and use the offline steps above.
 
 ## 2) Configure Inline Channel
 

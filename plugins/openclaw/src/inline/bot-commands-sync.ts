@@ -2,7 +2,7 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { listNativeCommandSpecsForConfig } from "openclaw/plugin-sdk/native-command-registry"
 import { getPluginCommandSpecs } from "openclaw/plugin-sdk/plugin-runtime"
 import { resolveAgentRoute } from "openclaw/plugin-sdk/routing"
-import { listSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
+import { prepareSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
 import {
   findInlineTokenOwnerAccountId,
   formatDuplicateInlineTokenReason,
@@ -191,7 +191,7 @@ async function buildInlineNativeCommandsForConfig(params: {
     : null
   const skillCommands =
     route
-      ? listSkillCommandsForAgents({
+      ? await prepareSkillCommandsForAgents({
           cfg: params.cfg,
           agentIds: [route.agentId],
         })

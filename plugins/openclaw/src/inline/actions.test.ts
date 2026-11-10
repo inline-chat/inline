@@ -4472,6 +4472,70 @@ describe("inline/actions", () => {
     expect(new TextDecoder().decode(data)).toBe("approve")
   })
 
+  it("maps typed presentation actions in shared interactive payloads to inline callbacks", async () => {
+    vi.resetModules()
+
+    const sendMessage = vi.fn(async () => ({ messageId: 1n }))
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        EDIT_MESSAGE: 8,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        sendMessage = sendMessage
+        invokeRaw = vi.fn(async () => ({ oneofKind: undefined }))
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "send",
+      cfg: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      params: {
+        to: "user:99",
+        message: "typed actions",
+        interactive: JSON.stringify({
+          blocks: [
+            {
+              type: "buttons",
+              buttons: [
+                { label: "Approve", action: { type: "callback", value: "approve" } },
+                { label: "Docs", action: { type: "url", url: "https://inline.chat/docs" } },
+                { label: "Status", action: { type: "command", command: "/status" } },
+              ],
+            },
+            {
+              type: "select",
+              options: [{ label: "Fast", action: { type: "callback", value: "model:fast" } }],
+            },
+          ],
+        }),
+      },
+    } as any)
+
+    const rows = sendMessage.mock.calls[0]?.[0]?.actions?.rows
+    expect(rows).toHaveLength(2)
+    expect(rows?.[0]?.actions.map((action: any) => action.text)).toEqual(["Approve", "Status"])
+    expect(rows?.[0]?.actions.map((action: any) => action.actionId)).toEqual(["agent:1:1", "system:1:2"])
+    expect(
+      rows?.[0]?.actions.map((action: any) => new TextDecoder().decode(action.action.callback.data)),
+    ).toEqual(["approve", "/status"])
+    expect(rows?.[1]?.actions?.[0]?.text).toBe("Fast")
+    expect(new TextDecoder().decode(rows?.[1]?.actions?.[0]?.action.callback.data)).toBe("model:fast")
+  })
+
   it("passes empty buttons on edit to clear existing actions", async () => {
     vi.resetModules()
 
