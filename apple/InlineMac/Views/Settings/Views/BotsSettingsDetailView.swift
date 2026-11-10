@@ -799,7 +799,7 @@ struct OwnedBotSettingsSheet: View {
 }
 
 /// The agent-wide default for how the bot replies. Threads can override it in
-/// their Agent Settings. Output mode applies to agents, which report a runtime.
+/// their Agent Settings. Output mode applies to agents that report a runtime or declare the setting.
 private struct ManagedBotOutputSection: View {
   let botUserID: Int64
   @ObservedObject private var store = AgentWorkStateStore.shared
@@ -807,12 +807,12 @@ private struct ManagedBotOutputSection: View {
 
   var body: some View {
     Group {
-      if store.runtimeBotUserIDs.contains(botUserID) {
+      if store.offersOutputMode(botUserID: botUserID) {
         section
       }
     }
     .task(id: botUserID) {
-      await store.loadAgentSettings(botUserID: botUserID)
+      await store.loadBotSettings(botUserID: botUserID)
     }
   }
 
