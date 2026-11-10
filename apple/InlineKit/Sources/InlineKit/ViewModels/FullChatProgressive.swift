@@ -241,7 +241,11 @@ public class MessagesProgressiveViewModel {
     /// `MessagesPublisher.publicationRevision(for:)` taken before the read. Updates published
     /// after it reached no view model, so one built from this state reads the chat again.
     public let publicationRevision: UInt64?
-    /// Last read ID frozen with the first window, so the unread line stays fixed for this visit.
+    /// Where the list opens on these rows, decided with them. The list places it in its first
+    /// layout and sets the history anchor then.
+    public let openAnchor: ChatOpenAnchor
+    /// The last read id the unread line is drawn after, frozen when the chat opened, whichever
+    /// anchor won. Nil when nothing was unread.
     public let unreadBoundary: Int64?
 
     public var threadAnchor: FullMessage? {
@@ -273,12 +277,14 @@ public class MessagesProgressiveViewModel {
       threadAnchor: ThreadAnchor = .unresolved,
       loadedWindowMetadata: LoadedWindowMetadata,
       publicationRevision: UInt64? = nil,
+      openAnchor: ChatOpenAnchor = .latest,
       unreadBoundary: Int64? = nil
     ) {
       self.messages = messages
       threadAnchorState = threadAnchor
       self.loadedWindowMetadata = loadedWindowMetadata
       self.publicationRevision = publicationRevision
+      self.openAnchor = openAnchor
       self.unreadBoundary = unreadBoundary
     }
   }
@@ -464,13 +470,17 @@ public class MessagesProgressiveViewModel {
       .fetchOne(db)
   }
 
-  /// Reads the latest window and the thread's parent message off the main actor, so a chat
-  /// view can be built from them without reading the database while it is constructed.
+  /// Reads the window a chat opens on and the thread's parent message off the main actor, so a
+  /// chat view can be built from them without reading the database while it is constructed.
+  /// The window is the saved place's, else the unread line's, else the latest messages
+  /// (`ChatOpening.resolve`), all from the cache in one snapshot. A saved place that was passed
+  /// and could not be shown comes back with another `openAnchor`; the caller clears it.
   /// Updates published during the read are reconciled when a view model subscribes.
   public static func prepareInitialState(
     peer: Peer,
     chatId: Int64? = nil,
     limit: Int = defaultInitialLimit(),
+    savedPlace: ChatReadingPlace? = nil,
     database: AppDatabase = .shared,
     publisher: MessagesPublisher = .shared,
     currentUserId: Int64? = Auth.shared.getCurrentUserId()
@@ -483,21 +493,22 @@ public class MessagesProgressiveViewModel {
         existingMessages: [], mode: .replaceLatest(limit: limit)
       )
       let dialog = try Dialog.get(peerId: peer).fetchOne(db)
-      let boundary = ChatUnreadOpening.boundary(
-        unreadCount: dialog?.unreadCount, readInboxMaxId: dialog?.readInboxMaxId
+      let opening = try ChatOpening.resolve(
+        db, peer: peer, chatId: chatId, saved: savedPlace,
+        unreadCount: dialog?.unreadCount, readInboxMaxId: dialog?.readInboxMaxId,
+        latest: snapshot.messages
       )
-      let openingMessages = try boundary.flatMap {
-        try ChatUnreadOpening.localOpeningWindow(db, peer: peer, chatId: chatId, boundary: $0, latest: snapshot.messages)
-      } ?? snapshot.messages
-      let usesLatestWindow = openingMessages.map(\.id) == snapshot.messages.map(\.id)
+      // The latest page keeps the metadata read with it; another window reads its own.
+      let isLatestPage = opening.messages.map(\.id) == snapshot.messages.map(\.id)
       return try InitialState(
-        messages: openingMessages,
+        messages: opening.messages,
         threadAnchor: .resolved(localThreadAnchor(db, peer: peer)),
-        loadedWindowMetadata: usesLatestWindow
+        loadedWindowMetadata: isLatestPage
           ? snapshot.metadata
-          : loadedWindowMetadata(db, peer: peer, messages: openingMessages),
+          : loadedWindowMetadata(db, peer: peer, messages: opening.messages),
         publicationRevision: publicationRevision,
-        unreadBoundary: boundary
+        openAnchor: opening.anchor,
+        unreadBoundary: opening.unreadBoundary
       )
     }
   }

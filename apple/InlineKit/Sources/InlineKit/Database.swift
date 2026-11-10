@@ -1462,6 +1462,20 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("chat reading places") { db in
+      // Where the user left a chat when its newest message was off screen, so it reopens there
+      // after a restart. Local to this device; never synced. Keyed by account as well as chat,
+      // so a row written during a logout can never be read by the next account.
+      try db.create(table: "chatReadingPlace") { table in
+        table.column("userId", .integer).notNull()
+        table.column("dialogId", .integer).notNull()
+        table.column("messageId", .integer).notNull()
+        table.column("offset", .double).notNull()
+        table.column("updatedAt", .datetime).notNull()
+        table.primaryKey(["userId", "dialogId"])
+      }
+    }
+
     return migrator
   }
 }

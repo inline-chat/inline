@@ -25,8 +25,26 @@ public final class ChatOpenPreparation {
   private var entries: [Peer: Entry] = [:]
   private var waiters: [(peer: Peer, continuation: CheckedContinuation<InitialState?, Never>)] = []
 
-  init(read: @escaping Read = { try await MessagesProgressiveViewModel.prepareInitialState(peer: $0) }) {
+  init(read: @escaping Read = { try await ChatOpenPreparation.readAtReadingPlace(peer: $0) }) {
     self.read = read
+  }
+
+  /// Reads the window at the chat's saved reading place, if any. A place the cache could not
+  /// show is cleared, so the next open does not try it again.
+  static func readAtReadingPlace(
+    peer: Peer,
+    store: ChatReadingPlaceStore = .shared,
+    prepare: (Peer, ChatReadingPlace?) async throws -> InitialState = {
+      try await MessagesProgressiveViewModel.prepareInitialState(peer: $0, savedPlace: $1)
+    }
+  ) async throws -> InitialState {
+    let saved = store.place(for: peer)
+    let state = try await prepare(peer, saved)
+    // Only the place that was read is cleared; one saved since then is kept.
+    if let saved, state.openAnchor != .saved(saved), store.place(for: peer) == saved {
+      store.clear(for: peer)
+    }
+    return state
   }
 
   /// The chat's window, read unless a fresh one exists or is being read. Nil when the read failed;
