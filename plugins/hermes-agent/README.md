@@ -41,6 +41,7 @@ Supported:
 - Reactions on bot messages, plus opt-in lifecycle/system events as synthetic Hermes messages.
 - Cron or standalone sends through `INLINE_HOME_CHANNEL` and `hermes send --to inline:<chat-id>`.
 - Hermes-native `typing_indicator` and `gateway_restart_notification` toggles, with plugin-owned YAML bridge coverage for external-plugin compatibility.
+- Detailed and Friendly output (the bot's Output setting in Inline; see Output below): a live, collapsible progress message for each turn, or short updates instead.
 
 Unsupported or intentionally limited:
 
@@ -51,6 +52,7 @@ Unsupported or intentionally limited:
 - Ephemeral in-channel private replies. Private notices are sent as DMs when a user id is available.
 - Live voice sessions or calls. Voice file messages are supported, but realtime audio is not.
 - Media without a usable Inline CDN/local URL. Those messages still produce text summaries, but Hermes may not receive a local file path.
+- Progress for turns Hermes starts on its own. Scheduled (cron) turns and late background sub-agent results post only their answer.
 
 ## Release 1.1.0
 
@@ -294,14 +296,44 @@ platforms:
     enabled: true
 ```
 
-Experimental tool timelines are unavailable in this adapter. The old
-`INLINE_EXPERIMENTAL_AGENT_ACTIVITY` setting is ignored and logs a warning when
-enabled. Hermes uses ordinary typing, optional processing reactions, and replies.
+### Output: Detailed or Friendly
 
-Inline keeps tool progress and interim assistant messages quiet by default.
-Explicit Hermes display settings still take precedence; if you enable native
-tool progress, Hermes uses its ordinary progress messages. Token streaming remains
-opt-in through both `streaming.enabled: true` and
+Each bot has an Output setting in Inline (the bot's chat settings), with a
+per-chat override. The adapter reads it at the start of every turn (cached for
+30 seconds per chat) and declares the `OUTPUT_MODE` capability so Inline offers
+the setting. An unset setting means Detailed.
+
+- **Detailed**: while Hermes works, one progress message ("Working · 1m 4s")
+  shows each step as a row: commands with their output tail and exit code, files
+  read and searched, edits with their diff, web searches, plans, sub-agents with
+  their own steps nested inside, and approvals waiting on someone. Hermes'
+  commentary between tool calls appears inside it too. When the answer is ready
+  the message collapses to "Worked for 1m 4s" and the answer follows as its own
+  message. A message someone sends mid-turn ends the progress message there;
+  later work starts a new one.
+- **Friendly**: no progress message. Hermes' commentary between tool calls posts
+  as short updates, then the answer.
+
+Approvals, questions and errors look the same in both modes. Output tails are
+capped at 2,000 characters and diffs at 8,000, and values that look like secrets
+are hidden. Row titles come from the tool, never from its output.
+
+This runs entirely on Hermes' public plugin hooks (`pre_tool_call`,
+`post_tool_call`, `subagent_start`/`subagent_stop`,
+`pre_approval_request`/`post_approval_response`) and its interim-message
+contract. Turns Hermes starts on its own, such as scheduled (cron) runs, have no
+processing hooks and post only their answer.
+
+The old experimental timeline is gone: `INLINE_EXPERIMENTAL_AGENT_ACTIVITY` is
+ignored and logs a warning when enabled.
+
+Inline's display defaults keep Hermes' own tool-progress bubbles off
+(`tool_progress: off`) and turn on `interim_assistant_messages`, which the
+Output setting then shows as Detailed commentary or Friendly updates. Explicit
+Hermes display settings still take precedence: turning `tool_progress` on adds
+Hermes' own progress bubbles on top of Detailed output, and turning
+`interim_assistant_messages` off hides commentary in both modes. Token streaming
+remains opt-in through both `streaming.enabled: true` and
 `display.platforms.inline.streaming: true`.
 
 Hermes-native sends and scheduled deliveries accept Inline's explicit target

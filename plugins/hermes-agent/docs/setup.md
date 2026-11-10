@@ -66,9 +66,11 @@ platforms:
     enabled: true
 ```
 
-Inline uses work-chat defaults: typing/presence while Hermes is working, final
-answers in chat, and no durable tool-call progress bubbles. If your Hermes
-config has global tool progress enabled, add this per-platform override:
+Inline uses work-chat defaults: a "working" indicator while Hermes works, the
+bot's Output setting for progress (Detailed: a live, collapsible progress
+message; Friendly: short updates), and final answers as their own messages.
+Hermes' own tool-progress bubbles stay off. If your Hermes config turns global
+tool progress on, add this per-platform override:
 
 ```yaml
 display:
@@ -77,8 +79,12 @@ display:
       tool_progress: off
       cleanup_progress: true
       streaming: false
-      interim_assistant_messages: false
+      interim_assistant_messages: true
 ```
+
+`interim_assistant_messages: true` lets Hermes' commentary between tool calls
+reach Inline, inside the progress message in Detailed or as updates in Friendly.
+Set it to `false` to hide commentary in both modes.
 
 If a process manager cannot inject the token directly, Hermes config can point
 to an environment variable without storing the token in the file:
@@ -144,6 +150,7 @@ Supported:
 - Inline entity summaries for live turns and tool-fetched history, including mentions, text links, thread links, thread-title links, code/pre blocks, bot commands, and group mentions as untrusted Hermes context.
 - Reactions on bot messages and opt-in lifecycle/system events.
 - Hermes-native `typing_indicator` and `gateway_restart_notification` toggles.
+- Detailed and Friendly output from the bot's Output setting in Inline: a live progress message with commands, reads, edits, plans and sub-agents, collapsing to "Worked for" above the answer, or short updates instead.
 
 Unsupported or intentionally limited:
 
@@ -153,6 +160,7 @@ Unsupported or intentionally limited:
 - Native animated draft streaming. Inline can stream by editing a preview message, but edit-based streaming is off by default like Discord and Slack.
 - Ephemeral in-channel private replies or realtime voice/calls.
 - Media without a usable Inline CDN/local URL. Hermes still receives a text summary, but may not receive a local file path.
+- Progress for scheduled (cron) turns, which Hermes runs without processing hooks: they post only their answer.
 
 ## Troubleshooting
 
@@ -166,6 +174,7 @@ Unsupported or intentionally limited:
 - Answers stay in the chat by default, and a thread starts only when someone asks for one. Use `/threads on` in a DM or group chat (or ask the agent) to answer each message in a reply thread, and `/threads auto` to go back.
 - Automatic context uses `INLINE_CONTEXT_BACKFILL=selective` by default: parent/reply-thread metadata, parent messages, reply windows, first thread turns, mention-gap catch-up, and observed unmentioned group context are included when relevant. Use `INLINE_THREAD_CONTEXT_LIMIT`, `INLINE_REPLY_CONTEXT_LIMIT`, `INLINE_OBSERVE_UNMENTIONED_MESSAGES=false`, or `INLINE_OBSERVED_CONTEXT_LIMIT` to tune it. Exact older history remains available through the `inline` tool.
 - Thread-specific prompts and skill bindings are supported through `platforms.inline.channel_prompts` and `platforms.inline.channel_skill_bindings`; Inline checks the thread chat id first, then the parent chat id. See the package README for examples.
-- Set `display.platforms.inline.tool_progress: off` to suppress tool-call progress messages. If you opt into progress, keep `display.platforms.inline.cleanup_progress: true` so successful runs do not leave progress bubbles behind.
+- Progress shows as the bot's Output setting says (Detailed or Friendly). Keep `display.platforms.inline.tool_progress: off`: turning it on adds Hermes' own progress bubbles on top. If you do, keep `display.platforms.inline.cleanup_progress: true` so successful runs do not leave those bubbles behind.
+- No progress message in Detailed: the adapter logs `[inline] progress ... failed` once when it cannot draw one, and the turn's answer still posts. Hermes versions without plugin hooks show only the turn's time.
 
 Full package docs: [`hermes-agent/README.md`](../README.md).

@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import concurrent.futures
+import contextvars
+import functools
 import hashlib
 import inspect
 import json
@@ -15,6 +18,7 @@ import logging
 import math
 import mimetypes
 import os
+import queue
 import re
 import secrets
 import shlex
@@ -25,7 +29,9 @@ import subprocess
 import sys
 import threading
 import time
-from collections import OrderedDict
+import urllib.error
+import urllib.request
+from collections import OrderedDict, deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional
@@ -59,7 +65,7 @@ from .message_actions import (
     parse_inline_agent_action_reply_target,
     resolve_inline_message_action_ownership,
 )
-from .profile import bot_state_key, inline_env, legacy_state_dir, may_adopt_legacy_state, state_dir
+from .profile import bot_state_key, hermes_home, inline_env, legacy_state_dir, may_adopt_legacy_state, state_dir
 from .telemetry import capture_plugin_error
 from .widgets import has_widget_markup, scan_widgets, split_widget_aware, streaming_preview, without_widgets
 
@@ -204,7 +210,9 @@ _INLINE_DISPLAY_DEFAULTS = {
     "tool_progress_grouping": "accumulate",
     "cleanup_progress": True,
     "streaming": False,
-    "interim_assistant_messages": False,
+    # Hermes' own between-tool-calls messages: Friendly posts them as short updates and
+    # Detailed folds them into the progress message (see InlineAdapter.send).
+    "interim_assistant_messages": True,
     "show_reasoning": False,
     "tool_preview_length": 40,
     "busy_ack_detail": False,
@@ -937,6 +945,531 @@ def _accepts_keyword(fn: Callable[..., Any], name: str) -> bool:
     return name in params or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
+# ── Detailed progress (Output: Detailed / Friendly) ──────────────────────────────────────
+# Hermes reports its work to plugins through public hooks: pre/post_tool_call,
+# subagent_start/stop and pre_approval_request/post_approval_response. Each hook finds the
+# Inline turn its session belongs to (gateway.session_context) and only enqueues in memory:
+# pre_tool_call blocks the tool while it runs. One worker thread per adapter posts the
+# events, in order, to the sidecar, which draws them with @inline-chat/agent-activity.
+
+_ACTIVITY_POST_TIMEOUT_SECONDS = 10.0
+_ACTIVITY_FLUSH_TIMEOUT_SECONDS = 30.0
+# The answer waits at most this long for "Worked for" to land above it.
+_ACTIVITY_FINAL_WAIT_SECONDS = 15.0
+# An interim message waits at most this long for the chat's mode before it posts as is.
+_ACTIVITY_MODE_WAIT_SECONDS = 5.0
+_ACTIVITY_OUTPUT_LIMIT = 2_000
+_ACTIVITY_DIFF_LIMIT = 8_000
+_ACTIVITY_TITLE_LIMIT = 100
+_ACTIVITY_PLAN_LIMIT = 50
+_ACTIVITY_HOOKS = (
+    "pre_tool_call", "post_tool_call", "subagent_start", "subagent_stop",
+    "pre_approval_request", "post_approval_response",
+)
+# Tools whose work is visible on its own: a question card, a message the agent sent.
+_ACTIVITY_SKIPPED_TOOLS = frozenset({"clarify"})
+_ACTIVITY_VISIBLE_INLINE_ACTIONS = frozenset({"send_message", "send_widget"})
+_ACTIVITY_COMMAND_TOOLS = frozenset({"terminal", "exec", "bash", "shell"})
+_ACTIVITY_READ_TOOLS = frozenset({"read_file", "file_read"})
+_ACTIVITY_SEARCH_TOOLS = frozenset({"search_files", "grep"})
+_ACTIVITY_EDIT_TOOLS = frozenset({"write_file", "file_write", "file_edit", "patch", "apply_patch"})
+_ACTIVITY_WEB_SEARCH_TOOLS = frozenset({"web_search", "x_search"})
+_ACTIVITY_PLAN_TOOLS = frozenset({"todo", "todo_list"})
+# Titles never come from a command, output or reasoning: only the tool and its explicit intent.
+_ACTIVITY_TOOL_TITLES = {
+    "execute_code": "Ran code",
+    "browser": "Used the browser",
+    "browser_exec": "Used the browser",
+    "browser_cdp": "Used the browser",
+    "browser_dialog": "Used the browser",
+    "browser_vault": "Used the browser",
+    "web_extract": "Read a web page",
+    "tool_describe": "Checked available tools",
+    "skill_view": "Read instructions",
+    "skills_list": "Listed skills",
+    "delegate_task": "Delegated a task",
+    "image_generate": "Generated an image",
+    "video_generate": "Generated a video",
+    "vision_analyze": "Looked at an image",
+    "video_analyze": "Watched a video",
+    "text_to_speech": "Generated speech",
+    "session_search": "Searched past sessions",
+    "memory": "Updated memory",
+    "read_terminal": "Read terminal output",
+    "close_terminal": "Closed a terminal",
+    "process_manage": "Managed a background process",
+    "cronjob_manage": "Managed scheduled jobs",
+    "skill_manage": "Managed skills",
+}
+
+_ACTIVITY_LOCK = threading.Lock()
+# Set while the adapter answers on its own (a /threads reply, a button's fallback, a question):
+# those sends are neither Hermes' answer nor its commentary, so a turn's progress ignores them.
+_ACTIVITY_LOCAL_SEND: contextvars.ContextVar[bool] = contextvars.ContextVar("inline_activity_local_send", default=False)
+# (chat_id, thread_id) as Hermes binds them for the turn's session -> open turns, oldest first.
+_ACTIVITY_TURNS: Dict[tuple[str, str], List["_ActivityTurn"]] = {}
+_ACTIVITY_LOGGED_FAILURES: set[str] = set()
+# gateway.session_context.get_session_env, resolved off the hook path.
+_ACTIVITY_SESSION_ENV: Optional[Callable[..., Any]] = None
+
+
+def _activity_local_sends(fn: Callable[..., Any]) -> Callable[..., Any]:
+    @functools.wraps(fn)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        token = _ACTIVITY_LOCAL_SEND.set(True)
+        try:
+            return await fn(*args, **kwargs)
+        finally:
+            _ACTIVITY_LOCAL_SEND.reset(token)
+
+    return wrapper
+
+
+def _activity_log_failure(operation: str, exc: BaseException) -> None:
+    """Progress never breaks a turn: log the first failure of each kind, then stay quiet."""
+    if operation in _ACTIVITY_LOGGED_FAILURES:
+        logger.debug("[inline] progress %s failed: %s", operation, exc)
+        return
+    _ACTIVITY_LOGGED_FAILURES.add(operation)
+    logger.warning("[inline] progress %s failed: %s: %s; the turn goes on without it", operation, type(exc).__name__, exc)
+
+
+def _activity_session_env_reader() -> Optional[Callable[..., Any]]:
+    global _ACTIVITY_SESSION_ENV
+    if _ACTIVITY_SESSION_ENV is None:
+        try:
+            from gateway.session_context import get_session_env
+            _ACTIVITY_SESSION_ENV = get_session_env
+        except Exception:
+            return None
+    return _ACTIVITY_SESSION_ENV
+
+
+def _activity_str(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _activity_tail(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[-limit:]
+
+
+def _activity_json(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str) and value[:1] in {"{", "["}:
+        try:
+            return json.loads(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _activity_plan_steps(todos: Any) -> List[Dict[str, str]]:
+    steps: List[Dict[str, str]] = []
+    for todo in todos if isinstance(todos, list) else []:
+        if not isinstance(todo, dict):
+            continue
+        text = _activity_str(todo.get("content"))
+        if not text:
+            continue
+        status = _activity_str(todo.get("status"))
+        if status == "cancelled":
+            steps.append({"text": f"{text} (cancelled)", "status": "completed"})
+        else:
+            steps.append({"text": text, "status": status if status in {"in_progress", "completed"} else "pending"})
+        if len(steps) >= _ACTIVITY_PLAN_LIMIT:
+            break
+    return steps
+
+
+def _activity_tool_body(name: str, args: Any) -> Optional[Dict[str, Any]]:
+    """The row a Hermes tool call starts, or None for tools that show no row."""
+    args = args if isinstance(args, dict) else {}
+    if name in _ACTIVITY_SKIPPED_TOOLS or name == "delegate_task":
+        # Sub-agents draw their own rows through subagent_start/stop.
+        return None
+    if name == "inline":
+        action = _activity_str(args.get("action"))
+        if action in _ACTIVITY_VISIBLE_INLINE_ACTIONS:
+            return None
+        return {"kind": "tool", "name": "inline", "title": f"Inline: {action.replace('_', ' ')}" if action else "Used Inline"}
+    if name in _ACTIVITY_COMMAND_TOOLS:
+        command = _activity_str(args.get("command"))
+        return {"kind": "command", "command": command} if command else {"kind": "tool", "name": name, "title": "Ran a command"}
+    path = _activity_str(args.get("path")) or _activity_str(args.get("file_path"))
+    if name in _ACTIVITY_READ_TOOLS and path:
+        return {"kind": "read", "path": path}
+    if name in _ACTIVITY_SEARCH_TOOLS:
+        query = _activity_str(args.get("pattern")) or _activity_str(args.get("query"))
+        body: Dict[str, Any] = {"kind": "search"}
+        if query:
+            body["query"] = query
+        if path and path != ".":
+            body["path"] = path
+        return body
+    if name in _ACTIVITY_EDIT_TOOLS:
+        if path:
+            return {"kind": "edit", "files": [{"path": path}]}
+        return {"kind": "tool", "name": name, "title": "Edited files"}
+    if name in _ACTIVITY_WEB_SEARCH_TOOLS:
+        query = _activity_str(args.get("query"))
+        return {"kind": "web", "query": query} if query else {"kind": "tool", "name": name, "title": "Searched the web"}
+    if name == "web_extract" or name.startswith("browser"):
+        urls = args.get("urls") if isinstance(args.get("urls"), list) else []
+        url = _activity_str(args.get("url")) or next((_activity_str(u) for u in urls if _activity_str(u)), "")
+        if url:
+            return {"kind": "web", "url": url}
+    if name in _ACTIVITY_PLAN_TOOLS:
+        steps = _activity_plan_steps(args.get("todos"))
+        # Reading the list (no todos) changes nothing worth a row.
+        return {"kind": "plan", "steps": steps} if steps else None
+    description = " ".join(_activity_str(args.get("description")).split())
+    title = description or _ACTIVITY_TOOL_TITLES.get(name) or f"Used {name}"
+    return {"kind": "tool", "name": name, "title": title[:_ACTIVITY_TITLE_LIMIT]}
+
+
+def _activity_tool_result(name: str, args: Any, body: Dict[str, Any], result: Any, status: str, error: str) -> Dict[str, Any]:
+    """The row's body once the tool finished: output tails, exit codes, diffs, plans, errors."""
+    args = args if isinstance(args, dict) else {}
+    parsed = _activity_json(result)
+    record = parsed if isinstance(parsed, dict) else {}
+    kind = body.get("kind")
+    if kind == "command":
+        merged = dict(body)
+        output = record.get("output")
+        if isinstance(output, str) and output.strip():
+            merged["output"] = _activity_tail(output.rstrip(), _ACTIVITY_OUTPUT_LIMIT)
+        exit_code = record.get("exit_code")
+        if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+            merged["exitCode"] = exit_code
+        return merged
+    if name in _ACTIVITY_EDIT_TOOLS:
+        files: List[Dict[str, Any]] = []
+        for key, change in (("files_created", "added"), ("files_deleted", "deleted"), ("files_modified", "modified")):
+            for path in record.get(key) or []:
+                if isinstance(path, str) and path.strip() and all(f["path"] != path for f in files):
+                    files.append({"path": path, "change": change})
+        path = _activity_str(args.get("path")) or _activity_str(args.get("file_path"))
+        if not files and path:
+            files.append({"path": path})
+        diff = record.get("diff")
+        if len(files) == 1 and isinstance(diff, str) and diff.strip():
+            files[0]["diff"] = _activity_tail(diff.rstrip(), _ACTIVITY_DIFF_LIMIT)
+        if files:
+            return {"kind": "edit", "files": files}
+        return body
+    if kind == "plan":
+        steps = _activity_plan_steps(record.get("todos"))
+        return {"kind": "plan", "steps": steps} if steps else body
+    if kind == "tool" and status == "error" and error:
+        return {**body, "error": error.splitlines()[0][:500]}
+    return body
+
+
+def _activity_agent_state(status: Any) -> str:
+    value = _activity_str(status).lower()
+    if value in {"interrupted", "cancelled", "canceled", "stopped"}:
+        return "cancelled"
+    if value in {"failed", "error", "timeout"}:
+        return "failed"
+    return "done"
+
+
+def _activity_same_text(left: Optional[str], right: Optional[str]) -> bool:
+    return bool(left) and bool(right) and " ".join(str(left).split()) == " ".join(str(right).split())
+
+
+class _ActivityTurn:
+    """One Hermes turn in one Inline chat, from on_processing_start to its answer."""
+
+    def __init__(self, *, pump: "_ActivityPump", turn_id: str, target: Dict[str, str], key: tuple[str, str], user_id: str, home: str):
+        self.pump = pump
+        self.turn_id = turn_id
+        self.target = target
+        self.key = key
+        self.user_id = user_id
+        self.home = home
+        # "detailed", "friendly", or "off" when the sidecar could not be reached; None until known.
+        self.mode: Optional[str] = None
+        self.mode_ready = threading.Event()
+        self.closed = False
+        # People's messages that arrived mid-turn: Hermes' busy notice replies to them, and
+        # that send is not this turn's answer.
+        self.later_messages: set[str] = set()
+        # Worker-thread state below.
+        self.rows: Dict[str, Dict[str, Any]] = {}
+        # (session, tool call) -> row; None for calls that show no row.
+        self.calls: Dict[tuple[str, str], Optional[str]] = {}
+        self.unmatched: Dict[tuple[str, str], deque] = {}
+        self.children: Dict[str, str] = {}
+        self.held: Optional[str] = None
+        self.next_row = 0
+
+
+def _activity_register(turn: _ActivityTurn) -> None:
+    with _ACTIVITY_LOCK:
+        _ACTIVITY_TURNS.setdefault(turn.key, []).append(turn)
+
+
+def _activity_unregister(turn: _ActivityTurn) -> None:
+    with _ACTIVITY_LOCK:
+        turns = _ACTIVITY_TURNS.get(turn.key)
+        if turns and turn in turns:
+            turns.remove(turn)
+        if not turns:
+            _ACTIVITY_TURNS.pop(turn.key, None)
+
+
+def _activity_turns_for(key: tuple[str, str]) -> List[_ActivityTurn]:
+    with _ACTIVITY_LOCK:
+        return list(_ACTIVITY_TURNS.get(key, ()))
+
+
+def _activity_turn_for_session() -> Optional[_ActivityTurn]:
+    """The open Inline turn the calling hook's session belongs to. In memory only: no I/O."""
+    get_env = _ACTIVITY_SESSION_ENV
+    if get_env is None or str(get_env("HERMES_SESSION_PLATFORM", "") or "") != "inline":
+        return None
+    key = (str(get_env("HERMES_SESSION_CHAT_ID", "") or ""), str(get_env("HERMES_SESSION_THREAD_ID", "") or ""))
+    candidates = _activity_turns_for(key)
+    if len(candidates) > 1:
+        # Per-user sessions share a group chat; several profiles' bots can share one too.
+        user_id = str(get_env("HERMES_SESSION_USER_ID", "") or "")
+        candidates = [turn for turn in candidates if turn.user_id == user_id] or candidates
+    if len(candidates) > 1:
+        home = str(hermes_home())
+        candidates = [turn for turn in candidates if turn.home == home] or candidates
+    return candidates[-1] if candidates else None
+
+
+def _activity_hook(kind: str) -> Callable[..., None]:
+    def callback(**kwargs: Any) -> None:
+        # pre_tool_call is fail-closed and blocks the tool while it runs: find the turn,
+        # copy the payload and enqueue it, nothing else. Never raise, never return a directive.
+        try:
+            turn = _activity_turn_for_session()
+            if turn is not None and not turn.closed and turn.mode not in {"friendly", "off"}:
+                payload = dict(kwargs)
+                if isinstance(payload.get("args"), dict):
+                    payload["args"] = dict(payload["args"])
+                turn.pump.put(kind, turn, payload)
+        except Exception as exc:
+            _activity_log_failure(f"hook {kind}", exc)
+        return None
+
+    callback.__name__ = f"inline_activity_{kind}"
+    return callback
+
+
+def _register_activity_hooks(ctx: Any) -> None:
+    register_hook = getattr(ctx, "register_hook", None)
+    if not callable(register_hook):
+        logger.info("[inline] this Hermes has no plugin hooks; Detailed output shows only the turn's time")
+        return
+    for name in _ACTIVITY_HOOKS:
+        try:
+            register_hook(name, _activity_hook(name))
+        except Exception as exc:
+            _activity_log_failure(f"register {name}", exc)
+
+
+class _ActivityPump:
+    """Posts one adapter's progress events to its sidecar, in order, off the agent's threads."""
+
+    def __init__(self, post: Callable[[str, Dict[str, Any], float], Dict[str, Any]]):
+        self._post = post
+        self._queue: "queue.SimpleQueue[Any]" = queue.SimpleQueue()
+        self._thread = threading.Thread(target=self._run, name="inline-activity", daemon=True)
+        self._thread.start()
+
+    def put(self, kind: str, turn: _ActivityTurn, payload: Any = None) -> None:
+        self._queue.put((kind, turn, payload, time.time()))
+
+    def flush(self, turn: _ActivityTurn) -> "concurrent.futures.Future[None]":
+        """Resolves once every event queued before it has reached Inline."""
+        future: "concurrent.futures.Future[None]" = concurrent.futures.Future()
+        self.put("flush", turn, future)
+        return future
+
+    def stop(self) -> None:
+        self._queue.put(None)
+
+    def _run(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            kind, turn, payload, at = item
+            try:
+                self._handle(kind, turn, payload, at)
+            except Exception as exc:
+                _activity_log_failure(kind, exc)
+            finally:
+                if kind == "flush" and isinstance(payload, concurrent.futures.Future) and not payload.done():
+                    payload.set_result(None)
+
+    def _send(self, turn: _ActivityTurn, event: Dict[str, Any], at: float) -> Dict[str, Any]:
+        return self._post("/activity", {
+            "target": turn.target, "turnId": turn.turn_id, "event": event, "at": int(at * 1000),
+        }, _ACTIVITY_POST_TIMEOUT_SECONDS)
+
+    def _handle(self, kind: str, turn: _ActivityTurn, payload: Any, at: float) -> None:
+        if kind == "start":
+            try:
+                data = self._post("/activity", {
+                    "target": turn.target, "turnId": turn.turn_id, "event": {"type": "turn.start"},
+                    "at": int(at * 1000), "lazy": bool((payload or {}).get("lazy")),
+                }, _ACTIVITY_POST_TIMEOUT_SECONDS)
+                mode = str((data.get("result") or {}).get("mode") or "")
+                turn.mode = mode if mode in {"detailed", "friendly"} else "detailed"
+            except Exception:
+                turn.mode = "off"
+                raise
+            finally:
+                turn.mode_ready.set()
+            return
+        if turn.mode != "detailed":
+            return
+        if kind == "flush":
+            self._post("/activity/flush", {"target": turn.target, "turnId": turn.turn_id}, _ACTIVITY_FLUSH_TIMEOUT_SECONDS)
+            return
+        for event in self._events(kind, turn, payload):
+            self._send(turn, event, at)
+
+    def _events(self, kind: str, turn: _ActivityTurn, payload: Any) -> List[Dict[str, Any]]:
+        if kind == "commentary":
+            text = str(payload or "").strip()
+            if not text:
+                return []
+            # Held until the next event: an interim message that turns out to be the answer
+            # (Hermes then sends the same text as the final) is not drawn twice.
+            events = self._release_held(turn)
+            turn.held = text
+            return events
+        if kind == "end":
+            final = (payload or {}).get("final")
+            if turn.held and _activity_same_text(turn.held, final):
+                turn.held = None
+            return [*self._release_held(turn), {"type": "turn.end", "outcome": (payload or {}).get("outcome") or "success"}]
+        events = self._release_held(turn)
+        if kind == "split":
+            events.append({"type": "split"})
+        elif kind in {"pre_approval_request", "post_approval_response"}:
+            # Smart approval is decided by a model, not a person: nothing waits.
+            if _activity_str((payload or {}).get("surface")) != "smart":
+                events.append({"type": "waiting", "waiting": kind == "pre_approval_request"})
+        elif kind == "pre_tool_call":
+            events.extend(self._tool_start(turn, payload or {}))
+        elif kind == "post_tool_call":
+            events.extend(self._tool_end(turn, payload or {}))
+        elif kind == "subagent_start":
+            events.extend(self._agent_start(turn, payload or {}))
+        elif kind == "subagent_stop":
+            events.extend(self._agent_stop(turn, payload or {}))
+        return events
+
+    @staticmethod
+    def _release_held(turn: _ActivityTurn) -> List[Dict[str, Any]]:
+        held, turn.held = turn.held, None
+        return [{"type": "commentary", "text": held}] if held else []
+
+    @staticmethod
+    def _new_row(turn: _ActivityTurn, call_id: str) -> str:
+        if call_id and f"tool:{call_id}" not in turn.rows:
+            return f"tool:{call_id}"
+        turn.next_row += 1
+        return f"tool:#{turn.next_row}"
+
+    def _tool_start(self, turn: _ActivityTurn, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        name = _activity_str(payload.get("tool_name"))
+        call_id = _activity_str(payload.get("tool_call_id"))
+        session_id = _activity_str(payload.get("session_id"))
+        body = _activity_tool_body(name, payload.get("args"))
+        if body is None:
+            if call_id:
+                turn.calls[(session_id, call_id)] = None
+            return []
+        # One plan per agent: later updates redraw the same row.
+        row_id = f"plan:{session_id or 'main'}" if body.get("kind") == "plan" else self._new_row(turn, call_id)
+        parent = turn.children.get(session_id)
+        turn.rows[row_id] = {"name": name, "args": payload.get("args"), "body": body}
+        if call_id:
+            turn.calls[(session_id, call_id)] = row_id
+        else:
+            turn.unmatched.setdefault((session_id, name), deque()).append(row_id)
+        event: Dict[str, Any] = {"type": "item", "id": row_id, "body": body, "state": "running"}
+        if parent:
+            event["parent"] = parent
+        return [event]
+
+    def _tool_end(self, turn: _ActivityTurn, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        name = _activity_str(payload.get("tool_name"))
+        call_id = _activity_str(payload.get("tool_call_id"))
+        session_id = _activity_str(payload.get("session_id"))
+        status = _activity_str(payload.get("status")) or "ok"
+        error = _activity_str(payload.get("error_message"))
+        row_id: Optional[str] = None
+        if call_id and (session_id, call_id) in turn.calls:
+            row_id = turn.calls.pop((session_id, call_id))
+            if row_id is None and not (name == "delegate_task" and status == "error"):
+                return []
+        elif not call_id:
+            pending = turn.unmatched.get((session_id, name))
+            row_id = pending.popleft() if pending else None
+        event: Dict[str, Any] = {"type": "item", "state": "failed" if status == "error" else "done"}
+        row = turn.rows.get(row_id) if row_id else None
+        if row is None:
+            # No start seen (or a sub-agent hand-off that failed before it began): draw it now.
+            body = _activity_tool_body(name, payload.get("args"))
+            if body is None and name == "delegate_task" and status == "error":
+                body = {"kind": "tool", "name": name, "title": _ACTIVITY_TOOL_TITLES["delegate_task"]}
+            if body is None:
+                return []
+            row_id = self._new_row(turn, call_id)
+            row = {"name": name, "args": payload.get("args"), "body": body}
+            turn.rows[row_id] = row
+            parent = turn.children.get(session_id)
+            if parent:
+                event["parent"] = parent
+        event["id"] = row_id
+        event["body"] = _activity_tool_result(name, row.get("args"), row["body"], payload.get("result"), status, error)
+        duration = payload.get("duration_ms")
+        if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration >= 0:
+            event["durationMs"] = int(duration)
+        return [event]
+
+    @staticmethod
+    def _agent_start(turn: _ActivityTurn, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        child = _activity_str(payload.get("child_subagent_id")) or _activity_str(payload.get("child_session_id"))
+        if not child:
+            return []
+        row_id = f"agent:{child}"
+        goal = _activity_str(payload.get("child_goal"))
+        body: Dict[str, Any] = {"kind": "agent"}
+        if goal:
+            body["title"] = " ".join(goal.splitlines()[0].split())[:_ACTIVITY_TITLE_LIMIT]
+        child_session = _activity_str(payload.get("child_session_id"))
+        if child_session:
+            turn.children[child_session] = row_id
+        event: Dict[str, Any] = {"type": "item", "id": row_id, "body": body, "state": "running"}
+        parent_subagent = _activity_str(payload.get("parent_subagent_id"))
+        parent = f"agent:{parent_subagent}" if parent_subagent else turn.children.get(_activity_str(payload.get("parent_session_id")))
+        if parent and parent != row_id:
+            event["parent"] = parent
+        return [event]
+
+    @staticmethod
+    def _agent_stop(turn: _ActivityTurn, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+        row_id = turn.children.get(_activity_str(payload.get("child_session_id")))
+        if not row_id:
+            return []
+        event: Dict[str, Any] = {"type": "item", "id": row_id, "state": _activity_agent_state(payload.get("child_status"))}
+        duration = payload.get("duration_ms")
+        if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration > 0:
+            event["durationMs"] = int(duration)
+        return [event]
+
+
 class InlineAdapter(BasePlatformAdapter):
     MAX_MESSAGE_LENGTH = _MAX_MESSAGE_LENGTH
     supports_code_blocks = True
@@ -949,7 +1482,7 @@ class InlineAdapter(BasePlatformAdapter):
         extra = config.extra or {}
 
         if _truthy(inline_env("INLINE_EXPERIMENTAL_AGENT_ACTIVITY")):
-            logger.warning("[inline] experimental tool timelines are unavailable; ignoring INLINE_EXPERIMENTAL_AGENT_ACTIVITY and using ordinary typing")
+            logger.warning("[inline] INLINE_EXPERIMENTAL_AGENT_ACTIVITY is ignored; progress follows the bot's Output setting (Detailed or Friendly)")
         self._token = _config_token(config)
         self._base_url = inline_env("INLINE_BASE_URL") or extra.get("base_url") or "https://api.inline.chat"
         self._sidecar_bind = _normalize_sidecar_bind(extra.get("sidecar_bind") or inline_env("INLINE_SIDECAR_BIND"))
@@ -1177,6 +1710,12 @@ class InlineAdapter(BasePlatformAdapter):
         self._reply_thread_overrides = self._load_reply_thread_overrides()
         # Threads the agent made for the message it is answering: (chat, message) -> thread.
         self._turn_threads: "OrderedDict[tuple[str, str], str]" = OrderedDict()
+        # Detailed progress: the worker that posts this adapter's turn events, and each
+        # processing event's turn (on_processing_start/complete receive the same event).
+        self._activity_pump: Optional[_ActivityPump] = None
+        self._activity_events: "OrderedDict[int, tuple[Any, _ActivityTurn]]" = OrderedDict()
+        self._activity_home = str(hermes_home())
+        self._activity_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         try:
             from . import tools as _inline_tools
             _inline_tools.configure_settings(self)
@@ -1980,6 +2519,7 @@ class InlineAdapter(BasePlatformAdapter):
             rows.append({"actions": [self._action(f"{prefix}reset", "Reset")]})
         return {"rows": rows}
 
+    @_activity_local_sends
     async def _send_thread_status(
         self,
         *,
@@ -1996,6 +2536,7 @@ class InlineAdapter(BasePlatformAdapter):
             actions=self._thread_status_actions(display_chat_id=chat_id, target_chat_id=target_chat_id),
         )
 
+    @_activity_local_sends
     async def _handle_thread_command(
         self,
         *,
@@ -2038,6 +2579,7 @@ class InlineAdapter(BasePlatformAdapter):
             )
         return True
 
+    @_activity_local_sends
     async def _handle_follow_command(
         self,
         *,
@@ -2081,6 +2623,7 @@ class InlineAdapter(BasePlatformAdapter):
         await self.send(chat_id, body, reply_to=msg_id, metadata=metadata)
         return True
 
+    @_activity_local_sends
     async def _handle_inline_maintenance_command(
         self,
         *,
@@ -2137,6 +2680,7 @@ class InlineAdapter(BasePlatformAdapter):
             return False
         # Re-register under the profile scope the gateway connects this adapter in.
         _configure_tool_sidecar(bind=self._sidecar_bind, port=self._sidecar_port, token=self._sidecar_token)
+        self._activity_home = str(hermes_home())
         node_error = _node_version_error(self._node_bin)
         if node_error:
             self._set_fatal_error("NODE_UNSUPPORTED", node_error, retryable=False)
@@ -2210,6 +2754,7 @@ class InlineAdapter(BasePlatformAdapter):
         if self._bot_settings_tasks:
             await asyncio.gather(*self._bot_settings_tasks, return_exceptions=True)
             self._bot_settings_tasks.clear()
+        self._activity_stop()
         await self._stop_sidecar()
         if self._http_client is not None:
             await self._http_client.aclose()
@@ -3051,6 +3596,10 @@ class InlineAdapter(BasePlatformAdapter):
         # A bot's answer coming back needs no reply: the agent may stay silent instead of Hermes
         # posting its "needed a reply" warning. Hosts before reply_expected ignore this.
         answer_from_bot = sender_is_bot and not explicitly_mentions_me and not command_addressed_to_me
+        if not edit and sender_profile.get("bot") is not True:
+            # A person's message mid-turn steers the work: the progress message ends here and
+            # later work starts a new one. Hermes' steer mode reports nothing itself.
+            self._activity_split(session_chat_id, str(thread_id or ""), msg_id)
         await self.handle_message(MessageEvent(
             **({"reply_expected": False} if answer_from_bot and "reply_expected" in getattr(MessageEvent, "__dataclass_fields__", {}) else {}),
             text=text,
@@ -5027,6 +5576,7 @@ class InlineAdapter(BasePlatformAdapter):
             logger.warning("[inline] expensive model check failed", exc_info=True)
             return None
 
+    @_activity_local_sends
     async def _edit_action_message(self, event: Dict[str, Any], text: str, actions: Optional[Dict[str, Any]] = None) -> SendResult:
         chat_id = str(event.get("chatId") or "")
         message_id = str(event.get("messageId") or "")
@@ -5059,6 +5609,36 @@ class InlineAdapter(BasePlatformAdapter):
             logger.debug("[inline] answer action failed", exc_info=True)
 
     async def send(
+        self,
+        chat_id: str,
+        content: str,
+        reply_to: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        actions: Optional[Dict[str, Any]] = None,
+    ) -> SendResult:
+        """Hermes' send. Within a turn, the first send not marked ``_interim_send`` is the
+        answer: Detailed progress closes ("Worked for") above it first. A Detailed turn's
+        interim messages (Hermes' commentary between tool calls) go into the progress message
+        instead of the chat. ``_interim_send`` and every other metadata key stay off the wire."""
+        turn = None if _ACTIVITY_LOCAL_SEND.get() else self._activity_turn_for_send(chat_id, metadata)
+        if turn is not None:
+            if (metadata or {}).get("_interim_send"):
+                if self._activity_foldable(content, metadata, actions) and await self._activity_is_detailed(turn):
+                    turn.pump.put("commentary", turn, str(content))
+                    # Not a chat message: reported undelivered so Hermes never counts it as the
+                    # answer (its final-reply dedup matches delivered interim text) and the answer
+                    # still posts. Nothing is retried; the text shows in the progress message.
+                    return _send_result(
+                        success=False,
+                        error="shown in the Inline progress message",
+                        raw_response={"inlineActivity": "commentary"},
+                        retryable=False,
+                    )
+            elif not (reply_to and str(reply_to) in turn.later_messages):
+                await self._activity_close_before_answer(turn, content)
+        return await self._send_message(chat_id, content, reply_to=reply_to, metadata=metadata, actions=actions)
+
+    async def _send_message(
         self,
         chat_id: str,
         content: str,
@@ -5368,6 +5948,7 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def on_processing_start(self, event: MessageEvent) -> None:
         """Mark an inbound message while Hermes is actively processing it."""
+        self._activity_begin(event)
         reaction_target = self._processing_reaction_target(event)
         if not reaction_target:
             return
@@ -5385,6 +5966,7 @@ class InlineAdapter(BasePlatformAdapter):
 
     async def on_processing_complete(self, event: MessageEvent, outcome: Any) -> None:
         """Replace the processing marker without affecting response delivery."""
+        self._activity_finish(event, outcome)
         reaction_target = self._processing_reaction_target(event)
         if not reaction_target:
             return
@@ -5398,6 +5980,140 @@ class InlineAdapter(BasePlatformAdapter):
             await self._set_processing_reaction(target, message_id, "✅")
         elif outcome_name == "failure":
             await self._set_processing_reaction(target, message_id, "❌")
+
+    # ── Detailed progress ───────────────────────────────────────────────────────────────
+
+    def _activity_post(self, path: str, body: Dict[str, Any], timeout: float) -> Dict[str, Any]:
+        """The activity worker's own blocking sidecar call (it runs on its own thread)."""
+        request = urllib.request.Request(
+            f"{self._sidecar_base_url()}{path}",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"content-type": "application/json; charset=utf-8", "x-hermes-sidecar-token": self._sidecar_token},
+            method="POST",
+        )
+        try:
+            # Loopback IPC: never through a configured HTTP proxy.
+            with self._activity_opener.open(request, timeout=timeout) as response:
+                raw = response.read().decode("utf-8")
+                status = response.status
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            status = exc.code
+        data = json.loads(raw or "{}")
+        if status != 200 or not data.get("ok"):
+            raise InlineSidecarError(path, status, str(data.get("error") or f"Inline sidecar {path} failed"), str(data.get("errorKind") or "unknown"), data)
+        return data
+
+    def _activity_begin(self, event: Any) -> None:
+        """Opens Detailed progress for a turn; the sidecar resolves the chat's mode."""
+        try:
+            if self._http_client is None:
+                return  # Not connected (or a one-shot sender): no turns to draw.
+            source = getattr(event, "source", None)
+            chat_id = str(getattr(source, "chat_id", None) or "").strip()
+            if not chat_id:
+                return
+            thread_id = str(getattr(source, "thread_id", None) or "").strip()
+            if _activity_session_env_reader() is None:
+                return
+            if self._activity_pump is None:
+                self._activity_pump = _ActivityPump(self._activity_post)
+            turn = _ActivityTurn(
+                pump=self._activity_pump,
+                turn_id=secrets.token_hex(8),
+                target=self._target_for(chat_id, {"thread_id": thread_id} if thread_id else None),
+                key=(chat_id, thread_id),
+                user_id=str(getattr(source, "user_id", None) or ""),
+                home=self._activity_home,
+            )
+            is_command = getattr(event, "is_command", None)
+            # A slash command usually answers without working: show "Working" only once work starts.
+            lazy = bool(is_command()) if callable(is_command) else False
+            self._remember(self._activity_events, id(event), (event, turn))
+            _activity_register(turn)
+            turn.pump.put("start", turn, {"lazy": lazy})
+        except Exception as exc:
+            _activity_log_failure("turn start", exc)
+
+    def _activity_finish(self, event: Any, outcome: Any) -> None:
+        """The fallback close for a turn that never sent an answer (empty, failed, stopped)."""
+        try:
+            entry = self._activity_events.pop(id(event), None)
+            if entry is None or entry[0] is not event:
+                return
+            turn = entry[1]
+            if turn.closed:
+                return
+            name = str(getattr(outcome, "value", outcome) or "").strip().lower()
+            self._activity_close(turn, {"outcome": name if name in {"success", "failure", "cancelled"} else "success"})
+        except Exception as exc:
+            _activity_log_failure("turn end", exc)
+
+    def _activity_close(self, turn: _ActivityTurn, payload: Dict[str, Any]) -> None:
+        turn.closed = True
+        _activity_unregister(turn)
+        turn.pump.put("end", turn, payload)
+
+    async def _activity_close_before_answer(self, turn: _ActivityTurn, final_text: Optional[str]) -> None:
+        """Closes the progress message and waits (bounded) until it reached Inline."""
+        if turn.closed:
+            return
+        try:
+            self._activity_close(turn, {"outcome": "success", "final": final_text})
+            await asyncio.wait_for(asyncio.wrap_future(turn.pump.flush(turn)), timeout=_ACTIVITY_FINAL_WAIT_SECONDS)
+        except Exception as exc:
+            _activity_log_failure("answer ordering", exc)
+
+    def _activity_turn_for_send(self, chat_id: Any, metadata: Optional[Dict[str, Any]]) -> Optional[_ActivityTurn]:
+        """This adapter's open turn for a Hermes send, matched as Hermes addresses the turn."""
+        if self._activity_pump is None:
+            return None
+        thread_id = str((metadata or {}).get("thread_id") or "").strip()
+        turns = [
+            turn for turn in _activity_turns_for((str(chat_id or "").strip(), thread_id))
+            if turn.pump is self._activity_pump and not turn.closed
+        ]
+        return turns[-1] if turns else None
+
+    @staticmethod
+    def _activity_foldable(content: Any, metadata: Optional[Dict[str, Any]], actions: Optional[Dict[str, Any]]) -> bool:
+        meta = metadata or {}
+        if meta.get("non_conversational") or meta.get("is_approval_prompt") or actions is not None:
+            return False
+        text = content if isinstance(content, str) else ""
+        return bool(text.strip()) and not has_widget_markup(text)
+
+    async def _activity_is_detailed(self, turn: _ActivityTurn) -> bool:
+        if not turn.mode_ready.is_set():
+            await asyncio.get_running_loop().run_in_executor(None, turn.mode_ready.wait, _ACTIVITY_MODE_WAIT_SECONDS)
+        return turn.mode == "detailed"
+
+    def _activity_split(self, chat_id: str, thread_id: str, message_id: str) -> None:
+        try:
+            if self._activity_pump is None:
+                return
+            for turn in _activity_turns_for((str(chat_id or ""), thread_id)):
+                if turn.pump is self._activity_pump and not turn.closed:
+                    if message_id and len(turn.later_messages) < 64:
+                        turn.later_messages.add(str(message_id))
+                    if turn.mode != "friendly":
+                        turn.pump.put("split", turn)
+        except Exception as exc:
+            _activity_log_failure("split", exc)
+
+    def _activity_stop(self) -> None:
+        pump, self._activity_pump = self._activity_pump, None
+        if pump is None:
+            return
+        with _ACTIVITY_LOCK:
+            for key in list(_ACTIVITY_TURNS):
+                kept = [turn for turn in _ACTIVITY_TURNS[key] if turn.pump is not pump]
+                if kept:
+                    _ACTIVITY_TURNS[key] = kept
+                else:
+                    _ACTIVITY_TURNS.pop(key, None)
+        self._activity_events.clear()
+        pump.stop()
 
     async def send_image_file(self, chat_id: str, image_path: str, caption: Optional[str] = None, reply_to: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> SendResult:
         return await self._send_attachment(chat_id, image_path, "photo", caption, reply_to, metadata=metadata)
@@ -5426,6 +6142,10 @@ class InlineAdapter(BasePlatformAdapter):
         return await self._send_attachment(chat_id, audio_path, "voice", caption, reply_to, metadata=metadata)
 
     async def _send_attachment(self, chat_id: str, file_path: str, kind: str, caption: Optional[str], reply_to: Optional[str], file_name: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> SendResult:
+        turn = None if _ACTIVITY_LOCAL_SEND.get() else self._activity_turn_for_send(chat_id, metadata)
+        if turn is not None and not (metadata or {}).get("_interim_send"):
+            # An answer that is only media (or TTS) also lands below "Worked for".
+            await self._activity_close_before_answer(turn, None)
         safe_path = self.validate_media_delivery_path(file_path)
         if not safe_path:
             return _send_result(success=False, error=f"unsafe or missing attachment path: {file_path}", error_kind="bad_format")
@@ -5475,7 +6195,12 @@ class InlineAdapter(BasePlatformAdapter):
         if not choices:
             from tools.clarify_gateway import mark_awaiting_text
             mark_awaiting_text(clarify_id)
-            return await self.send(chat_id, f"Clarify: {question}", metadata=metadata)
+            # A question, not the answer: the turn's progress stays open below it.
+            token = _ACTIVITY_LOCAL_SEND.set(True)
+            try:
+                return await self.send(chat_id, f"Clarify: {question}", metadata=metadata)
+            finally:
+                _ACTIVITY_LOCAL_SEND.reset(token)
         clean_choices = [str(c).strip() for c in choices if str(c).strip()][:10]
         self._remember(self._clarify_sessions, clarify_id, session_key)
         self._remember(self._clarify_choices, clarify_id, clean_choices)
@@ -5944,8 +6669,9 @@ class InlineAdapter(BasePlatformAdapter):
     def _send_retry_is_final(self, result: SendResult) -> bool:
         # The request reached Inline but its result was lost. A retry or plain-text
         # fallback would post the message twice; Hermes treats timeouts the same way.
+        # Commentary folded into a progress message is shown already: never resend it.
         raw = getattr(result, "raw_response", None)
-        return isinstance(raw, dict) and raw.get("outcomeUnknown") is True
+        return isinstance(raw, dict) and (raw.get("outcomeUnknown") is True or "inlineActivity" in raw)
 
     async def _send_sidecar(self, path: str, body: Dict[str, Any]) -> SendResult:
         try:
@@ -6272,3 +6998,4 @@ def register(ctx) -> None:
         handler_fn=_cli.dispatch,
     )
     _tools.register(ctx)
+    _register_activity_hooks(ctx)

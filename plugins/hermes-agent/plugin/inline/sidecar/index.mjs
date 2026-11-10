@@ -55367,6 +55367,1167 @@ function readUsers(result, kind) {
   return Array.isArray(users) ? users : [];
 }
 
+// src/vendor/agent-activity/protocol.ts
+var BlockStatusValue = {
+  unspecified: 0,
+  pending: 1,
+  running: 2,
+  waiting: 3,
+  done: 4,
+  failed: 5,
+  cancelled: 6
+};
+var DisclosureKindValue = {
+  default: 0,
+  progress: 1
+};
+var ActivityKindValue = {
+  unspecified: 0,
+  reasoning: 1,
+  explore: 2,
+  read: 3,
+  search: 4,
+  edit: 5,
+  delete: 6,
+  move: 7,
+  command: 8,
+  web: 9,
+  tool: 10,
+  agent: 11
+};
+var DiffChangeValue = {
+  unspecified: 0,
+  added: 1,
+  modified: 2,
+  deleted: 3,
+  renamed: 4
+};
+
+// src/vendor/agent-activity/doc.ts
+var statusValue = (status) => status === "none" ? BlockStatusValue.unspecified : BlockStatusValue[status];
+
+class DocBuilder {
+  text = "";
+  blocks = [];
+  isEmpty() {
+    return this.text.trim() === "";
+  }
+  finish() {
+    return { text: this.text.replace(/\n+$/, ""), blockContent: { blocks: this.blocks } };
+  }
+  span(text) {
+    const offset = this.text.length;
+    this.text += `${text}
+`;
+    return { offset: BigInt(offset), length: BigInt(text.length) };
+  }
+  raw(text) {
+    this.text += text;
+  }
+  nested(build) {
+    const inner = new DocBuilder;
+    inner.text = this.text;
+    build(inner);
+    this.text = inner.text;
+    return inner.blocks;
+  }
+  paragraph(text) {
+    if (text.trim() === "")
+      return;
+    this.blocks.push({ kind: { oneofKind: "paragraph", paragraph: this.span(text.trimEnd()) } });
+  }
+  footer(text) {
+    this.blocks.push({ kind: { oneofKind: "footer", footer: this.span(text) } });
+  }
+  code(text, language) {
+    if (text === "")
+      return;
+    const range = this.span(text.replace(/\n+$/, ""));
+    this.blocks.push({ kind: { oneofKind: "code", code: { text: range, ...language ? { language } : {} } } });
+  }
+  steps(steps) {
+    if (steps.length === 0)
+      return;
+    const blocks = steps.map(({ text, status }) => {
+      this.raw(status === "done" ? "[x] " : status === "running" ? "[>] " : "[ ] ");
+      return { text: this.span(text), status: statusValue(status) };
+    });
+    this.blocks.push({ kind: { oneofKind: "steps", steps: { steps: blocks } } });
+  }
+  diff(path, change, diff, counts) {
+    const added = counts?.additions ?? (diff ? diff.split(`
+`).filter((line) => line.startsWith("+") && !line.startsWith("+++")).length : undefined);
+    const removed = counts?.deletions ?? (diff ? diff.split(`
+`).filter((line) => line.startsWith("-") && !line.startsWith("---")).length : undefined);
+    const pathRange = this.span(path);
+    const text = diff ? this.span(diff.trimEnd()) : undefined;
+    this.blocks.push({
+      kind: {
+        oneofKind: "diff",
+        diff: {
+          path: pathRange,
+          ...text ? { text } : {},
+          change: DiffChangeValue[change],
+          ...added !== undefined ? { additions: added } : {},
+          ...removed !== undefined ? { deletions: removed } : {}
+        }
+      }
+    });
+  }
+  disclosure(summary, options, build) {
+    const summaryRange = { offset: BigInt(this.text.length), length: BigInt(summary.length) };
+    this.raw(summary);
+    const meta = options.meta ? this.metaRange(options.meta) : undefined;
+    this.raw(`
+`);
+    const children = this.nested(build);
+    this.blocks.push({
+      kind: {
+        oneofKind: "disclosure",
+        disclosure: {
+          summary: summaryRange,
+          kind: DisclosureKindValue.default,
+          children,
+          activityKind: ActivityKindValue[options.activity ?? "unspecified"],
+          status: statusValue(options.status ?? "none"),
+          ...meta ? { meta } : {}
+        }
+      }
+    });
+  }
+  progress(summary, working, elapsed, build) {
+    const summaryRange = { offset: BigInt(this.text.length), length: BigInt(summary.length) };
+    this.raw(summary);
+    const live = working ? elapsed : undefined;
+    const meta = live ? this.metaRange(live.text) : undefined;
+    this.raw(`
+`);
+    const children = this.nested(build);
+    this.blocks.push({
+      kind: {
+        oneofKind: "disclosure",
+        disclosure: {
+          summary: summaryRange,
+          kind: working ? DisclosureKindValue.progress : DisclosureKindValue.default,
+          initiallyOpen: working,
+          children,
+          activityKind: ActivityKindValue.unspecified,
+          status: BlockStatusValue.unspecified,
+          ...meta ? { meta } : {},
+          ...live ? { startedAt: BigInt(Math.max(0, Math.floor(live.startedAtSeconds))) } : {}
+        }
+      }
+    });
+  }
+  metaRange(meta) {
+    this.raw(" · ");
+    const range = { offset: BigInt(this.text.length), length: BigInt(meta.length) };
+    this.raw(meta);
+    return range;
+  }
+}
+// src/vendor/agent-activity/limits.ts
+var MAX_TEXT_UTF16 = 1e5;
+var MAX_TEXT_BYTES = 400000;
+var MAX_BLOCKS = 1024;
+var MAX_DEPTH = 16;
+function docSize(doc) {
+  const size = { utf16: doc.text.length, bytes: Buffer.byteLength(doc.text, "utf8"), blocks: 0, depth: 0 };
+  const walk = (blocks, depth) => {
+    if (blocks.length > 0)
+      size.depth = Math.max(size.depth, depth);
+    for (const block of blocks) {
+      size.blocks += 1;
+      switch (block.kind.oneofKind) {
+        case "disclosure":
+          walk(block.kind.disclosure.children, depth + 1);
+          break;
+        case "callout":
+          walk(block.kind.callout.children, depth + 1);
+          break;
+        case "quote":
+          walk(block.kind.quote.children, depth + 1);
+          break;
+        case "list":
+          for (const item of block.kind.list.items)
+            walk(item.children, depth + 1);
+          break;
+        default:
+          break;
+      }
+    }
+  };
+  walk(doc.blockContent.blocks, 0);
+  return size;
+}
+function docWithin(doc, share = 1) {
+  const size = docSize(doc);
+  return size.utf16 <= MAX_TEXT_UTF16 * share && size.bytes <= MAX_TEXT_BYTES * share && size.blocks <= MAX_BLOCKS * share && size.depth <= MAX_DEPTH;
+}
+function progressFits(doc) {
+  return docWithin(doc, 0.8);
+}
+// src/vendor/agent-activity/text.ts
+var MAX_DETAIL_CHARS = 2000;
+var MAX_ROW_DIFF_CHARS = 8000;
+function elapsedText(ms) {
+  const seconds = Math.floor(Math.max(0, Number.isFinite(ms) ? ms : 0) / 1000);
+  if (seconds < 60)
+    return `${Math.max(1, seconds)}s`;
+  if (seconds < 3600)
+    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
+}
+function firstLine(text, max) {
+  const line = (text.split(`
+`).find((candidate) => candidate.trim() !== "") ?? "").trim().replace(/^\*+|\*+$/g, "").trim();
+  const characters = Array.from(line);
+  return characters.length > max ? `${characters.slice(0, max).join("")}…` : line;
+}
+function tail(text, max = MAX_DETAIL_CHARS) {
+  const characters = Array.from(text);
+  if (characters.length <= max)
+    return text;
+  const cutText = characters.slice(characters.length - max).join("");
+  const cut = text.length - cutText.length;
+  const newline = text.indexOf(`
+`, cut);
+  const start = newline >= 0 && newline + 1 < text.length ? newline + 1 : cut;
+  const hidden = Math.max(1, text.slice(0, start).split(`
+`).length - (text.slice(0, start).endsWith(`
+`) ? 1 : 0));
+  return `… +${hidden} ${hidden === 1 ? "line" : "lines"}
+${text.slice(start)}`;
+}
+function head(text, max = MAX_DETAIL_CHARS) {
+  const characters = Array.from(text);
+  return characters.length <= max ? text : `${characters.slice(0, max).join("")}…`;
+}
+function relativePath(path, folder) {
+  if (!folder)
+    return path;
+  const base = folder.endsWith("/") ? folder : `${folder}/`;
+  return path.startsWith(base) && path.length > base.length ? path.slice(base.length) : path;
+}
+function baseName(path) {
+  const trimmed = path.replace(/\/+$/, "");
+  const index = trimmed.lastIndexOf("/");
+  return index >= 0 ? trimmed.slice(index + 1) || trimmed : trimmed;
+}
+var SECRET_ASSIGNMENT = /\b([A-Za-z0-9_.-]*(?:api[_-]?key|access[_-]?key|secret|token|passw(?:or)?d|credential|auth)[A-Za-z0-9_.-]*)(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s"'&]+)/gi;
+var BEARER = /\b(bearer|basic)\s+[A-Za-z0-9._~+/-]{8,}=*/gi;
+var KNOWN_KEYS = /\b(?:sk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,})\b/g;
+var URL_CREDENTIALS = /\b([a-z][a-z0-9+.-]*:\/\/)[^\s/:@]+:[^\s/@]+@/gi;
+function redactSecrets(text) {
+  return text.replace(BEARER, (_match, scheme) => `${scheme} •••`).replace(SECRET_ASSIGNMENT, (match, key, separator, value) => /^(bearer|basic)$/i.test(value) ? match : `${key}${separator}•••`).replace(/(--?(?:password|passwd|token|secret|api-key|apikey)\s+)(\S+)/gi, "$1•••").replace(KNOWN_KEYS, "•••").replace(URL_CREDENTIALS, "$1•••@");
+}
+
+// src/vendor/agent-activity/renderer.ts
+var busy = (row) => row.state === "running" || row.state === "waiting";
+var status = (state) => state;
+var exploring = (body) => body?.kind === "read" || body?.kind === "search" || body?.kind === "list";
+
+class ProgressRenderer {
+  options;
+  nextSlot = 1;
+  slot;
+  now = 0;
+  notes = 0;
+  constructor(options = {}) {
+    this.options = options;
+  }
+  get isOpen() {
+    return this.slot !== undefined;
+  }
+  apply(event, at = Date.now()) {
+    this.now = at;
+    const ops = [];
+    switch (event.type) {
+      case "turn.start":
+        this.openSlot();
+        this.pushProgress(ops, true);
+        break;
+      case "item":
+        this.item(event);
+        this.pushProgress(ops, event.state === "waiting" || event.state === "failed");
+        break;
+      case "commentary": {
+        const text = event.text.trim();
+        if (!text)
+          break;
+        this.openSlot();
+        this.notes += 1;
+        this.slot.rows.push({ id: `note:${this.notes}`, body: { kind: "note", text }, state: "done", startedAt: at });
+        this.pushProgress(ops, false);
+        break;
+      }
+      case "waiting":
+        if (!this.slot)
+          break;
+        this.markWaiting(event.id, event.waiting);
+        this.pushProgress(ops, true);
+        break;
+      case "split":
+        this.split(ops);
+        break;
+      case "turn.end":
+        this.endTurn(event.outcome, ops);
+        break;
+    }
+    return ops;
+  }
+  openSlot() {
+    if (!this.slot)
+      this.slot = { id: this.nextSlot++, startedAt: this.now, rows: [] };
+  }
+  item(event) {
+    this.openSlot();
+    const slot = this.slot;
+    let row = slot.rows.find((candidate) => candidate.id === event.id);
+    if (!row) {
+      row = { id: event.id, state: "running", startedAt: this.now };
+      if (event.parent !== undefined)
+        row.parent = event.parent;
+      slot.rows.push(row);
+    }
+    if (event.body)
+      row.body = mergeBody(row.body, event.body);
+    if (event.state) {
+      const ending = !busy({ ...row, state: event.state }) && busy(row);
+      row.state = event.state;
+      if (event.durationMs !== undefined)
+        row.durationMs = event.durationMs;
+      else if (ending && row.durationMs === undefined)
+        row.durationMs = this.now - row.startedAt;
+    } else if (event.durationMs !== undefined) {
+      row.durationMs = event.durationMs;
+    }
+  }
+  markWaiting(id, waiting) {
+    const rows = this.slot?.rows ?? [];
+    const target = id !== undefined ? rows.find((row) => row.id === id) : [...rows].reverse().find((row) => waiting ? row.state === "running" : row.state === "waiting");
+    if (!target)
+      return;
+    if (waiting && target.state === "running")
+      target.state = "waiting";
+    else if (!waiting && target.state === "waiting")
+      target.state = "running";
+  }
+  split(ops) {
+    const slot = this.slot;
+    if (!slot)
+      return;
+    const carried = slot.rows.filter(busy);
+    const kept = { ...slot, rows: slot.rows.filter((row) => !busy(row)) };
+    ops.push({ type: "end", slot: slot.id, doc: this.endedDoc(kept, `Worked for ${elapsedText(this.now - slot.startedAt)}`) });
+    this.slot = undefined;
+    if (carried.length > 0) {
+      this.openSlot();
+      this.slot.rows.push(...carried);
+      this.pushProgress(ops, true);
+    }
+  }
+  endTurn(outcome, ops) {
+    const slot = this.slot;
+    if (!slot)
+      return;
+    for (const row of slot.rows) {
+      if (!busy(row))
+        continue;
+      row.state = outcome === "success" ? "done" : "cancelled";
+      row.durationMs ??= this.now - row.startedAt;
+    }
+    const verb = outcome === "cancelled" ? "Stopped after" : outcome === "failure" ? "Failed after" : "Worked for";
+    const failed = unresolvedFailures(slot.rows);
+    const summary = `${verb} ${elapsedText(this.now - slot.startedAt)}${failed > 0 ? ` · ${failed} failed` : ""}`;
+    ops.push({ type: "end", slot: slot.id, doc: this.endedDoc(slot, summary) });
+    this.slot = undefined;
+  }
+  pushProgress(ops, urgent) {
+    if (!this.slot)
+      return;
+    let doc = this.progressDoc(this.slot);
+    if (!progressFits(doc) && this.splitForSize(ops))
+      doc = this.progressDoc(this.slot);
+    ops.push({ type: "progress", slot: this.slot.id, doc, urgent });
+  }
+  splitForSize(ops) {
+    const slot = this.slot;
+    const summary = `Worked for ${elapsedText(this.now - slot.startedAt)} · continued below`;
+    const tops = slot.rows.filter((row) => topLevel(row, slot.rows));
+    let finished = 0;
+    while (finished < tops.length && !busy(tops[finished]))
+      finished += 1;
+    const fits = (count) => progressFits(this.endedDoc(subset(slot, tops.slice(0, count)), summary));
+    let low = 0;
+    let high = finished;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      if (fits(middle))
+        low = middle;
+      else
+        high = middle - 1;
+    }
+    if (low === 0)
+      return false;
+    const kept = subset(slot, tops.slice(0, low));
+    ops.push({ type: "end", slot: slot.id, doc: this.endedDoc(kept, summary) });
+    this.slot = {
+      id: this.nextSlot++,
+      startedAt: this.now,
+      rows: slot.rows.filter((row) => !kept.rows.includes(row))
+    };
+    return true;
+  }
+  progressDoc(slot) {
+    const builder = new DocBuilder;
+    builder.progress("Working", true, { startedAtSeconds: slot.startedAt / 1000, text: elapsedText(this.now - slot.startedAt) }, (inner) => this.writeSlot(inner, slot));
+    return builder.finish();
+  }
+  endedDoc(slot, summary) {
+    const builder = new DocBuilder;
+    const rows = new DocBuilder;
+    this.writeSlot(rows, slot);
+    if (rows.isEmpty())
+      builder.footer(summary);
+    else
+      builder.progress(summary, false, undefined, (inner) => this.writeSlot(inner, slot));
+    return builder.finish();
+  }
+  writeSlot(builder, slot) {
+    const rows = slot.rows.filter((row) => topLevel(row, slot.rows) && shows(row));
+    let start = 0;
+    while (start < rows.length) {
+      let end = start + 1;
+      while (end < rows.length && !startsPhase(rows[end]))
+        end += 1;
+      const first = rows[start];
+      if (startsPhase(first) && end > start + 1)
+        this.writePhase(builder, slot, first, rows.slice(start + 1, end));
+      else if (startsPhase(first))
+        this.writeRow(builder, slot, first);
+      else
+        this.writeRuns(builder, slot, rows.slice(start, end));
+      start = end;
+    }
+  }
+  writePhase(builder, slot, headRow, rows) {
+    const text = headRow.body?.kind === "reasoning" ? headRow.body.summary : "";
+    const title = firstLine(text, 80);
+    const running = [headRow, ...rows].some(busy);
+    builder.disclosure(title, { activity: "reasoning", status: running ? "running" : "done" }, (inner) => {
+      if (text.trim() !== title)
+        inner.paragraph(tail(text));
+      this.writeRuns(inner, slot, rows);
+    });
+  }
+  writeRuns(builder, slot, rows) {
+    let index = 0;
+    while (index < rows.length) {
+      const fold = foldOf(rows[index]);
+      let end = index + 1;
+      if (fold !== "none")
+        while (end < rows.length && foldOf(rows[end]) === fold)
+          end += 1;
+      const run = rows.slice(index, end);
+      if (fold === "explore")
+        this.writeExplore(builder, run);
+      else if (fold === "command" && run.length > 1)
+        this.writeCommands(builder, slot, run);
+      else if (fold === "edit" && run.length > 1)
+        this.writeEdits(builder, slot, run);
+      else
+        for (const row of run)
+          this.writeRow(builder, slot, row);
+      index = end;
+    }
+  }
+  writeExplore(builder, run) {
+    const running = run.some(busy);
+    const failed = run.filter((row) => row.state === "failed").length;
+    const lines = [];
+    let reads = [];
+    const flush = () => {
+      if (reads.length > 0)
+        lines.push(`Read ${reads.join(", ")}`);
+      reads = [];
+    };
+    for (const row of run) {
+      const body = row.body;
+      const suffix = row.state === "failed" ? " (failed)" : "";
+      if (body?.kind === "read") {
+        if (row.state === "failed") {
+          flush();
+          lines.push(`Read ${this.path(body.path)}${suffix}`);
+        } else {
+          const name = baseName(body.path);
+          if (!reads.includes(name))
+            reads.push(name);
+        }
+      } else if (body?.kind === "search") {
+        flush();
+        const query = body.query ? redactSecrets(firstLine(body.query, 80)) : undefined;
+        const where = body.path ? this.path(body.path) : undefined;
+        lines.push(`${query && where ? `Search ${query} in ${where}` : query ? `Search ${query}` : where ? `Search in ${where}` : "Search"}${suffix}`);
+      } else if (body?.kind === "list") {
+        flush();
+        lines.push(`List ${body.path ? this.path(body.path) : "."}${suffix}`);
+      }
+    }
+    flush();
+    builder.disclosure(running ? "Exploring" : "Explored", { activity: "explore", status: running ? "running" : "done", ...failed > 0 ? { meta: `${failed} failed` } : {} }, (inner) => {
+      for (const line of lines)
+        inner.paragraph(line);
+    });
+  }
+  writeCommands(builder, slot, run) {
+    const total = run.reduce((sum, row) => sum + (row.durationMs ?? 0), 0);
+    builder.disclosure(`Ran ${run.length} commands`, { activity: "command", status: "done", ...total > 0 ? { meta: elapsedText(Math.max(total, 1000)) } : {} }, (inner) => {
+      for (const row of run)
+        this.writeRow(inner, slot, row);
+    });
+  }
+  writeEdits(builder, slot, run) {
+    const files = run.flatMap((row) => row.body?.kind === "edit" ? row.body.files : []);
+    const { added, removed } = files.reduce((sum, file) => {
+      const counts = lineCounts(file);
+      return { added: sum.added + counts.added, removed: sum.removed + counts.removed };
+    }, { added: 0, removed: 0 });
+    const count = new Set(files.map((file) => file.path)).size;
+    const meta = countsMeta(added, removed);
+    builder.disclosure(count === 1 ? "Edited 1 file" : `Edited ${count} files`, { activity: "edit", status: "done", ...meta ? { meta } : {} }, (inner) => {
+      for (const row of run)
+        this.writeRow(inner, slot, row);
+    });
+  }
+  writeRow(builder, slot, row) {
+    const body = row.body;
+    if (body?.kind === "note") {
+      builder.paragraph(body.text);
+      return;
+    }
+    const { title, meta, activity } = this.rowTitle(row);
+    const children = body?.kind === "agent" ? slot.rows.filter((candidate) => candidate.parent === row.id && shows(candidate)) : [];
+    builder.disclosure(title, { activity, status: status(row.state), ...meta ? { meta } : {} }, (inner) => {
+      this.rowDetail(inner, row);
+      if (children.length > 0)
+        this.writeRuns(inner, slot, children);
+    });
+  }
+  rowTitle(row) {
+    const body = row.body;
+    const running = busy(row);
+    const time = !running && row.durationMs !== undefined ? elapsedText(Math.max(row.durationMs, 1000)) : undefined;
+    switch (body?.kind) {
+      case "command": {
+        const code = body.exitCode !== undefined && body.exitCode !== 0 ? `exit ${body.exitCode}` : undefined;
+        const meta = [code, time].filter(Boolean).join(" · ") || undefined;
+        const command = firstLine(redactSecrets(body.command), 80);
+        return { title: `${running ? "Running" : "Ran"} ${command}`.trim(), ...meta ? { meta } : {}, activity: "command" };
+      }
+      case "read":
+        return { title: `Read ${this.path(body.path)}`, activity: "read" };
+      case "search":
+        return { title: body.query ? `Search ${redactSecrets(firstLine(body.query, 80))}` : "Search", activity: "search" };
+      case "list":
+        return { title: `List ${body.path ? this.path(body.path) : "."}`, activity: "explore" };
+      case "edit": {
+        const [only, ...rest] = body.files;
+        const verb = (change) => change === "added" ? "Added" : change === "deleted" ? "Deleted" : change === "renamed" ? "Renamed" : "Edited";
+        const title = only && rest.length === 0 ? `${verb(only.change)} ${this.path(only.path)}` : `Edited ${body.files.length} files`;
+        const { added, removed } = body.files.reduce((sum, file) => {
+          const counts = lineCounts(file);
+          return { added: sum.added + counts.added, removed: sum.removed + counts.removed };
+        }, { added: 0, removed: 0 });
+        const meta = countsMeta(added, removed);
+        const deletes = body.files.length > 0 && body.files.every((file) => file.change === "deleted");
+        return { title, ...meta ? { meta } : {}, activity: deletes ? "delete" : "edit" };
+      }
+      case "web":
+        if (body.query)
+          return { title: `Searched the web for ${redactSecrets(firstLine(body.query, 80))}`, activity: "web" };
+        return { title: body.url ? `Read ${redactSecrets(shortUrl(body.url))}` : "Browsed the web", activity: "web" };
+      case "tool": {
+        const title = firstLine(redactSecrets(body.title || body.name), 90);
+        return { title, ...time ? { meta: time } : {}, activity: "tool" };
+      }
+      case "agent": {
+        const title = body.title ? `Sub-agent: ${firstLine(redactSecrets(body.title), 70)}` : "Sub-agent";
+        return { title, ...body.meta ? { meta: body.meta } : time ? { meta: time } : {}, activity: "agent" };
+      }
+      case "plan":
+        return { title: "Updated plan", activity: "unspecified" };
+      case "reasoning":
+        return { title: firstLine(body.summary, 80) || "Thinking", activity: "reasoning" };
+      case "compaction":
+        return { title: running ? "Compacting the conversation" : "Compacted the conversation", activity: "tool" };
+      default:
+        return { title: "Working", activity: "unspecified" };
+    }
+  }
+  rowDetail(builder, row) {
+    const body = row.body;
+    switch (body?.kind) {
+      case "command":
+        builder.code(`$ ${head(redactSecrets(body.command))}`, "sh");
+        if (body.output)
+          builder.code(tail(redactSecrets(body.output)));
+        if (body.exitCode !== undefined && body.exitCode !== 0)
+          builder.paragraph(`Exit code ${body.exitCode}`);
+        break;
+      case "edit": {
+        let shown = 0;
+        for (const file of body.files) {
+          const diff = file.diff && shown < MAX_ROW_DIFF_CHARS ? tail(file.diff) : undefined;
+          shown += diff?.length ?? 0;
+          const counts = {
+            ...file.additions !== undefined ? { additions: file.additions } : {},
+            ...file.deletions !== undefined ? { deletions: file.deletions } : {}
+          };
+          builder.diff(this.path(file.path), file.change ?? "modified", diff, counts);
+        }
+        break;
+      }
+      case "tool":
+        if (body.input)
+          builder.code(tail(redactSecrets(body.input)));
+        if (body.output)
+          builder.code(tail(redactSecrets(body.output)));
+        if (body.error)
+          builder.paragraph(redactSecrets(firstLine(body.error, 500)));
+        break;
+      case "plan":
+        if (body.explanation)
+          builder.paragraph(body.explanation);
+        builder.steps(body.steps.map((step) => ({
+          text: step.text,
+          status: step.status === "completed" ? "done" : step.status === "in_progress" ? "running" : "none"
+        })));
+        break;
+      case "reasoning": {
+        const title = firstLine(body.summary, 80);
+        if (body.summary.trim() !== title)
+          builder.paragraph(tail(body.summary));
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  path(path) {
+    return relativePath(path, this.options.folder);
+  }
+}
+function mergeBody(previous, next) {
+  if (!previous || previous.kind !== next.kind)
+    return next;
+  const merged = { ...previous };
+  for (const [key, value] of Object.entries(next))
+    if (value !== undefined)
+      merged[key] = value;
+  return merged;
+}
+function topLevel(row, rows) {
+  return row.parent === undefined || !rows.some((candidate) => candidate.id === row.parent && candidate.body?.kind === "agent");
+}
+function shows(row) {
+  if (!row.body)
+    return busy(row);
+  return !(row.body.kind === "reasoning" && row.body.summary.trim() === "");
+}
+function startsPhase(row) {
+  return row.body?.kind === "reasoning" && row.body.summary.trim() !== "";
+}
+function foldOf(row) {
+  if (exploring(row.body))
+    return "explore";
+  if (row.body?.kind === "command" && row.state === "done" && (row.body.exitCode ?? 0) === 0)
+    return "command";
+  if (row.body?.kind === "edit" && row.state === "done")
+    return "edit";
+  return "none";
+}
+function unresolvedFailures(rows) {
+  const keyed = rows.flatMap((row) => {
+    const body = row.body;
+    if (body?.kind === "command") {
+      const failed = row.state === "failed" || body.exitCode !== undefined && body.exitCode !== 0;
+      return [{ key: `command:${body.command}`, failed }];
+    }
+    if (body?.kind === "tool")
+      return [{ key: `tool:${body.name}:${body.title ?? ""}`, failed: row.state === "failed" }];
+    return [];
+  });
+  return keyed.filter((entry, index) => entry.failed && !keyed.slice(index + 1).some((later) => later.key === entry.key && !later.failed)).length;
+}
+function subset(slot, tops) {
+  const keep = new Set(tops);
+  const parents = tops.filter((row) => row.body?.kind === "agent").map((row) => row.id);
+  while (parents.length > 0) {
+    const parent = parents.pop();
+    for (const row of slot.rows) {
+      if (!keep.has(row) && row.parent === parent) {
+        keep.add(row);
+        if (row.body?.kind === "agent")
+          parents.push(row.id);
+      }
+    }
+  }
+  return { ...slot, rows: slot.rows.filter((row) => keep.has(row)) };
+}
+function lineCounts(file) {
+  if (file.additions !== undefined || file.deletions !== undefined) {
+    return { added: file.additions ?? 0, removed: file.deletions ?? 0 };
+  }
+  if (!file.diff)
+    return { added: 0, removed: 0 };
+  const lines = file.diff.split(`
+`);
+  const hunks = lines.some((line) => line.startsWith("@@"));
+  if (file.change === "added" && !hunks)
+    return { added: lines.length, removed: 0 };
+  if (file.change === "deleted" && !hunks)
+    return { added: 0, removed: lines.length };
+  let added = 0;
+  let removed = 0;
+  for (const line of lines) {
+    if (line.startsWith("+++") || line.startsWith("---"))
+      continue;
+    if (line.startsWith("+"))
+      added += 1;
+    else if (line.startsWith("-"))
+      removed += 1;
+  }
+  return { added, removed };
+}
+function countsMeta(added, removed) {
+  return added + removed > 0 ? `+${added} −${removed}` : undefined;
+}
+function shortUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    return firstLine(`${parsed.host}${path}`, 80);
+  } catch {
+    return firstLine(url, 80);
+  }
+}
+// src/vendor/agent-activity/presenter.ts
+var EDIT_INTERVAL_MS = 1200;
+
+class ProgressPresenter {
+  transport;
+  options;
+  slots = new Map;
+  chain = Promise.resolve();
+  interval;
+  now;
+  setTimer;
+  clearTimer;
+  constructor(transport, options = {}) {
+    this.transport = transport;
+    this.options = options;
+    this.interval = options.editIntervalMs ?? EDIT_INTERVAL_MS;
+    this.now = options.now ?? Date.now;
+    this.setTimer = options.setTimer ?? ((callback, ms) => setTimeout(callback, ms));
+    this.clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer));
+  }
+  push(ops) {
+    for (const op of ops) {
+      const slot = this.slotState(op.slot);
+      if (slot.ended || slot.failed)
+        continue;
+      slot.pending = op.doc;
+      if (op.type === "end") {
+        slot.ended = true;
+        this.writeNow(op.slot, slot);
+      } else if (slot.messageId === undefined && slot.lastFingerprint === undefined && slot.timer === undefined) {
+        this.writeNow(op.slot, slot);
+      } else if (op.urgent || this.now() - slot.lastWriteAt >= this.interval) {
+        this.writeNow(op.slot, slot);
+      } else if (slot.timer === undefined) {
+        slot.timer = this.setTimer(() => {
+          slot.timer = undefined;
+          this.enqueue(op.slot, slot);
+        }, Math.max(0, slot.lastWriteAt + this.interval - this.now()));
+      }
+    }
+  }
+  async flush() {
+    for (const [id, slot] of this.slots)
+      if (slot.pending && !slot.failed)
+        this.writeNow(id, slot);
+    await this.chain;
+  }
+  messageIds() {
+    return [...this.slots.values()].flatMap((slot) => slot.messageId === undefined ? [] : [slot.messageId]);
+  }
+  slotState(id) {
+    let slot = this.slots.get(id);
+    if (!slot) {
+      slot = { lastWriteAt: Number.NEGATIVE_INFINITY, ended: false, failed: false };
+      this.slots.set(id, slot);
+    }
+    return slot;
+  }
+  writeNow(id, slot) {
+    if (slot.timer !== undefined) {
+      this.clearTimer(slot.timer);
+      slot.timer = undefined;
+    }
+    this.enqueue(id, slot);
+  }
+  enqueue(id, slot) {
+    slot.lastFingerprint ??= "";
+    this.chain = this.chain.then(() => this.write(id, slot));
+  }
+  async write(_id, slot) {
+    const doc = slot.pending;
+    if (!doc || slot.failed)
+      return;
+    slot.pending = undefined;
+    const fingerprint = fingerprintOf(doc);
+    if (fingerprint === slot.lastFingerprint)
+      return;
+    const attempts = slot.ended && slot.messageId !== undefined ? 2 : 1;
+    for (let attempt = 1;attempt <= attempts; attempt += 1) {
+      try {
+        if (slot.messageId === undefined) {
+          slot.messageId = await this.transport.send(doc);
+        } else {
+          await this.transport.edit(slot.messageId, doc);
+        }
+        slot.lastFingerprint = fingerprint;
+        slot.lastWriteAt = this.now();
+        return;
+      } catch (error) {
+        if (attempt < attempts)
+          continue;
+        slot.failed = true;
+        this.options.onError?.(error, slot.messageId === undefined ? "send" : "edit");
+      }
+    }
+  }
+}
+function fingerprintOf(doc) {
+  return JSON.stringify(doc, (_key, value) => typeof value === "bigint" ? value.toString() : value);
+}
+
+class ProgressStream {
+  renderer;
+  presenter;
+  constructor(transport, options = {}) {
+    this.renderer = new ProgressRenderer(options);
+    this.presenter = new ProgressPresenter(transport, options);
+  }
+  apply(event, at) {
+    try {
+      this.presenter.push(this.renderer.apply(event, at));
+    } catch (error) {}
+  }
+  get isOpen() {
+    return this.renderer.isOpen;
+  }
+  flush() {
+    return this.presenter.flush();
+  }
+}
+// src/vendor/agent-activity/mode.ts
+var DETAILED = 1;
+var FRIENDLY = 2;
+function resolveOutputMode(defaultMode, threadOverride) {
+  const pick = (mode) => mode === DETAILED ? "detailed" : mode === FRIENDLY ? "friendly" : undefined;
+  return pick(threadOverride) ?? pick(defaultMode) ?? "detailed";
+}
+// src/sidecar/activity.ts
+var MODE_CACHE_MS = 30000;
+var MODE_TIMEOUT_MS = 3000;
+var MAX_TURNS = 256;
+
+class ActivityHub {
+  options;
+  turns = new Map;
+  modes = new Map;
+  now;
+  modeCacheMs;
+  modeTimeoutMs;
+  maxTurns;
+  constructor(options) {
+    this.options = options;
+    this.now = options.now ?? Date.now;
+    this.modeCacheMs = options.modeCacheMs ?? MODE_CACHE_MS;
+    this.modeTimeoutMs = options.modeTimeoutMs ?? MODE_TIMEOUT_MS;
+    this.maxTurns = options.maxTurns ?? MAX_TURNS;
+  }
+  async apply(turnId, target, event, options = {}) {
+    let state = this.turns.get(turnId);
+    if (event.type === "turn.start") {
+      if (!state)
+        state = this.open(turnId, target);
+      const mode = await state.ready;
+      if (mode === "detailed" && !options.lazy && !state.ended)
+        state.stream?.apply(event, options.at);
+      return { mode };
+    }
+    if (!state || state.ended)
+      return { ignored: true };
+    const mode = await state.ready;
+    state.touchedAt = this.now();
+    if (mode !== "detailed" || !state.stream)
+      return { mode };
+    state.stream.apply(event, options.at);
+    if (event.type === "turn.end")
+      this.end(turnId, state);
+    return { mode };
+  }
+  async flush(turnId) {
+    const state = this.turns.get(turnId);
+    if (!state)
+      return;
+    await state.ready;
+    await state.stream?.flush();
+  }
+  get size() {
+    return this.turns.size;
+  }
+  open(turnId, target) {
+    this.prune();
+    const state = { target, ended: false, touchedAt: this.now(), ready: Promise.resolve("detailed") };
+    state.ready = this.modeFor(target).then((mode) => {
+      state.mode = mode;
+      if (mode === "detailed") {
+        state.stream = new ProgressStream(this.options.transportFor(target), {
+          onError: (error, op) => this.options.onError?.(error, op)
+        });
+      }
+      return mode;
+    });
+    this.turns.set(turnId, state);
+    return state;
+  }
+  end(turnId, state) {
+    state.ended = true;
+    const done = () => {
+      if (this.turns.get(turnId) === state)
+        this.turns.delete(turnId);
+    };
+    (state.stream?.flush() ?? Promise.resolve()).then(done, done);
+  }
+  prune() {
+    if (this.turns.size < this.maxTurns)
+      return;
+    const byAge = [...this.turns.entries()].sort((left, right) => left[1].touchedAt - right[1].touchedAt);
+    for (const [id] of byAge.slice(0, this.turns.size - this.maxTurns + 1))
+      this.turns.delete(id);
+  }
+  async modeFor(target) {
+    const key = targetKey(target);
+    const cached = this.modes.get(key);
+    if (cached && this.now() - cached.at < this.modeCacheMs)
+      return cached.mode;
+    try {
+      let timer;
+      const settings = await Promise.race([
+        this.options.readMode(target),
+        new Promise((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("output mode lookup timed out")), this.modeTimeoutMs);
+        })
+      ]).finally(() => clearTimeout(timer));
+      const mode = resolveOutputMode(settings.defaultMode, settings.override);
+      this.modes.set(key, { mode, at: this.now() });
+      if (this.modes.size > 1024)
+        this.modes.delete(this.modes.keys().next().value);
+      return mode;
+    } catch (error) {
+      this.options.onError?.(error, "mode");
+      return cached?.mode ?? "detailed";
+    }
+  }
+}
+function targetKey(target) {
+  return "chatId" in target ? `chat:${target.chatId.toString()}` : `user:${target.userId.toString()}`;
+}
+function randomMessageId2() {
+  const bytes = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(bytes);
+  const value = new DataView(bytes.buffer).getBigInt64(0, true);
+  return value === 0n ? 1n : value;
+}
+function firstMessageId(result) {
+  const record = asOptionalRecord(result);
+  const send = asOptionalRecord(record?.sendMessage) ?? record;
+  const updates = Array.isArray(send?.updates) ? send.updates : [];
+  for (const raw of updates) {
+    const update = asOptionalRecord(asOptionalRecord(raw)?.update);
+    if (update?.oneofKind === "newMessage") {
+      const id = asOptionalRecord(asOptionalRecord(update.newMessage)?.message)?.id;
+      if (id != null)
+        return BigInt(String(id));
+    }
+    if (update?.oneofKind === "updateMessageId") {
+      const id = asOptionalRecord(update.updateMessageId)?.messageId;
+      if (id != null)
+        return BigInt(String(id));
+    }
+  }
+  return null;
+}
+var ITEM_STATES = new Set(["running", "waiting", "done", "failed", "cancelled"]);
+var OUTCOMES = new Set(["success", "failure", "cancelled"]);
+var PLAN_STATUSES = new Set(["pending", "in_progress", "completed"]);
+var CHANGES = new Set(["added", "deleted", "modified", "renamed"]);
+function parseActivityEvent(value) {
+  const record = asOptionalRecord(value);
+  if (!record)
+    throw new SidecarError("event must be an object", "bad_format");
+  switch (record.type) {
+    case "turn.start":
+      return { type: "turn.start" };
+    case "split":
+      return { type: "split" };
+    case "turn.end": {
+      const outcome = record.outcome;
+      if (typeof outcome !== "string" || !OUTCOMES.has(outcome)) {
+        throw new SidecarError("turn.end requires outcome success, failure or cancelled", "bad_format");
+      }
+      return { type: "turn.end", outcome };
+    }
+    case "commentary":
+      return { type: "commentary", text: requiredString(record, "text") };
+    case "waiting": {
+      if (typeof record.waiting !== "boolean")
+        throw new SidecarError("waiting requires a boolean", "bad_format");
+      const id = optionalString(record, "id");
+      return { type: "waiting", waiting: record.waiting, ...id !== undefined ? { id } : {} };
+    }
+    case "item": {
+      const id = requiredString(record, "id");
+      const parent = optionalString(record, "parent");
+      const state = record.state;
+      if (state !== undefined && (typeof state !== "string" || !ITEM_STATES.has(state))) {
+        throw new SidecarError("item state is not valid", "bad_format");
+      }
+      const durationMs = optionalNumber(record, "durationMs");
+      const body = record.body === undefined ? undefined : parseBody(record.body);
+      return {
+        type: "item",
+        id,
+        ...parent !== undefined ? { parent } : {},
+        ...body ? { body } : {},
+        ...state !== undefined ? { state } : {},
+        ...durationMs !== undefined ? { durationMs } : {}
+      };
+    }
+    default:
+      throw new SidecarError("unknown activity event type", "bad_format");
+  }
+}
+function parseBody(value) {
+  const body = asOptionalRecord(value);
+  if (!body)
+    throw new SidecarError("item body must be an object", "bad_format");
+  const strings = (...keys) => {
+    const out = {};
+    for (const key of keys) {
+      const text = optionalString(body, key);
+      if (text !== undefined)
+        out[key] = text;
+    }
+    return out;
+  };
+  switch (body.kind) {
+    case "command": {
+      const exitCode = optionalNumber(body, "exitCode");
+      return {
+        kind: "command",
+        command: requiredString(body, "command"),
+        ...strings("output"),
+        ...exitCode !== undefined ? { exitCode: Math.trunc(exitCode) } : {}
+      };
+    }
+    case "read":
+      return { kind: "read", path: requiredString(body, "path") };
+    case "search":
+      return { kind: "search", ...strings("query", "path") };
+    case "list":
+      return { kind: "list", ...strings("path") };
+    case "edit": {
+      const files = Array.isArray(body.files) ? body.files : [];
+      return { kind: "edit", files: files.map(parseFileChange) };
+    }
+    case "web":
+      return { kind: "web", ...strings("query", "url") };
+    case "tool":
+      return { kind: "tool", name: requiredString(body, "name"), ...strings("title", "input", "output", "error") };
+    case "agent":
+      return { kind: "agent", ...strings("title", "meta") };
+    case "plan": {
+      const steps = Array.isArray(body.steps) ? body.steps : [];
+      return {
+        kind: "plan",
+        steps: steps.map((raw) => {
+          const step = asOptionalRecord(raw);
+          const status = step?.status;
+          if (!step || typeof status !== "string" || !PLAN_STATUSES.has(status)) {
+            throw new SidecarError("plan step is not valid", "bad_format");
+          }
+          return { text: requiredString(step, "text"), status };
+        }),
+        ...strings("explanation")
+      };
+    }
+    case "reasoning":
+      return { kind: "reasoning", summary: requiredString(body, "summary") };
+    case "note":
+      return { kind: "note", text: requiredString(body, "text") };
+    case "compaction":
+      return { kind: "compaction" };
+    default:
+      throw new SidecarError("unknown item body kind", "bad_format");
+  }
+}
+function parseFileChange(value) {
+  const file = asOptionalRecord(value);
+  if (!file)
+    throw new SidecarError("edit file must be an object", "bad_format");
+  const change = file.change;
+  if (change !== undefined && (typeof change !== "string" || !CHANGES.has(change))) {
+    throw new SidecarError("edit file change is not valid", "bad_format");
+  }
+  const diff = optionalString(file, "diff");
+  const additions = optionalNumber(file, "additions");
+  const deletions = optionalNumber(file, "deletions");
+  return {
+    path: requiredString(file, "path"),
+    ...change !== undefined ? { change } : {},
+    ...diff !== undefined ? { diff } : {},
+    ...additions !== undefined ? { additions: Math.trunc(additions) } : {},
+    ...deletions !== undefined ? { deletions: Math.trunc(deletions) } : {}
+  };
+}
+function requiredString(record, key) {
+  const value = record[key];
+  if (typeof value !== "string")
+    throw new SidecarError(`${key} must be a string`, "bad_format");
+  return value;
+}
+function optionalString(record, key) {
+  const value = record[key];
+  if (value === undefined || value === null)
+    return;
+  if (typeof value !== "string")
+    throw new SidecarError(`${key} must be a string`, "bad_format");
+  return value;
+}
+function optionalNumber(record, key) {
+  const value = record[key];
+  if (value === undefined || value === null)
+    return;
+  if (typeof value !== "number" || !Number.isFinite(value))
+    throw new SidecarError(`${key} must be a number`, "bad_format");
+  return value;
+}
+
 // src/sidecar/telemetry.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { readFile as readFile2 } from "node:fs/promises";
@@ -55606,7 +56767,10 @@ async function connectClientLoop() {
       meUsername = normalizeOwnUsername(me.username);
       registerBotCapabilitiesWithRetry({
         register: () => client.setMyBotCapabilities({
-          capabilities: [{ kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 }]
+          capabilities: [
+            { kind: BotCapability_Kind.CHAT_SETTINGS, version: 1 },
+            { kind: BotCapability_Kind.OUTPUT_MODE, version: 1 }
+          ]
         }),
         isCancelled: () => stopping,
         onFailure: (error, willRetry) => {
@@ -55720,6 +56884,12 @@ async function handleRequest(req, res) {
     case "/send":
       await endpointSend(res, body);
       return;
+    case "/activity":
+      await endpointActivity(res, body);
+      return;
+    case "/activity/flush":
+      await endpointActivityFlush(res, body);
+      return;
     case "/edit":
       await endpointEdit(res, body);
       return;
@@ -55827,6 +56997,84 @@ async function endpointSend(res, body) {
   };
   const result = "chatId" in target ? await client.sendMessage({ chatId: target.chatId, ...params }) : await client.sendMessage({ userId: target.userId, ...params });
   writeJson(res, 200, { ok: true, result: { messageId: result.messageId?.toString() ?? null } });
+}
+async function endpointActivity(res, body) {
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const event = parseActivityEvent(record.event);
+  const turnId = readOptionalString(record, "turnId") || activityTargetKey(target);
+  const at = readOptionalNumber(record, "at");
+  const lazy = readOptionalBoolean(record, "lazy") ?? false;
+  const result = await activityHub.apply(turnId, target, event, {
+    ...at !== undefined && Number.isFinite(at) ? { at } : {},
+    lazy
+  });
+  writeJson(res, 200, { ok: true, result });
+}
+async function endpointActivityFlush(res, body) {
+  const record = asRecord(body);
+  const target = parseTarget(record);
+  const turnId = readOptionalString(record, "turnId") || activityTargetKey(target);
+  await activityHub.flush(turnId);
+  writeJson(res, 200, { ok: true, result: {} });
+}
+function activityTargetKey(target) {
+  return "chatId" in target ? `chat:${target.chatId.toString()}` : `user:${target.userId.toString()}`;
+}
+function progressTransport(target) {
+  const peerId = inputPeerFromTarget(target);
+  return {
+    async send(doc) {
+      const result = await client.invokeRaw(Method.SEND_MESSAGE, {
+        oneofKind: "sendMessage",
+        sendMessage: {
+          peerId,
+          randomId: randomMessageId2(),
+          message: doc.text,
+          blockContent: doc.blockContent,
+          sendMode: MessageSendMode.MODE_SILENT
+        }
+      });
+      const messageId = firstMessageId(result);
+      if (messageId == null)
+        throw new Error("sendMessage returned no message id");
+      return messageId;
+    },
+    async edit(messageId, doc) {
+      await client.invokeRaw(Method.EDIT_MESSAGE, {
+        oneofKind: "editMessage",
+        editMessage: { messageId, peerId, text: doc.text, blockContent: doc.blockContent }
+      });
+    }
+  };
+}
+var AGENT_SETTINGS_CACHE_MS = 30000;
+var agentDefaultOutputMode;
+async function readOutputModeSettings(target) {
+  const peerId = inputPeerFromTarget(target);
+  const [defaultMode, participations] = await Promise.all([
+    (async () => {
+      if (agentDefaultOutputMode && Date.now() - agentDefaultOutputMode.at < AGENT_SETTINGS_CACHE_MS) {
+        return agentDefaultOutputMode.value;
+      }
+      const result = asOptionalRecord(await client.invokeRaw(Method.GET_AGENT_SETTINGS, {
+        oneofKind: "getAgentSettings",
+        getAgentSettings: { botUserId: 0n }
+      }));
+      const settings = asOptionalRecord(asOptionalRecord(result?.getAgentSettings)?.settings);
+      const value = typeof settings?.defaultOutputMode === "number" ? settings.defaultOutputMode : undefined;
+      agentDefaultOutputMode = { value, at: Date.now() };
+      return value;
+    })(),
+    client.invokeRaw(Method.GET_AGENT_PARTICIPATIONS, {
+      oneofKind: "getAgentParticipations",
+      getAgentParticipations: { peerId }
+    })
+  ]);
+  const list = asOptionalRecord(asOptionalRecord(participations)?.getAgentParticipations)?.participations;
+  const mine = Array.isArray(list) && meId != null ? list.map(asOptionalRecord).find((entry) => entry != null && String(entry.botUserId) === meId) : undefined;
+  const override = typeof mine?.outputMode === "number" ? mine.outputMode : undefined;
+  return { defaultMode, override };
 }
 async function endpointEdit(res, body) {
   const record = asRecord(body);
@@ -56704,6 +57952,34 @@ class MockInlineClient {
     }
     return {};
   }
+  async invokeRaw(method, input) {
+    this.record(`invokeRaw:${methodName(method)}`, input);
+    if (method === Method.SEND_MESSAGE) {
+      this.messageId += 1n;
+      return {
+        oneofKind: "sendMessage",
+        sendMessage: { updates: [{ update: { oneofKind: "updateMessageId", updateMessageId: { messageId: this.messageId, randomId: 1n } } }] }
+      };
+    }
+    if (method === Method.EDIT_MESSAGE)
+      return { oneofKind: "editMessage", editMessage: { updates: [] } };
+    if (method === Method.GET_AGENT_SETTINGS) {
+      return {
+        oneofKind: "getAgentSettings",
+        getAgentSettings: { settings: { botUserId: 999n, defaultOutputMode: mockOutputMode("INLINE_SIDECAR_TEST_DEFAULT_OUTPUT_MODE"), revision: 0n } }
+      };
+    }
+    if (method === Method.GET_AGENT_PARTICIPATIONS) {
+      const override = mockOutputMode("INLINE_SIDECAR_TEST_OUTPUT_MODE_OVERRIDE");
+      return {
+        oneofKind: "getAgentParticipations",
+        getAgentParticipations: {
+          participations: override ? [{ botUserId: 999n, mode: 1, revision: 1n, date: 1n, outputMode: override }] : []
+        }
+      };
+    }
+    return { oneofKind: undefined };
+  }
   async invokeUncheckedRaw(method, input) {
     this.record(`invokeUncheckedRaw:${methodName(method)}`, input);
     if (method === Method.GET_CHAT_PARTICIPANTS) {
@@ -56824,7 +58100,23 @@ function chatIdFromInputPeer(peer) {
 function methodName(method) {
   return Method[method] ?? String(method);
 }
+function mockOutputMode(name) {
+  const value = readEnv(name);
+  return value === "detailed" ? 1 : value === "friendly" ? 2 : 0;
+}
 var client = createClient(clientOptions);
+var activityHub = new ActivityHub({
+  transportFor: progressTransport,
+  readMode: readOutputModeSettings,
+  onError: (error, operation) => {
+    if (operation === "mode") {
+      console.error(`inline-sidecar: output mode lookup failed: ${redactError(error)}; using the last known mode`);
+      return;
+    }
+    reportHermesPluginError(`activity.${operation}`, error);
+    console.error(`inline-sidecar: progress ${operation} failed: ${redactError(error)}`);
+  }
+});
 var userDirectory = new InlineUserDirectory(client, {
   onError: (operation, error) => {
     reportHermesPluginError(`sender_directory.${operation}`, error);
