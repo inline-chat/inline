@@ -3,7 +3,7 @@ import path from "node:path"
 import { writeFile } from "node:fs/promises"
 import { renameSync, unlinkSync, writeFileSync } from "node:fs"
 import { InlineInboundInbox } from "./inbound-inbox.js"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, onTestFinished, vi } from "vitest"
 import {
   INLINE_ACTION_CALLBACK_DATA_MAX_BYTES,
   INLINE_ACTION_LABEL_MAX_LENGTH,
@@ -2896,6 +2896,8 @@ describe("inline/monitor", () => {
       },
     })
 
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    onTestFinished(() => { vi.useRealTimers() })
     const handle = await harness.monitorInlineProvider({
       cfg: {
         messages: {
@@ -2912,6 +2914,9 @@ describe("inline/monitor", () => {
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
 
+    await handle.done
+    await vi.advanceTimersByTimeAsync(250)
+    vi.useRealTimers()
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
@@ -2923,7 +2928,6 @@ describe("inline/monitor", () => {
       )
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 80))
     expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
     expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3130,6 +3134,8 @@ describe("inline/monitor", () => {
       },
     })
 
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    onTestFinished(() => { vi.useRealTimers() })
     const handle = await harness.monitorInlineProvider({
       cfg: {
         messages: {
@@ -3149,6 +3155,9 @@ describe("inline/monitor", () => {
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
 
+    await handle.done
+    await vi.advanceTimersByTimeAsync(250)
+    vi.useRealTimers()
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
@@ -3160,7 +3169,6 @@ describe("inline/monitor", () => {
       )
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 80))
     expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
     expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3333,6 +3341,8 @@ describe("inline/monitor", () => {
       },
     })
 
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    onTestFinished(() => { vi.useRealTimers() })
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
       account: buildAccount({
@@ -3344,6 +3354,9 @@ describe("inline/monitor", () => {
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
 
+    await handle.done
+    await vi.advanceTimersByTimeAsync(250)
+    vi.useRealTimers()
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
@@ -3355,7 +3368,6 @@ describe("inline/monitor", () => {
       )
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 80))
     expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
     expect(harness.calls.readRemoteMediaBuffer).not.toHaveBeenCalled()
     expect(harness.calls.enqueueSystemEvent).not.toHaveBeenCalled()
