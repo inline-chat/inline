@@ -30,6 +30,7 @@ final class RichBlockTextSurface: NSView {
   }()
 
   private var text = NSAttributedString()
+  private var linkColor: NSColor?
   private(set) var renderRevision: UInt64 = 0
   private var onEntityClick: ((MessageTextEntityHit, NSAttributedString) -> Bool)?
 
@@ -155,19 +156,30 @@ final class RichBlockTextSurface: NSView {
     singleLine: Bool = false,
     onEntityClick: @escaping (MessageTextEntityHit, NSAttributedString) -> Bool
   ) {
-    label.textContainer?.maximumNumberOfLines = singleLine ? 1 : 0
-    label.textContainer?.lineBreakMode = singleLine ? .byTruncatingTail : .byWordWrapping
-    let textChanged = !self.text.isEqual(to: text)
+    // Container setters invalidate layout even when the value is the same.
+    if let container = label.textContainer {
+      let maximumLines = singleLine ? 1 : 0
+      let lineBreakMode: NSLineBreakMode = singleLine ? .byTruncatingTail : .byWordWrapping
+      if container.maximumNumberOfLines != maximumLines { container.maximumNumberOfLines = maximumLines }
+      if container.lineBreakMode != lineBreakMode { container.lineBreakMode = lineBreakMode }
+    }
+    // The render context hands back the same object for an unchanged node.
+    let textChanged = self.text !== text && !self.text.isEqual(to: text)
     let preservedSelections = textChanged ? preservedSelections(in: text) : []
     if textChanged {
       renderRevision &+= 1
     }
     self.text = text
-    label.setAccessibilityValue(RichTextMath.containsRenderedMath(text) ? RichTextMath.sourceText(text) : nil)
-    label.linkTextAttributes = [
-      .foregroundColor: linkColor,
-      .cursor: NSCursor.pointingHand,
-    ]
+    if textChanged {
+      label.setAccessibilityValue(RichTextMath.containsRenderedMath(text) ? RichTextMath.sourceText(text) : nil)
+    }
+    if !(self.linkColor?.isEqual(linkColor) ?? false) {
+      self.linkColor = linkColor
+      label.linkTextAttributes = [
+        .foregroundColor: linkColor,
+        .cursor: NSCursor.pointingHand,
+      ]
+    }
     if textChanged {
       label.textStorage?.setAttributedString(text)
       if !preservedSelections.isEmpty {

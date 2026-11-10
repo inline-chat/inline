@@ -46,7 +46,11 @@ final class RichBlockTableNodeView: RichBlockRenderableView {
     let preservedOffset = scrollView.contentView.bounds.minX
     cells = table.cells
     contentWidth = table.contentWidth
-    canvasView.apply(cells: cells, separatorColor: context.palette.separator)
+    canvasView.apply(
+      cells: cells,
+      separatorColor: context.palette.separator,
+      headerFillColor: context.palette.subtleFill
+    )
 
     let indices = Set(cells.indices)
     for index in Array(cellViews.keys) where !indices.contains(index) {
@@ -91,19 +95,23 @@ final class RichBlockTableNodeView: RichBlockRenderableView {
     super.layout()
     let preservedOffset = scrollView.contentView.bounds.minX
     scrollView.frame = bounds
-    canvasView.frame = CGRect(
+    let canvasFrame = CGRect(
       x: 0,
       y: 0,
       width: max(bounds.width, contentWidth),
       height: bounds.height
     )
+    // The rules span the canvas; content changes redraw through `apply`.
+    if canvasView.frame != canvasFrame {
+      canvasView.frame = canvasFrame
+      canvasView.needsDisplay = true
+    }
     for (index, cell) in cells.enumerated() {
       cellViews[index]?.frame = cell.frame.insetBy(
         dx: Self.horizontalPadding,
         dy: Self.verticalPadding
       )
     }
-    canvasView.needsDisplay = true
     restoreHorizontalOffset(preservedOffset)
   }
 
@@ -115,7 +123,7 @@ final class RichBlockTableNodeView: RichBlockRenderableView {
     cellViews.removeAll(keepingCapacity: true)
     cells = []
     contentWidth = 0
-    canvasView.apply(cells: [], separatorColor: .clear)
+    canvasView.apply(cells: [], separatorColor: .clear, headerFillColor: .clear)
     restoreHorizontalOffset(0)
   }
 
@@ -128,33 +136,75 @@ final class RichBlockTableNodeView: RichBlockRenderableView {
   }
 }
 
+/// Header fill plus row and column rules, as on iOS: one device pixel wide,
+/// starting on the cell edge. Columns come from cell frames, so the rules follow
+/// whichever side the first column is on.
 private final class RichBlockTableCanvasView: NSView {
   private var cells: [RichBlockLayoutPlan.TableNode.Cell] = []
   private var separatorColor = NSColor.separatorColor
+  private var headerFillColor = NSColor.clear
 
   override var isFlipped: Bool { true }
 
-  func apply(cells: [RichBlockLayoutPlan.TableNode.Cell], separatorColor: NSColor) {
+  func apply(
+    cells: [RichBlockLayoutPlan.TableNode.Cell],
+    separatorColor: NSColor,
+    headerFillColor: NSColor
+  ) {
+    guard cells != self.cells
+      || !separatorColor.isEqual(self.separatorColor)
+      || !headerFillColor.isEqual(self.headerFillColor)
+    else { return }
     self.cells = cells
     self.separatorColor = separatorColor
+    self.headerFillColor = headerFillColor
     needsDisplay = true
   }
 
   func updateGeometry(cells: [RichBlockLayoutPlan.TableNode.Cell]) {
+    guard cells != self.cells else { return }
     self.cells = cells
+    needsDisplay = true
+  }
+
+  override func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    needsDisplay = true
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
     needsDisplay = true
   }
 
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
     guard !cells.isEmpty else { return }
-    separatorColor.setStroke()
-    let rules = NSBezierPath()
-    rules.lineWidth = 1
-    for edge in Set(cells.map { $0.frame.maxY }).sorted() where edge < bounds.height - 0.5 {
-      rules.move(to: CGPoint(x: 0, y: edge))
-      rules.line(to: CGPoint(x: bounds.width, y: edge))
+    let scale = max(1, window?.backingScaleFactor ?? 2)
+    let hairline = 1 / scale
+    func snap(_ value: CGFloat) -> CGFloat { (value * scale).rounded() / scale }
+
+    let headerBottom = cells.reduce(CGFloat(0)) { $1.isHeader ? max($0, $1.frame.maxY) : $0 }
+    if headerBottom > 0 {
+      headerFillColor.setFill()
+      CGRect(x: 0, y: 0, width: bounds.width, height: snap(headerBottom)).fill(using: .sourceOver)
     }
-    rules.stroke()
+
+    separatorColor.setFill()
+    let rowTops = Set(cells.map(\.frame.minY))
+    for top in rowTops where top > 0.5 && top < bounds.height - 0.5 {
+      CGRect(x: 0, y: snap(top), width: bounds.width, height: hairline).fill(using: .sourceOver)
+    }
+    // Every row shares the column edges; the first row is enough.
+    guard let firstRowTop = rowTops.min() else { return }
+    let tableMaxX = cells.reduce(CGFloat(0)) { max($0, $1.frame.maxX) }
+    var columnEdges = Set<CGFloat>()
+    for cell in cells where cell.frame.minY == firstRowTop {
+      columnEdges.insert(cell.frame.minX)
+      columnEdges.insert(cell.frame.maxX)
+    }
+    for edge in columnEdges where edge > 0.5 && edge < tableMaxX - 0.5 {
+      CGRect(x: snap(edge), y: 0, width: hairline, height: bounds.height).fill(using: .sourceOver)
+    }
   }
 }
