@@ -2,6 +2,7 @@ import Auth
 import InlineIOSUI
 import InlineKit
 import InlineMessageLayout
+import struct InlineProtocol.MessageEntities
 import struct InlineProtocol.MessageEntity
 import InlineTheme
 import InlineUI
@@ -74,6 +75,10 @@ struct MessageViewContent {
   let richPalette: MessageRichView.Palette
   let showsAcknowledgement: Bool
   let accessibilityLabel: String
+  /// For rich bodies, which read node by node: the sender and blocks before the body, and the
+  /// time after it.
+  let accessibilityLead: String?
+  let accessibilityTime: String
 
   var isOutgoing: Bool { message.message.out == true }
 
@@ -212,9 +217,13 @@ struct MessageViewContent {
       metrics: metrics
     )
     input.revealedLength = revealedLength
+    // Rich blocks slice the body, which is the text the pacer counts.
+    input.richSources = rich?.sources
 
     let lighting = outgoing ? theme.outgoingLighting : theme.incomingLighting
     let supportsLighting = !isEmoji && !isBareMedia && model.status != .failed
+    let lead = ([name?.string] + MessageBlock.accessibilityDescription(of: blocks, message: message))
+      .compactMap(\.self)
     return MessageViewContent(
       message: message,
       context: context,
@@ -229,8 +238,9 @@ struct MessageViewContent {
       rich: rich,
       richPalette: .init(text: textColor, secondary: richSecondary, accent: outgoing ? .white : theme.primary.uiColor),
       showsAcknowledgement: showsAcknowledgement,
-      accessibilityLabel: ([name?.string] + MessageBlock.accessibilityDescription(of: blocks, message: message)
-        + [text.isEmpty ? nil : text, time.string]).compactMap(\.self).joined(separator: ", ")
+      accessibilityLabel: (lead + [text.isEmpty ? nil : text, time.string].compactMap(\.self)).joined(separator: ", "),
+      accessibilityLead: lead.isEmpty ? nil : lead.joined(separator: ", "),
+      accessibilityTime: time.string
     )
   }
 
@@ -257,11 +267,66 @@ struct MessageViewContent {
     return formatter
   }()
 
-  private static let bodyCache: NSCache<NSString, NSAttributedString> = {
-    let cache = NSCache<NSString, NSAttributedString>()
+  private static let bodyCache: NSCache<BodyCacheKey, NSAttributedString> = {
+    let cache = NSCache<BodyCacheKey, NSAttributedString>()
     cache.countLimit = 512
     return cache
   }()
+
+  /// Everything the styled body depends on. Built per content build, so it hashes the inputs
+  /// once and compares them only on a hash match, instead of describing the entities as text.
+  private final class BodyCacheKey: NSObject {
+    let text: String
+    let entities: MessageEntities?
+    let preset: String
+    let variant: String
+    let contentSizeCategory: UIContentSizeCategory
+    let isOutgoing: Bool
+    let isFailed: Bool
+    private let hashValueCache: Int
+
+    init(
+      text: String,
+      entities: MessageEntities?,
+      preset: String,
+      variant: String,
+      contentSizeCategory: UIContentSizeCategory,
+      isOutgoing: Bool,
+      isFailed: Bool
+    ) {
+      self.text = text
+      self.entities = entities
+      self.preset = preset
+      self.variant = variant
+      self.contentSizeCategory = contentSizeCategory
+      self.isOutgoing = isOutgoing
+      self.isFailed = isFailed
+      var hasher = Hasher()
+      hasher.combine(text)
+      hasher.combine(entities)
+      hasher.combine(preset)
+      hasher.combine(variant)
+      hasher.combine(contentSizeCategory.rawValue)
+      hasher.combine(isOutgoing)
+      hasher.combine(isFailed)
+      hashValueCache = hasher.finalize()
+      super.init()
+    }
+
+    override var hash: Int { hashValueCache }
+
+    override func isEqual(_ object: Any?) -> Bool {
+      guard let other = object as? BodyCacheKey else { return false }
+      return hashValueCache == other.hashValueCache
+        && isOutgoing == other.isOutgoing
+        && isFailed == other.isFailed
+        && preset == other.preset
+        && variant == other.variant
+        && contentSizeCategory == other.contentSizeCategory
+        && text == other.text
+        && entities == other.entities
+    }
+  }
 
   private static func bodyText(
     _ text: String,
@@ -273,15 +338,15 @@ struct MessageViewContent {
     let outgoing = message.message.out == true
     let theme = context.theme
     let entities = message.translationEntities ?? message.message.entities
-    let key = [
-      "\(entities.map { "\($0)" } ?? "")",
-      text,
-      theme.preset.rawValue,
-      theme.variant.rawValue,
-      context.contentSizeCategory.rawValue,
-      outgoing ? "out" : "in",
-      message.message.status == .failed ? "failed" : "",
-    ].joined(separator: "-") as NSString
+    let key = BodyCacheKey(
+      text: text,
+      entities: entities,
+      preset: theme.preset.rawValue,
+      variant: theme.variant.rawValue,
+      contentSizeCategory: context.contentSizeCategory,
+      isOutgoing: outgoing,
+      isFailed: message.message.status == .failed
+    )
     if let cached = bodyCache.object(forKey: key) {
       return MessageText(cached)
     }
