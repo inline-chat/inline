@@ -17,7 +17,8 @@
         { "slug": "add-inline", "label": "Add Inline to Your Agent" },
         "mcp",
         "openclaw",
-        "hermes"
+        "hermes",
+        { "slug": "chatgpt-dots", "label": "ChatGPT Dots" }
       ]
     },
     {
