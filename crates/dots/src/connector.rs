@@ -256,7 +256,12 @@ impl DotsConnector {
             tokio::select! {
                 _ = tokio::time::sleep_until(wake_at) => {}
                 signal = signals.recv() => match signal {
-                    Some(Signal::Subscribed) => subscribed = true,
+                    Some(Signal::Subscribed) => {
+                        if !subscribed {
+                            log::info!(target: "inline::bridge::dots", "realtime subscribed");
+                        }
+                        subscribed = true;
+                    }
                     Some(Signal::Wake) => {}
                     Some(Signal::Typing(active)) => {
                         emit(&events, ConnectorEvent::Typing(active)).await?;
@@ -280,9 +285,7 @@ impl DotsConnector {
                         emit(&events, ConnectorEvent::Profile(profile(&fresh))).await?;
                     }
                     Some(Signal::Disconnected(reason)) => {
-                        if subscribed {
-                            log::info!(target: "inline::bridge::dots", "realtime dropped: {reason}");
-                        }
+                        log::info!(target: "inline::bridge::dots", "realtime unavailable: {reason}");
                         subscribed = false;
                     }
                     None => subscribed = false,
