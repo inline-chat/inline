@@ -35,7 +35,9 @@ struct MessageRichContent {
     expanded: [RichPath: Bool]
   ) -> MessageRichContent? {
     // Block ranges index the original text; a translation replaces it.
-    if message.translationText == nil, let content = message.message.blockContentPayload?.content {
+    if message.translationText == nil, let stored = message.message.blockContentPayload?.content {
+      // Direction is decided per block from its own text, replacing the stored flags.
+      let content = BlockContentDirection.resolved(stored, text: body.string)
       var builder = Builder(body: body, style: style, expanded: expanded, messageDate: message.message.date)
       guard builder.withinLimits(content), let blocks = builder.blocks(content.blocks, path: RichPath()),
             !blocks.isEmpty
@@ -171,7 +173,11 @@ struct MessageRichContent {
             "•"
           }
           guard let children = blocks(item.children, path: path.appending(index)) else { return nil }
-          items.append(.init(marker: styled(marker), children: children))
+          items.append(.init(
+            marker: styled(marker),
+            children: children,
+            isRightToLeft: BlockContentDirection.direction(of: item)
+          ))
         }
         return .list(RichList(items: items, isRightToLeft: list.hasIsRtl && list.isRtl))
       case let .quote(quote)?:
