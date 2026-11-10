@@ -21,14 +21,13 @@ Install the plugin that matches your OpenClaw version:
 
 | OpenClaw                                          | Inline plugin | Install                                                                                     |
 | ------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------- |
-| `2026.11.1` and newer                             | `1.0.0`       | `openclaw plugins install npm:@inline-openclaw/inline@1.0.0 --force --accept-capabilities`  |
+| `2026.11.1` and newer                             | `1.0.0-alpha.1`       | `openclaw plugins install npm:@inline-openclaw/inline@1.0.0-alpha.1 --force --accept-capabilities`  |
 | `2026.8.2` through `2026.10.x`                    | `0.0.72`      | `openclaw plugins install npm:@inline-openclaw/inline@0.0.72 --force --accept-capabilities` |
 | `2026.7.x` (`>=2026.7.1`)                         | `0.0.63`      | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`                           |
 | `2026.6.x` (`>=2026.6.11`, including `2026.6.34`) | `0.0.63`      | `openclaw plugins install @inline-openclaw/inline@0.0.63 --force`                           |
 
 Plugin 1.0 needs OpenClaw `2026.11.1` or newer, and OpenClaw refuses to install
-it on an older host. Use the pinned command for your version; `inline agents
-setup` picks it for you. Check your version with `openclaw --version`.
+it on an older host. Use the pinned command above to opt into the alpha. The stable npm release is `0.0.72`. Check your version with `openclaw --version`.
 
 `--accept-capabilities` approves the capabilities declared by Inline's trusted
 first-party package so the install can't stall on a prompt. OpenClaw 2026.7 and
