@@ -857,6 +857,25 @@ fn merge_service_lifecycle_detail(
     }
 }
 
+/// A setup-time warning when the installed service will not outlive the
+/// current login (a headless server or VM reached over SSH).
+#[cfg(target_os = "linux")]
+pub(super) fn setup_lifecycle_hint() -> Option<String> {
+    linux_setup_lifecycle_hint(linux_linger_enabled())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(super) fn setup_lifecycle_hint() -> Option<String> {
+    None
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn linux_setup_lifecycle_hint(linger_enabled: Option<bool>) -> Option<String> {
+    (linger_enabled == Some(false)).then(|| {
+        "The bridge stops when you log out of this machine. On a server or VM, keep it running with: sudo loginctl enable-linger \"$USER\"".to_string()
+    })
+}
+
 #[cfg(target_os = "linux")]
 fn service_lifecycle_detail() -> Option<String> {
     Some(linux_service_lifecycle_detail(linux_linger_enabled()))

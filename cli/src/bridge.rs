@@ -221,6 +221,7 @@ pub(crate) struct ProviderSetupOutcome {
     pub(crate) display_name: String,
     pub(crate) workspace: PathBuf,
     pub(crate) background_service: String,
+    pub(crate) config_path: PathBuf,
 }
 
 pub(crate) struct ProviderSetupOptions {
@@ -235,6 +236,7 @@ pub(crate) enum ProviderSetupProgress {
     Completed(&'static str, &'static str),
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn setup_provider(
     config: &Config,
     owner_auth: AuthCredential,
@@ -280,8 +282,27 @@ pub async fn setup_provider(
             println!("Workspace: {}", workspace_label(&outcome.workspace));
         }
         println!("Background service: {}", result.background_service);
+        if result.background_service == "restart_required" {
+            println!(
+                "No service was installed. Start the bridge with: inline bridge run --config {}",
+                shell_quote(&outcome.config_path.display().to_string())
+            );
+        } else if let Some(hint) = service::setup_lifecycle_hint() {
+            println!("{hint}");
+        }
     }
     Ok(())
+}
+
+fn shell_quote(value: &str) -> String {
+    if value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "/._-~".contains(c))
+    {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
 }
 
 pub(crate) async fn setup_provider_core(
@@ -372,7 +393,10 @@ where
     if dots_name_follows_dot {
         // The bot follows the Dot's name until the owner renames it.
         fs::write(
-            provisioned.installation.state_dir.join(dots::MANAGED_NAME_FILE),
+            provisioned
+                .installation
+                .state_dir
+                .join(dots::MANAGED_NAME_FILE),
             &provisioned.installation.display_name,
         )?;
     }
@@ -424,6 +448,7 @@ where
         display_name: provisioned.installation.display_name.clone(),
         workspace: provisioned.installation.workspace.clone(),
         background_service,
+        config_path: provisioned.paths.config.clone(),
     })
 }
 
