@@ -125,6 +125,31 @@ struct BotChatSettingsCoordinatorTests {
     #expect(coordinator.selectedState.document?.revision == "one")
   }
 
+  @Test("records bots that declare the Output setting")
+  func outputModeCapability() async {
+    let coordinator = BotChatSettingsCoordinator(
+      peer: .thread(id: 77),
+      discoveryFetcher: { _ in
+        .with {
+          var openClaw = peerBot(id: 20, name: "OpenClaw")
+          openClaw.capabilities.append(.with {
+            $0.kind = .outputMode
+            $0.version = 1
+          })
+          $0.bots = [peerBot(id: 10, name: "Hermes"), openClaw]
+          $0.suggestedBotUserID = 20
+        }
+      },
+      settingsRequester: { _, _ in documentResponse(revision: "one") },
+      itemInvoker: { _, _, _, _, _ in documentResponse(revision: "two") }
+    )
+
+    await coordinator.warmUp()
+    await waitUntil { coordinator.selectedState.phase == .loaded }
+
+    #expect(coordinator.outputModeBotIDs == [20])
+  }
+
   @Test("preserves manual selection across rediscovery")
   func preservesSelection() async {
     let coordinator = BotChatSettingsCoordinator(
