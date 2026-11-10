@@ -75,6 +75,7 @@ import {
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { shareInlineAccountClient } from "./client-registry.js"
+import { readInlineOutputMode } from "./output-mode.js"
 import { createInlineMessageSender } from "./delivery.js"
 import {
   INLINE_DEFAULT_GROUP_POLICY,
@@ -944,7 +945,7 @@ function resolveInlineProgressPlaceholderEnabled(config: {
   if (config.streaming === false) return false
   if (isRecord(config.streaming) && isRecord(config.streaming.progress)) return true
 
-  // Friendly by default (D2): Working status while it runs, no progress card.
+  // With no presentation preference, show Working while the turn runs.
   // `streaming: { mode: "progress" }` opts into the card.
   return false
 }
@@ -1171,7 +1172,7 @@ export async function monitorInlineProvider(params: {
       capabilities: [{
         kind: BotCapability_Kind.CHAT_SETTINGS,
         version: OPENCLAW_BOT_CHAT_SETTINGS_VERSION,
-      }],
+      }, { kind: BotCapability_Kind.OUTPUT_MODE, version: 1 }],
     }),
     isCancelled: () => abortSignal.aborted,
     onFailure: (error, willRetry) => {
@@ -3124,17 +3125,17 @@ export async function monitorInlineProvider(params: {
           }).catch(() => null)
         : null
 
-    const agentActivityEnabled = account.config.experimentalAgentActivity === true
-    const inlineStreamingMode = resolveInlineStreamingMode(account.config)
-    const streamViaEditMessage =
-      inlineStreamingMode === "partial" &&
-      !shouldEditCallbackTargetInPlace
-    const progressPlaceholderEnabled =
-      resolveInlineProgressPlaceholderEnabled(account.config) &&
-      !shouldEditCallbackTargetInPlace
+    // Controls must reach the active run immediately, even when settings RPCs are slow.
+    const outputMode = isInlineOutOfBandCommandText(normalizedCommandBody) ? undefined
+      : await readInlineOutputMode(client, meId, deliveryChatId, abortSignal)
+    const useHostPresentation = outputMode === undefined
+    const agentActivityEnabled = outputMode === "detailed" || (useHostPresentation && account.config.experimentalAgentActivity === true)
+    const streamViaEditMessage = useHostPresentation && resolveInlineStreamingMode(account.config) === "partial" && !shouldEditCallbackTargetInPlace
+    const progressPlaceholderEnabled = !shouldEditCallbackTargetInPlace &&
+      (outputMode === "detailed" || (useHostPresentation && resolveInlineProgressPlaceholderEnabled(account.config)))
     const progressToolProgressEnabled =
       progressPlaceholderEnabled && resolveChannelStreamingPreviewToolProgress(account.config)
-    const suppressDefaultToolProgressMessages = progressPlaceholderEnabled
+    const suppressDefaultToolProgressMessages = !useHostPresentation || progressPlaceholderEnabled
     // An answer quotes a bot only when that bot asked by mention or addressed
     // command, so the answer reaches it. A bot's reply needs no answer and quoting
     // it would wake it again, which is how two bots end up in a loop. People get
@@ -3146,7 +3147,7 @@ export async function monitorInlineProvider(params: {
       canReplyToSourceMessage && botAskedThisBot ? msg.id : undefined
     const inlineBlockStreamingEnabled = resolveInlineBlockStreamingEnabled(account.config)
     const disableBlockStreaming =
-      progressPlaceholderEnabled || streamViaEditMessage
+      !useHostPresentation || progressPlaceholderEnabled || streamViaEditMessage
         ? true
         : typeof inlineBlockStreamingEnabled === "boolean"
         ? !inlineBlockStreamingEnabled
@@ -3926,7 +3927,7 @@ export async function monitorInlineProvider(params: {
     }
     const replyOptions = {
       abortSignal,
-      ...(agentActivityEnabled ? { onAgentRunStart: (runId: string) => {
+      ...(agentActivityEnabled ? { onPreparedAgentRunStart: ({ runId }: { runId: string }) => {
         activityRunId = runId
         resetActivityTerminal()
       } } : {}),

@@ -230,6 +230,9 @@ type MonitorSetup = {
     lastName?: string
     bot?: boolean
   }>
+  botOutputMode?: number
+  outputParticipations?: Array<{ botUserId: bigint; outputMode?: number }>
+  outputParticipationsError?: Error
   participantLookupError?: Error
   directoryLookupError?: Error
   historyByChat?: Record<string, Array<{
@@ -709,6 +712,13 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         updateDialogFollowMode: {},
       }
     }
+    if (method === 158 && input?.oneofKind === "getAgentParticipations") {
+      if (setup.outputParticipationsError) throw setup.outputParticipationsError
+      return { oneofKind: "getAgentParticipations", getAgentParticipations: { participations: setup.outputParticipations ?? [] } }
+    }
+    if (method === 164 && input?.oneofKind === "getAgentSettings") {
+      return { oneofKind: "getAgentSettings", getAgentSettings: { settings: { defaultOutputMode: setup.botOutputMode ?? 0 } } }
+    }
     if (method === 1 && input?.oneofKind === "getMe") {
       if (setup.getMeError) {
         throw setup.getMeError
@@ -973,7 +983,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           return false
         }
       },
-      BotCapability_Kind: { CHAT_SETTINGS: 1 },
+      AgentOutputMode: { UNSPECIFIED: 0, DETAILED: 1, FRIENDLY: 2 },
+      BotCapability_Kind: { CHAT_SETTINGS: 1, OUTPUT_MODE: 3 },
       BotChatSettingsInfo_Tone: { TONE_UNSPECIFIED: 0, NEUTRAL: 1, SUCCESS: 2, WARNING: 3, ERROR: 4 },
       BotChatSettingsProblem_Code: {
         CODE_UNSPECIFIED: 0,
@@ -987,6 +998,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         constructor(_path: string) {}
       },
       Method: {
+        GET_AGENT_PARTICIPATIONS: 158,
+        GET_AGENT_SETTINGS: 164,
         GET_ME: 1,
         SEND_COMPOSE_ACTION: 20,
         DELETE_MESSAGES: 4,
@@ -1302,7 +1315,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.setMyBotCapabilities).toHaveBeenCalledWith({
-        capabilities: [{ kind: 1, version: 1 }],
+        capabilities: [{ kind: 1, version: 1 }, { kind: 3, version: 1 }],
       })
       expect(harness.calls.answerBotChatSettings).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -8836,6 +8849,42 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it.each([
+    { label: "unset retains configured progress", bot: 0, own: 0, legacy: true, show: true },
+    { label: "another bot's override leaves the mode unset", bot: 0, own: 0, legacy: false, show: false },
+    { label: "explicit bot Detailed", bot: 1, own: 0, legacy: false, show: true },
+    { label: "explicit bot Friendly", bot: 2, own: 0, legacy: true, show: false },
+    { label: "chat Friendly overrides Detailed", bot: 1, own: 2, legacy: true, show: false },
+    { label: "chat Detailed overrides Friendly", bot: 2, own: 1, legacy: false, show: true },
+    { label: "unavailable chat preference keeps a Detailed turn quiet", bot: 1, own: 0, legacy: true, show: false, unavailable: true },
+  ])("renders one answer when $label", async ({ bot, own, legacy, show, unavailable }) => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 772n, message: { id: 42n, date: 1_700_000_004n, fromId: 3n, message: "check" } }],
+      chats: { "772": { kind: "direct", title: "Alice" } },
+      botOutputMode: bot,
+      outputParticipations: [{ botUserId: 888n, outputMode: 1 }, { botUserId: 777n, outputMode: own }],
+      ...(unavailable ? { outputParticipationsError: new Error("unavailable") } : {}),
+      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
+        await replyOptions.onToolStart({ name: "exec", args: { command: "date" } })
+        await dispatcherOptions.deliver({ text: "finished" }, { kind: "final" })
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ dmPolicy: "open", streaming: { mode: legacy ? "progress" : "off" } }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: new AbortController().signal,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "finished" })))
+      const sends = harness.calls.sendMessage.mock.calls.map(([payload]) => payload)
+      expect(sends.filter((payload) => payload.text === "finished")).toHaveLength(1)
+      expect(sends.some((payload) => payload.sendMode === "silent")).toBe(show)
+      const methods = harness.calls.invokeRaw.mock.calls.map(([, input]) => input.oneofKind)
+      expect(methods).toContain("getAgentSettings")
+      expect(methods).not.toContain("updateAgentSettings")
+      expect(methods).not.toContain("setAgentParticipation")
+    } finally { await handle.stop() }
+  })
+
   it("maps unified streaming.mode=progress to a separate Inline progress placeholder path", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -8925,7 +8974,7 @@ describe("inline/monitor", () => {
       chats: { "773": { kind: "direct", title: "Alice" } },
       dispatchReplyResult: { queuedFinal: false, counts: {} },
       dispatchReplyBlocker: async ({ replyOptions, emitAgentEvent }) => {
-        replyOptions.onAgentRunStart("current-run")
+        replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
         await replyOptions.onToolStart({ name: "read", toolCallId: "read-1", args: { path: "/tmp/book.txt" } })
         await replyOptions.onItemEvent({ itemId: "tool:read-1", toolCallId: "read-1", kind: "tool", name: "read", phase: "end", status: "completed" })
         // The host's /stop returns an empty normal dispatch result. The provider
@@ -8956,7 +9005,7 @@ describe("inline/monitor", () => {
       chats: { "773": { kind: "direct", title: "Alice" } },
       dispatchReplyResult: { queuedFinal: false, counts: {} },
       dispatchReplyBlocker: async ({ replyOptions, emitAgentEvent }) => {
-        replyOptions.onAgentRunStart("current-run")
+        replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
         await replyOptions.onToolStart({ name: "exec", toolCallId: "exec-1", args: { command: "sleep 45", title: "Wait for stop check" } })
         // OpenClaw 2026.9.7 returns its aborted dispatch before the worker's
         // settled lifecycle callback. The provider signal remains active.
@@ -8989,7 +9038,7 @@ describe("inline/monitor", () => {
       dispatchReplyResult: { queuedFinal: false, counts: {} },
       editMessageDelayMs: 150,
       dispatchReplyBlocker: async ({ replyOptions, emitAgentEvent }) => {
-        replyOptions.onAgentRunStart("current-run")
+        replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
         await replyOptions.onToolStart({ name: "exec", toolCallId: "exec-1", args: { command: "sleep 45" } })
         if (late) setTimeout(() => {
           emitAgentEvent({ runId: "current-run", stream: "lifecycle", data: { phase: "error", aborted: true, stopReason: "aborted", executionSettled: true } })
@@ -9014,7 +9063,7 @@ describe("inline/monitor", () => {
       events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
       chats: { "773": { kind: "direct", title: "Alice" } },
       dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
-        replyOptions.onAgentRunStart("current-run")
+        replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
         await dispatcherOptions.deliver({ text: "Ready." })
       },
     })
@@ -9305,7 +9354,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.sendComposeAction?.action === 6)).toBe(true)
       expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 773n, typing: true })
       expect(harness.agentEventListenerCount()).toBe(0)
-      expect(harness.calls.dispatchReply.mock.calls[0]?.[0]?.replyOptions?.onAgentRunStart).toBeUndefined()
+      expect(harness.calls.dispatchReply.mock.calls[0]?.[0]?.replyOptions?.onPreparedAgentRunStart).toBeUndefined()
     } finally { await handle.stop() }
   })
 

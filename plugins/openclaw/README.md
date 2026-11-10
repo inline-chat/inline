@@ -45,7 +45,7 @@ Breaking changes in 1.0. The behavior changes match the rules Hermes 1.0 follows
 - **A command no bot claimed is ignored.** Several bots offering `/status` with nothing naming one means none of them runs it.
 - **Someone added to a thread under the bot's DM keeps group rules** and their own session, so the DM's context never reaches them.
 - **Messages sent while the gateway was down aren't answered.** Updates recorded more than 60 seconds before the gateway started don't wake the agent. Set `dropPendingOnColdBoot: false` to answer them.
-- **Quiet by default.** A turn shows Working and then one answer, with no progress message. Set `streaming: { mode: "progress" }` for the progress card.
+- **Output mode starts unset.** Setup and upgrades preserve your choice. An explicit thread choice overrides the bot choice. Detailed shows a progress timeline and a separate answer. Friendly skips the tool timeline. With both choices unset, OpenClaw follows the configured streaming behavior (quiet by default). For example, `inline bots settings --bot-user-id 42 --output-mode friendly` selects Friendly for bot 42. Pass `default` to clear the selection, or add `--chat-id <id>` to change it for one chat.
 
 ## Install
 
