@@ -195,6 +195,23 @@ private struct Fixture {
     }
   }
 
+  /// Changes a stored row without publishing it, as a sync or history save does before its reload.
+  func setText(_ text: String, of messageID: Int64) async throws {
+    try await database.dbWriter.write { db in
+      try db.execute(
+        sql: "UPDATE message SET text = ? WHERE chatId = 1 AND messageId = ?",
+        arguments: [text, messageID]
+      )
+    }
+  }
+
+  @MainActor func waitForReload(of model: MessagesProgressiveViewModel) async throws {
+    for _ in 0 ..< 500 where model.hasPendingReload {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(!model.hasPendingReload)
+  }
+
   func latest(_ limit: Int) async throws -> [FullMessage] {
     try await database.reader.read { db in
       try FullMessage.queryRequest(currentUserId: 1)
@@ -215,5 +232,238 @@ private struct Fixture {
       initialState: .init(messages: rows, threadAnchor: .resolved(nil), loadedWindowMetadata: metadata),
       database: database, publisher: publisher, currentUserId: 1
     )
+  }
+}
+
+/// Window reads race with live traffic: an edit, a new message or a scroll anchor change that
+/// lands while a read is in flight (2026-11-10 message list review).
+@Suite("Window loads under live traffic")
+struct WindowLoadLiveTrafficTests {
+  @Test @MainActor
+  func editDuringTheUnreadWindowReadKeepsTheLanding() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let latest = try await fixture.latest(60)
+    let model = fixture.model(rows: latest)
+    defer { model.dispose() }
+
+    let load = Task { @MainActor in try await model.loadUnreadOpeningWindowAsync(boundary: 1_000) }
+    await Task.yield()
+    fixture.publisher.publisher.send(.update(.init(message: latest[59], animated: false, peer: .thread(id: 1))))
+
+    #expect(try await load.value)
+    #expect(ChatUnreadOpening.firstUnreadMessageId(in: model.messages, boundary: 1_000, of: model) == 1_001)
+  }
+
+  @Test @MainActor
+  func editDuringAnOlderPageReadKeepsThePage() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let latest = try await fixture.latest(60)
+    let model = fixture.model(rows: latest)
+    defer { model.dispose() }
+    #expect(model.canLoadOlderFromLocal)
+
+    let load = Task { @MainActor in await model.loadBatchAsync(at: .older) }
+    await Task.yield()
+    fixture.publisher.publisher.send(.update(.init(message: latest[59], animated: false, peer: .thread(id: 1))))
+
+    #expect(await load.value)
+    #expect(model.messages.count > 60)
+  }
+
+  @Test @MainActor
+  func scrollingDuringAnOlderPageReadKeepsThePage() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let latest = try await fixture.latest(60)
+    let model = fixture.model(rows: latest)
+    defer { model.dispose() }
+
+    model.setAtBottom(false)
+    model.setHistoryAnchor(2_350)
+    let load = Task { @MainActor in await model.loadBatchAsync(at: .older) }
+    await Task.yield()
+    // The first visible row changes as the list keeps scrolling.
+    model.setHistoryAnchor(2_349)
+
+    #expect(await load.value)
+    #expect(model.messages.count > 60)
+  }
+
+  /// Saving a fetched history page publishes a reload just before the list reads that page.
+  @Test @MainActor
+  func reloadDuringAnOlderPageReadKeepsThePage() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let model = fixture.model(rows: try await fixture.latest(60))
+    defer { model.dispose() }
+    model.setAtBottom(false)
+    model.setHistoryAnchor(2_350)
+
+    fixture.publisher.publisher.send(.reload(peer: .thread(id: 1), animated: false))
+    let loaded = await model.loadBatchAsync(at: .older)
+    while model.hasPendingReload {
+      try await Task.sleep(for: .milliseconds(10))
+    }
+
+    #expect(loaded)
+    #expect(model.messages.count > 60)
+    #expect(model.messages.contains { $0.message.messageId == 2_340 })
+  }
+
+  @Test @MainActor
+  func newMessageDuringTheReturnToLatestReadStillReturns() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let model = fixture.model(rows: try await fixture.latest(60))
+    defer { model.dispose() }
+    #expect(model.loadLocalWindowAroundMessage(messageId: 1_000, publish: false))
+    #expect(!model.historyCoverage.isAtCertifiedLiveEnd)
+
+    let live = try await fixture.addMessage(2_401)
+    let load = Task { @MainActor in try await model.loadLatestWindowAsync() }
+    await Task.yield()
+    fixture.publisher.publisher.send(.add(.init(messages: [live], peer: .thread(id: 1))))
+
+    #expect(try await load.value)
+    #expect(model.historyCoverage.isAtCertifiedLiveEnd)
+  }
+
+  /// The list reports the first visible row on every scroll tick, so a reload published while
+  /// scrolling (sync catch-up, a saved history page) must survive the anchor moving.
+  @Test @MainActor
+  func reloadWhileScrollingAtTheLiveEndStillLands() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let model = fixture.model(rows: try await fixture.latest(60))
+    defer { model.dispose() }
+    model.setAtBottom(false)
+    model.setHistoryAnchor(2_350)
+
+    try await fixture.setText("Edited", of: 2_360)
+    fixture.publisher.publisher.send(.reload(peer: .thread(id: 1), animated: false))
+    let generation = model.reloadGeneration
+    model.setHistoryAnchor(2_349)
+    #expect(model.hasPendingReload)
+    #expect(model.reloadGeneration == generation)
+
+    try await fixture.waitForReload(of: model)
+    #expect(model.messages.first { $0.message.messageId == 2_360 }?.message.text == "Edited")
+    #expect(model.messages.count == 60)
+  }
+
+  @Test @MainActor
+  func reloadInsideHistoryKeepsReadingAsTheAnchorMoves() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let model = fixture.model(rows: try await fixture.latest(60))
+    defer { model.dispose() }
+    #expect(model.loadLocalWindowAroundMessage(messageId: 1_000, publish: false))
+    #expect(!model.historyCoverage.isAtCertifiedLiveEnd)
+
+    try await fixture.setText("Edited", of: 1_010)
+    fixture.publisher.publisher.send(.reload(peer: .thread(id: 1), animated: false))
+    let generation = model.reloadGeneration
+    model.setHistoryAnchor(1_002)
+    model.setHistoryAnchor(1_004)
+    #expect(model.hasPendingReload)
+    #expect(model.reloadGeneration == generation)
+
+    try await fixture.waitForReload(of: model)
+    #expect(model.messages.first { $0.message.messageId == 1_010 }?.message.text == "Edited")
+    #expect(model.messages.contains { $0.message.messageId == 1_004 })
+  }
+
+  /// A reload scheduled at the bottom reads only the latest rows; once the user has scrolled
+  /// into older loaded rows it is read again for the window they are in.
+  @Test @MainActor
+  func reloadScheduledAtTheBottomIsReadAgainAfterScrollingUp() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let model = fixture.model(rows: try await fixture.latest(200))
+    defer { model.dispose() }
+    #expect(model.historyCoverage.isAtCertifiedLiveEnd)
+
+    try await fixture.setText("Edited", of: 2_250)
+    fixture.publisher.publisher.send(.reload(peer: .thread(id: 1), animated: false))
+    let generation = model.reloadGeneration
+    model.setAtBottom(false)
+    model.setHistoryAnchor(2_250)
+    #expect(model.hasPendingReload)
+    #expect(model.reloadGeneration != generation)
+
+    try await fixture.waitForReload(of: model)
+    #expect(model.messages.first { $0.message.messageId == 2_250 }?.message.text == "Edited")
+    #expect(model.messages.count == 200)
+  }
+
+  @Test @MainActor
+  func editOfALoadedRowUpdatesItInPlace() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let rows = try await fixture.latest(600)
+    let model = fixture.model(rows: rows)
+    defer { model.dispose() }
+    var changes: [MessagesProgressiveViewModel.MessagesChangeSet] = []
+    model.observe { changes.append($0) }
+    let edges = (model.oldestLoadedMessageId, model.newestLoadedMessageId, model.canLoadOlderFromLocal)
+
+    var edited = rows[300]
+    edited.message.text = "Edited"
+    fixture.publisher.publisher.send(.update(.init(message: edited, animated: false, peer: .thread(id: 1))))
+
+    #expect(model.messages[300].message.text == "Edited")
+    #expect(model.messagesByID[edited.id]?.message.text == "Edited")
+    #expect(model.messagesByID.count == model.messages.count)
+    #expect(model.messages.allSatisfy { model.messagesByID[$0.id] == $0 })
+    #expect(model.oldestLoadedMessageId == edges.0)
+    #expect(model.newestLoadedMessageId == edges.1)
+    #expect(model.canLoadOlderFromLocal == edges.2)
+    guard case let .updated(updated, indexSet, _) = changes.last else {
+      Issue.record("expected an update")
+      return
+    }
+    #expect(indexSet == [300])
+    #expect(updated.map(\.message.text) == ["Edited"])
+  }
+
+  @Test @MainActor
+  func confirmingASendMovesTheNewestEdge() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let model = fixture.model(rows: try await fixture.latest(60))
+    defer { model.dispose() }
+
+    let pending = try await fixture.database.dbWriter.write { db -> FullMessage in
+      var message = Message(
+        messageId: -5, randomId: 5, fromId: 1, date: Date(timeIntervalSince1970: 2_401), text: "Sending",
+        peerUserId: nil, peerThreadId: 1, chatId: 1, out: true, status: .sending
+      )
+      try message.saveMessage(db)
+      return try #require(try FullMessage.queryRequest(currentUserId: 1).filter(Column("messageId") == -5).fetchOne(db))
+    }
+    fixture.publisher.publisher.send(.add(.init(messages: [pending], peer: .thread(id: 1))))
+    #expect(model.messages.last?.id == pending.id)
+    #expect(model.newestLoadedMessageId == 2_400)
+
+    let confirmed = try await fixture.database.dbWriter.write { db -> FullMessage in
+      try db.execute(
+        sql: "UPDATE message SET messageId = 2401, status = ? WHERE globalId = ?",
+        arguments: [MessageSendingStatus.sent.rawValue, pending.id]
+      )
+      return try #require(try FullMessage.queryRequest(currentUserId: 1).filter(Column("messageId") == 2_401).fetchOne(db))
+    }
+    #expect(confirmed.id == pending.id)
+    fixture.publisher.publisher.send(.update(.init(message: confirmed, animated: false, peer: .thread(id: 1))))
+
+    #expect(model.messages.last?.message.messageId == 2_401)
+    #expect(model.messagesByID[pending.id]?.message.messageId == 2_401)
+    #expect(model.newestLoadedMessageId == 2_401)
+    #expect(model.historyCoverage.isAtCertifiedLiveEnd)
+  }
+
+  @Test @MainActor
+  func pinChangeUpdatesOnlyItsRows() async throws {
+    let fixture = try await Fixture(messageCount: 2_400)
+    let model = fixture.model(rows: try await fixture.latest(60))
+    defer { model.dispose() }
+
+    fixture.publisher.publisher.send(.pinnedMessages(.init(chatId: 1, messageIds: [2_390], pinned: true)))
+
+    #expect(model.messages.first { $0.message.messageId == 2_390 }?.message.pinned == true)
+    #expect(model.messages.filter { $0.message.pinned == true }.count == 1)
+    #expect(model.messagesByID.count == model.messages.count)
+    #expect(model.messages.allSatisfy { model.messagesByID[$0.id] == $0 })
   }
 }

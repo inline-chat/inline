@@ -199,9 +199,13 @@ public class MessagesProgressiveViewModel {
   public var messagesByID: [Int64: FullMessage] = [:]
   public var messages: [FullMessage] = [] {
     didSet {
+      // `replaceRow` updates its one entry itself.
+      guard !isReplacingRowInPlace else { return }
       messagesByID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
     }
   }
+
+  private var isReplacingRowInPlace = false
 
   // Used to ignore range when reloading if at bottom
   private var atBottom: Bool = true
@@ -302,9 +306,17 @@ public class MessagesProgressiveViewModel {
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
   private var loadedWindowMetadataGeneration: UInt64 = 0
-  private var reloadGeneration: UInt64 = 0
+  private(set) var reloadGeneration: UInt64 = 0
   private var reloadTask: Task<Void, Never>?
-  /// Replacing the whole window invalidates pages; ordinary row publications do not.
+  /// The window `reloadTask` reads.
+  private var reloadTaskMode: PublisherReloadMode?
+  /// Advances when a caller asks for a different window (latest, unread line, jump), so a
+  /// request that finishes after a newer one is dropped. Live publications never advance it:
+  /// they change rows, not which window was asked for.
+  private var windowRequestGeneration: UInt64 = 0
+  /// Advances when the rows are replaced by a different window (latest, unread line, jump), so
+  /// a page read for the earlier one is dropped. Edits, new messages, scroll anchors and
+  /// reloads of the same window leave it alone; `pageStillAdjoins` checks the edge instead.
   private var windowEpoch: UInt64 = 0
   private var pinChangesDuringReload: [MessagesPublisher.PinnedMessagesChange] = []
   /// Incremental publications may reach the visible window before a page's older database
@@ -325,7 +337,6 @@ public class MessagesProgressiveViewModel {
       }
     }
   }
-
 
   deinit {
     threadAnchorFetchTask?.cancel()
@@ -555,11 +566,13 @@ public class MessagesProgressiveViewModel {
   /// Keep history reloads in the continuous component containing the visible coordinate.
   public func setHistoryAnchor(_ messageID: Int64) {
     guard messageID > 0 else { return }
-    if historyAnchorID != messageID {
-      invalidatePendingReload()
-    }
     historyAnchorID = messageID
     atBottom = false
+    // Scrolling between rows leaves a reload reading. One that chose a different window from
+    // the earlier position (the latest rows, read before the user scrolled up) reads again.
+    if reloadTask != nil, let reloadTaskMode, !reloadTaskMode.readsSameWindow(as: reloadMode()) {
+      scheduleReload(animated: false)
+    }
   }
 
   /// Replaces the window with the one a chat opens on for its unread line
@@ -568,7 +581,8 @@ public class MessagesProgressiveViewModel {
   @discardableResult
   public func loadUnreadOpeningWindowAsync(boundary: Int64) async throws -> Bool {
     invalidatePendingReload()
-    let generation = reloadGeneration
+    windowRequestGeneration &+= 1
+    let request = windowRequestGeneration
     let revision = publisher.publicationRevision(for: peer)
     let (peer, chatId, currentUserId, limit) = (peer, chatId, currentUserId, initialLimit)
     let window = try await db.reader.read { db -> (messages: [FullMessage], metadata: LoadedWindowMetadata)? in
@@ -582,7 +596,7 @@ public class MessagesProgressiveViewModel {
       return (messages, try Self.loadedWindowMetadata(db, peer: peer, messages: messages))
     }
     try Task.checkCancellation()
-    guard generation == reloadGeneration, let window else { return false }
+    guard request == windowRequestGeneration, let window else { return false }
     loadedWindowMetadataGeneration &+= 1
     applyInitialState(.init(
       messages: window.messages,
@@ -593,23 +607,30 @@ public class MessagesProgressiveViewModel {
     historyAnchorID = historyCoverage.isAtCertifiedLiveEnd
       ? nil
       : ChatUnreadOpening.firstUnreadMessageId(in: messages, boundary: boundary, of: self)
-    // Updates published during the read reached the old window; read again to include them.
-    if revision != publisher.publicationRevision(for: peer) {
+    reloadAfterWindowReplacement(readAt: revision)
+    return true
+  }
+
+  /// Updates published while a replacement window was being read reached the old rows, and a
+  /// reload scheduled meanwhile chose its window from the old position. Read again from here.
+  private func reloadAfterWindowReplacement(readAt revision: UInt64) {
+    if reloadTask != nil || revision != publisher.publicationRevision(for: peer) {
       scheduleReload(animated: false)
     }
-    return true
   }
 
   @discardableResult
   public func loadLatestWindowAsync() async throws -> Bool {
     invalidatePendingReload()
-    let generation = reloadGeneration
+    windowRequestGeneration &+= 1
+    let request = windowRequestGeneration
+    let revision = publisher.publicationRevision(for: peer)
     let snapshot = try await Self.publisherReloadSnapshot(
       database: db, peer: peer, chatId: chatId, currentUserId: currentUserId, reversed: reversed,
       existingMessages: messages, mode: .replaceLatest(limit: initialLimit)
     )
     try Task.checkCancellation()
-    guard generation == reloadGeneration else { return false }
+    guard request == windowRequestGeneration else { return false }
     loadedWindowMetadataGeneration &+= 1
     applyInitialState(.init(
       messages: snapshot.messages,
@@ -618,6 +639,7 @@ public class MessagesProgressiveViewModel {
     ))
     messages = reapplyingPendingAcknowledgements(to: messages)
     historyAnchorID = nil
+    reloadAfterWindowReplacement(readAt: revision)
     return true
   }
 
@@ -773,10 +795,9 @@ public class MessagesProgressiveViewModel {
         if messageAdd.peer == peer {
           invalidatePendingReload()
           // Check if we have it to not add it again
-          let existingIds = Set(messages.map(\.id))
           let newMessages = reapplyingPendingAcknowledgements(
             to: messageAdd.messages.filter {
-              guard !existingIds.contains($0.id) else { return false }
+              guard messagesByID[$0.id] == nil else { return false }
               // Scrolling up does not detach a window that already ends at
               // the newest message; only a window with newer rows below it
               // leaves new messages to paging.
@@ -858,7 +879,13 @@ public class MessagesProgressiveViewModel {
 
         if messageUpdate.peer == peer {
           invalidatePendingReload()
-          guard let index = messages.firstIndex(where: { $0.id == messageUpdate.message.id }) else {
+          let id = messageUpdate.message.id
+          // Streaming edits land on the newest rows, so search from that end.
+          guard messagesByID[id] != nil,
+                let index = reversed
+                ? messages.firstIndex(where: { $0.id == id })
+                : messages.lastIndex(where: { $0.id == id })
+          else {
             // Confirming an optimistic message outside an anchored window can
             // create its first positive newer candidate. Refresh the edge even
             // though that message does not belong in the visible projection.
@@ -868,9 +895,21 @@ public class MessagesProgressiveViewModel {
             return nil
           }
 
-          messages[index] = reapplyingPendingAcknowledgements(to: messageUpdate.message)
-          updateRange() // ??
-          refreshLoadedWindowMetadata()
+          let message = reapplyingPendingAcknowledgements(to: messageUpdate.message)
+          let previous = messages[index]
+          if previous != message,
+             previous.message.messageId == message.message.messageId,
+             previous.message.date == message.message.date
+          {
+            // An edit leaves the date range and the window's edges as they were.
+            replaceRow(at: index, with: message)
+          } else {
+            // A send gaining its server ID or a new date moves them. A row published
+            // unchanged still refreshes them: it can follow a saved coverage change.
+            messages[index] = message
+            updateRange()
+            refreshLoadedWindowMetadata()
+          }
           return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index], animated: messageUpdate.animated)
         }
 
@@ -880,12 +919,13 @@ public class MessagesProgressiveViewModel {
         if reloadTask != nil {
           pinChangesDuringReload.append(change)
         }
-        var nextMessages = messages
         var updated: [FullMessage] = []
         var indices: [Int] = []
-        for index in nextMessages.indices {
-          if change.apply(to: &nextMessages[index]) {
-            updated.append(nextMessages[index])
+        for index in messages.indices {
+          var message = messages[index]
+          if change.apply(to: &message) {
+            replaceRow(at: index, with: message)
+            updated.append(message)
             indices.append(index)
           }
         }
@@ -894,7 +934,6 @@ public class MessagesProgressiveViewModel {
           updated.append(anchor)
         }
         guard !updated.isEmpty else { return nil }
-        messages = nextMessages
         return .updated(updated, indexSet: indices, animated: false)
 
       case let .acknowledgements(change):
@@ -962,6 +1001,17 @@ public class MessagesProgressiveViewModel {
     case replaceLatest(limit: Int)
     case preserveRange(minDate: Date, maxDate: Date, limit: Int)
     case mergeLatest(limit: Int)
+
+    /// Same kind of window. An `.around` read still fits after its anchor moves between rows.
+    func readsSameWindow(as other: Self) -> Bool {
+      switch (self, other) {
+        case (.around, .around), (.replaceLatest, .replaceLatest),
+             (.preserveRange, .preserveRange), (.mergeLatest, .mergeLatest):
+          true
+        default:
+          false
+      }
+    }
   }
 
   private struct PublisherReloadSnapshot: Sendable {
@@ -973,18 +1023,8 @@ public class MessagesProgressiveViewModel {
   /// must not. A generation fence prevents a delayed snapshot from overwriting
   /// a newer incremental publication, pagination result, or reload request.
   private func scheduleReload(animated: Bool?) {
-    // A scroll anchor cannot shrink a window that already reaches the cached
-    // tail. Only a window with newer cached rows reloads around its anchor.
-    let mode: PublisherReloadMode = if let historyAnchorID, !atBottom, hasNewerLocalMessages {
-      .around(anchorID: historyAnchorID, limit: max(initialLimit, messages.count))
-    } else if atBottom {
-      .replaceLatest(limit: initialLimit)
-    } else if !historyCoverage.isAtCertifiedLiveEnd {
-      .mergeLatest(limit: initialLimit)
-    } else {
-      .preserveRange(minDate: minDate, maxDate: maxDate, limit: messages.count)
-    }
-
+    let mode = reloadMode()
+    reloadTaskMode = mode
     reloadGeneration &+= 1
     let generation = reloadGeneration
     reloadTask?.cancel()
@@ -1034,6 +1074,21 @@ public class MessagesProgressiveViewModel {
         pinChangesDuringReload.removeAll()
         Log.shared.error("Failed to reload messages", error: error)
       }
+    }
+  }
+
+  /// The window a reload reads from the current position.
+  private func reloadMode() -> PublisherReloadMode {
+    // A scroll anchor cannot shrink a window that already reaches the cached
+    // tail. Only a window with newer cached rows reloads around its anchor.
+    if let historyAnchorID, !atBottom, hasNewerLocalMessages {
+      .around(anchorID: historyAnchorID, limit: max(initialLimit, messages.count))
+    } else if atBottom {
+      .replaceLatest(limit: initialLimit)
+    } else if !historyCoverage.isAtCertifiedLiveEnd {
+      .mergeLatest(limit: initialLimit)
+    } else {
+      .preserveRange(minDate: minDate, maxDate: maxDate, limit: messages.count)
     }
   }
 
@@ -1416,6 +1471,16 @@ public class MessagesProgressiveViewModel {
     return (minDate: lowestDate, maxDate: highestDate)
   }
 
+  /// Writes an edited row back in place. It keeps its identity, so `messagesByID` changes one
+  /// entry instead of being rebuilt for the whole window.
+  private func replaceRow(at index: Int, with message: FullMessage) {
+    assert(messages[index].id == message.id)
+    isReplacingRowInPlace = true
+    messages[index] = message
+    isReplacingRowInPlace = false
+    messagesByID[message.id] = message
+  }
+
   // TODO: make it O(1) instead of O(n)
   private func updateRange() {
     let range = Self.dateRange(for: messages)
@@ -1624,6 +1689,8 @@ public class MessagesProgressiveViewModel {
       // A reload queued before this jump (often by saving the target's history)
       // read the old window; finishing later, it would replace this one.
       invalidatePendingReload()
+      // A latest or unread window still being read was asked for before this jump.
+      windowRequestGeneration &+= 1
       windowEpoch &+= 1
       // A deferred history reload must preserve this window until scrolling
       // establishes that the user has returned to the live end of the chat.
