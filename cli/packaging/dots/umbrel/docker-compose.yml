@@ -1,0 +1,10 @@
+version: "3.7"
+
+services:
+  dots:
+    image: ghcr.io/inline-chat/inline-dots:0.7.22
+    restart: on-failure
+    stop_grace_period: 30s
+    volumes:
+      - ${APP_DATA_DIR}/data:/data
+    # Outbound only; no ports or app proxy.

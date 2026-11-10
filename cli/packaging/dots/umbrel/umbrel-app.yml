@@ -1,0 +1,28 @@
+# Draft Umbrel app definition. Not submitted: the bridge has no web interface
+# yet, and the Umbrel store expects one on `port`. Until a small status page
+# exists, set up from the app's terminal with `inline-dots setup`.
+manifestVersion: 1
+id: inline-dots
+category: social
+name: ChatGPT Dot for Inline
+version: "0.7.22"
+tagline: Talk to your ChatGPT Dot from Inline
+description: >-
+  Bridges your ChatGPT Dot into Inline as a personal bot. Messages, replies,
+  reactions, files, task progress, and confirmations go both ways. Uses the
+  ChatGPT login of the bundled Codex CLI; the token stays on this device.
+  This uses ChatGPT's private API and may stop working if OpenAI changes it.
+developer: Inline
+website: https://inline.chat
+dependencies: []
+repo: https://github.com/inline-chat/inline
+support: https://inline.chat/docs/chatgpt-dots
+port: 0
+gallery: []
+path: ""
+defaultUsername: ""
+defaultPassword: ""
+releaseNotes: >-
+  First release.
+submitter: Inline
+submission: ""
