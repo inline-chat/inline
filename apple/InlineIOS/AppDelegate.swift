@@ -411,6 +411,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
       completionHandler()
       return
     }
+    // A notification opens at the unread line or the latest messages, as Telegram does, never
+    // far back at a saved place. Cleared before navigation starts the chat's window read.
+    ChatReadingPlaceStore.shared.clear(for: peerId)
     if waitsForSceneActivation {
       let accepted = sceneRouterRegistry.navigate(
         .externalChat(peer: peerId, contextSpaceID: nil, messageID: messageID),
