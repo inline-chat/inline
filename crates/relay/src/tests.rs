@@ -9,6 +9,12 @@ const OWNER: i64 = 100;
 
 #[derive(Default)]
 struct FakeInline {
+    fail_next_post: Mutex<bool>,
+    fail_next_file_post: Mutex<bool>,
+    fail_next_edit: Mutex<bool>,
+    fail_next_reaction: Mutex<bool>,
+    fail_next_button_post: Mutex<bool>,
+    fail_post_count: Mutex<u32>,
     next_id: Mutex<i64>,
     posts: Mutex<Vec<(i64, InlinePost)>>,
     edits: Mutex<Vec<(i64, String, usize)>>,
@@ -34,6 +40,21 @@ impl FakeInline {
 impl InlineSide for FakeInline {
     fn post<'a>(&'a self, post: &'a InlinePost) -> BoxFuture<'a, InlineResult<i64>> {
         Box::pin(async move {
+            {
+                let mut failures = self.fail_post_count.lock().unwrap();
+                if *failures > 0 {
+                    *failures -= 1;
+                    return Err(InlineError("bad message".into()));
+                }
+            }
+            if (!post.buttons.is_empty()
+                && std::mem::take(&mut *self.fail_next_button_post.lock().unwrap()))
+                || std::mem::take(&mut *self.fail_next_post.lock().unwrap())
+                || (post.file.is_some()
+                    && std::mem::take(&mut *self.fail_next_file_post.lock().unwrap()))
+            {
+                return Err(InlineError("temporary Inline outage".into()));
+            }
             let mut next = self.next_id.lock().unwrap();
             *next += 1;
             let id = 1000 + *next;
@@ -48,6 +69,9 @@ impl InlineSide for FakeInline {
         buttons: Option<&'a [Vec<Button>]>,
     ) -> BoxFuture<'a, InlineResult<()>> {
         Box::pin(async move {
+            if std::mem::take(&mut *self.fail_next_edit.lock().unwrap()) {
+                return Err(InlineError("temporary Inline outage".into()));
+            }
             self.edits.lock().unwrap().push((
                 message_id,
                 text.to_owned(),
@@ -63,6 +87,9 @@ impl InlineSide for FakeInline {
         remove: bool,
     ) -> BoxFuture<'a, InlineResult<()>> {
         Box::pin(async move {
+            if std::mem::take(&mut *self.fail_next_reaction.lock().unwrap()) {
+                return Err(InlineError("temporary Inline outage".into()));
+            }
             self.reactions
                 .lock()
                 .unwrap()
@@ -125,6 +152,7 @@ impl InlineSide for FakeInline {
 
 #[derive(Default)]
 struct FakeConnector {
+    run_messages: Mutex<Vec<RemoteMessage>>,
     sends: Mutex<Vec<OutboundMessage>>,
     send_results: Mutex<VecDeque<ConnectorResult<String>>>,
     find_results: Mutex<VecDeque<ConnectorResult<Option<String>>>>,
@@ -150,7 +178,21 @@ impl Connector for FakeConnector {
         _checkpoint: Option<String>,
         _events: tokio::sync::mpsc::Sender<ConnectorEvent>,
     ) -> BoxFuture<'a, ConnectorResult<()>> {
-        Box::pin(async { Ok(()) })
+        Box::pin(async move {
+            let messages = self.run_messages.lock().unwrap().clone();
+            _events
+                .send(ConnectorEvent::Health(ConnectorHealth::Ready))
+                .await
+                .unwrap();
+            for message in messages {
+                _events
+                    .send(ConnectorEvent::Message(message))
+                    .await
+                    .unwrap();
+            }
+            _events.closed().await;
+            Ok(())
+        })
     }
     fn send<'a>(&'a self, message: &'a OutboundMessage) -> BoxFuture<'a, ConnectorResult<String>> {
         Box::pin(async move {
@@ -1066,4 +1108,509 @@ async fn task_transcript_entries_post_once_under_the_card() {
     assert_eq!(posts[1].1.text, "_Task prompt:_\nFind flights");
     assert_eq!(posts[2].1.text, "Here are three options.");
     assert!(!posts[2].1.silent);
+}
+
+#[tokio::test(start_paused = true)]
+async fn review_remote_worker_survives_temporary_inline_outage() {
+    let h = harness();
+    *h.inline.fail_next_post.lock().unwrap() = true;
+    h.connector
+        .run_messages
+        .lock()
+        .unwrap()
+        .push(agent("m1", "reply", "r1"));
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let relay = Arc::new(h.relay);
+    let worker = tokio::spawn(async move { relay.run_remote(stopped).await });
+    tokio::task::yield_now().await;
+    assert!(h.inline.posts().is_empty());
+    tokio::time::advance(std::time::Duration::from_secs(4)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(h.inline.texts(), vec!["reply"]);
+    assert!(!worker.is_finished());
+    stop.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn review_replay_finishes_file_after_failed_inline_upload() {
+    let h = harness();
+    let mut message = agent("m1", "Here is the report", "r1");
+    message.files.push(RemoteFile {
+        key: "a".into(),
+        locator: "file-1".into(),
+        name: Some("report.png".into()),
+    });
+    *h.inline.fail_next_file_post.lock().unwrap() = true;
+    assert!(
+        h.relay
+            .handle_remote(ConnectorEvent::Message(message.clone()))
+            .await
+            .is_err()
+    );
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message))
+        .await
+        .unwrap();
+    assert_eq!(
+        h.inline
+            .posts()
+            .iter()
+            .filter(|(_, post)| post.file.is_some())
+            .count(),
+        1,
+        "replaying the snapshot should finish its missing file"
+    );
+}
+
+#[tokio::test]
+async fn review_failed_edit_is_retried_on_next_snapshot() {
+    let h = harness();
+    h.relay
+        .handle_remote(ConnectorEvent::Message(agent("m1", "original", "r1")))
+        .await
+        .unwrap();
+    let edited = agent("m1", "corrected", "r2");
+    *h.inline.fail_next_edit.lock().unwrap() = true;
+    assert!(
+        h.relay
+            .handle_remote(ConnectorEvent::Message(edited.clone()))
+            .await
+            .is_err()
+    );
+    h.relay
+        .handle_remote(ConnectorEvent::Message(edited))
+        .await
+        .unwrap();
+    assert_eq!(
+        h.inline.edits.lock().unwrap().len(),
+        1,
+        "failed edit should be retried before marking revision applied"
+    );
+}
+
+#[tokio::test]
+async fn review_owner_file_from_chatgpt_is_mirrored() {
+    let h = harness();
+    let mut message = agent("o1", "", "r1");
+    message.speaker = Speaker::Owner;
+    message.files.push(RemoteFile {
+        key: "a".into(),
+        locator: "file-1".into(),
+        name: Some("report.png".into()),
+    });
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message))
+        .await
+        .unwrap();
+    assert_eq!(
+        h.inline.posts().len(),
+        1,
+        "ChatGPT owner attachment should be mirrored when /mirror is on"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn poison_message_does_not_block_following_events() {
+    let h = harness();
+    *h.inline.fail_post_count.lock().unwrap() = 5;
+    h.connector
+        .run_messages
+        .lock()
+        .unwrap()
+        .extend([agent("bad", "bad", "r1"), agent("good", "good", "r1")]);
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let relay = Arc::new(h.relay);
+    let worker = tokio::spawn(async move { relay.run_remote(stopped).await });
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+        tokio::time::advance(std::time::Duration::from_secs(60)).await;
+    }
+    assert_eq!(h.inline.texts(), vec!["good"]);
+    assert_eq!(h.store.kv_prefix("apply_skipped:").unwrap().len(), 1);
+    stop.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn text_added_after_file_only_message_is_posted_once() {
+    let h = harness();
+    let mut message = agent("m1", "", "r1");
+    message.files.push(RemoteFile {
+        key: "a".into(),
+        locator: "file-1".into(),
+        name: Some("report.png".into()),
+    });
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message.clone()))
+        .await
+        .unwrap();
+    message.text = "Here is the caption".into();
+    message.revision = "r2".into();
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message.clone()))
+        .await
+        .unwrap();
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message))
+        .await
+        .unwrap();
+    assert_eq!(h.inline.posts().len(), 2);
+    assert_eq!(h.inline.texts()[1], "Here is the caption");
+}
+
+#[tokio::test]
+async fn failed_confirmation_post_is_completed_by_replay() {
+    let h = harness();
+    let mut message = agent("m1", "Approve this", "r1");
+    message.confirmation = Some(confirmation(ConfirmationStatus::Pending));
+    *h.inline.fail_next_button_post.lock().unwrap() = true;
+    assert!(
+        h.relay
+            .handle_remote(ConnectorEvent::Message(message.clone()))
+            .await
+            .is_err()
+    );
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message))
+        .await
+        .unwrap();
+    assert_eq!(h.inline.posts().len(), 2);
+    assert_eq!(h.inline.posts()[1].1.buttons[0].len(), 2);
+}
+
+#[tokio::test]
+async fn failed_reaction_replacement_is_completed_by_replay() {
+    let h = harness();
+    let mut message = agent("m1", "hi", "r1");
+    message.agent_reaction = Some("👍".into());
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message.clone()))
+        .await
+        .unwrap();
+    *h.inline.fail_next_reaction.lock().unwrap() = true;
+    message.agent_reaction = Some("❤️".into());
+    assert!(
+        h.relay
+            .handle_remote(ConnectorEvent::Message(message.clone()))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        h.store
+            .link("m1", part::TEXT)
+            .unwrap()
+            .unwrap()
+            .agent_reaction
+            .as_deref(),
+        Some("👍")
+    );
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message))
+        .await
+        .unwrap();
+    assert_eq!(
+        h.inline
+            .reactions
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, e, r)| (e.as_str(), *r))
+            .collect::<Vec<_>>(),
+        vec![("👍", false), ("👍", true), ("❤️", false)]
+    );
+}
+
+#[tokio::test]
+async fn failed_confirmation_close_is_retried_without_answering_twice() {
+    let h = harness();
+    let mut message = agent("m1", "", "r1");
+    message.confirmation = Some(confirmation(ConfirmationStatus::Pending));
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message.clone()))
+        .await
+        .unwrap();
+    let (id, card) = &h.inline.posts()[0];
+    let click = InlineEvent::Action {
+        interaction_id: 1,
+        message_id: *id,
+        actor_id: OWNER,
+        data: card.buttons[0][0].data.clone(),
+    };
+    *h.inline.fail_next_edit.lock().unwrap() = true;
+    assert!(h.relay.handle_inline(click.clone()).await.is_err());
+    h.relay.handle_inline(click).await.unwrap();
+    assert_eq!(h.connector.answers.lock().unwrap().len(), 1);
+    assert_eq!(
+        h.store.confirmation("def-1").unwrap().unwrap().state,
+        ConfirmationState::Done
+    );
+    assert!(
+        h.inline
+            .edits
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .1
+            .contains("Approved")
+    );
+}
+
+#[tokio::test]
+async fn remote_confirmation_close_and_task_edit_retry_after_failure() {
+    let h = harness();
+    let mut message = agent("m1", "", "r1");
+    message.confirmation = Some(confirmation(ConfirmationStatus::Pending));
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message.clone()))
+        .await
+        .unwrap();
+    message.confirmation = Some(confirmation(ConfirmationStatus::Closed("accepted".into())));
+    message.revision = "r2".into();
+    *h.inline.fail_next_edit.lock().unwrap() = true;
+    assert!(
+        h.relay
+            .handle_remote(ConnectorEvent::Message(message.clone()))
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        h.store.confirmation("def-1").unwrap().unwrap().state,
+        ConfirmationState::Open
+    );
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message))
+        .await
+        .unwrap();
+    let task = |label: &str| {
+        ConnectorEvent::Task(TaskUpdate {
+            id: "t1".into(),
+            title: None,
+            label: label.into(),
+            terminal: false,
+            entries: Vec::new(),
+        })
+    };
+    h.relay.handle_remote(task("Working")).await.unwrap();
+    *h.inline.fail_next_edit.lock().unwrap() = true;
+    assert!(h.relay.handle_remote(task("Completed")).await.is_err());
+    h.relay.handle_remote(task("Completed")).await.unwrap();
+    assert!(
+        h.inline
+            .edits
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .1
+            .contains("Completed")
+    );
+}
+
+#[tokio::test]
+async fn task_replies_resolve_to_real_message_after_restart_and_reactions_are_ignored() {
+    let h = harness();
+    let mut message = agent("m1", "On it", "r1");
+    message.task_id = Some("t1".into());
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message))
+        .await
+        .unwrap();
+    // Construct a fresh relay using the persisted store, before the card is posted.
+    let relay = Relay::new(
+        h.connector.clone(),
+        h.inline.clone(),
+        h.store.clone(),
+        RelayConfig {
+            owner_user_id: OWNER,
+            agent_name: "Dot".into(),
+            network_name: "ChatGPT".into(),
+            request_salt: "bot-1".into(),
+            mirror_owner_default: true,
+        },
+    );
+    relay
+        .handle_remote(ConnectorEvent::Task(TaskUpdate {
+            id: "t1".into(),
+            title: None,
+            label: "Completed".into(),
+            terminal: true,
+            entries: vec![TaskEntry {
+                id: "turn:answer".into(),
+                speaker: Speaker::Agent,
+                text: "Answer".into(),
+            }],
+        }))
+        .await
+        .unwrap();
+    let posts = h.inline.posts();
+    assert_eq!(posts[1].1.reply_to, Some(posts[0].0));
+    for (n, (target, _)) in posts[1..].iter().enumerate() {
+        relay
+            .handle_inline(InlineEvent::Message {
+                message_id: 50 + n as i64,
+                sender_id: OWNER,
+                text: "follow-up".into(),
+                reply_to: Some(*target),
+                media: None,
+                edited: false,
+            })
+            .await
+            .unwrap();
+        relay
+            .handle_inline(InlineEvent::Reaction {
+                message_id: *target,
+                user_id: OWNER,
+                emoji: "👍".into(),
+                removed: false,
+            })
+            .await
+            .unwrap();
+    }
+    assert!(
+        h.connector
+            .sends
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|m| m.reply_to.as_deref() == Some("m1"))
+    );
+    assert_eq!(h.connector.sends.lock().unwrap().len(), 2);
+    assert!(h.connector.reactions.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn queued_edits_replace_the_text_and_notify_once() {
+    let h = harness();
+    h.connector
+        .send_results
+        .lock()
+        .unwrap()
+        .push_back(Err(ConnectorError::new(FailureKind::Transient, "offline")));
+    h.relay
+        .handle_inline(owner_text(9, "original"))
+        .await
+        .unwrap();
+    for text in ["edited", "final"] {
+        h.relay
+            .handle_inline(InlineEvent::Message {
+                message_id: 9,
+                sender_id: OWNER,
+                text: text.into(),
+                reply_to: None,
+                media: None,
+                edited: true,
+            })
+            .await
+            .unwrap();
+    }
+    assert_eq!(h.store.pending_by_inline(9).unwrap().unwrap().text, "final");
+    h.store
+        .defer_send(&correlation_id("bot-1", 9), 1, 0)
+        .unwrap();
+    h.relay.retry_pending().await.unwrap();
+    assert_eq!(h.connector.sends.lock().unwrap()[1].text, "final");
+    assert_eq!(
+        h.inline
+            .texts()
+            .iter()
+            .filter(|t| t.contains("Updated the queued"))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn recovered_send_reports_delay_once_even_after_first_attempt() {
+    let h = harness();
+    let request = correlation_id("bot-1", 9);
+    h.store
+        .reserve_send(&PendingSend {
+            request_id: request.clone(),
+            inline_id: 9,
+            reply_to: None,
+            text: "hi".into(),
+            media: None,
+            attempts: 0,
+            next_attempt_at: 0,
+        })
+        .unwrap();
+    for n in 0..2 {
+        h.connector
+            .find_results
+            .lock()
+            .unwrap()
+            .push_back(Err(ConnectorError::new(FailureKind::Transient, "offline")));
+        h.store.defer_send(&request, n, 0).unwrap();
+        h.relay.retry_pending().await.unwrap();
+    }
+    assert_eq!(h.inline.texts().len(), 1);
+    assert!(h.inline.texts()[0].starts_with("Not delivered yet"));
+}
+
+#[tokio::test]
+async fn queued_edit_after_an_uncertain_send_reports_the_version_that_landed() {
+    let h = harness();
+    h.connector
+        .send_results
+        .lock()
+        .unwrap()
+        .push_back(Err(ConnectorError::new(
+            FailureKind::Uncertain,
+            "lost response",
+        )));
+    h.relay
+        .handle_inline(owner_text(9, "original"))
+        .await
+        .unwrap();
+    h.relay
+        .handle_inline(InlineEvent::Message {
+            message_id: 9,
+            sender_id: OWNER,
+            text: "edited".into(),
+            reply_to: None,
+            media: None,
+            edited: true,
+        })
+        .await
+        .unwrap();
+    h.connector
+        .find_results
+        .lock()
+        .unwrap()
+        .push_back(Ok(Some("landed".into())));
+    h.store
+        .defer_send(&correlation_id("bot-1", 9), 1, 0)
+        .unwrap();
+    h.relay.retry_pending().await.unwrap();
+    assert_eq!(h.connector.sends.lock().unwrap().len(), 1);
+    assert!(h.store.pending_sends().unwrap().is_empty());
+    assert!(h.inline.texts().last().unwrap().contains("earlier version"));
+}
+
+#[tokio::test]
+async fn removed_caption_is_reflected_without_removing_its_file() {
+    let h = harness();
+    let mut message = agent("m1", "caption", "r1");
+    message.files.push(RemoteFile {
+        key: "a".into(),
+        locator: "file-1".into(),
+        name: Some("report.png".into()),
+    });
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message.clone()))
+        .await
+        .unwrap();
+    message.text.clear();
+    message.revision = "r2".into();
+    h.relay
+        .handle_remote(ConnectorEvent::Message(message))
+        .await
+        .unwrap();
+    assert_eq!(h.inline.posts().len(), 2);
+    assert_eq!(
+        h.inline.edits.lock().unwrap()[0].1,
+        "_Text removed in ChatGPT._"
+    );
 }

@@ -29,7 +29,7 @@ impl From<std::io::Error> for StoreError {
 /// Result alias.
 pub type StoreResult<T> = Result<T, StoreError>;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// Which piece of a remote message an Inline message mirrors.
 pub mod part {
@@ -80,6 +80,9 @@ pub struct Link {
     pub revision: Option<String>,
     /// Agent reaction currently mirrored on `inline_id`.
     pub agent_reaction: Option<String>,
+    /// Hash of the text last applied to `inline_id` (or a marker such as a
+    /// posted deletion notice).
+    pub rendered: Option<String>,
 }
 
 /// A message sent from Inline whose remote delivery is not yet confirmed.
@@ -232,6 +235,16 @@ impl RelayStore {
                  COMMIT;",
             )?;
         }
+        if version < 2 {
+            // v2: hash of the text last applied to the Inline message, so
+            // replays fix what is missing instead of trusting the revision.
+            connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 ALTER TABLE links ADD COLUMN rendered TEXT;
+                 PRAGMA user_version = 2;
+                 COMMIT;",
+            )?;
+        }
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -285,7 +298,7 @@ impl RelayStore {
         Ok(self
             .lock()
             .query_row(
-                "SELECT remote_id, part, inline_id, origin, revision, agent_reaction
+                "SELECT remote_id, part, inline_id, origin, revision, agent_reaction, rendered
                  FROM links WHERE remote_id = ?1 AND part = ?2",
                 params![remote_id, part],
                 row_to_link,
@@ -297,7 +310,7 @@ impl RelayStore {
     pub fn links(&self, remote_id: &str) -> StoreResult<Vec<Link>> {
         let connection = self.lock();
         let mut statement = connection.prepare(
-            "SELECT remote_id, part, inline_id, origin, revision, agent_reaction
+            "SELECT remote_id, part, inline_id, origin, revision, agent_reaction, rendered
              FROM links WHERE remote_id = ?1 ORDER BY part",
         )?;
         let rows = statement.query_map([remote_id], row_to_link)?;
@@ -307,18 +320,20 @@ impl RelayStore {
     /// Inserts or replaces a link.
     pub fn put_link(&self, link: &Link) -> StoreResult<()> {
         self.lock().execute(
-            "INSERT INTO links (remote_id, part, inline_id, origin, revision, agent_reaction)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO links (remote_id, part, inline_id, origin, revision, agent_reaction, rendered)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(remote_id, part) DO UPDATE SET
                  inline_id = excluded.inline_id, origin = excluded.origin,
-                 revision = excluded.revision, agent_reaction = excluded.agent_reaction",
+                 revision = excluded.revision, agent_reaction = excluded.agent_reaction,
+                 rendered = excluded.rendered",
             params![
                 link.remote_id,
                 link.part,
                 link.inline_id,
                 link.origin.as_str(),
                 link.revision,
-                link.agent_reaction
+                link.agent_reaction,
+                link.rendered
             ],
         )?;
         Ok(())
@@ -472,6 +487,41 @@ impl RelayStore {
             .optional()?)
     }
 
+    /// The task whose card is an Inline message.
+    pub fn task_by_inline(&self, inline_id: i64) -> StoreResult<Option<String>> {
+        Ok(self
+            .lock()
+            .query_row(
+                "SELECT task_id FROM tasks WHERE inline_id = ?1",
+                [inline_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Reservation for an Inline message, if any.
+    pub fn pending_by_inline(&self, inline_id: i64) -> StoreResult<Option<PendingSend>> {
+        Ok(self
+            .lock()
+            .query_row(
+                "SELECT request_id, inline_id, reply_to, text, media, attempts, next_attempt_at
+                 FROM pending_sends WHERE inline_id = ?1",
+                [inline_id],
+                row_to_pending,
+            )
+            .optional()?)
+    }
+
+    /// Replaces the text of a reserved send (the owner edited it before it
+    /// was delivered).
+    pub fn update_pending_text(&self, request_id: &str, text: &str) -> StoreResult<()> {
+        self.lock().execute(
+            "UPDATE pending_sends SET text = ?2 WHERE request_id = ?1",
+            params![request_id, text],
+        )?;
+        Ok(())
+    }
+
     /// Records a task card's rendering.
     pub fn put_task(&self, task_id: &str, inline_id: i64, rendered: &str) -> StoreResult<()> {
         self.lock().execute(
@@ -547,6 +597,7 @@ fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<Link> {
         origin: Origin::parse(&row.get::<_, String>(3)?),
         revision: row.get(4)?,
         agent_reaction: row.get(5)?,
+        rendered: row.get(6)?,
     })
 }
 
@@ -636,5 +687,52 @@ mod tests {
         assert_eq!(store.kv_get("checkpoint").unwrap().as_deref(), Some("c1"));
         assert!(store.inbound_handled(7).unwrap());
         assert!(!store.mark_inbound(7, "sent", 2).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    #[test]
+    fn v1_store_migrates_to_v2_keeping_links() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("relay.sqlite");
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE links (remote_id TEXT NOT NULL, part TEXT NOT NULL, inline_id INTEGER,
+                         origin TEXT NOT NULL, revision TEXT, agent_reaction TEXT, PRIMARY KEY (remote_id, part));
+                     CREATE TABLE pending_sends (request_id TEXT PRIMARY KEY, inline_id INTEGER NOT NULL UNIQUE,
+                         reply_to TEXT, text TEXT NOT NULL, media TEXT, attempts INTEGER NOT NULL DEFAULT 0,
+                         next_attempt_at INTEGER NOT NULL);
+                     CREATE TABLE inbound (inline_id INTEGER PRIMARY KEY, outcome TEXT NOT NULL, at INTEGER NOT NULL);
+                     CREATE TABLE tasks (task_id TEXT PRIMARY KEY, inline_id INTEGER NOT NULL, rendered TEXT NOT NULL);
+                     CREATE TABLE confirmations (key TEXT PRIMARY KEY, remote_id TEXT NOT NULL, inline_id INTEGER NOT NULL,
+                         state TEXT NOT NULL, body TEXT NOT NULL);
+                     CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                     INSERT INTO links VALUES ('m1', 'text', 7, 'remote', 'r1', NULL);
+                     PRAGMA user_version = 1;",
+                )
+                .unwrap();
+        }
+        let store = RelayStore::open(&path).unwrap();
+        let mut link = store.link("m1", part::TEXT).unwrap().unwrap();
+        assert_eq!(link.inline_id, Some(7));
+        assert_eq!(link.rendered, None);
+        link.rendered = Some("applied hash".into());
+        store.put_link(&link).unwrap();
+        drop(store);
+        let reopened = RelayStore::open(&path).unwrap();
+        assert_eq!(
+            reopened
+                .link("m1", part::TEXT)
+                .unwrap()
+                .unwrap()
+                .rendered
+                .as_deref(),
+            Some("applied hash")
+        );
     }
 }
