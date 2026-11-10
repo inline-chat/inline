@@ -804,15 +804,16 @@ async fn task_card_is_posted_once_and_edited_in_place() {
     let posts = h.inline.posts();
     assert_eq!(posts.len(), 2);
     assert_eq!(posts[1].1.reply_to, Some(anchor));
-    assert_eq!(posts[1].1.text, "🗂 **Book flights**\nWorking…");
+    assert_eq!(posts[1].1.text, "🗂 **Task**\nStarting…", "posted with its message");
     let edits = h.inline.edits.lock().unwrap().clone();
+    let card = posts[1].0;
     assert_eq!(
         edits,
-        vec![(
-            posts[1].0,
-            "🗂 **Book flights**\nCompleted".to_owned(),
-            usize::MAX
-        )]
+        vec![
+            (card, "🗂 **Book flights**\nWorking…".to_owned(), usize::MAX),
+            (card, "🗂 **Book flights**\nCompleted".to_owned(), usize::MAX),
+        ],
+        "unchanged updates do not edit again"
     );
 }
 
