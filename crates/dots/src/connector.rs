@@ -162,9 +162,32 @@ impl DotsConnector {
 
     /// Finds and verifies the primary Dot and its DM room.
     pub async fn discover(&self) -> Result<DotRoom, DotsError> {
-        let room = discover(&self.client).await?;
-        *self.room.lock().await = Some(room.clone());
-        Ok(room)
+        self.discover_known(None).await
+    }
+
+    /// Like [`Self::discover`], with the room this bridge linked before.
+    /// ChatGPT answers the same bare 404 for "no Dot" and for "Dots not
+    /// served here" (a region or VPN location without Dots). A linked room
+    /// that also 404s means the second, so messages wait instead of failing.
+    async fn discover_known(&self, known_room: Option<&str>) -> Result<DotRoom, DotsError> {
+        let cached = self.room.lock().await.as_ref().map(|room| room.room_id.clone());
+        match discover(&self.client).await {
+            Ok(room) => {
+                *self.room.lock().await = Some(room.clone());
+                Ok(room)
+            }
+            Err(DotsError::NoPrimaryDot) => {
+                let Some(room_id) = cached.or_else(|| known_room.map(str::to_owned)) else {
+                    return Err(DotsError::NoPrimaryDot);
+                };
+                match self.client.room(&room_id).await {
+                    Err(error) if is_bare_not_found(&error) => Err(DotsError::Unavailable),
+                    Err(error) if error.is_transient() => Err(error),
+                    _ => Err(DotsError::NoPrimaryDot),
+                }
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn current_room(&self) -> ConnectorResult<DotRoom> {
@@ -181,8 +204,12 @@ impl DotsConnector {
         checkpoint: Option<String>,
         events: mpsc::Sender<ConnectorEvent>,
     ) -> ConnectorResult<()> {
+        let linked_room = checkpoint
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<SyncState>(raw).ok())
+            .map(|state| state.room_id);
         let room = self
-            .discover()
+            .discover_known(linked_room.as_deref())
             .await
             .map_err(|error| map_error(error, false))?;
         let mut state = checkpoint
@@ -930,6 +957,12 @@ fn confirmation(raw: &Value) -> Confirmation {
     }
 }
 
+/// The framework's default 404 (`{"detail": "Not Found"}`), which ChatGPT
+/// returns for every Dots route where Dots is not offered.
+fn is_bare_not_found(error: &DotsError) -> bool {
+    matches!(error, DotsError::Http { status: 404, detail: Some(detail), .. } if detail == "Not Found")
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -937,6 +970,11 @@ fn hex(bytes: &[u8]) -> String {
 /// Maps client errors onto the relay's delivery semantics. `sending` marks
 /// a message POST, where a timeout or 5xx leaves delivery uncertain.
 pub fn map_error(error: DotsError, sending: bool) -> ConnectorError {
+    // A bare 404 on a room this bridge already uses is ChatGPT not serving
+    // Dots here, not a rejected message: keep it queued.
+    if matches!(error, DotsError::Unavailable) || is_bare_not_found(&error) {
+        return ConnectorError::new(FailureKind::Unavailable, DotsError::Unavailable.to_string());
+    }
     let kind = if error.needs_login() || matches!(error, DotsError::NoPrimaryDot) {
         FailureKind::NeedsLogin
     } else {
@@ -1444,6 +1482,16 @@ mod tests {
             detail: None,
         };
         assert_eq!(map_error(http(400), true).kind, FailureKind::Rejected);
+        // No detail: a real "not found" answer, still a rejection.
+        assert_eq!(map_error(http(404), true).kind, FailureKind::Rejected);
+        let bare_404 = DotsError::Http {
+            status: 404,
+            endpoint: "x",
+            detail: Some("Not Found".into()),
+        };
+        let mapped = map_error(bare_404, true);
+        assert_eq!(mapped.kind, FailureKind::Unavailable);
+        assert!(mapped.message.contains("region or VPN"));
         assert_eq!(map_error(http(502), true).kind, FailureKind::Uncertain);
         assert_eq!(map_error(http(401), true).kind, FailureKind::NeedsLogin);
         assert_eq!(

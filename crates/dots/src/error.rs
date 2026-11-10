@@ -46,8 +46,17 @@ pub enum DotsError {
         retry_after: Option<Duration>,
     },
     /// The account has no primary Dot.
-    #[error("this ChatGPT account has no Dot yet; create one in the ChatGPT app first")]
+    #[error(
+        "ChatGPT has no Dot for this account here; create one in the ChatGPT app, or, if you already have one, Dots may not be available in your current region or VPN location"
+    )]
     NoPrimaryDot,
+    /// ChatGPT is not serving Dots to this connection: the known room and
+    /// the Dot endpoints answer a bare 404 while the rest of ChatGPT works.
+    /// Seen when the bridge's network exits in a region without Dots.
+    #[error(
+        "ChatGPT isn't returning your Dot from this location; Dots may not be available in your current region or VPN location, or the Dot was removed"
+    )]
+    Unavailable,
     /// A response did not match the expected shape or identity checks.
     #[error("unexpected ChatGPT response: {0}")]
     Protocol(String),

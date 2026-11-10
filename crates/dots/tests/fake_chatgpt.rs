@@ -82,6 +82,9 @@ struct FakeState {
     avatar_fetches: usize,
     list_calls: usize,
     task_calls: usize,
+    /// Answer every Dots route with the bare 404 ChatGPT gives in regions
+    /// without Dots.
+    dots_unavailable: bool,
 }
 
 type Shared = Arc<Mutex<FakeState>>;
@@ -143,6 +146,13 @@ fn check(state: &Shared, headers: &HeaderMap) -> Result<(), Response> {
             StatusCode::FORBIDDEN,
             [("cf-mitigated", "challenge"), ("content-type", "text/html")],
             "<html>challenge</html>",
+        )
+            .into_response());
+    }
+    if state.dots_unavailable {
+        return Err((
+            StatusCode::NOT_FOUND,
+            axum::Json(json!({"detail": "Not Found"})),
         )
             .into_response());
     }
@@ -1468,4 +1478,35 @@ async fn realtime_task_association_fetches_older_message_and_tracks_task() {
     );
     stop.send(true).unwrap();
     worker.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn dots_not_offered_here_waits_instead_of_failing() {
+    let (fake, base) = start().await;
+    let linked = connector(&base);
+    linked.discover().await.unwrap();
+    fake.lock().unwrap().dots_unavailable = true;
+
+    // A first setup can't tell "no Dot" from "not offered here"; it says both.
+    let error = connector(&base).discover().await.unwrap_err();
+    assert!(matches!(error, DotsError::NoPrimaryDot));
+    assert!(error.to_string().contains("region or VPN"));
+
+    // A bridge that linked this room before knows the Dot existed.
+    let error = linked.discover().await.unwrap_err();
+    assert!(matches!(error, DotsError::Unavailable), "{error}");
+    let send = linked
+        .send(&OutboundMessage {
+            request_id: "00000000-0000-4000-8000-000000000042".into(),
+            text: "[inline test] region".into(),
+            file: None,
+            reply_to: None,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(send.kind, FailureKind::Unavailable);
+    assert!(send.message.contains("region or VPN"));
+
+    fake.lock().unwrap().dots_unavailable = false;
+    linked.discover().await.unwrap();
 }
