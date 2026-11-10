@@ -21,16 +21,26 @@ public enum RichTextRole: Hashable, Sendable {
   case footer
 }
 
+/// A list marker the host draws as a shape instead of its text.
+public enum RichListSymbol: Hashable, Sendable {
+  case bullet
+  case checkbox(isChecked: Bool)
+}
+
 public struct RichList: Hashable, Sendable {
   public struct Item: Hashable, Sendable {
-    /// "•", "3." or a checkbox, styled like the body text.
+    /// "•", "3." or a checkbox, styled like the body text. Symbols are still measured by it,
+    /// so the marker column keeps its width.
     public var marker: MessageText
+    /// Drawn in place of `marker`'s text when set.
+    public var symbol: RichListSymbol?
     public var children: [RichBlock]
     /// The item's own direction, which places its marker; nil follows the list.
     public var isRightToLeft: Bool?
 
-    public init(marker: MessageText, children: [RichBlock], isRightToLeft: Bool? = nil) {
+    public init(marker: MessageText, symbol: RichListSymbol? = nil, children: [RichBlock], isRightToLeft: Bool? = nil) {
       self.marker = marker
+      self.symbol = symbol
       self.children = children
       self.isRightToLeft = isRightToLeft
     }
@@ -200,7 +210,7 @@ public struct RichLayoutMetrics: Hashable, Sendable {
 public struct RichLayout: Sendable {
   public enum Node: Sendable {
     case text(TextLayout, role: RichTextRole)
-    case marker(TextLayout)
+    case marker(TextLayout, symbol: RichListSymbol?)
     case code(Code)
     /// A quote's rail and fill, behind its children.
     case quote(isRightToLeft: Bool)
@@ -248,7 +258,10 @@ public struct RichLayout: Sendable {
   }
 
   public struct Disclosure: Sendable {
+    /// One line, ending in an ellipsis when the summary is wider than its room.
     public var summary: TextLayout
+    /// The summary as written, for accessibility and copying.
+    public var fullSummary: MessageText
     /// In the node's coordinates.
     public var titleFrame: CGRect
     public var chevronFrame: CGRect
@@ -265,6 +278,12 @@ public struct RichLayout: Sendable {
     public var path: RichPath
     public var frame: CGRect
     public var node: Node
+    /// The node's characters in the message's flat text, when the host gave them. Streaming
+    /// maps its revealed count through these.
+    public var sourceRange: Range<Int>?
+    /// While streaming, characters of this text node to draw; nil draws all of it. Only the
+    /// node holding the reveal frontier has one.
+    public var revealedLength: Int?
   }
 
   /// The last line of a closing paragraph, where a message's time can sit inline.
@@ -277,4 +296,7 @@ public struct RichLayout: Sendable {
   public var size: CGSize
   public var nodes: [Placed]
   public var trailingLine: TrailingLine?
+  /// While streaming, the revealed count at which this plan goes stale: the frontier enters a
+  /// new line or a hidden node. Nil when nothing more would change.
+  public var revealLimit: Int?
 }

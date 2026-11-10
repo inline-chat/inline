@@ -113,7 +113,11 @@ public struct MessageLayoutInput: Hashable, Sendable {
   public var richMetrics = RichLayoutMetrics()
   /// While a message streams, how many characters of a text body are revealed. The body is
   /// sized by the lines holding them, so the bubble grows a line at a time; nil shows all.
+  /// Rich bodies reveal too when `richSources` maps their blocks into the same text.
   public var revealedLength: Int?
+  /// Each rich block's characters in the message's flat text, by path: what `revealedLength`
+  /// counts. Nil when the host can't map them; the rich body then shows whole.
+  public var richSources: [RichPath: Range<Int>]?
 
   public init(
     rowWidth: CGFloat,

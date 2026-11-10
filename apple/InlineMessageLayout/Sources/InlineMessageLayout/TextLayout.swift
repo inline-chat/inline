@@ -1,6 +1,7 @@
 import CoreGraphics
 import CoreText
 import Foundation
+import Synchronization
 
 public struct TextLayoutStyle: Hashable, Sendable {
   /// Extra space between lines of one paragraph.
@@ -120,7 +121,8 @@ public struct TextLayout: Sendable {
           if let last = segments.last, abs(last.upperBound - glyph.minX) < 0.5 {
             segments[segments.count - 1] = last.lowerBound ... max(last.upperBound, glyph.maxX)
           } else {
-            segments.append(glyph.minX ... glyph.maxX)
+            // Arabic fonts kern with negative advances, so a glyph can end before it starts.
+            segments.append(min(glyph.minX, glyph.maxX) ... max(glyph.minX, glyph.maxX))
           }
         }
       }
@@ -159,12 +161,26 @@ final class LineStorage: @unchecked Sendable {
   }
 
   let line: CTLine
-  let runs: [Run]
+  // Only hit tests, selection and decorations read glyph positions, and most lines are drawn
+  // without any of those, so they are read from the line on first use.
+  private let glyphRuns = Mutex<[Run]?>(nil)
 
   init(line: CTLine) {
     self.line = line
+  }
+
+  var runs: [Run] {
+    glyphRuns.withLock { runs in
+      if let runs { return runs }
+      let built = Self.runs(of: line)
+      runs = built
+      return built
+    }
+  }
+
+  private static func runs(of line: CTLine) -> [Run] {
     let ctRuns = CTLineGetGlyphRuns(line) as? [CTRun] ?? []
-    runs = ctRuns.map { run in
+    return ctRuns.map { run in
       let count = CTRunGetGlyphCount(run)
       guard count > 0 else { return Run(glyphs: []) }
       var positions = [CGPoint](repeating: .zero, count: count)
@@ -181,6 +197,57 @@ final class LineStorage: @unchecked Sendable {
         )
       })
     }
+  }
+}
+
+extension TextLayout {
+  /// Width of the widest run of non-whitespace characters, unrounded: the narrowest a column can
+  /// be without breaking a word.
+  ///
+  /// Each glyph's advance counts toward the run holding its character, so it doesn't matter
+  /// where bidi reordering puts the glyphs or which line a run lands on. A run's advances add up
+  /// to its width typeset alone, give or take kerning against the neighboring space.
+  func widestUnbreakableRunWidth() -> CGFloat {
+    let string = text.attributedString.string as NSString
+    let length = string.length
+    guard length > 0, !lines.isEmpty else { return 0 }
+    // Run number per UTF-16 index, split exactly where the old per-word measuring split.
+    var runOfIndex = [Int32](repeating: -1, count: length)
+    var runCount: Int32 = 0
+    var location = 0
+    while location < length {
+      let space = string.rangeOfCharacter(
+        from: .whitespacesAndNewlines,
+        options: [],
+        range: NSRange(location: location, length: length - location)
+      )
+      let end = space.location == NSNotFound ? length : space.location
+      if end > location {
+        for index in location ..< end { runOfIndex[index] = runCount }
+        runCount += 1
+      }
+      location = space.location == NSNotFound ? length : space.location + max(1, space.length)
+    }
+    guard runCount > 0 else { return 0 }
+
+    var widths = [CGFloat](repeating: 0, count: Int(runCount))
+    for line in lines {
+      for run in CTLineGetGlyphRuns(line.ctLine) as? [CTRun] ?? [] {
+        let count = CTRunGetGlyphCount(run)
+        guard count > 0 else { continue }
+        var advances = [CGSize](repeating: .zero, count: count)
+        var indices = [CFIndex](repeating: 0, count: count)
+        CTRunGetAdvances(run, CFRange(location: 0, length: count), &advances)
+        CTRunGetStringIndices(run, CFRange(location: 0, length: count), &indices)
+        for glyph in 0 ..< count {
+          let index = indices[glyph]
+          guard index >= 0, index < length else { continue }
+          let owner = runOfIndex[index]
+          if owner >= 0 { widths[Int(owner)] += advances[glyph].width }
+        }
+      }
+    }
+    return widths.max() ?? 0
   }
 }
 

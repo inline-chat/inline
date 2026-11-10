@@ -8,9 +8,13 @@ public struct MessageText: Hashable, @unchecked Sendable {
   // NSAttributedString is immutable and safe to read from any thread; a mutable subclass is
   // copied on init so later mutation by the caller cannot change a cached layout.
   public let attributedString: NSAttributedString
+  // The text never changes, so its hash is computed once: cache lookups then cost O(1) to hash,
+  // and texts that differ almost always fail `==` without comparing their contents.
+  private let contentHash: Int
 
   public init(_ attributedString: NSAttributedString) {
     self.attributedString = attributedString.copy() as! NSAttributedString
+    contentHash = Self.hash(of: self.attributedString.string as NSString)
   }
 
   public var string: String { attributedString.string }
@@ -18,12 +22,31 @@ public struct MessageText: Hashable, @unchecked Sendable {
   public var isEmpty: Bool { attributedString.length == 0 }
 
   public static func == (lhs: MessageText, rhs: MessageText) -> Bool {
-    lhs.attributedString === rhs.attributedString || lhs.attributedString.isEqual(to: rhs.attributedString)
+    lhs.attributedString === rhs.attributedString
+      || (lhs.contentHash == rhs.contentHash && lhs.attributedString.isEqual(to: rhs.attributedString))
   }
 
   public func hash(into hasher: inout Hasher) {
-    hasher.combine(attributedString.length)
-    hasher.combine(attributedString.string)
+    hasher.combine(contentHash)
+  }
+
+  /// Hash of the UTF-16 code units. Equal attributed strings have code-unit-equal strings, so
+  /// this agrees with `==`; unlike `String` hashing it needs no Unicode normalization.
+  private static func hash(of string: NSString) -> Int {
+    var hasher = Hasher()
+    let length = string.length
+    hasher.combine(length)
+    let chunk = 1024
+    withUnsafeTemporaryAllocation(of: unichar.self, capacity: chunk) { buffer in
+      var location = 0
+      while location < length {
+        let count = min(chunk, length - location)
+        string.getCharacters(buffer.baseAddress!, range: NSRange(location: location, length: count))
+        hasher.combine(bytes: UnsafeRawBufferPointer(start: buffer.baseAddress, count: count * MemoryLayout<unichar>.size))
+        location += count
+      }
+    }
+    return hasher.finalize()
   }
 }
 
