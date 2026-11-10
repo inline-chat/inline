@@ -263,6 +263,7 @@ type MonitorSetup = {
   pluginCommands?: Array<{ name: string; description: string }>
   onDispatchReply?: () => void
   dispatchReplyPayload?: {
+    isError?: boolean
     text?: string
     replyToId?: string
     mediaUrl?: string
@@ -10817,6 +10818,39 @@ describe("inline/monitor", () => {
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
 
     await handle.stop()
+  })
+
+  it.each([
+    { target: "chat:7", messageId: 901n, fallback: false },
+    { target: "user:42", messageId: 901n, fallback: false },
+    { target: "chat:8", messageId: 901n, fallback: true },
+    { target: "chat:7", messageId: null, fallback: true },
+  ])("uses the widget receipt for the current turn ($target, $messageId)", async ({ target, messageId, fallback }) => {
+    const warning = "⚠️ Couldn't answer that. Try again."
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 7n, message: { id: 18n, date: 1_700_000_000n, fromId: 42n, message: "Show a widget" } }],
+      chats: { "7": { kind: "direct", title: "Alice" } },
+      dispatchReplyBlocker: async ({ ctx }) => {
+        const { createInlineWidgetPresenter } = await import("./widget-presenter.js")
+        const presenter = createInlineWidgetPresenter({
+          readConfig: () => ({ channels: { inline: { token: "test-token" } } }),
+          createClient: () => ({ connect: async () => {}, close: async () => {}, sendMessage: async () => ({ messageId }) }),
+        })
+        await presenter.present({
+          document: { kind: "html", html: "<p>Done</p>" }, title: "Result",
+          context: { messageChannel: "inline", sessionKey: (ctx as { SessionKey: string }).SessionKey, deliveryContext: { channel: "inline", to: target } },
+        })
+      },
+      dispatchReplyPayload: { text: warning, isError: true },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {}, account: buildAccount({ dmPolicy: "open" }), runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+    })
+    try {
+      await handle.done
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(fallback ? 1 : 0)
+    } finally { await handle.stop() }
   })
 
   it.each([

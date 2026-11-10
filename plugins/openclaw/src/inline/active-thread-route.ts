@@ -6,6 +6,7 @@ export type ActiveInlineThreadRoute = {
   sourceMessageSid?: string
   parentPeer: { kind: "direct" | "group"; id: string }
   threadId?: bigint | undefined
+  deliveredWidgetChatId?: bigint
   adoption?: Promise<void>
   onThreadAdopted: (threadId: bigint) => Promise<void>
   runVisibleReply?: <T>(send: () => Promise<T>) => Promise<T>

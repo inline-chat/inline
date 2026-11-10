@@ -4211,6 +4211,10 @@ export async function monitorInlineProvider(params: {
               if (!visiblePayload) return finishPayload()
               await drainActivityOperations()
               const payloadIsError = visiblePayload.isError === true || info?.kind === "error"
+              if (payloadIsError && activeThreadRoute.deliveredWidgetChatId === deliveryChatId &&
+                isInlineHostNoReplyFallback(visiblePayload.text)) {
+                return inlineReplyDeliveryResult(true)
+              }
               await cleanupInlineProgressPlaceholder(payloadIsError ? "failure" : "success")
               // A hand-back needs no answer, so a failed run has nothing to report.
               // Runtimes that treat a silent reply as an empty response would
@@ -4627,7 +4631,8 @@ export async function monitorInlineProvider(params: {
       // A hand-back needs no answer, so an empty turn there is not a failure to report.
       if (
         !abortSignal.aborted && dispatchResult.sendPolicyDenied !== true && !botHandBack &&
-        !delivered && !hostDeliveredReply && !deferredToActiveRun && !adoptingThread &&
+        !delivered && activeThreadRoute.deliveredWidgetChatId !== deliveryChatId &&
+        !hostDeliveredReply && !deferredToActiveRun && !adoptingThread &&
         (explicitFailure ||
           (!hostHandledTurn &&
             !deliberateSilence && !skipFallbackSuppressed &&

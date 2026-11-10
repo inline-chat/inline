@@ -117,6 +117,7 @@ describe("inline/message-formatting", () => {
     ].join("\n"))).toBe("Model: anthropic/claude-sonnet-5-5\nThinking: high")
     expect(isInlineHostNoReplyFallback("⚠️ Couldn't answer that. Try again.")).toBe(true)
     expect(isInlineHostNoReplyFallback("⚠️ OpenClaw couldn't produce or deliver a reply. Please try again.")).toBe(true)
+    expect(isInlineHostNoReplyFallback("⚠️ The AI service returned an empty reply. Please try again.")).toBe(true)
     expect(isInlineHostNoReplyFallback("Couldn't answer that, sorry")).toBe(false)
     // Agent text that only mentions these words is left alone.
     expect(adaptInlineVisibleCopy("The approval required. I sent it.")).toBe("The approval required. I sent it.")
