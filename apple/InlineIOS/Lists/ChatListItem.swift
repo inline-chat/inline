@@ -267,7 +267,6 @@ struct ChatListItem: View {
 
         case let .user(userInfo, _):
           UserAvatar(userInfo: userInfo, size: avatarSize)
-            .botOnlineIndicator(userInfo.user, avatarSize: avatarSize)
             .frame(width: avatarSize, height: avatarSize)
       }
     }
