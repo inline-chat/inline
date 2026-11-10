@@ -610,6 +610,17 @@ impl InlineSide for RecordingInline {
             Ok(())
         })
     }
+    fn edit_as_owner<'a>(&'a self, id: i64, text: &'a str) -> BoxFuture<'a, InlineResult<()>> {
+        self.edit(id, text, None)
+    }
+    fn react_as_owner<'a>(
+        &'a self,
+        id: i64,
+        emoji: &'a str,
+        remove: bool,
+    ) -> BoxFuture<'a, InlineResult<()>> {
+        self.react(id, emoji, remove)
+    }
     fn react<'a>(
         &'a self,
         id: i64,
@@ -1001,12 +1012,19 @@ async fn full_round_trip_through_fake_chatgpt() {
         json!({}),
     );
     eventually("task card", || {
+        // Posted in place as "Starting…", then edited from the task backend.
         inline
             .posts
             .lock()
             .unwrap()
             .iter()
-            .any(|(_, post)| post.text == "🗂 **Book flights**\nWorking…")
+            .any(|(_, post)| post.text.starts_with("🗂"))
+            && inline
+                .edits
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(_, text)| text == "🗂 **Book flights**\nWorking…")
     })
     .await;
     fake.lock().unwrap().task_status = "completed".into();
@@ -1046,7 +1064,7 @@ async fn full_round_trip_through_fake_chatgpt() {
             .lock()
             .unwrap()
             .iter()
-            .any(|(_, post)| post.text == "_You, in ChatGPT:_\n> from my phone")
+            .any(|(_, post)| post.text == "from my phone" && post.as_owner)
     })
     .await;
 
@@ -1185,11 +1203,11 @@ async fn review_active_task_is_resumed_after_it_leaves_message_overlap() {
     };
     eventually("working task card", || {
         inline
-            .posts
+            .edits
             .lock()
             .unwrap()
             .iter()
-            .any(|(_, p)| p.text.contains("Book flights"))
+            .any(|(_, text)| text.contains("Book flights"))
     })
     .await;
     {
@@ -1434,11 +1452,11 @@ async fn realtime_task_association_fetches_older_message_and_tracks_task() {
     );
     eventually("task from targeted association", || {
         inline
-            .posts
+            .edits
             .lock()
             .unwrap()
             .iter()
-            .any(|(_, p)| p.text.contains("Book flights"))
+            .any(|(_, text)| text.contains("Book flights"))
     })
     .await;
     assert_eq!(

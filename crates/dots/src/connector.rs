@@ -863,6 +863,7 @@ pub fn convert(message: &Message, room: &DotRoom) -> Option<RemoteMessage> {
             .map(|reply| reply.message_id.clone()),
         deleted: message.deleted_at.is_some(),
         agent_reaction: message.reactions.get(&room.dot_member).cloned(),
+        owner_reaction: message.reactions.get(&room.owner_member).cloned(),
         task_id,
         confirmation,
         revision,
