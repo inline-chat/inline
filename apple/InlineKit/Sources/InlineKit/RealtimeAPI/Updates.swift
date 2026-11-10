@@ -50,6 +50,7 @@ public actor UpdatesEngine: Sendable {
     db: Database,
     source: UpdateApplySource,
     batchIndex: Int? = nil,
+    accessContext: ChatAccessPageContext? = nil,
     reloadPeers: inout Set<Peer>,
     deferredEffects: inout [DeferredUpdateEffect]
   ) -> Bool {
@@ -174,18 +175,44 @@ public actor UpdatesEngine: Sendable {
           try joinSpace.apply(db)
 
         case let .participantAdd(participantAdd):
+          if accessContext?.restoresChat(for: update.update) == true {
+            try restoreMissingSidecarChat(
+              participantAdd.chatID, context: accessContext, db: db, source: source, reloadPeers: &reloadPeers
+            )
+          }
           try participantAdd.apply(db)
 
         case let .participantDelete(participantDelete):
-          try participantDelete.apply(db)
+          try participantDelete.apply(
+            db,
+            currentUserID: accessContext?.currentUserID ?? Auth.shared.getCurrentUserId(),
+            currentUserRegainsAccess: accessContext?.currentUserRegainsAccess(
+              chatID: participantDelete.chatID, after: batchIndex
+            ) ?? false
+          )
 
         case let .participantGroupAdd(participantGroupAdd):
+          if accessContext?.restoresChat(for: update.update) == true {
+            try restoreMissingSidecarChat(
+              participantGroupAdd.chatID, context: accessContext, db: db, source: source, reloadPeers: &reloadPeers
+            )
+          }
           try participantGroupAdd.apply(db)
 
         case let .participantGroupDelete(participantGroupDelete):
-          try participantGroupDelete.apply(db)
+          try participantGroupDelete.apply(
+            db,
+            currentUserRegainsAccess: accessContext?.currentUserRegainsAccess(
+              chatID: participantGroupDelete.chatID, after: batchIndex
+            ) ?? false
+          )
 
         case let .userAddedToChat(userAddedToChat):
+          if accessContext?.restoresChat(for: update.update) == true {
+            try restoreMissingSidecarChat(
+              userAddedToChat.chatID, context: accessContext, db: db, source: source, reloadPeers: &reloadPeers
+            )
+          }
           try userAddedToChat.apply(db)
 
         case let .userRemovedFromChat(userRemovedFromChat):
@@ -497,6 +524,12 @@ public actor UpdatesEngine: Sendable {
       in: updates,
       bucketCommit: bucketCommit
     )
+    let accessContext = ChatAccessPageContext(
+      updates: updates,
+      sidecars: sidecars,
+      bucketKey: bucketCommit?.key,
+      currentUserID: mutationToken?.userID ?? authenticatedUserID()
+    )
     var reloadPeers = Set<Peer>()
     var appliedCount = 0
     var failedCount = 0
@@ -587,6 +620,7 @@ public actor UpdatesEngine: Sendable {
               db: db,
               source: source,
               batchIndex: chunkStartOffset + offset,
+              accessContext: accessContext,
               reloadPeers: &chunkReloadPeers,
               deferredEffects: &chunkDeferredEffects
             ) {
@@ -1620,6 +1654,46 @@ public actor UpdatesEngine: Sendable {
     try applyDialogSidecarCounts(sidecars, bucketCommit: bucketCommit, db: db)
   }
 
+  /// An earlier update in the same page (a removal, a chat deletion) can delete
+  /// a chat the page's sidecars imported up front. A later grant in that page
+  /// is the server's current authorization, so it re-imports that chat and its
+  /// dialog exactly as a following page's sidecars would have.
+  private nonisolated func restoreMissingSidecarChat(
+    _ chatID: Int64,
+    context: ChatAccessPageContext?,
+    db: Database,
+    source: UpdateApplySource,
+    reloadPeers: inout Set<Peer>
+  ) throws {
+    guard chatID > 0,
+          let context,
+          let sidecars = context.sidecars,
+          try Chat.fetchOne(db, id: chatID) == nil,
+          let snapshot = sidecars.chats.last(where: { $0.id == chatID }),
+          let prepared = try preparedSidecarChats([snapshot], db: db).first
+    else { return }
+
+    try saveMissingSidecarChat(snapshot, preparedChat: prepared, db: db, allowBehindRetainedCursor: true)
+    guard try Chat.fetchOne(db, id: chatID) != nil else { return }
+
+    let affected = try Acknowledgement.save(
+      db, cursors: snapshot.acknowledgements.cursors, chatId: chatID,
+      publishChanges: source != .syncCatchup
+    )
+    if source == .syncCatchup, !affected.isEmpty {
+      reloadPeers.insert(snapshot.peerID.toPeer())
+    }
+
+    for dialog in sidecars.dialogs {
+      guard let peer = validatedPeer(dialog.peer),
+            peer == .thread(id: chatID) || (dialog.hasChatID && dialog.chatID == chatID),
+            try Dialog.get(peerId: peer).fetchOne(db) == nil,
+            try sidecarDialogDependenciesExist(dialog, db: db)
+      else { continue }
+      _ = try dialog.saveFull(db)
+    }
+  }
+
   private nonisolated func applyDialogSidecarCounts(
     _ sidecars: InlineProtocol.UpdateSidecars,
     bucketCommit: UpdateBucketCommit?,
@@ -1891,6 +1965,70 @@ private func userAuthorizedJoinSpaceIDs(
     else { return nil }
     return join.space.id
   })
+}
+
+/// Page-scoped access facts for reducers that replay a chat's grant history.
+/// A removal that the same page later reverses must not leave the page
+/// unappliable: the later grant references rows the removal deleted.
+struct ChatAccessPageContext: Sendable {
+  let sidecars: InlineProtocol.UpdateSidecars?
+  let bucketKey: BucketKey?
+  let currentUserID: Int64?
+  /// Highest batch index of a direct grant to the current user, per chat.
+  private let lastCurrentUserGrantIndex: [Int64: Int]
+
+  init(
+    updates: [InlineProtocol.Update],
+    sidecars: InlineProtocol.UpdateSidecars?,
+    bucketKey: BucketKey?,
+    currentUserID: Int64?
+  ) {
+    self.sidecars = sidecars
+    self.bucketKey = bucketKey
+    self.currentUserID = currentUserID
+    var grants: [Int64: Int] = [:]
+    for (index, update) in updates.enumerated() {
+      switch update.update {
+        case let .userAddedToChat(access) where access.chatID > 0:
+          grants[access.chatID] = index
+        case let .participantAdd(add)
+          where add.chatID > 0 && add.hasParticipant && add.participant.userID == currentUserID:
+          grants[add.chatID] = index
+        default:
+          break
+      }
+    }
+    lastCurrentUserGrantIndex = grants
+  }
+
+  /// Whether a later update in this page grants the current user the chat again.
+  func currentUserRegainsAccess(chatID: Int64, after batchIndex: Int?) -> Bool {
+    guard let batchIndex, let grantIndex = lastCurrentUserGrantIndex[chatID] else { return false }
+    return grantIndex > batchIndex
+  }
+
+  /// Whether this grant authorizes re-importing its chat from the page sidecars.
+  /// The User journal replays only grants for chats the user can access now. A
+  /// chat journal replays every participant change, so only the current user's
+  /// own grant may bring back a private chat an earlier removal deleted.
+  func restoresChat(for update: InlineProtocol.Update.OneOf_Update?) -> Bool {
+    guard sidecars != nil, let bucketKey else { return false }
+    switch update {
+      case .userAddedToChat:
+        return bucketKey == .user
+      case let .participantAdd(add):
+        if bucketKey == .user { return true }
+        guard case let .chat(peer) = bucketKey,
+              validatedPeer(peer) == .thread(id: add.chatID),
+              let currentUserID
+        else { return false }
+        return add.hasParticipant && add.participant.userID == currentUserID
+      case .participantGroupAdd:
+        return bucketKey == .user
+      default:
+        return false
+    }
+  }
 }
 
 private func userAuthorizedSidecarChatIDs(
@@ -3110,21 +3248,72 @@ extension InlineProtocol.UpdateJoinSpace {
   }
 }
 
+/// Grant edges are a projection subordinate to their chat: they cascade away
+/// with it and are re-read with the roster. An edge whose chat, user, or group
+/// is not local cannot be stored, and must not fail the page that carries it.
+/// The roster is marked incomplete so the next reader refetches it.
+private func saveParticipantIfParentsExist(
+  _ db: Database,
+  participant: InlineProtocol.ChatParticipant,
+  chatId: Int64
+) throws {
+  guard try Chat.fetchOne(db, id: chatId) != nil else {
+    Log.shared.warning("Skipping participant grant for a chat that is not local")
+    return
+  }
+  guard try User.fetchOne(db, id: participant.userID) != nil else {
+    Log.shared.warning("Skipping participant grant for a user that is not local")
+    try markParticipantRosterIncomplete(db, chatId: chatId)
+    return
+  }
+  try ChatParticipant.save(db, from: participant, chatId: chatId)
+}
+
+private func saveParticipantGroupIfParentsExist(
+  _ db: Database,
+  group: InlineProtocol.ChatParticipantGroup,
+  chatId: Int64
+) throws {
+  guard try Chat.fetchOne(db, id: chatId) != nil else {
+    Log.shared.warning("Skipping group grant for a chat that is not local")
+    return
+  }
+  guard try UserGroup.fetchOne(db, id: group.groupID) != nil else {
+    Log.shared.warning("Skipping group grant for a group that is not local")
+    try markParticipantRosterIncomplete(db, chatId: chatId)
+    return
+  }
+  try ChatParticipantGroup.save(db, from: group, chatId: chatId)
+}
+
+private func markParticipantRosterIncomplete(_ db: Database, chatId: Int64) throws {
+  try Chat
+    .filter(Chat.Columns.id == chatId)
+    .updateAll(db, [Chat.Columns.participantRosterComplete.set(to: false)])
+}
+
 extension InlineProtocol.UpdateChatParticipantAdd {
   func apply(_ db: Database) throws {
     Log.shared.debug("update chat participant add \(chatID) \(participant.userID)")
 
-    try ChatParticipant.save(db, from: participant, chatId: chatID)
+    guard hasParticipant else { return }
+    try saveParticipantIfParentsExist(db, participant: participant, chatId: chatID)
   }
 }
 
 extension InlineProtocol.UpdateChatParticipantDelete {
-  func apply(_ db: Database) throws {
+  func apply(
+    _ db: Database,
+    currentUserID: Int64? = Auth.shared.getCurrentUserId(),
+    currentUserRegainsAccess: Bool = false
+  ) throws {
     Log.shared.debug("update chat participant delete \(chatID) \(userID)")
 
     try ChatParticipant.filter(Column("chatId") == chatID).filter(Column("userId") == userID).deleteAll(db)
 
-    if userID == Auth.shared.getCurrentUserId() {
+    // A later grant in the same page supersedes this removal; deleting the
+    // chat here would drop the page's earlier messages for a chat the user has.
+    if userID == currentUserID, !currentUserRegainsAccess {
       try deleteLocalPrivateThreadIfCurrentUserLostAccess(db, chatId: chatID)
     }
   }
@@ -3135,19 +3324,23 @@ extension InlineProtocol.UpdateChatParticipantGroupAdd {
     Log.shared.debug("update chat participant group add \(chatID) \(groupParticipant.groupID)")
 
     guard hasGroupParticipant else { return }
-    try ChatParticipantGroup.save(db, from: groupParticipant, chatId: chatID)
+    try saveParticipantGroupIfParentsExist(db, group: groupParticipant, chatId: chatID)
   }
 }
 
 extension InlineProtocol.UpdateChatParticipantGroupDelete {
-  func apply(_ db: Database) throws {
+  func apply(_ db: Database, currentUserRegainsAccess: Bool = false) throws {
     Log.shared.debug("update chat participant group delete \(chatID) \(groupID)")
 
-    try ChatParticipantGroup
+    let removed = try ChatParticipantGroup
       .filter(ChatParticipantGroup.Columns.chatId == chatID)
       .filter(ChatParticipantGroup.Columns.groupId == groupID)
       .deleteAll(db)
 
+    // Only a grant this client actually held can be the one it just lost. With
+    // a sparse local roster, an unknown group's removal says nothing about the
+    // current user's access; the User journal's removal stays authoritative.
+    guard removed > 0, !currentUserRegainsAccess else { return }
     try deleteLocalPrivateThreadIfCurrentUserLostAccess(db, chatId: chatID)
   }
 }
@@ -3156,10 +3349,10 @@ extension InlineProtocol.UpdateUserAddedToChat {
   func apply(_ db: Database) throws {
     guard chatID > 0 else { return }
     if hasParticipant {
-      try ChatParticipant.save(db, from: participant, chatId: chatID)
+      try saveParticipantIfParentsExist(db, participant: participant, chatId: chatID)
     }
     if hasGroup {
-      try ChatParticipantGroup.save(db, from: group, chatId: chatID)
+      try saveParticipantGroupIfParentsExist(db, group: group, chatId: chatID)
     }
   }
 }
