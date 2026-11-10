@@ -661,6 +661,7 @@ impl Command {
                 SetupCommand::Opencode(_) => "setup_opencode",
                 SetupCommand::Claude(_) => "setup_claude",
                 SetupCommand::Amp(_) => "setup_amp",
+                SetupCommand::Dots(_) => "setup_dots",
                 SetupCommand::Hermes(_) => "setup_hermes",
                 SetupCommand::Openclaw(_) => "setup_openclaw",
             },
@@ -718,6 +719,8 @@ enum SetupCommand {
     Claude(SetupAgentArgs),
     #[command(about = "Set up Amp as an experimental personal Inline bot")]
     Amp(SetupAgentArgs),
+    #[command(about = "Bridge your ChatGPT Dot into Inline as a personal bot")]
+    Dots(SetupDotsArgs),
     #[command(about = "Set up Hermes as an Inline bot")]
     Hermes(agents::AgentsSetupArgs),
     #[command(about = "Set up OpenClaw as an Inline bot")]
@@ -748,6 +751,17 @@ enum PluginCommand {
         #[arg(long, help = "Print the host commands without changing configuration")]
         dry_run: bool,
     },
+}
+
+#[derive(Args)]
+struct SetupDotsArgs {
+    #[arg(long, value_name = "NAME", help = "Bot name (defaults to your Dot's name)")]
+    name: Option<String>,
+    #[arg(
+        long,
+        help = "Configure without installing a launchd/systemd service (containers run `inline bridge run` themselves)"
+    )]
+    no_service: bool,
 }
 
 #[derive(Args)]
@@ -3289,11 +3303,20 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         .await?;
                     }
                     legacy => {
+                        let manage_service =
+                            !matches!(&legacy, SetupCommand::Dots(args) if args.no_service);
                         let (provider_id, args) = match legacy {
                             SetupCommand::Codex(args) => ("codex", args),
                             SetupCommand::Opencode(args) => ("opencode", args),
                             SetupCommand::Claude(args) => ("claude", args),
                             SetupCommand::Amp(args) => ("amp", args),
+                            SetupCommand::Dots(args) => (
+                                "dots",
+                                SetupAgentArgs {
+                                    folder: None,
+                                    name: args.name,
+                                },
+                            ),
                             SetupCommand::Hermes(_) | SetupCommand::Openclaw(_) => unreachable!(),
                         };
                         let owner_auth = match owner_session::resolve_owner_credential(&auth_store)? {
@@ -3330,6 +3353,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             provider_id,
                             args.folder,
                             args.name,
+                            manage_service,
                             cli.json,
                             json_format,
                         )
@@ -8940,6 +8964,23 @@ mod cli_parsing_tests {
             }
             _ => panic!("expected hidden typing observer development command"),
         }
+    }
+
+    #[test]
+    fn parses_dots_setup() {
+        let cli = Cli::try_parse_from(["inline", "setup", "dots", "--name", "Pip"]).unwrap();
+        match cli.command {
+            Command::Setup {
+                command: SetupCommand::Dots(args),
+            } => assert_eq!(args.name.as_deref(), Some("Pip")),
+            _ => panic!("expected dots setup"),
+        }
+        assert!(Cli::try_parse_from(["inline", "setup", "dots", "--folder", "/tmp"]).is_err());
+        let cli = Cli::try_parse_from(["inline", "setup", "dots", "--no-service"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Setup { command: SetupCommand::Dots(SetupDotsArgs { no_service: true, .. }) }
+        ));
     }
 
     #[test]

@@ -666,6 +666,21 @@ pub(super) async fn provision_dev_bot(
 }
 
 pub(super) fn agent_command_catalog(provider_id: &str) -> Vec<proto::BotCommand> {
+    if provider_id == super::dots::DOTS_PROVIDER_ID {
+        return [
+            ("help", "What this bridge does"),
+            ("status", "Show the ChatGPT connection"),
+            ("mirror", "Show messages you type in ChatGPT here (on/off)"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (command, description))| proto::BotCommand {
+            command: command.to_string(),
+            description: description.to_string(),
+            sort_order: i32::try_from(index).ok(),
+        })
+        .collect();
+    }
     let mut commands = vec![
         ("help", "Show agent commands"),
         ("status", "Show bridge and session status"),

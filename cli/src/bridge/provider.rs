@@ -103,6 +103,10 @@ pub(super) fn provider_profile_asset(provider_id: &str) -> Option<ProviderProfil
             "inline-amp-avatar.png",
             include_bytes!("../../assets/provider-avatars/amp.png"),
         ),
+        "dots" => (
+            "inline-dots-avatar.png",
+            include_bytes!("../../assets/provider-avatars/dots.png"),
+        ),
         _ => return None,
     };
     Some(ProviderProfileAsset {
@@ -111,6 +115,7 @@ pub(super) fn provider_profile_asset(provider_id: &str) -> Option<ProviderProfil
             "claude" => "claude",
             "opencode" => "opencode",
             "amp" => "amp",
+            "dots" => "dots",
             _ => unreachable!(),
         },
         file_name,
@@ -149,6 +154,7 @@ pub(super) fn provider_profile_asset_digest(asset: ProviderProfileAsset) -> Stri
 pub(super) fn provider_display_name(provider_id: &str) -> Option<&'static str> {
     match provider_id {
         "codex" => Some("Codex"),
+        super::dots::DOTS_PROVIDER_ID => Some(super::dots::DOTS_DISPLAY_NAME),
         provider_id => provider_support(provider_id).map(|support| support.display_name),
     }
 }
@@ -252,6 +258,28 @@ pub(super) async fn prepare_setup_provider(
         })?;
         debug_assert!(runtime.capabilities().existing_turn_driver);
         return probe_configured_provider_async(provider_id, runtime.executable()).await;
+    }
+    if provider_id == super::dots::DOTS_PROVIDER_ID {
+        // The Dots bridge reuses the ChatGPT login held by the Codex
+        // app-server; it needs any Codex that answers `getAuthStatus`.
+        let runtime = discover_codex_turn_runtime_in_paths(
+            &CodexRuntimeDiscoveryConfig {
+                configured_executable: configured_provider_executable(paths, provider_id)?,
+                ..CodexRuntimeDiscoveryConfig::default()
+            },
+            crate::agents::harness_search_directories(),
+        )
+        .await
+        .map_err(|error| {
+            format!("{error}; install Codex or the ChatGPT app, run `codex login`, then retry")
+        })?;
+        return Ok(ProviderProbe {
+            provider_id: super::dots::DOTS_PROVIDER_ID,
+            display_name: super::dots::DOTS_DISPLAY_NAME,
+            executable: runtime.executable().to_path_buf(),
+            provider_runtime: None,
+            version: runtime.version().to_string(),
+        });
     }
     if provider_id == "claude" && super::v2_enabled_for(provider_id) {
         return probe_native_claude(None);
@@ -673,6 +701,26 @@ pub(super) async fn probe_configured_provider_async_with_runtime(
     executable: &std::path::Path,
     configured_runtime: Option<std::path::PathBuf>,
 ) -> Result<ProviderProbe, String> {
+    if provider_id == super::dots::DOTS_PROVIDER_ID {
+        // Validates the Codex runtime only; the ChatGPT side is checked live
+        // by the running relay and shown in `/status`.
+        let runtime = discover_codex_turn_runtime(&CodexRuntimeDiscoveryConfig {
+            configured_executable: Some(executable.to_path_buf()),
+            search_path: false,
+            search_chatgpt_app: false,
+        })
+        .await
+        .map_err(|error| {
+            format!("the configured Codex runtime failed validation: {error}; rerun `inline setup dots`")
+        })?;
+        return Ok(ProviderProbe {
+            provider_id: super::dots::DOTS_PROVIDER_ID,
+            display_name: super::dots::DOTS_DISPLAY_NAME,
+            executable: runtime.executable().to_path_buf(),
+            provider_runtime: None,
+            version: runtime.version().to_string(),
+        });
+    }
     let provider_id = provider_id.to_string();
     let executable = executable.to_path_buf();
     tokio::task::spawn_blocking(move || {

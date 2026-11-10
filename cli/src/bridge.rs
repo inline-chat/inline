@@ -68,6 +68,7 @@ mod adapter;
 mod allowlist_ui;
 mod approval_ui;
 mod copy;
+mod dots;
 mod inline_tools;
 mod provider;
 mod question_ui;
@@ -240,6 +241,7 @@ pub async fn setup_provider(
     provider_id: &str,
     folder: Option<PathBuf>,
     name: Option<String>,
+    manage_service: bool,
     json: bool,
     json_format: JsonFormat,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -252,7 +254,7 @@ pub async fn setup_provider(
         ProviderSetupOptions {
             quiet_adapter_install: json,
             allow_adapter_install: true,
-            manage_service: true,
+            manage_service,
             operator_user_ids: None,
         },
     )
@@ -274,7 +276,9 @@ pub async fn setup_provider(
             "Provider: {} ({})",
             result.provider, result.provider_version
         );
-        println!("Workspace: {}", workspace_label(&outcome.workspace));
+        if result.provider != dots::DOTS_PROVIDER_ID {
+            println!("Workspace: {}", workspace_label(&outcome.workspace));
+        }
         println!("Background service: {}", result.background_service);
     }
     Ok(())
@@ -342,6 +346,16 @@ where
     )
     .await
     .map_err(CliError::provider_integration_failed)?;
+    // The Dot must exist and Codex must hold a ChatGPT login before a bot is
+    // created; the bot takes the Dot's name unless one was given.
+    let name = if provider.provider_id == dots::DOTS_PROVIDER_ID {
+        let room = dots::preflight(&provider.executable)
+            .await
+            .map_err(CliError::provider_integration_failed)?;
+        name.or(Some(room.name))
+    } else {
+        name
+    };
     progress(ProviderSetupProgress::Completed("integration", "ready"));
 
     progress(ProviderSetupProgress::Started("bot"));
@@ -2120,6 +2134,24 @@ async fn run_provider_installation(
             "Owner dialog state is unavailable: {}",
             safe_diagnostic(&error.to_string())
         );
+    }
+    if installation.provider_id == dots::DOTS_PROVIDER_ID {
+        // A Dot has no coding turns: the relay owns the DM instead of a
+        // driver, sharing this service's bot, owner control, and health.
+        let _owner_control = owner_control;
+        drop(startup_activity);
+        return dots::run_dots_relay(dots::DotsLaunch {
+            installation: &installation,
+            owner_user_id: account.owner_user_id,
+            dm_chat_id,
+            bot,
+            inline_events,
+            connection_lease: &connection_lease,
+            readiness: shared_provider_readiness.as_ref(),
+            external_shutdown,
+            standalone_runtime,
+        })
+        .await;
     }
     let bridge_store = Arc::new(BridgeStore::open(&provider_paths.bridge_db)?);
     let installation_id = InstallationId::new(installation.installation_id.clone())?;
