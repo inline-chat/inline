@@ -98,9 +98,11 @@ final class RichBlockCodeNodeView: RichBlockRenderableView {
     copyButton.target = self
     copyButton.action = #selector(copyCode)
     addSubview(languageLabel)
-    addSubview(copyButton)
     addSubview(gutter)
     addSubview(surface)
+    // Without a language header the button overlays the text surface, so it
+    // must be the topmost subview or the surface takes its clicks.
+    addSubview(copyButton)
   }
 
   @available(*, unavailable)
