@@ -36,6 +36,32 @@ Linux). Use `--name` to pick another bot name.
 
 Open the bot's DM in Inline and send a message.
 
+## Remote Linux server or VM
+
+Everything works over SSH; no browser is needed on the server.
+
+```bash
+curl -fsSL https://inline.chat/cli/install.sh | sh
+inline auth login
+codex login --device-auth
+inline setup dots
+sudo loginctl enable-linger "$USER"
+inline bridge status
+```
+
+`codex login --device-auth` prints a code to enter on any device. Setup
+installs a systemd user service; without `enable-linger` it stops when you
+log out, and setup reminds you. Messages sent to the bot while the bridge
+is down are delivered when it starts again, and your Dot's replies from
+that time are caught up.
+
+## Next to other bridges
+
+The Dots bridge runs inside the same Inline bridge service as Codex,
+Claude, OpenCode, and Amp bots on that machine, with its own bot and DM.
+Running `inline setup dots` adds it and restarts the service; the other
+bots keep their settings. `inline bridge status` lists each one.
+
 ## What goes through
 
 Everything that can sync goes both ways by default.
