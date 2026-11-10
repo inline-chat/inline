@@ -475,25 +475,63 @@ fn probe_configured_provider_with_runtime(
     })
 }
 
-/// The user's own `claude`, which bridge v2 runs directly. An installation
-/// from before v2 still names its ACP adapter, so that path is ignored here.
+/// The user's own `claude`, which bridge v2 runs directly: the newest of every
+/// install found. The path saved at setup, the service's PATH (Homebrew and
+/// `/usr/local/bin` first) and the native installer's `~/.local/bin` can name
+/// different installs, and `claude update` refreshes only one of them, so
+/// trusting the first would keep the bridge on a CLI without the latest
+/// models. An installation from before v2 still names its ACP adapter, so that
+/// path is ignored here.
 pub(super) fn native_claude_executable(
     configured: Option<&std::path::Path>,
 ) -> Result<std::path::PathBuf, String> {
+    newest_claude(native_claude_candidates(configured), |path| {
+        probe_command("claude", path, &["--version"], "Claude version")
+            .ok()
+            .and_then(|version| inline_agent_driver_claude::ClaudeVersion::parse(&version))
+    })
+    .ok_or_else(|| {
+        "could not find the `claude` CLI; install Claude Code and sign in, then retry".to_string()
+    })
+}
+
+/// Every distinct `claude` on this machine, the saved one first. Paths are
+/// kept as found (the native install's symlink survives updates; its target
+/// does not), and deduplicated by where they lead.
+fn native_claude_candidates(configured: Option<&std::path::Path>) -> Vec<std::path::PathBuf> {
+    let mut seen = std::collections::HashSet::new();
     configured
-        .filter(|path| is_native_claude_path(path) && super::is_executable_file(path))
+        .filter(|path| is_native_claude_path(path))
         .map(std::path::Path::to_path_buf)
-        .or_else(|| super::resolve_executable(std::path::Path::new("claude")).ok())
-        .or_else(|| {
+        .into_iter()
+        .chain(super::resolve_executable(std::path::Path::new("claude")).ok())
+        .chain(
             crate::agents::harness_search_directories()
                 .into_iter()
-                .map(|directory| directory.join("claude"))
-                .find(|candidate| super::is_executable_file(candidate))
+                .map(|directory| directory.join("claude")),
+        )
+        .filter(|candidate| super::is_executable_file(candidate))
+        .filter(|candidate| {
+            seen.insert(std::fs::canonicalize(candidate).unwrap_or_else(|_| candidate.clone()))
         })
-        .ok_or_else(|| {
-            "could not find the `claude` CLI; install Claude Code and sign in, then retry"
-                .to_string()
-        })
+        .collect()
+}
+
+/// The candidate with the highest version; the earlier one wins a tie, and
+/// the first stands in when no version can be read.
+fn newest_claude(
+    candidates: Vec<std::path::PathBuf>,
+    version: impl Fn(&std::path::Path) -> Option<inline_agent_driver_claude::ClaudeVersion>,
+) -> Option<std::path::PathBuf> {
+    let mut newest: Option<(Option<inline_agent_driver_claude::ClaudeVersion>, std::path::PathBuf)> =
+        None;
+    for candidate in candidates {
+        let found = version(&candidate);
+        if newest.as_ref().is_none_or(|(best, _)| found > *best) {
+            newest = Some((found, candidate));
+        }
+    }
+    newest.map(|(_, path)| path)
 }
 
 fn is_native_claude_path(path: &std::path::Path) -> bool {
@@ -1393,6 +1431,31 @@ mod tests {
     use super::*;
     use inline_agent_driver_codex::CodexPeer;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    #[test]
+    fn the_newest_claude_wins_over_the_saved_or_first_found() {
+        use inline_agent_driver_claude::ClaudeVersion;
+        let homebrew = PathBuf::from("/opt/homebrew/bin/claude");
+        let native = PathBuf::from("/Users/a/.local/bin/claude");
+        let broken = PathBuf::from("/usr/local/bin/claude");
+        let version = |path: &std::path::Path| match path.to_str() {
+            Some("/opt/homebrew/bin/claude") => Some(ClaudeVersion::new(2, 1, 290)),
+            Some("/Users/a/.local/bin/claude") => Some(ClaudeVersion::new(2, 1, 322)),
+            _ => None,
+        };
+        assert_eq!(
+            newest_claude(vec![broken.clone(), homebrew.clone(), native.clone()], version),
+            Some(native.clone())
+        );
+        // A tie keeps the saved (first) install; unreadable versions fall back to it.
+        let same = |_: &std::path::Path| Some(ClaudeVersion::new(2, 1, 322));
+        assert_eq!(
+            newest_claude(vec![homebrew.clone(), native], same),
+            Some(homebrew)
+        );
+        assert_eq!(newest_claude(vec![broken.clone()], |_| None), Some(broken));
+        assert_eq!(newest_claude(Vec::new(), version), None);
+    }
 
     #[cfg(unix)]
     #[tokio::test]
