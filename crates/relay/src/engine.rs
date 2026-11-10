@@ -447,9 +447,7 @@ impl Relay {
             } else if !message.text.trim().is_empty() && (mirror || link.inline_id.is_some()) {
                 Some(match message.speaker {
                     Speaker::System => render::system_notice(&message.text),
-                    Speaker::Owner => {
-                        render::owner_mirror(&self.config.network_name, &message.text)
-                    }
+                    Speaker::Owner => render::agent_text(&message.text),
                     Speaker::Agent => render::agent_text(&message.text),
                 })
             } else if link.inline_id.is_some() {
@@ -460,7 +458,11 @@ impl Relay {
             if let Some(text) = text {
                 let rendered = text_hash(&text);
                 if link.rendered.as_deref() != Some(&rendered) {
+                    let as_owner = message.speaker == Speaker::Owner;
                     match link.inline_id {
+                        Some(inline_id) if as_owner => {
+                            self.inline.edit_as_owner(inline_id, &text).await?
+                        }
                         Some(inline_id) => self.inline.edit(inline_id, &text, None).await?,
                         None => {
                             link.inline_id = Some(
@@ -477,9 +479,15 @@ impl Relay {
                                         buttons: Vec::new(),
                                         silent: message.speaker != Speaker::Agent
                                             || message.deleted,
+                                        as_owner,
                                     })
                                     .await?,
                             );
+                            if as_owner && let Some(inline_id) = link.inline_id {
+                                // The bot sees this as a new owner message;
+                                // it came from the remote, so never send it back.
+                                self.store.mark_inbound(inline_id, "mirrored", now())?;
+                            }
                         }
                     }
                     link.rendered = Some(rendered);
@@ -524,8 +532,43 @@ impl Relay {
                 self.store.put_link(&link)?;
             }
         }
+        self.reconcile_owner_reaction(message).await?;
         if message.speaker == Speaker::Agent {
             let anchor = self.store.inline_for_remote(&message.id)?.or(reply_to);
+            // In ChatGPT a task is shown as a card at the message that started
+            // it. Post the card there now, so it keeps its place; progress
+            // updates edit it later.
+            if let Some(task_id) = &message.task_id
+                && !message.deleted
+                && self.store.task(task_id)?.is_none()
+            {
+                let key = format!("task_anchor:{task_id}");
+                if self.store.kv_get(&key)?.is_none()
+                    && let Some(anchor) = anchor
+                {
+                    self.store.kv_set(&key, &anchor.to_string())?;
+                }
+                let card = self
+                    .apply_task_card(&TaskUpdate {
+                        id: task_id.clone(),
+                        title: None,
+                        label: "Starting…".into(),
+                        terminal: false,
+                        entries: Vec::new(),
+                    })
+                    .await?;
+                // A task-only message is the card; replies to the card
+                // answer that message.
+                self.store.put_link(&Link {
+                    remote_id: message.id.clone(),
+                    part: "task".into(),
+                    inline_id: Some(card),
+                    origin: Origin::Remote,
+                    revision: None,
+                    agent_reaction: None,
+                    rendered: None,
+                })?;
+            }
             if let Some(task_id) = &message.task_id {
                 let remote_key = format!("task_anchor_remote:{task_id}");
                 if self.store.kv_get(&remote_key)?.is_none() {
@@ -579,6 +622,29 @@ impl Relay {
         Ok(())
     }
 
+    /// Mirrors the owner's reaction made in the remote app as the owner's own
+    /// Inline reaction. The same key records reactions sent from Inline, so an
+    /// echo in either direction is a no-op.
+    async fn reconcile_owner_reaction(&self, message: &RemoteMessage) -> RelayResult<()> {
+        let key = format!("owner_reaction:{}", message.id);
+        let current = self.store.kv_get(&key)?.filter(|value| !value.is_empty());
+        if current == message.owner_reaction {
+            return Ok(());
+        }
+        let Some(target) = self.store.inline_for_remote(&message.id)? else {
+            return Ok(());
+        };
+        if let Some(old) = current.as_deref() {
+            self.inline.react_as_owner(target, old, true).await?;
+            self.store.kv_set(&key, "")?;
+        }
+        if let Some(new) = message.owner_reaction.as_deref() {
+            self.inline.react_as_owner(target, new, false).await?;
+            self.store.kv_set(&key, new)?;
+        }
+        Ok(())
+    }
+
     async fn mirror_file(
         &self,
         message: &RemoteMessage,
@@ -599,12 +665,13 @@ impl Relay {
         let key = format!("remote:{}:{part}", message.id);
         let post = match self.connector.fetch_file(&message.id, file).await {
             Ok(Some(data)) => InlinePost {
-                text: self.file_text(owner, ""),
+                text: String::new(),
                 reply_to,
                 key,
                 file: Some(data),
                 buttons: Vec::new(),
                 silent: owner,
+                as_owner: owner,
             },
             Ok(None) => InlinePost {
                 text: self.file_text(
@@ -616,6 +683,7 @@ impl Relay {
                 file: None,
                 buttons: Vec::new(),
                 silent: true,
+                as_owner: owner,
             },
             Err(error) => {
                 log::warn!(target: "inline::bridge::relay", "file download failed: {}", error.message);
@@ -689,6 +757,7 @@ impl Relay {
                 file: None,
                 buttons,
                 silent: false,
+                as_owner: false,
             })
             .await?;
         self.store.put_confirmation(&ConfirmationCard {
@@ -717,6 +786,7 @@ impl Relay {
                     file: None,
                     buttons: Vec::new(),
                     silent: entry.speaker != Speaker::Agent,
+                    as_owner: false,
                 })
                 .await?;
             self.store.put_link(&Link {
@@ -755,6 +825,7 @@ impl Relay {
                         file: None,
                         buttons: Vec::new(),
                         silent: true,
+                        as_owner: false,
                     })
                     .await?;
                 self.store.put_task(&task.id, inline_id, &rendered)?;
@@ -913,6 +984,7 @@ impl Relay {
                 file: None,
                 buttons: Vec::new(),
                 silent: true,
+                as_owner: false,
             })
             .await?;
         Ok(())
@@ -927,6 +999,7 @@ impl Relay {
                 file: None,
                 buttons: Vec::new(),
                 silent: true,
+                as_owner: false,
             })
             .await?;
         Ok(())
@@ -1199,6 +1272,7 @@ impl Relay {
                             file,
                             buttons: Vec::new(),
                             silent: silent || retry.owner,
+                            as_owner: retry.owner,
                         })
                         .await?;
                     self.store.put_link(&Link {
@@ -1226,13 +1300,9 @@ impl Relay {
     }
 
     fn file_text(&self, owner: bool, text: &str) -> String {
-        if owner {
-            render::owner_mirror(&self.config.network_name, text)
-                .trim_end()
-                .to_owned()
-        } else {
-            text.to_owned()
-        }
+        // Owner files are posted from the owner's account, so no label.
+        let _ = owner;
+        text.to_owned()
     }
 
     fn synthetic_task(&self, inline_id: i64) -> RelayResult<Option<String>> {
@@ -1263,7 +1333,11 @@ impl Relay {
             return Ok(());
         };
         let key = format!("owner_reaction:{remote_id}");
-        let current = self.store.kv_get(&key)?;
+        let current = self.store.kv_get(&key)?.filter(|value| !value.is_empty());
+        // Already in this state: an echo of a reaction this relay mirrored.
+        if !removed && current.as_deref() == Some(emoji) {
+            return Ok(());
+        }
         let result = if removed {
             // The remote keeps one reaction per person; only clear it if it
             // is still the one being removed.
@@ -1277,6 +1351,14 @@ impl Relay {
         match result {
             Ok(()) => {
                 self.store.kv_set(&key, if removed { "" } else { emoji })?;
+                // The remote keeps one reaction per person and just replaced
+                // the old one; mirror that so both sides show the same.
+                if !removed
+                    && let Some(old) = current.as_deref()
+                    && let Err(error) = self.inline.react_as_owner(message_id, old, true).await
+                {
+                    log::warn!(target: "inline::bridge::relay", "replaced reaction not cleared: {error}");
+                }
             }
             Err(error) => {
                 log::warn!(target: "inline::bridge::relay", "reaction not forwarded: {}", error.message);

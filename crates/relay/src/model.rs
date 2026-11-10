@@ -78,6 +78,9 @@ pub struct RemoteMessage {
     pub deleted: bool,
     /// The agent's reaction on this message, if any.
     pub agent_reaction: Option<String>,
+    /// The owner's reaction on this message, if any (set in the remote app or
+    /// through this relay).
+    pub owner_reaction: Option<String>,
     /// Linked long-running task.
     pub task_id: Option<String>,
     /// Confirmation request carried by this message.
@@ -353,6 +356,9 @@ pub struct InlinePost {
     pub buttons: Vec<Vec<Button>>,
     /// Deliver without a notification.
     pub silent: bool,
+    /// Post from the owner's own account instead of the bot's, so something
+    /// the owner wrote on the other network appears as theirs.
+    pub as_owner: bool,
 }
 
 /// Inline media reference on an inbound message.
@@ -398,6 +404,19 @@ pub trait InlineSide: Send + Sync + 'static {
     ) -> BoxFuture<'a, InlineResult<()>>;
     /// Adds or removes the bot's reaction.
     fn react<'a>(
+        &'a self,
+        message_id: i64,
+        emoji: &'a str,
+        remove: bool,
+    ) -> BoxFuture<'a, InlineResult<()>>;
+    /// Edits a message the owner's account posted (see [`InlinePost::as_owner`]).
+    fn edit_as_owner<'a>(
+        &'a self,
+        message_id: i64,
+        text: &'a str,
+    ) -> BoxFuture<'a, InlineResult<()>>;
+    /// Adds or removes the owner's own reaction.
+    fn react_as_owner<'a>(
         &'a self,
         message_id: i64,
         emoji: &'a str,

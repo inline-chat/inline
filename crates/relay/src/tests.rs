@@ -23,6 +23,8 @@ struct FakeInline {
     toasts: Mutex<Vec<String>>,
     reads: Mutex<Vec<i64>>,
     profiles: Mutex<Vec<(Option<String>, Option<usize>)>>,
+    owner_edits: Mutex<Vec<(i64, String)>>,
+    owner_reactions: Mutex<Vec<(i64, String, bool)>>,
 }
 
 impl FakeInline {
@@ -91,6 +93,33 @@ impl InlineSide for FakeInline {
                 return Err(InlineError("temporary Inline outage".into()));
             }
             self.reactions
+                .lock()
+                .unwrap()
+                .push((message_id, emoji.to_owned(), remove));
+            Ok(())
+        })
+    }
+    fn edit_as_owner<'a>(
+        &'a self,
+        message_id: i64,
+        text: &'a str,
+    ) -> BoxFuture<'a, InlineResult<()>> {
+        Box::pin(async move {
+            self.owner_edits
+                .lock()
+                .unwrap()
+                .push((message_id, text.to_owned()));
+            Ok(())
+        })
+    }
+    fn react_as_owner<'a>(
+        &'a self,
+        message_id: i64,
+        emoji: &'a str,
+        remove: bool,
+    ) -> BoxFuture<'a, InlineResult<()>> {
+        Box::pin(async move {
+            self.owner_reactions
                 .lock()
                 .unwrap()
                 .push((message_id, emoji.to_owned(), remove));
@@ -339,6 +368,7 @@ fn agent(id: &str, text: &str, revision: &str) -> RemoteMessage {
         reply_to: None,
         deleted: false,
         agent_reaction: None,
+        owner_reaction: None,
         task_id: None,
         confirmation: None,
         revision: revision.into(),
@@ -575,9 +605,11 @@ async fn owner_typed_in_remote_app_is_mirrored_until_turned_off() {
         .handle_remote(ConnectorEvent::Message(typed))
         .await
         .unwrap();
-    assert_eq!(
-        h.inline.texts(),
-        vec!["_You, in ChatGPT:_\n> from my phone"]
+    let posts = h.inline.posts();
+    assert_eq!(posts[0].1.text, "from my phone");
+    assert!(
+        posts[0].1.as_owner,
+        "typed in ChatGPT shows as the owner's own message"
     );
     h.relay
         .handle_inline(owner_text(3, "/mirror off"))
@@ -1612,5 +1644,166 @@ async fn removed_caption_is_reflected_without_removing_its_file() {
     assert_eq!(
         h.inline.edits.lock().unwrap()[0].1,
         "_Text removed in ChatGPT._"
+    );
+}
+
+#[tokio::test]
+async fn owner_message_from_remote_is_not_sent_back() {
+    let h = harness();
+    let typed = RemoteMessage {
+        speaker: Speaker::Owner,
+        ..agent("o1", "from my phone", "r1")
+    };
+    h.relay
+        .handle_remote(ConnectorEvent::Message(typed.clone()))
+        .await
+        .unwrap();
+    let inline_id = h.inline.posts()[0].0;
+    // The bot then sees it as a new owner message in the DM.
+    h.relay
+        .handle_inline(owner_text(inline_id, "from my phone"))
+        .await
+        .unwrap();
+    assert!(h.connector.sends.lock().unwrap().is_empty(), "no echo loop");
+    // A remote edit edits the owner's message, not a bot message.
+    let edited = RemoteMessage {
+        text: "from my phone (edited)".into(),
+        revision: "r2".into(),
+        ..typed
+    };
+    h.relay
+        .handle_remote(ConnectorEvent::Message(edited))
+        .await
+        .unwrap();
+    assert_eq!(
+        h.inline.owner_edits.lock().unwrap().clone(),
+        vec![(inline_id, "from my phone (edited)".to_owned())]
+    );
+    assert!(h.inline.edits.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn owner_reaction_in_remote_app_shows_as_owner_and_echo_is_noop() {
+    let h = harness();
+    h.relay
+        .handle_remote(ConnectorEvent::Message(agent("m1", "hi", "r1")))
+        .await
+        .unwrap();
+    let inline_id = h.inline.posts()[0].0;
+    let reacted = RemoteMessage {
+        owner_reaction: Some("🔥".into()),
+        ..agent("m1", "hi", "r1")
+    };
+    h.relay
+        .handle_remote(ConnectorEvent::Message(reacted))
+        .await
+        .unwrap();
+    assert_eq!(
+        h.inline.owner_reactions.lock().unwrap().clone(),
+        vec![(inline_id, "🔥".to_owned(), false)]
+    );
+    // The bot sees the owner's reaction land in Inline: not sent back.
+    h.relay
+        .handle_inline(InlineEvent::Reaction {
+            message_id: inline_id,
+            user_id: OWNER,
+            emoji: "🔥".into(),
+            removed: false,
+        })
+        .await
+        .unwrap();
+    assert!(h.connector.reactions.lock().unwrap().is_empty());
+    // Cleared in ChatGPT: cleared in Inline.
+    h.relay
+        .handle_remote(ConnectorEvent::Message(agent("m1", "hi", "r1")))
+        .await
+        .unwrap();
+    assert_eq!(
+        h.inline.owner_reactions.lock().unwrap().last().cloned(),
+        Some((inline_id, "🔥".to_owned(), true))
+    );
+}
+
+#[tokio::test]
+async fn switching_reaction_in_inline_keeps_one_like_chatgpt() {
+    let h = harness();
+    h.relay
+        .handle_remote(ConnectorEvent::Message(agent("m1", "hi", "r1")))
+        .await
+        .unwrap();
+    let inline_id = h.inline.posts()[0].0;
+    for emoji in ["👍", "❤️"] {
+        h.relay
+            .handle_inline(InlineEvent::Reaction {
+                message_id: inline_id,
+                user_id: OWNER,
+                emoji: emoji.into(),
+                removed: false,
+            })
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        h.inline.owner_reactions.lock().unwrap().clone(),
+        vec![(inline_id, "👍".to_owned(), true)],
+        "the replaced reaction is cleared in Inline too"
+    );
+}
+
+#[tokio::test]
+async fn task_only_message_becomes_the_card_in_place() {
+    let h = harness();
+    let mut started = agent("m1", "", "r1");
+    started.task_id = Some("t1".into());
+    h.relay
+        .handle_remote(ConnectorEvent::Message(started.clone()))
+        .await
+        .unwrap();
+    h.relay
+        .handle_remote(ConnectorEvent::Message(agent("m2", "I opened it.", "r1")))
+        .await
+        .unwrap();
+    let posts = h.inline.posts();
+    assert_eq!(
+        posts[0].1.text, "🗂 **Task**\nStarting…",
+        "card keeps the message's place"
+    );
+    assert_eq!(posts[1].1.text, "I opened it.");
+    let card = posts[0].0;
+    // Replay does not post a second card.
+    h.relay
+        .handle_remote(ConnectorEvent::Message(started))
+        .await
+        .unwrap();
+    h.relay
+        .handle_remote(ConnectorEvent::Task(TaskUpdate {
+            id: "t1".into(),
+            title: Some("Say hi".into()),
+            label: "Completed".into(),
+            terminal: true,
+            entries: Vec::new(),
+        }))
+        .await
+        .unwrap();
+    assert_eq!(h.inline.posts().len(), 2);
+    assert_eq!(
+        h.inline.edits.lock().unwrap().last().cloned(),
+        Some((card, "🗂 **Say hi**\nCompleted".to_owned(), usize::MAX))
+    );
+    // A reply to the card answers the task's message.
+    h.relay
+        .handle_inline(InlineEvent::Message {
+            message_id: 9,
+            sender_id: OWNER,
+            text: "thanks".into(),
+            reply_to: Some(card),
+            media: None,
+            edited: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        h.connector.sends.lock().unwrap()[0].reply_to.as_deref(),
+        Some("m1")
     );
 }
