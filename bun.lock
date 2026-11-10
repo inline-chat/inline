@@ -133,6 +133,15 @@
         "vitest": "catalog:",
       },
     },
+    "packages/agent-activity": {
+      "name": "@inline-chat/agent-activity",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@inline-chat/protocol": "workspace:*",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/bot-api-types": {
       "name": "@inline-chat/bot-api-types",
       "version": "0.1.3-alpha.0",
@@ -762,6 +771,8 @@
     "@img/sharp-win32-x64": ["@img/sharp-win32-x64@0.35.5", "", { "os": "win32", "cpu": "x64" }, "sha512-x76eH0vEiHlcMQu8Y8IenntaACtddpT6W0wmXtWrnKcnKI7ME5DdgqhAD6SEWOEl1v2zDvkZDhFA9KnURwpfqg=="],
 
     "@in/protocol": ["@in/protocol@workspace:landing/packages/protocol"],
+
+    "@inline-chat/agent-activity": ["@inline-chat/agent-activity@workspace:packages/agent-activity"],
 
     "@inline-chat/bot-api-types": ["@inline-chat/bot-api-types@workspace:packages/bot-api-types"],
 
