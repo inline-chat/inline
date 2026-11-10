@@ -84,7 +84,7 @@ let package = Package(
 
     .target(
       name: "ReactionPickerEmojis",
-      dependencies: [],
+      dependencies: ["EmojiAutocomplete"],
       swiftSettings: swiftSettings
     ),
 

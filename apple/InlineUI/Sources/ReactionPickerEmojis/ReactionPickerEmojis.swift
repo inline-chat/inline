@@ -1,3 +1,4 @@
+import EmojiAutocomplete
 import Foundation
 
 public enum ReactionPickerEmojis {
@@ -198,6 +199,8 @@ public enum ReactionPickerEmojiUsageStore {
     var counts = usageCounts(userDefaults: userDefaults)
     counts[normalizedEmoji, default: 0] += 1
     save(counts, userDefaults: userDefaults)
+    // Reactions also rank emoji search and the pickers' Frequently Used section.
+    EmojiUsageStore.record(normalizedEmoji, userDefaults: userDefaults)
   }
 
   public static func removeSuggestion(_ emoji: String, userDefaults: UserDefaults = .standard) {
