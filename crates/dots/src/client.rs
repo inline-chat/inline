@@ -335,6 +335,7 @@ impl DotsClient {
                 .reply_to
                 .clone()
                 .map(|message_id| ReplyTo { message_id }),
+            timezone_offset_min: timezone_offset_min(),
         };
         let created: Message = self
             .call(
@@ -594,6 +595,103 @@ impl DotsClient {
             .to_owned())
     }
 
+    /// `POST /messaging/rooms/{room}/responding_heartbeat`: the owner is
+    /// typing. The ChatGPT apps send it with no body.
+    pub async fn responding_heartbeat(&self, room_id: &str) -> DotsResult<()> {
+        self.call_raw(
+            Method::POST,
+            "/messaging/rooms/{room}/responding_heartbeat",
+            self.api(&["messaging", "rooms", room_id, "responding_heartbeat"]),
+            None,
+            Retry::OnUnauthorized,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// `POST /messaging/rooms/{room}/read {last_read_at}`.
+    pub async fn mark_read(&self, room_id: &str, last_read_at: &str) -> DotsResult<()> {
+        self.call_raw(
+            Method::POST,
+            "/messaging/rooms/{room}/read",
+            self.api(&["messaging", "rooms", room_id, "read"]),
+            Some(Body::Json(json!({ "last_read_at": last_read_at }))),
+            Retry::OnUnauthorized,
+        )
+        .await
+        .map(drop)
+    }
+
+    /// Downloads a Dot avatar from OpenAI's asset hosts, without credentials.
+    pub async fn avatar(&self, raw_url: &str) -> DotsResult<DownloadedFile> {
+        let url = Url::parse(raw_url).map_err(|_| DotsError::Protocol("bad avatar URL".into()))?;
+        let host = url.host_str().unwrap_or("");
+        let trusted = host == "cdn.openai.com"
+            || host.ends_with(".oaiusercontent.com")
+            || host.ends_with(".oaistatic.com")
+            || (!self.config.require_https_downloads
+                && host == self.config.download_host_suffix.trim_start_matches('.'));
+        if !trusted || (url.scheme() != "https" && self.config.require_https_downloads) {
+            return Err(DotsError::Protocol(
+                "avatar is not on an OpenAI asset host".into(),
+            ));
+        }
+        let response = self.http.get(url).send().await?;
+        if !response.status().is_success() {
+            return Err(DotsError::Network(format!(
+                "avatar download returned HTTP {}",
+                response.status().as_u16()
+            )));
+        }
+        let mime = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.split(';').next().unwrap_or("").trim().to_owned())
+            .unwrap_or_default();
+        if !mime.starts_with("image/") {
+            return Err(DotsError::Protocol("avatar is not an image".into()));
+        }
+        let bytes = read_limited(response, 4 * 1024 * 1024).await?;
+        let extension = mime.trim_start_matches("image/").replace("jpeg", "jpg");
+        Ok(DownloadedFile {
+            name: format!("dot-avatar.{extension}"),
+            mime,
+            bytes,
+        })
+    }
+
+    /// Prompt and final answer of the latest task turns, oldest first.
+    pub async fn task_transcript(
+        &self,
+        thread_id: &str,
+        turns: u32,
+    ) -> DotsResult<Vec<TaskTurnEntry>> {
+        let mut url = join(
+            &self.config.codex_base,
+            &["v2", "threads", thread_id, "turns"],
+        );
+        url.query_pairs_mut()
+            .append_pair("limit", &turns.clamp(1, 20).to_string())
+            .append_pair("sortDirection", "desc")
+            .append_pair("itemsView", "full");
+        let value: Value = self
+            .call(
+                Method::GET,
+                "/v2/threads/{thread}/turns",
+                url,
+                None,
+                Retry::OnUnauthorized,
+            )
+            .await?;
+        let data = value
+            .get("data")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        Ok(data.iter().rev().flat_map(turn_entries).collect())
+    }
+
     /// `GET /celsius/ws/user`.
     pub async fn realtime_endpoint(&self) -> DotsResult<Url> {
         let endpoint: RealtimeEndpoint = self
@@ -672,6 +770,110 @@ impl DotsClient {
             updated_at: thread.get("updatedAt").and_then(Value::as_i64).unwrap_or(0),
         })
     }
+}
+
+/// Extracts the prompt and, once the turn finished, its final answer.
+pub fn turn_entries(turn: &Value) -> Vec<TaskTurnEntry> {
+    let Some(turn_id) = turn.get("id").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    let finished = turn
+        .get("status")
+        .and_then(Value::as_str)
+        .and_then(TaskStatus::parse)
+        .is_some_and(TaskStatus::is_terminal);
+    let items = turn
+        .get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut prompt = None;
+    let mut answer = None;
+    for item in &items {
+        match item.get("type").and_then(Value::as_str).unwrap_or("") {
+            "userMessage" if prompt.is_none() => {
+                let text = content_text(item);
+                if !text.is_empty() {
+                    prompt = Some(text);
+                }
+            }
+            "functionCallOutput"
+                if prompt.is_none()
+                    && item.get("namespace").and_then(Value::as_str) == Some("cloud_threads")
+                    && item.get("name").and_then(Value::as_str) == Some("send_message") =>
+            {
+                let output = item.get("output").and_then(Value::as_str).unwrap_or("");
+                if let Some(inner) = output
+                    .split_once("<input>")
+                    .and_then(|(_, rest)| rest.split_once("</input>"))
+                    .map(|(inner, _)| unescape_html(inner.trim()))
+                    .filter(|inner| !inner.is_empty())
+                {
+                    prompt = Some(inner);
+                }
+            }
+            "agentMessage" if finished => {
+                let text = item
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| content_text(item));
+                if !text.trim().is_empty() {
+                    let is_final =
+                        item.get("phase").and_then(Value::as_str) == Some("final_answer");
+                    answer = Some(text);
+                    if is_final {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut entries = Vec::new();
+    if let Some(text) = prompt {
+        entries.push(TaskTurnEntry {
+            id: format!("{turn_id}:prompt"),
+            prompt: true,
+            text,
+        });
+    }
+    if let Some(text) = answer {
+        entries.push(TaskTurnEntry {
+            id: format!("{turn_id}:answer"),
+            prompt: false,
+            text,
+        });
+    }
+    entries
+}
+
+fn content_text(item: &Value) -> String {
+    item.get("content")
+        .and_then(Value::as_array)
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_owned()
+}
+
+fn unescape_html(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+}
+
+/// JavaScript `Date#getTimezoneOffset`: minutes to add to local time for UTC.
+pub fn timezone_offset_min() -> i32 {
+    -(chrono::Local::now().offset().local_minus_utc() / 60)
 }
 
 /// Status precedence: thread error and active state win over the latest turn.
@@ -874,6 +1076,28 @@ mod tests {
             Completed
         );
         assert!(derive_task_status("idle", false, Some("weird")).is_err());
+    }
+
+    #[test]
+    fn turn_entries_take_prompt_and_final_answer() {
+        let turn = json!({"id": "t1", "status": "completed", "items": [
+            {"type": "functionCallOutput", "namespace": "cloud_threads", "name": "send_message",
+             "output": "x <input>Find &amp; book</input> y"},
+            {"type": "agentMessage", "text": "draft"},
+            {"type": "agentMessage", "text": "Booked.", "phase": "final_answer"},
+            {"type": "agentMessage", "text": "after"}
+        ]});
+        let entries = turn_entries(&turn);
+        assert_eq!(entries[0].text, "Find & book");
+        assert!(entries[0].prompt);
+        assert_eq!(entries[1].text, "Booked.");
+        let running = json!({"id": "t2", "status": "inProgress", "items": [
+            {"type": "userMessage", "content": [{"type": "text", "text": "Go"}]},
+            {"type": "agentMessage", "text": "partial"}
+        ]});
+        let entries = turn_entries(&running);
+        assert_eq!(entries.len(), 1, "no answer until the turn finishes");
+        assert_eq!(entries[0].id, "t2:prompt");
     }
 
     #[test]

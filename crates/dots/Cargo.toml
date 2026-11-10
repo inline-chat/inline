@@ -11,7 +11,7 @@ description = "ChatGPT Dots client and relay connector for the Inline bridge."
 
 [dependencies]
 base64 = "0.22.1"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures-util.workspace = true
 inline-relay = { path = "../relay" }
 log.workspace = true

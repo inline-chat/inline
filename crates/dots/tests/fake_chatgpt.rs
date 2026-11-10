@@ -77,6 +77,9 @@ struct FakeState {
     bad_headers: Vec<String>,
     ws: Option<mpsc::UnboundedSender<String>>,
     ws_connections: usize,
+    heartbeats: usize,
+    read_marks: Vec<Value>,
+    avatar_fetches: usize,
 }
 
 type Shared = Arc<Mutex<FakeState>>;
@@ -106,6 +109,17 @@ impl FakeState {
                 target.insert(key.clone(), value.clone());
             }
         }
+        self.messages.push(message);
+        id
+    }
+
+    /// Adds a message with a caller-chosen shape (id and times filled in).
+    fn add_raw(&mut self, mut message: Value) -> String {
+        let id = format!("m-{}", self.messages.len());
+        let at = self.stamp();
+        message["id"] = json!(id);
+        message["created_at"] = json!(at);
+        message["updated_at"] = json!(at);
         self.messages.push(message);
         id
     }
@@ -168,7 +182,38 @@ macro_rules! guard {
 
 async fn primary(State(state): State<Shared>, headers: HeaderMap) -> Response {
     guard!(state, headers);
-    axum::Json(serde_json::from_str::<Value>(include_str!("fixtures/primary.json")).unwrap())
+    let mut primary: Value = serde_json::from_str(include_str!("fixtures/primary.json")).unwrap();
+    // Keep tests off the real asset host.
+    let base = state.lock().unwrap().base.clone();
+    primary["profile"]["avatar_url"] = json!(format!("{base}/avatar.png?sig=1"));
+    axum::Json(primary).into_response()
+}
+
+async fn heartbeat(State(state): State<Shared>, headers: HeaderMap) -> Response {
+    guard!(state, headers);
+    state.lock().unwrap().heartbeats += 1;
+    axum::Json(json!({})).into_response()
+}
+
+async fn mark_read(
+    State(state): State<Shared>,
+    headers: HeaderMap,
+    body: axum::Json<Value>,
+) -> Response {
+    guard!(state, headers);
+    state.lock().unwrap().read_marks.push(body.0);
+    axum::Json(json!({})).into_response()
+}
+
+async fn avatar(State(state): State<Shared>, headers: HeaderMap) -> Response {
+    if headers.contains_key("authorization") {
+        state.lock().unwrap().storage_saw_auth = true;
+    }
+    state.lock().unwrap().avatar_fetches += 1;
+    (
+        [("content-type", "image/png")],
+        Bytes::from_static(b"\x89PNGavatar"),
+    )
         .into_response()
 }
 
@@ -408,11 +453,21 @@ async fn task(State(state): State<Shared>, headers: HeaderMap, Path(id): Path<St
     .into_response()
 }
 
-async fn turns(State(state): State<Shared>, headers: HeaderMap) -> Response {
+async fn turns(
+    State(state): State<Shared>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
     guard!(state, headers);
     let status = state.lock().unwrap().task_status.clone();
-    axum::Json(json!({"data": [{"id": "turn-1", "status": status, "startedAt": 1_700_000_000}], "nextCursor": null}))
-        .into_response()
+    let mut turn = json!({"id": "turn-1", "status": status, "startedAt": 1_700_000_000});
+    if query.get("itemsView").map(String::as_str) == Some("full") {
+        turn["items"] = json!([
+            {"type": "userMessage", "content": [{"type": "text", "text": "Find a Tuesday flight"}]},
+            {"type": "agentMessage", "text": "Booked the 9:40.", "phase": "final_answer"}
+        ]);
+    }
+    axum::Json(json!({"data": [turn], "nextCursor": null})).into_response()
 }
 
 async fn start() -> (Shared, String) {
@@ -451,6 +506,12 @@ async fn start() -> (Shared, String) {
         .route("/storage/{file}", get(storage))
         .route("/codex/v1/threads/{id}", get(task))
         .route("/codex/v2/threads/{id}/turns", get(turns))
+        .route(
+            "/backend-api/messaging/rooms/{room}/responding_heartbeat",
+            post(heartbeat),
+        )
+        .route("/backend-api/messaging/rooms/{room}/read", post(mark_read))
+        .route("/avatar.png", get(avatar))
         .with_state(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -488,6 +549,9 @@ fn connector(base: &str) -> Arc<DotsConnector> {
     ))
 }
 
+/// `(name, avatar bytes)` passed to `update_profile`.
+type ProfileCall = (Option<String>, Option<Vec<u8>>);
+
 #[derive(Default)]
 struct RecordingInline {
     next: Mutex<i64>,
@@ -495,9 +559,30 @@ struct RecordingInline {
     edits: Mutex<Vec<(i64, String)>>,
     reactions: Mutex<Vec<(i64, String, bool)>>,
     typing: Mutex<Vec<bool>>,
+    reads: Mutex<Vec<i64>>,
+    profiles: Mutex<Vec<ProfileCall>>,
 }
 
 impl InlineSide for RecordingInline {
+    fn mark_read(&self, message_id: i64) -> BoxFuture<'_, InlineResult<()>> {
+        Box::pin(async move {
+            self.reads.lock().unwrap().push(message_id);
+            Ok(())
+        })
+    }
+    fn update_profile<'a>(
+        &'a self,
+        name: Option<&'a str>,
+        avatar: Option<&'a FileData>,
+    ) -> BoxFuture<'a, InlineResult<()>> {
+        Box::pin(async move {
+            self.profiles
+                .lock()
+                .unwrap()
+                .push((name.map(str::to_owned), avatar.map(|a| a.bytes.clone())));
+            Ok(())
+        })
+    }
     fn post<'a>(&'a self, post: &'a InlinePost) -> BoxFuture<'a, InlineResult<i64>> {
         Box::pin(async move {
             let mut next = self.next.lock().unwrap();
@@ -652,6 +737,7 @@ async fn full_round_trip_through_fake_chatgpt() {
             text: "Thanks Pip".into(),
             reply_to: Some(hello_inline),
             media: None,
+            edited: false,
         })
         .await
         .unwrap();
@@ -664,6 +750,95 @@ async fn full_round_trip_through_fake_chatgpt() {
         assert_eq!(body["request_id"], correlation_id("bot-7", 501).as_str());
     }
     let owner_remote = store.remote_for_inline(501).unwrap().unwrap();
+
+    // Bot name and photo follow the Dot.
+    assert!(
+        inline
+            .profiles
+            .lock()
+            .unwrap()
+            .contains(&(Some("Pip".into()), None))
+    );
+    assert!(
+        inline
+            .profiles
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, avatar)| avatar.as_deref() == Some(&b"\x89PNGavatar"[..]))
+    );
+
+    // Sending from Inline marks the ChatGPT room read up to that message.
+    {
+        let state = fake.lock().unwrap();
+        let created = state
+            .messages
+            .iter()
+            .find(|m| m["id"] == owner_remote.as_str())
+            .unwrap()["created_at"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let marked = state.read_marks.last().unwrap()["last_read_at"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(
+            chrono::DateTime::parse_from_rfc3339(&marked).unwrap(),
+            chrono::DateTime::parse_from_rfc3339(&created).unwrap()
+        );
+        assert!(state.sent_bodies.last().unwrap()["timezone_offset_min"].is_i64());
+    }
+
+    // The Dot reads it: the bot marks the Inline DM read.
+    {
+        let state = fake.lock().unwrap();
+        let created = state
+            .messages
+            .iter()
+            .find(|m| m["id"] == owner_remote.as_str())
+            .unwrap()["created_at"]
+            .clone();
+        state.push(
+            "calpico-room-read-receipt",
+            json!({"room_id": "room-1", "account_user_id": DOT_MEMBER, "last_read_at": created}),
+        );
+    }
+    eventually("dot read receipt", || {
+        inline.reads.lock().unwrap().contains(&501)
+    })
+    .await;
+
+    // The owner types in Inline: ChatGPT gets the heartbeat, throttled.
+    for _ in 0..3 {
+        relay_one
+            .handle_inline(InlineEvent::Typing {
+                user_id: OWNER_INLINE,
+                active: true,
+            })
+            .await
+            .unwrap();
+    }
+    assert_eq!(fake.lock().unwrap().heartbeats, 1);
+
+    // Shapes from the app's own schema: system notices and assistant
+    // messages without a sender still show up.
+    fake.lock().unwrap().add_raw(json!({
+        "role": "system", "content": {"type": "dot_renamed"}, "preview": "Pip renamed itself"
+    }));
+    fake.lock().unwrap().add_raw(json!({
+        "role": "assistant", "raw_messages": [{"author": {"role": "assistant"}, "content": {"content_type": "canvas"}}]
+    }));
+    eventually("system and assistant messages", || {
+        let posts = inline.posts.lock().unwrap();
+        posts
+            .iter()
+            .any(|(_, post)| post.text == "_Pip renamed itself_" && post.silent)
+            && posts
+                .iter()
+                .any(|(_, post)| post.text.contains("only shows in ChatGPT"))
+    })
+    .await;
 
     // The Dot reacts to the owner's message.
     {
@@ -684,9 +859,13 @@ async fn full_round_trip_through_fake_chatgpt() {
             .contains(&(501, "👍".into(), false))
     })
     .await;
-    assert_eq!(
-        inline.posts.lock().unwrap().len(),
-        1,
+    assert!(
+        !inline
+            .posts
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, post)| post.text.contains("Thanks Pip")),
         "echo of owner message not mirrored"
     );
 
@@ -718,6 +897,7 @@ async fn full_round_trip_through_fake_chatgpt() {
                 mime: Some("image/jpeg".into()),
                 size: Some(9),
             }),
+            edited: false,
         })
         .await
         .unwrap();
@@ -830,6 +1010,20 @@ async fn full_round_trip_through_fake_chatgpt() {
             .unwrap()
             .iter()
             .any(|(_, text)| text == "🗂 **Book flights**\nCompleted")
+    })
+    .await;
+    eventually("task transcript under the card", || {
+        let posts = inline.posts.lock().unwrap();
+        let card = posts
+            .iter()
+            .find(|(_, post)| post.text.starts_with("🗂"))
+            .map(|(id, _)| *id);
+        posts
+            .iter()
+            .any(|(_, post)| post.reply_to == card && post.text == "Booked the 9:40.")
+            && posts.iter().any(|(_, post)| {
+                post.reply_to == card && post.text.ends_with("Find a Tuesday flight")
+            })
     })
     .await;
 

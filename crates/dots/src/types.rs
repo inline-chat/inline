@@ -94,6 +94,18 @@ pub struct Room {
     /// Newest messages; `null` on current servers.
     #[serde(default)]
     pub latest_messages: Option<Vec<MessageStub>>,
+    /// Per-member read positions.
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub read_receipts: Vec<ReadReceipt>,
+}
+
+/// A member's read position.
+#[derive(Clone, Debug, Deserialize)]
+pub struct ReadReceipt {
+    /// Member.
+    pub account_user_id: String,
+    /// RFC 3339 read time.
+    pub last_read_at: String,
 }
 
 /// Room member.
@@ -142,8 +154,10 @@ pub struct Message {
     /// RFC 3339 last update.
     #[serde(default)]
     pub updated_at: Option<String>,
-    /// Sender member id.
-    pub account_user_id: String,
+    /// Sender member id. Absent on `system` messages and on some `assistant`
+    /// messages.
+    #[serde(default)]
+    pub account_user_id: Option<String>,
     /// Echo of the client `request_id` for messages this client sent.
     #[serde(default)]
     pub request_id: Option<String>,
@@ -151,7 +165,7 @@ pub struct Message {
     #[serde(default)]
     pub deleted_at: Option<String>,
     /// `account_user_id` to one emoji.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub reactions: BTreeMap<String, String>,
     /// Direct parent.
     #[serde(default)]
@@ -159,12 +173,28 @@ pub struct Message {
     /// Root of the reply thread.
     #[serde(default)]
     pub reply_root_message_id: Option<String>,
-    /// Sender role, when the server provides it.
+    /// `user` (owner or Dot), `assistant`, or `system`.
     #[serde(default)]
     pub role: Option<String>,
-    /// Body.
+    /// Linked task (the app reads this; older payloads use a `thread`
+    /// attachment instead).
     #[serde(default)]
+    pub task_id: Option<String>,
+    /// Server-rendered summary; the only text of `system` messages.
+    #[serde(default)]
+    pub preview: Option<String>,
+    /// Body.
+    #[serde(default, deserialize_with = "null_as_default")]
     pub content: Content,
+}
+
+/// Treats JSON `null` like a missing field.
+fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 impl Message {
@@ -184,12 +214,15 @@ pub struct ReplyTo {
 /// Message body.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct Content {
-    /// Text; may be empty for media.
-    #[serde(default)]
+    /// Text; `null` or empty for media.
+    #[serde(default, deserialize_with = "null_as_default")]
     pub text: String,
     /// Attachments.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub attachments: Vec<Attachment>,
+    /// Content kind on `system` messages.
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     /// Confirmation request, raw. Parse with [`Elicitation::parse`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elicitation: Option<Value>,
@@ -227,6 +260,20 @@ pub struct SendBody {
     /// Parent message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<ReplyTo>,
+    /// Minutes from local time to UTC (JavaScript `getTimezoneOffset`), as
+    /// the ChatGPT apps send it.
+    pub timezone_offset_min: i32,
+}
+
+/// One prompt or answer extracted from a task turn.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaskTurnEntry {
+    /// `<turn id>:prompt` or `<turn id>:answer`.
+    pub id: String,
+    /// `true` for the owner's prompt.
+    pub prompt: bool,
+    /// Text.
+    pub text: String,
 }
 
 /// Outgoing content.

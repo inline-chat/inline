@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use inline_relay::{
-    BoxFuture, Capabilities, Confirmation, ConfirmationAnswer, ConfirmationStatus, Connector,
-    ConnectorError, ConnectorEvent, ConnectorHealth, ConnectorResult, FailureKind, FileData,
-    OutboundMessage, RemoteFile, RemoteMessage, Speaker, TaskUpdate,
+    AgentProfile, BoxFuture, Capabilities, Confirmation, ConfirmationAnswer, ConfirmationStatus,
+    Connector, ConnectorError, ConnectorEvent, ConnectorHealth, ConnectorResult, FailureKind,
+    FileData, OutboundMessage, RemoteFile, RemoteMessage, Speaker, TaskEntry, TaskUpdate,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -66,6 +66,8 @@ pub struct DotRoom {
     pub paused: bool,
     /// Rendered avatar URL.
     pub avatar_url: Option<String>,
+    /// Where the Dot had read up to at discovery (RFC 3339).
+    pub dot_read_at: Option<String>,
 }
 
 /// Durable sync position. Serialized as the relay checkpoint.
@@ -116,6 +118,9 @@ pub struct DotsConnector {
     settings: ConnectorSettings,
     room: Mutex<Option<DotRoom>>,
     sync: Mutex<SyncState>,
+    /// Recently seen messages: id to (created, speaker). Used to turn read
+    /// times into message positions and back.
+    known: std::sync::Mutex<VecDeque<(String, chrono::DateTime<chrono::FixedOffset>, Speaker)>>,
 }
 
 impl std::fmt::Debug for DotsConnector {
@@ -132,6 +137,7 @@ impl DotsConnector {
             settings,
             room: Mutex::new(None),
             sync: Mutex::new(SyncState::default()),
+            known: Default::default(),
         }
     }
 
@@ -191,6 +197,8 @@ impl DotsConnector {
             }),
         )
         .await?;
+        emit(&events, ConnectorEvent::Profile(profile(&room))).await?;
+        let mut pending_read = room.dot_read_at.clone();
 
         let (signal_sender, mut signals) = mpsc::channel(64);
         let realtime_task = self.settings.realtime.then(|| {
@@ -228,6 +236,11 @@ impl DotsConnector {
                 Err(error) => return Err(map_error(error, false)),
             }
             self.poll_tasks(&events, &mut tasks).await?;
+            if let Some(at) = pending_read.take()
+                && let Some(id) = self.read_position(&at)
+            {
+                emit(&events, ConnectorEvent::ReadUpTo(id)).await?;
+            }
 
             let interval = if failures > 0 {
                 Duration::from_secs(3u64 << failures.min(4))
@@ -248,6 +261,23 @@ impl DotsConnector {
                     Some(Signal::Typing(active)) => {
                         emit(&events, ConnectorEvent::Typing(active)).await?;
                         continue;
+                    }
+                    Some(Signal::ReadReceipt { account_user_id, last_read_at }) => {
+                        if account_user_id == room.dot_member {
+                            // Applied after the next poll so the messages it
+                            // covers are known.
+                            pending_read = Some(last_read_at);
+                        }
+                    }
+                    Some(Signal::RoomChanged) => {
+                        let fresh = self.discover().await.map_err(|error| map_error(error, false))?;
+                        if fresh.room_id != room.room_id || fresh.dot_member != room.dot_member {
+                            return Err(ConnectorError::new(
+                                FailureKind::Transient,
+                                "the Dot's room changed; reconnecting",
+                            ));
+                        }
+                        emit(&events, ConnectorEvent::Profile(profile(&fresh))).await?;
                     }
                     Some(Signal::Disconnected(reason)) => {
                         if subscribed {
@@ -298,6 +328,9 @@ impl DotsConnector {
                     continue;
                 }
                 if let Some(remote) = convert(item, room) {
+                    if let Some(created) = item.created() {
+                        self.remember_known(&item.id, created, remote.speaker);
+                    }
                     if let Some(task_id) = &remote.task_id {
                         tasks.entry(task_id.clone()).or_insert_with(|| TaskTrack {
                             last: None,
@@ -332,6 +365,39 @@ impl DotsConnector {
         Ok(())
     }
 
+    fn remember_known(
+        &self,
+        id: &str,
+        created: chrono::DateTime<chrono::FixedOffset>,
+        speaker: Speaker,
+    ) {
+        let mut known = self
+            .known
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if known.iter().any(|(known_id, ..)| known_id == id) {
+            return;
+        }
+        known.push_back((id.to_owned(), created, speaker));
+        while known.len() > 256 {
+            known.pop_front();
+        }
+    }
+
+    /// Newest owner message at or before a read time.
+    fn read_position(&self, at: &str) -> Option<String> {
+        let at = parse_time(at)?;
+        let known = self
+            .known
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        known
+            .iter()
+            .filter(|(_, created, speaker)| *speaker == Speaker::Owner && *created <= at)
+            .max_by_key(|(_, created, _)| *created)
+            .map(|(id, ..)| id.clone())
+    }
+
     async fn poll_tasks(
         &self,
         events: &mpsc::Sender<ConnectorEvent>,
@@ -360,7 +426,16 @@ impl DotsConnector {
                     }
                     let changed = track.last.as_ref() != Some(&summary);
                     if changed {
-                        emit(events, ConnectorEvent::Task(task_update(&summary))).await?;
+                        // Transcript failures leave the card working; the next
+                        // change retries.
+                        let entries = match self.client.task_transcript(&id, 5).await {
+                            Ok(entries) => entries,
+                            Err(error) => {
+                                log::warn!(target: "inline::bridge::dots", "task transcript unavailable: {error}");
+                                Vec::new()
+                            }
+                        };
+                        emit(events, ConnectorEvent::Task(task_update(&summary, entries))).await?;
                     }
                     if summary.status.is_terminal() {
                         tasks.remove(&id);
@@ -387,6 +462,7 @@ impl DotsConnector {
                                     "Task details are unavailable here. Open ChatGPT to follow it."
                                         .into(),
                                 terminal: true,
+                                entries: Vec::new(),
                             }),
                         )
                         .await?;
@@ -455,12 +531,37 @@ fn parse_time(value: &str) -> Option<chrono::DateTime<chrono::FixedOffset>> {
     chrono::DateTime::parse_from_rfc3339(value).ok()
 }
 
-fn task_update(summary: &TaskSummary) -> TaskUpdate {
+fn task_update(summary: &TaskSummary, entries: Vec<crate::types::TaskTurnEntry>) -> TaskUpdate {
     TaskUpdate {
         id: summary.id.clone(),
         title: summary.title.clone(),
         label: summary.status.label().into(),
         terminal: summary.status.is_terminal(),
+        entries: entries
+            .into_iter()
+            .map(|entry| TaskEntry {
+                id: entry.id,
+                speaker: if entry.prompt {
+                    Speaker::Owner
+                } else {
+                    Speaker::Agent
+                },
+                text: entry.text,
+            })
+            .collect(),
+    }
+}
+
+fn profile(room: &DotRoom) -> AgentProfile {
+    AgentProfile {
+        name: room.name.clone(),
+        // The signed query changes on every fetch; the path names the image.
+        avatar: room.avatar_url.as_deref().map(|url| {
+            url.split_once('?')
+                .map(|(path, _)| path)
+                .unwrap_or(url)
+                .to_owned()
+        }),
     }
 }
 
@@ -510,7 +611,13 @@ pub async fn discover(client: &DotsClient) -> Result<DotRoom, DotsError> {
             "the Dot room belongs to a different ChatGPT user".into(),
         ));
     }
+    let dot_read_at = room
+        .read_receipts
+        .iter()
+        .find(|receipt| receipt.account_user_id == dot.account_user_id)
+        .map(|receipt| receipt.last_read_at.clone());
     Ok(DotRoom {
+        dot_read_at,
         room_id: room.id,
         aeon_id: selection.aeon_id,
         dot_member: dot.account_user_id.clone(),
@@ -552,16 +659,28 @@ async fn baseline(
 /// Converts a wire message into a relay snapshot. `None` for senders that are
 /// neither the Dot nor the owner.
 pub fn convert(message: &Message, room: &DotRoom) -> Option<RemoteMessage> {
-    let speaker = if message.account_user_id == room.dot_member {
+    let sender = message.account_user_id.as_deref();
+    let role = message.role.as_deref().unwrap_or("user");
+    let speaker = if role == "system" {
+        Speaker::System
+    } else if sender == Some(room.dot_member.as_str()) || (role == "assistant" && sender.is_none())
+    {
         Speaker::Agent
-    } else if message.account_user_id == room.owner_member {
+    } else if sender == Some(room.owner_member.as_str()) {
         Speaker::Owner
     } else {
         return None;
     };
     let mut text = message.content.text.clone();
+    if speaker == Speaker::System {
+        text = message
+            .preview
+            .clone()
+            .filter(|preview| !preview.trim().is_empty())
+            .unwrap_or_else(|| "Something changed in ChatGPT.".into());
+    }
     let mut files = Vec::new();
-    let mut task_id = None;
+    let mut task_id = message.task_id.clone().filter(|id| !id.is_empty());
     let mut unsupported = 0;
     for (index, attachment) in message.content.attachments.iter().enumerate() {
         match attachment.kind.as_str() {
@@ -590,6 +709,20 @@ pub fn convert(message: &Message, room: &DotRoom) -> Option<RemoteMessage> {
             text.push_str("\n\n");
         }
         text.push_str("_[An attachment here only shows in ChatGPT.]_");
+    }
+    // A Dot message with nothing the bridge can show still appears.
+    if speaker == Speaker::Agent
+        && text.trim().is_empty()
+        && files.is_empty()
+        && task_id.is_none()
+        && message.content.elicitation.is_none()
+        && message.deleted_at.is_none()
+    {
+        text = message
+            .preview
+            .clone()
+            .filter(|preview| !preview.trim().is_empty())
+            .unwrap_or_else(|| "_[This message only shows in ChatGPT.]_".into());
     }
     let confirmation = match (&message.content.elicitation, speaker) {
         (Some(raw), Speaker::Agent) => Some(confirmation(raw)),
@@ -764,7 +897,7 @@ impl Connector for DotsConnector {
                 )
                 .await
                 .map_err(|error| map_error(error, true))?;
-            if sent.account_user_id != room.owner_member {
+            if sent.account_user_id.as_deref() != Some(room.owner_member.as_str()) {
                 return Err(ConnectorError::new(
                     FailureKind::Uncertain,
                     "sent message has an unexpected sender",
@@ -783,7 +916,7 @@ impl Connector for DotsConnector {
             let room = self.current_room().await?;
             let matches = |message: &Message| {
                 message.request_id.as_deref() == Some(request_id)
-                    && message.account_user_id == room.owner_member
+                    && message.account_user_id.as_deref() == Some(room.owner_member.as_str())
             };
             let mut after = self.sync.lock().await.resume_after();
             for _ in 0..4 {
@@ -957,6 +1090,74 @@ impl Connector for DotsConnector {
         })
     }
 
+    fn owner_typing(&self) -> BoxFuture<'_, ConnectorResult<()>> {
+        Box::pin(async move {
+            let room = self.current_room().await?;
+            self.client
+                .responding_heartbeat(&room.room_id)
+                .await
+                .map_err(|error| map_error(error, false))
+        })
+    }
+
+    fn mark_read<'a>(&'a self, message_id: &'a str) -> BoxFuture<'a, ConnectorResult<()>> {
+        Box::pin(async move {
+            let room = self.current_room().await?;
+            let known = self
+                .known
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .iter()
+                .find(|(id, ..)| id == message_id)
+                .map(|(_, created, _)| *created);
+            let created = match known {
+                Some(created) => created,
+                None => self
+                    .client
+                    .message(&room.room_id, message_id)
+                    .await
+                    .map_err(|error| map_error(error, false))?
+                    .and_then(|message| message.created())
+                    .ok_or_else(|| {
+                        ConnectorError::new(FailureKind::Transient, "message not found")
+                    })?,
+            };
+            self.client
+                .mark_read(
+                    &room.room_id,
+                    &created.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
+                )
+                .await
+                .map_err(|error| map_error(error, false))
+        })
+    }
+
+    fn fetch_avatar<'a>(
+        &'a self,
+        _locator: &'a str,
+    ) -> BoxFuture<'a, ConnectorResult<Option<FileData>>> {
+        Box::pin(async move {
+            // The locator drops the signed query; use the live URL.
+            let url = self
+                .room
+                .lock()
+                .await
+                .as_ref()
+                .and_then(|room| room.avatar_url.clone());
+            let Some(url) = url else { return Ok(None) };
+            let avatar = self
+                .client
+                .avatar(&url)
+                .await
+                .map_err(|error| map_error(error, false))?;
+            Ok(Some(FileData {
+                name: avatar.name,
+                mime: avatar.mime,
+                bytes: avatar.bytes,
+            }))
+        })
+    }
+
     fn describe(&self) -> BoxFuture<'_, String> {
         Box::pin(async move {
             match self.room.lock().await.as_ref() {
@@ -988,6 +1189,7 @@ mod tests {
             name: "Pip".into(),
             paused: false,
             avatar_url: None,
+            dot_read_at: None,
         }
     }
 
@@ -996,13 +1198,15 @@ mod tests {
             id: "m1".into(),
             created_at: "2026-11-10T10:00:00Z".into(),
             updated_at: None,
-            account_user_id: sender.into(),
+            account_user_id: Some(sender.into()),
             request_id: None,
             deleted_at: None,
             reactions: Default::default(),
             reply_to: None,
             reply_root_message_id: None,
             role: None,
+            task_id: None,
+            preview: None,
             content: Content::default(),
         }
     }
@@ -1036,6 +1240,7 @@ mod tests {
                 },
             ],
             elicitation: None,
+            kind: None,
         };
         dot.reply_to = Some(ReplyTo {
             message_id: "p".into(),
@@ -1055,6 +1260,40 @@ mod tests {
             Speaker::Owner
         );
         assert!(convert(&message("stranger"), &room()).is_none());
+    }
+
+    #[test]
+    fn app_message_shapes_degrade_visibly() {
+        let system: Message = serde_json::from_value(json!({
+            "id": "s", "created_at": "2026-11-10T10:00:00Z", "updated_at": "2026-11-10T10:00:00Z",
+            "role": "system", "content": {"type": "member_joined"}, "preview": "Pip joined"
+        }))
+        .unwrap();
+        let converted = convert(&system, &room()).unwrap();
+        assert_eq!(converted.speaker, Speaker::System);
+        assert_eq!(converted.text, "Pip joined");
+
+        let assistant: Message = serde_json::from_value(json!({
+            "id": "a", "created_at": "2026-11-10T10:00:00Z", "updated_at": "2026-11-10T10:00:00Z",
+            "role": "assistant", "raw_messages": [{"author": {"role": "assistant"}, "content": {"content_type": "code"}}]
+        }))
+        .unwrap();
+        let converted = convert(&assistant, &room()).unwrap();
+        assert_eq!(converted.speaker, Speaker::Agent);
+        assert!(converted.text.contains("only shows in ChatGPT"));
+
+        let null_text: Message = serde_json::from_value(json!({
+            "id": "n", "created_at": "2026-11-10T10:00:00Z", "role": "user",
+            "account_user_id": "dot", "content": {"text": null, "attachments": null},
+            "reactions": null, "task_id": "t9"
+        }))
+        .unwrap();
+        let converted = convert(&null_text, &room()).unwrap();
+        assert_eq!(converted.task_id.as_deref(), Some("t9"));
+        assert!(
+            converted.text.is_empty(),
+            "a task-only message needs no placeholder"
+        );
     }
 
     #[test]

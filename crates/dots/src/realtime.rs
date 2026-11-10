@@ -30,6 +30,15 @@ pub enum Signal {
     Wake,
     /// The Dot started or stopped responding.
     Typing(bool),
+    /// A member read the room up to a time (RFC 3339).
+    ReadReceipt {
+        /// Member.
+        account_user_id: String,
+        /// Read position.
+        last_read_at: String,
+    },
+    /// Room or Dot metadata changed (name, avatar, replacement); rediscover.
+    RoomChanged,
     /// The socket dropped; poll on the fallback interval until it is back.
     Disconnected(String),
 }
@@ -95,6 +104,13 @@ pub fn interpret_frame(text: &str, room_id: &str, dot_member: &str) -> Vec<Signa
         };
         let kind = signal.get("type").and_then(Value::as_str).unwrap_or("");
         let payload = signal.get("payload").unwrap_or(&Value::Null);
+        // `calpico-room-update` names the room as `room.id`, not `room_id`.
+        if kind == "calpico-room-update" {
+            if payload.pointer("/room/id").and_then(Value::as_str) == Some(room_id) {
+                signals.push(Signal::RoomChanged);
+            }
+            continue;
+        }
         if payload.get("room_id").and_then(Value::as_str) != Some(room_id) {
             continue;
         }
@@ -124,6 +140,24 @@ pub fn interpret_frame(text: &str, room_id: &str, dot_member: &str) -> Vec<Signa
                 }
                 signals.push(Signal::Wake);
             }
+            "calpico-room-read-receipt" => {
+                if let (Some(member), Some(at)) = (
+                    payload.get("account_user_id").and_then(Value::as_str),
+                    payload.get("last_read_at").and_then(Value::as_str),
+                ) {
+                    signals.push(Signal::ReadReceipt {
+                        account_user_id: member.to_owned(),
+                        last_read_at: at.to_owned(),
+                    });
+                }
+            }
+            "calpico-room-metadata-update" | "calpico-room-leave" => {
+                signals.push(Signal::RoomChanged);
+                signals.push(Signal::Wake);
+            }
+            // The owner read the room elsewhere; nothing for Inline to show.
+            "calpico-room-read" => {}
+            // message-update, message-task-associated, and anything new.
             _ => signals.push(Signal::Wake),
         }
     }
@@ -260,6 +294,34 @@ mod tests {
             interpret_frame(&frame, "r", "d"),
             vec![Signal::Typing(false), Signal::Wake]
         );
+    }
+
+    #[test]
+    fn read_receipts_and_room_changes() {
+        let frame = envelope(
+            "calpico-room-read-receipt",
+            json!({"room_id": "r", "account_user_id": "d", "last_read_at": "2026-11-10T09:00:00Z"}),
+        );
+        assert_eq!(
+            interpret_frame(&frame, "r", "d"),
+            vec![Signal::ReadReceipt {
+                account_user_id: "d".into(),
+                last_read_at: "2026-11-10T09:00:00Z".into()
+            }]
+        );
+        let update = envelope(
+            "calpico-room-update",
+            json!({"room": {"id": "r", "aeon_id": "a"}}),
+        );
+        assert_eq!(
+            interpret_frame(&update, "r", "d"),
+            vec![Signal::RoomChanged]
+        );
+        let associated = envelope(
+            "calpico-message-task-associated",
+            json!({"room_id": "r", "message_id": "m", "task_id": "t"}),
+        );
+        assert_eq!(interpret_frame(&associated, "r", "d"), vec![Signal::Wake]);
     }
 
     #[test]
