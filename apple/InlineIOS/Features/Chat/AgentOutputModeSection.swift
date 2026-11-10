@@ -3,7 +3,8 @@ import SwiftUI
 
 /// Output in a chat's Agent Settings: one row for this thread, its menu
 /// holding the agent's default as a submenu, like on Mac. Shown for agents
-/// that report a runtime. The sheet loads the values (`loadOutputModes`).
+/// that report a runtime or declare the Output capability. The sheet loads
+/// the values (`loadOutputModes`).
 struct AgentOutputModeSection: View {
   let peer: Peer
   let botUserID: Int64
