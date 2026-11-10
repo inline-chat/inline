@@ -1,5 +1,6 @@
 import Foundation
 import SwiftTreeSitter
+import Synchronization
 import TreeSitterBash
 import TreeSitterCSS
 import TreeSitterGo
@@ -38,13 +39,7 @@ public struct CodeToken: Sendable, Hashable {
 public actor CodeSyntaxHighlighter {
   private final class BundleAnchor: NSObject {}
 
-  private struct CacheEntry {
-    let text: String
-    let language: LanguageKind
-    let tokens: [CodeToken]
-  }
-
-  private enum LanguageKind: Hashable {
+  enum LanguageKind: Hashable, Sendable {
     case swift
     case typeScript
     case tsx
@@ -58,28 +53,44 @@ public actor CodeSyntaxHighlighter {
     case rust
   }
 
+  /// One instance for the app so each language's parser is created once.
+  public static let shared = CodeSyntaxHighlighter()
+
+  /// Shared by every instance so a block highlighted once can be colored on
+  /// its first frame wherever it is shown again.
+  static let tokenCache = CodeTokenCache(costLimit: 400_000)
+
+  /// Queries are immutable and Sendable. Loading one scans bundles and
+  /// compiles the query source, so do it once per process, not per instance.
+  private static let configurationCache = Mutex<[LanguageKind: LanguageConfiguration]>([:])
+
+  // Parsers carry mutable parse state and are not thread-safe, so they stay per actor.
   private var parsers: [LanguageKind: Parser] = [:]
-  private var configurations: [LanguageKind: LanguageConfiguration] = [:]
-  private var cache: [CacheEntry] = []
-  private let cacheLimit = 8
   private let maximumUTF16Length = 100_000
   private let maximumLines = 5_000
 
   public init() {}
 
+  /// Synchronous, thread-safe read of tokens already computed by any instance;
+  /// nil when not cached or unsupported.
+  public nonisolated static func cachedTokens(for text: String, language: String?) -> [CodeToken]? {
+    guard let language = languageKind(for: language) else { return nil }
+    return tokenCache.tokens(for: text, language: language)
+  }
+
   public func tokens(for text: String, language: String?) throws -> [CodeToken]? {
     guard let language = Self.languageKind(for: language),
           text.utf16.count <= maximumUTF16Length,
-          text.lazy.filter({ $0 == "\n" }).prefix(maximumLines).count < maximumLines
+          !Self.hasLines(atLeast: maximumLines, in: text)
     else { return nil }
-    if let entry = cache.first(where: { $0.text.utf8.elementsEqual(text.utf8) && $0.language == language }) {
-      return entry.tokens
+    if let tokens = Self.tokenCache.tokens(for: text, language: language) {
+      return tokens
     }
     try Task.checkCancellation()
-    let (parser, configuration) = try configuredParser(for: language)
+    let parser = try configuredParser(for: language)
     parser.timeout = 0.03
     guard let tree = Self.parseCompleteDocument(text, with: parser),
-          let query = configuration.queries[.highlights]
+          let query = try Self.configuration(for: language).queries[.highlights]
     else { return nil }
     try Task.checkCancellation()
     let textLength = (text as NSString).length
@@ -97,12 +108,10 @@ public actor CodeSyntaxHighlighter {
         else { return nil }
         return CodeToken(range: highlight.range, kind: kind)
       }
+    // Keep finished work even if the caller moved on; scrolling back to the
+    // block can then color it synchronously.
+    Self.tokenCache.insert(tokens, for: text, language: language)
     try Task.checkCancellation()
-    cache.removeAll { $0.text.utf8.elementsEqual(text.utf8) && $0.language == language }
-    cache.insert(.init(text: text, language: language, tokens: tokens), at: 0)
-    if cache.count > cacheLimit {
-      cache.removeLast(cache.count - cacheLimit)
-    }
     return tokens
   }
 
@@ -120,7 +129,7 @@ public actor CodeSyntaxHighlighter {
     languageKind(for: language) != nil
   }
 
-  private static func languageKind(for language: String?) -> LanguageKind? {
+  static func languageKind(for language: String?) -> LanguageKind? {
     guard let language else { return nil }
     return switch language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
       case "swift", "swift5", "swift6": .swift
@@ -138,10 +147,40 @@ public actor CodeSyntaxHighlighter {
     }
   }
 
-  private func configuredParser(for language: LanguageKind) throws -> (Parser, LanguageConfiguration) {
-    if let parser = parsers[language], let configuration = configurations[language] {
-      return (parser, configuration)
+  /// Scans UTF-8 bytes: iterating Characters runs grapheme breaking and does
+  /// not count "\r\n" as a newline.
+  private static func hasLines(atLeast limit: Int, in text: String) -> Bool {
+    var count = 0
+    for byte in text.utf8 where byte == 0x0A {
+      count += 1
+      if count >= limit { return true }
     }
+    return false
+  }
+
+  private func configuredParser(for language: LanguageKind) throws -> Parser {
+    if let parser = parsers[language] { return parser }
+    let parser = Parser()
+    try parser.setLanguage(Self.configuration(for: language).language)
+    parsers[language] = parser
+    return parser
+  }
+
+  private static func configuration(for language: LanguageKind) throws -> LanguageConfiguration {
+    if let configuration = configurationCache.withLock({ $0[language] }) {
+      return configuration
+    }
+    // Built outside the lock so a slow first load does not block other
+    // languages; a rare duplicate build is harmless.
+    let configuration = try makeConfiguration(for: language)
+    return configurationCache.withLock { cache in
+      if let existing = cache[language] { return existing }
+      cache[language] = configuration
+      return configuration
+    }
+  }
+
+  private static func makeConfiguration(for language: LanguageKind) throws -> LanguageConfiguration {
     let definition: (pointer: OpaquePointer, name: String, bundle: String) = switch language {
       case .swift: (tree_sitter_swift(), "Swift", "TreeSitterSwift_TreeSitterSwift")
       case .typeScript: (tree_sitter_typescript(), "TypeScript", "TreeSitterTypeScript_TreeSitterTypeScript")
@@ -167,18 +206,13 @@ public actor CodeSyntaxHighlighter {
         queryData.append(0x0A)
       }
     }
-    let highlightsURL = try Self.queriesURL(bundleName: definition.bundle)
+    let highlightsURL = try queriesURL(bundleName: definition.bundle)
       .appendingPathComponent("highlights.scm")
     try queryData.append(Data(contentsOf: highlightsURL))
     // Message rendering needs only highlights, not tags, locals, or injection queries.
-    let configuration = try LanguageConfiguration(
+    return try LanguageConfiguration(
       grammar, name: definition.name, queries: [.highlights: Query(language: grammar, data: queryData)]
     )
-    let parser = Parser()
-    try parser.setLanguage(configuration.language)
-    parsers[language] = parser
-    configurations[language] = configuration
-    return (parser, configuration)
   }
 
   private static func queriesURL(bundleName: String) throws -> URL {
