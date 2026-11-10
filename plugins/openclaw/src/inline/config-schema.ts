@@ -168,6 +168,7 @@ export const InlineAccountSchemaBase = z
   .object({
     name: z.string().optional(),
     enabled: z.boolean().optional(),
+    // Deprecated and ignored (each chat's Output setting decides); kept so existing configs validate.
     experimentalAgentActivity: z.boolean().optional(),
     baseUrl: z.string().optional(),
     token: SecretInputSchema.optional(),

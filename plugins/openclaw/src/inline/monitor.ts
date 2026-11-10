@@ -1,4 +1,7 @@
-import { formatQuietTimeline, activityAttention, activityLifecycleOutcome, preserveActivityTitles, ACTIVITY_MESSAGE_MAX_CHARS, type ActivityOutcome } from "./quiet-timeline.js"
+import { ProgressStream, type ActivityEvent, type TurnOutcome } from "../vendor/agent-activity/index.js"
+import { OpenClawActivityMapper, activityLifecycleOutcome } from "./activity-events.js"
+import { createInlineOutputModeResolver } from "./output-mode.js"
+import { createInlineProgressTransport } from "./progress-transport.js"
 import { reportOpenClawPluginError } from "../telemetry.js"
 import { mkdir, stat } from "node:fs/promises"
 import path from "node:path"
@@ -36,19 +39,7 @@ import {
 } from "openclaw/plugin-sdk/session-store-runtime"
 import { buildModelsProviderData } from "openclaw/plugin-sdk/models-provider-runtime"
 import { prepareSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
-import {
-  buildChannelProgressDraftLine,
-  buildChannelProgressDraftLineForEntry,
-  createChannelProgressDraftGate,
-  formatChannelProgressDraftText,
-  resolveChannelProgressDraftMaxLines,
-  isChannelProgressDraftWorkToolName,
-  mergeChannelProgressDraftLine,
-  resolveChannelProgressDraftMaxLineChars,
-  resolveChannelStreamingPreviewToolProgress,
-  type AgentPlanStep,
-  type ChannelProgressDraftLine,
-} from "openclaw/plugin-sdk/channel-outbound"
+import type { AgentPlanStep } from "openclaw/plugin-sdk/channel-outbound"
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime"
 import {
   clearHistoryEntriesIfEnabled,
@@ -75,7 +66,6 @@ import {
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { shareInlineAccountClient } from "./client-registry.js"
-import { readInlineOutputMode } from "./output-mode.js"
 import { createInlineMessageSender } from "./delivery.js"
 import {
   INLINE_DEFAULT_GROUP_POLICY,
@@ -277,51 +267,6 @@ const INLINE_COLD_BOOT_GATED_EVENTS = new Set([
   "reaction.delete",
 ])
 
-// The Claude Code runtime reaches OpenClaw tools over MCP, so they arrive as
-// `mcp__openclaw__exec`; the host would title that "Mcp Openclaw Exec".
-const INLINE_OPENCLAW_MCP_TOOL_PREFIX = /^mcp__openclaw__/
-
-function normalizeInlineProgressToolInput<T>(input: T): T {
-  const record = input as { event?: unknown; name?: unknown }
-  if (record.event !== "tool" || typeof record.name !== "string") return input
-  const name = record.name.replace(INLINE_OPENCLAW_MCP_TOOL_PREFIX, "")
-  return name === record.name ? input : { ...input, name }
-}
-
-const INLINE_COMMAND_TOOL_NAMES = new Set(["exec", "bash", "shell"])
-
-// Say what the command is, like bridge v2 ("Running `cargo test`"), not "Exec".
-function relabelInlineCommandProgressLine(line: unknown, input: unknown): void {
-  const record = input as {
-    event?: unknown
-    name?: unknown
-    phase?: unknown
-    title?: unknown
-    args?: { command?: unknown }
-  }
-  if (!line || typeof line !== "object" || typeof record.name !== "string") return
-  if (!INLINE_COMMAND_TOOL_NAMES.has(record.name.replace(INLINE_OPENCLAW_MCP_TOOL_PREFIX, ""))) return
-  const shorten = (value: unknown): string => {
-    const command = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : ""
-    return command.length > 80 ? `${command.slice(0, 79)}…` : command
-  }
-  // The host decides whether command text is shown (`commandText`, "status" by
-  // default on every channel): it is in the host's line only when allowed.
-  const hostText = typeof (line as { text?: unknown }).text === "string" ? (line as { text: string }).text : ""
-  if (record.event === "tool") {
-    const raw = typeof record.args?.command === "string" ? record.args.command.trim() : ""
-    const command = raw && hostText.includes(raw) ? shorten(raw) : ""
-    Object.assign(line, { text: command ? `Running \`${command}\`` : "Running a command", label: "Running a command" })
-    return
-  }
-  if (record.event === "item" && record.phase === "end") {
-    // Host item titles read `command <text>`; anything else is not the command.
-    const title = typeof record.title === "string" ? record.title.match(/^command\s+(.+)$/s)?.[1] : undefined
-    const command = title && hostText.includes(title.trim()) ? shorten(title) : ""
-    Object.assign(line, { text: command ? `Ran \`${command}\`` : "Ran a command", label: "Ran a command" })
-  }
-}
-
 const INLINE_OUT_OF_BAND_COMMAND_RE = /^\/(?:approve|stop)(?:@[A-Za-z0-9_]+)?(?:\s|$)/i
 
 export function isInlineOutOfBandCommandText(text: string | undefined | null): boolean {
@@ -414,27 +359,6 @@ type InlinePartialMediaDeliveryResult = {
   sent: boolean
   usedUrlFallback: boolean
   commitOutcomeUnknown: boolean
-}
-
-type InlineClosedProgressRow = {
-  messageId: bigint
-  chatId: bigint
-  lines: Array<string | ChannelProgressDraftLine>
-  elapsed: number
-  toolFailed: boolean
-  outcome: ActivityOutcome
-}
-
-type InlineProgressPlaceholderState = {
-  messageId: bigint | null
-  text: string
-  lines: Array<string | ChannelProgressDraftLine>
-  opChain: Promise<void>
-  closing: boolean
-  startedAt: number | null
-  toolFailed: boolean
-  lastClosed: InlineClosedProgressRow | null
-  pendingClosures: Set<InlineClosedProgressRow>
 }
 
 type InlineDispatchReplyInfo = {
@@ -644,6 +568,8 @@ function isInlineSendOutcomeUnknown(error: unknown): boolean {
 
 const INLINE_EDIT_STREAM_MIN_INTERVAL_MS = 250
 const INLINE_EDIT_STREAM_MAX_INTERVAL_MS = 750
+/** `experimentalAgentActivity` is deprecated; warn once per process. */
+let warnedExperimentalAgentActivity = false
 const EMPTY_RESPONSE_FALLBACK = "No response generated. Please try again."
 
 function normalizeAllowEntry(raw: string): string {
@@ -935,20 +861,12 @@ function resolveInlineStreamingMode(config: {
   return config.streamViaEditMessage === true ? "partial" : "off"
 }
 
-function resolveInlineProgressPlaceholderEnabled(config: {
-  streaming?: unknown
-  streamMode?: unknown
-  streamViaEditMessage?: boolean | undefined
-}): boolean {
-  const mode = resolveExplicitInlineStreamingMode(config)
-  if (mode === "off") return false
-  if (mode === "progress") return true
-  if (config.streaming === false) return false
-  if (isRecord(config.streaming) && isRecord(config.streaming.progress)) return true
-
-  // With no presentation preference, show Working while the turn runs.
-  // `streaming: { mode: "progress" }` opts into the card.
-  return false
+/** `streaming.progress.commandText: "status"` keeps command text out of chat progress. */
+function resolveInlineHideCommandText(config: { streaming?: unknown }): boolean {
+  const streaming = isRecord(config.streaming) ? config.streaming : null
+  const progress = streaming && isRecord(streaming.progress) ? streaming.progress : null
+  const preview = streaming && isRecord(streaming.preview) ? streaming.preview : null
+  return (progress?.commandText ?? preview?.commandText) === "status"
 }
 
 function resolveInlineBlockStreamingEnabled(config: {
@@ -965,12 +883,6 @@ function resolveInlineBlockStreamingEnabled(config: {
   if (mode === "block") return true
   if (mode === "off") return false
   return undefined
-}
-
-function shouldStartInlineProgressPlaceholderNow(
-  line: string | ChannelProgressDraftLine | undefined,
-): boolean {
-  return typeof line === "object" && line?.kind === "patch" && Boolean(line.detail)
 }
 
 function resolveInlineSystemPrompt(params: {
@@ -1170,10 +1082,14 @@ export async function monitorInlineProvider(params: {
   const botUsername = normalizeInlineUsername(meUser.username)?.toLowerCase()
   void registerBotCapabilitiesWithRetry({
     register: () => client.setMyBotCapabilities({
-      capabilities: [{
-        kind: BotCapability_Kind.CHAT_SETTINGS,
-        version: OPENCLAW_BOT_CHAT_SETTINGS_VERSION,
-      }, { kind: BotCapability_Kind.OUTPUT_MODE, version: 1 }],
+      capabilities: [
+        {
+          kind: BotCapability_Kind.CHAT_SETTINGS,
+          version: OPENCLAW_BOT_CHAT_SETTINGS_VERSION,
+        },
+        // Detailed and Friendly output; apps offer the Output setting for it.
+        { kind: BotCapability_Kind.OUTPUT_MODE, version: 1 },
+      ],
     }),
     isCancelled: () => abortSignal.aborted,
     onFailure: (error, willRetry) => {
@@ -1184,6 +1100,22 @@ export async function monitorInlineProvider(params: {
     },
   })
   log?.info(`[${account.accountId}] inline connected (me=${String(meId)})`)
+  if (account.config.experimentalAgentActivity !== undefined && !warnedExperimentalAgentActivity) {
+    warnedExperimentalAgentActivity = true
+    log?.warn(
+      "inline: channels.inline.experimentalAgentActivity is ignored. Each chat's Output setting " +
+      "(Detailed or Friendly) now decides how agent work appears; remove the key from your config.",
+    )
+  }
+  const outputModes = createInlineOutputModeResolver({
+    client,
+    botUserId: meId,
+    onError: (operation, error) =>
+      log?.warn(`[${account.accountId}] inline output mode ${operation} failed: ${String(error)}`),
+  })
+  // Each turn's open Detailed progress, by the chat it renders in: a person's
+  // new message there ends the message so later work starts below theirs.
+  const openProgressByChat = new Map<string, Set<() => void>>()
   const connectedAt = Date.now()
   pushDiagnostics({
     ...createConnectedChannelStatusPatch(connectedAt),
@@ -3126,17 +3058,20 @@ export async function monitorInlineProvider(params: {
           }).catch(() => null)
         : null
 
-    // Controls must reach the active run immediately, even when settings RPCs are slow.
-    const outputMode = isInlineOutOfBandCommandText(normalizedCommandBody) ? undefined
-      : await readInlineOutputMode(client, meId, deliveryChatId, abortSignal)
-    const useHostPresentation = outputMode === undefined
-    const agentActivityEnabled = outputMode === "detailed" || (useHostPresentation && account.config.experimentalAgentActivity === true)
-    const streamViaEditMessage = useHostPresentation && resolveInlineStreamingMode(account.config) === "partial" && !shouldEditCallbackTargetInPlace
-    const progressPlaceholderEnabled = !shouldEditCallbackTargetInPlace &&
-      (outputMode === "detailed" || (useHostPresentation && resolveInlineProgressPlaceholderEnabled(account.config)))
-    const progressToolProgressEnabled =
-      progressPlaceholderEnabled && resolveChannelStreamingPreviewToolProgress(account.config)
-    const suppressDefaultToolProgressMessages = !useHostPresentation || progressPlaceholderEnabled
+    // Detailed shows the turn's work in a progress message per stretch of
+    // work; Friendly shows none. A tapped button edits its message in place.
+    // Controls must reach the active run immediately, so they never wait on
+    // the settings reads and show no progress.
+    const outputMode = isInlineOutOfBandCommandText(normalizedCommandBody)
+      ? "friendly"
+      : await outputModes.resolve(deliveryChatId)
+    const detailedProgress = outputMode === "detailed" && !shouldEditCallbackTargetInPlace
+    const inlineStreamingMode = resolveInlineStreamingMode(account.config)
+    // Detailed edits the progress message, never the answer.
+    const streamViaEditMessage =
+      !detailedProgress &&
+      inlineStreamingMode === "partial" &&
+      !shouldEditCallbackTargetInPlace
     // An answer quotes a bot only when that bot asked by mention or addressed
     // command, so the answer reaches it. A bot's reply needs no answer and quoting
     // it would wake it again, which is how two bots end up in a loop. People get
@@ -3148,7 +3083,7 @@ export async function monitorInlineProvider(params: {
       canReplyToSourceMessage && botAskedThisBot ? msg.id : undefined
     const inlineBlockStreamingEnabled = resolveInlineBlockStreamingEnabled(account.config)
     const disableBlockStreaming =
-      !useHostPresentation || progressPlaceholderEnabled || streamViaEditMessage
+      detailedProgress || streamViaEditMessage
         ? true
         : typeof inlineBlockStreamingEnabled === "boolean"
         ? !inlineBlockStreamingEnabled
@@ -3189,92 +3124,31 @@ export async function monitorInlineProvider(params: {
       actionsFingerprint: null,
       latestActions: undefined,
     }
-    let progressSeed = `${account.accountId}:${String(deliveryChatId)}:${String(msg.id)}`
-    const progressState: InlineProgressPlaceholderState = {
-      messageId: null,
-      text: "",
-      lines: [],
-      opChain: Promise.resolve(),
-      closing: false,
-      startedAt: null,
-      toolFailed: false,
-      lastClosed: null,
-      pendingClosures: new Set(),
-    }
-    const progressMaxLineChars = resolveChannelProgressDraftMaxLineChars(account.config)
-    // The row's start on the wall clock, for the clients' live timer; the
-    // monotonic clock stays the source of truth for "Worked for".
-    // Kept per start, so clock jitter can't change the text and force an edit.
-    let progressStartedAtWall: { at: number; unix: number } | null = null
-    const progressStartedAtUnix = (): number => {
-      const startedAt = progressState.startedAt ?? performance.now()
-      if (progressStartedAtWall?.at !== startedAt) {
-        progressStartedAtWall = { at: startedAt, unix: Math.floor((Date.now() - (performance.now() - startedAt)) / 1000) }
-      }
-      return progressStartedAtWall.unix
-    }
-    const formatProgress = (lines: Array<string | ChannelProgressDraftLine>, working: boolean, elapsed?: number, outcome?: ActivityOutcome, toolFailed?: boolean) =>
-      agentActivityEnabled
-        ? formatQuietTimeline(lines, working, elapsed, outcome, toolFailed, progressMaxLineChars, working ? progressStartedAtUnix() : undefined)
-        : sanitizeInlineDeliveryText(formatChannelProgressDraftText({
-            entry: account.config, lines, seed: progressSeed,
-          })).trim()
-    const renderInlineProgressPlaceholder = async (): Promise<void> => {
-      if (abortSignal.aborted || !progressPlaceholderEnabled || progressState.closing || adoptingThread) return
-      const text = formatProgress(progressState.lines, true)
-      if (!text || text === progressState.text) return
-
-      progressState.opChain = progressState.opChain
-        .then(async () => {
-          if (abortSignal.aborted || progressState.closing || text === progressState.text) return
-          if (progressState.messageId == null) {
-            progressState.startedAt ??= performance.now()
-            const sent = await sendMessage({
-              chatId: deliveryChatId,
-              text,
-              sendMode: "silent",
-              parseMarkdown: agentActivityEnabled || parseMarkdown,
-            })
-            if (sent.messageId == null) {
-              throw new Error("inline progress placeholder: sendMessage returned no messageId")
-            }
-            progressState.messageId = sent.messageId
-            rememberSentBotMessage({
-              chatId: deliveryChatId,
-              messageId: sent.messageId,
-              replyThreadContext: deliveryReplyThreadContext,
-            })
-          } else {
-            const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
-              oneofKind: "editMessage",
-              editMessage: {
-                messageId: progressState.messageId,
-                peerId: buildChatPeer(deliveryChatId),
-                text,
-                parseMarkdown: agentActivityEnabled || parseMarkdown,
-              },
-            })
-            if (result.oneofKind !== "editMessage") {
-              throw new Error(
-                `inline progress placeholder: expected editMessage result, got ${String(result.oneofKind)}`,
-              )
-            }
-          }
-          progressState.text = text
-          publishStatus({ lastOutboundAt: Date.now() })
-        })
-        .catch((error) => {
-          runtime.error?.(`inline progress placeholder failed: ${String(error)}`)
-        })
-
-      await progressState.opChain
-    }
-    let progressDraftGate = createChannelProgressDraftGate({
-      onStart: renderInlineProgressPlaceholder,
+    const progressActivity = new OpenClawActivityMapper({
+      hideCommandText: resolveInlineHideCommandText(account.config),
     })
+    const createProgressStream = (
+      targetChatId: bigint,
+      replyThreadContext: InlineReplyThreadContext | null,
+    ): ProgressStream => new ProgressStream(
+      createInlineProgressTransport({
+        client,
+        chatId: targetChatId,
+        onSent: (messageId) => {
+          rememberSentBotMessage({ chatId: targetChatId, messageId, replyThreadContext })
+          publishStatus({ lastOutboundAt: Date.now() })
+        },
+      }),
+      { onError: (error, op) => runtime.error?.(`inline progress ${op} failed: ${String(error)}`) },
+    )
+    let progressStream = detailedProgress
+      ? createProgressStream(deliveryChatId, deliveryReplyThreadContext)
+      : undefined
+    // Progress events, visible replies and the thread handoff run in call
+    // order, so a reply always lands below the work before it and above the
+    // work after it.
     let activityOperationTail: Promise<void> = Promise.resolve()
     const enqueueActivityOperation = <T>(operation: () => Promise<T>): Promise<T> => {
-      if (!agentActivityEnabled) return operation()
       const pending = activityOperationTail.then(operation)
       // Keep later operations runnable after a failed visible send.
       activityOperationTail = pending.then(() => undefined, () => undefined)
@@ -3287,125 +3161,53 @@ export async function monitorInlineProvider(params: {
         await pending
       } while (pending !== activityOperationTail)
     }
-    const pushInlineProgressPlaceholder = async (
-      line?: string | ChannelProgressDraftLine,
-      options?: { toolName?: string; startImmediately?: boolean },
-    ): Promise<void> => {
-      const eventAt = performance.now()
-      return enqueueActivityOperation(async () => {
-        if (!progressPlaceholderEnabled || progressState.closing) return
-        if (options?.toolName !== undefined && !isChannelProgressDraftWorkToolName(options.toolName)) {
-          return
-        }
-
-        const normalized = typeof line === "string" ? line.replace(/\s+/g, " ").trim() : line?.text.trim()
-        if (line && !normalized) return
-        if (line) progressState.startedAt ??= eventAt
-        if (progressToolProgressEnabled && line && normalized) {
-          const toolFailed = agentActivityEnabled && activityAttention([line]).failed
-          const nextLines = mergeChannelProgressDraftLine(progressState.lines, line, {
-            maxLines: agentActivityEnabled ? Number.MAX_SAFE_INTEGER : resolveChannelProgressDraftMaxLines(account.config),
-          })
-          if (nextLines !== progressState.lines) {
-            if (agentActivityEnabled) preserveActivityTitles(progressState.lines, nextLines)
-            // Reserve room for the terminal title, and flush even if the initial
-            // delayed draft has not been sent yet. Individual previews are bounded.
-            if (agentActivityEnabled && nextLines.length > 1 && formatProgress(nextLines, true).length > ACTIVITY_MESSAGE_MAX_CHARS - 300) {
-              const rolloverLine = nextLines.find((entry, index) => entry !== progressState.lines[index]) ?? line
-              await progressDraftGate.startNow()
-              await cleanupInlineProgressPlaceholder("success", eventAt)
-              progressState.closing = false
-              progressState.lines = [rolloverLine]
-              progressState.startedAt = eventAt
-              progressDraftGate = createChannelProgressDraftGate({ onStart: renderInlineProgressPlaceholder })
-            } else {
-              progressState.lines = nextLines
-            }
-          }
-          progressState.toolFailed ||= toolFailed
-        }
-
-        const alreadyStarted = progressDraftGate.hasStarted
-        if (options?.startImmediately || shouldStartInlineProgressPlaceholderNow(line)) {
-          await progressDraftGate.startNow()
-        } else {
-          await progressDraftGate.noteWork()
-        }
-        if (alreadyStarted && progressDraftGate.hasStarted) {
-          await renderInlineProgressPlaceholder()
-        }
+    /** Applies host events in order without holding up the host's callback. */
+    const queueProgress = (events: () => readonly ActivityEvent[]): void => {
+      if (!progressStream) return
+      const at = Date.now()
+      const pending = events()
+      if (pending.length === 0) return
+      void enqueueActivityOperation(async () => {
+        for (const event of pending) progressStream?.apply(event, at)
       })
     }
-    const cleanupInlineProgressPlaceholder = async (outcome: ActivityOutcome = "success", endedAt = performance.now()): Promise<void> => {
-      progressDraftGate.cancel()
-      progressState.closing = true
-      // Freeze the endpoint before awaiting queued transport.
-      await progressState.opChain
-      const messageId = progressState.messageId
-      if (!agentActivityEnabled) {
-        if (messageId == null) return
-        try {
-          const result = await client.invokeRaw(Method.DELETE_MESSAGES, {
-            oneofKind: "deleteMessages",
-            deleteMessages: { peerId: buildChatPeer(deliveryChatId), messageIds: [messageId] },
-          })
-          if (result.oneofKind !== "deleteMessages") {
-            throw new Error(`inline progress placeholder: expected deleteMessages result, got ${String(result.oneofKind)}`)
-          }
-        } catch (error) {
-          runtime.error?.(`inline progress placeholder cleanup failed: ${String(error)}`)
-        } finally {
-          progressState.messageId = null
-          progressState.text = ""
-        }
-        return
-      }
-      if (messageId != null) {
-        progressState.lastClosed = {
-          messageId, chatId: deliveryChatId, lines: progressState.lines.slice(),
-          elapsed: Math.max(0, (endedAt - (progressState.startedAt ?? endedAt)) / 1000),
-          toolFailed: progressState.toolFailed,
-          outcome,
-        }
-        progressState.pendingClosures.add(progressState.lastClosed)
-        progressState.messageId = null
-      }
-      // A short block may close before its delayed first send. Its clock and
-      // attention still belong to that block, never the next conversational step.
-      progressState.text = ""
-      progressState.startedAt = null
-      progressState.toolFailed = false
-      const row = progressState.lastClosed
-      // A final dispatch error may arrive after the reply boundary closed its
-      // activity row. Correct that row using its frozen duration and peer.
-      if (row && messageId == null && outcome !== "success" && row.outcome !== outcome) {
-        row.outcome = outcome
-        progressState.pendingClosures.add(row)
-      }
-      for (const pending of progressState.pendingClosures) {
-        // Editing the same frozen payload is idempotent. Keep failed closures
-        // through rollovers and retry again at the reply/turn boundary.
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
-              oneofKind: "editMessage",
-              editMessage: {
-                peerId: buildChatPeer(pending.chatId), messageId: pending.messageId,
-                text: formatProgress(pending.lines, false, pending.elapsed, pending.outcome, pending.toolFailed),
-                parseMarkdown: true,
-              },
-            })
-            if (result.oneofKind !== "editMessage") {
-              throw new Error(`inline activity: expected editMessage result, got ${String(result.oneofKind)}`)
-            }
-            progressState.pendingClosures.delete(pending)
-            break
-          } catch (error) {
-            if (attempt === 1) runtime.error?.(`inline progress placeholder cleanup failed: ${String(error)}`)
-          }
-        }
+    /**
+     * Applies `boundary`, waits until the progress message shows it, and
+     * holds later progress until the returned release: the visible send in
+     * between lands below "Worked for" and above any later work.
+     */
+    const holdProgressAt = async (boundary: ActivityEvent, at = Date.now()): Promise<() => void> => {
+      if (!progressStream) return () => {}
+      let release!: () => void
+      const held = new Promise<void>((resolve) => { release = resolve })
+      const ready = enqueueActivityOperation(async () => {
+        progressStream?.apply(boundary, at)
+        await progressStream?.flush()
+      })
+      void enqueueActivityOperation(() => held)
+      await ready
+      return release
+    }
+    const endProgress = async (outcome: TurnOutcome, at?: number): Promise<void> => {
+      const release = await holdProgressAt({ type: "turn.end", outcome }, at)
+      release()
+    }
+    let unregisterProgressSplit: (() => void) | undefined
+    const registerProgressSplit = (targetChatId: bigint): void => {
+      unregisterProgressSplit?.()
+      if (!progressStream) return
+      const key = String(targetChatId)
+      const split = () => queueProgress(() => [{ type: "split" }])
+      const splits = openProgressByChat.get(key) ?? new Set<() => void>()
+      splits.add(split)
+      openProgressByChat.set(key, splits)
+      unregisterProgressSplit = () => {
+        splits.delete(split)
+        if (splits.size === 0 && openProgressByChat.get(key) === splits) openProgressByChat.delete(key)
+        unregisterProgressSplit = undefined
       }
     }
+    registerProgressSplit(deliveryChatId)
     let finalDeliveredForCurrentAssistantMessage = false
     const clearEditStreamTimer = (): void => {
       if (editStreamState.timer == null) return
@@ -3804,29 +3606,6 @@ export async function monitorInlineProvider(params: {
         partialReplyToMsgId,
       )
     }
-    const buildInlineProgressLineForEntry = (
-      input: Parameters<typeof buildChannelProgressDraftLineForEntry>[1],
-      options?: Parameters<typeof buildChannelProgressDraftLineForEntry>[2],
-    ): ChannelProgressDraftLine | undefined => {
-      const line = buildChannelProgressDraftLineForEntry(
-        account.config,
-        normalizeInlineProgressToolInput(input),
-        options,
-      )
-      relabelInlineCommandProgressLine(line, input)
-      // Item titles are host-generated strings such as `command ${command}`,
-      // not an agent description. Keep the description from the correlated start.
-      const description = input.event === "tool"
-        ? [input.args?.description, input.args?.title].find((value) => typeof value === "string" && value.trim())
-        : undefined
-      // Preserve an explicit agent description separately from the raw tool log.
-      // Mutate the existing line so the host's WeakMap correlation survives.
-      if (agentActivityEnabled && line && typeof description === "string" && description.trim()) {
-        Object.assign(line, { activityTitle: description })
-      }
-      return line
-    }
-
     let delivered = false
     const activeThreadRoute: ActiveInlineThreadRoute = {
       accountId: account.accountId,
@@ -3839,33 +3618,28 @@ export async function monitorInlineProvider(params: {
         id: isGroup ? String(effectiveChatId) : senderId,
       },
       threadId: deliveryReplyThreadContext?.childChatId,
-      ...(agentActivityEnabled ? { runVisibleReply: async <T>(send: () => Promise<T>) => {
-        const boundaryAt = performance.now()
-        return enqueueActivityOperation(async () => {
-          try {
-            // Flush a delayed first row before placing its conversational reply.
-            if (progressState.lines.length > 0 && !progressState.closing) await progressDraftGate.startNow()
-            await cleanupInlineProgressPlaceholder("success", boundaryAt)
-            const result = await send()
-            delivered = true
-            return result
-          } finally {
-            // Failed sends retain the closed logs and release later progress too.
-            progressState.closing = false
-            progressState.lines = []
-            progressDraftGate = createChannelProgressDraftGate({ onStart: renderInlineProgressPlaceholder })
-          }
-        })
+      ...(detailedProgress ? { runVisibleReply: async <T>(send: () => Promise<T>) => {
+        // A visible reply mid-turn ends the progress message; later work starts below it.
+        const release = await holdProgressAt({ type: "split" })
+        try {
+          const result = await send()
+          delivered = true
+          return result
+        } finally {
+          release()
+        }
       } } : {}),
       onThreadAdopted: async (threadId: bigint) => {
         adoptingThread = true
+        // Inline message IDs are local to a chat, so the parent's progress
+        // ends there and later work continues in the child. Progress events
+        // that arrive meanwhile wait for the child's stream.
+        const releaseProgress = await holdProgressAt({ type: "turn.end", outcome: "success" })
         try {
-          // Drain old-chat operations before changing IDs: Inline message IDs
-          // are local to a chat, so an old draft cannot be edited in the child.
+          // Drain old-chat operations before changing IDs: an old draft
+          // cannot be edited in the child.
           await resetEditStreamForAssistantMessage().catch((error) =>
             runtime.error?.(`inline thread handoff stream reset failed: ${String(error)}`))
-          await cleanupInlineProgressPlaceholder().catch((error) =>
-            runtime.error?.(`inline thread handoff placeholder cleanup failed: ${String(error)}`))
           delivered = false
           partialMediaDelivered = false
           await sendDeliveryTyping(deliveryChatId, false)
@@ -3890,18 +3664,19 @@ export async function monitorInlineProvider(params: {
             runtime.error?.(`inline thread handoff presence retarget failed: ${String(error)}`))
           await sendDeliveryTyping(threadId, true)
             .catch((error) => runtime.error?.(`inline thread handoff typing start failed: ${String(error)}`))
-          progressState.closing = false
-          progressState.lines = []
-          progressSeed = `${account.accountId}:${String(threadId)}:${String(msg.id)}`
-          progressDraftGate = createChannelProgressDraftGate({ onStart: renderInlineProgressPlaceholder })
+          if (progressStream) {
+            progressStream = createProgressStream(threadId, deliveryReplyThreadContext)
+            registerProgressSplit(threadId)
+          }
         } finally {
+          releaseProgress()
           adoptingThread = false
         }
       },
     }
 
     let activityRunId: string | undefined
-    let activityHostOutcome: ActivityOutcome | undefined
+    let activityHostOutcome: TurnOutcome | undefined
     let activityHostEndedAt: number | undefined
     let activityTerminal: Promise<void> | undefined
     let resolveActivityTerminal: (() => void) | undefined
@@ -3911,8 +3686,7 @@ export async function monitorInlineProvider(params: {
       activityTerminal = new Promise<void>((resolve) => { resolveActivityTerminal = resolve })
     }
     const settleActivityTerminal = async () => {
-      if (!agentActivityEnabled || !activityTerminal || activityHostOutcome || !core.events?.onAgentEvent) return
-      if (progressState.messageId == null && !progressState.lastClosed && !progressDraftGate.hasStarted) return
+      if (!progressStream?.isOpen || !activityTerminal || activityHostOutcome || !core.events?.onAgentEvent) return
       // /stop can settle channel dispatch before the admitted run emits its
       // terminal event. Drain that event before freezing the activity outcome.
       // Bound a missing host event so teardown cannot retain this listener.
@@ -3926,12 +3700,20 @@ export async function monitorInlineProvider(params: {
         if (timer) clearTimeout(timer)
       }
     }
+    const noteAgentRunStart = (runId: string): void => {
+      activityRunId = runId
+      resetActivityTerminal()
+      queueProgress(() => [{ type: "turn.start" }])
+    }
     const replyOptions = {
       abortSignal,
-      ...(agentActivityEnabled ? { onPreparedAgentRunStart: ({ runId }: { runId: string }) => {
-        activityRunId = runId
-        resetActivityTerminal()
-      } } : {}),
+      ...(detailedProgress
+        ? {
+            onPreparedAgentRunStart: ({ runId }: { runId: string }) => {
+              noteAgentRunStart(runId)
+            },
+          }
+        : {}),
       onObservedReplyDelivery: async () => {
         delivered = true
       },
@@ -3951,21 +3733,12 @@ export async function monitorInlineProvider(params: {
             },
           }
         : {}),
-      ...(progressPlaceholderEnabled
-        ? {
-            onReasoningStream: async () => {
-              botPresenceLifecycle.busy("review")
-              await pushInlineProgressPlaceholder()
-            },
-          }
-        : {}),
       onToolStart: async (payload: {
         itemId?: string
         toolCallId?: string
         name?: string
         phase?: string
         args?: Record<string, unknown>
-        detailMode?: "explain" | "raw"
       }) => {
         const toolName = payload.name?.trim()
         if (toolName === "inline_bot_presence") {
@@ -3973,54 +3746,36 @@ export async function monitorInlineProvider(params: {
         }
 
         botPresenceLifecycle.busy("running")
-        if (!(streamViaEditMessage || progressPlaceholderEnabled)) return
-        if (streamViaEditMessage || !agentActivityEnabled) await resetEditStreamOnBoundary()
-        await pushInlineProgressPlaceholder(
-          buildInlineProgressLineForEntry(
-            {
-              event: "tool",
-              ...(payload.itemId !== undefined ? { itemId: payload.itemId } : {}),
-              ...(payload.toolCallId !== undefined ? { toolCallId: payload.toolCallId } : {}),
-              ...(toolName ? { name: toolName } : {}),
-              ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
-              ...(payload.args !== undefined ? { args: payload.args } : {}),
-            },
-            payload.detailMode ? { detailMode: payload.detailMode } : undefined,
-          ),
-          {
-            ...(toolName ? { toolName } : {}),
-            startImmediately: true,
-          },
-        )
+        await resetEditStreamOnBoundary()
+        queueProgress(() => progressActivity.toolStart(payload))
       },
       onApprovalEvent: async (payload: {
         phase?: string
-        title?: string
-        command?: string
-        reason?: string
-        message?: string
+        itemId?: string
+        toolCallId?: string
       }) => {
-        if (payload.phase !== "requested") return
-        botPresenceLifecycle.busy("waiting")
-        if (!progressPlaceholderEnabled) return
-        await pushInlineProgressPlaceholder(
-          buildChannelProgressDraftLine({
-            event: "approval",
-            ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
-            ...(payload.title !== undefined ? { title: payload.title } : {}),
-            ...(payload.command !== undefined ? { command: payload.command } : {}),
-            ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
-            ...(payload.message !== undefined ? { message: payload.message } : {}),
-          }),
-          { startImmediately: true },
-        )
+        if (payload.phase === "requested") botPresenceLifecycle.busy("waiting")
+        queueProgress(() => progressActivity.approval(payload))
       },
-      ...(progressPlaceholderEnabled
+      onCompactionStart: async () => {
+        botPresenceLifecycle.busy("review")
+        await resetEditStreamOnBoundary()
+        queueProgress(() => progressActivity.compactionStart())
+      },
+      onCompactionEnd: async (payload?: { completed: boolean }) => {
+        botPresenceLifecycle.busy("running")
+        await resetEditStreamOnBoundary()
+        queueProgress(() => progressActivity.compactionEnd(payload))
+      },
+      ...(detailedProgress
         ? {
+            // Reasoning stays private; it only moves the bot's presence.
+            onReasoningStream: async () => {
+              botPresenceLifecycle.busy("review")
+            },
             onItemEvent: async (payload: {
               itemId?: string
               toolCallId?: string
-              commandBearing?: boolean
               kind?: string
               title?: string
               name?: string
@@ -4029,111 +3784,45 @@ export async function monitorInlineProvider(params: {
               summary?: string
               progressText?: string
               meta?: string
+              approvalId?: string
+              hideFromChannelProgress?: boolean
+              suppressChannelProgress?: boolean
             }) => {
-              await pushInlineProgressPlaceholder(
-                buildInlineProgressLineForEntry({
-                  event: "item",
-                  ...(payload.itemId !== undefined ? { itemId: payload.itemId } : {}),
-                  ...(payload.toolCallId !== undefined ? { toolCallId: payload.toolCallId } : {}),
-                  ...(payload.commandBearing !== undefined ? { commandBearing: payload.commandBearing } : {}),
-                  ...(payload.kind !== undefined ? { itemKind: payload.kind } : {}),
-                  ...(payload.title !== undefined ? { title: payload.title } : {}),
-                  ...(payload.name !== undefined ? { name: payload.name } : {}),
-                  ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
-                  ...(payload.status !== undefined ? { status: payload.status } : {}),
-                  ...(payload.summary !== undefined ? { summary: payload.summary } : {}),
-                  ...(payload.progressText !== undefined ? { progressText: payload.progressText } : {}),
-                  ...(payload.meta !== undefined ? { meta: payload.meta } : {}),
-                }),
-              )
+              queueProgress(() => progressActivity.item(payload))
             },
             onPlanUpdate: async (payload: {
               phase?: string | undefined
-              title?: string | undefined
               explanation?: string | undefined
               steps?: AgentPlanStep[] | undefined
-              source?: string | undefined
             }) => {
-              if (payload.phase !== "update") return
-              await pushInlineProgressPlaceholder(
-                buildChannelProgressDraftLine({
-                  event: "plan",
-                  ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
-                  ...(payload.title !== undefined ? { title: payload.title } : {}),
-                  ...(payload.explanation !== undefined ? { explanation: payload.explanation } : {}),
-                  ...(payload.steps !== undefined ? { steps: payload.steps } : {}),
-                }),
-              )
+              queueProgress(() => progressActivity.plan(payload))
             },
             onCommandOutput: async (payload: {
               itemId?: string
               toolCallId?: string
               phase?: string
-              title?: string
               name?: string
+              output?: string
               status?: string
               exitCode?: number | null
+              durationMs?: number
             }) => {
-              if (payload.phase !== "end") return
-              await pushInlineProgressPlaceholder(
-                buildChannelProgressDraftLine({
-                  event: "command-output",
-                  ...(payload.itemId !== undefined ? { itemId: payload.itemId } : {}),
-                  ...(payload.toolCallId !== undefined ? { toolCallId: payload.toolCallId } : {}),
-                  ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
-                  ...(payload.title !== undefined ? { title: payload.title } : {}),
-                  ...(payload.name !== undefined ? { name: payload.name } : {}),
-                  ...(payload.status !== undefined ? { status: payload.status } : {}),
-                  ...(payload.exitCode !== undefined ? { exitCode: payload.exitCode } : {}),
-                }),
-              )
+              queueProgress(() => progressActivity.commandOutput(payload))
             },
             onPatchSummary: async (payload: {
+              itemId?: string
+              toolCallId?: string
               phase?: string
-              title?: string
-              name?: string
               added?: string[]
               modified?: string[]
               deleted?: string[]
-              summary?: string
             }) => {
-              if (payload.phase !== "end") return
-              await pushInlineProgressPlaceholder(
-                buildChannelProgressDraftLine({
-                  event: "patch",
-                  ...(payload.phase !== undefined ? { phase: payload.phase } : {}),
-                  ...(payload.title !== undefined ? { title: payload.title } : {}),
-                  ...(payload.name !== undefined ? { name: payload.name } : {}),
-                  ...(payload.added !== undefined ? { added: payload.added } : {}),
-                  ...(payload.modified !== undefined ? { modified: payload.modified } : {}),
-                  ...(payload.deleted !== undefined ? { deleted: payload.deleted } : {}),
-                  ...(payload.summary !== undefined ? { summary: payload.summary } : {}),
-                }),
-              )
+              queueProgress(() => progressActivity.patchSummary(payload))
             },
+            preserveProgressCallbackStartOrder: true,
+            suppressDefaultToolProgressMessages: true,
+            allowProgressCallbacksWhenSourceDeliverySuppressed: true,
           }
-        : {}),
-      onCompactionStart: async () => {
-        botPresenceLifecycle.busy("review")
-        if (!(streamViaEditMessage || progressPlaceholderEnabled)) return
-        if (streamViaEditMessage || !agentActivityEnabled) await resetEditStreamOnBoundary()
-        await pushInlineProgressPlaceholder("Compacting context", {
-          startImmediately: true,
-        })
-      },
-      onCompactionEnd: async () => {
-        botPresenceLifecycle.busy("running")
-        if (!(streamViaEditMessage || progressPlaceholderEnabled)) return
-        if (streamViaEditMessage || !agentActivityEnabled) await resetEditStreamOnBoundary()
-        await pushInlineProgressPlaceholder("Resuming", {
-          startImmediately: true,
-        })
-      },
-      ...(suppressDefaultToolProgressMessages
-        ? { suppressDefaultToolProgressMessages: true }
-        : {}),
-      ...(progressPlaceholderEnabled
-        ? { allowProgressCallbacksWhenSourceDeliverySuppressed: true }
         : {}),
       ...(typeof disableBlockStreaming === "boolean" ? { disableBlockStreaming } : {}),
     }
@@ -4141,7 +3830,7 @@ export async function monitorInlineProvider(params: {
     const endActiveThreadRoute = beginInlineActiveThreadRoute(activeThreadRoute)
     // /stop aborts the host's run, not this channel's lifetime signal. Observe
     // only the run admitted for this turn through the public runtime event API.
-    const unsubscribeActivity = agentActivityEnabled ? core.events?.onAgentEvent((event) => {
+    const unsubscribeActivity = detailedProgress ? core.events?.onAgentEvent((event) => {
       if (!activityRunId || event.runId !== activityRunId || event.stream !== "lifecycle") return
       if (event.data.phase === "start") {
         resetActivityTerminal()
@@ -4150,7 +3839,7 @@ export async function monitorInlineProvider(params: {
       const outcome = activityLifecycleOutcome(event.data)
       if (outcome) {
         activityHostOutcome = outcome
-        activityHostEndedAt = performance.now()
+        activityHostEndedAt = Date.now()
         resolveActivityTerminal?.()
       }
     }) : undefined
@@ -4193,15 +3882,7 @@ export async function monitorInlineProvider(params: {
                 delivered = true
                 payloadVisible = true
               }
-              const finishPayload = () => {
-                // Later tool work belongs below this conversational reply.
-                if (agentActivityEnabled && payloadVisible && progressState.closing) {
-                  progressState.closing = false
-                  progressState.lines = []
-                  progressDraftGate = createChannelProgressDraftGate({ onStart: renderInlineProgressPlaceholder })
-                }
-                return inlineReplyDeliveryResult(payloadVisible)
-              }
+              const finishPayload = () => inlineReplyDeliveryResult(payloadVisible)
               await activeThreadRoute.adoption
               const presenceSignal = resolveInlineBotPresenceSignal(payload)
               if (presenceSignal) {
@@ -4210,344 +3891,355 @@ export async function monitorInlineProvider(params: {
 
               const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
               if (!visiblePayload) return finishPayload()
-              await drainActivityOperations()
               const payloadIsError = visiblePayload.isError === true || info?.kind === "error"
               if (payloadIsError && activeThreadRoute.deliveredWidgetChatId === deliveryChatId &&
                 isInlineHostNoReplyFallback(visiblePayload.text)) {
                 return inlineReplyDeliveryResult(true)
               }
-              await cleanupInlineProgressPlaceholder(payloadIsError ? "failure" : "success")
-              // A hand-back needs no answer, so a failed run has nothing to report.
-              // Runtimes that treat a silent reply as an empty response would
-              // otherwise post their error into the shared chat.
-              // Silence is a correct answer to a hand-back, but OpenClaw requires a
-              // group reply and posts its "couldn't produce a reply" notice instead.
-              if (botHandBack && (payloadIsError || isInlineHostNoReplyFallback(visiblePayload.text))) {
-                log?.warn(
-                  `[${account.accountId}] inline: dropped error reply to bot hand-back chat=${String(deliveryChatId)} msg=${String(msg.id)}`,
+              // "Worked for" lands above the reply. A final answer ends the
+              // turn's progress; a mid-turn reply ends this message and later
+              // work starts below it.
+              const boundaryKind = typeof info?.kind === "string" ? info.kind : undefined
+              const releaseProgress = await holdProgressAt(
+                boundaryKind === "block" || boundaryKind === "tool"
+                  ? { type: "split" }
+                  : { type: "turn.end", outcome: payloadIsError ? "failure" : "success" },
+              )
+              try {
+                // A hand-back needs no answer, so a failed run has nothing to report.
+                // Runtimes that treat a silent reply as an empty response would
+                // otherwise post their error into the shared chat.
+                // Silence is a correct answer to a hand-back, but OpenClaw requires a
+                // group reply and posts its "couldn't produce a reply" notice instead.
+                if (botHandBack && (payloadIsError || isInlineHostNoReplyFallback(visiblePayload.text))) {
+                  log?.warn(
+                    `[${account.accountId}] inline: dropped error reply to bot hand-back chat=${String(deliveryChatId)} msg=${String(msg.id)}`,
+                  )
+                  return finishPayload()
+                }
+
+                const payloadRecord = visiblePayload as InlineReplyPayload & {
+                  interactive?: unknown
+                  presentation?: unknown
+                  presentationTextMode?: "fallback"
+                }
+                const rawText =
+                  resolveInlineInteractiveTextFallback({
+                    text: visiblePayload.text,
+                    interactive: payloadRecord.interactive,
+                    presentation: payloadRecord.presentation,
+                    presentationTextMode: payloadRecord.presentationTextMode,
+                  }) ??
+                  visiblePayload.text ??
+                  ""
+                const mediaList = resolveInlinePayloadMediaUrls(visiblePayload)
+                const sanitizedOutboundText = sanitizeInlineDeliveryText(
+                  rewriteNumericMentionsToUsernames(rawText, senderProfilesById),
                 )
-                return finishPayload()
-              }
-
-              const payloadRecord = visiblePayload as InlineReplyPayload & {
-                interactive?: unknown
-                presentation?: unknown
-                presentationTextMode?: "fallback"
-              }
-              const rawText =
-                resolveInlineInteractiveTextFallback({
-                  text: visiblePayload.text,
-                  interactive: payloadRecord.interactive,
-                  presentation: payloadRecord.presentation,
-                  presentationTextMode: payloadRecord.presentationTextMode,
-                }) ??
-                visiblePayload.text ??
-                ""
-              const mediaList = resolveInlinePayloadMediaUrls(visiblePayload)
-              const sanitizedOutboundText = sanitizeInlineDeliveryText(
-                rewriteNumericMentionsToUsernames(rawText, senderProfilesById),
-              )
-              const canHoldWidgetText =
-                mediaList.length === 0 && !streamViaEditMessage && !shouldEditCallbackTargetInPlace
-              let outboundText = sanitizedOutboundText
-              if (canHoldWidgetText && info?.kind === "block") {
-                outboundText = takeInlineWidgetStreamText(widgetStreamHoldback, sanitizedOutboundText, { flush: false })
-              } else if (widgetStreamHoldback.held && await sendHeldInlineWidgetText()) {
-                markPayloadVisible()
-              }
-              const suppliedOutboundActions = resolveInlineReplyActions(
-                visiblePayload as Record<string, unknown>,
-              )
-              if (suppliedOutboundActions !== undefined) {
-                editStreamState.latestActions = suppliedOutboundActions
-              }
-              const outboundActions = suppliedOutboundActions ?? editStreamState.latestActions
-              const infoKind = typeof info?.kind === "string" ? info.kind : undefined
-
-              let replyToMsgId: bigint | undefined
-              if (visiblePayload.replyToId != null) {
-                try {
-                  replyToMsgId = canReplyToSourceMessage ? BigInt(visiblePayload.replyToId) : undefined
-                } catch {
-                  // ignore
-                }
-              }
-              if (replyToMsgId == null && canReplyToSourceMessage && botAskedThisBot) {
-                replyToMsgId = msg.id
-              }
-
-              const rememberSent = (messageId: bigint | null | undefined) => {
-                rememberSentBotMessage({
-                  chatId: deliveryChatId,
-                  messageId,
-                  replyThreadContext: deliveryReplyThreadContext,
-                })
-              }
-
-              const sendTextFallback = async (
-                text: string,
-                includeReplyTo: boolean,
-                includeActions: boolean,
-              ): Promise<void> => {
-                const outbound = sanitizeInlineDeliveryText(text)
-                if (!outbound.trim()) return
-                try {
-                  const sent = await sendMessage({
-                    chatId: deliveryChatId,
-                    text: outbound,
-                    ...(includeReplyTo && replyToMsgId != null ? { replyToMsgId } : {}),
-                    ...(includeActions && outboundActions !== undefined ? { actions: outboundActions } : {}),
-                    parseMarkdown,
-                  })
+                const canHoldWidgetText =
+                  mediaList.length === 0 && !streamViaEditMessage && !shouldEditCallbackTargetInPlace
+                let outboundText = sanitizedOutboundText
+                if (canHoldWidgetText && info?.kind === "block") {
+                  outboundText = takeInlineWidgetStreamText(widgetStreamHoldback, sanitizedOutboundText, { flush: false })
+                } else if (widgetStreamHoldback.held && await sendHeldInlineWidgetText()) {
                   markPayloadVisible()
+                }
+                const suppliedOutboundActions = resolveInlineReplyActions(
+                  visiblePayload as Record<string, unknown>,
+                )
+                if (suppliedOutboundActions !== undefined) {
+                  editStreamState.latestActions = suppliedOutboundActions
+                }
+                const outboundActions = suppliedOutboundActions ?? editStreamState.latestActions
+                const infoKind = typeof info?.kind === "string" ? info.kind : undefined
+
+                let replyToMsgId: bigint | undefined
+                if (visiblePayload.replyToId != null) {
                   try {
-                    rememberSent(sent.messageId)
-                  } catch (error) {
-                    runtime.error?.(`inline text delivery bookkeeping failed: ${String(error)}`)
+                    replyToMsgId = canReplyToSourceMessage ? BigInt(visiblePayload.replyToId) : undefined
+                  } catch {
+                    // ignore
                   }
-                } catch (error) {
-                  if (!isInlineSendOutcomeUnknown(error)) throw error
-                  markPayloadVisible()
-                  runtime.error?.(
-                    `inline text delivery outcome is unknown; suppressing duplicate (${String(error)})`,
-                  )
                 }
-              }
+                if (replyToMsgId == null && canReplyToSourceMessage && botAskedThisBot) {
+                  replyToMsgId = msg.id
+                }
 
-              const updateStreamedMessage = async (text: string, actions?: MessageActions): Promise<boolean> => {
-                await settleEditStream(true)
-                if (editStreamState.messageId == null) return false
-                const nextText = sanitizeInlineDeliveryText(text).trim()
-                const textForEdit = nextText || editStreamState.accumulatedText
-                if (!textForEdit && actions === undefined) return true
-                const shouldSkipTextUpdate =
-                  !editStreamState.failed && textForEdit === editStreamState.accumulatedText
-                if (shouldSkipTextUpdate && actions === undefined) return true
+                const rememberSent = (messageId: bigint | null | undefined) => {
+                  rememberSentBotMessage({
+                    chatId: deliveryChatId,
+                    messageId,
+                    replyThreadContext: deliveryReplyThreadContext,
+                  })
+                }
 
-                undeliveredFinalText = textForEdit
-                undeliveredFinalActions = actions
-                let result: Awaited<ReturnType<typeof client.invokeRaw>>
-                try {
-                  result = await client.invokeRaw(Method.EDIT_MESSAGE, {
-                    oneofKind: "editMessage",
-                    editMessage: {
-                      messageId: editStreamState.messageId,
-                      peerId: buildChatPeer(deliveryChatId),
-                      text: textForEdit,
+                const sendTextFallback = async (
+                  text: string,
+                  includeReplyTo: boolean,
+                  includeActions: boolean,
+                ): Promise<void> => {
+                  const outbound = sanitizeInlineDeliveryText(text)
+                  if (!outbound.trim()) return
+                  try {
+                    const sent = await sendMessage({
+                      chatId: deliveryChatId,
+                      text: outbound,
+                      ...(includeReplyTo && replyToMsgId != null ? { replyToMsgId } : {}),
+                      ...(includeActions && outboundActions !== undefined ? { actions: outboundActions } : {}),
                       parseMarkdown,
-                      ...(actions !== undefined ? { actions } : {}),
-                    },
-                  })
-                } catch (error) {
-                  // A definite edit rejection still needs the final answer via
-                  // the ordinary send path. An unknown commit keeps the one
-                  // existing bubble and must not create a duplicate.
-                  streamedFinalEditRejected = !isInlineCommitOutcomeUnknown(error)
-                  throw error
-                }
-                if (result.oneofKind !== "editMessage") {
-                  streamedFinalEditRejected = true
-                  throw new Error(
-                    `inline edit stream: expected editMessage result, got ${String(result.oneofKind)}`,
-                  )
-                }
-                if (!shouldSkipTextUpdate) {
-                  editStreamState.accumulatedText = textForEdit
-                  editStreamState.lastPartialText = textForEdit
-                }
-                if (actions !== undefined) {
-                  editStreamState.actionsFingerprint = fingerprintInlineMessageActions(actions)
-                  editStreamState.latestActions = actions
-                }
-                editStreamState.failed = false
-                streamedFinalEditRejected = false
-                undeliveredFinalText = ""
-                undeliveredFinalActions = undefined
-                return true
-              }
-
-              if (streamViaEditMessage) {
-                await settleEditStream(true)
-              }
-
-              if (mediaList.length === 0) {
-                if (shouldEditCallbackTargetInPlace && editStreamState.messageId != null) {
-                  const callbackEditActions = outboundActions ?? { rows: [] }
-                  if (!outboundText.trim() && outboundActions === undefined) {
-                    return finishPayload()
-                  }
-                  await updateStreamedMessage(outboundText, callbackEditActions)
-                  markPayloadVisible()
-                  publishStatus({ lastOutboundAt: Date.now() })
-                  return finishPayload()
-                }
-                if (
-                  streamViaEditMessage &&
-                  infoKind === "final" &&
-                  finalDeliveredForCurrentAssistantMessage &&
-                  editStreamState.messageId != null
-                ) {
-                  await resetEditStreamForAssistantMessage()
-                }
-                if (streamViaEditMessage && editStreamState.messageId != null) {
-                  if (outboundText.trim()) {
-                    editStreamState.finalTextAccumulator += outboundText
-                  }
-                  if (!editStreamState.finalTextAccumulator.trim() && outboundActions === undefined) {
+                    })
                     markPayloadVisible()
-                    return finishPayload()
-                  }
-                  await updateStreamedMessage(editStreamState.finalTextAccumulator, outboundActions)
-                  markPayloadVisible()
-                  if (infoKind === "final") {
-                    finalDeliveredForCurrentAssistantMessage = true
-                  }
-                  publishStatus({ lastOutboundAt: Date.now() })
-                  return finishPayload()
-                }
-                if (!outboundText.trim()) return finishPayload()
-                if (streamViaEditMessage && editStreamState.initialSendMayHaveLanded) {
-                  markPayloadVisible()
-                  return finishPayload()
-                }
-                // Inline takes one widget per message.
-                const outboundParts = splitInlineWidgetMessages(outboundText)
-                for (const [index, part] of outboundParts.entries()) {
-                  await sendTextFallback(part, index === 0, index === outboundParts.length - 1)
-                }
-                publishStatus({ lastOutboundAt: Date.now() })
-                return finishPayload()
-              }
-
-              if (streamViaEditMessage && editStreamState.messageId != null && outboundText.trim()) {
-                await updateStreamedMessage(outboundText, outboundActions)
-              }
-
-              for (let index = 0; index < mediaList.length; index++) {
-                const mediaUrl = mediaList[index]
-                if (!mediaUrl?.trim()) continue
-                const isFirst = index === 0
-                const shouldAttachActionsToMedia =
-                  isFirst && (!(streamViaEditMessage && editStreamState.messageId != null) || !outboundText.trim())
-                const caption =
-                  isFirst &&
-                  !(streamViaEditMessage && (
-                    editStreamState.messageId != null || editStreamState.initialSendMayHaveLanded
-                  ))
-                    ? outboundText
-                    : ""
-                const partialDelivery = partialMediaDeliveries.get(mediaUrl)
-                if (partialDelivery) {
-                  const result = await partialDelivery
-                  if (result.sent) {
-                    markPayloadVisible()
-                    if (result.commitOutcomeUnknown) {
-                      // The first send may already be visible. Do not turn an
-                      // unknown receipt into a duplicate caption/media bubble.
-                      continue
+                    try {
+                      rememberSent(sent.messageId)
+                    } catch (error) {
+                      runtime.error?.(`inline text delivery bookkeeping failed: ${String(error)}`)
                     }
-                    const mediaText = result.usedUrlFallback
-                      ? caption
-                        ? `${caption}\n\nAttachment: ${mediaUrl}`
-                        : `Attachment: ${mediaUrl}`
-                      : caption
-                    const shouldUpdateEarlyMedia =
-                      isFirst &&
-                      (Boolean(mediaText.trim()) ||
-                        (shouldAttachActionsToMedia && outboundActions !== undefined))
-                    if (shouldUpdateEarlyMedia && result.messageId != null) {
-                      try {
-                        const update = await client.invokeRaw(Method.EDIT_MESSAGE, {
-                          oneofKind: "editMessage",
-                          editMessage: {
-                            messageId: result.messageId,
-                            peerId: buildChatPeer(deliveryChatId),
-                            text: mediaText,
-                            parseMarkdown,
-                            ...(shouldAttachActionsToMedia && outboundActions !== undefined
-                              ? { actions: outboundActions }
-                              : {}),
-                          },
-                        })
-                        if (update.oneofKind !== "editMessage") {
-                          throw new Error(
-                            `inline early media: expected editMessage result, got ${String(update.oneofKind)}`,
-                          )
-                        }
-                      } catch (error) {
-                        runtime.error?.(
-                          `inline early media finalization failed (${String(error)})`,
-                        )
-                        if (!isInlineCommitOutcomeUnknown(error)) {
-                          await sendTextFallback(
-                            caption || `Attachment: ${mediaUrl}`,
-                            false,
-                            shouldAttachActionsToMedia,
-                          )
-                        }
-                      }
-                    } else if (shouldUpdateEarlyMedia) {
-                      await sendTextFallback(
-                        caption || `Attachment: ${mediaUrl}`,
-                        false,
-                        shouldAttachActionsToMedia,
-                      )
-                    }
-                    continue
-                  }
-                }
-                let media: Awaited<ReturnType<typeof uploadInlineMediaFromUrl>>
-                try {
-                  media = await uploadInlineMediaFromUrl({
-                    client,
-                    cfg,
-                    accountId: account.accountId,
-                    mediaUrl,
-                  })
-                } catch (error) {
-                  runtime.error?.(`inline media upload failed; falling back to url text (${String(error)})`)
-                  const fallbackText = caption
-                    ? `${caption}\n\nAttachment: ${mediaUrl}`
-                    : `Attachment: ${mediaUrl}`
-                  await sendTextFallback(fallbackText, isFirst, isFirst)
-                  continue
-                }
-
-                try {
-                  const sent = await sendMessage({
-                    chatId: deliveryChatId,
-                    ...(caption ? { text: caption } : {}),
-                    media,
-                    ...(isFirst && replyToMsgId != null ? { replyToMsgId } : {}),
-                    ...(shouldAttachActionsToMedia && outboundActions !== undefined
-                      ? { actions: outboundActions }
-                      : {}),
-                    ...(caption ? { parseMarkdown } : {}),
-                  })
-                  markPayloadVisible()
-                  try {
-                    rememberSent(sent.messageId)
                   } catch (error) {
-                    runtime.error?.(`inline media delivery bookkeeping failed: ${String(error)}`)
-                  }
-                } catch (error) {
-                  if (isInlineSendOutcomeUnknown(error)) {
+                    if (!isInlineSendOutcomeUnknown(error)) throw error
                     markPayloadVisible()
                     runtime.error?.(
-                      `inline media delivery outcome is unknown; suppressing duplicate (${String(error)})`,
+                      `inline text delivery outcome is unknown; suppressing duplicate (${String(error)})`,
                     )
+                  }
+                }
+
+                const updateStreamedMessage = async (text: string, actions?: MessageActions): Promise<boolean> => {
+                  await settleEditStream(true)
+                  if (editStreamState.messageId == null) return false
+                  const nextText = sanitizeInlineDeliveryText(text).trim()
+                  const textForEdit = nextText || editStreamState.accumulatedText
+                  if (!textForEdit && actions === undefined) return true
+                  const shouldSkipTextUpdate =
+                    !editStreamState.failed && textForEdit === editStreamState.accumulatedText
+                  if (shouldSkipTextUpdate && actions === undefined) return true
+
+                  undeliveredFinalText = textForEdit
+                  undeliveredFinalActions = actions
+                  let result: Awaited<ReturnType<typeof client.invokeRaw>>
+                  try {
+                    result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+                      oneofKind: "editMessage",
+                      editMessage: {
+                        messageId: editStreamState.messageId,
+                        peerId: buildChatPeer(deliveryChatId),
+                        text: textForEdit,
+                        parseMarkdown,
+                        ...(actions !== undefined ? { actions } : {}),
+                      },
+                    })
+                  } catch (error) {
+                    // A definite edit rejection still needs the final answer via
+                    // the ordinary send path. An unknown commit keeps the one
+                    // existing bubble and must not create a duplicate.
+                    streamedFinalEditRejected = !isInlineCommitOutcomeUnknown(error)
+                    throw error
+                  }
+                  if (result.oneofKind !== "editMessage") {
+                    streamedFinalEditRejected = true
+                    throw new Error(
+                      `inline edit stream: expected editMessage result, got ${String(result.oneofKind)}`,
+                    )
+                  }
+                  if (!shouldSkipTextUpdate) {
+                    editStreamState.accumulatedText = textForEdit
+                    editStreamState.lastPartialText = textForEdit
+                  }
+                  if (actions !== undefined) {
+                    editStreamState.actionsFingerprint = fingerprintInlineMessageActions(actions)
+                    editStreamState.latestActions = actions
+                  }
+                  editStreamState.failed = false
+                  streamedFinalEditRejected = false
+                  undeliveredFinalText = ""
+                  undeliveredFinalActions = undefined
+                  return true
+                }
+
+                if (streamViaEditMessage) {
+                  await settleEditStream(true)
+                }
+
+                if (mediaList.length === 0) {
+                  if (shouldEditCallbackTargetInPlace && editStreamState.messageId != null) {
+                    const callbackEditActions = outboundActions ?? { rows: [] }
+                    if (!outboundText.trim() && outboundActions === undefined) {
+                      return finishPayload()
+                    }
+                    await updateStreamedMessage(outboundText, callbackEditActions)
+                    markPayloadVisible()
+                    publishStatus({ lastOutboundAt: Date.now() })
+                    return finishPayload()
+                  }
+                  if (
+                    streamViaEditMessage &&
+                    infoKind === "final" &&
+                    finalDeliveredForCurrentAssistantMessage &&
+                    editStreamState.messageId != null
+                  ) {
+                    await resetEditStreamForAssistantMessage()
+                  }
+                  if (streamViaEditMessage && editStreamState.messageId != null) {
+                    if (outboundText.trim()) {
+                      editStreamState.finalTextAccumulator += outboundText
+                    }
+                    if (!editStreamState.finalTextAccumulator.trim() && outboundActions === undefined) {
+                      markPayloadVisible()
+                      return finishPayload()
+                    }
+                    await updateStreamedMessage(editStreamState.finalTextAccumulator, outboundActions)
+                    markPayloadVisible()
+                    if (infoKind === "final") {
+                      finalDeliveredForCurrentAssistantMessage = true
+                    }
+                    publishStatus({ lastOutboundAt: Date.now() })
+                    return finishPayload()
+                  }
+                  if (!outboundText.trim()) return finishPayload()
+                  if (streamViaEditMessage && editStreamState.initialSendMayHaveLanded) {
+                    markPayloadVisible()
+                    return finishPayload()
+                  }
+                  // Inline takes one widget per message.
+                  const outboundParts = splitInlineWidgetMessages(outboundText)
+                  for (const [index, part] of outboundParts.entries()) {
+                    await sendTextFallback(part, index === 0, index === outboundParts.length - 1)
+                  }
+                  publishStatus({ lastOutboundAt: Date.now() })
+                  return finishPayload()
+                }
+
+                if (streamViaEditMessage && editStreamState.messageId != null && outboundText.trim()) {
+                  await updateStreamedMessage(outboundText, outboundActions)
+                }
+
+                for (let index = 0; index < mediaList.length; index++) {
+                  const mediaUrl = mediaList[index]
+                  if (!mediaUrl?.trim()) continue
+                  const isFirst = index === 0
+                  const shouldAttachActionsToMedia =
+                    isFirst && (!(streamViaEditMessage && editStreamState.messageId != null) || !outboundText.trim())
+                  const caption =
+                    isFirst &&
+                    !(streamViaEditMessage && (
+                      editStreamState.messageId != null || editStreamState.initialSendMayHaveLanded
+                    ))
+                      ? outboundText
+                      : ""
+                  const partialDelivery = partialMediaDeliveries.get(mediaUrl)
+                  if (partialDelivery) {
+                    const result = await partialDelivery
+                    if (result.sent) {
+                      markPayloadVisible()
+                      if (result.commitOutcomeUnknown) {
+                        // The first send may already be visible. Do not turn an
+                        // unknown receipt into a duplicate caption/media bubble.
+                        continue
+                      }
+                      const mediaText = result.usedUrlFallback
+                        ? caption
+                          ? `${caption}\n\nAttachment: ${mediaUrl}`
+                          : `Attachment: ${mediaUrl}`
+                        : caption
+                      const shouldUpdateEarlyMedia =
+                        isFirst &&
+                        (Boolean(mediaText.trim()) ||
+                          (shouldAttachActionsToMedia && outboundActions !== undefined))
+                      if (shouldUpdateEarlyMedia && result.messageId != null) {
+                        try {
+                          const update = await client.invokeRaw(Method.EDIT_MESSAGE, {
+                            oneofKind: "editMessage",
+                            editMessage: {
+                              messageId: result.messageId,
+                              peerId: buildChatPeer(deliveryChatId),
+                              text: mediaText,
+                              parseMarkdown,
+                              ...(shouldAttachActionsToMedia && outboundActions !== undefined
+                                ? { actions: outboundActions }
+                                : {}),
+                            },
+                          })
+                          if (update.oneofKind !== "editMessage") {
+                            throw new Error(
+                              `inline early media: expected editMessage result, got ${String(update.oneofKind)}`,
+                            )
+                          }
+                        } catch (error) {
+                          runtime.error?.(
+                            `inline early media finalization failed (${String(error)})`,
+                          )
+                          if (!isInlineCommitOutcomeUnknown(error)) {
+                            await sendTextFallback(
+                              caption || `Attachment: ${mediaUrl}`,
+                              false,
+                              shouldAttachActionsToMedia,
+                            )
+                          }
+                        }
+                      } else if (shouldUpdateEarlyMedia) {
+                        await sendTextFallback(
+                          caption || `Attachment: ${mediaUrl}`,
+                          false,
+                          shouldAttachActionsToMedia,
+                        )
+                      }
+                      continue
+                    }
+                  }
+                  let media: Awaited<ReturnType<typeof uploadInlineMediaFromUrl>>
+                  try {
+                    media = await uploadInlineMediaFromUrl({
+                      client,
+                      cfg,
+                      accountId: account.accountId,
+                      mediaUrl,
+                    })
+                  } catch (error) {
+                    runtime.error?.(`inline media upload failed; falling back to url text (${String(error)})`)
+                    const fallbackText = caption
+                      ? `${caption}\n\nAttachment: ${mediaUrl}`
+                      : `Attachment: ${mediaUrl}`
+                    await sendTextFallback(fallbackText, isFirst, isFirst)
                     continue
                   }
-                  runtime.error?.(`inline media send failed; falling back to url text (${String(error)})`)
-                  const fallbackText = caption
-                    ? `${caption}\n\nAttachment: ${mediaUrl}`
-                    : `Attachment: ${mediaUrl}`
-                  await sendTextFallback(fallbackText, isFirst, isFirst)
-                }
-              }
 
-              publishStatus({ lastOutboundAt: Date.now() })
-              return finishPayload()
+                  try {
+                    const sent = await sendMessage({
+                      chatId: deliveryChatId,
+                      ...(caption ? { text: caption } : {}),
+                      media,
+                      ...(isFirst && replyToMsgId != null ? { replyToMsgId } : {}),
+                      ...(shouldAttachActionsToMedia && outboundActions !== undefined
+                        ? { actions: outboundActions }
+                        : {}),
+                      ...(caption ? { parseMarkdown } : {}),
+                    })
+                    markPayloadVisible()
+                    try {
+                      rememberSent(sent.messageId)
+                    } catch (error) {
+                      runtime.error?.(`inline media delivery bookkeeping failed: ${String(error)}`)
+                    }
+                  } catch (error) {
+                    if (isInlineSendOutcomeUnknown(error)) {
+                      markPayloadVisible()
+                      runtime.error?.(
+                        `inline media delivery outcome is unknown; suppressing duplicate (${String(error)})`,
+                      )
+                      continue
+                    }
+                    runtime.error?.(`inline media send failed; falling back to url text (${String(error)})`)
+                    const fallbackText = caption
+                      ? `${caption}\n\nAttachment: ${mediaUrl}`
+                      : `Attachment: ${mediaUrl}`
+                    await sendTextFallback(fallbackText, isFirst, isFirst)
+                  }
+                }
+
+                publishStatus({ lastOutboundAt: Date.now() })
+                return finishPayload()
+              } finally {
+                releaseProgress()
+              }
             },
             onSkip: (_payload, info) => {
               if (info?.reason === "silent") {
@@ -4595,16 +4287,13 @@ export async function monitorInlineProvider(params: {
       }
       await drainActivityOperations()
       await settleActivityTerminal()
-      const finalActivityOutcome = (): ActivityOutcome =>
+      // Work after the last reply, or a turn that ended without one, closes
+      // here: "Stopped after" for /stop, "Failed after" for errors.
+      await endProgress(
         abortSignal.aborted || activityHostOutcome === "cancelled" ? "cancelled"
-          : dispatchError != null || failedNonSilent || activityHostOutcome === "failure" ? "failure" : "success"
-      const closedOutcome = finalActivityOutcome()
-      await cleanupInlineProgressPlaceholder(closedOutcome, activityHostEndedAt)
-      // An event can arrive at the bounded wait's deadline while the terminal
-      // edit is in flight. Reconcile it against the same frozen row before exit.
-      if (finalActivityOutcome() !== closedOutcome) {
-        await cleanupInlineProgressPlaceholder(finalActivityOutcome(), activityHostEndedAt)
-      }
+          : dispatchError != null || failedNonSilent || activityHostOutcome === "failure" ? "failure" : "success",
+        activityHostEndedAt,
+      )
       if (
         !delivered &&
         streamViaEditMessage &&
@@ -4664,16 +4353,13 @@ export async function monitorInlineProvider(params: {
     } finally {
       unsubscribeActivity?.()
       endActiveThreadRoute()
-      if (agentActivityEnabled && !activityTurnCompleted && !abortSignal.aborted) {
-        await cleanupInlineProgressPlaceholder("failure")
+      unregisterProgressSplit?.()
+      if (!activityTurnCompleted || abortSignal.aborted) {
+        await endProgress(abortSignal.aborted ? "cancelled" : "failure")
       }
       if (abortSignal.aborted) {
-        if (agentActivityEnabled) await cleanupInlineProgressPlaceholder("cancelled")
         runTypingCleanup()
         botPresenceLifecycle.cleanup()
-      }
-      if (progressState.pendingClosures.size > 0) {
-        await cleanupInlineProgressPlaceholder()
       }
       if (adoptedThreadThisTurn) {
         await sendDeliveryTyping(deliveryChatId, false).catch((error) =>
@@ -5866,6 +5552,11 @@ export async function monitorInlineProvider(params: {
               "priority abort dispatch",
             )
             return
+          }
+          // A person's message mid-turn (a steer, or anything said below the
+          // work) ends the open progress message; later work starts below it.
+          if (senderProfilesById.get(String(msg.fromId))?.bot !== true) {
+            for (const split of openProgressByChat.get(String(event.chatId)) ?? []) split()
           }
           if (voiceTranscriptWaitMs > 0 && shouldWaitForInlineVoiceTranscript(msg)) {
             holdInlineVoiceMessage(entry)

@@ -45,7 +45,7 @@ Breaking changes in 1.0. The behavior changes match the rules Hermes 1.0 follows
 - **A command no bot claimed is ignored.** Several bots offering `/status` with nothing naming one means none of them runs it.
 - **Someone added to a thread under the bot's DM keeps group rules** and their own session, so the DM's context never reaches them.
 - **Messages sent while the gateway was down aren't answered.** Messages and button, form, or widget actions recorded more than 60 seconds before the gateway started don't wake the agent on replay. Locally accepted requests still recover after a restart. Set `dropPendingOnColdBoot: false` to answer them.
-- **Output mode starts unset.** Setup and upgrades preserve your choice. An explicit thread choice overrides the bot choice. Detailed shows a progress timeline and a separate answer. Friendly skips the tool timeline. With both choices unset, OpenClaw follows the configured streaming behavior (quiet by default). For example, `inline bots settings --bot-user-id 42 --output-mode friendly` selects Friendly for bot 42. Pass `default` to clear the selection, or add `--chat-id <id>` to change it for one chat.
+- **Each chat's Output setting decides how work appears.** An explicit thread choice overrides the bot choice; with neither set, Detailed. Detailed shows one progress message per stretch of work and a separate answer. Friendly shows Working, then the answer. `experimentalAgentActivity` and the `streaming.mode: "progress"` card no longer apply. For example, `inline bots settings --bot-user-id 42 --output-mode friendly` selects Friendly for bot 42. Pass `default` to clear the selection, or add `--chat-id <id>` to change it for one chat.
 
 ## Install
 
@@ -504,38 +504,31 @@ channels:
 While OpenClaw works on a turn, Inline shows **Working** instead of Typing, with or
 without agent activity. Apps that don't support Working yet show Typing.
 
-By default the bot is quiet while it works: Inline shows Working, then the answer
-arrives as one message, with no progress message in the chat. Set
-`channels.inline.streaming: { mode: "progress" }` to post a progress card that
-lists what the agent is doing.
+Each chat's **Output** setting in Inline decides how the work appears. The bot's
+default applies unless a thread overrides it; bots with no setting use
+**Detailed**. The plugin reads the setting at the start of each turn and caches it
+for 30 seconds, so a change reaches a running gateway within that time.
 
-Agent activity is experimental and **off by default**. Set
-`channels.inline.experimentalAgentActivity: true` (or the same field on an
-individual Inline account), then restart the gateway to opt in. Unset it or set
-it to `false` and restart to restore the temporary progress placeholder (in
-progress mode), which is deleted when the reply arrives.
+- **Detailed**: one silent progress message per stretch of work. It opens as
+  **Working**, with a live timer, and shows a row per tool call: commands with
+  their output tail, exit code and duration, reads and searches folded into
+  **Explored**, edits with their files, web lookups, plans, sub-agents and
+  compaction. Before the answer, or a reply sent mid-turn, it closes to
+  **Worked for 1m 4s** (**Failed after** or **Stopped after** from the host's
+  explicit outcome), and later work starts a new message below. A person's new
+  message mid-turn also closes it. Detailed uses this path whatever the
+  `streaming` settings say, and never edit-streams the answer.
+- **Friendly**: no progress message. Inline shows Working while OpenClaw works;
+  mid-turn replies and the answer arrive as ordinary messages, and the
+  `streaming` settings apply as before.
 
-In Inline on each device, enable **Settings → Experimental → Agents → Agent
-Activity** and restart the app. Expanded logs also need **Rich Content Renderer**
-on macOS or the existing **Message View 2** Debug setting on iOS. Without the
-app opt-in, Working falls back to Typing and saved agent rows use their text
-fallback. The app setting does not reconfigure a running gateway.
-
-When enabled, progress mode uses a quiet timeline: silent, collapsed activity
-rows stay separate from conversational replies and remain available afterward.
-They use `activity="agent"` to identify agent activity while retaining standard
-message bubbles and disclosure controls without decorative activity icons.
-Collapsed titles use structured descriptions and tool names, with **Running a
-script** as the fallback for terminal work. Commands are never parsed to guess
-purpose. Finished rows show **Worked for 18s**, **Failed after 18s**, or **Stopped
-after 18s** from explicit host outcomes. A recovered tool error remains visible
-without mislabeling the whole turn as failed. Monotonic time starts at the first
-work event and freezes at each reply/rollover boundary before final transport.
-Expanded details contain the host's progress previews, not full execution logs.
-Long activity histories continue in another row instead of dropping older steps.
-Existing explicit streaming settings still apply, including `streaming: false`
-to disable progress previews. Activity markup is parsed independently of the
-`parseMarkdown` setting for ordinary replies.
+Progress rows use tool names and the agent's explicit descriptions as titles,
+never command output. Tools OpenClaw hides from channel progress stay hidden.
+Set `streaming.progress.commandText: "status"` to keep command text and output
+out of the rows ("Ran a command"). Output tails and diffs are bounded, and values
+that look like credentials are masked. Approval cards are unchanged in both
+modes. `experimentalAgentActivity` is no longer used; the gateway logs a warning
+if it is still set.
 
 The integration emits `WORKING` (compose-action value `6`) through the existing
 short-lived compose activity lifecycle for every turn and heartbeat run. The server

@@ -117,6 +117,8 @@ type MonitorSetup = {
           replyToMsgId?: bigint
         }
         seq?: number
+        /** Holds this and later events until it resolves. */
+        waitFor?: () => Promise<void>
       }
     | {
         kind: "message.edit"
@@ -230,9 +232,6 @@ type MonitorSetup = {
     lastName?: string
     bot?: boolean
   }>
-  botOutputMode?: number
-  outputParticipations?: Array<{ botUserId: bigint; outputMode?: number }>
-  outputParticipationsError?: Error
   participantLookupError?: Error
   directoryLookupError?: Error
   historyByChat?: Record<string, Array<{
@@ -360,7 +359,15 @@ type MonitorSetup = {
   getMeError?: Error
   connectAuthenticationError?: "UNAUTHORIZED" | "INVALID_AUTH" | "SESSION_REVOKED"
   openKeyedStore?: ReturnType<typeof vi.fn>
+  /** The bot's AgentOutputMode default (0 unspecified = Detailed, 1 Detailed, 2 Friendly). */
+  agentOutputMode?: number
+  /** Per-chat AgentOutputMode overrides for this bot, by chat ID. */
+  chatOutputModes?: Record<string, number>
+  agentSettingsError?: Error
 }
+
+const OUTPUT_DETAILED = 1
+const OUTPUT_FRIENDLY = 2
 
 function buildAccount(overrides?: {
   experimentalAgentActivity?: boolean
@@ -526,6 +533,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   })
 
   let nextSentMessageId = 1n
+  // Progress messages go through invokeRaw; their IDs stay clear of sendMessage's.
+  let nextProgressMessageId = 1000n
   const sendMessage = vi.fn(async () => {
     if (setup.sendMessageDelayMs != null && setup.sendMessageDelayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, setup.sendMessageDelayMs))
@@ -682,7 +691,17 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } }
         text?: string
         parseMarkdown?: boolean
+        blockContent?: unknown
       }
+      sendMessage?: {
+        peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } }
+        message?: string
+        randomId?: bigint
+        sendMode?: number
+        parseMarkdown?: boolean
+        blockContent?: unknown
+      }
+      getAgentParticipations?: { peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } } }
       getMessages?: {
         peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } }
         messageIds?: bigint[]
@@ -712,13 +731,6 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         oneofKind: "updateDialogFollowMode",
         updateDialogFollowMode: {},
       }
-    }
-    if (method === 158 && input?.oneofKind === "getAgentParticipations") {
-      if (setup.outputParticipationsError) throw setup.outputParticipationsError
-      return { oneofKind: "getAgentParticipations", getAgentParticipations: { participations: setup.outputParticipations ?? [] } }
-    }
-    if (method === 164 && input?.oneofKind === "getAgentSettings") {
-      return { oneofKind: "getAgentSettings", getAgentSettings: { settings: { defaultOutputMode: setup.botOutputMode ?? 0 } } }
     }
     if (method === 1 && input?.oneofKind === "getMe") {
       if (setup.getMeError) {
@@ -843,6 +855,31 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         },
       }
     }
+    if (method === 2 && input?.oneofKind === "sendMessage") {
+      const messageId = nextProgressMessageId
+      nextProgressMessageId += 1n
+      return {
+        oneofKind: "sendMessage",
+        sendMessage: { updates: [{ update: { oneofKind: "updateMessageId", updateMessageId: { messageId, randomId: input.sendMessage?.randomId } } }] },
+      }
+    }
+    if (method === 164 && input?.oneofKind === "getAgentSettings") {
+      if (setup.agentSettingsError) throw setup.agentSettingsError
+      return {
+        oneofKind: "getAgentSettings",
+        getAgentSettings: { settings: { botUserId: setup.me?.userId ?? 777n, defaultOutputMode: setup.agentOutputMode ?? 0, revision: 0n } },
+      }
+    }
+    if (method === 158 && input?.oneofKind === "getAgentParticipations") {
+      const chatId = String(input.getAgentParticipations?.peerId?.type?.chat?.chatId ?? "")
+      const override = setup.chatOutputModes?.[chatId]
+      return {
+        oneofKind: "getAgentParticipations",
+        getAgentParticipations: {
+          participations: override === undefined ? [] : [{ botUserId: setup.me?.userId ?? 777n, outputMode: override, mode: 0, revision: 0n, date: 0n }],
+        },
+      }
+    }
     if (method === 8 && input?.oneofKind === "editMessage") {
       if (setup.editMessageDelayMs != null && setup.editMessageDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, setup.editMessageDelayMs))
@@ -876,6 +913,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     async function* eventsGenerator() {
       for (const event of setup.events) {
         if (event.kind === "message.new") {
+          await event.waitFor?.()
           yield {
             kind: event.kind,
             chatId: event.chatId,
@@ -986,6 +1024,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       },
       AgentOutputMode: { UNSPECIFIED: 0, DETAILED: 1, FRIENDLY: 2 },
       BotCapability_Kind: { CHAT_SETTINGS: 1, OUTPUT_MODE: 3 },
+      MessageSendMode: { MODE_UNSPECIFIED: 0, MODE_SILENT: 1 },
       BotChatSettingsInfo_Tone: { TONE_UNSPECIFIED: 0, NEUTRAL: 1, SUCCESS: 2, WARNING: 3, ERROR: 4 },
       BotChatSettingsProblem_Code: {
         CODE_UNSPECIFIED: 0,
@@ -999,9 +1038,10 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         constructor(_path: string) {}
       },
       Method: {
+        GET_ME: 1,
+        SEND_MESSAGE: 2,
         GET_AGENT_PARTICIPATIONS: 158,
         GET_AGENT_SETTINGS: 164,
-        GET_ME: 1,
         SEND_COMPOSE_ACTION: 20,
         DELETE_MESSAGES: 4,
         GET_CHAT_HISTORY: 5,
@@ -2728,6 +2768,7 @@ describe("inline/monitor", () => {
     let runSignal: AbortSignal | undefined
     const blocked = new Promise<void>(resolve => { release = resolve })
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{ kind: "message.new", chatId: 7n, message: {
         id: 1001n, date: 1_700_000_000n, fromId: 42n, message: "long task",
       } }],
@@ -5352,6 +5393,7 @@ describe("inline/monitor", () => {
     const toolReply = tool !== "none"
     const cfg = { channels: { inline: { token: "token", baseUrl: "https://api.inline.chat" } } }
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       me: { userId: 777n, username: "inlinebot" },
       events: [{ kind: "message.new", chatId: 89n, message: {
         id: 12n, date: 1_700_000_014n, fromId: 51n, message: "@inlinebot investigate this", mentioned: true,
@@ -8706,6 +8748,7 @@ describe("inline/monitor", () => {
 
   it("maps unified streaming.mode=block to Inline block streaming", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [
         {
           kind: "message.new",
@@ -8748,669 +8791,308 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it.each([
-    { label: "unset retains configured progress", bot: 0, own: 0, legacy: true, show: true },
-    { label: "another bot's override leaves the mode unset", bot: 0, own: 0, legacy: false, show: false },
-    { label: "explicit bot Detailed", bot: 1, own: 0, legacy: false, show: true },
-    { label: "explicit bot Friendly", bot: 2, own: 0, legacy: true, show: false },
-    { label: "chat Friendly overrides Detailed", bot: 1, own: 2, legacy: true, show: false },
-    { label: "chat Detailed overrides Friendly", bot: 2, own: 1, legacy: false, show: true },
-    { label: "unavailable chat preference keeps a Detailed turn quiet", bot: 1, own: 0, legacy: true, show: false, unavailable: true },
-  ])("renders one answer when $label", async ({ bot, own, legacy, show, unavailable }) => {
+  it("always takes the Detailed progress path, whatever the streaming config says", async () => {
     const harness = await setupMonitorHarness({
-      events: [{ kind: "message.new", chatId: 772n, message: { id: 42n, date: 1_700_000_004n, fromId: 3n, message: "check" } }],
+      events: [{ kind: "message.new", chatId: 772n, message: { id: 5557n, date: 1_700_000_004n, fromId: 42n, message: "dm" } }],
       chats: { "772": { kind: "direct", title: "Alice" } },
-      botOutputMode: bot,
-      outputParticipations: [{ botUserId: 888n, outputMode: 1 }, { botUserId: 777n, outputMode: own }],
-      ...(unavailable ? { outputParticipationsError: new Error("unavailable") } : {}),
-      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
-        await replyOptions.onToolStart({ name: "exec", args: { command: "date" } })
-        await dispatcherOptions.deliver({ text: "finished" }, { kind: "final" })
-      },
+      dispatchReplyPayload: { text: "final" },
     })
     const handle = await harness.monitorInlineProvider({
-      cfg: {} as any, account: buildAccount({ dmPolicy: "open", streaming: { mode: legacy ? "progress" : "off" } }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: new AbortController().signal,
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streaming: { mode: "partial" } }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
     })
     try {
-      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "finished" })))
-      const sends = harness.calls.sendMessage.mock.calls.map(([payload]) => payload)
-      expect(sends.filter((payload) => payload.text === "finished")).toHaveLength(1)
-      expect(sends.some((payload) => payload.sendMode === "silent")).toBe(show)
-      const methods = harness.calls.invokeRaw.mock.calls.map(([, input]) => input.oneofKind)
-      expect(methods).toContain("getAgentSettings")
-      expect(methods).not.toContain("updateAgentSettings")
-      expect(methods).not.toContain("setAgentParticipation")
+      await waitFor(() => {
+        const options = harness.calls.dispatchReply.mock.calls[0]?.[0]?.replyOptions
+        expect(options?.onPartialReply).toBeUndefined()
+        expect(typeof options?.onPreparedAgentRunStart).toBe("function")
+        expect(typeof options?.onItemEvent).toBe("function")
+        expect(options?.preserveProgressCallbackStartOrder).toBe(true)
+        expect(options?.suppressDefaultToolProgressMessages).toBe(true)
+        expect(options?.disableBlockStreaming).toBe(true)
+      })
     } finally { await handle.stop() }
   })
 
-  it("maps unified streaming.mode=progress to a separate Inline progress placeholder path", async () => {
-    const harness = await setupMonitorHarness({
-      events: [
-        {
-          kind: "message.new",
-          chatId: 772n,
-          message: {
-            id: 5557n,
-            date: 1_700_000_004n,
-            fromId: 42n,
-            message: "dm",
-          },
-        },
-      ],
-      chats: {
-        "772": { kind: "direct", title: "Alice" },
-      },
-      partialReplies: [{ text: "first paragraph\n\n" }],
-      dispatchReplyPayload: {
-        text: "first paragraph\n\nfinal",
-      },
-    })
-
+  it("warns once that experimentalAgentActivity is ignored", async () => {
+    const harness = await setupMonitorHarness({ events: [], chats: {} })
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
-      account: buildAccount({
-        dmPolicy: "open",
-        streaming: { mode: "progress" },
-      }),
+      account: buildAccount({ experimentalAgentActivity: true }),
       runtime: { log: vi.fn(), error: vi.fn() } as any,
       abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      log,
     })
-
-    await waitFor(() => {
-      const args = harness.calls.dispatchReply.mock.calls[0]?.[0]
-      expect(args?.replyOptions?.onPartialReply).toBeUndefined()
-      expect(typeof args?.replyOptions?.onToolStart).toBe("function")
-      expect(args?.replyOptions?.suppressDefaultToolProgressMessages).toBe(true)
-      expect(args?.replyOptions?.disableBlockStreaming).toBe(true)
-    })
-
-    await handle.stop()
+    try {
+      await waitFor(() => expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("experimentalAgentActivity is ignored")))
+    } finally { await handle.stop() }
   })
 
-  it.each(["failure", "cancelled", "late-failure", "error-payload"] as const)("finalizes activity after %s with a frozen duration", async (outcome) => {
-    const abort = new AbortController()
-    let now = 10_000
-    const clock = vi.spyOn(performance, "now").mockImplementation(() => now)
+  it("shows a Detailed turn as one block-content progress message that ends before the answer", async () => {
     const harness = await setupMonitorHarness({
       events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
       chats: { "773": { kind: "direct", title: "Alice" } },
       dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
-        await replyOptions.onToolStart({ name: "exec", args: { command: "python3 check.py", description: "Checking the EPUB" } })
-        now = 15_000
-        if (outcome === "error-payload") {
-          await dispatcherOptions.deliver({ text: "The run failed." }, { kind: "error" })
-          return
-        }
-        if (outcome === "late-failure") {
-          await dispatcherOptions.deliver({ text: "The first step finished." })
-          now = 90_000
-        }
-        if (outcome === "cancelled") abort.abort()
-        throw new Error("run failed")
+        replyOptions.onPreparedAgentRunStart({ runId: "run-1", transcriptStart: null })
+        await replyOptions.onToolStart({ toolCallId: "exec-1", name: "exec", args: { command: "python3 check.py" } })
+        await replyOptions.onItemEvent({ itemId: "command:exec-1", toolCallId: "exec-1", kind: "command", name: "exec", phase: "start", status: "running" })
+        await replyOptions.onCommandOutput({ itemId: "command:exec-1", toolCallId: "exec-1", name: "exec", phase: "end", exitCode: 0, durationMs: 2_000, output: "ok" })
+        await replyOptions.onPatchSummary({ toolCallId: "patch-1", phase: "end", modified: ["/tmp/book.txt"] })
+        await replyOptions.onPlanUpdate({ phase: "update", steps: [{ step: "Check the book", status: "completed" }] })
+        await dispatcherOptions.deliver({ text: "Finished." })
       },
     })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+    })
     try {
-      const handle = await harness.monitorInlineProvider({
-        cfg: {} as any, account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress" } }),
-        runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: abort.signal,
-        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      })
-      await waitFor(() => {
-        expect(harness.calls.sendMessage.mock.calls.some((call) => call[0]?.text?.includes('>Checking the EPUB</summary>'))).toBe(true)
-        const prefix = outcome === "cancelled" ? "Stopped after" : "Failed after"
-        expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.editMessage?.text?.includes(`>${prefix} 5s</summary>`))).toBe(true)
-      })
-      await handle.stop()
-    } finally { clock.mockRestore() }
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ chatId: 773n, text: "Finished." })))
+      const sends = harness.calls.invokeRaw.mock.calls.filter((call) => call[0] === 2)
+      expect(sends).toHaveLength(1)
+      const send = sends[0]![1].sendMessage
+      expect(send.peerId).toEqual({ type: { oneofKind: "chat", chat: { chatId: 773n } } })
+      expect(send.sendMode).toBe(1)
+      expect(send.parseMarkdown).toBeUndefined()
+      expect(typeof send.randomId).toBe("bigint")
+      expect(send.message).toMatch(/^Working/)
+      expect(send.blockContent.blocks[0].kind.disclosure.kind).toBe(1)
+      const edits = harness.calls.invokeRaw.mock.calls.filter((call) => call[0] === 8 && call[1]?.editMessage?.messageId === 1000n)
+      expect(edits.length).toBeGreaterThan(0)
+      const last = edits.at(-1)![1].editMessage
+      expect(last.parseMarkdown).toBeUndefined()
+      expect(last.text).toMatch(/^Worked for \d+s/)
+      expect(last.text).toContain("python3 check.py")
+      expect(last.text).toContain("book.txt")
+      expect(last.text).toContain("Check the book")
+      expect(last.blockContent.blocks[0].kind.disclosure.kind).toBe(0)
+      const lastEditOrder = harness.calls.invokeRaw.mock.invocationCallOrder[harness.calls.invokeRaw.mock.calls.lastIndexOf(edits.at(-1)!)]!
+      const answerIndex = harness.calls.sendMessage.mock.calls.findIndex(([input]) => input.text === "Finished.")
+      expect(lastEditOrder).toBeLessThan(harness.calls.sendMessage.mock.invocationCallOrder[answerIndex]!)
+      expect(harness.agentEventListenerCount()).toBe(0)
+    } finally { await handle.stop() }
   })
 
-  it.each([true, false])("uses the admitted run lifecycle for /stop, cancelled=%s", async (cancelled) => {
-    const abort = new AbortController()
+  it.each([
+    ["the bot default", { agentOutputMode: OUTPUT_FRIENDLY }],
+    ["a thread override", { agentOutputMode: OUTPUT_DETAILED, chatOutputModes: { "773": OUTPUT_FRIENDLY } }],
+  ])("sends no progress in Friendly from %s", async (_label, modes) => {
+    const harness = await setupMonitorHarness({
+      ...modes,
+      dispatchTypingLifecycle: true,
+      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
+      chats: { "773": { kind: "direct", title: "Alice" } },
+      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
+        replyOptions.onPreparedAgentRunStart?.({ runId: "run-1", transcriptStart: null })
+        await replyOptions.onToolStart({ toolCallId: "exec-1", name: "exec", args: { command: "ls" } })
+        await replyOptions.onItemEvent?.({ itemId: "tool:exec-1", toolCallId: "exec-1", kind: "tool", name: "exec", phase: "end", status: "completed" })
+        await dispatcherOptions.deliver({ text: "Finished." })
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "Finished." })))
+      const options = harness.calls.dispatchReply.mock.calls[0]?.[0]?.replyOptions
+      expect(options?.onPreparedAgentRunStart).toBeUndefined()
+      expect(options?.onItemEvent).toBeUndefined()
+      expect(options?.suppressDefaultToolProgressMessages).toBeUndefined()
+      expect(harness.calls.invokeRaw.mock.calls.some((call) => call[0] === 2 || call[0] === 8)).toBe(false)
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      // Working stays in both modes.
+      expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.sendComposeAction?.action === 6)).toBe(true)
+    } finally { await handle.stop() }
+  })
+
+  it("lets a thread override pick Detailed and falls back to Detailed when the mode can't be read", async () => {
+    for (const setup of [
+      { agentOutputMode: OUTPUT_FRIENDLY, chatOutputModes: { "773": OUTPUT_DETAILED } },
+      { agentSettingsError: new Error("offline") },
+    ]) {
+      const harness = await setupMonitorHarness({
+        ...setup,
+        events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
+        chats: { "773": { kind: "direct", title: "Alice" } },
+        dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
+          await replyOptions.onToolStart({ toolCallId: "read-1", name: "read", args: { path: "/tmp/book.txt" } })
+          await dispatcherOptions.deliver({ text: "Finished." })
+        },
+      })
+      const handle = await harness.monitorInlineProvider({
+        cfg: {} as any,
+        account: buildAccount({ dmPolicy: "open" }),
+        runtime: { log: vi.fn(), error: vi.fn() } as any,
+        abortSignal: new AbortController().signal,
+      })
+      try {
+        await waitFor(() => {
+          expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "Finished." }))
+          expect(harness.calls.invokeRaw.mock.calls.some((call) => call[0] === 2 && call[1].sendMessage.message.includes("book.txt"))).toBe(true)
+        })
+      } finally { await handle.stop() }
+    }
+  })
+
+  it.each([false, true])("ends progress before a mid-turn visible reply and continues below it, failed=%s", async (failed) => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
+      chats: { "773": { kind: "direct", title: "Alice" } },
+      dispatchReplyBlocker: async ({ ctx, replyOptions, dispatcherOptions }) => {
+        const { getInlineActiveThreadRoute } = await import("./active-thread-route")
+        const route = getInlineActiveThreadRoute({ accountId: "default", sessionKey: (ctx as any).SessionKey })!
+        await replyOptions.onToolStart({ toolCallId: "read-1", name: "read", args: { path: "/tmp/first.txt" } })
+        await replyOptions.onItemEvent({ itemId: "tool:read-1", toolCallId: "read-1", kind: "tool", name: "read", phase: "end", status: "completed" })
+        const update = route.runVisibleReply!(async () => {
+          if (failed) throw new Error("public send rejected")
+          return harness.calls.sendMessage({ chatId: 773n, text: "Public update." })
+        })
+        await replyOptions.onToolStart({ toolCallId: "read-2", name: "read", args: { path: "/tmp/second.txt" } })
+        await update.catch(() => undefined)
+        await dispatcherOptions.deliver({ text: "Finished." })
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "Finished." })))
+      const progressSends = harness.calls.invokeRaw.mock.calls.filter((call) => call[0] === 2)
+      expect(progressSends.map((call) => call[1].sendMessage.message.includes("first.txt"))).toEqual([true, false])
+      expect(progressSends[1]![1].sendMessage.message).toContain("second.txt")
+      const ended = (messageId: bigint) => harness.calls.invokeRaw.mock.calls.findIndex((call) =>
+        call[0] === 8 && call[1].editMessage.messageId === messageId && call[1].editMessage.text.startsWith("Worked for"))
+      const order = (index: number) => harness.calls.invokeRaw.mock.invocationCallOrder[index]!
+      const sendOrder = (text: string) => harness.calls.sendMessage.mock.invocationCallOrder[
+        harness.calls.sendMessage.mock.calls.findIndex(([input]) => input.text === text)
+      ]!
+      expect(ended(1000n)).toBeGreaterThanOrEqual(0)
+      expect(ended(1001n)).toBeGreaterThanOrEqual(0)
+      expect(order(harness.calls.invokeRaw.mock.calls.indexOf(progressSends[1]!))).toBeGreaterThan(order(ended(1000n)))
+      if (!failed) {
+        expect(order(ended(1000n))).toBeLessThan(sendOrder("Public update."))
+        expect(sendOrder("Public update.")).toBeLessThan(order(harness.calls.invokeRaw.mock.calls.indexOf(progressSends[1]!)))
+      }
+      expect(order(ended(1001n))).toBeLessThan(sendOrder("Finished."))
+    } finally { await handle.stop() }
+  })
+
+  it("keeps hidden items and, with commandText status, command text out of progress", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
+      chats: { "773": { kind: "direct", title: "Alice" } },
+      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
+        await replyOptions.onItemEvent({ itemId: "tool:secret", toolCallId: "secret", kind: "tool", name: "vault_read", phase: "start", status: "running", hideFromChannelProgress: true })
+        await replyOptions.onItemEvent({ itemId: "tool:quiet", toolCallId: "quiet", kind: "tool", name: "quiet_tool", phase: "start", status: "running", suppressChannelProgress: true })
+        await replyOptions.onToolStart({ toolCallId: "exec-1", name: "exec", args: { command: "deploy --token hunter2" } })
+        await replyOptions.onCommandOutput({ toolCallId: "exec-1", name: "exec", phase: "end", exitCode: 0, output: "deployed with hunter2" })
+        await dispatcherOptions.deliver({ text: "Finished." })
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streaming: { progress: { commandText: "status" } } }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+    })
+    try {
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "Finished." })))
+      const texts = harness.calls.invokeRaw.mock.calls
+        .filter((call) => call[0] === 2 || call[0] === 8)
+        .map((call) => call[1].sendMessage?.message ?? call[1].editMessage?.text)
+      expect(texts.length).toBeGreaterThan(0)
+      expect(texts.at(-1)).toContain("Ran a command")
+      for (const text of texts) {
+        expect(text).not.toContain("hunter2")
+        expect(text).not.toContain("vault")
+        expect(text).not.toMatch(/quiet/i)
+      }
+    } finally { await handle.stop() }
+  })
+
+  it.each([
+    ["cancelled by /stop", { phase: "end", aborted: true, stopReason: "aborted" }, "Stopped after"],
+    ["failed", { phase: "error" }, "Failed after"],
+    ["finished", { phase: "end", aborted: false, stopReason: "stop" }, "Worked for"],
+  ])("closes progress from the admitted run's lifecycle when it %s", async (_label, data, prefix) => {
     const harness = await setupMonitorHarness({
       events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
       chats: { "773": { kind: "direct", title: "Alice" } },
       dispatchReplyResult: { queuedFinal: false, counts: {} },
       dispatchReplyBlocker: async ({ replyOptions, emitAgentEvent }) => {
         replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
-        await replyOptions.onToolStart({ name: "read", toolCallId: "read-1", args: { path: "/tmp/book.txt" } })
-        await replyOptions.onItemEvent({ itemId: "tool:read-1", toolCallId: "read-1", kind: "tool", name: "read", phase: "end", status: "completed" })
-        // The host's /stop returns an empty normal dispatch result. The provider
-        // stays running, and a cancelled unrelated run must never taint this one.
+        await replyOptions.onToolStart({ toolCallId: "exec-1", name: "exec", args: { command: "sleep 45" } })
+        // An unrelated run never decides this turn's outcome.
         emitAgentEvent({ runId: "another-run", stream: "lifecycle", data: { phase: "end", aborted: true } })
-        emitAgentEvent({ runId: "current-run", stream: "lifecycle", data: { phase: "end", aborted: cancelled, stopReason: cancelled ? "aborted" : "stop", executionSettled: true } })
+        // The host's /stop can settle dispatch before the run's terminal event.
+        setTimeout(() => emitAgentEvent({ runId: "current-run", stream: "lifecycle", data }), 25)
       },
     })
+    const abort = new AbortController()
     const handle = await harness.monitorInlineProvider({
-      cfg: {} as any, account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress" } }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: abort.signal,
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: abort.signal,
     })
     try {
       await waitFor(() => {
-        expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.editMessage?.text?.includes(`<summary activity="agent">${cancelled ? "Stopped after" : "Worked for"}`))).toBe(true)
+        const finals = harness.calls.invokeRaw.mock.calls.filter((call) => call[0] === 8).map((call) => call[1].editMessage.text)
+        expect(finals.at(-1)).toMatch(new RegExp(`^${prefix} \\d+s`))
         expect(harness.agentEventListenerCount()).toBe(0)
       })
       expect(abort.signal.aborted).toBe(false)
     } finally { await handle.stop() }
   })
 
-  it("waits for the real host /stop terminal event after dispatch has returned", async () => {
-    const abort = new AbortController()
-    let now = 10_000
-    const clock = vi.spyOn(performance, "now").mockImplementation(() => now)
+  it("ends the progress message when a person writes mid-turn", async () => {
+    let release!: () => void
+    const released = new Promise<void>((resolve) => { release = resolve })
+    let firstTurn = true
     const harness = await setupMonitorHarness({
-      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
-      chats: { "773": { kind: "direct", title: "Alice" } },
-      dispatchReplyResult: { queuedFinal: false, counts: {} },
-      dispatchReplyBlocker: async ({ replyOptions, emitAgentEvent }) => {
-        replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
-        await replyOptions.onToolStart({ name: "exec", toolCallId: "exec-1", args: { command: "sleep 45", title: "Wait for stop check" } })
-        // OpenClaw 2026.9.7 returns its aborted dispatch before the worker's
-        // settled lifecycle callback. The provider signal remains active.
-        setTimeout(() => {
-          now = 15_000
-          emitAgentEvent({ runId: "current-run", stream: "lifecycle", data: { phase: "error", aborted: true, stopReason: "aborted", executionSettled: true } })
-        }, 25)
-      },
-    })
-    try {
-      const handle = await harness.monitorInlineProvider({
-        cfg: {} as any, account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress" } }),
-        runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: abort.signal,
-      })
-      try {
-        await waitFor(() => {
-          const terminal = harness.calls.invokeRaw.mock.calls.map((call) => call[1]?.editMessage?.text).filter(Boolean)
-          expect(terminal).toEqual([expect.stringContaining("Stopped after 5s")])
-          expect(harness.agentEventListenerCount()).toBe(0)
-        })
-        expect(abort.signal.aborted).toBe(false)
-      } finally { await handle.stop() }
-    } finally { clock.mockRestore() }
-  })
-
-  it.each([false, true])("bounds missing terminal events and reconciles an event during the final edit, late=%s", async (late) => {
-    const harness = await setupMonitorHarness({
-      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
-      chats: { "773": { kind: "direct", title: "Alice" } },
-      dispatchReplyResult: { queuedFinal: false, counts: {} },
-      editMessageDelayMs: 150,
-      dispatchReplyBlocker: async ({ replyOptions, emitAgentEvent }) => {
-        replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
-        await replyOptions.onToolStart({ name: "exec", toolCallId: "exec-1", args: { command: "sleep 45" } })
-        if (late) setTimeout(() => {
-          emitAgentEvent({ runId: "current-run", stream: "lifecycle", data: { phase: "error", aborted: true, stopReason: "aborted", executionSettled: true } })
-        }, 2050)
-      },
-    })
-    const handle = await harness.monitorInlineProvider({
-      cfg: {} as any, account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress" } }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: new AbortController().signal,
-    })
-    try {
-      await waitFor(() => {
-        const terminal = harness.calls.invokeRaw.mock.calls.map((call) => call[1]?.editMessage?.text).filter(Boolean)
-        expect(terminal.at(-1)).toContain(late ? "Stopped after" : "Worked for")
-        expect(harness.agentEventListenerCount()).toBe(0)
-      }, 3_000)
-    } finally { await handle.stop() }
-  })
-
-  it("does not wait for a missing lifecycle event on a short answer without activity", async () => {
-    const harness = await setupMonitorHarness({
-      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
-      chats: { "773": { kind: "direct", title: "Alice" } },
-      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
-        replyOptions.onPreparedAgentRunStart({ runId: "current-run", transcriptStart: null })
-        await dispatcherOptions.deliver({ text: "Ready." })
-      },
-    })
-    const handle = await harness.monitorInlineProvider({
-      cfg: {} as any, account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress" } }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: new AbortController().signal,
-    })
-    try {
-      await waitFor(() => {
-        expect(harness.calls.sendMessage.mock.calls.some(([input]) => input.text === "Ready.")).toBe(true)
-        expect(harness.agentEventListenerCount()).toBe(0)
-      }, 1_000)
-    } finally { await handle.stop() }
-  })
-
-  it.each([false, true])("queues later progress behind a deferred public message tool send, failed=%s", async (failed) => {
-    let now = 0
-    const clock = vi.spyOn(performance, "now").mockImplementation(() => now)
-    let releaseSend!: () => void
-    const sending = new Promise<void>((resolve) => { releaseSend = resolve })
-    let sendStarted = false
-    const harness = await setupMonitorHarness({
-      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
-      chats: { "773": { kind: "direct", title: "Alice" } },
-      sendMessageDelayMs: 25,
-      dispatchReplyBlocker: async ({ ctx, replyOptions, dispatcherOptions }) => {
-        const { getInlineActiveThreadRoute } = await import("./active-thread-route")
-        const route = getInlineActiveThreadRoute({ accountId: "default", sessionKey: (ctx as any).SessionKey })!
-        await replyOptions.onItemEvent({ itemId: "first", kind: "tool", name: "custom_tool", summary: "first step", status: "running" })
-        now = 5_000
-        const delivery = route.runVisibleReply!(async () => {
-          sendStarted = true
-          await sending
-          if (failed) throw new Error("public send rejected")
-          return harness.calls.sendMessage({ chatId: 773n, text: "Public update." })
-        })
-        const settled = delivery.catch((error) => error)
-        await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1))
-        // The first activity send is still pending; its transport delay is
-        // outside the first block's captured 5s endpoint.
-        now = 10_000
-        await waitFor(() => expect(sendStarted).toBe(true))
-        const nextProgress = replyOptions.onToolStart({ name: "exec", args: { command: "printf second" }, detailMode: "raw" })
-        await Promise.resolve()
-        expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
-        now = 15_000
-        releaseSend()
-        if (failed) expect(await settled).toBeInstanceOf(Error)
-        else await delivery
-        await nextProgress
-        now = 18_000
-        await dispatcherOptions.deliver({ text: "Finished." })
-      },
-    })
-    try {
-      const handle = await harness.monitorInlineProvider({
-        cfg: {} as any, account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress", progress: { commandText: "raw" } } }),
-        runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: new AbortController().signal,
-      })
-      try {
-        await waitFor(() => {
-          const sends = harness.calls.sendMessage.mock.calls.map(([input]) => input.text)
-          expect(sends).toHaveLength(failed ? 3 : 4)
-          expect(sends.at(-1)).toBe("Finished.")
-          if (!failed) expect(sends[1]).toBe("Public update.")
-          const finals = harness.calls.invokeRaw.mock.calls.map((call) => call[1]?.editMessage?.text).filter(Boolean)
-          expect(finals).toHaveLength(2)
-          expect(finals[0]).toContain("Worked for 5s")
-          expect(finals[0]).toContain("first step")
-          expect(finals[1]).toContain("Worked for 8s")
-          expect(finals[1]).toContain("printf second")
-          expect(harness.agentEventListenerCount()).toBe(0)
-        })
-      } finally { await handle.stop() }
-    } finally { releaseSend(); clock.mockRestore() }
-  })
-
-  it.each([false, true])("serializes public sends and progress in invocation order, progress first=%s", async (progressFirst) => {
-    let releaseFirst!: () => void
-    const firstPending = new Promise<void>((resolve) => { releaseFirst = resolve })
-    const order: string[] = []
-    const harness = await setupMonitorHarness({
-      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
-      chats: { "773": { kind: "direct", title: "Alice" } },
-      dispatchReplyResult: { queuedFinal: false, counts: {} },
-      dispatchReplyBlocker: async ({ ctx, replyOptions }) => {
-        const { getInlineActiveThreadRoute } = await import("./active-thread-route")
-        const route = getInlineActiveThreadRoute({ accountId: "default", sessionKey: (ctx as any).SessionKey })!
-        await replyOptions.onToolStart({ name: "read", args: { path: "/tmp/sample" } })
-        const first = route.runVisibleReply!(async () => { order.push("first start"); await firstPending; order.push("first end") })
-        const sendSecond = () => route.runVisibleReply!(async () => {
-          // The earlier progress operation must render and close before this send.
-          expect(harness.calls.sendMessage).toHaveBeenCalledTimes(progressFirst ? 2 : 1)
-          const finals = harness.calls.invokeRaw.mock.calls.filter((call) => call[1]?.editMessage)
-          expect(finals).toHaveLength(progressFirst ? 2 : 1)
-          order.push("second")
-        })
-        const startProgress = () => replyOptions.onToolStart({ name: "exec", args: { command: "printf second" } })
-        let second: Promise<unknown>
-        let progress: Promise<void>
-        if (progressFirst) {
-          progress = startProgress()
-          second = sendSecond()
-        } else {
-          second = sendSecond()
-          progress = startProgress()
-        }
-        await waitFor(() => expect(order).toEqual(["first start"]))
-        releaseFirst()
-        await Promise.all([first, second, progress])
-      },
-    })
-    const handle = await harness.monitorInlineProvider({
-      cfg: {} as any, account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress" } }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: new AbortController().signal,
-    })
-    try {
-      await waitFor(() => {
-        expect(order).toEqual(["first start", "first end", "second"])
-        expect(harness.agentEventListenerCount()).toBe(0)
-      })
-      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2)
-    } finally { releaseFirst(); await handle.stop() }
-  })
-
-  it("retries a failed terminal edit with the same frozen duration", async () => {
-    let now = 10_000
-    const clock = vi.spyOn(performance, "now").mockImplementation(() => now)
-    const harness = await setupMonitorHarness({
-      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
-      chats: { "773": { kind: "direct", title: "Alice" } },
-      editMessageErrors: [new Error("transient outage"), new Error("still offline")],
-      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
-        now = 0
-        await replyOptions.onItemEvent({ itemId: "plan-1", kind: "analysis", title: "Checking inputs", summary: "Checking inputs", status: "running" })
-        await dispatcherOptions.deliver({ text: "Starting." })
-        now = 10_000
-        await replyOptions.onToolStart({ name: "exec", args: { command: "true" } })
-        now = 15_000
-        await dispatcherOptions.deliver({ text: "Finished." })
-        now = 90_000
-      },
-    })
-    try {
-      const handle = await harness.monitorInlineProvider({
-        cfg: {} as any, account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress" } }),
-        runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: new AbortController().signal,
-      })
-      try {
-        await waitFor(() => expect(harness.agentEventListenerCount()).toBe(0))
-        await waitFor(() => {
-          const edits = harness.calls.invokeRaw.mock.calls.filter((call) => call[1]?.editMessage)
-          expect(edits).toHaveLength(3)
-          for (const call of edits) expect(call[1].editMessage.text).toContain("Worked for 5s")
-        })
-      } finally { await handle.stop() }
-    } finally { clock.mockRestore() }
-  })
-
-  it.each(["description", "title"] as const)("retains explicit %s through real host tool, item, and command-output callbacks", async (titleField) => {
-    const harness = await setupMonitorHarness({
-      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
-      chats: { "773": { kind: "direct", title: "Alice" } },
-      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
-        await replyOptions.onToolStart({ toolCallId: "exec-1", name: "exec", args: { command: "python3 check.py", [titleField]: "Checking the EPUB" } })
-        for (const kind of ["tool", "command"]) {
-          await replyOptions.onItemEvent({ itemId: `${kind}:exec-1`, toolCallId: "exec-1", kind, name: "exec", title: `${kind} python3 check.py`, meta: "python3 check.py", phase: "start", status: "running" })
-        }
-        await replyOptions.onCommandOutput({ itemId: "command:exec-1", toolCallId: "exec-1", name: "exec", title: "python3 check.py", phase: "end", exitCode: 0 })
-        await dispatcherOptions.deliver({ text: "Finished." })
-      },
-    })
-    const handle = await harness.monitorInlineProvider({
-      cfg: {} as any, account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress", progress: { commandText: "raw" } } }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: new AbortController().signal,
-    })
-    try {
-      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2))
-      const messages = [
-        ...harness.calls.sendMessage.mock.calls.map(([input]) => input.text),
-        ...harness.calls.invokeRaw.mock.calls.map((call) => call[1]?.editMessage?.text),
-      ].filter((text): text is string => typeof text === "string")
-      const progress = messages.filter((text) => text.includes('kind="progress"'))
-      expect(progress.length).toBeGreaterThan(1)
-      for (const text of progress) expect(text.split("\n")[1]).toMatch(/^<summary kind="progress" started="\d+" activity="agent">Checking the EPUB<\/summary>$/)
-      const terminal = messages.find((text) => text.includes('<summary activity="agent">Worked'))!
-      expect(terminal).toContain("python3 check.py")
-      expect(terminal.match(/^- /gm)).toHaveLength(1)
-    } finally { await handle.stop() }
-  })
-
-  it("freezes rollover timing before a delayed initial activity send", async () => {
-    let now = 0
-    const clock = vi.spyOn(performance, "now").mockImplementation(() => now)
-    const harness = await setupMonitorHarness({
-      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
-      chats: { "773": { kind: "direct", title: "Alice" } },
-      sendMessageDelayMs: 100,
-      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
-        // Item events defer their initial send. The second event forces the
-        // first row onto the wire, but that delay is outside its work duration.
-        await replyOptions.onItemEvent({ itemId: "first", kind: "tool", name: "custom_tool", summary: "first " + "[*".repeat(1000), status: "running" })
-        now = 5_000
-        const rollover = replyOptions.onPatchSummary({ phase: "end", summary: "second " + "[*".repeat(1000) })
-        await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1))
-        now = 15_000
-        await rollover
-        now = 18_000
-        await dispatcherOptions.deliver({ text: "Finished." })
-      },
-    })
-    try {
-      const handle = await harness.monitorInlineProvider({
-        cfg: {} as any, account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress", progress: { maxLineChars: 1200 } } }),
-        runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: new AbortController().signal,
-      })
-      try {
-        await waitFor(() => {
-          const firstFinal = harness.calls.invokeRaw.mock.calls.find((call) => call[1]?.editMessage?.messageId === 1n)
-          expect(firstFinal?.[1]?.editMessage.text).toContain("Worked for 5s")
-          expect(harness.agentEventListenerCount()).toBe(0)
-        })
-      } finally { await handle.stop() }
-    } finally { clock.mockRestore() }
-  })
-
-  it("bounds oversized first steps and every rollover without losing step history", async () => {
-    const harness = await setupMonitorHarness({
-      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
-      chats: { "773": { kind: "direct", title: "Alice" } },
-      editMessageErrors: [new Error("offline during first rollover"), new Error("still offline")],
-      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
-        for (let index = 0; index < 6; index++) {
-          await replyOptions.onPatchSummary({ phase: "end", summary: `step-${index} ${"[*".repeat(60_000)}` })
-        }
-        await dispatcherOptions.deliver({ text: "Finished." })
-      },
-    })
-    const handle = await harness.monitorInlineProvider({
-      cfg: {} as any, account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress", progress: { maxLineChars: 100_000 } } }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any, abortSignal: new AbortController().signal,
-    })
-    try {
-      await waitFor(() => expect(harness.calls.sendMessage.mock.calls.some(([input]) => input.text === "Finished.")).toBe(true))
-      const terminalCalls = harness.calls.invokeRaw.mock.calls.filter((call) => call[1]?.editMessage?.text?.includes('<summary activity="agent">Worked'))
-      expect(terminalCalls.filter((call) => call[1].editMessage.messageId === 1n)).toHaveLength(3)
-      const terminal = [...new Map<bigint, string>(terminalCalls.map((call) => [call[1].editMessage.messageId, call[1].editMessage.text])).values()]
-      expect(terminal).toHaveLength(6)
-      for (let index = 0; index < 6; index++) expect(terminal.join("\n")).toContain(`step-${index}`)
-      const texts = [...terminal, ...harness.calls.sendMessage.mock.calls.map(([input]) => input.text)]
-      for (const text of texts) expect(text.length).toBeLessThanOrEqual(3700)
-    } finally { await handle.stop() }
-  })
-
-  it.each([undefined, false])("shows Working and keeps temporary progress when activity is %s", async (experimentalAgentActivity) => {
-    const harness = await setupMonitorHarness({
-      dispatchTypingLifecycle: true,
-      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
-      chats: { "773": { kind: "direct", title: "Alice" } },
-      toolStartBeforePayloadIndexes: [0],
-      itemEventBeforePayloadIndexes: [0],
-      dispatchReplyPayload: { text: "visible after tool" },
-    })
-    const handle = await harness.monitorInlineProvider({
-      cfg: {} as any,
-      account: buildAccount({
-        ...(experimentalAgentActivity === undefined ? {} : { experimentalAgentActivity }),
-        dmPolicy: "open", parseMarkdown: false, streaming: { mode: "progress" },
-      }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
-      abortSignal: new AbortController().signal,
-    })
-    try {
-      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "visible after tool" })))
-      const progress = harness.calls.sendMessage.mock.calls[0]?.[0]
-      expect(progress?.parseMarkdown).toBe(false)
-      expect(progress?.text).not.toContain('activity="agent"')
-      const progressTexts = [
-        ...harness.calls.sendMessage.mock.calls.map(([args]) => args?.text),
-        ...harness.calls.invokeRaw.mock.calls.map(([, args]) => args?.editMessage?.text),
-      ].filter((text): text is string => typeof text === "string")
-      // Commands read as what is running, not as the tool name; command text stays
-      // hidden under the host's default commandText "status".
-      expect(progressTexts.some((text) => text.includes("Running a command"))).toBe(true)
-      expect(progressTexts.some((text) => text.includes("ls"))).toBe(false)
-      expect(progressTexts.some((text) => /\bExec\b/.test(text))).toBe(false)
-      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(4, expect.objectContaining({ oneofKind: "deleteMessages" }))
-      expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.sendComposeAction?.action === 6)).toBe(true)
-      expect(harness.calls.sendTyping).toHaveBeenCalledWith({ chatId: 773n, typing: true })
-      expect(harness.agentEventListenerCount()).toBe(0)
-      expect(harness.calls.dispatchReply.mock.calls[0]?.[0]?.replyOptions?.onPreparedAgentRunStart).toBeUndefined()
-    } finally { await handle.stop() }
-  })
-
-  it("shows the command in progress only when commandText is raw", async () => {
-    const harness = await setupMonitorHarness({
-      dispatchTypingLifecycle: true,
-      events: [{ kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } }],
-      chats: { "773": { kind: "direct", title: "Alice" } },
-      toolStartBeforePayloadIndexes: [0],
-      dispatchReplyPayload: { text: "visible after tool" },
-    })
-    const handle = await harness.monitorInlineProvider({
-      cfg: {} as any,
-      account: buildAccount({
-        dmPolicy: "open", parseMarkdown: false,
-        streaming: { mode: "progress", progress: { commandText: "raw" } },
-      } as any),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
-      abortSignal: new AbortController().signal,
-    })
-    try {
-      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "visible after tool" })))
-      const progressTexts = [
-        ...harness.calls.sendMessage.mock.calls.map(([args]) => args?.text),
-        ...harness.calls.invokeRaw.mock.calls.map(([, args]) => args?.editMessage?.text),
-      ].filter((text): text is string => typeof text === "string")
-      // With raw command text the host's own command detail shows through.
-      expect(progressTexts.some((text) => text.includes("list files"))).toBe(true)
-      expect(progressTexts.some((text) => text.includes("Running a command"))).toBe(false)
-    } finally { await handle.stop() }
-  })
-
-  it("keeps a closed activity disclosure before the separate final reply", async () => {
-    const harness = await setupMonitorHarness({
-      dispatchTypingLifecycle: true,
       events: [
-        {
-          kind: "message.new",
-          chatId: 773n,
-          message: {
-            id: 5558n,
-            date: 1_700_000_004n,
-            fromId: 42n,
-            message: "dm",
-          },
-        },
+        { kind: "message.new", chatId: 773n, message: { id: 5558n, date: 1_700_000_004n, fromId: 42n, message: "check" } },
+        { kind: "message.new", chatId: 773n, message: { id: 5559n, date: 1_700_000_005n, fromId: 42n, message: "also look at the tests" }, waitFor: async () => {
+          await waitFor(() => expect(harness.calls.invokeRaw.mock.calls.some((call) => call[0] === 2)).toBe(true))
+        } },
       ],
-      chats: {
-        "773": { kind: "direct", title: "Alice" },
+      chats: { "773": { kind: "direct", title: "Alice" } },
+      dispatchReplyBlocker: async ({ replyOptions, dispatcherOptions }) => {
+        if (!firstTurn) return
+        firstTurn = false
+        await replyOptions.onToolStart({ toolCallId: "read-1", name: "read", args: { path: "/tmp/first.txt" } })
+        await replyOptions.onItemEvent({ itemId: "tool:read-1", toolCallId: "read-1", kind: "tool", name: "read", phase: "end", status: "completed" })
+        await released
+        await replyOptions.onToolStart({ toolCallId: "read-2", name: "read", args: { path: "/tmp/second.txt" } })
+        await dispatcherOptions.deliver({ text: "Finished." })
       },
-      partialReplies: [{ text: "draft before tool\n\n" }],
-      toolStartBeforePayloadIndexes: [0],
-      itemEventBeforePayloadIndexes: [0],
-      dispatchReplyPayload: {
-        text: "visible after tool",
-      },
-    })
-
-    const handle = await harness.monitorInlineProvider({
-      cfg: {} as any,
-      account: buildAccount({ experimentalAgentActivity: true,
-        dmPolicy: "open",
-        parseMarkdown: false,
-        streaming: { mode: "progress" },
-      }),
-      runtime: { log: vi.fn(), error: vi.fn() } as any,
-      abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    })
-
-    await waitFor(() => {
-      const args = harness.calls.dispatchReply.mock.calls[0]?.[0]
-      expect(typeof args?.replyOptions?.onToolStart).toBe("function")
-      expect(typeof args?.replyOptions?.onItemEvent).toBe("function")
-      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({
-          chatId: 773n,
-          sendMode: "silent",
-          text: expect.stringMatching(/<summary kind="progress" started="\d+" activity="agent">/),
-          parseMarkdown: true,
-        }),
-      )
-      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
-        8,
-        expect.objectContaining({
-          oneofKind: "editMessage",
-          editMessage: expect.objectContaining({
-            messageId: 1n,
-            text: expect.stringContaining("Ran a command"),
-            parseMarkdown: true,
-          }),
-        }),
-      )
-      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
-        8,
-        expect.objectContaining({
-          oneofKind: "editMessage",
-          editMessage: expect.objectContaining({
-            messageId: 1n,
-            text: expect.stringContaining('<summary activity="agent">Worked'),
-            parseMarkdown: true,
-          }),
-        }),
-      )
-      expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(4, expect.objectContaining({ oneofKind: "deleteMessages" }))
-      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({
-          chatId: 773n,
-          text: "visible after tool",
-        }),
-      )
-    })
-
-    expect(harness.calls.invokeRaw.mock.calls.some((call) => call[1]?.sendComposeAction?.action === 6)).toBe(true)
-
-    const finalActivityIndex = harness.calls.invokeRaw.mock.calls.findIndex(
-      (call) => call[1]?.editMessage?.text?.includes('<summary activity="agent">Worked'),
-    )
-    expect(finalActivityIndex).toBeGreaterThanOrEqual(0)
-    expect(harness.calls.invokeRaw.mock.invocationCallOrder[finalActivityIndex]).toBeLessThan(
-      harness.calls.sendMessage.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY,
-    )
-
-    await handle.stop()
-  })
-
-  it("starts new activity below an intermediate conversational reply", async () => {
-    const harness = await setupMonitorHarness({
-      events: [{ kind: "message.new", chatId: 774n, message: { id: 5559n, date: 1_700_000_004n, fromId: 42n, message: "compare" } }],
-      chats: { "774": { kind: "direct", title: "Alice" } },
-      toolStartBeforePayloadIndexes: [0, 1],
-      itemEventBeforePayloadIndexes: [0, 1],
-      dispatchReplyPayloads: [{ text: "I found the first proposal." }, { text: "Here is the comparison." }],
     })
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
-      account: buildAccount({ experimentalAgentActivity: true, dmPolicy: "open", streaming: { mode: "progress" } }),
+      account: buildAccount({ dmPolicy: "open", debounceMs: 0 }),
       runtime: { log: vi.fn(), error: vi.fn() } as any,
       abortSignal: new AbortController().signal,
-      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
     try {
-      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledTimes(4))
-      const texts = harness.calls.sendMessage.mock.calls.map(([params]) => params.text)
-      expect(texts[0]).toContain('<summary kind="progress"')
-      expect(texts[1]).toBe("I found the first proposal.")
-      expect(texts[2]).toContain('<summary kind="progress"')
-      expect(texts[3]).toBe("Here is the comparison.")
-      const finishedRows = harness.calls.invokeRaw.mock.calls
-        .filter((call) => call[1]?.editMessage?.text?.includes('<summary activity="agent">Worked'))
-        .map((call) => call[1]?.editMessage?.messageId)
-      expect(finishedRows).toEqual([1n, 3n])
-    } finally {
-      await handle.stop()
-    }
+      await waitFor(() => expect(harness.calls.invokeRaw.mock.calls.some((call) =>
+        call[0] === 8 && call[1].editMessage.messageId === 1000n && call[1].editMessage.text.startsWith("Worked for"))).toBe(true))
+      release()
+      await waitFor(() => expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "Finished." })))
+      const progressSends = harness.calls.invokeRaw.mock.calls.filter((call) => call[0] === 2).map((call) => call[1].sendMessage.message)
+      expect(progressSends[0]).toContain("first.txt")
+      expect(progressSends[1]).toContain("second.txt")
+    } finally { release(); await handle.stop() }
   })
 
   it("keeps edit-based streaming off by default", async () => {
@@ -9459,6 +9141,7 @@ describe("inline/monitor", () => {
 
   it("lets explicit streaming=false override legacy edit-streaming config", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [
         {
           kind: "message.new",
@@ -9513,6 +9196,7 @@ describe("inline/monitor", () => {
 
   it("streams through send plus editMessage when enabled", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [
         {
           kind: "message.new",
@@ -9575,6 +9259,7 @@ describe("inline/monitor", () => {
 
   it("shows the active paragraph before a paragraph delimiter arrives", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6710n,
@@ -9618,6 +9303,7 @@ describe("inline/monitor", () => {
 
   it("keeps only the latest partial snapshot while an edit-stream send is in flight", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6711n,
@@ -9664,6 +9350,7 @@ describe("inline/monitor", () => {
 
   it("emits the latest queued snapshot during a longer stream", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6713n,
@@ -9714,6 +9401,7 @@ describe("inline/monitor", () => {
 
   it("flushes the latest partial snapshot when no final payload arrives", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6714n,
@@ -9763,6 +9451,7 @@ describe("inline/monitor", () => {
 
   it("drops queued partials before rotating at an assistant-message boundary", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6715n,
@@ -9819,6 +9508,7 @@ describe("inline/monitor", () => {
   it("keeps text, media, and actions live from cumulative partial payloads", async () => {
     const mediaUrl = "https://example.com/live-image.png"
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6716n,
@@ -9880,6 +9570,7 @@ describe("inline/monitor", () => {
   it("finalizes an early media companion with its final caption and actions", async () => {
     const mediaUrl = "https://example.com/early-companion.png"
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6720n,
@@ -9936,6 +9627,7 @@ describe("inline/monitor", () => {
   it("uses a partial media payload's explicit reply target", async () => {
     const mediaUrl = "https://example.com/reply-target.png"
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6721n,
@@ -9977,6 +9669,7 @@ describe("inline/monitor", () => {
   it("scopes identical media URLs to assistant-message boundaries", async () => {
     const mediaUrl = "https://example.com/repeated-across-answers.png"
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6722n,
@@ -10015,6 +9708,7 @@ describe("inline/monitor", () => {
   it("settles early media before rotating to the next assistant message", async () => {
     const mediaUrl = "https://example.com/slow-boundary.png"
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6723n,
@@ -10058,6 +9752,7 @@ describe("inline/monitor", () => {
     const secondUrl = "https://example.com/second-fast.png"
     const completionOrder: string[] = []
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6724n,
@@ -10098,6 +9793,7 @@ describe("inline/monitor", () => {
     const partialText = "![Chart](https://example.com/chart.png)"
     const finalText = `${partialText}\n\nUpdated live.`
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6717n,
@@ -10141,6 +9837,7 @@ describe("inline/monitor", () => {
 
   it("applies actions when a partial producer supplies them", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6718n,
@@ -10189,6 +9886,7 @@ describe("inline/monitor", () => {
   it("falls back once for repeated partial media without stopping text updates", async () => {
     const mediaUrl = "https://example.com/unavailable.png"
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6719n,
@@ -10241,6 +9939,7 @@ describe("inline/monitor", () => {
   it("does not resend partial media after an unknown send outcome", async () => {
     const mediaUrl = "https://example.com/commit-unknown.png"
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6725n,
@@ -10277,6 +9976,7 @@ describe("inline/monitor", () => {
 
   it("delivers the final snapshot after an intermediate edit-stream failure", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 6712n,
@@ -10318,6 +10018,7 @@ describe("inline/monitor", () => {
 
   it("falls back to the final text after a definite streamed edit rejection", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 67120n,
@@ -10360,6 +10061,7 @@ describe("inline/monitor", () => {
       }),
     })
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 67121n,
@@ -10397,6 +10099,7 @@ describe("inline/monitor", () => {
 
   it("does not leak an unknown initial-send receipt across assistant-message boundaries", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [{
         kind: "message.new",
         chatId: 67122n,
@@ -10437,6 +10140,7 @@ describe("inline/monitor", () => {
 
   it("rotates streamed edit messages on assistant message boundaries", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [
         {
           kind: "message.new",
@@ -10490,6 +10194,7 @@ describe("inline/monitor", () => {
 
   it("rotates streamed edit messages on tool-start boundaries", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [
         {
           kind: "message.new",
@@ -10625,6 +10330,7 @@ describe("inline/monitor", () => {
 
   it("keeps an unfinished widget out of partial previews", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [
         {
           kind: "message.new",
@@ -10660,6 +10366,7 @@ describe("inline/monitor", () => {
 
   it("splits repeated final payloads into separate messages when stream boundaries are absent", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [
         {
           kind: "message.new",
@@ -11492,6 +11199,7 @@ describe("inline/monitor", () => {
 
   it("does not send partial reasoning tag prefixes during edit streaming", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [
         {
           kind: "message.new",
@@ -11543,6 +11251,7 @@ describe("inline/monitor", () => {
 
   it("does not expose reasoning streams in mentioned group edit streaming", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [
         {
           kind: "message.new",
@@ -11636,6 +11345,7 @@ describe("inline/monitor", () => {
 
   it("serializes concurrent partial snapshots so the first paragraph sends only once", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [
         {
           kind: "message.new",
@@ -11696,6 +11406,7 @@ describe("inline/monitor", () => {
 
   it("reconstructs multi-chunk final text into the streamed message instead of overwriting with the last chunk", async () => {
     const harness = await setupMonitorHarness({
+      agentOutputMode: OUTPUT_FRIENDLY,
       events: [
         {
           kind: "message.new",
