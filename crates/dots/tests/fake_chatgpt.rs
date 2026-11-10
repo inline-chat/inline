@@ -80,6 +80,8 @@ struct FakeState {
     heartbeats: usize,
     read_marks: Vec<Value>,
     avatar_fetches: usize,
+    list_calls: usize,
+    task_calls: usize,
 }
 
 type Shared = Arc<Mutex<FakeState>>;
@@ -240,7 +242,8 @@ async fn list_messages(
     Query(query): Query<HashMap<String, String>>,
 ) -> Response {
     guard!(state, headers);
-    let state = state.lock().unwrap();
+    let mut state = state.lock().unwrap();
+    state.list_calls += 1;
     let limit: usize = query
         .get("limit")
         .and_then(|limit| limit.parse().ok())
@@ -440,7 +443,11 @@ async fn ws_session(state: Shared, mut socket: WebSocket) {
 
 async fn task(State(state): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
     guard!(state, headers);
-    let status = state.lock().unwrap().task_status.clone();
+    let status = {
+        let mut state = state.lock().unwrap();
+        state.task_calls += 1;
+        state.task_status.clone()
+    };
     let thread_status = if status == "completed" {
         "idle"
     } else {
@@ -1152,4 +1159,295 @@ fn rand_suffix() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos() as u64
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn review_active_task_is_resumed_after_it_leaves_message_overlap() {
+    let (fake, base) = start().await;
+    let inline = Arc::new(RecordingInline::default());
+    let store = Arc::new(RelayStore::open_in_memory().unwrap());
+    let first = relay(connector(&base), inline.clone(), store.clone());
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let worker = tokio::spawn(async move { first.run_remote(stopped).await });
+    eventually("initial checkpoint", || {
+        store.kv_get("connector.checkpoint").unwrap().is_some()
+    })
+    .await;
+    let task_message = {
+        let mut state = fake.lock().unwrap();
+        let id = state.add(
+            DOT_MEMBER,
+            json!({"text":"On it", "attachments":[]}),
+            json!({"task_id":"task-review"}),
+        );
+        state.push("calpico-message-add", json!({"room_id":"room-1"}));
+        id
+    };
+    eventually("working task card", || {
+        inline
+            .posts
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, p)| p.text.contains("Book flights"))
+    })
+    .await;
+    {
+        let mut state = fake.lock().unwrap();
+        for n in 0..40 {
+            state.add(
+                DOT_MEMBER,
+                json!({"text":format!("later {n}"), "attachments":[]}),
+                json!({}),
+            );
+        }
+        state.push("calpico-message-add", json!({"room_id":"room-1"}));
+    }
+    eventually("task announcement outside overlap", || {
+        let raw = store.kv_get("connector.checkpoint").unwrap().unwrap();
+        let cp: inline_dots::connector::SyncState = serde_json::from_str(&raw).unwrap();
+        cp.recent.len() == 33 && !cp.recent.contains(&task_message)
+    })
+    .await;
+    stop.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+    fake.lock().unwrap().task_status = "completed".into();
+    let second = relay(connector(&base), inline.clone(), store.clone());
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let worker = tokio::spawn(async move { second.run_remote(stopped).await });
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    stop.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+    assert!(
+        inline
+            .edits
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, text)| text.contains("Completed")),
+        "task completed while stopped should update its existing card on restart"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn review_realtime_update_reconciles_an_older_message() {
+    let (fake, base) = start().await;
+    let inline = Arc::new(RecordingInline::default());
+    let store = Arc::new(RelayStore::open_in_memory().unwrap());
+    let r = relay(connector(&base), inline.clone(), store.clone());
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let worker = tokio::spawn(async move { r.run_remote(stopped).await });
+    eventually("initial checkpoint", || {
+        store.kv_get("connector.checkpoint").unwrap().is_some()
+    })
+    .await;
+    let old = {
+        let mut state = fake.lock().unwrap();
+        let old = state.add(
+            DOT_MEMBER,
+            json!({"text":"old message", "attachments":[]}),
+            json!({}),
+        );
+        for n in 0..40 {
+            state.add(
+                DOT_MEMBER,
+                json!({"text":format!("later {n}"), "attachments":[]}),
+                json!({}),
+            );
+        }
+        state.push("calpico-message-add", json!({"room_id":"room-1"}));
+        old
+    };
+    eventually("older message outside overlap", || {
+        let raw = store.kv_get("connector.checkpoint").unwrap().unwrap();
+        let cp: inline_dots::connector::SyncState = serde_json::from_str(&raw).unwrap();
+        cp.recent.len() == 33 && !cp.recent.contains(&old)
+    })
+    .await;
+    {
+        let mut state = fake.lock().unwrap();
+        let m = state
+            .messages
+            .iter_mut()
+            .find(|m| m["id"].as_str() == Some(old.as_str()))
+            .unwrap();
+        m["reactions"] = json!({DOT_MEMBER:"👍"});
+        state.push(
+            "calpico-message-update",
+            json!({"room_id":"room-1", "message_id":old}),
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    stop.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+    assert_eq!(
+        inline.reactions.lock().unwrap().len(),
+        1,
+        "message_id from realtime should allow reactions on older messages to sync"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn polling_without_realtime_keeps_its_interval() {
+    let (fake, base) = start().await;
+    let connector = Arc::new(DotsConnector::new(
+        client(&base, Arc::new(CountingTokens::default())),
+        ConnectorSettings {
+            realtime: false,
+            poll_without_socket: Duration::from_secs(60),
+            ..Default::default()
+        },
+    ));
+    let (events, mut receiver) = mpsc::channel(256);
+    let worker = tokio::spawn(async move { connector.run(None, events).await });
+    let mut checkpoints = 0;
+    while checkpoints < 3 {
+        if matches!(
+            tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+                .await
+                .unwrap(),
+            Some(ConnectorEvent::Checkpoint(_))
+        ) {
+            checkpoints += 1;
+        }
+    }
+    let before = fake.lock().unwrap().list_calls;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let after = fake.lock().unwrap().list_calls;
+    worker.abort();
+    let _ = worker.await;
+    assert_eq!(
+        after, before,
+        "a closed signal stream must not bypass the 60-second poll interval"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_tasks_stay_idle_across_polls_and_restart_until_a_new_announcement() {
+    let (fake, base) = start().await;
+    let inline = Arc::new(RecordingInline::default());
+    let store = Arc::new(RelayStore::open_in_memory().unwrap());
+    let first = relay(connector(&base), inline.clone(), store.clone());
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let worker = tokio::spawn(async move { first.run_remote(stopped).await });
+    eventually("initial checkpoint", || {
+        store.kv_get("connector.checkpoint").unwrap().is_some()
+    })
+    .await;
+    {
+        let mut state = fake.lock().unwrap();
+        state.task_status = "completed".into();
+        state.add(
+            DOT_MEMBER,
+            json!({"text":"First task", "attachments":[]}),
+            json!({"task_id":"task-review"}),
+        );
+        state.push("calpico-message-add", json!({"room_id":"room-1"}));
+    }
+    eventually("terminal checkpoint", || {
+        let raw = store.kv_get("connector.checkpoint").unwrap().unwrap();
+        let cp: inline_dots::connector::SyncState = serde_json::from_str(&raw).unwrap();
+        cp.tasks
+            .get("task-review")
+            .is_some_and(|task| task.terminal)
+    })
+    .await;
+    let calls = fake.lock().unwrap().task_calls;
+    tokio::time::sleep(Duration::from_millis(950)).await;
+    assert_eq!(
+        fake.lock().unwrap().task_calls,
+        calls,
+        "terminal overlap must not re-poll task"
+    );
+    stop.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+    let second = relay(connector(&base), inline.clone(), store.clone());
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let worker = tokio::spawn(async move { second.run_remote(stopped).await });
+    tokio::time::sleep(Duration::from_millis(450)).await;
+    assert_eq!(
+        fake.lock().unwrap().task_calls,
+        calls,
+        "terminal state must survive restart"
+    );
+    {
+        let mut state = fake.lock().unwrap();
+        state.task_status = "inProgress".into();
+        state.add(
+            DOT_MEMBER,
+            json!({"text":"Resumed task", "attachments":[]}),
+            json!({"task_id":"task-review"}),
+        );
+        state.push("calpico-message-add", json!({"room_id":"room-1"}));
+    }
+    eventually("resumed task", || {
+        inline
+            .edits
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, text)| text.contains("Working"))
+    })
+    .await;
+    stop.send(true).unwrap();
+    worker.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn realtime_task_association_fetches_older_message_and_tracks_task() {
+    let (fake, base) = start().await;
+    let inline = Arc::new(RecordingInline::default());
+    let store = Arc::new(RelayStore::open_in_memory().unwrap());
+    let r = relay(connector(&base), inline.clone(), store.clone());
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let worker = tokio::spawn(async move { r.run_remote(stopped).await });
+    eventually("initial checkpoint", || {
+        store.kv_get("connector.checkpoint").unwrap().is_some()
+    })
+    .await;
+    let old = {
+        let mut state = fake.lock().unwrap();
+        let old = state.add(
+            DOT_MEMBER,
+            json!({"text":"original", "attachments":[]}),
+            json!({}),
+        );
+        for n in 0..40 {
+            state.add(
+                DOT_MEMBER,
+                json!({"text":format!("later {n}"), "attachments":[]}),
+                json!({}),
+            );
+        }
+        state.push("calpico-message-add", json!({"room_id":"room-1"}));
+        old
+    };
+    eventually("older message outside overlap", || {
+        let raw = store.kv_get("connector.checkpoint").unwrap().unwrap();
+        let cp: inline_dots::connector::SyncState = serde_json::from_str(&raw).unwrap();
+        cp.recent.len() == 33 && !cp.recent.contains(&old)
+    })
+    .await;
+    fake.lock().unwrap().push(
+        "calpico-message-task-associated",
+        json!({"room_id":"room-1", "message_id":old, "task_id":"task-review"}),
+    );
+    eventually("task from targeted association", || {
+        inline
+            .posts
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, p)| p.text.contains("Book flights"))
+    })
+    .await;
+    assert_eq!(
+        store
+            .kv_get("task_anchor_remote:task-review")
+            .unwrap()
+            .as_deref(),
+        Some(old.as_str())
+    );
+    stop.send(true).unwrap();
+    worker.await.unwrap().unwrap();
 }

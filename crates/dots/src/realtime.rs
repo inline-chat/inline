@@ -28,6 +28,13 @@ pub enum Signal {
     Subscribed,
     /// Something in the room changed; poll now.
     Wake,
+    /// Fetch this message directly, even outside the recent polling window.
+    MessageChanged {
+        /// Message that changed.
+        message_id: String,
+        /// A newly associated task, which may have resumed.
+        task_id: Option<String>,
+    },
     /// The Dot started or stopped responding.
     Typing(bool),
     /// A member read the room up to a time (RFC 3339).
@@ -157,7 +164,24 @@ pub fn interpret_frame(text: &str, room_id: &str, dot_member: &str) -> Vec<Signa
             }
             // The owner read the room elsewhere; nothing for Inline to show.
             "calpico-room-read" => {}
-            // message-update, message-task-associated, and anything new.
+            "calpico-message-update" | "calpico-message-task-associated" => {
+                if let Some(message_id) = payload
+                    .get("message_id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                {
+                    signals.push(Signal::MessageChanged {
+                        message_id: message_id.into(),
+                        task_id: payload
+                            .get("task_id")
+                            .and_then(Value::as_str)
+                            .filter(|id| !id.is_empty())
+                            .map(str::to_owned),
+                    });
+                } else {
+                    signals.push(Signal::Wake);
+                }
+            }
             _ => signals.push(Signal::Wake),
         }
     }
@@ -297,6 +321,32 @@ mod tests {
     }
 
     #[test]
+    fn changed_message_ids_and_task_associations_are_retained() {
+        let updated = envelope(
+            "calpico-message-update",
+            json!({"room_id":"r", "message_id":"older"}),
+        );
+        assert_eq!(
+            interpret_frame(&updated, "r", "d"),
+            vec![Signal::MessageChanged {
+                message_id: "older".into(),
+                task_id: None
+            }]
+        );
+        let task = envelope(
+            "calpico-message-task-associated",
+            json!({"room_id":"r", "message_id":"older", "task_id":"t1"}),
+        );
+        assert_eq!(
+            interpret_frame(&task, "r", "d"),
+            vec![Signal::MessageChanged {
+                message_id: "older".into(),
+                task_id: Some("t1".into())
+            }]
+        );
+    }
+
+    #[test]
     fn read_receipts_and_room_changes() {
         let frame = envelope(
             "calpico-room-read-receipt",
@@ -321,7 +371,13 @@ mod tests {
             "calpico-message-task-associated",
             json!({"room_id": "r", "message_id": "m", "task_id": "t"}),
         );
-        assert_eq!(interpret_frame(&associated, "r", "d"), vec![Signal::Wake]);
+        assert_eq!(
+            interpret_frame(&associated, "r", "d"),
+            vec![Signal::MessageChanged {
+                message_id: "m".into(),
+                task_id: Some("t".into())
+            }]
+        );
     }
 
     #[test]

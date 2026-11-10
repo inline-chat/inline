@@ -1,6 +1,6 @@
 //! The Dots connector for `inline-relay`.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,6 +24,7 @@ const PAGE: u32 = 32;
 const OVERLAP: usize = 33;
 const MAX_PAGES_PER_POLL: usize = 20;
 const CHECKPOINT_VERSION: u32 = 1;
+const TASK_HISTORY_LIMIT: usize = 50;
 
 /// Tunables; production defaults.
 #[derive(Clone, Debug)]
@@ -84,6 +85,24 @@ pub struct SyncState {
     /// Most recent delivered ids, oldest first. Polls restart from the
     /// oldest so recent edits and reactions are seen again.
     pub recent: VecDeque<String>,
+    /// Active tasks and a bounded cache of completed tasks. Missing in v1
+    /// checkpoints written before task recovery was added.
+    #[serde(default)]
+    pub tasks: BTreeMap<String, SavedTask>,
+}
+
+/// Task state that survives connector and bridge restarts.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedTask {
+    /// Whether polling has finished (including an unavailable task).
+    pub terminal: bool,
+    /// Latest backend timestamp, for rejecting stale snapshots.
+    pub updated_at: i64,
+    /// Last known title.
+    pub title: Option<String>,
+    /// Latest announcing message, ordered by creation time then id. Overlap
+    /// replays must not wake a task that has already finished.
+    pub announcement: Option<(i64, String)>,
 }
 
 impl SyncState {
@@ -180,6 +199,7 @@ impl DotsConnector {
                 baseline_id: baseline.as_ref().map(|(id, _)| id.clone()),
                 linked_at: baseline.map(|(_, at)| at),
                 recent: VecDeque::new(),
+                tasks: BTreeMap::new(),
             };
             if checkpoint.is_some() {
                 log::warn!(target: "inline::bridge::dots", "Dot room changed; linking the new room from now on");
@@ -213,7 +233,16 @@ impl DotsConnector {
         drop(signal_sender);
 
         let mut subscribed = false;
-        let mut tasks: HashMap<String, TaskTrack> = HashMap::new();
+        let mut tasks: HashMap<String, TaskTrack> = self
+            .sync
+            .lock()
+            .await
+            .tasks
+            .iter()
+            .filter(|(_, saved)| !saved.terminal)
+            .map(|(id, _)| (id.clone(), TaskTrack::new()))
+            .collect();
+        let mut signals_open = self.settings.realtime;
         let mut failures = 0u32;
         loop {
             match self.poll(&room, &events, &mut tasks).await {
@@ -236,6 +265,7 @@ impl DotsConnector {
                 Err(error) => return Err(map_error(error, false)),
             }
             self.poll_tasks(&events, &mut tasks).await?;
+            self.checkpoint(&events).await?;
             if let Some(at) = pending_read.take()
                 && let Some(id) = self.read_position(&at)
             {
@@ -255,7 +285,7 @@ impl DotsConnector {
                 .unwrap_or(Instant::now() + interval);
             tokio::select! {
                 _ = tokio::time::sleep_until(wake_at) => {}
-                signal = signals.recv() => match signal {
+                signal = signals.recv(), if signals_open => match signal {
                     Some(Signal::Subscribed) => {
                         if !subscribed {
                             log::info!(target: "inline::bridge::dots", "realtime subscribed");
@@ -263,6 +293,20 @@ impl DotsConnector {
                         subscribed = true;
                     }
                     Some(Signal::Wake) => {}
+                    Some(Signal::MessageChanged { message_id, task_id }) => {
+                        if let Some(mut item) = self.client.message(&room.room_id, &message_id).await
+                            .map_err(|error| map_error(error, false))?
+                        {
+                            let associated = task_id.is_some();
+                            if let Some(task_id) = task_id { item.task_id = Some(task_id); }
+                            let mut state = self.sync.lock().await.clone();
+                            if eligible(&item, &state) {
+                                self.emit_message(&item, &room, &events, &mut tasks, &mut state, associated).await
+                                    .map_err(|error| map_error(error, false))?;
+                                *self.sync.lock().await = state;
+                            }
+                        }
+                    }
                     Some(Signal::Typing(active)) => {
                         emit(&events, ConnectorEvent::Typing(active)).await?;
                         continue;
@@ -288,7 +332,7 @@ impl DotsConnector {
                         log::info!(target: "inline::bridge::dots", "realtime unavailable: {reason}");
                         subscribed = false;
                     }
-                    None => subscribed = false,
+                    None => { subscribed = false; signals_open = false; },
                 },
                 _ = events.closed() => return Ok(()),
             }
@@ -302,7 +346,6 @@ impl DotsConnector {
         tasks: &mut HashMap<String, TaskTrack>,
     ) -> Result<(), DotsError> {
         let mut state = self.sync.lock().await.clone();
-        let linked_at = state.linked_at.as_deref().and_then(parse_time);
         let mut after = state.resume_after();
         let mut seen_cursors = Vec::new();
         for _ in 0..MAX_PAGES_PER_POLL {
@@ -322,30 +365,11 @@ impl DotsConnector {
             let full = items.len() as u32 >= PAGE;
             let last_id = items.last().map(|item| item.id.clone());
             for item in &items {
-                if Some(&item.id) == state.baseline_id.as_ref() {
+                if !eligible(item, &state) {
                     continue;
                 }
-                if let (Some(linked), Some(created)) = (linked_at, item.created())
-                    && created < linked
-                {
-                    continue;
-                }
-                if let Some(remote) = convert(item, room) {
-                    if let Some(created) = item.created() {
-                        self.remember_known(&item.id, created, remote.speaker);
-                    }
-                    if let Some(task_id) = &remote.task_id {
-                        tasks.entry(task_id.clone()).or_insert_with(|| TaskTrack {
-                            last: None,
-                            due: Instant::now(),
-                            interval: Duration::from_secs(3),
-                            failures: 0,
-                        });
-                    }
-                    emit(events, ConnectorEvent::Message(remote))
-                        .await
-                        .map_err(|_| DotsError::Protocol("relay stopped".into()))?;
-                }
+                self.emit_message(item, room, events, tasks, &mut state, false)
+                    .await?;
                 state.remember(&item.id);
             }
             let next = page
@@ -365,6 +389,54 @@ impl DotsConnector {
         emit(events, ConnectorEvent::Checkpoint(to_checkpoint(&state)))
             .await
             .map_err(|_| DotsError::Protocol("relay stopped".into()))?;
+        Ok(())
+    }
+
+    async fn checkpoint(&self, events: &mpsc::Sender<ConnectorEvent>) -> ConnectorResult<()> {
+        let state = self.sync.lock().await.clone();
+        emit(events, ConnectorEvent::Checkpoint(to_checkpoint(&state))).await
+    }
+
+    async fn emit_message(
+        &self,
+        item: &Message,
+        room: &DotRoom,
+        events: &mpsc::Sender<ConnectorEvent>,
+        tasks: &mut HashMap<String, TaskTrack>,
+        state: &mut SyncState,
+        associated: bool,
+    ) -> Result<(), DotsError> {
+        if let Some(remote) = convert(item, room) {
+            if let Some(created) = item.created() {
+                self.remember_known(&item.id, created, remote.speaker);
+            }
+            if let Some(task_id) = &remote.task_id {
+                let announcement = (
+                    item.created().map(|at| at.timestamp_micros()).unwrap_or(0),
+                    item.id.clone(),
+                );
+                let saved = state.tasks.entry(task_id.clone()).or_default();
+                let new_announcement = saved
+                    .announcement
+                    .as_ref()
+                    .is_none_or(|last| announcement > *last);
+                if new_announcement {
+                    saved.announcement = Some(announcement);
+                }
+                if !saved.terminal || new_announcement || associated {
+                    saved.terminal = false;
+                    if associated {
+                        tasks.insert(task_id.clone(), TaskTrack::new());
+                    } else {
+                        tasks.entry(task_id.clone()).or_insert_with(TaskTrack::new);
+                    }
+                }
+                prune_tasks(&mut state.tasks);
+            }
+            emit(events, ConnectorEvent::Message(remote))
+                .await
+                .map_err(|_| DotsError::Protocol("relay stopped".into()))?;
+        }
         Ok(())
     }
 
@@ -414,53 +486,51 @@ impl DotsConnector {
             .collect();
         for id in due {
             let result = self.client.task(&id).await;
+            let mut state = self.sync.lock().await.clone();
+            let saved = state.tasks.entry(id.clone()).or_default();
             let track = tasks.get_mut(&id).expect("tracked");
             match result {
                 Ok(summary) => {
-                    track.failures = 0;
-                    // Ignore an older snapshot arriving after a newer one.
-                    if track
-                        .last
-                        .as_ref()
-                        .is_some_and(|last| summary.updated_at < last.updated_at)
-                    {
+                    if summary.updated_at < saved.updated_at {
                         track.due = now + track.interval;
                         continue;
                     }
                     let changed = track.last.as_ref() != Some(&summary);
                     if changed {
-                        // Transcript failures leave the card working; the next
-                        // change retries.
                         let entries = match self.client.task_transcript(&id, 5).await {
                             Ok(entries) => entries,
                             Err(error) => {
                                 log::warn!(target: "inline::bridge::dots", "task transcript unavailable: {error}");
-                                Vec::new()
+                                track.due = now + Duration::from_secs(30);
+                                continue;
                             }
                         };
                         emit(events, ConnectorEvent::Task(task_update(&summary, entries))).await?;
                     }
-                    if summary.status.is_terminal() {
+                    track.failures = 0;
+                    saved.terminal = summary.status.is_terminal();
+                    saved.updated_at = summary.updated_at;
+                    saved.title = summary.title.clone();
+                    if saved.terminal {
                         tasks.remove(&id);
-                        continue;
-                    }
-                    track.interval = if changed {
-                        Duration::from_secs(3)
                     } else {
-                        (track.interval * 2).min(Duration::from_secs(30))
-                    };
-                    track.due = now + track.interval;
-                    track.last = Some(summary);
+                        track.interval = if changed {
+                            Duration::from_secs(3)
+                        } else {
+                            (track.interval * 2).min(Duration::from_secs(30))
+                        };
+                        track.due = now + track.interval;
+                        track.last = Some(summary);
+                    }
                 }
                 Err(error) => {
                     track.failures += 1;
                     if track.failures >= 5 || !error.is_transient() {
-                        let title = track.last.as_ref().and_then(|last| last.title.clone());
                         emit(
                             events,
                             ConnectorEvent::Task(TaskUpdate {
                                 id: id.clone(),
-                                title,
+                                title: saved.title.clone(),
                                 label:
                                     "Task details are unavailable here. Open ChatGPT to follow it."
                                         .into(),
@@ -469,14 +539,54 @@ impl DotsConnector {
                             }),
                         )
                         .await?;
+                        saved.terminal = true;
                         tasks.remove(&id);
                     } else {
                         track.due = now + Duration::from_secs(3u64 << track.failures.min(4));
                     }
                 }
             }
+            prune_tasks(&mut state.tasks);
+            *self.sync.lock().await = state;
         }
         Ok(())
+    }
+}
+
+impl TaskTrack {
+    fn new() -> Self {
+        Self {
+            last: None,
+            due: Instant::now(),
+            interval: Duration::from_secs(3),
+            failures: 0,
+        }
+    }
+}
+
+fn eligible(item: &Message, state: &SyncState) -> bool {
+    if state.baseline_id.as_deref() == Some(&item.id) {
+        return false;
+    }
+    match (
+        state.linked_at.as_deref().and_then(parse_time),
+        item.created(),
+    ) {
+        (Some(linked), Some(created)) => created >= linked,
+        _ => true,
+    }
+}
+
+fn prune_tasks(tasks: &mut BTreeMap<String, SavedTask>) {
+    // Retain every active task; only finished history can be discarded.
+    while tasks.values().filter(|saved| saved.terminal).count() > TASK_HISTORY_LIMIT {
+        let oldest = tasks
+            .iter()
+            .filter(|(_, saved)| saved.terminal)
+            .min_by_key(|(_, saved)| saved.updated_at)
+            .map(|(id, _)| id.clone());
+        let Some(oldest) = oldest else { break };
+        tasks.remove(&oldest);
     }
 }
 
@@ -1353,6 +1463,37 @@ mod tests {
         assert_eq!(
             map_error(DotsError::Network("t".into()), false).kind,
             FailureKind::Transient
+        );
+    }
+
+    #[test]
+    fn older_checkpoints_load_and_pruning_keeps_active_tasks() {
+        let mut state: SyncState = serde_json::from_value(json!({
+            "v":1, "room_id":"r", "baseline_id":null, "linked_at":null, "recent":[]
+        }))
+        .unwrap();
+        assert!(state.tasks.is_empty());
+        for n in 0..55 {
+            state.tasks.insert(
+                format!("done-{n}"),
+                SavedTask {
+                    terminal: true,
+                    updated_at: n,
+                    ..Default::default()
+                },
+            );
+            state
+                .tasks
+                .insert(format!("active-{n}"), SavedTask::default());
+        }
+        prune_tasks(&mut state.tasks);
+        assert_eq!(
+            state.tasks.values().filter(|task| task.terminal).count(),
+            50
+        );
+        assert_eq!(
+            state.tasks.values().filter(|task| !task.terminal).count(),
+            55
         );
     }
 
