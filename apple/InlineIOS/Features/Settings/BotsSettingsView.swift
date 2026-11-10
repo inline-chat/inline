@@ -785,7 +785,7 @@ struct IOSManagedBotPhotoEditor: View {
 }
 
 /// The agent-wide default for how the bot replies. Threads can override it.
-/// Output mode applies to agents, which report a runtime.
+/// Output mode applies to agents that report a runtime or declare the setting.
 private struct IOSManagedBotOutputSection: View {
   let botUserID: Int64
   @ObservedObject private var store = AgentWorkStateStore.shared
@@ -793,12 +793,12 @@ private struct IOSManagedBotOutputSection: View {
 
   var body: some View {
     Group {
-      if store.runtimeBotUserIDs.contains(botUserID) {
+      if store.offersOutputMode(botUserID: botUserID) {
         section
       }
     }
     .task(id: botUserID) {
-      await store.loadAgentSettings(botUserID: botUserID)
+      await store.loadBotSettings(botUserID: botUserID)
     }
   }
 
