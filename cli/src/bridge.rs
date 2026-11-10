@@ -348,6 +348,7 @@ where
     .map_err(CliError::provider_integration_failed)?;
     // The Dot must exist and Codex must hold a ChatGPT login before a bot is
     // created; the bot takes the Dot's name unless one was given.
+    let dots_name_follows_dot = provider.provider_id == dots::DOTS_PROVIDER_ID && name.is_none();
     let name = if provider.provider_id == dots::DOTS_PROVIDER_ID {
         let room = dots::preflight(&provider.executable)
             .await
@@ -368,6 +369,13 @@ where
         name.as_deref(),
     )
     .await?;
+    if dots_name_follows_dot {
+        // The bot follows the Dot's name until the owner renames it.
+        fs::write(
+            provisioned.installation.state_dir.join(dots::MANAGED_NAME_FILE),
+            &provisioned.installation.display_name,
+        )?;
+    }
     progress(ProviderSetupProgress::Completed("bot", "configured"));
 
     progress(ProviderSetupProgress::Started("access"));
@@ -2150,6 +2158,13 @@ async fn run_provider_installation(
             readiness: shared_provider_readiness.as_ref(),
             external_shutdown,
             standalone_runtime,
+            profile: Some(dots::ProfileSync {
+                config: config.clone(),
+                owner_auth: owner_credential(&secrets)?,
+                bot_user_id: installation.bot_user_id,
+                state_dir: installation.state_dir.clone(),
+                bundled_avatar_id: installation.managed_avatar_file_unique_id.clone(),
+            }),
         })
         .await;
     }

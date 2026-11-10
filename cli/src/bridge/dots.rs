@@ -41,16 +41,134 @@ pub(crate) struct BotDm {
     bot: InlineClient,
     chat_id: InlineId,
     http: reqwest::Client,
+    profile: Option<ProfileSync>,
+}
+
+/// Mirrors the Dot's name and photo onto the bot through a short-lived owner
+/// session (bot profiles are owner-managed). Only fields still managed by
+/// the bridge change: a name or photo the owner set by hand is kept.
+pub(crate) struct ProfileSync {
+    pub(crate) config: crate::config::Config,
+    pub(crate) owner_auth: inline_client::AuthCredential,
+    pub(crate) bot_user_id: i64,
+    pub(crate) state_dir: std::path::PathBuf,
+    pub(crate) bundled_avatar_id: Option<String>,
+}
+
+/// Marker holding the bot name the bridge last set (absent when the owner
+/// chose a name at setup).
+pub(crate) const MANAGED_NAME_FILE: &str = "dots-managed-name";
+const MANAGED_AVATAR_FILE: &str = "dots-managed-avatar";
+
+impl ProfileSync {
+    fn marker(&self, file: &str) -> Option<String> {
+        std::fs::read_to_string(self.state_dir.join(file))
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    }
+
+    fn set_marker(&self, file: &str, value: &str) -> io::Result<()> {
+        std::fs::write(self.state_dir.join(file), value)
+    }
+
+    async fn apply(&self, name: Option<&str>, avatar: Option<&FileData>) -> Result<(), String> {
+        use inline_protocol::proto;
+        let mut owner =
+            crate::owner_session::OwnerSession::connect(&self.config, self.owner_auth.clone())
+                .await
+                .map_err(|error| error.to_string())?;
+        let bots = owner
+            .call(proto::ListBotsInput {})
+            .await
+            .map_err(|error| error.to_string())?
+            .bots;
+        let bot = bots
+            .into_iter()
+            .find(|bot| bot.id == self.bot_user_id)
+            .ok_or_else(|| "the bridge bot no longer exists".to_owned())?;
+        if let Some(name) = name {
+            let current = bot.first_name.as_deref().unwrap_or("").trim().to_owned();
+            if current != name {
+                let Some(managed) = self.marker(MANAGED_NAME_FILE) else {
+                    return Ok(());
+                };
+                if current != managed {
+                    // Renamed by hand; stop following the Dot's name.
+                    return Ok(());
+                }
+                owner
+                    .call(proto::UpdateBotProfileInput {
+                        bot_user_id: self.bot_user_id,
+                        name: Some(name.to_owned()),
+                        photo_file_unique_id: None,
+                        username: None,
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?;
+            }
+            self.set_marker(MANAGED_NAME_FILE, name)
+                .map_err(|error| error.to_string())?;
+        }
+        if let Some(avatar) = avatar {
+            let current = bot
+                .profile_photo
+                .as_ref()
+                .and_then(|photo| photo.file_unique_id.clone());
+            let managed = self
+                .marker(MANAGED_AVATAR_FILE)
+                .or_else(|| self.bundled_avatar_id.clone());
+            if current.is_some() && current != managed {
+                return Ok(());
+            }
+            let path = self.state_dir.join("dots-avatar-upload");
+            tokio::fs::write(&path, &avatar.bytes)
+                .await
+                .map_err(|error| error.to_string())?;
+            let upload = owner
+                .upload(inline_sdk::NativeUploadInput::new(
+                    &path,
+                    &avatar.name,
+                    &avatar.mime,
+                    proto::UploadKind::Photo,
+                ))
+                .await
+                .map_err(|error| error.to_string());
+            let _ = tokio::fs::remove_file(&path).await;
+            let upload = upload?;
+            owner
+                .call(proto::UpdateBotProfileInput {
+                    bot_user_id: self.bot_user_id,
+                    name: None,
+                    photo_file_unique_id: Some(upload.file_unique_id.clone()),
+                    username: None,
+                })
+                .await
+                .map_err(|error| error.to_string())?;
+            self.set_marker(MANAGED_AVATAR_FILE, &upload.file_unique_id)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
 }
 
 impl BotDm {
-    pub(crate) fn new(bot: InlineClient, chat_id: InlineId) -> io::Result<Self> {
+    pub(crate) fn new(
+        bot: InlineClient,
+        chat_id: InlineId,
+        profile: Option<ProfileSync>,
+    ) -> io::Result<Self> {
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(60))
             .build()
             .map_err(io::Error::other)?;
-        Ok(Self { bot, chat_id, http })
+        Ok(Self {
+            bot,
+            chat_id,
+            http,
+            profile,
+        })
     }
 
     fn external(key: &str) -> InlineResult<ExternalId> {
@@ -230,6 +348,31 @@ impl InlineSide for BotDm {
         })
     }
 
+    fn mark_read(&self, message_id: i64) -> BoxFuture<'_, InlineResult<()>> {
+        Box::pin(async move {
+            self.bot
+                .read(inline_client::ReadRequest {
+                    chat_id: self.chat_id,
+                    max_message_id: Some(InlineId::new(message_id)),
+                })
+                .await
+                .map_err(inline_error)
+        })
+    }
+
+    fn update_profile<'a>(
+        &'a self,
+        name: Option<&'a str>,
+        avatar: Option<&'a FileData>,
+    ) -> BoxFuture<'a, InlineResult<()>> {
+        Box::pin(async move {
+            let Some(profile) = &self.profile else {
+                return Ok(());
+            };
+            profile.apply(name, avatar).await.map_err(inline_error)
+        })
+    }
+
     fn fetch_media<'a>(
         &'a self,
         media: &'a InlineMedia,
@@ -300,6 +443,7 @@ pub(crate) fn relay_event(event: &ClientEvent, dm_chat_id: InlineId) -> Option<I
             if message.chat_id != dm_chat_id || message.is_outgoing || message.metadata.is_service {
                 return None;
             }
+            let edited = message.metadata.edit_timestamp.is_some();
             // Edited messages arrive as the same id; the relay sends each id
             // once, so an edit of a delivered message is not resent, while a
             // message edited before the bridge saw it goes out as edited.
@@ -321,7 +465,13 @@ pub(crate) fn relay_event(event: &ClientEvent, dm_chat_id: InlineId) -> Option<I
                         size: *size_bytes,
                     }),
                 ),
-                _ => return None,
+                // Visible rather than silently dropped.
+                _ => {
+                    return Some(InlineEvent::Unsupported {
+                        message_id: message.message_id.get(),
+                        sender_id: message.sender_id.get(),
+                    });
+                }
             };
             Some(InlineEvent::Message {
                 message_id: message.message_id.get(),
@@ -329,8 +479,23 @@ pub(crate) fn relay_event(event: &ClientEvent, dm_chat_id: InlineId) -> Option<I
                 text,
                 reply_to: message.reply_to_message_id.map(InlineId::get),
                 media,
+                edited,
             })
         }
+        ClientEvent::MessageDeleted {
+            chat_id,
+            message_id,
+        } if *chat_id == dm_chat_id => Some(InlineEvent::Deleted {
+            message_id: message_id.get(),
+        }),
+        ClientEvent::Typing {
+            chat_id,
+            user_id,
+            is_typing,
+        } if *chat_id == dm_chat_id => Some(InlineEvent::Typing {
+            user_id: user_id.get(),
+            active: *is_typing,
+        }),
         ClientEvent::ReactionChanged {
             chat_id,
             message_id,
@@ -386,6 +551,7 @@ pub(crate) struct DotsLaunch<'a> {
     pub(crate) readiness: Option<&'a ProviderReadiness>,
     pub(crate) external_shutdown: Option<tokio::sync::watch::Receiver<bool>>,
     pub(crate) standalone_runtime: bool,
+    pub(crate) profile: Option<ProfileSync>,
 }
 
 /// Serves the Dots relay until shutdown.
@@ -402,13 +568,16 @@ pub(crate) async fn run_dots_relay(
         readiness,
         mut external_shutdown,
         standalone_runtime,
+        profile,
     } = launch;
+    // Typing is best-effort and only on the broadcast stream.
+    let mut best_effort = bot.subscribe();
     let client = dots_client(&installation.executable)?;
     let connector = Arc::new(DotsConnector::new(client, ConnectorSettings::default()));
     let store = Arc::new(RelayStore::open(
         &installation.state_dir.join("dots-relay.sqlite"),
     )?);
-    let side = Arc::new(BotDm::new(bot.clone(), dm_chat_id)?);
+    let side = Arc::new(BotDm::new(bot.clone(), dm_chat_id, profile)?);
     let relay = Arc::new(Relay::new(
         connector,
         side,
@@ -454,6 +623,14 @@ pub(crate) async fn run_dots_relay(
             changed = health.changed() => {
                 if changed.is_ok() {
                     report(&health.borrow());
+                }
+            }
+            event = best_effort.recv() => {
+                if let Ok(event @ ClientEvent::Typing { .. }) = event
+                    && let Some(event) = relay_event(&event, dm_chat_id)
+                    && let Err(error) = relay.handle_inline(event).await
+                {
+                    log::debug!(target: "inline::bridge::dots", "typing not applied: {error}");
                 }
             }
             delivery = inline_events.recv_delivery() => {
@@ -520,6 +697,7 @@ mod tests {
                 text: "hi".into(),
                 reply_to: Some(3),
                 media: None,
+                edited: false,
             })
         );
         assert_eq!(
@@ -588,6 +766,45 @@ mod tests {
             .map(|command| command.command)
             .collect();
         assert_eq!(commands, ["help", "status", "mirror"]);
+    }
+
+    #[test]
+    fn deletes_typing_and_unknown_content_are_mapped() {
+        let dm = InlineId::new(42);
+        assert_eq!(
+            relay_event(
+                &ClientEvent::MessageDeleted {
+                    chat_id: dm,
+                    message_id: InlineId::new(5)
+                },
+                dm
+            ),
+            Some(InlineEvent::Deleted { message_id: 5 })
+        );
+        assert_eq!(
+            relay_event(
+                &ClientEvent::Typing {
+                    chat_id: dm,
+                    user_id: InlineId::new(100),
+                    is_typing: true
+                },
+                dm
+            ),
+            Some(InlineEvent::Typing {
+                user_id: 100,
+                active: true
+            })
+        );
+        let unsupported = MessageContent::Unsupported {
+            reason: "poll".into(),
+        };
+        assert_eq!(
+            relay_event(&stored(42, false, unsupported, false), dm),
+            Some(InlineEvent::Unsupported {
+                message_id: 9,
+                sender_id: 100
+            })
+        );
     }
 
     #[test]
