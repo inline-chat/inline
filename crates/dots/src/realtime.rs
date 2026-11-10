@@ -153,7 +153,8 @@ pub async fn session(
 
     let deadline = tokio::time::Instant::now() + SUBSCRIBE_TIMEOUT;
     let mut subscribed = false;
-    let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + PING_INTERVAL, PING_INTERVAL);
+    let mut ping =
+        tokio::time::interval_at(tokio::time::Instant::now() + PING_INTERVAL, PING_INTERVAL);
     let mut awaiting_pong: Option<tokio::time::Instant> = None;
     loop {
         let pong_deadline = awaiting_pong.map(|sent| sent + PONG_TIMEOUT);
@@ -219,7 +220,8 @@ mod tests {
 
     #[test]
     fn subscribe_reply_is_recognized() {
-        let frame = json!([{"id": 2, "reply": {"type": "subscribe", "topic_id": TOPIC}}]).to_string();
+        let frame =
+            json!([{"id": 2, "reply": {"type": "subscribe", "topic_id": TOPIC}}]).to_string();
         assert_eq!(interpret_frame(&frame, "r", "d"), vec![Signal::Subscribed]);
     }
 
@@ -229,12 +231,18 @@ mod tests {
             "calpico-is-responding-heartbeat",
             json!({"room_id": "r", "source": {"role": "user", "account_user_id": "d"}}),
         );
-        assert_eq!(interpret_frame(&frame, "r", "d"), vec![Signal::Typing(true)]);
+        assert_eq!(
+            interpret_frame(&frame, "r", "d"),
+            vec![Signal::Typing(true)]
+        );
         let stop = envelope(
             "calpico-is-responding-heartbeat",
             json!({"room_id": "r", "typing": false, "source": {"role": "user", "account_user_id": "d"}}),
         );
-        assert_eq!(interpret_frame(&stop, "r", "d"), vec![Signal::Typing(false)]);
+        assert_eq!(
+            interpret_frame(&stop, "r", "d"),
+            vec![Signal::Typing(false)]
+        );
         let other = envelope(
             "calpico-is-responding-heartbeat",
             json!({"room_id": "r", "source": {"role": "user", "account_user_id": "owner"}}),
@@ -264,8 +272,20 @@ mod tests {
     #[test]
     fn policy_requires_exact_host() {
         let policy = RealtimePolicy::default();
-        assert!(policy.check(&Url::parse("wss://ws.chatgpt.com/x?t=1").unwrap()).is_ok());
-        assert!(policy.check(&Url::parse("ws://ws.chatgpt.com/x").unwrap()).is_err());
-        assert!(policy.check(&Url::parse("wss://evil.example/x").unwrap()).is_err());
+        assert!(
+            policy
+                .check(&Url::parse("wss://ws.chatgpt.com/x?t=1").unwrap())
+                .is_ok()
+        );
+        assert!(
+            policy
+                .check(&Url::parse("ws://ws.chatgpt.com/x").unwrap())
+                .is_err()
+        );
+        assert!(
+            policy
+                .check(&Url::parse("wss://evil.example/x").unwrap())
+                .is_err()
+        );
     }
 }

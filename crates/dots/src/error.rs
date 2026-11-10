@@ -30,7 +30,9 @@ pub enum DotsError {
         detail: Option<String>,
     },
     /// Cloudflare or a similar edge served a challenge page.
-    #[error("ChatGPT served a browser challenge for {endpoint}; the bridge will not work around it")]
+    #[error(
+        "ChatGPT served a browser challenge for {endpoint}; the bridge will not work around it"
+    )]
     Challenge {
         /// Endpoint template.
         endpoint: &'static str,

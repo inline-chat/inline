@@ -96,7 +96,10 @@ impl SyncState {
     }
 
     fn resume_after(&self) -> Option<String> {
-        self.recent.front().cloned().or_else(|| self.baseline_id.clone())
+        self.recent
+            .front()
+            .cloned()
+            .or_else(|| self.baseline_id.clone())
     }
 }
 
@@ -143,7 +146,9 @@ impl DotsConnector {
         if let Some(room) = self.room.lock().await.clone() {
             return Ok(room);
         }
-        self.discover().await.map_err(|error| map_error(error, false))
+        self.discover()
+            .await
+            .map_err(|error| map_error(error, false))
     }
 
     async fn run_inner(
@@ -151,7 +156,10 @@ impl DotsConnector {
         checkpoint: Option<String>,
         events: mpsc::Sender<ConnectorEvent>,
     ) -> ConnectorResult<()> {
-        let room = self.discover().await.map_err(|error| map_error(error, false))?;
+        let room = self
+            .discover()
+            .await
+            .map_err(|error| map_error(error, false))?;
         let mut state = checkpoint
             .as_deref()
             .and_then(|raw| serde_json::from_str::<SyncState>(raw).ok())
@@ -304,7 +312,10 @@ impl DotsConnector {
                 }
                 state.remember(&item.id);
             }
-            let next = page.next_cursor.filter(|cursor| !cursor.is_empty()).or(last_id);
+            let next = page
+                .next_cursor
+                .filter(|cursor| !cursor.is_empty())
+                .or(last_id);
             if items.is_empty() || (!full && next.as_ref() == items.last().map(|item| &item.id)) {
                 break;
             }
@@ -372,8 +383,9 @@ impl DotsConnector {
                             ConnectorEvent::Task(TaskUpdate {
                                 id: id.clone(),
                                 title,
-                                label: "Task details are unavailable here. Open ChatGPT to follow it."
-                                    .into(),
+                                label:
+                                    "Task details are unavailable here. Open ChatGPT to follow it."
+                                        .into(),
                                 terminal: true,
                             }),
                         )
@@ -428,10 +440,7 @@ async fn realtime_loop(
     }
 }
 
-async fn emit(
-    events: &mpsc::Sender<ConnectorEvent>,
-    event: ConnectorEvent,
-) -> ConnectorResult<()> {
+async fn emit(events: &mpsc::Sender<ConnectorEvent>, event: ConnectorEvent) -> ConnectorResult<()> {
     events
         .send(event)
         .await
@@ -471,7 +480,9 @@ pub async fn discover(client: &DotsClient) -> Result<DotRoom, DotsError> {
             .as_deref()
             .is_some_and(|thread| !thread.is_empty() && thread != selection.thread_id)
     {
-        return Err(DotsError::Protocol("Dot profile does not match its selection".into()));
+        return Err(DotsError::Protocol(
+            "Dot profile does not match its selection".into(),
+        ));
     }
     let room = client.room(&selection.messaging_room_id).await?;
     if room.kind != "DM"
@@ -511,7 +522,10 @@ pub async fn discover(client: &DotsClient) -> Result<DotRoom, DotsError> {
 }
 
 /// Newest message at link time, as `(id, created_at)`.
-async fn baseline(client: &DotsClient, room_id: &str) -> Result<Option<(String, String)>, DotsError> {
+async fn baseline(
+    client: &DotsClient,
+    room_id: &str,
+) -> Result<Option<(String, String)>, DotsError> {
     let room = client.room(room_id).await?;
     if let Some(latest) = room.latest_messages.filter(|latest| !latest.is_empty()) {
         return Ok(latest
@@ -597,7 +611,10 @@ pub fn convert(message: &Message, room: &DotRoom) -> Option<RemoteMessage> {
         client_request_id: message.request_id.clone().filter(|id| !id.is_empty()),
         text,
         files,
-        reply_to: message.reply_to.as_ref().map(|reply| reply.message_id.clone()),
+        reply_to: message
+            .reply_to
+            .as_ref()
+            .map(|reply| reply.message_id.clone()),
         deleted: message.deleted_at.is_some(),
         agent_reaction: message.reactions.get(&room.dot_member).cloned(),
         task_id,
@@ -627,7 +644,10 @@ fn canonical(value: &Value) -> String {
             format!("{{{}}}", body.join(","))
         }
         Value::Array(items) => {
-            format!("[{}]", items.iter().map(canonical).collect::<Vec<_>>().join(","))
+            format!(
+                "[{}]",
+                items.iter().map(canonical).collect::<Vec<_>>().join(",")
+            )
         }
         other => other.to_string(),
     }
@@ -684,9 +704,7 @@ pub fn map_error(error: DotsError, sending: bool) -> ConnectorError {
                 }
             }
             DotsError::Attachment(_) => FailureKind::Rejected,
-            DotsError::Network(_) | DotsError::Protocol(_) | DotsError::Http { .. }
-                if sending =>
-            {
+            DotsError::Network(_) | DotsError::Protocol(_) | DotsError::Http { .. } if sending => {
                 FailureKind::Uncertain
             }
             _ => FailureKind::Transient,
@@ -787,10 +805,12 @@ impl Connector for DotsConnector {
                 if page.items.len() < PAGE as usize {
                     break;
                 }
-                let next = page
-                    .next_cursor
-                    .clone()
-                    .or_else(|| page.items.iter().max_by_key(|item| item.created()).map(|item| item.id.clone()));
+                let next = page.next_cursor.clone().or_else(|| {
+                    page.items
+                        .iter()
+                        .max_by_key(|item| item.created())
+                        .map(|item| item.id.clone())
+                });
                 if next == after {
                     break;
                 }
@@ -893,10 +913,14 @@ impl Connector for DotsConnector {
                 ));
             }
             let Some(parsed) = Elicitation::parse(&state.elicitation) else {
-                return Ok(ConfirmationAnswer::NotApplied("the request is malformed".into()));
+                return Ok(ConfirmationAnswer::NotApplied(
+                    "the request is malformed".into(),
+                ));
             };
             if !parsed.is_pending() {
-                return Ok(ConfirmationAnswer::NotApplied("it was already answered".into()));
+                return Ok(ConfirmationAnswer::NotApplied(
+                    "it was already answered".into(),
+                ));
             }
             let Some(content) = parsed.accept_content else {
                 return Ok(ConfirmationAnswer::NotApplied(
@@ -1026,7 +1050,10 @@ mod tests {
         assert_eq!(converted.agent_reaction.as_deref(), Some("👍"));
         assert!(converted.text.contains("only shows in ChatGPT"));
 
-        assert_eq!(convert(&message("me"), &room()).unwrap().speaker, Speaker::Owner);
+        assert_eq!(
+            convert(&message("me"), &room()).unwrap().speaker,
+            Speaker::Owner
+        );
         assert!(convert(&message("stranger"), &room()).is_none());
     }
 
@@ -1036,9 +1063,15 @@ mod tests {
         a.content.text = "x".into();
         let mut b = a.clone();
         b.reactions.insert("dot".into(), "👍".into());
-        assert_eq!(convert(&a, &room()).unwrap().revision, convert(&b, &room()).unwrap().revision);
+        assert_eq!(
+            convert(&a, &room()).unwrap().revision,
+            convert(&b, &room()).unwrap().revision
+        );
         b.content.text = "y".into();
-        assert_ne!(convert(&a, &room()).unwrap().revision, convert(&b, &room()).unwrap().revision);
+        assert_ne!(
+            convert(&a, &room()).unwrap().revision,
+            convert(&b, &room()).unwrap().revision
+        );
     }
 
     #[test]
@@ -1061,11 +1094,24 @@ mod tests {
         assert_eq!(map_error(http(502), true).kind, FailureKind::Uncertain);
         assert_eq!(map_error(http(401), true).kind, FailureKind::NeedsLogin);
         assert_eq!(
-            map_error(DotsError::RateLimited { endpoint: "x", retry_after: None }, true).kind,
+            map_error(
+                DotsError::RateLimited {
+                    endpoint: "x",
+                    retry_after: None
+                },
+                true
+            )
+            .kind,
             FailureKind::Transient
         );
-        assert_eq!(map_error(DotsError::Network("t".into()), true).kind, FailureKind::Uncertain);
-        assert_eq!(map_error(DotsError::Network("t".into()), false).kind, FailureKind::Transient);
+        assert_eq!(
+            map_error(DotsError::Network("t".into()), true).kind,
+            FailureKind::Uncertain
+        );
+        assert_eq!(
+            map_error(DotsError::Network("t".into()), false).kind,
+            FailureKind::Transient
+        );
     }
 
     #[test]

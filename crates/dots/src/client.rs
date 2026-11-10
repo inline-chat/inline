@@ -196,11 +196,7 @@ impl DotsClient {
             request = match &body {
                 None => request,
                 Some(Body::Json(value)) => request.json(value),
-                Some(Body::File {
-                    name,
-                    mime,
-                    bytes,
-                }) => {
+                Some(Body::File { name, mime, bytes }) => {
                     let part = reqwest::multipart::Part::bytes(bytes.to_vec())
                         .file_name(name.to_string())
                         .mime_str(mime)
@@ -335,14 +331,19 @@ impl DotsClient {
             },
             request_id: message.request_id.clone(),
             idempotency_token: message.request_id.clone(),
-            reply_to: message.reply_to.clone().map(|message_id| ReplyTo { message_id }),
+            reply_to: message
+                .reply_to
+                .clone()
+                .map(|message_id| ReplyTo { message_id }),
         };
         let created: Message = self
             .call(
                 Method::POST,
                 "/messaging/rooms/{room}/messages",
                 self.api(&["messaging", "rooms", room_id, "messages"]),
-                Some(Body::Json(serde_json::to_value(&body).expect("serializable"))),
+                Some(Body::Json(
+                    serde_json::to_value(&body).expect("serializable"),
+                )),
                 Retry::OnUnauthorized,
             )
             .await?;
@@ -415,8 +416,7 @@ impl DotsClient {
             .await
         {
             Err(DotsError::Http {
-                status: 404 | 410,
-                ..
+                status: 404 | 410, ..
             }) => return Ok(None),
             other => other?,
         };
@@ -487,7 +487,14 @@ impl DotsClient {
         self.call_raw(
             Method::POST,
             "/messaging/rooms/{room}/messages/{message}/reactions",
-            self.api(&["messaging", "rooms", room_id, "messages", message_id, "reactions"]),
+            self.api(&[
+                "messaging",
+                "rooms",
+                room_id,
+                "messages",
+                message_id,
+                "reactions",
+            ]),
             Some(Body::Json(json!({ "reaction": emoji }))),
             Retry::OnUnauthorized,
         )
@@ -500,7 +507,14 @@ impl DotsClient {
         self.call_raw(
             Method::DELETE,
             "/messaging/rooms/{room}/messages/{message}/reactions",
-            self.api(&["messaging", "rooms", room_id, "messages", message_id, "reactions"]),
+            self.api(&[
+                "messaging",
+                "rooms",
+                room_id,
+                "messages",
+                message_id,
+                "reactions",
+            ]),
             None,
             Retry::OnUnauthorized,
         )
@@ -514,7 +528,14 @@ impl DotsClient {
         room_id: &str,
         message_id: &str,
     ) -> DotsResult<ElicitationState> {
-        let mut url = self.api(&["messaging", "rooms", room_id, "messages", message_id, "elicitation"]);
+        let mut url = self.api(&[
+            "messaging",
+            "rooms",
+            room_id,
+            "messages",
+            message_id,
+            "elicitation",
+        ]);
         url.query_pairs_mut().append_pair("inspect", "true");
         let state: ElicitationState = self
             .call(
@@ -610,7 +631,10 @@ impl DotsClient {
         if status_type.is_empty() {
             return Err(DotsError::Protocol("task has no status".into()));
         }
-        let mut turns = join(&self.config.codex_base, &["v2", "threads", thread_id, "turns"]);
+        let mut turns = join(
+            &self.config.codex_base,
+            &["v2", "threads", thread_id, "turns"],
+        );
         turns
             .query_pairs_mut()
             .append_pair("limit", "1")
@@ -832,11 +856,23 @@ mod tests {
     #[test]
     fn task_status_precedence() {
         use TaskStatus::*;
-        assert_eq!(derive_task_status("systemError", false, Some("completed")).unwrap(), Failed);
-        assert_eq!(derive_task_status("active", true, None).unwrap(), NeedsInput);
-        assert_eq!(derive_task_status("active", false, Some("completed")).unwrap(), InProgress);
+        assert_eq!(
+            derive_task_status("systemError", false, Some("completed")).unwrap(),
+            Failed
+        );
+        assert_eq!(
+            derive_task_status("active", true, None).unwrap(),
+            NeedsInput
+        );
+        assert_eq!(
+            derive_task_status("active", false, Some("completed")).unwrap(),
+            InProgress
+        );
         assert_eq!(derive_task_status("idle", false, None).unwrap(), Thinking);
-        assert_eq!(derive_task_status("idle", false, Some("completed")).unwrap(), Completed);
+        assert_eq!(
+            derive_task_status("idle", false, Some("completed")).unwrap(),
+            Completed
+        );
         assert!(derive_task_status("idle", false, Some("weird")).is_err());
     }
 
@@ -849,7 +885,10 @@ mod tests {
 
     #[test]
     fn error_detail_forms() {
-        assert_eq!(error_detail(&json!({"detail": "Not Found"})).as_deref(), Some("Not Found"));
+        assert_eq!(
+            error_detail(&json!({"detail": "Not Found"})).as_deref(),
+            Some("Not Found")
+        );
         assert_eq!(
             error_detail(&json!({"detail": {"message": "nope"}})).as_deref(),
             Some("nope")

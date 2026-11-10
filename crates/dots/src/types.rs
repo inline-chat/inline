@@ -340,10 +340,7 @@ impl Elicitation {
         Some(Self {
             request_id,
             thread_id,
-            status: raw
-                .get("status")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
+            status: raw.get("status").and_then(Value::as_str).map(str::to_owned),
             accept_content: binary_accept_content(params, &message),
             message,
             title,

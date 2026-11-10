@@ -16,8 +16,8 @@ pub mod realtime;
 pub mod types;
 
 pub use auth::{AccessToken, CodexAppServerTokenSource, Identity, StaticTokenSource, TokenSource};
-pub use connector::{ConnectorSettings, DotRoom, DotsConnector, SyncState, discover};
 pub use client::{DotsClient, DotsConfig, MessageQuery, SendMessage};
+pub use connector::{ConnectorSettings, DotRoom, DotsConnector, SyncState, discover};
 pub use error::{DotsError, DotsResult};
 
 /// First six characters of an id, for logs.
