@@ -1589,6 +1589,8 @@ export async function monitorInlineProvider(params: {
   }
 
   const handleInboundNow = async (input: InlineParsedInboundEvent): Promise<void> => {
+    // Look the output mode up while the turn's metadata loads; never throws.
+    void outputModes.resolve(input.chatId)
     if (abortSignal.aborted) return
     refreshLiveConfig()
     const chatId = input.chatId
@@ -3061,10 +3063,12 @@ export async function monitorInlineProvider(params: {
     // Detailed shows the turn's work in a progress message per stretch of
     // work; Friendly shows none. A tapped button edits its message in place.
     // Controls must reach the active run immediately, so they never wait on
-    // the settings reads and show no progress.
+    // the settings reads and show no progress. Others read synchronously when
+    // the early lookup has landed: an await here reorders this turn against a
+    // concurrent stop's cancellation.
     const outputMode = isInlineOutOfBandCommandText(normalizedCommandBody)
       ? "friendly"
-      : await outputModes.resolve(deliveryChatId)
+      : outputModes.peek(deliveryChatId) ?? await outputModes.resolve(deliveryChatId)
     const detailedProgress = outputMode === "detailed" && !shouldEditCallbackTargetInPlace
     const inlineStreamingMode = resolveInlineStreamingMode(account.config)
     // Detailed edits the progress message, never the answer.
@@ -4431,6 +4435,19 @@ export async function monitorInlineProvider(params: {
   const runDurableInbound = async (initialInput: InlineParsedInboundEvent): Promise<void> => {
     const allIds = initialInput.receiptIds ?? []
     if (allIds.length === 0) return handleInboundNow(initialInput)
+    // An authorized stop retires the sender's queued input before its own
+    // metadata loads, so input that flushes meanwhile cannot dispatch first.
+    // beforeDispatch repeats this for input saved while the stop was loading,
+    // and retries it if this early pass fails.
+    if (isInlineAbortRequestMessage(initialInput.msg, botUsername, meId)) {
+      try {
+        if (await isAuthorizedInlineAbortMessage(initialInput)) {
+          cancelPendingInlineVoiceMessages(initialInput, await cancelPendingInlineDebounce(initialInput))
+        }
+      } catch {
+        // beforeDispatch cancels again under the retry loop below.
+      }
+    }
     let input = initialInput
     let ids = allIds
     let attempt = 0

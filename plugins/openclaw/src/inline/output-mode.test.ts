@@ -45,6 +45,19 @@ describe("output mode resolution", () => {
     expect(await resolver.resolve(2n)).toBe("detailed")
   })
 
+  it("peeks only fresh cached modes, without waiting", async () => {
+    const state = { defaultMode: 2 }
+    const client = fakeClient(state)
+    let now = 0
+    const resolver = createInlineOutputModeResolver({ client: client as any, botUserId: BOT, now: () => now })
+    expect(resolver.peek(1n)).toBeUndefined()
+    await resolver.resolve(1n)
+    expect(resolver.peek(1n)).toBe("friendly")
+    expect(resolver.peek(2n)).toBeUndefined()
+    now += 30_000
+    expect(resolver.peek(1n)).toBeUndefined()
+  })
+
   it("caches both reads for 30 s and shares a lookup in flight", async () => {
     const state = { defaultMode: 2 }
     const client = fakeClient(state)

@@ -15879,7 +15879,9 @@ describe("inline/monitor durable inbound recovery", () => {
       ],
       chats: { "7": { kind: "group", title: "Ops" } },
       resolveControlCommandGate: ({ hasControlCommand }: any) => {
-        if (hasControlCommand && ++checks === 2) {
+        // The first check is the Stop's early cancellation pass; failing it
+        // leaves the cancellation to beforeDispatch and its retry loop.
+        if (hasControlCommand && ++checks === 1) {
           const directory = path.join(harness.stateDir, "channels/inline/inbox")
           renameSync(directory, `${directory}-backup`)
           writeFileSync(directory, "temporarily blocked inbox directory")

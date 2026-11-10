@@ -15,6 +15,8 @@ type Cached = { mode: number | undefined; fetchedAt: number }
 export type InlineOutputModeResolver = {
   /** The mode for a turn in `chatId`: the chat's override, else the bot's default, else Detailed. Never throws. */
   resolve(chatId: bigint): Promise<OutputMode>
+  /** The mode without waiting, when both reads are cached and fresh. */
+  peek(chatId: bigint): OutputMode | undefined
 }
 
 /**
@@ -126,6 +128,11 @@ export function createInlineOutputModeResolver(params: {
     async resolve(chatId) {
       const [defaultMode, override] = await Promise.all([readDefault(), readOverride(chatId)])
       return resolveOutputMode(defaultMode, override)
+    },
+    peek(chatId) {
+      const override = overrides.get(String(chatId))
+      const fresh = (cached: Cached | undefined): cached is Cached => cached !== undefined && now() - cached.fetchedAt < ttl
+      return fresh(botDefault) && fresh(override) ? resolveOutputMode(botDefault.mode, override.mode) : undefined
     },
   }
 }
