@@ -98,6 +98,7 @@ describe("Hermes tag release staging", () => {
     }
     await writeFile(path.join(packageRoot, "README.md"), "source version 1.0.0")
     await writeFile(path.join(directory, "source/.oxlintignore"), "")
+    await writeFile(path.join(directory, "source/scripts/ci/check-umbrel-hermes.sh"), "")
     await writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
       name: "@inline-chat/hermes-agent-adapter", version: "1.0.0", type: "module",
       dependencies: { "@inline-chat/realtime-sdk": "0.0.18", yaml: "2.9.0" },
