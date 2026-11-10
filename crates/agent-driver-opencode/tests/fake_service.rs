@@ -251,6 +251,14 @@ async fn command(State(fake): State<Fake>, axum::Json(body): axum::Json<Value>) 
     StatusCode::NO_CONTENT
 }
 
+async fn synthetic(
+    State(fake): State<Fake>,
+    axum::Json(body): axum::Json<Value>,
+) -> axum::Json<Value> {
+    fake.record("synthetic", body.clone());
+    axum::Json(json!({"data": {"id": body["id"], "type": "synthetic"}}))
+}
+
 async fn generate(axum::Json(body): axum::Json<Value>) -> axum::Json<Value> {
     axum::Json(
         json!({"data": {"text": format!("sampled: {}", body["prompt"].as_str().unwrap_or(""))}}),
@@ -344,6 +352,7 @@ async fn serve(folder: &std::path::Path) -> (Fake, url::Url, mpsc::UnboundedRece
         .route("/api/session/{id}/permission", get(empty_data))
         .route("/api/session/{id}/form", get(empty_data))
         .route("/api/session/{id}/prompt", post(prompt))
+        .route("/api/session/{id}/synthetic", post(synthetic))
         .route("/api/session/{id}/generate", post(generate))
         .route("/api/session/{id}/command", post(command))
         .route(
@@ -650,7 +659,7 @@ async fn a_turn_runs_end_to_end_with_approval_tools_and_catalog() {
         .send(Input {
             id: InputId::new("in-cmd").unwrap(),
             content: InputContent::text("/init for the CLI"),
-            origin: Origin::Owner { user: UserId(1) },
+            origin: Origin::Teammate { user: UserId(42) },
             delivery: Delivery::Turn,
         })
         .await
@@ -668,6 +677,23 @@ async fn a_turn_runs_end_to_end_with_approval_tools_and_catalog() {
             .1;
         assert_eq!(command["name"], "init");
         assert_eq!(command["text"], "for the CLI");
+        let context_index = requests
+            .iter()
+            .position(|(route, _)| route == "synthetic")
+            .unwrap();
+        let command_index = requests
+            .iter()
+            .position(|(route, _)| route == "command")
+            .unwrap();
+        assert!(context_index < command_index);
+        let context = &requests[context_index].1;
+        assert_eq!(context["resume"], false);
+        let text = context["text"].as_str().unwrap();
+        assert!(text.contains("Inline user 42 (a teammate, not the owner)"));
+        assert!(
+            !text.contains("for the CLI"),
+            "command arguments are not copied into context"
+        );
         assert_eq!(
             requests
                 .iter()

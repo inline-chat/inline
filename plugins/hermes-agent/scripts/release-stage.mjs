@@ -9,8 +9,8 @@ import { parseReleaseTag } from "../../../scripts/ci/release-tag.mjs"
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const repoRoot = path.resolve(packageRoot, "..", "..")
 const { mode, outputDir: requestedOutputDir, candidateSdkTarball, candidateProtocolTarball, verifySourceBundle, version, tag, sha } = parseArgs(process.argv.slice(2))
-if (verifySourceBundle && (candidateSdkTarball || candidateProtocolTarball)) {
-  throw new Error("--verify-source-bundle requires registry dependencies; candidate tarball overrides are not allowed")
+if (version && (candidateSdkTarball || candidateProtocolTarball)) {
+  throw new Error("Tagged releases require registry dependencies; candidate tarball overrides are not allowed")
 }
 const sourceBundle = path.join(packageRoot, "plugin", "inline", "sidecar", "index.mjs")
 if (verifySourceBundle) {
@@ -59,7 +59,8 @@ for (const entry of stageEntries) {
   })
 }
 await cp(path.join(repoRoot, ".oxlintignore"), path.join(stageRoot, ".oxlintignore"))
-// The package tests check the Umbrel smoke script against the packaged plugin files.
+// The package's artifact contract checks the repository's Umbrel copy list.
+// Keep that input in the isolated test tree without adding it to the tarball.
 await mkdir(path.join(stageRoot, "scripts", "ci"), { recursive: true })
 await cp(
   path.join(repoRoot, "scripts", "ci", "check-umbrel-hermes.sh"),
@@ -90,7 +91,8 @@ if (candidateSdkTarball || candidateProtocolTarball) {
   const installedSdk = JSON.parse(await readFile(path.join(stagePackageRoot, "node_modules", "@inline-chat", "realtime-sdk", "package.json"), "utf8"))
   const installedProtocol = JSON.parse(await readFile(path.join(stagePackageRoot, "node_modules", "@inline-chat", "protocol", "package.json"), "utf8"))
   if (installedSdk.version !== packageJson.dependencies["@inline-chat/realtime-sdk"] ||
-      installedProtocol.version !== JSON.parse(await readFile(path.join(repoRoot, "packages", "protocol", "package.json"), "utf8")).version) {
+      installedProtocol.version !== JSON.parse(await readFile(path.join(repoRoot, "packages", "protocol", "package.json"), "utf8")).version ||
+      installedSdk.dependencies?.["@inline-chat/protocol"] !== installedProtocol.version) {
     throw new Error("candidate dependency versions do not match the release manifest")
   }
 }
@@ -102,9 +104,9 @@ execFileSync("bun", ["run", "check"], {
 if (verifySourceBundle) {
   const builtBundle = await readFile(path.join(stagePackageRoot, "plugin", "inline", "sidecar", "index.mjs"))
   if (!builtBundle.equals(await readFile(sourceBundle))) {
-    throw new Error("Hermes source sidecar differs from the isolated registry-dependency build; regenerate the tracked source bundle from release staging")
+    throw new Error("Hermes source sidecar differs from the isolated dependency build; regenerate the tracked source bundle from release staging")
   }
-  console.log(`Hermes source bundle verified: sha256:${createHash("sha256").update(builtBundle).digest("hex")}`)
+  console.log(`Hermes source bundle verified (${candidateSdkTarball ? "candidate" : "registry"} dependencies): sha256:${createHash("sha256").update(builtBundle).digest("hex")}`)
 }
 
 if (version) {

@@ -1,12 +1,13 @@
-import { describe, expect, test } from "bun:test"
-import { and, eq } from "drizzle-orm"
-import { MessageEntity_Type as T, type InputPeer, type MessageEntities } from "@inline-chat/protocol/core"
+import { describe, expect, spyOn, test } from "bun:test"
+import { and, eq, sql } from "drizzle-orm"
+import { MessageEntity_Type as T, type InputPeer, type MessageEntities, type Update } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import {
   ACTIVITY_KIND_MENTION,
   ACTIVITY_KIND_REACTION,
   ACTIVITY_KIND_REPLY,
   activityItems,
+  messages,
   members,
   updates,
   UpdateBucket,
@@ -21,6 +22,7 @@ import { deleteReaction } from "@in/server/functions/messages.deleteReaction"
 import { getChatHistory } from "@in/server/functions/messages.getChatHistory"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
+import { RealtimeUpdates } from "@in/server/realtime/message"
 import { listUnreadActivity, planMessageActivity, readActivity } from "@in/server/modules/activityItems"
 import { setupTestLifecycle, testUtils } from "../setup"
 
@@ -87,6 +89,34 @@ async function userBucketActivityUpdates(userId: number) {
 const counts = (update: { unreadMentionsCount: number; unreadReactionsCount: number } | undefined) =>
   update ? [update.unreadMentionsCount, update.unreadReactionsCount] : undefined
 
+async function holdUserSequence(userId: number) {
+  const entered = Promise.withResolvers<void>()
+  const released = Promise.withResolvers<void>()
+  const transaction = db.transaction(async (tx) => {
+    // This blocks sequence allocation but permits activity's foreign-key KEY SHARE lock.
+    await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for("no key update")
+    entered.resolve()
+    await released.promise
+  })
+  await entered.promise
+  return { transaction, release: released.resolve }
+}
+
+async function waitForActivityMutationWaiters(minimum: number) {
+  const deadline = Date.now() + 5_000
+  while (Date.now() < deadline) {
+    const rows = await db.execute<{ count: number }>(sql`
+      SELECT count(*)::int AS count FROM pg_stat_activity
+      WHERE datname = current_database() AND pid <> pg_backend_pid()
+        AND wait_event_type = 'Lock'
+        AND (query ILIKE '%users%' OR query ILIKE '%chats%')
+    `)
+    if (Number(rows[0]?.count ?? 0) >= minimum) return
+    await Bun.sleep(5)
+  }
+  throw new Error(`Timed out waiting for ${minimum} activity mutation lock waiters`)
+}
+
 describe("planMessageActivity", () => {
   const base = {
     chatType: "thread" as const,
@@ -120,6 +150,109 @@ describe("planMessageActivity", () => {
 
 describe("activity items", () => {
   setupTestLifecycle()
+
+  test("concurrent mention creation publishes the count after both mutations", async () => {
+    const { alice, bob, carol, chat, peer, as } = await threadFixture()
+    const hold = await holdUserSequence(bob.id)
+    const sends = [
+      send(peer, as(alice), { message: "@bob one", entities: mention(bob.id) }),
+      send(peer, as(carol), { message: "@bob two", entities: mention(bob.id) }),
+    ]
+    try {
+      await waitForActivityMutationWaiters(2)
+    } finally {
+      hold.release()
+      await hold.transaction
+      await Promise.allSettled(sends)
+    }
+    await Promise.all(sends)
+    expect((await rows(chat.id, bob.id)).filter((row) => row.readAt === null)).toHaveLength(2)
+    expect(counts((await userBucketActivityUpdates(bob.id)).at(-1))).toEqual([2, 0])
+  })
+
+  test("concurrent reads cannot leave a stale nonzero durable count", async () => {
+    const { alice, bob, chat, peer, as } = await threadFixture()
+    await send(peer, as(alice), { message: "@bob one", entities: mention(bob.id) })
+    await send(peer, as(alice), { message: "@bob two", entities: mention(bob.id) })
+    const hold = await holdUserSequence(bob.id)
+    const reads = [1, 2].map((id) => readActivity({ userId: bob.id, chat, messageIds: [id] }))
+    try {
+      await waitForActivityMutationWaiters(2)
+    } finally {
+      hold.release()
+      await hold.transaction
+      await Promise.allSettled(reads)
+    }
+    await Promise.all(reads)
+    expect((await rows(chat.id, bob.id)).every((row) => row.readAt !== null)).toBe(true)
+    expect(counts((await userBucketActivityUpdates(bob.id)).at(-1))).toEqual([0, 0])
+  })
+
+  test("a recipient reading during first message publication cannot regain unread activity afterward", async () => {
+    const { alice, bob, chat, peer, as } = await threadFixture()
+    const originalPush = RealtimeUpdates.pushToUser.bind(RealtimeUpdates)
+    let unreadAtFirstPublication: number | undefined
+    const liveActivity: Update[] = []
+    const push = spyOn(RealtimeUpdates, "pushToUser").mockImplementation(async (userId, updates, options) => {
+      if (userId === bob.id) liveActivity.push(...updates.filter((update) => update.update.oneofKind === "unreadActivity"))
+      if (userId === bob.id && updates.some((update) => update.update.oneofKind === "newMessage")) {
+        unreadAtFirstPublication = (await rows(chat.id, bob.id)).filter((row) => row.readAt === null).length
+        await readActivity({ userId: bob.id, chat, messageIds: [1] })
+      }
+      return await originalPush(userId, updates, options)
+    })
+    try {
+      await send(peer, as(alice), { message: "@bob", entities: mention(bob.id) })
+      expect(unreadAtFirstPublication).toBe(1)
+      expect((await rows(chat.id, bob.id)).map((row) => row.readAt !== null)).toEqual([true])
+      expect(counts((await userBucketActivityUpdates(bob.id)).at(-1))).toEqual([0, 0])
+      // The create hint is sent after the fast read hint. Both carry their
+      // durable user sequence, so the client can reject the late older count.
+      expect(liveActivity).toHaveLength(2)
+      expect(liveActivity.every((update) => update.seq !== undefined && update.seq > 0 && update.date !== undefined)).toBe(true)
+      expect(liveActivity[0]!.seq).toBeGreaterThan(liveActivity[1]!.seq!)
+    } finally {
+      push.mockRestore()
+    }
+  })
+
+  test("activity persistence failure rolls back the message and its chat update", async () => {
+    const { alice, bob, chat, peer, as } = await threadFixture()
+    await db.execute(sql`
+      CREATE FUNCTION reject_activity_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'activity write fault'; END $$
+    `)
+    try {
+      await db.execute(sql`
+        CREATE TRIGGER reject_activity_insert BEFORE INSERT ON activity_items
+        FOR EACH ROW EXECUTE FUNCTION reject_activity_insert()
+      `)
+      await expect(sendMessage({ peerId: peer, message: "@bob", entities: mention(bob.id) }, as(alice))).rejects.toThrow()
+      expect(await db.select().from(messages).where(eq(messages.chatId, chat.id))).toHaveLength(0)
+      expect(await rows(chat.id, bob.id)).toHaveLength(0)
+      expect(await db.select().from(updates).where(and(eq(updates.bucket, UpdateBucket.Chat), eq(updates.entityId, chat.id)))).toHaveLength(0)
+    } finally {
+      await db.execute(sql`DROP TRIGGER IF EXISTS reject_activity_insert ON activity_items`)
+      await db.execute(sql`DROP FUNCTION reject_activity_insert()`)
+    }
+  })
+
+  test("competing read, reaction and deletion leave the final durable counters authoritative", async () => {
+    const { alice, bob, chat, peer, as } = await threadFixture()
+    await send(peer, as(bob), { message: "my message" })
+    await send(peer, as(alice), { message: "@bob", entities: mention(bob.id) })
+    const mutations = await Promise.allSettled([
+      readActivity({ userId: bob.id, chat, allMentions: true, allReactions: true, maxId: 2 }),
+      addReaction({ emoji: "👍", messageId: 1n, peer }, as(alice)),
+      deleteMessage({ peer, messageIds: [2n] }, as(alice)),
+    ])
+    for (const mutation of mutations) expect(mutation.status).toBe("fulfilled")
+    const unread = (await rows(chat.id, bob.id)).filter((row) => row.readAt === null)
+    expect(counts((await userBucketActivityUpdates(bob.id)).at(-1))).toEqual([
+      unread.filter((row) => row.kind !== ACTIVITY_KIND_REACTION).length,
+      unread.filter((row) => row.kind === ACTIVITY_KIND_REACTION).length,
+    ])
+  })
 
   test("a mention and a reply create items, durable updates and dialog counts", async () => {
     const { alice, bob, carol, chat, peer, as } = await threadFixture()

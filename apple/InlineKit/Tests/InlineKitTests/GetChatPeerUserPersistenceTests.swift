@@ -5,6 +5,47 @@ import Testing
 
 @Suite("Get chat peer user persistence")
 struct GetChatPeerUserPersistenceTests {
+  @Test("a full profile clears a previously shared time zone after access is revoked")
+  func clearsRevokedTimeZone() throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+
+    try queue.write { db in
+      var existing = User(id: 202, email: nil, firstName: "Peer")
+      existing.timeZone = "Asia/Tokyo"
+      try existing.insert(db)
+      let redacted = InlineProtocol.User.with {
+        $0.id = 202
+        $0.firstName = "Peer"
+        $0.min = false
+      }
+
+      #expect(try GetChatTransaction.repairPeerProfilePhoto(redacted, in: db))
+      #expect(try User.fetchOne(db, id: 202)?.timeZone == nil)
+      #expect(try GetChatTransaction.repairPeerProfilePhoto(redacted, in: db) == false)
+    }
+  }
+
+  @Test("minimal profile omission retains the cached time zone")
+  func minimalOmissionKeepsTimeZone() throws {
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
+    _ = try AppDatabase(queue)
+
+    try queue.write { db in
+      var existing = User(id: 203, email: nil, firstName: "Peer")
+      existing.timeZone = "Asia/Tokyo"
+      try existing.insert(db)
+      let minimal = InlineProtocol.User.with {
+        $0.id = 203
+        $0.firstName = "Peer"
+        $0.min = true
+      }
+
+      #expect(try GetChatTransaction.repairPeerProfilePhoto(minimal, in: db) == false)
+      #expect(try User.fetchOne(db, id: 203)?.timeZone == "Asia/Tokyo")
+    }
+  }
+
   @Test("peer profile photo repairs the existing user")
   func repairsExistingProfilePhoto() throws {
     let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))

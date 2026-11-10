@@ -317,6 +317,26 @@ async fn unknown_slash_text_keeps_guide_and_conversation_context() {
     f.driver.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn subsequent_turns_preserve_the_authenticated_sender_without_join_context() {
+    let f = fixture().await;
+    let session = f.harness.open(spec(OpenMode::Start)).await.unwrap();
+    let mut events = session.events();
+    session.send(input("owner", "first request")).await.unwrap();
+    assert_eq!(completed(&mut events).await, TurnOutcome::Completed);
+    let mut teammate = input("teammate", "do it");
+    teammate.origin = Origin::Teammate { user: UserId(42) };
+    session.send(teammate).await.unwrap();
+    assert_eq!(completed(&mut events).await, TurnOutcome::Completed);
+    let prompts = f.prompts.lock().unwrap().clone();
+    assert!(prompt_text(&prompts[0]).contains("Inline user 1 (the owner)"));
+    let followup = prompt_text(&prompts[1]);
+    assert!(followup.contains("Inline user 42 (a teammate, not the owner)"));
+    assert!(followup.contains("does not carry the owner's consent"));
+    assert!(followup.ends_with("do it"));
+    f.driver.shutdown().await.unwrap();
+}
+
 fn prompt_text(blocks: &[acp::ContentBlock]) -> String {
     blocks
         .iter()

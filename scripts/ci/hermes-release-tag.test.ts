@@ -33,7 +33,9 @@ if (program === 'npm' && args[0] === 'install') {
     for (const [name, version] of [['realtime-sdk', '0.0.18'], ['protocol', '0.0.15']]) {
       const target = path.join('node_modules', '@inline-chat', name)
       fs.mkdirSync(target, { recursive: true })
-      fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify({ version }))
+      fs.writeFileSync(path.join(target, 'package.json'), JSON.stringify({ version,
+        ...(name === 'realtime-sdk' ? { dependencies: { '@inline-chat/protocol': process.env.HERMES_STAGE_BAD_PROTOCOL_PIN ? '0.0.14' : '0.0.15' } } : {}),
+      }))
     }
   }
 } else if (program === 'bun') {
@@ -43,6 +45,7 @@ if (program === 'npm' && args[0] === 'install') {
     assert(plugin.includes('version: 1.0.0\n'))
     assert(probe.includes('inline-hermes-agent-adapter/1.0.0'))
     assert.equal(fs.readFileSync('README.md', 'utf8'), 'source version 1.0.0')
+    assert.equal(fs.readFileSync('../../scripts/ci/check-umbrel-hermes.sh', 'utf8'), 'umbrel-copy-list-fixture')
     assert(!manifest.dependencies['@inline-chat/realtime-sdk'].startsWith('file:'))
     if (process.env.HERMES_STAGE_FAIL_CHECK) process.exit(12)
   } else {
@@ -93,12 +96,12 @@ describe("Hermes tag release staging", () => {
     await mkdir(path.join(directory, "source/scripts/ci"), { recursive: true })
     await cp(path.join(root, "plugins/hermes-agent/scripts/release-stage.mjs"), script)
     await cp(path.join(root, "scripts/ci/release-tag.mjs"), path.join(directory, "source/scripts/ci/release-tag.mjs"))
+    await writeFile(path.join(directory, "source/scripts/ci/check-umbrel-hermes.sh"), "umbrel-copy-list-fixture")
     for (const name of ["LICENSE", "RELEASE.md", "tsconfig.json", "vitest.config.ts"]) {
       await writeFile(path.join(packageRoot, name), "fixture")
     }
     await writeFile(path.join(packageRoot, "README.md"), "source version 1.0.0")
     await writeFile(path.join(directory, "source/.oxlintignore"), "")
-    await writeFile(path.join(directory, "source/scripts/ci/check-umbrel-hermes.sh"), "")
     await writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
       name: "@inline-chat/hermes-agent-adapter", version: "1.0.0", type: "module",
       dependencies: { "@inline-chat/realtime-sdk": "0.0.18", yaml: "2.9.0" },
@@ -157,7 +160,7 @@ describe("Hermes tag release staging", () => {
       await rm(calls, { force: true })
       await rm(outputDir, { recursive: true, force: true })
       const args = candidate
-        ? ["--candidate-sdk-tarball", "/fixture/sdk.tgz", "--candidate-protocol-tarball", "/fixture/protocol.tgz"]
+        ? ["--verify-source-bundle", "--candidate-sdk-tarball", "/fixture/sdk.tgz", "--candidate-protocol-tarball", "/fixture/protocol.tgz"]
         : ["--verify-source-bundle"]
       const result = stage(["--prepare-only", ...args])
       expect(result.code, result.error).toBe(0)
@@ -177,8 +180,17 @@ describe("Hermes tag release staging", () => {
       ["--version", version, "--tag", tag, "--sha", "short"],
       ["--version", "0.0.23-alpha.01", "--tag", "hermes-agent-v0.0.23-alpha.01", "--sha", sha],
       [...releaseArgs, "--version", version], ["--version"],
+      [...releaseArgs, "--candidate-sdk-tarball", "/fixture/sdk.tgz", "--candidate-protocol-tarball", "/fixture/protocol.tgz"],
     ]) expect(stage(args).code).not.toBe(0)
     expect(await Bun.file(calls).exists()).toBe(false)
+  })
+
+  it("rejects a candidate SDK that pins a different protocol before checks or packing", async () => {
+    const result = stage(["--prepare-only", "--candidate-sdk-tarball", "/fixture/sdk.tgz", "--candidate-protocol-tarball", "/fixture/protocol.tgz"],
+      { HERMES_STAGE_BAD_PROTOCOL_PIN: "1" })
+    expect(result.code).not.toBe(0)
+    expect(result.error).toContain("candidate dependency versions do not match")
+    expect((await operations()).map(({ program, args }) => `${program} ${args[0]}`)).toEqual(["npm install"])
   })
 
   it("fails before stamping/packing when original source checks or bundle comparison fail", async () => {

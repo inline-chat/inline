@@ -84,7 +84,7 @@ import {
 import { encodeMessageAttachment } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { VoiceTranscriptionModule } from "@in/server/modules/voiceTranscription"
 import { applicationBackgroundWork } from "@in/server/lifecycle/backgroundWork"
-import { recordMessageActivity } from "@in/server/modules/activityItems"
+import { pushChanges as pushActivityChanges, recordMessageActivity, type ActivityChanges } from "@in/server/modules/activityItems"
 import {
   DIALOG_FOLLOWING,
   getFollowingDialogUserIds,
@@ -497,6 +497,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   let newMessage: DbMessage & { blockContent?: BlockContent | null }
   let update: UpdateSeqAndDate
   let agentContextUpdate: UpdateSeqAndDate | undefined
+  let activityChanges: ActivityChanges = new Map()
   try {
     // The first history snapshot must see the message and its initial attachments together.
     ;({
@@ -552,6 +553,17 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
           await tx.insert(messageAttachments).values(attachmentRows)
         }
       }
+      activityChanges = await recordMessageActivity(tx, {
+        chat: inserted.chat,
+        message: {
+          messageId: inserted.message.messageId,
+          fromId: inserted.message.fromId,
+          countsAsUnread: inserted.message.countsAsUnread,
+          isSystemMessage: inserted.message.systemMessageEncrypted !== null,
+        },
+        mentionedUserIds,
+        repliedToMessageId: replyToMsgIdNumber ?? undefined,
+      })
       return inserted
     }))
   } catch (error) {
@@ -712,16 +724,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   })
 
   // After the new-message push so recipients see the message before its activity badge.
-  const activityWork = recordSentMessageActivity({
-    chat,
-    message: newMessage,
-    mentionedUserIds,
-    replyToMessageId: replyToMsgIdNumber ?? undefined,
-    recipientUserIds: updateGroup.userIds,
-  }).catch((error) => {
-    log.error("Failed to record message activity", { error, chatId, messageId: newMessage.messageId })
-  })
-  applicationBackgroundWork.track(activityWork)
+  pushActivityChanges(activityChanges)
 
   // Start after the new-message update is pushed so attachment updates cannot race ahead of the message.
   if (previewRoutes.length > 0) {
@@ -954,32 +957,6 @@ async function scheduleThreadTitleGenerationWithMessageAttachments(input: {
     entities: input.entities,
     attachments,
     currentUserId: input.currentUserId,
-  })
-}
-
-async function recordSentMessageActivity(input: {
-  chat: DbChat
-  message: { messageId: number; fromId: number; countsAsUnread: boolean; systemMessage?: unknown }
-  mentionedUserIds: ReadonlySet<number>
-  replyToMessageId: number | undefined
-  recipientUserIds: number[]
-}): Promise<void> {
-  if (input.chat.type === "private") return
-  const repliedToUserId =
-    input.replyToMessageId === undefined
-      ? undefined
-      : await MessageModel.getSenderIdForMessage({ chatId: input.chat.id, messageId: input.replyToMessageId })
-  await recordMessageActivity({
-    chat: input.chat,
-    message: {
-      messageId: input.message.messageId,
-      fromId: input.message.fromId,
-      countsAsUnread: input.message.countsAsUnread,
-      isSystemMessage: input.message.systemMessage != null,
-    },
-    mentionedUserIds: input.mentionedUserIds,
-    repliedToUserId,
-    recipientUserIds: input.recipientUserIds,
   })
 }
 

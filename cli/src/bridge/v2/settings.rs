@@ -783,6 +783,17 @@ mod tests {
     }
 
     #[test]
+    fn a_model_scoped_weekly_limit_reads_with_its_model_name() {
+        let window = DriverUsageWindow {
+            label: "seven_day_fable".to_owned(),
+            used_percent: 37,
+            window_minutes: Some(10_080),
+            resets_at: None,
+        };
+        assert_eq!(window_title(&window, true), "Weekly · Fable");
+    }
+
+    #[test]
     fn usage_windows_with_equal_readings_keep_unique_ids() {
         let catalog = catalog();
         let settings = SettingsChange::default();

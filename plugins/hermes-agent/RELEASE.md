@@ -41,6 +41,7 @@ Expected tarball shape:
 - `plugin/inline/sidecar/index.mjs`
 - `plugin/inline/telemetry.py`
 - `plugin/inline/tools.py`
+- `plugin/inline/widgets.py`
 
 ## Host Compatibility and Message Flow
 
@@ -69,14 +70,22 @@ The publish workflow repeats host admission against the exact immutable release
 tarball before npm trusted publishing. Release checks use the adapter's pinned
 registry dependencies; an unrelated workspace prerelease is not substituted.
 
-Catalog source also carries the bundled sidecar. Source CI and npm publication
-run `release-stage.mjs --verify-source-bundle` to compare that tracked bundle with
-the isolated build from pinned registry dependencies. Candidate dependency
-overrides cannot be combined with this check. To regenerate after an SDK or
+Catalog source also carries the bundled sidecar. Registry-only checks and npm
+publication run `release-stage.mjs --verify-source-bundle` to compare it with
+the isolated build from pinned registry dependencies. Tagged release preparation
+rejects candidate dependency overrides. To regenerate after an SDK or
 sidecar change, run `release:stage`, copy the sidecar from the reported stage
 into `plugin/inline/sidecar/index.mjs`, then rerun staging with
 `--verify-source-bundle` and commit the result. A workspace build is not the
 canonical catalog artifact.
+
+Before the dependency releases are published, source CI and candidate Umbrel
+checks use `node scripts/ci/prepare-hermes-candidate.mjs <artifact-directory>`.
+When the adapter pins the workspace SDK version, this builds and packs the SDK
+and its exact protocol dependency, installs those tarballs in the isolated tree,
+and compares the tracked sidecar. The packed adapter retains registry dependency
+specifications. This proves candidate consistency; tagged publication still
+uses only registry dependencies and requires protocol, then SDK, publication.
 
 These checks do not establish live provider or production messaging health.
 The following live checks remain useful before broader rollout.

@@ -381,6 +381,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   private var historyRefetchTask: Task<Void, Never>?
   private var lastHistoryRefetchTime: CFTimeInterval = 0
   private let historyRefetchCooldown: CFTimeInterval = 1.0
+  private let peerProfileRefresh = PeerProfileRefresh()
   private var didStartChatObservation = false
   private let log = Log.scoped("FullChat")
 
@@ -503,11 +504,14 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
   private func fetchPeerUserIfNeeded(peer: Peer, cachedUser: User?) async {
     guard peer.asUserId() != nil else { return }
-    guard cachedUser?.needsDisplayNameFetch ?? true else { return }
+    guard let account = try? Auth.shared.handle.beginAccountMutation() else { return }
 
     do {
-      try Task.checkCancellation()
-      _ = try await Api.realtime.send(.getChat(peer: peer))
+      // A cached name says nothing about whether its time zone is still shared.
+      // Keep the first frame local, then refresh the full profile at a bounded rate.
+      try await peerProfileRefresh.refresh(account: account, force: cachedUser?.needsDisplayNameFetch ?? true) {
+        _ = try await Api.realtime.send(.getChat(peer: peer), expectedAccount: account)
+      }
     } catch {
       if Self.isCancellation(error) { return }
       log.error("Failed to refetch user info", error: error)

@@ -1,5 +1,8 @@
 import os from "node:os"
 import path from "node:path"
+import { writeFile } from "node:fs/promises"
+import { renameSync, unlinkSync, writeFileSync } from "node:fs"
+import { InlineInboundInbox } from "./inbound-inbox.js"
 import { describe, expect, it, vi } from "vitest"
 import {
   INLINE_ACTION_CALLBACK_DATA_MAX_BYTES,
@@ -67,6 +70,7 @@ vi.mock("openclaw/plugin-sdk/model-session-runtime", async () => {
 })
 
 type MonitorHarness = {
+  stateDir: string
   monitorInlineProvider: typeof import("./monitor")["monitorInlineProvider"]
   agentEventListenerCount: () => number
   calls: {
@@ -93,6 +97,7 @@ type MonitorHarness = {
 }
 
 type MonitorSetup = {
+  stateDir?: string
   eventClient?: import("@inline-chat/realtime-sdk").InlineSdkClient
   me?: {
     userId?: bigint
@@ -467,7 +472,7 @@ async function waitForMockPromise(mock: ReturnType<typeof vi.fn>, callIndex = 0)
 
 async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness> {
   vi.resetModules()
-  const stateDir = path.join(
+  const stateDir = setup.stateDir ?? path.join(
     os.tmpdir(),
     "openclaw-inline-tests",
     `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -1240,6 +1245,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   const routeMod = await import("./thread-routes")
   routeMod.clearInlineReplyThreadRouteCacheForTest()
   return {
+    stateDir,
     monitorInlineProvider: mod.monitorInlineProvider,
     agentEventListenerCount: () => agentEventListeners.size,
     calls: {
@@ -2896,7 +2902,7 @@ describe("inline/monitor", () => {
     }
   })
 
-  it("dispatches stop requests without waiting for an active inbound run", async () => {
+  it.each(["/stop", "/approve request-1 allow-once"])("dispatches %s without waiting for an active inbound run", async (command) => {
     let releaseFirstRun!: () => void
     const firstRunBlocked = new Promise<void>((resolve) => {
       releaseFirstRun = resolve
@@ -2922,7 +2928,7 @@ describe("inline/monitor", () => {
             id: 1002n,
             date: 1_700_000_001n,
             fromId: 42n,
-            message: "/stop",
+            message: command,
           },
         },
       ],
@@ -2949,8 +2955,8 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: "/stop",
-          CommandBody: "/stop",
+          Body: command,
+          CommandBody: command,
           MessageSid: "1002",
         }),
       )
@@ -5339,7 +5345,7 @@ describe("inline/monitor", () => {
   })
 
   it("fails closed when a reply-thread child's parent kind cannot be resolved", async () => {
-    const runtimeLog = vi.fn()
+    const runtimeError = vi.fn()
     const harness = await setupMonitorHarness({
       events: [{ kind: "message.new", chatId: 8912n, message: {
         id: 2n, date: 1_700_000_016n, fromId: 51n, message: "do not guess my policy",
@@ -5352,39 +5358,46 @@ describe("inline/monitor", () => {
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
       account: buildAccount({ dmPolicy: "disabled", groupPolicy: "open" }),
-      runtime: { log: runtimeLog, error: vi.fn() } as any,
+      runtime: { log: vi.fn(), error: runtimeError } as any,
       abortSignal: new AbortController().signal,
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
-    await waitFor(() => expect(runtimeLog).toHaveBeenCalledWith(
-      expect.stringContaining("reply-thread parent unavailable"),
+    await waitFor(() => expect(runtimeError).toHaveBeenCalledWith(
+      expect.stringContaining("reply-thread parent metadata is unavailable"),
     ))
     expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
     await handle.stop()
   })
 
-  it("drops an inbound child when its own chat metadata is unavailable", async () => {
-    const runtimeLog = vi.fn()
+  it("retains an inbound request through unavailable chat metadata and retries without a new event", async () => {
+    const runtimeError = vi.fn()
+    const getChatErrors: Record<string, string> = { "8912": "metadata unavailable" }
     const harness = await setupMonitorHarness({
       events: [{ kind: "message.new", chatId: 8912n, message: {
         id: 2n, date: 1_700_000_016n, fromId: 51n, message: "do not guess my policy",
       } }],
-      chats: {},
-      getChatErrors: { "8912": "metadata unavailable" },
+      chats: { "8912": { kind: "direct", title: "Alice", peerUserId: 51n } },
+      getChatErrors,
     })
     const handle = await harness.monitorInlineProvider({
       cfg: {} as any,
-      account: buildAccount({ dmPolicy: "disabled", groupPolicy: "open" }),
-      runtime: { log: runtimeLog, error: vi.fn() } as any,
+      account: buildAccount({ dmPolicy: "open", groupPolicy: "open" }),
+      runtime: { log: vi.fn(), error: runtimeError } as any,
       abortSignal: new AbortController().signal,
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     })
-    await waitFor(() => expect(runtimeLog).toHaveBeenCalledWith(
-      expect.stringContaining("chat metadata unavailable"),
+    await waitFor(() => expect(runtimeError).toHaveBeenCalledWith(
+      expect.stringContaining("saved input dispatch failed: Error: metadata unavailable"),
     ))
     expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
     expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+    const inbox = await InlineInboundInbox.open(harness.stateDir, {
+      baseUrl: "https://api.inline.chat", accountId: "default", botUserId: 777n,
+    })
+    expect(inbox.entries().map((entry) => entry.state)).toEqual(["pending"])
+    delete getChatErrors["8912"]
+    await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
     await handle.stop()
   })
 
@@ -15931,6 +15944,344 @@ it("the real SDK delivers a different chat through the monitor while a reaction 
     await handle.stop()
     await client.close()
   }
+})
+
+describe("inline/monitor durable inbound recovery", () => {
+  const identity = { baseUrl: "https://api.inline.chat", accountId: "default", botUserId: 777n }
+  const request = { chatId: 7n, msg: { id: 991n, chatId: 7n, date: 1_700_000_016n, fromId: 42n, message: "saved request" } }
+  const start = (harness: MonitorHarness, config: Parameters<typeof buildAccount>[0] = {}) => harness.monitorInlineProvider({
+    cfg: {} as any,
+    account: buildAccount({ dmPolicy: "open", debounceMs: 0, ...config }),
+    runtime: { log: vi.fn(), error: vi.fn() } as any,
+    abortSignal: new AbortController().signal,
+    log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  })
+
+  it("recovers accepted pending input even when cold boot drops old unaccepted server events", async () => {
+    const harness = await setupMonitorHarness({ events: [], chats: { "7": { kind: "direct", title: "Alice", peerUserId: 42n } } })
+    const inbox = await InlineInboundInbox.open(harness.stateDir, identity)
+    await inbox.accept("message:7:991", request)
+    const handle = await start(harness, { dropPendingOnColdBoot: true })
+    try {
+      await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+      await handle.done
+      expect((await InlineInboundInbox.open(harness.stateDir, identity)).state("message:7:991")).toBe("completed")
+    } finally { await handle.stop() }
+  })
+
+  it("never repeats an uncertain action and emits one recovery notice across restarts", async () => {
+    const harness = await setupMonitorHarness({ events: [], chats: {} })
+    const inbox = await InlineInboundInbox.open(harness.stateDir, identity)
+    await inbox.accept("action:123", { ...request, callbackActionEvent: {
+      interactionId: 123n, actionId: "approve", targetMessageId: request.msg.id, data: new Uint8Array([1, 2]),
+    } })
+    await inbox.beginDispatch(["action:123"])
+    const handle = await start(harness)
+    await handle.done
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.answerMessageAction).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: 7n, replyToMsgId: 991n, text: expect.stringContaining("Check its result"),
+    }))
+    await handle.stop()
+    const restarted = await setupMonitorHarness({ stateDir: harness.stateDir, events: [], chats: {} })
+    const second = await start(restarted)
+    try {
+      await second.done
+      expect(restarted.calls.dispatchReply).not.toHaveBeenCalled()
+      expect(restarted.calls.sendMessage).not.toHaveBeenCalled()
+      expect((await InlineInboundInbox.open(harness.stateDir, identity)).state("action:123")).toBe("completed")
+    } finally { await second.stop() }
+  })
+
+  it("retries a failed recovery notice with the same send identity before retiring custody", async () => {
+    const harness = await setupMonitorHarness({ events: [], chats: {}, sendMessageErrors: [new Error("temporary send failure")] })
+    const inbox = await InlineInboundInbox.open(harness.stateDir, identity)
+    await inbox.accept("action:123", { ...request, callbackActionEvent: {
+      interactionId: 123n, actionId: "approve", targetMessageId: request.msg.id, data: new Uint8Array([1]),
+    } })
+    await inbox.beginDispatch(["action:123"])
+    const handle = await start(harness)
+    await handle.done
+    expect((await InlineInboundInbox.open(harness.stateDir, identity)).needsRecoveryNotice("action:123")).toBe(true)
+    const randomId = harness.calls.sendMessage.mock.calls[0]?.[0]?.randomId
+    expect(typeof randomId).toBe("bigint")
+    await handle.stop()
+    const restarted = await setupMonitorHarness({ stateDir: harness.stateDir, events: [], chats: {} })
+    const second = await start(restarted)
+    try {
+      await second.done
+      expect(restarted.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ randomId }))
+      const recovered = await InlineInboundInbox.open(harness.stateDir, identity)
+      expect(recovered.state("action:123")).toBe("completed")
+      expect(recovered.entries()).toEqual([])
+      expect(restarted.calls.answerMessageAction).not.toHaveBeenCalled()
+    } finally { await second.stop() }
+  })
+
+  it("uses a new recovery notice identity when confirmation was lost and the custody group grows", async () => {
+    const harness = await setupMonitorHarness({ events: [], chats: {}, sendMessageErrors: [new Error("send confirmation lost")] })
+    const inbox = await InlineInboundInbox.open(harness.stateDir, identity)
+    await inbox.accept("message:first", request)
+    await inbox.beginDispatch(["message:first"])
+    const first = await start(harness)
+    await first.done
+    const oldNotice = harness.calls.sendMessage.mock.calls[0]?.[0]
+    await first.stop()
+    const saved = await InlineInboundInbox.open(harness.stateDir, identity)
+    expect(saved.state("message:first")).toBe("dispatching")
+    await saved.accept("message:second", { ...request, msg: { ...request.msg, id: 992n } })
+    await saved.beginDispatch(["message:second"])
+    const restarted = await setupMonitorHarness({ stateDir: harness.stateDir, events: [], chats: {} })
+    const second = await start(restarted)
+    try {
+      await second.done
+      expect(restarted.calls.sendMessage).toHaveBeenCalledTimes(1)
+      const newNotice = restarted.calls.sendMessage.mock.calls[0]?.[0]
+      expect(newNotice.randomId).not.toBe(oldNotice.randomId)
+      expect(newNotice.text).toContain("2 earlier requests")
+      const recovered = await InlineInboundInbox.open(harness.stateDir, identity)
+      expect(recovered.state("message:first")).toBe("completed")
+      expect(recovered.state("message:second")).toBe("completed")
+      expect(restarted.calls.dispatchReply).not.toHaveBeenCalled()
+    } finally { await second.stop() }
+  })
+
+  it.each(["steer", "followup"] as const)("retains host %s memory-queue uncertainty until an owner recovery handoff", async (deferredToActiveRun) => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: request.chatId, message: request.msg }],
+      chats: { "7": { kind: "direct", title: "Alice", peerUserId: 42n } },
+      dispatchReplyResult: { deferredToActiveRun },
+    })
+    const first = await start(harness)
+    await first.done
+    const entries = (await InlineInboundInbox.open<typeof request>(harness.stateDir, identity)).entries()
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.state).toBe("dispatching")
+    expect(entries[0]?.payload.msg.message).toBe("")
+    await first.stop()
+    const restarted = await setupMonitorHarness({ stateDir: harness.stateDir, events: [], chats: {} })
+    const second = await start(restarted)
+    try {
+      await second.done
+      expect(restarted.calls.dispatchReply).not.toHaveBeenCalled()
+      expect(restarted.calls.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ replyToMsgId: request.msg.id }))
+      expect((await InlineInboundInbox.open(harness.stateDir, identity)).entries()).toEqual([])
+    } finally { await second.stop() }
+  })
+
+  it("preserves pending message/action order on recovery despite configured debounce", async () => {
+    const harness = await setupMonitorHarness({ events: [], chats: { "7": { kind: "direct", title: "Alice", peerUserId: 42n } } })
+    const inbox = await InlineInboundInbox.open(harness.stateDir, identity)
+    await inbox.accept("message:one", request)
+    await inbox.accept("action:two", { ...request, callbackActionEvent: {
+      interactionId: 123n, actionId: "agent:choice", targetMessageId: request.msg.id, data: new Uint8Array(),
+    } })
+    const handle = await start(harness, { debounceMs: 60_000 })
+    try {
+      await handle.done
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2)
+      expect(harness.calls.finalizeInboundContext.mock.calls[0]?.[0]?.MessageSid).toBe("991")
+      expect(harness.calls.finalizeInboundContext.mock.calls[1]?.[0]?.MessageActionInteractionId).toBe("123")
+    } finally { await handle.stop() }
+  })
+
+  it("waits for fresh group follow policy after a cached followed chat has a metadata failure", async () => {
+    const errors: Record<string, string> = {}
+    const chats = { "7": { kind: "group" as const, title: "Work", dialogFollowMode: 1 } }
+    const runtimeError = vi.fn()
+    const harness = await setupMonitorHarness({
+      events: [
+        { kind: "message.new", chatId: 7n, message: { ...request.msg, id: 990n, mentioned: true, message: "@inlinebot start" } },
+        { kind: "message.new", chatId: 7n, message: { ...request.msg, id: 991n, mentioned: false, message: "do not wake on stale follow" } },
+      ],
+      chats, getChatErrors: errors,
+      dispatchReplyPayload: { text: "first reply" },
+      onDispatchReply: () => { errors["7"] = "metadata down"; chats["7"].dialogFollowMode = 2 },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ groupPolicy: "open", requireMention: true, debounceMs: 0 }),
+      runtime: { log: vi.fn(), error: runtimeError } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(runtimeError).toHaveBeenCalledWith(expect.stringContaining("saved input dispatch failed: Error: metadata down")))
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      delete errors["7"]
+      await handle.done
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect((await InlineInboundInbox.open(harness.stateDir, identity)).entries()).toEqual([])
+    } finally { await handle.stop() }
+  })
+
+  it.each(["live", "voice", "recovered"] as const)("retries %s Stop authorization after durable acceptance", async (source) => {
+    let controlChecks = 0
+    const runtimeError = vi.fn()
+    const stop = { ...request.msg, id: 992n, message: "/stop" }
+    const voice = { ...stop, message: "", media: { media: { oneofKind: "voice", voice: { voice: { id: 5n, cdnUrl: "https://cdn.inline.chat/stop.ogg" } } } } }
+    const harness = await setupMonitorHarness({
+      events: source === "recovered" ? [] : source === "voice" ? [
+        { kind: "message.new", chatId: 7n, message: voice as any },
+        { kind: "message.edit", chatId: 7n, message: { ...voice, message: "/stop" } as any },
+      ] : [{ kind: "message.new", chatId: 7n, message: stop }],
+      chats: { "7": { kind: "group", title: "Ops" } },
+      resolveControlCommandGate: ({ hasControlCommand }: any) => {
+        // The first check builds the handler context; the second is the
+        // explicit cancellation authorization at durable admission.
+        if (hasControlCommand && ++controlChecks === 2) throw new Error("authorization temporarily unavailable")
+        return { commandAuthorized: true, shouldBlock: false }
+      },
+    })
+    if (source === "recovered") await (await InlineInboundInbox.open(harness.stateDir, identity)).accept("saved-stop", { chatId: 7n, msg: stop })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ groupPolicy: "open", requireMention: false, debounceMs: 60_000, voiceTranscriptWaitMs: 60_000 }),
+      runtime: { log: vi.fn(), error: runtimeError } as any, abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(runtimeError).toHaveBeenCalledWith(expect.stringContaining("authorization temporarily unavailable")))
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      expect((await InlineInboundInbox.open(harness.stateDir, identity)).entries().map((entry) => entry.state)).toEqual(["pending"])
+      await handle.done
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect((await InlineInboundInbox.open(harness.stateDir, identity)).entries()).toEqual([])
+    } finally { await handle.stop() }
+  })
+
+  it("retries a failed durable Stop cancellation without dropping accepted requests", async () => {
+    let checks = 0
+    let blocked = false
+    const restore = () => {
+      if (!blocked) return
+      const directory = path.join(harness.stateDir, "channels/inline/inbox")
+      unlinkSync(directory)
+      renameSync(`${directory}-backup`, directory)
+      blocked = false
+    }
+    const runtimeError = vi.fn((message: string) => { if (message.includes("saved input dispatch failed")) restore() })
+    const harness = await setupMonitorHarness({
+      events: [
+        { kind: "message.new", chatId: 7n, message: request.msg },
+        { kind: "message.new", chatId: 7n, message: { ...request.msg, id: 992n, message: "/stop" } },
+      ],
+      chats: { "7": { kind: "group", title: "Ops" } },
+      resolveControlCommandGate: ({ hasControlCommand }: any) => {
+        if (hasControlCommand && ++checks === 2) {
+          const directory = path.join(harness.stateDir, "channels/inline/inbox")
+          renameSync(directory, `${directory}-backup`)
+          writeFileSync(directory, "temporarily blocked inbox directory")
+          blocked = true
+        }
+        return { commandAuthorized: true, shouldBlock: false }
+      },
+    })
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any, account: buildAccount({ groupPolicy: "open", requireMention: false, debounceMs: 60_000 }),
+      runtime: { log: vi.fn(), error: runtimeError } as any, abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+    try {
+      await waitFor(() => expect(runtimeError).toHaveBeenCalledWith(expect.stringContaining("saved input dispatch failed")))
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      expect((await InlineInboundInbox.open(harness.stateDir, identity)).entries().map((entry) => entry.state)).toEqual(["pending", "pending"])
+      await handle.done
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect((await InlineInboundInbox.open(harness.stateDir, identity)).entries()).toEqual([])
+    } finally { restore(); await handle.stop() }
+  })
+
+  it("rebuilds a partially cancelled debounce burst from the surviving post-Stop receipt", async () => {
+    let releaseStop!: () => void
+    let releaseBurst!: () => void
+    const stopGate = new Promise<void>((resolve) => { releaseStop = resolve })
+    const burstGate = new Promise<void>((resolve) => { releaseBurst = resolve })
+    const harness = await setupMonitorHarness({
+      events: [
+        { kind: "message.new", chatId: 7n, message: { ...request.msg, message: "cancel this earlier input" } },
+        { kind: "message.new", chatId: 7n, message: { ...request.msg, id: 992n, message: "/stop" } },
+        { kind: "message.new", chatId: 7n, message: { ...request.msg, id: 993n, message: "keep this later input" } },
+      ],
+      chats: { "7": { kind: "direct", title: "Alice", peerUserId: 42n } },
+    })
+    let reads = 0
+    harness.calls.readAllowFromStore.mockImplementation(async () => {
+      if (++reads === 1) await stopGate
+      else if (reads === 2) await burstGate
+      return []
+    })
+    const handle = await start(harness, { debounceMs: 40 })
+    try {
+      await waitFor(() => expect(reads).toBe(2))
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      releaseStop()
+      await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1))
+      releaseBurst()
+      await waitFor(() => expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(2))
+      expect(harness.calls.dispatchReply.mock.calls.map((call) => call[0]?.ctx?.Body)).toEqual(["/stop", "keep this later input"])
+      await handle.done
+      await vi.waitFor(async () => expect((await InlineInboundInbox.open(harness.stateDir, identity)).entries()).toEqual([]))
+    } finally { releaseStop(); releaseBurst(); await handle.stop() }
+  })
+
+  it("keeps an SDK receipt unacknowledged when its durable admission write fails", async () => {
+    const { InlineSdkClient } = await vi.importActual<typeof import("@inline-chat/realtime-sdk")>("@inline-chat/realtime-sdk")
+    const { MockTransport } = await import("../../../../packages/sdk/src/realtime/mock-transport.js")
+    const { Method, ServerProtocolMessage, Update } = await import("../../../../packages/protocol/src/core.js")
+    const transport = new MockTransport()
+    const send = transport.send.bind(transport)
+    transport.send = async (message) => {
+      await send(message)
+      if (message.body.oneofKind === "rpcCall" && message.body.rpcCall.method === Method.GET_UPDATES_STATE) {
+        await transport.emitMessage(ServerProtocolMessage.create({ body: { oneofKind: "rpcResult", rpcResult: {
+          reqMsgId: message.id, result: { oneofKind: "getUpdatesState", getUpdatesState: { date: 100n, updatesFound: false } },
+        } } }))
+      }
+    }
+    const client = new InlineSdkClient({ token: "test", transport, state: {
+      load: async () => ({ version: 1, lastSeqByChatId: { "7": 1 } }), save: async () => {},
+    } })
+    const connecting = client.connect()
+    await new Promise((resolve) => setImmediate(resolve))
+    await transport.connect()
+    await new Promise((resolve) => setImmediate(resolve))
+    await transport.emitMessage(ServerProtocolMessage.create({ body: { oneofKind: "connectionOpen", connectionOpen: {} } }))
+    await connecting
+    const harness = await setupMonitorHarness({ eventClient: client, events: [], chats: {} })
+    const handle = await start(harness)
+    const done = handle.done.catch((error: unknown) => error)
+    try {
+      await writeFile(path.join(harness.stateDir, "channels/inline/inbox"), "blocked directory")
+      await transport.emitMessage(ServerProtocolMessage.create({ body: { oneofKind: "message", message: {
+        payload: { oneofKind: "update", update: { updates: [Update.create({ seq: 2, date: 100n,
+          update: { oneofKind: "newMessage", newMessage: { message: { ...request.msg, id: 2n,
+            peerId: { type: { oneofKind: "user", user: { userId: 42n } } },
+          } } },
+        })] } },
+      } } }))
+      expect(await done).toBeInstanceOf(Error)
+      expect(client.exportState().lastSeqByChatId?.["7"]).toBe(1)
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    } finally { await handle.stop(); await client.close() }
+  })
+
+  it("retains input accepted into a debounce window when the monitor stops before dispatch", async () => {
+    const harness = await setupMonitorHarness({
+      events: [{ kind: "message.new", chatId: request.chatId, message: request.msg }],
+      chats: { "7": { kind: "direct", title: "Alice", peerUserId: 42n } },
+    })
+    const first = await start(harness, { debounceMs: 60_000 })
+    await first.done
+    await first.stop()
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect((await InlineInboundInbox.open(harness.stateDir, identity)).entries().map((entry) => entry.state)).toEqual(["pending"])
+    const restarted = await setupMonitorHarness({ stateDir: harness.stateDir, events: [], chats: { "7": { kind: "direct", title: "Alice", peerUserId: 42n } } })
+    const second = await start(restarted)
+    try {
+      await second.done
+      expect(restarted.calls.dispatchReply).toHaveBeenCalledTimes(1)
+    } finally { await second.stop() }
+  })
 })
 
 describe("inline/monitor bot addressing rules", () => {

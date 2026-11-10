@@ -68,7 +68,7 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 
 | Plugin version | OpenClaw host | Inline realtime SDK | Status | Notes |
 | --- | --- | --- | --- | --- |
-| `1.0.0` | `>=2026.11.1` | `0.0.21` | Stable | First major. Async host SDK and `MessagePresentation` only; see Upgrading to 1.0. |
+| `1.0.0` | `>=2026.11.1` | `0.0.22` | Stable | First major. Async host SDK and `MessagePresentation` only; see Upgrading to 1.0. Carries widget calls and submitted forms, so the protocol `0.0.14` and SDK `0.0.22` releases come first. |
 | `0.0.72` | `>=2026.8.2` | `0.0.19` | Legacy | Last line for OpenClaw `2026.8.2`–`2026.10.x`; 1.0 requires `2026.11.1`. Loads on OpenClaw `2026.10.5` and newer, which removed `readJsonFileWithFallback`; `0.0.71` and older fail to register the channel there. Matches `toolsBySender` on numeric sender ids only. |
 | `0.0.71` | `>=2026.8.2` | `0.0.19` | Previous | Adds opt-in quiet agent activity timelines and the expanded chat-history protocol while retaining recovery and install provenance diagnostics. |
 | `0.0.70` | `>=2026.8.2` | `0.0.18` | Previous | Preserves native reply suppression and send-policy decisions, with September approvals and shutdown cancellation. |
@@ -87,6 +87,7 @@ on the 24.x line or Node 26.1+; Node 26 is recommended.
 - Tools share the monitor's connection instead of opening their own. Sends retry rate limits once the server says when.
 - Service messages, such as a linked thread, no longer wake the bot. Each reply thread keeps one session.
 - Agent `read` and `search` work from runtimes that call OpenClaw tools over MCP, such as Claude Code.
+- Agents can show `show_widget` message widgets; widget calls and submitted forms come back as agent turns. Needs protocol `0.0.14` and realtime SDK `0.0.22`.
 
 ### Release 0.0.72
 

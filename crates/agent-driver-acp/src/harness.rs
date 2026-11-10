@@ -364,7 +364,7 @@ pub struct AcpSession {
 }
 
 fn turn_input(input: &Input, instructions: Option<&str>, first: bool) -> TurnInput {
-    let mut context = input.content.context.clone();
+    let mut context = Some(input.context_with_origin());
     // The trusted guide rides on the first turn; ACP has no system prompt slot.
     if first && let Some(instructions) = instructions {
         let mut merged = context.unwrap_or_else(|| inline_agent_bridge::TurnContext {

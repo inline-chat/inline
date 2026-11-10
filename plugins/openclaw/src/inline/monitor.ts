@@ -2,6 +2,8 @@ import { formatQuietTimeline, activityAttention, activityLifecycleOutcome, prese
 import { reportOpenClawPluginError } from "../telemetry.js"
 import { mkdir, stat } from "node:fs/promises"
 import path from "node:path"
+import { createHash } from "node:crypto"
+import { InlineInboundInbox, InlineInboxCapacityError } from "./inbound-inbox.js"
 import { beginInlineActiveThreadRoute, type ActiveInlineThreadRoute } from "./active-thread-route.js"
 import {
   resolveCommandArgMenuAsync,
@@ -104,12 +106,10 @@ import {
 import {
   buildInlineAgentActionBody,
   buildInlineAgentActionStructuredContext,
-  buildInlineMessageActionId,
   buildInlineWidgetCallBody,
   isInlineWidgetInteraction,
   readInlineWidgetCall,
   resolveInlineMessageActionOwnership,
-  type InlineMessageActionOwner,
   type InlineWidgetCall,
 } from "./message-actions.js"
 import {
@@ -118,12 +118,6 @@ import {
   takeInlineWidgetStreamText,
   type InlineWidgetStreamHoldback,
 } from "./widgets.js"
-import {
-  sanitizeInlineActionCallbackData,
-  sanitizeInlineActionCopyText,
-  sanitizeInlineActionLabel,
-  sanitizeInlineVisibleText,
-} from "./outbound-sanitize.js"
 import { resolveInlineInteractiveTextFallback } from "./interactive-fallback.js"
 import {
   InlineSenderProfileCache,
@@ -332,13 +326,6 @@ export function isInlineOutOfBandCommandText(text: string | undefined | null): b
   return typeof text === "string" && INLINE_OUT_OF_BAND_COMMAND_RE.test(text.trim())
 }
 
-function decodeInlineCallbackText(data: Uint8Array): string {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(data)
-  } catch {
-    return ""
-  }
-}
 
 const INLINE_BOT_HAND_BACK_SYSTEM_PROMPT =
   "This message is another bot's reply to you. It needs no answer: your response will not reach that bot. To ask it for more, mention it."
@@ -532,17 +519,22 @@ function buildInlineReplyThreadSessionKey(parentSessionKey: string, threadChatId
 type InlineDebounceEntry = {
   chatId: bigint
   msg: Message
+  receiptIds?: string[] | undefined
 }
 
 type InlinePendingVoiceMessage = {
   chatId: bigint
   msg: Message
+  receiptIds?: string[] | undefined
   timeout: ReturnType<typeof setTimeout>
 }
 
 type InlineParsedInboundEvent = {
   chatId: bigint
   msg: Message
+  receiptIds?: string[] | undefined
+  beforeDispatch?: () => Promise<void>
+  onDeferred?: () => void
   messageIds?: string[]
   rawBodyOverride?: string | null
   callbackActionEvent?: {
@@ -552,6 +544,21 @@ type InlineParsedInboundEvent = {
     data: Uint8Array
     widgetCall?: InlineWidgetCall | null
   } | null
+}
+
+type InlineStoredInbound = Omit<InlineParsedInboundEvent, "receiptIds" | "beforeDispatch" | "onDeferred">
+
+function inboundRecoverySummary(input: InlineStoredInbound): InlineStoredInbound {
+  return {
+    chatId: input.chatId,
+    msg: { id: input.msg.id, chatId: input.chatId, fromId: input.msg.fromId, date: input.msg.date, message: "" } as Message,
+    ...(input.callbackActionEvent ? { callbackActionEvent: {
+      interactionId: input.callbackActionEvent.interactionId,
+      actionId: input.callbackActionEvent.actionId,
+      targetMessageId: input.callbackActionEvent.targetMessageId,
+      data: new Uint8Array(),
+    } } : {}),
+  }
 }
 
 type InlineSystemEventContext = {
@@ -814,35 +821,6 @@ function buildInlineInboundMessageSid(params: {
     return `callback:${String(params.callbackActionEvent.targetMessageId)}:${String(params.callbackActionEvent.interactionId)}`
   }
   return String(params.msgId)
-}
-
-function claimInlineInboundMessageInstance(params: {
-  seen: Map<string, true>
-  chatId: bigint
-  message: Pick<Message, "id" | "date">
-  maximum?: number
-}): boolean {
-  const message = params.message as Message
-  const media = message.media as
-    | { media?: { oneofKind?: string }; oneofKind?: string }
-    | undefined
-  const content = [
-    String(message.fromId ?? 0n),
-    message.message ?? "",
-    String(message.replyToMsgId ?? 0n),
-    media?.media?.oneofKind ?? media?.oneofKind ?? "",
-    String(message.entities?.entities.length ?? 0),
-  ].join("\u0000")
-  const key = `${String(params.chatId)}:${String(message.id)}:${String(message.date ?? 0n)}:${content}`
-  if (params.seen.has(key)) return false
-  params.seen.set(key, true)
-  const maximum = params.maximum ?? 5_000
-  while (params.seen.size > maximum) {
-    const oldest = params.seen.keys().next().value
-    if (oldest == null) break
-    params.seen.delete(oldest)
-  }
-  return true
 }
 
 function buildInlineDebounceKey(params: {
@@ -1177,6 +1155,16 @@ export async function monitorInlineProvider(params: {
   })
   const sendMessage = createInlineMessageSender(client, abortSignal)
   const meId = meUser.id
+  let inboundInbox: InlineInboundInbox<InlineStoredInbound>
+  try {
+    inboundInbox = await InlineInboundInbox.open<InlineStoredInbound>(stateDir, {
+      baseUrl: account.baseUrl, accountId: account.accountId, botUserId: meId,
+    })
+  } catch (error) {
+    await client.close().catch(() => {})
+    pushDiagnostics({ connected: false, lastError: "Saved Inline input could not be loaded" })
+    throw error
+  }
   const botUsername = normalizeInlineUsername(meUser.username)?.toLowerCase()
   void registerBotCapabilitiesWithRetry({
     register: () => client.setMyBotCapabilities({
@@ -1241,7 +1229,6 @@ export async function monitorInlineProvider(params: {
     },
   })
   const botMessageIdsByChat = new Map<string, string[]>()
-  const seenInboundMessageInstances = new Map<string, true>()
   const groupPendingHistories = new Map<string, InlinePendingHistoryEntry[]>()
   const inlineAgentResolver = createInlineAgentSpecializationResolver({
     fetchAgent: async (agentId) => {
@@ -1726,9 +1713,10 @@ export async function monitorInlineProvider(params: {
       chatInfo = await resolveChatInfo(client, chatCache, chatId)
     } catch (err) {
       publishStatus({ lastError: `getChat failed: ${String(err)}` })
-      if (!previousChatInfo) {
-        runtime.log?.(`inline: drop message chat=${String(chatId)} (chat metadata unavailable)`)
-        return
+      // Only a stable DM peer has no mutable group follow/wake policy. A stale
+      // group or reply-thread snapshot cannot authorize a new turn.
+      if (!previousChatInfo || previousChatInfo.kind !== "direct" || previousChatInfo.parentChatId != null) {
+        throw err
       }
       chatInfo = previousChatInfo
     }
@@ -1752,10 +1740,7 @@ export async function monitorInlineProvider(params: {
       return null
     })
     if (replyThreadContextFailed && chatInfo.parentChatId != null) {
-      runtime.log?.(
-        `inline: drop child message chat=${String(chatId)} (reply-thread parent unavailable)`,
-      )
-      return
+      throw new Error("Inline reply-thread parent metadata is unavailable")
     }
     // Inline encodes every reply-thread child as a chat peer. Preserve the
     // logical parent kind so a DM child remains a DM for policy and sessions.
@@ -1809,8 +1794,7 @@ export async function monitorInlineProvider(params: {
     const explicitlyMentionsThisBot = collectInlineMentionedUserIds(currentContent)
       .includes(String(meId))
     if (!senderResolution.provenanceVerified && !explicitlyMentionsThisBot) {
-      runtime.log?.(`inline: observe sender with unverified bot provenance chat=${String(chatId)} sender=${senderId}`)
-      return
+      throw new Error("Inline sender provenance is temporarily unavailable")
     }
     // Another bot wakes this one by mention, addressed command, or a reply to its
     // message; the reply is checked against history below.
@@ -1893,10 +1877,12 @@ export async function monitorInlineProvider(params: {
     let callbackActionAnswered = false
     const answerCallbackIfNeeded = async () => {
       if (!callbackActionEvent || callbackActionAnswered) return
+      await input.beforeDispatch?.()
       await answerInlineMessageAction(client, callbackActionEvent.interactionId, callbackResponseUi)
       callbackActionAnswered = true
     }
     if (callbackActionEvent) {
+      await input.beforeDispatch?.()
       await answerCallbackIfNeeded().catch((error) => {
         runtime.error?.(`inline callback answer failed: ${String(error)}`)
       })
@@ -2081,6 +2067,7 @@ export async function monitorInlineProvider(params: {
         const allowed = allowlistMatch({ allowFrom: effectiveAllowFrom, senderId })
         if (!allowed) {
           if (dmPolicy === "pairing") {
+            await input.beforeDispatch?.()
             const { code, created } = await core.channel.pairing.upsertPairingRequest({
               channel: CHANNEL_ID,
               id: senderId,
@@ -2292,6 +2279,7 @@ export async function monitorInlineProvider(params: {
 
     const parseMarkdown = account.config.parseMarkdown ?? true
     if (inlineFollowCommand) {
+      await input.beforeDispatch?.()
       const { command, args } = inlineFollowCommand
       let responseText: string
       if (args) {
@@ -2337,6 +2325,7 @@ export async function monitorInlineProvider(params: {
       isInlineThreadReplyCommandBody(normalizedCommandBody) &&
       !hostInlinePluginCommandRegistered
     ) {
+      await input.beforeDispatch?.()
       const configRuntime = (core as {
         config?: {
           current?: unknown
@@ -2490,6 +2479,7 @@ export async function monitorInlineProvider(params: {
       sessionKey: inboundSessionKey,
     })
     if (nativeCommandMenu) {
+      await input.beforeDispatch?.()
       const menuActions = resolveInlineReplyActions({
         channelData: {
           inline: {
@@ -4164,6 +4154,7 @@ export async function monitorInlineProvider(params: {
     }) : undefined
     let activityTurnCompleted = false
     try {
+      await input.beforeDispatch?.()
       let skippedNonSilent = false
       let skippedSilently = false
       let failedNonSilent = false
@@ -4624,6 +4615,7 @@ export async function monitorInlineProvider(params: {
       )
       const hostHandledTurn = hasFinalInboundReplyDispatch(dispatchResult) || hostDeliveredReply
       const deferredToActiveRun = dispatchResult.deferredToActiveRun != null
+      if (deferredToActiveRun) input.onDeferred?.()
       const deliberateSilence =
         skippedSilently || dispatchResult.deliberateSilentTerminalReply === true
       const skipFallbackSuppressed =
@@ -4699,6 +4691,117 @@ export async function monitorInlineProvider(params: {
     }
   }
 
+  const activeInboundReceipts = new Set<string>()
+  const wakeInboundRetries = new Map<string, () => void>()
+  const recoveryNoticeChats = new Set<string>()
+  const reportUncertainInbound = async (id: string, input: InlineStoredInbound): Promise<void> => {
+    const chat = String(input.chatId)
+    publishStatus({ lastError: `Inline request ${String(input.msg.id)} may already have run; check it before retrying` })
+    if (!inboundInbox.needsRecoveryNotice(id) || recoveryNoticeChats.has(chat)) return
+    recoveryNoticeChats.add(chat)
+    const uncertain = inboundInbox.entries().filter((entry) => entry.state === "dispatching" &&
+      entry.payload.chatId === input.chatId && (entry.id === id || !activeInboundReceipts.has(entry.id)))
+    const noticeKey = uncertain.map((entry) => entry.id).sort().join("\u0000")
+    try {
+      await client.sendMessage({
+        chatId: input.chatId,
+        replyToMsgId: input.msg.id,
+        randomId: BigInt.asIntN(64, BigInt(`0x${createHash("sha256").update(`inline-recovery:${noticeKey}`).digest("hex").slice(0, 16)}`)),
+        text: uncertain.length > 1
+          ? `I couldn't confirm whether ${uncertain.length} earlier requests in this chat finished. Check their results before retrying.`
+          : input.callbackActionEvent
+          ? "I couldn't confirm whether this action finished. Check its result before trying it again."
+          : "I couldn't confirm whether I finished this request. Check the result before retrying.",
+        parseMarkdown: false,
+      })
+      await inboundInbox.markRecoveryNotified(uncertain.map((entry) => entry.id))
+    } catch (error) {
+      runtime.error?.(`inline recovery notice failed: ${String(error)}`)
+    } finally {
+      recoveryNoticeChats.delete(chat)
+    }
+  }
+
+  const combineInboundEntries = (entries: InlineParsedInboundEvent[]): InlineParsedInboundEvent | undefined => {
+    const last = entries.at(-1)
+    if (!last || entries.length === 1) return last
+    const combinedText = entries.map((entry) => buildInlineInboundBodyText(summarizeInlineMessageContent(entry.msg))).filter(Boolean).join("\n")
+    return {
+      chatId: last.chatId,
+      msg: buildSyntheticInlineTextMessage({ base: last.msg, text: combinedText, mentioned: entries.some((entry) => entry.msg.mentioned === true) }),
+      messageIds: entries.map((entry) => String(entry.msg.id)),
+      receiptIds: entries.flatMap((entry) => entry.receiptIds ?? []),
+      rawBodyOverride: combinedText,
+    }
+  }
+
+  const runDurableInbound = async (initialInput: InlineParsedInboundEvent): Promise<void> => {
+    const allIds = initialInput.receiptIds ?? []
+    if (allIds.length === 0) return handleInboundNow(initialInput)
+    let input = initialInput
+    let ids = allIds
+    let attempt = 0
+    try {
+      while (!abortSignal.aborted) {
+        const pendingIds = allIds.filter((id) => inboundInbox.state(id) === "pending")
+        if (pendingIds.length === 0) return
+        if (pendingIds.length !== ids.length || pendingIds.some((id, index) => id !== ids[index])) {
+          // Stop can retire part of a burst while metadata is loading. Rebuild
+          // from the journal so later input keeps its scheduler slot and never
+          // carries the cancelled portion's text into host dispatch.
+          input = combineInboundEntries(pendingIds.map((id) => ({ ...inboundInbox.entry(id)!.payload, receiptIds: [id] })))!
+          ids = pendingIds
+        }
+        let dispatching = false
+        let deferred = false
+        try {
+          await handleInboundNow({ ...input, onDeferred: () => { deferred = true }, beforeDispatch: async () => {
+            if (dispatching) return
+            if (isInlineAbortRequestMessage(input.msg, botUsername, meId) && await isAuthorizedInlineAbortMessage(input)) {
+              const cancelled = await cancelPendingInlineDebounce(input)
+              cancelPendingInlineVoiceMessages(input, cancelled)
+            }
+            if (abortSignal.aborted || !await inboundInbox.beginDispatch(ids, inboundRecoverySummary)) throw new Error("Inline input was cancelled before dispatch")
+            dispatching = true
+          } })
+          if (!dispatching && ids.some((id) => inboundInbox.state(id) !== "pending")) continue
+          // An old host's steer/followup queue is only memory, not durable
+          // completion. Keep custody without automatically repeating the turn.
+          if (!abortSignal.aborted && !deferred) await inboundInbox.complete(ids)
+          return
+        } catch (error) {
+          const uncertain = ids.find((id) => inboundInbox.state(id) === "dispatching")
+          if (uncertain) {
+            if (!abortSignal.aborted) await reportUncertainInbound(uncertain, input)
+            return
+          }
+          if (abortSignal.aborted) return
+          if (ids.some((id) => inboundInbox.state(id) !== "pending")) continue
+          publishStatus({ lastError: `Inline input is saved and waiting for admission: ${String(error)}` })
+          runtime.error?.(`inline saved input dispatch failed: ${String(error)}`)
+          attempt++
+          // Keep the chat's scheduler slot through pre-admission retries. Stop
+          // and approvals use the independent fast lane below.
+          await new Promise<void>((resolve) => {
+            const finish = () => {
+              clearTimeout(timer)
+              abortSignal.removeEventListener("abort", finish)
+              for (const id of ids) wakeInboundRetries.delete(id)
+              resolve()
+            }
+            const timer = setTimeout(finish, Math.min(30_000, 1_000 * 2 ** Math.min(attempt - 1, 5)))
+            timer.unref?.()
+            for (const id of ids) wakeInboundRetries.set(id, finish)
+            abortSignal.addEventListener("abort", finish, { once: true })
+            if (abortSignal.aborted) finish()
+          })
+        }
+      }
+    } finally {
+      for (const id of allIds) activeInboundReceipts.delete(id)
+    }
+  }
+
   const inlineDebounceMsOverride = resolveInlineInboundDebounceMsOverride(account.config)
   const { debouncer: inboundDebouncer } = createChannelInboundDebouncer<InlineDebounceEntry>({
     cfg,
@@ -4724,33 +4827,11 @@ export async function monitorInlineProvider(params: {
     },
     onFlush: (entries, createFlush) => createFlush({
       dispatch: async () => {
-        const last = entries.at(-1)
-        if (!last) return
-
-        if (entries.length === 1) {
-          await handleInboundNow({
-            chatId: last.chatId,
-            msg: last.msg,
-          })
-          return
-        }
-
-        const combinedText = entries
-          .map((entry) => buildInlineInboundBodyText(summarizeInlineMessageContent(entry.msg)))
-          .filter(Boolean)
-          .join("\n")
-        if (!combinedText.trim()) return
-
-        await handleInboundNow({
-          chatId: last.chatId,
-          msg: buildSyntheticInlineTextMessage({
-            base: last.msg,
-            text: combinedText,
-            mentioned: entries.some((entry) => entry.msg.mentioned === true),
-          }),
-          messageIds: entries.map((entry) => String(entry.msg.id)),
-          rawBodyOverride: combinedText,
-        })
+        // Stop retires exact receipts. Keep any later input in the same host
+        // debounce bucket rather than cancelling the entire sender bucket.
+        const pendingEntries = entries.filter((entry) => (entry.receiptIds ?? []).every((id) => inboundInbox.state(id) === "pending"))
+        const combined = combineInboundEntries(pendingEntries)
+        if (combined) await runDurableInbound(combined)
       },
     }),
     onError: (err, items) => {
@@ -5493,10 +5574,7 @@ export async function monitorInlineProvider(params: {
     // /approve and /stop act on the run that is already going in this chat.
     // Queued behind it, an approval waits for the very run it would unblock.
     if (isInlineOutOfBandCommandText(entry.msg.message)) {
-      scheduleImmediateInboundMessage(
-        { chatId: entry.chatId, msg: entry.msg },
-        "inline control command dispatch",
-      )
+      scheduleImmediateInboundMessage(entry, "inline control command dispatch")
       return
     }
     scheduleInboundTask(
@@ -5513,14 +5591,14 @@ export async function monitorInlineProvider(params: {
     )
   }
 
-  const cancelPendingInlineDebounce = (entry: InlineDebounceEntry): void => {
-    const key = buildInlineDebounceKey({
-      accountId: account.accountId,
-      chatId: entry.chatId,
-      senderId: entry.msg.fromId,
-    })
-    if (!key) return
-    inboundDebouncer.cancelKey(key)
+  const cancelPendingInlineDebounce = async (entry: InlineDebounceEntry): Promise<string[]> => {
+    const cancelled = await inboundInbox.cancelPendingBefore(entry.receiptIds ?? [], (payload) =>
+      payload.chatId === entry.chatId && payload.msg.fromId === entry.msg.fromId && payload.msg.id !== entry.msg.id)
+    for (const id of cancelled) {
+      activeInboundReceipts.delete(id)
+      wakeInboundRetries.get(id)?.()
+    }
+    return cancelled
   }
 
   const suppressInlineVoiceMessageEdit = (key: string): void => {
@@ -5535,9 +5613,10 @@ export async function monitorInlineProvider(params: {
     suppressedVoiceMessageEditTimeouts.set(key, timeout)
   }
 
-  const cancelPendingInlineVoiceMessages = (entry: InlineDebounceEntry): void => {
+  const cancelPendingInlineVoiceMessages = (entry: InlineDebounceEntry, cancelled: readonly string[]): void => {
     for (const [key, pending] of pendingVoiceMessages) {
-      if (pending.chatId !== entry.chatId || pending.msg.fromId !== entry.msg.fromId) {
+      if (pending.chatId !== entry.chatId || pending.msg.fromId !== entry.msg.fromId ||
+        !pending.receiptIds?.some((id) => cancelled.includes(id))) {
         continue
       }
       pendingVoiceMessages.delete(key)
@@ -5554,7 +5633,7 @@ export async function monitorInlineProvider(params: {
     scheduleInboundTask(
       label,
       async () => {
-        await handleInboundNow(input)
+        await runDurableInbound(input)
       },
       options?.serializeWithChat
         ? {
@@ -5576,25 +5655,21 @@ export async function monitorInlineProvider(params: {
     pendingVoiceMessages.delete(params.key)
     clearTimeout(pending.timeout)
     const msg = params.msg ?? pending.msg
-    if (
-      isInlineAbortRequestMessage(msg, botUsername, meId) &&
-      await isAuthorizedInlineAbortMessage({ chatId: pending.chatId, msg })
-    ) {
-      cancelPendingInlineDebounce({ chatId: pending.chatId, msg })
-      cancelPendingInlineVoiceMessages({ chatId: pending.chatId, msg })
+    if (isInlineAbortRequestMessage(msg, botUsername, meId)) {
       scheduleImmediateInboundMessage(
-        { chatId: pending.chatId, msg },
+        { chatId: pending.chatId, msg, receiptIds: pending.receiptIds },
         "priority voice transcript abort dispatch",
       )
       return true
     }
-    scheduleInboundMessage({ chatId: pending.chatId, msg })
+    scheduleInboundMessage({ chatId: pending.chatId, msg, receiptIds: pending.receiptIds })
     return true
   }
 
   const holdInlineVoiceMessage = (params: {
     chatId: bigint
     msg: Message
+    receiptIds?: string[] | undefined
   }): void => {
     const key = buildInlineVoicePendingKey({
       chatId: params.chatId,
@@ -5612,6 +5687,7 @@ export async function monitorInlineProvider(params: {
     pendingVoiceMessages.set(key, {
       chatId: params.chatId,
       msg: params.msg,
+      receiptIds: params.receiptIds,
       timeout,
     })
   }
@@ -5630,12 +5706,13 @@ export async function monitorInlineProvider(params: {
     const transcript = extractInlineVoiceTranscriptText(params.msg)
     if (!transcript) return true
 
+    const pending = pendingVoiceMessages.get(key)!
+    const msg = buildInlineTranscriptTextMessage({ base: params.msg, text: transcript })
+    for (const id of pending.receiptIds ?? []) await inboundInbox.updatePending(id, { chatId: params.chatId, msg })
+
     return flushPendingVoiceMessage({
       key,
-      msg: buildInlineTranscriptTextMessage({
-        base: params.msg,
-        text: transcript,
-      }),
+      msg,
     })
   }
 
@@ -5678,6 +5755,47 @@ export async function monitorInlineProvider(params: {
       clearTimeout(timer)
       if (onAbort) abortSignal.removeEventListener("abort", onAbort)
     }
+  }
+
+  const acceptInbound = async (input: InlineStoredInbound, savedId?: string): Promise<InlineParsedInboundEvent | null> => {
+    const media = input.msg.media as { media?: { oneofKind?: string }; oneofKind?: string } | undefined
+    const id = savedId ?? (input.callbackActionEvent
+      ? `action:${String(input.callbackActionEvent.interactionId)}`
+      : `message:${String(input.chatId)}:${String(input.msg.id)}:${String(input.msg.date)}:${createHash("sha256").update([
+          String(input.msg.fromId), input.msg.message ?? "", String(input.msg.replyToMsgId ?? 0n),
+          media?.media?.oneofKind ?? media?.oneofKind ?? "",
+          String(input.msg.entities?.entities.length ?? 0),
+        ].join("\u0000")).digest("hex")}`)
+    try { await inboundInbox.accept(id, input) } catch (error) {
+      if (!(error instanceof InlineInboxCapacityError)) throw error
+      // Old hosts cannot prove completion of deferred in-memory work. If that
+      // bounded recovery ledger fills, explicitly hand inactive uncertainty to
+      // the owner instead of dropping pending input or repeating actions.
+      for (const entry of inboundInbox.entries()) {
+        if (entry.state === "dispatching" && !activeInboundReceipts.has(entry.id)) await reportUncertainInbound(entry.id, entry.payload)
+      }
+      await inboundInbox.accept(id, input)
+    }
+    if (inboundInbox.state(id) !== "pending" || activeInboundReceipts.has(id)) return null
+    activeInboundReceipts.add(id)
+    return { ...(inboundInbox.entry(id)?.payload ?? input), receiptIds: [id] }
+  }
+
+  // These were durably accepted before a previous process stopped; the cold-boot
+  // policy below applies only to server input that has not entered this inbox.
+  for (const record of inboundInbox.entries()) {
+    if (record.state === "dispatching") {
+      scheduleInboundTask("uncertain input recovery", () => reportUncertainInbound(record.id, record.payload))
+      continue
+    }
+    const entry = await acceptInbound(record.payload, record.id)
+    if (!entry) continue
+    if (isInlineAbortRequestMessage(entry.msg, botUsername, meId)) {
+      scheduleImmediateInboundMessage(entry, "saved stop recovery")
+    } else if (entry.callbackActionEvent) scheduleImmediateInboundMessage(entry, "saved action recovery", { serializeWithChat: true })
+    else if (voiceTranscriptWaitMs > 0 && shouldWaitForInlineVoiceTranscript(entry.msg)) holdInlineVoiceMessage(entry)
+    else if (isInlineOutOfBandCommandText(entry.msg.message)) scheduleImmediateInboundMessage(entry, "saved control recovery")
+    else scheduleImmediateInboundMessage(entry, "saved inbound recovery", { serializeWithChat: true })
   }
 
   let coldBootDropped = 0
@@ -5733,34 +5851,20 @@ export async function monitorInlineProvider(params: {
           } as Message
           if (msg.out || msg.fromId === meId) return
           if (isInlineServiceMessage(msg)) return
-          if (!claimInlineInboundMessageInstance({
-            seen: seenInboundMessageInstances,
-            chatId: event.chatId,
-            message: msg,
-          })) return
-          if (
-            isInlineAbortRequestMessage(msg, botUsername, meId) &&
-            await isAuthorizedInlineAbortMessage({ chatId: event.chatId, msg })
-          ) {
-            cancelPendingInlineDebounce({ chatId: event.chatId, msg })
-            cancelPendingInlineVoiceMessages({ chatId: event.chatId, msg })
+          const entry = await acceptInbound({ chatId: event.chatId, msg })
+          if (!entry) return
+          if (isInlineAbortRequestMessage(msg, botUsername, meId)) {
             scheduleImmediateInboundMessage(
-              { chatId: event.chatId, msg },
+              entry,
               "priority abort dispatch",
             )
             return
           }
           if (voiceTranscriptWaitMs > 0 && shouldWaitForInlineVoiceTranscript(msg)) {
-            holdInlineVoiceMessage({
-              chatId: event.chatId,
-              msg,
-            })
+            holdInlineVoiceMessage(entry)
             return
           }
-          scheduleInboundMessage({
-            chatId: event.chatId,
-            msg,
-          })
+          scheduleInboundMessage(entry)
           return
         }
 
@@ -5841,21 +5945,15 @@ export async function monitorInlineProvider(params: {
             ...(eventDate != null ? { eventDate } : {}),
           })
           for (const msg of recovered) {
-            if (!claimInlineInboundMessageInstance({
-              seen: seenInboundMessageInstances,
-              chatId: eventChatId,
-              message: msg,
-            })) continue
+            const entry = await acceptInbound({ chatId: eventChatId, msg: { ...msg, mentioned: true } })
+            if (!entry) continue
             // This is a bounded replay selected by the authoritative join
             // timestamp, not a new live typing burst. Send it through the same
             // semantic inbound owner immediately: the ordinary debounce timer
             // can otherwise delay recovery beyond the join-event lifetime and
             // make the mention disappear if the monitor stops meanwhile.
             scheduleImmediateInboundMessage(
-              {
-                chatId: eventChatId,
-                msg: { ...msg, mentioned: true },
-              },
+              entry,
               "inline join mention recovery",
               { serializeWithChat: true },
             )
@@ -5879,8 +5977,7 @@ export async function monitorInlineProvider(params: {
           }
           if (actorUserId === meId) return
 
-          scheduleImmediateInboundMessage(
-            {
+          const entry = await acceptInbound({
               chatId: eventChatId,
               msg: {
                 id: targetMessageId,
@@ -5899,15 +5996,19 @@ export async function monitorInlineProvider(params: {
                 data,
                 ...(widgetCall ? { widgetCall } : {}),
               },
-            },
+            })
+          if (!entry) return
+          scheduleImmediateInboundMessage(
+            entry,
             "inline action dispatch",
-            // Approval buttons carry their /approve command as callback data.
-            isInlineOutOfBandCommandText(decodeInlineCallbackText(data)) ? undefined : { serializeWithChat: true },
+            isInlineOutOfBandCommandText(resolveCallbackCommandBodyFromActionData({ data, ...(botUsername ? { botUsername } : {}) }))
+              ? undefined : { serializeWithChat: true },
           )
           return
         }
       })
     } catch (err) {
+      if (abortSignal.aborted) return
       publishStatus({ connected: false, lastError: String(err) })
       runtime.error?.(`inline monitor loop crashed: ${String(err)}`)
       unshareClient()
@@ -5932,6 +6033,7 @@ export async function monitorInlineProvider(params: {
       clearInterval(diagnosticsTimer)
       clearPendingInlineVoiceMessages()
       unshareClient()
+      await inboundInbox.close()
       await client.close().catch(() => {})
       await loop.catch(() => {})
       await drainInboundTasks()

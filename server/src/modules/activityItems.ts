@@ -20,6 +20,8 @@ import { encodeOutputPeerFromChat } from "@in/server/realtime/encoders/encodePee
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { registerPostCommitHook } from "@in/server/db/commitHooks"
+import { getEffectiveChatAccessUserIds } from "@in/server/modules/authorization/chatAccessProjection"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 const log = new Log("activityItems")
 
@@ -75,10 +77,10 @@ export function planMessageActivity(input: {
   return Array.from(planned, ([userId, kind]) => ({ userId, kind }))
 }
 
-async function getHumanUserIds(userIds: number[]): Promise<Set<number>> {
+async function getHumanUserIds(tx: Transaction, userIds: number[]): Promise<Set<number>> {
   const unique = Array.from(new Set(userIds.filter((id) => Number.isSafeInteger(id) && id > 0)))
   if (unique.length === 0) return new Set()
-  const rows = await db
+  const rows = await tx
     .select({ id: users.id })
     .from(users)
     .where(
@@ -91,51 +93,58 @@ async function getHumanUserIds(userIds: number[]): Promise<Set<number>> {
   return new Set(rows.map((row) => row.id))
 }
 
-/** Records mention and reply items for a sent message and notifies each recipient. */
-export async function recordMessageActivity(input: {
+/**
+ * Records activity in the message's transaction, while its chat row is locked.
+ * The caller pushes these live hints after the new-message push; rows and user
+ * updates already commit with the message, so a read can never precede creation.
+ */
+export async function recordMessageActivity(tx: Transaction, input: {
   chat: ChatForActivity
   message: { messageId: number; fromId: number; countsAsUnread: boolean; isSystemMessage: boolean }
   mentionedUserIds: ReadonlySet<number>
-  repliedToUserId: number | undefined
-  recipientUserIds: readonly number[]
-}): Promise<void> {
-  if (input.chat.type === "private") return
+  repliedToMessageId: number | undefined
+}): Promise<ActivityChanges> {
+  if (input.chat.type === "private" || !input.message.countsAsUnread || input.message.isSystemMessage) return new Map()
 
-  const candidates = [...input.mentionedUserIds, ...(input.repliedToUserId === undefined ? [] : [input.repliedToUserId])]
-  if (candidates.length === 0) return
+  const [repliedTo] = input.repliedToMessageId === undefined ? [] : await tx
+    .select({ fromId: messages.fromId })
+    .from(messages)
+    .where(and(eq(messages.chatId, input.chat.id), eq(messages.messageId, input.repliedToMessageId)))
+    .limit(1)
+  const repliedToUserId = repliedTo?.fromId
 
-  const humanUserIds = await getHumanUserIds(candidates)
+  const candidates = [...input.mentionedUserIds, ...(repliedToUserId === undefined ? [] : [repliedToUserId])]
+  if (candidates.length === 0) return new Map()
+
+  const humanUserIds = await getHumanUserIds(tx, candidates)
+  const access = await getEffectiveChatAccessUserIds(tx, [input.chat.id], { userIds: [...humanUserIds] })
   const planned = planMessageActivity({
     chatType: input.chat.type,
     senderUserId: input.message.fromId,
     countsAsUnread: input.message.countsAsUnread,
     isSystemMessage: input.message.isSystemMessage,
     mentionedUserIds: input.mentionedUserIds,
-    repliedToUserId: input.repliedToUserId,
-    recipientUserIds: input.recipientUserIds,
+    repliedToUserId,
+    recipientUserIds: [...(access.get(input.chat.id) ?? [])],
     humanUserIds,
   })
-  if (planned.length === 0) return
+  if (planned.length === 0) return new Map()
 
-  const updatesByUser = await db.transaction(async (tx) => {
-    const inserted = await tx
-      .insert(activityItems)
-      .values(
-        planned.map(({ userId, kind }) => ({
-          userId,
-          chatId: input.chat.id,
-          messageId: input.message.messageId,
-          kind,
-          actorUserId: input.message.fromId,
-        })),
-      )
-      .onConflictDoNothing()
-      .returning({ userId: activityItems.userId, messageId: activityItems.messageId, kind: activityItems.kind })
+  const inserted = await tx
+    .insert(activityItems)
+    .values(
+      planned.map(({ userId, kind }) => ({
+        userId,
+        chatId: input.chat.id,
+        messageId: input.message.messageId,
+        kind,
+        actorUserId: input.message.fromId,
+      })),
+    )
+    .onConflictDoNothing()
+    .returning({ userId: activityItems.userId, messageId: activityItems.messageId, kind: activityItems.kind })
 
-    return await enqueueChanges(tx, input.chat, { added: inserted, removed: [] })
-  })
-
-  pushChanges(updatesByUser)
+  return await enqueueChanges(tx, input.chat, { added: inserted, removed: [] })
 }
 
 /**
@@ -381,6 +390,10 @@ export async function readActivity(input: {
   if (messageIds.length === 0 && allKinds.length === 0) return 0
 
   const changes = await db.transaction(async (tx) => {
+    // Every activity writer owns the chat before activity rows and user
+    // sequences. This serializes per-chat absolute counts with reactions,
+    // message creation, deletion and history clears without user/chat inversion.
+    await tx.select({ id: chats.id }).from(chats).where(eq(chats.id, input.chat.id)).for("update").limit(1)
     const base = and(eq(activityItems.userId, input.userId), eq(activityItems.chatId, input.chat.id), isNull(activityItems.readAt))
     const bySeen = messageIds.length === 0 ? undefined : and(base, inArray(activityItems.messageId, messageIds))
     const byAll =
@@ -471,23 +484,26 @@ export async function removeActivityForChatHistory(
 // Durable fan-out
 // ------------------------------------------------------------
 
-export type ActivityChanges = Map<number, UpdateUnreadActivity>
+export type ActivityChanges = Map<number, Update>
 
 async function enqueueChanges(
   tx: Transaction,
   chat: ChatForActivity,
   changes: { added: ChangedRow[]; removed: { userId: number; messageId: number }[] },
 ): Promise<ActivityChanges> {
+  // The caller retains the chat mutation lock through these count reads and
+  // user-sequence allocation; no competing activity mutation can publish a
+  // count computed before this one commits.
   const userIds = Array.from(
     new Set([...changes.added.map((row) => row.userId), ...changes.removed.map((row) => row.userId)]),
   ).sort((a, b) => a - b)
-  const result: ActivityChanges = new Map()
-  if (userIds.length === 0) return result
+  const payloads = new Map<number, UpdateUnreadActivity>()
+  if (userIds.length === 0) return new Map()
 
   for (const userId of userIds) {
     const counts = await getActivityCounts(userId, chat.id, tx)
     const added = changes.added.filter((row) => row.userId === userId)
-    result.set(userId, {
+    payloads.set(userId, {
       peerId: encodeOutputPeerFromChat(chat as DbChat, { currentUserId: userId }),
       unreadMentionsCount: counts.mentions,
       unreadReactionsCount: counts.reactions,
@@ -497,14 +513,18 @@ async function enqueueChanges(
     })
   }
 
-  await UserBucketUpdates.enqueueMany(
+  const durable = await UserBucketUpdates.enqueueMany(
     userIds.map((userId) => ({
       userId,
-      update: { oneofKind: "userUnreadActivity", userUnreadActivity: result.get(userId)! } satisfies ServerUpdate["update"],
+      update: { oneofKind: "userUnreadActivity", userUnreadActivity: payloads.get(userId)! } satisfies ServerUpdate["update"],
     })),
     { tx },
   )
-  return result
+  return new Map(userIds.map((userId, index) => [userId, {
+    seq: durable[index]!.seq,
+    date: encodeDateStrict(durable[index]!.date),
+    update: { oneofKind: "unreadActivity", unreadActivity: payloads.get(userId)! },
+  } satisfies Update]))
 }
 
 function sortedIds(rows: readonly { messageId: number }[]): bigint[] {
@@ -522,8 +542,7 @@ function pushAfterCommit(tx: Transaction, changes: ActivityChanges): void {
 
 /** Realtime delivery after commit. Durable catch-up covers anything this misses. */
 export function pushChanges(changes: ActivityChanges): void {
-  for (const [userId, unreadActivity] of changes) {
-    const realtime: Update = { update: { oneofKind: "unreadActivity", unreadActivity } }
+  for (const [userId, realtime] of changes) {
     RealtimeUpdates.pushToUser(userId, [realtime]).catch((error) => {
       log.warn("Failed to push activity update", { userId, error })
     })

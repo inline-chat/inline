@@ -215,7 +215,7 @@ jobs:
         with:
           bun-version: '1.4.4'
       - name: Check isolated release and verify tracked source sidecar
-        run: node plugins/hermes-agent/scripts/release-stage.mjs --prepare-only --verify-source-bundle
+        run: node scripts/ci/prepare-hermes-candidate.mjs
 
   chat-sdk:
     name: Vercel Chat SDK adapter
@@ -387,7 +387,7 @@ jobs:
       - name: Load packed Inline plugin through real OpenClaw CLI
         env:
           OPENCLAW_VERSION: ${{ matrix.host }}
-        run: node scripts/ci/check-openclaw-admission.mjs "$RUNNER_TEMP/inline-packages" "$OPENCLAW_VERSION"
+        run: node scripts/ci/check-openclaw-admission.mjs "$RUNNER_TEMP/inline-packages" "$OPENCLAW_VERSION" --candidate
 
   hermes-admission:
     name: Installed Hermes host (${{ matrix.host }})

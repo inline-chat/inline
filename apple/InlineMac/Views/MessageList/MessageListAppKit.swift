@@ -1320,7 +1320,8 @@ class MessageListAppKit: NSViewController {
           let window = view.window,
           window.isVisible,
           !view.isHiddenOrHasHiddenAncestor,
-          !needsInitialScroll
+          !needsInitialScroll,
+          unreadFetchBoundary == nil
     else {
       activityNavigator.clearVisible()
       return
@@ -2619,6 +2620,7 @@ class MessageListAppKit: NSViewController {
           revealsAfterInitialPlacement = false
           revealListAfterLayout()
         }
+        updateUnreadIfNeeded()
       }
     }
 
@@ -2795,6 +2797,7 @@ class MessageListAppKit: NSViewController {
     } else {
       revealListAfterLayout()
     }
+    updateUnreadIfNeeded()
   }
 
   /// Fades the list in on the frame after placement, so the first frame shown is already settled.
@@ -4144,13 +4147,38 @@ class MessageListAppKit: NSViewController {
           !view.isHiddenOrHasHiddenAncestor
     else { return }
 
-    // Temporary read-on-open workaround: do not wait for history coverage or
-    // an advancing incoming marker. readAll clears locally before sending.
-    UnreadManager.shared.readAll(peerId, chatId: chatId)
-    if isAtBottom {
+    // Nothing is read before the list has landed: until then it sits at the bottom of the
+    // latest page, hidden or unplaced, and would read past an unread line it is about to open at.
+    guard !needsInitialScroll, unreadFetchBoundary == nil else { return }
+
+    if isAtBottom, chatRows.historyCoverage.isAtCertifiedLiveEnd {
+      // The bottom of a partial history window is not the end of the chat.
+      // Clear everything only after the loaded page reaches the certified live end.
+      UnreadManager.shared.readAll(peerId, chatId: chatId)
       markMessagesSeen()
+    } else {
+      // In history the read marker follows what was on screen. A read the coverage
+      // cannot certify waits until that history has been loaded.
+      readVisibleIncomingMessages()
     }
     reportVisibleActivity()
+  }
+
+  private func readVisibleIncomingMessages() {
+    let coverage = chatRows.historyCoverage
+    if coverage != lastVisibleReadCoverage {
+      lastVisibleReadCoverage = coverage
+      lastVisibleReadCandidateID = nil
+    }
+    guard let highestVisibleIncomingID = highestVisibleIncomingMessageID(),
+          highestVisibleIncomingID > (lastVisibleReadCandidateID ?? 0)
+    else { return }
+    lastVisibleReadCandidateID = highestVisibleIncomingID
+    UnreadManager.shared.readVisible(
+      peerId: peerId,
+      chatId: chatId,
+      highestVisibleIncomingID: highestVisibleIncomingID
+    )
   }
 
   /// All on-screen messages: mentions arrive on others' messages, reactions on yours.
