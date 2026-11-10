@@ -1488,26 +1488,52 @@ fn usage_window(label: &str, percent: f64, resets_at: Option<i64>) -> DriverUsag
 
 /// The plan limits in a `get_usage` answer, which unlike `rate_limit_event`
 /// reads percents as 0-100 and resets as ISO 8601.
+///
+/// Weekly limits of one model family (Fable today) arrive in `model_scoped`
+/// under their display name rather than as a named `seven_day_*` key; each
+/// becomes `seven_day_<name>`, so a new model's limit shows without a change
+/// here.
 pub(crate) fn plan_usage(response: &Value) -> Vec<DriverUsageWindow> {
-    [
+    let limits = &response["rate_limits"];
+    let mut windows: Vec<DriverUsageWindow> = [
         "five_hour",
         "seven_day",
         "seven_day_opus",
         "seven_day_sonnet",
     ]
     .into_iter()
-    .filter_map(|label| {
-        let window = &response["rate_limits"][label];
-        Some(usage_window(
-            label,
-            window["utilization"].as_f64()?,
-            window["resets_at"]
-                .as_str()
-                .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
-                .map(|time| time.timestamp()),
-        ))
-    })
-    .collect()
+    .filter_map(|label| plan_window(label, &limits[label]))
+    .collect();
+    for scoped in limits["model_scoped"].as_array().into_iter().flatten() {
+        let Some(name) = scoped["display_name"].as_str() else {
+            continue;
+        };
+        let slug: String = name
+            .trim()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+            .collect();
+        if slug.is_empty() {
+            continue;
+        }
+        let label = format!("seven_day_{slug}");
+        if windows.iter().any(|window| window.label == label) {
+            continue;
+        }
+        windows.extend(plan_window(&label, scoped));
+    }
+    windows
+}
+
+fn plan_window(label: &str, window: &Value) -> Option<DriverUsageWindow> {
+    Some(usage_window(
+        label,
+        window["utilization"].as_f64()?,
+        window["resets_at"]
+            .as_str()
+            .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
+            .map(|time| time.timestamp()),
+    ))
 }
 
 fn turn_outcome(result: &ResultMessage) -> TurnOutcome {
@@ -1785,6 +1811,26 @@ mod tests {
         assert_eq!(windows[1].label, "seven_day");
         assert_eq!(windows[1].resets_at, Some(1793685600));
         assert!(plan_usage(&json!({"rate_limits": null})).is_empty());
+    }
+
+    #[test]
+    fn plan_usage_reads_model_scoped_weekly_limits() {
+        let windows = plan_usage(&json!({"rate_limits": {
+            "five_hour": {"utilization": 3, "resets_at": "2026-11-10T14:20:00+00:00"},
+            "seven_day": {"utilization": 20, "resets_at": "2026-11-17T06:00:00+00:00"},
+            "seven_day_opus": {"utilization": 40, "resets_at": "2026-11-17T06:00:00+00:00"},
+            "model_scoped": [
+                {"display_name": "Fable", "utilization": 37, "resets_at": "2026-11-17T06:00:00+00:00"},
+                {"display_name": "Opus", "utilization": 99, "resets_at": "2026-11-17T06:00:00+00:00"},
+                {"display_name": "No reading"}
+            ]
+        }}));
+        let labels: Vec<&str> = windows.iter().map(|window| window.label.as_str()).collect();
+        assert_eq!(labels, ["five_hour", "seven_day", "seven_day_opus", "seven_day_fable"]);
+        assert_eq!(windows[2].used_percent, 40);
+        assert_eq!(windows[3].used_percent, 37);
+        assert_eq!(windows[3].window_minutes, Some(10_080));
+        assert_eq!(windows[3].resets_at, Some(1794895200));
     }
 
     #[test]
