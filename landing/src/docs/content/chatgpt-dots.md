@@ -38,19 +38,24 @@ Open the bot's DM in Inline and send a message.
 
 ## What goes through
 
+Everything that can sync goes both ways by default.
+
 | | Inline → Dot | Dot → Inline |
 | --- | --- | --- |
 | Text and replies | Yes | Yes |
-| Files and photos (up to 20 MiB) | Yes, one per message | Yes |
+| Files and photos (up to 20 MiB) | Yes, one per message | Yes, retried if storage is slow |
 | Reactions | Yes | Yes |
-| Typing | No | Yes |
-| Task progress | — | One card, updated in place |
+| Typing | Yes | Yes |
+| Read state | Sending marks the Dot's room read | Read marks on your messages |
+| Task progress | — | One card, updated in place, with each prompt and final answer under it |
 | Confirmations | Approve or Decline buttons | Yes |
-| Edits and deletions | No; they stay in Inline | Shown as edits |
+| Edits and deletions | Not possible in ChatGPT; the bot tells you | Shown as edits |
+| Messages you type in ChatGPT | — | Shown as quotes (`/mirror off` to stop) |
+| Dot name and avatar | — | The bot follows them, unless you renamed it or set its photo yourself |
 
 - Messages from before setup are not imported.
-- Messages you type in ChatGPT itself show up as quotes. Turn that off with
-  `/mirror off`.
+- Notices from ChatGPT itself and messages the bridge can't render appear as
+  short placeholders, never silently dropped.
 - Confirmations that need more than a yes or no say so and point you to
   ChatGPT.
 - Only you can use the bot. Other people, and group chats, are ignored.
